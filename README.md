@@ -131,6 +131,21 @@ node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.x
 - **The ZXP installer says it can't parse the package:** `ExtensionManifest Version` must be the manifest *schema* version (7.0), not the CEP version (12.0).
 - **Blank panel or JavaScript errors:** open `http://localhost:8097` (service) or `8096` (panel) in Chrome or Edge.
 
+## Roadmap
+
+Priorities and reasons are in `docs/FEATURES.md`. The items marked "Atom" come from the review in `docs/ATOM-REVIEW.md`.
+
+- [ ] **P1: automatic checkpoints around every write** (Atom). Copy the .aep before (and optionally after) each mutating tool call, with a setting to turn it off for big projects. Restore to a branch copy, never overwrite.
+- [ ] **P2: AE skills bundle** (Atom). `SKILL.md` plus numbered `1.jsx`, `2.jsx`, per project or global, with `ae_skill_run` and `ae_skill_save` (capture a working `ae_run_jsx`). For house rigs, lower thirds and kinetic type.
+- [ ] **P2: one-click registration** (Atom). The panel runs `claude mcp add` itself, with toggles for Codex and Cursor.
+- [ ] **P2: asset staging plus auto-import** (Atom). Generated assets (Flora, Higgsfield, ElevenLabs) land in a known folder and are imported into an `_Assets` bin.
+- [ ] **P2: social reframe** to 16:9, 1:1 and 9:16, re-anchoring controllers and applying safe areas (Atom).
+- [ ] **P2: data-driven builds from CSV/JSON**, for charts and localisation (Atom).
+- [ ] **P3: diagnostics bundle**: logs, quarantine state, AE version and popups in one file (Atom).
+- [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. Gulp 5 measures whether `app.executeCommand` works from CEP for AEGP commands.
+- [ ] **macOS popup reading** for `ae_dialogs`, through AppleScript System Events (needs accessibility permission). Windows-only today.
+- [ ] **A self-hosted CI runner** on a machine with AE, so the QA scenarios run on every push.
+
 ## Docs
 
 - `SPEC.md`: the original design.
