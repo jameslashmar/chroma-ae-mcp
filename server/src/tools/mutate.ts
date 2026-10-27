@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
-import { BridgeError, SLOW_TIMEOUT_MS } from "../bridge.js";
+import { BridgeError, SLOW_TIMEOUT_MS } from "../host.js";
 import { buildJsxCall, pathsMatchForGuard } from "../jsx.js";
 import { buildReceipt } from "../receipts.js";
 import { QueueWaitError } from "../queue.js";

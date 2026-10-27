@@ -23,6 +23,9 @@
   var $ae = typeof document !== "undefined" ? document.getElementById("ae-version") : null;
   var $inflight = typeof document !== "undefined" ? document.getElementById("inflight-label") : null;
   var $queueDepth = typeof document !== "undefined" ? document.getElementById("queue-depth") : null;
+  var $setupCommand = typeof document !== "undefined" ? document.getElementById("setup-command") : null;
+  var $copySetupBtn = typeof document !== "undefined" ? document.getElementById("copy-setup-btn") : null;
+  var $regenTokenBtn = typeof document !== "undefined" ? document.getElementById("regen-token-btn") : null;
   var $log = typeof document !== "undefined" ? document.getElementById("log") : null;
 
   function setBadge(text, stateClass) {
@@ -32,6 +35,10 @@
   }
 
   function log(level, msg) {
+    if (msg === undefined) {
+      msg = level;
+      level = "";
+    }
     if (!$log || typeof document === "undefined") return;
     var row = document.createElement("div");
     row.className = "log-entry" + (level ? " " + level : "");
@@ -147,7 +154,11 @@
   var framesDir = path.join(stateDir, "frames");
   var tokenPath = path.join(stateDir, "token");
   var configPath = path.join(stateDir, "config.json");
-  var sessionToken = crypto.randomBytes(32).toString("hex");
+  var sessionToken = "";
+
+  function isValidToken(candidate) {
+    return typeof candidate === "string" && /^[0-9a-fA-F]{64}$/.test(candidate);
+  }
 
   function hardenWindowsFolderAcl(folderPath) {
     if (process.platform !== "win32") return;
@@ -180,6 +191,12 @@
     }
   }
 
+  function writeTokenFile(token) {
+    hardenWindowsFolderAcl(stateDir);
+    fs.writeFileSync(tokenPath, token, { encoding: "utf8", mode: 384 }); // 0o600 = 384
+    try { fs.chmodSync(tokenPath, 384); } catch (e) {}
+  }
+
   function initPrivateStorage() {
     fs.mkdirSync(stateDir, { recursive: true, mode: 448 }); // 0o700 = 448
     try { fs.chmodSync(stateDir, 448); } catch (e) {}
@@ -188,8 +205,25 @@
 
     hardenWindowsFolderAcl(stateDir);
 
+    var existing = "";
+    try {
+      if (fs.existsSync(tokenPath)) {
+        existing = fs.readFileSync(tokenPath, "utf8").trim();
+      }
+    } catch (e) {
+      existing = "";
+    }
+
+    if (isValidToken(existing)) {
+      sessionToken = existing;
+      try { fs.chmodSync(tokenPath, 384); } catch (e) {}
+      return { reused: true };
+    }
+
+    sessionToken = crypto.randomBytes(32).toString("hex");
     fs.writeFileSync(tokenPath, sessionToken, { encoding: "utf8", mode: 384 }); // 0o600 = 384
     try { fs.chmodSync(tokenPath, 384); } catch (e) {}
+    return { reused: false };
   }
 
   function resolvePort() {
@@ -441,13 +475,199 @@
     }
   }
 
+  // ---------- Panel MCP bundle integration ----------
+  function evalScriptForMcp(script, label) {
+    return new Promise(function (resolve) {
+      reqCounter += 1;
+      var id = "mcp_" + reqCounter;
+      var lbl = typeof label === "string" && label.length > 0 ? label : "mcp";
+      enqueueEval(id, String(script || ""), lbl, function (_statusCode, payload) {
+        if (payload && payload.ok === true) {
+          resolve({
+            ok: true,
+            result: payload.result,
+            durationMs: typeof payload.durationMs === "number" ? payload.durationMs : 0
+          });
+        } else {
+          resolve({
+            ok: false,
+            error: (payload && payload.error) || {
+              message: "ExtendScript evaluation failed",
+              kind: "evalscript_error"
+            }
+          });
+        }
+      });
+    });
+  }
+
+  function resolveMcpBundlePath() {
+    var extDir = resolveExtensionDir();
+    var clientBundle = path.join(extDir, "client", "mcp-bundle.cjs");
+    if (fs.existsSync(clientBundle)) return clientBundle;
+    var panelClientBundle = path.join(extDir, "panel", "client", "mcp-bundle.cjs");
+    if (fs.existsSync(panelClientBundle)) return panelClientBundle;
+    if (typeof __dirname === "string") {
+      var dirBundle = path.join(__dirname, "mcp-bundle.cjs");
+      if (fs.existsSync(dirBundle)) return dirBundle;
+    }
+    return clientBundle;
+  }
+
+  var panelMcp = null;
+  var panelMcpErrorLogged = false;
+
+  function getPanelMcp() {
+    if (panelMcp !== null) return panelMcp;
+    var bundlePath = resolveMcpBundlePath();
+    if (!fs.existsSync(bundlePath)) {
+      if (!panelMcpErrorLogged) {
+        panelMcpErrorLogged = true;
+        log("err", "MCP bundle missing at " + bundlePath + " — /mcp unavailable (/eval remains working)");
+      }
+      return null;
+    }
+    try {
+      var mod = require(bundlePath);
+      var createPanelMcp = mod && (mod.createPanelMcp || (mod.default && mod.default.createPanelMcp));
+      if (typeof createPanelMcp !== "function") {
+        if (!panelMcpErrorLogged) {
+          panelMcpErrorLogged = true;
+          log("err", "MCP bundle at " + bundlePath + " does not export createPanelMcp");
+        }
+        return null;
+      }
+      panelMcp = createPanelMcp({
+        evalScript: evalScriptForMcp,
+        dataDir: stateDir,
+        log: log
+      });
+      log("ok", "Loaded MCP bundle (" + path.basename(bundlePath) + ")");
+      return panelMcp;
+    } catch (err) {
+      if (!panelMcpErrorLogged) {
+        panelMcpErrorLogged = true;
+        log(
+          "err",
+          "Failed to load MCP bundle at " + bundlePath + ": " + (err && err.message ? err.message : String(err))
+        );
+      }
+      return null;
+    }
+  }
+
+  // ---------- Setup command UI & clipboard ----------
+  function maskToken(token) {
+    if (typeof token !== "string" || token.length < 12) return "••••••••";
+    return token.slice(0, 4) + "••••••••" + token.slice(-4);
+  }
+
+  function buildSetupCommand(port, token) {
+    return (
+      "claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:" +
+      port +
+      '/mcp --header "Authorization: Bearer ' +
+      token +
+      '"'
+    );
+  }
+
+  function updateSetupUi() {
+    if ($setupCommand) {
+      $setupCommand.textContent = buildSetupCommand(boundPort, maskToken(sessionToken));
+    }
+  }
+
+  function copyViaHiddenTextarea(text) {
+    if (typeof document === "undefined" || !document.body) return false;
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "readonly");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.left = "-9999px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    var ok = false;
+    try {
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      ok = Boolean(document.execCommand("copy"));
+    } catch (e) {
+      ok = false;
+    }
+    try {
+      document.body.removeChild(ta);
+    } catch (e) {}
+    return ok;
+  }
+
+  function copyTextToClipboard(text, callback) {
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    ) {
+      try {
+        navigator.clipboard.writeText(text).then(
+          function () {
+            callback(true);
+          },
+          function () {
+            callback(copyViaHiddenTextarea(text));
+          }
+        );
+        return;
+      } catch (e) {
+        // Fall through to hidden textarea + document.execCommand('copy')
+      }
+    }
+    callback(copyViaHiddenTextarea(text));
+  }
+
+  function bindSetupActions() {
+    if ($copySetupBtn) {
+      $copySetupBtn.addEventListener("click", function () {
+        var cmd = buildSetupCommand(boundPort, sessionToken);
+        copyTextToClipboard(cmd, function (copied) {
+          if (copied) {
+            log("ok", "Copied setup command to clipboard");
+          } else {
+            log("err", "Failed to copy setup command to clipboard");
+          }
+        });
+      });
+    }
+
+    if ($regenTokenBtn) {
+      $regenTokenBtn.addEventListener("click", function () {
+        if (typeof window !== "undefined" && typeof window.confirm === "function") {
+          var confirmed = window.confirm(
+            "Regenerate the MCP Bearer token? You must copy and paste the setup command again."
+          );
+          if (!confirmed) return;
+        }
+        try {
+          var nextToken = crypto.randomBytes(32).toString("hex");
+          writeTokenFile(nextToken);
+          sessionToken = nextToken;
+          updateSetupUi();
+          log("warn", "Token regenerated. Copy and paste the setup command again.");
+        } catch (err) {
+          log("err", "Failed to regenerate token: " + err.message);
+        }
+      });
+    }
+  }
+
   // ---------- Security validation ----------
   function verifyBearerToken(authHeader) {
     if (typeof authHeader !== "string") return false;
     var prefix = "Bearer ";
     if (authHeader.slice(0, prefix.length) !== prefix) return false;
     var candidate = authHeader.slice(prefix.length).trim();
-    if (candidate.length !== sessionToken.length) return false;
+    if (!sessionToken || candidate.length !== sessionToken.length) return false;
     try {
       return crypto.timingSafeEqual(
         Buffer.from(candidate, "utf8"),
@@ -465,6 +685,38 @@
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
     res.end(body);
+  }
+
+  function readRequestBody(req, res, onBody) {
+    var chunks = [];
+    var totalBytes = 0;
+    var maxBodyBytes = 10 * 1024 * 1024; // 10 MB safety limit
+    var aborted = false;
+
+    req.on("data", function (chunk) {
+      if (aborted) return;
+      totalBytes += chunk.length;
+      if (totalBytes > maxBodyBytes) {
+        aborted = true;
+        sendJson(res, 413, {
+          ok: false,
+          error: { kind: "invalid_request", message: "Request body too large" }
+        });
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on("end", function () {
+      if (aborted) return;
+      var rawBody = Buffer.concat(chunks).toString("utf8");
+      onBody(rawBody);
+    });
+
+    req.on("error", function (err) {
+      log("err", "Request stream error: " + err.message);
+    });
   }
 
   // ---------- HTTP Server ----------
@@ -521,32 +773,46 @@
       return;
     }
 
-    if (req.method === "POST" && reqUrl === "/eval") {
-      var chunks = [];
-      var totalBytes = 0;
-      var maxBodyBytes = 10 * 1024 * 1024; // 10 MB safety limit
-      var aborted = false;
-
-      req.on("data", function (chunk) {
-        if (aborted) return;
-        totalBytes += chunk.length;
-        if (totalBytes > maxBodyBytes) {
-          aborted = true;
-          sendJson(res, 413, {
+    if ((req.method === "POST" || req.method === "GET") && reqUrl === "/mcp") {
+      readRequestBody(req, res, function (rawBody) {
+        var mcp = getPanelMcp();
+        if (!mcp || typeof mcp.handleHttp !== "function") {
+          sendJson(res, 503, {
             ok: false,
-            error: { kind: "invalid_request", message: "Request body too large" }
+            error: {
+              kind: "unavailable",
+              message: "MCP bundle (mcp-bundle.cjs) is not loaded"
+            }
           });
-          req.destroy();
           return;
         }
-        chunks.push(chunk);
+        try {
+          Promise.resolve(mcp.handleHttp(req, res, rawBody)).catch(function (err) {
+            log("err", "MCP handler error: " + (err && err.message ? err.message : String(err)));
+            if (!res.writableEnded) {
+              sendJson(res, 500, {
+                ok: false,
+                error: { kind: "internal", message: "Internal MCP handler error" }
+              });
+            }
+          });
+        } catch (syncErr) {
+          log("err", "MCP handler throw: " + (syncErr && syncErr.message ? syncErr.message : String(syncErr)));
+          if (!res.writableEnded) {
+            sendJson(res, 500, {
+              ok: false,
+              error: { kind: "internal", message: "Internal MCP handler error" }
+            });
+          }
+        }
       });
+      return;
+    }
 
-      req.on("end", function () {
-        if (aborted) return;
+    if (req.method === "POST" && reqUrl === "/eval") {
+      readRequestBody(req, res, function (rawBody) {
         var parsedBody;
         try {
-          var rawBody = Buffer.concat(chunks).toString("utf8");
           parsedBody = JSON.parse(rawBody);
         } catch (e) {
           sendJson(res, 400, {
@@ -578,10 +844,6 @@
         enqueueEval(id, parsedBody.script, label, function (statusCode, payload) {
           sendJson(res, statusCode, payload);
         });
-      });
-
-      req.on("error", function (err) {
-        log("err", "Request stream error: " + err.message);
       });
       return;
     }
@@ -643,11 +905,6 @@
       } catch (e) {}
       server = null;
     }
-    try {
-      if (fs.existsSync(tokenPath) && fs.readFileSync(tokenPath, "utf8").trim() === sessionToken) {
-        fs.unlinkSync(tokenPath);
-      }
-    } catch (e) {}
   }
 
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -659,6 +916,7 @@
   function boot() {
     setBadge("starting", "");
     if ($port) $port.textContent = "127.0.0.1:" + boundPort;
+    bindSetupActions();
 
     if (host) {
       var env = host.getHostEnvironment();
@@ -669,13 +927,16 @@
     }
 
     try {
-      initPrivateStorage();
-      log("", "Token written to " + tokenPath);
+      var tokenState = initPrivateStorage();
+      updateSetupUi();
+      log("", (tokenState && tokenState.reused ? "Token loaded from " : "Token written to ") + tokenPath);
     } catch (storageErr) {
       setBadge("error", "err");
       log("err", "Failed to initialize private token storage: " + storageErr.message);
       return;
     }
+
+    getPanelMcp();
 
     ensureCoreJsxLoaded()
       .then(function () {
@@ -691,6 +952,7 @@
             boundPort = addr.port;
           }
           if ($port) $port.textContent = "127.0.0.1:" + boundPort;
+          updateSetupUi();
           updateQueueUi();
           log("ok", "Listening on http://127.0.0.1:" + boundPort);
         });

@@ -1,92 +1,42 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  BridgeError,
+  DEFAULT_BRIDGE_PORT,
+  DEFAULT_TIMEOUT_MS,
+  HEALTH_TIMEOUT_MS,
+  normalizeErrorKind,
+  SLOW_TIMEOUT_MS,
+  type BridgeErrorDetail,
+  type BridgeErrorKind,
+  type CallHostOptions,
+  type EvalErrorResponse,
+  type EvalResponse,
+  type EvalSuccessResponse,
+  type HostTransport,
+  type PanelHealth,
+} from "./host.js";
 import { buildJsxCall, type HostFunctionName } from "./jsx.js";
 import { defaultDataDir, type QuarantineStore } from "./quarantine.js";
 import { QueueWaitError, type SingleWriterQueue } from "./queue.js";
 
-export type BridgeErrorKind =
-  | "timeout"
-  | "unreachable"
-  | "queued"
-  | "evalscript_error"
-  | "guard";
-
-export interface BridgeErrorDetail {
-  kind: BridgeErrorKind;
-  message: string;
-  line?: number;
-  actual?: unknown;
-  expected?: unknown;
-  op_id?: string;
-}
-
-export class BridgeError extends Error {
-  readonly kind: BridgeErrorKind;
-  readonly line?: number;
-  readonly actual?: unknown;
-  readonly expected?: unknown;
-  readonly op_id?: string;
-
-  constructor(detail: BridgeErrorDetail) {
-    super(detail.message);
-    this.name = "BridgeError";
-    this.kind = detail.kind;
-    this.line = detail.line;
-    this.actual = detail.actual;
-    this.expected = detail.expected;
-    this.op_id = detail.op_id;
-  }
-
-  toJSON(): BridgeErrorDetail {
-    const out: BridgeErrorDetail = {
-      kind: this.kind,
-      message: this.message,
-    };
-    if (this.line !== undefined) out.line = this.line;
-    if (this.actual !== undefined) out.actual = this.actual;
-    if (this.expected !== undefined) out.expected = this.expected;
-    if (this.op_id !== undefined) out.op_id = this.op_id;
-    return out;
-  }
-}
-
-export interface PanelHealth {
-  ok: boolean;
-  busy: boolean;
-  queueDepth: number;
-  aeVersion: string;
-  panelVersion: string;
-  inFlight: { id: string; startedAt: number } | null;
-}
-
-export interface EvalSuccessResponse<T = unknown> {
-  id: string;
-  ok: true;
-  result: T;
-  durationMs: number;
-}
-
-export interface EvalErrorResponse {
-  id: string;
-  ok: false;
-  error: {
-    message: string;
-    line?: number;
-    kind: BridgeErrorKind | string;
-    actual?: unknown;
-    expected?: unknown;
-  };
-}
-
-export type EvalResponse<T = unknown> =
-  | EvalSuccessResponse<T>
-  | EvalErrorResponse;
-
-export const DEFAULT_BRIDGE_PORT = 7790;
-export const DEFAULT_TIMEOUT_MS = 120_000;
-export const SLOW_TIMEOUT_MS = 600_000;
-export const HEALTH_TIMEOUT_MS = 5_000;
+export {
+  BridgeError,
+  DEFAULT_BRIDGE_PORT,
+  DEFAULT_TIMEOUT_MS,
+  HEALTH_TIMEOUT_MS,
+  normalizeErrorKind,
+  SLOW_TIMEOUT_MS,
+  type BridgeErrorDetail,
+  type BridgeErrorKind,
+  type CallHostOptions,
+  type EvalErrorResponse,
+  type EvalResponse,
+  type EvalSuccessResponse,
+  type HostTransport,
+  type PanelHealth,
+};
 
 export function resolveBridgePort(): number {
   const raw = process.env.CHROMA_AE_MCP_PORT?.trim();
@@ -140,15 +90,7 @@ export interface BridgeClientOptions {
   quarantine?: QuarantineStore;
 }
 
-export interface CallHostOptions {
-  label: string;
-  mutates?: boolean;
-  toolName?: string;
-  timeoutMs?: number;
-  opId?: string;
-}
-
-export class BridgeClient {
+export class BridgeClient implements HostTransport {
   readonly port: number;
   readonly baseUrl: string;
   private readonly tokenPath: string;
@@ -356,18 +298,5 @@ export class BridgeClient {
       }
       throw err;
     }
-  }
-}
-
-function normalizeErrorKind(kind: string | undefined): BridgeErrorKind {
-  switch (kind) {
-    case "timeout":
-    case "unreachable":
-    case "queued":
-    case "evalscript_error":
-    case "guard":
-      return kind;
-    default:
-      return "evalscript_error";
   }
 }

@@ -101,6 +101,65 @@ body {
   text-overflow: ellipsis;
 }
 
+.setup-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.setup-command {
+  background: #141414;
+  border: 1px solid #2c2c2c;
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: #bdbdbd;
+  font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid #3c3c3c;
+  background: #2a2a2a;
+  color: #dcdcdc;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #343434;
+  border-color: #4a4a4a;
+}
+
+.btn:active {
+  background: #222222;
+}
+
+.btn-primary {
+  background: #1f4f82;
+  border-color: #2c6cb0;
+  color: #f0f6fc;
+}
+
+.btn-primary:hover {
+  background: #265f9c;
+  border-color: #3882d0;
+}
+
 .log-container {
   flex: 1;
   min-height: 0;

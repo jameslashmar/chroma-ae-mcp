@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BridgeError, type BridgeClient } from "../bridge.js";
+import { BridgeError, type HostTransport } from "../host.js";
 import { QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
 import { QueueWaitError, type SingleWriterQueue } from "../queue.js";
@@ -54,7 +54,7 @@ export const LayerSelectorSchema = z
 export type LayerSelector = z.infer<typeof LayerSelectorSchema>;
 
 export interface ToolContext {
-  bridge: BridgeClient;
+  bridge: HostTransport;
   queue: SingleWriterQueue;
   quarantine: QuarantineStore;
 }

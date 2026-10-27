@@ -60,7 +60,9 @@ export const readTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeStatusSchema,
     handler: async (_args, ctx) => {
-      const health = await ctx.bridge.health();
+      const health = ctx.bridge.health
+        ? await ctx.bridge.health()
+        : { ok: true, transport: "panel" as const };
       const hostStatus = await ctx.bridge.callHost<Record<string, unknown>>(
         "status",
         {},
