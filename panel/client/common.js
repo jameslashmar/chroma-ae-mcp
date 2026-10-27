@@ -10,10 +10,22 @@
   var crypto = require("crypto");
   var childProcess = require("child_process");
 
-  var PANEL_VERSION = "0.1.0";
+  // The version comes from the manifest, which scripts/package.ps1 stamps from VERSION,
+  // so /health reports what is actually installed.
+  var PANEL_VERSION = readBundleVersion();
   var DEFAULT_PORT = 7790;
   var LOG_MAX_BYTES = 1024 * 1024; // 1 MB rotation threshold
   var MAX_LOG_LINES = 200;
+
+  function readBundleVersion() {
+    try {
+      var here = fileUrlToNativePath(String(window.location.href).split("#")[0].split("?")[0]);
+      var manifest = path.join(path.dirname(path.dirname(here)), "CSXS", "manifest.xml");
+      var m = /ExtensionBundleVersion="([^"]+)"/.exec(fs.readFileSync(manifest, "utf8"));
+      if (m) return m[1];
+    } catch (e) {}
+    return "unknown";
+  }
 
   // ---------- CEP Host Interface adapter ----------
   function fileUrlToNativePath(raw) {
