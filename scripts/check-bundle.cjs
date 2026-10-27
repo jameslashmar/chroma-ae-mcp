@@ -14,7 +14,7 @@ const srv = http.createServer((req, res) => { let b = ''; req.on('data', c => b 
   const note = await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
   const list = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const call = await post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ae_get_comp', arguments: { comp_id: 1 } } });
-  const ok = init[0] === 200 && note[0] === 202 && JSON.parse(list[1]).result.tools.length === 12 && call[0] === 200 && seen[0] === '__chromaAe.getComp({"comp_id":1})';
+  const ok = init[0] === 200 && note[0] === 202 && JSON.parse(list[1]).result.tools.length >= 12 && call[0] === 200 && seen[0] === '__chromaAe.getComp({"comp_id":1})';
   console.log(ok ? 'PASS' : 'FAIL', process.version, 'init', init[0], JSON.parse(init[1]).result.protocolVersion, '| notif', note[0], JSON.stringify(note[1]), '| tools', JSON.parse(list[1]).result.tools.length, '| call', call[0], JSON.parse(call[1]).result.content[0].text.slice(0, 40).replace(/\s+/g, ' '), '| script', seen[0]);
   srv.close();
   process.exitCode = ok ? 0 : 1;

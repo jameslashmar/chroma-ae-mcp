@@ -55,8 +55,8 @@ export default {
    Better still, run it in a **separate AE instance**, or on a QA machine.
 3. **Read back separately** from the action, as the MCP does. Reads in the same script are stale on AE 26.
 4. **Frames:** wait for the PNG to finish writing (it's written asynchronously), and never change `resolutionFactor`.
-5. **Don't use `app.executeCommand` from the harness.** It does nothing through CEP. Gulp's `gulpTriggerMultipass` relies on it for an AEGP command, so the first Gulp scenario should *measure* whether that works from CEP. Gulp works in production, so it may behave differently for commands an AEGP registers.
-6. **Dialogs block AE.** Set `app.beginSuppressDialogs()` for each scenario, and treat a timeout as a failure with a snapshot. Never kill the eval.
+5. **`app.executeCommand` works from CEP for Window-menu commands** (measured 2026-10-27). Engine-Room said it does nothing. Gulp's `gulpTriggerMultipass` relies on it for an AEGP command, so the first Gulp scenario should *measure* whether that works from CEP. Gulp works in production, so it may behave differently for commands an AEGP registers.
+6. **Never suppress dialogs** (Jay, 2026-10-27). AE shows its popups as normal. A popup that blocks a scenario is read with `ae_dialogs` and recorded in the report (title, text, buttons, screenshot). The scenario fails unless it explicitly expected that dialog and answered it with `ae_dialog_respond`. Never kill the eval.
 
 ## Fixtures (generated, not committed)
 | Need | How |

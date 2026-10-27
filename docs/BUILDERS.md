@@ -32,7 +32,8 @@ Exception: an edit your task names explicitly.
 - **Read tools must not change the project or comp state at all,** including `resolutionFactor`, selection, active item, time or solo: anything they change lands on Jay's undo stack.
 - **Read back in a separate evalScript.** A read in the same script as the write returns stale values.
 - **`saveFrameToPng` writes asynchronously.** Wait for the file on the Node side (see `waitForFreshPng` in `tools/render.ts`).
-- **`app.executeCommand` does nothing through CEP.** Don't use it.
+- **`app.executeCommand` DOES work through CEP for Window-menu commands** (measured 2026-10-27, AE 26.0: `findMenuCommandId("Effects & Presets")` = 3718 reopened the panel). This contradicts Engine-Room's note. Window commands **toggle**, so check the state first. Other commands are untested.
+- **Never suppress AE dialogs** (no `app.beginSuppressDialogs`). Jay's rule: popups are read and answered through `ae_dialogs` / `ae_dialog_respond`, never hidden.
 - **Node code that runs in the panel** (anything reachable from `panel-entry.ts`) must work on **Node 17.7.2**: no `fetch`, no `Headers`, no `AbortSignal.timeout`, no `structuredClone`, no native modules. Pure-JS deps only.
 - **Child processes:** `windowsHide: true` always. Never block the eval queue waiting on a long process; run it as a background job with a status tool.
 - **Bound every list** (500 entries, `truncated: true`) **and every string** (20k).

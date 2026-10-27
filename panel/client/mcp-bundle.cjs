@@ -5,6 +5,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -27,6 +30,2094 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// node_modules/pngjs/lib/chunkstream.js
+var require_chunkstream = __commonJS({
+  "node_modules/pngjs/lib/chunkstream.js"(exports2, module2) {
+    "use strict";
+    var util2 = require("util");
+    var Stream = require("stream");
+    var ChunkStream = module2.exports = function() {
+      Stream.call(this);
+      this._buffers = [];
+      this._buffered = 0;
+      this._reads = [];
+      this._paused = false;
+      this._encoding = "utf8";
+      this.writable = true;
+    };
+    util2.inherits(ChunkStream, Stream);
+    ChunkStream.prototype.read = function(length, callback) {
+      this._reads.push({
+        length: Math.abs(length),
+        // if length < 0 then at most this length
+        allowLess: length < 0,
+        func: callback
+      });
+      process.nextTick(
+        function() {
+          this._process();
+          if (this._paused && this._reads && this._reads.length > 0) {
+            this._paused = false;
+            this.emit("drain");
+          }
+        }.bind(this)
+      );
+    };
+    ChunkStream.prototype.write = function(data, encoding) {
+      if (!this.writable) {
+        this.emit("error", new Error("Stream not writable"));
+        return false;
+      }
+      let dataBuffer;
+      if (Buffer.isBuffer(data)) {
+        dataBuffer = data;
+      } else {
+        dataBuffer = Buffer.from(data, encoding || this._encoding);
+      }
+      this._buffers.push(dataBuffer);
+      this._buffered += dataBuffer.length;
+      this._process();
+      if (this._reads && this._reads.length === 0) {
+        this._paused = true;
+      }
+      return this.writable && !this._paused;
+    };
+    ChunkStream.prototype.end = function(data, encoding) {
+      if (data) {
+        this.write(data, encoding);
+      }
+      this.writable = false;
+      if (!this._buffers) {
+        return;
+      }
+      if (this._buffers.length === 0) {
+        this._end();
+      } else {
+        this._buffers.push(null);
+        this._process();
+      }
+    };
+    ChunkStream.prototype.destroySoon = ChunkStream.prototype.end;
+    ChunkStream.prototype._end = function() {
+      if (this._reads.length > 0) {
+        this.emit("error", new Error("Unexpected end of input"));
+      }
+      this.destroy();
+    };
+    ChunkStream.prototype.destroy = function() {
+      if (!this._buffers) {
+        return;
+      }
+      this.writable = false;
+      this._reads = null;
+      this._buffers = null;
+      this.emit("close");
+    };
+    ChunkStream.prototype._processReadAllowingLess = function(read) {
+      this._reads.shift();
+      let smallerBuf = this._buffers[0];
+      if (smallerBuf.length > read.length) {
+        this._buffered -= read.length;
+        this._buffers[0] = smallerBuf.slice(read.length);
+        read.func.call(this, smallerBuf.slice(0, read.length));
+      } else {
+        this._buffered -= smallerBuf.length;
+        this._buffers.shift();
+        read.func.call(this, smallerBuf);
+      }
+    };
+    ChunkStream.prototype._processRead = function(read) {
+      this._reads.shift();
+      let pos = 0;
+      let count = 0;
+      let data = Buffer.alloc(read.length);
+      while (pos < read.length) {
+        let buf = this._buffers[count++];
+        let len = Math.min(buf.length, read.length - pos);
+        buf.copy(data, pos, 0, len);
+        pos += len;
+        if (len !== buf.length) {
+          this._buffers[--count] = buf.slice(len);
+        }
+      }
+      if (count > 0) {
+        this._buffers.splice(0, count);
+      }
+      this._buffered -= read.length;
+      read.func.call(this, data);
+    };
+    ChunkStream.prototype._process = function() {
+      try {
+        while (this._buffered > 0 && this._reads && this._reads.length > 0) {
+          let read = this._reads[0];
+          if (read.allowLess) {
+            this._processReadAllowingLess(read);
+          } else if (this._buffered >= read.length) {
+            this._processRead(read);
+          } else {
+            break;
+          }
+        }
+        if (this._buffers && !this.writable) {
+          this._end();
+        }
+      } catch (ex) {
+        this.emit("error", ex);
+      }
+    };
+  }
+});
+
+// node_modules/pngjs/lib/interlace.js
+var require_interlace = __commonJS({
+  "node_modules/pngjs/lib/interlace.js"(exports2) {
+    "use strict";
+    var imagePasses = [
+      {
+        // pass 1 - 1px
+        x: [0],
+        y: [0]
+      },
+      {
+        // pass 2 - 1px
+        x: [4],
+        y: [0]
+      },
+      {
+        // pass 3 - 2px
+        x: [0, 4],
+        y: [4]
+      },
+      {
+        // pass 4 - 4px
+        x: [2, 6],
+        y: [0, 4]
+      },
+      {
+        // pass 5 - 8px
+        x: [0, 2, 4, 6],
+        y: [2, 6]
+      },
+      {
+        // pass 6 - 16px
+        x: [1, 3, 5, 7],
+        y: [0, 2, 4, 6]
+      },
+      {
+        // pass 7 - 32px
+        x: [0, 1, 2, 3, 4, 5, 6, 7],
+        y: [1, 3, 5, 7]
+      }
+    ];
+    exports2.getImagePasses = function(width, height) {
+      let images = [];
+      let xLeftOver = width % 8;
+      let yLeftOver = height % 8;
+      let xRepeats = (width - xLeftOver) / 8;
+      let yRepeats = (height - yLeftOver) / 8;
+      for (let i = 0; i < imagePasses.length; i++) {
+        let pass = imagePasses[i];
+        let passWidth = xRepeats * pass.x.length;
+        let passHeight = yRepeats * pass.y.length;
+        for (let j = 0; j < pass.x.length; j++) {
+          if (pass.x[j] < xLeftOver) {
+            passWidth++;
+          } else {
+            break;
+          }
+        }
+        for (let j = 0; j < pass.y.length; j++) {
+          if (pass.y[j] < yLeftOver) {
+            passHeight++;
+          } else {
+            break;
+          }
+        }
+        if (passWidth > 0 && passHeight > 0) {
+          images.push({ width: passWidth, height: passHeight, index: i });
+        }
+      }
+      return images;
+    };
+    exports2.getInterlaceIterator = function(width) {
+      return function(x, y, pass) {
+        let outerXLeftOver = x % imagePasses[pass].x.length;
+        let outerX = (x - outerXLeftOver) / imagePasses[pass].x.length * 8 + imagePasses[pass].x[outerXLeftOver];
+        let outerYLeftOver = y % imagePasses[pass].y.length;
+        let outerY = (y - outerYLeftOver) / imagePasses[pass].y.length * 8 + imagePasses[pass].y[outerYLeftOver];
+        return outerX * 4 + outerY * width * 4;
+      };
+    };
+  }
+});
+
+// node_modules/pngjs/lib/paeth-predictor.js
+var require_paeth_predictor = __commonJS({
+  "node_modules/pngjs/lib/paeth-predictor.js"(exports2, module2) {
+    "use strict";
+    module2.exports = function paethPredictor(left, above, upLeft) {
+      let paeth = left + above - upLeft;
+      let pLeft = Math.abs(paeth - left);
+      let pAbove = Math.abs(paeth - above);
+      let pUpLeft = Math.abs(paeth - upLeft);
+      if (pLeft <= pAbove && pLeft <= pUpLeft) {
+        return left;
+      }
+      if (pAbove <= pUpLeft) {
+        return above;
+      }
+      return upLeft;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/filter-parse.js
+var require_filter_parse = __commonJS({
+  "node_modules/pngjs/lib/filter-parse.js"(exports2, module2) {
+    "use strict";
+    var interlaceUtils = require_interlace();
+    var paethPredictor = require_paeth_predictor();
+    function getByteWidth(width, bpp, depth) {
+      let byteWidth = width * bpp;
+      if (depth !== 8) {
+        byteWidth = Math.ceil(byteWidth / (8 / depth));
+      }
+      return byteWidth;
+    }
+    var Filter = module2.exports = function(bitmapInfo, dependencies) {
+      let width = bitmapInfo.width;
+      let height = bitmapInfo.height;
+      let interlace = bitmapInfo.interlace;
+      let bpp = bitmapInfo.bpp;
+      let depth = bitmapInfo.depth;
+      this.read = dependencies.read;
+      this.write = dependencies.write;
+      this.complete = dependencies.complete;
+      this._imageIndex = 0;
+      this._images = [];
+      if (interlace) {
+        let passes = interlaceUtils.getImagePasses(width, height);
+        for (let i = 0; i < passes.length; i++) {
+          this._images.push({
+            byteWidth: getByteWidth(passes[i].width, bpp, depth),
+            height: passes[i].height,
+            lineIndex: 0
+          });
+        }
+      } else {
+        this._images.push({
+          byteWidth: getByteWidth(width, bpp, depth),
+          height,
+          lineIndex: 0
+        });
+      }
+      if (depth === 8) {
+        this._xComparison = bpp;
+      } else if (depth === 16) {
+        this._xComparison = bpp * 2;
+      } else {
+        this._xComparison = 1;
+      }
+    };
+    Filter.prototype.start = function() {
+      this.read(
+        this._images[this._imageIndex].byteWidth + 1,
+        this._reverseFilterLine.bind(this)
+      );
+    };
+    Filter.prototype._unFilterType1 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f1Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        unfilteredLine[x] = rawByte + f1Left;
+      }
+    };
+    Filter.prototype._unFilterType2 = function(rawData, unfilteredLine, byteWidth) {
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f2Up = lastLine ? lastLine[x] : 0;
+        unfilteredLine[x] = rawByte + f2Up;
+      }
+    };
+    Filter.prototype._unFilterType3 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f3Up = lastLine ? lastLine[x] : 0;
+        let f3Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        let f3Add = Math.floor((f3Left + f3Up) / 2);
+        unfilteredLine[x] = rawByte + f3Add;
+      }
+    };
+    Filter.prototype._unFilterType4 = function(rawData, unfilteredLine, byteWidth) {
+      let xComparison = this._xComparison;
+      let xBiggerThan = xComparison - 1;
+      let lastLine = this._lastLine;
+      for (let x = 0; x < byteWidth; x++) {
+        let rawByte = rawData[1 + x];
+        let f4Up = lastLine ? lastLine[x] : 0;
+        let f4Left = x > xBiggerThan ? unfilteredLine[x - xComparison] : 0;
+        let f4UpLeft = x > xBiggerThan && lastLine ? lastLine[x - xComparison] : 0;
+        let f4Add = paethPredictor(f4Left, f4Up, f4UpLeft);
+        unfilteredLine[x] = rawByte + f4Add;
+      }
+    };
+    Filter.prototype._reverseFilterLine = function(rawData) {
+      let filter = rawData[0];
+      let unfilteredLine;
+      let currentImage = this._images[this._imageIndex];
+      let byteWidth = currentImage.byteWidth;
+      if (filter === 0) {
+        unfilteredLine = rawData.slice(1, byteWidth + 1);
+      } else {
+        unfilteredLine = Buffer.alloc(byteWidth);
+        switch (filter) {
+          case 1:
+            this._unFilterType1(rawData, unfilteredLine, byteWidth);
+            break;
+          case 2:
+            this._unFilterType2(rawData, unfilteredLine, byteWidth);
+            break;
+          case 3:
+            this._unFilterType3(rawData, unfilteredLine, byteWidth);
+            break;
+          case 4:
+            this._unFilterType4(rawData, unfilteredLine, byteWidth);
+            break;
+          default:
+            throw new Error("Unrecognised filter type - " + filter);
+        }
+      }
+      this.write(unfilteredLine);
+      currentImage.lineIndex++;
+      if (currentImage.lineIndex >= currentImage.height) {
+        this._lastLine = null;
+        this._imageIndex++;
+        currentImage = this._images[this._imageIndex];
+      } else {
+        this._lastLine = unfilteredLine;
+      }
+      if (currentImage) {
+        this.read(currentImage.byteWidth + 1, this._reverseFilterLine.bind(this));
+      } else {
+        this._lastLine = null;
+        this.complete();
+      }
+    };
+  }
+});
+
+// node_modules/pngjs/lib/filter-parse-async.js
+var require_filter_parse_async = __commonJS({
+  "node_modules/pngjs/lib/filter-parse-async.js"(exports2, module2) {
+    "use strict";
+    var util2 = require("util");
+    var ChunkStream = require_chunkstream();
+    var Filter = require_filter_parse();
+    var FilterAsync = module2.exports = function(bitmapInfo) {
+      ChunkStream.call(this);
+      let buffers = [];
+      let that = this;
+      this._filter = new Filter(bitmapInfo, {
+        read: this.read.bind(this),
+        write: function(buffer) {
+          buffers.push(buffer);
+        },
+        complete: function() {
+          that.emit("complete", Buffer.concat(buffers));
+        }
+      });
+      this._filter.start();
+    };
+    util2.inherits(FilterAsync, ChunkStream);
+  }
+});
+
+// node_modules/pngjs/lib/constants.js
+var require_constants = __commonJS({
+  "node_modules/pngjs/lib/constants.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      PNG_SIGNATURE: [137, 80, 78, 71, 13, 10, 26, 10],
+      TYPE_IHDR: 1229472850,
+      TYPE_IEND: 1229278788,
+      TYPE_IDAT: 1229209940,
+      TYPE_PLTE: 1347179589,
+      TYPE_tRNS: 1951551059,
+      // eslint-disable-line camelcase
+      TYPE_gAMA: 1732332865,
+      // eslint-disable-line camelcase
+      // color-type bits
+      COLORTYPE_GRAYSCALE: 0,
+      COLORTYPE_PALETTE: 1,
+      COLORTYPE_COLOR: 2,
+      COLORTYPE_ALPHA: 4,
+      // e.g. grayscale and alpha
+      // color-type combinations
+      COLORTYPE_PALETTE_COLOR: 3,
+      COLORTYPE_COLOR_ALPHA: 6,
+      COLORTYPE_TO_BPP_MAP: {
+        0: 1,
+        2: 3,
+        3: 1,
+        4: 2,
+        6: 4
+      },
+      GAMMA_DIVISION: 1e5
+    };
+  }
+});
+
+// node_modules/pngjs/lib/crc.js
+var require_crc = __commonJS({
+  "node_modules/pngjs/lib/crc.js"(exports2, module2) {
+    "use strict";
+    var crcTable = [];
+    (function() {
+      for (let i = 0; i < 256; i++) {
+        let currentCrc = i;
+        for (let j = 0; j < 8; j++) {
+          if (currentCrc & 1) {
+            currentCrc = 3988292384 ^ currentCrc >>> 1;
+          } else {
+            currentCrc = currentCrc >>> 1;
+          }
+        }
+        crcTable[i] = currentCrc;
+      }
+    })();
+    var CrcCalculator = module2.exports = function() {
+      this._crc = -1;
+    };
+    CrcCalculator.prototype.write = function(data) {
+      for (let i = 0; i < data.length; i++) {
+        this._crc = crcTable[(this._crc ^ data[i]) & 255] ^ this._crc >>> 8;
+      }
+      return true;
+    };
+    CrcCalculator.prototype.crc32 = function() {
+      return this._crc ^ -1;
+    };
+    CrcCalculator.crc32 = function(buf) {
+      let crc = -1;
+      for (let i = 0; i < buf.length; i++) {
+        crc = crcTable[(crc ^ buf[i]) & 255] ^ crc >>> 8;
+      }
+      return crc ^ -1;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/parser.js
+var require_parser = __commonJS({
+  "node_modules/pngjs/lib/parser.js"(exports2, module2) {
+    "use strict";
+    var constants = require_constants();
+    var CrcCalculator = require_crc();
+    var Parser = module2.exports = function(options, dependencies) {
+      this._options = options;
+      options.checkCRC = options.checkCRC !== false;
+      this._hasIHDR = false;
+      this._hasIEND = false;
+      this._emittedHeadersFinished = false;
+      this._palette = [];
+      this._colorType = 0;
+      this._chunks = {};
+      this._chunks[constants.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this.read = dependencies.read;
+      this.error = dependencies.error;
+      this.metadata = dependencies.metadata;
+      this.gamma = dependencies.gamma;
+      this.transColor = dependencies.transColor;
+      this.palette = dependencies.palette;
+      this.parsed = dependencies.parsed;
+      this.inflateData = dependencies.inflateData;
+      this.finished = dependencies.finished;
+      this.simpleTransparency = dependencies.simpleTransparency;
+      this.headersFinished = dependencies.headersFinished || function() {
+      };
+    };
+    Parser.prototype.start = function() {
+      this.read(constants.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+    };
+    Parser.prototype._parseSignature = function(data) {
+      let signature = constants.PNG_SIGNATURE;
+      for (let i = 0; i < signature.length; i++) {
+        if (data[i] !== signature[i]) {
+          this.error(new Error("Invalid file signature"));
+          return;
+        }
+      }
+      this.read(8, this._parseChunkBegin.bind(this));
+    };
+    Parser.prototype._parseChunkBegin = function(data) {
+      let length = data.readUInt32BE(0);
+      let type = data.readUInt32BE(4);
+      let name = "";
+      for (let i = 4; i < 8; i++) {
+        name += String.fromCharCode(data[i]);
+      }
+      let ancillary = Boolean(data[4] & 32);
+      if (!this._hasIHDR && type !== constants.TYPE_IHDR) {
+        this.error(new Error("Expected IHDR on beggining"));
+        return;
+      }
+      this._crc = new CrcCalculator();
+      this._crc.write(Buffer.from(name));
+      if (this._chunks[type]) {
+        return this._chunks[type](length);
+      }
+      if (!ancillary) {
+        this.error(new Error("Unsupported critical chunk type " + name));
+        return;
+      }
+      this.read(length + 4, this._skipChunk.bind(this));
+    };
+    Parser.prototype._skipChunk = function() {
+      this.read(8, this._parseChunkBegin.bind(this));
+    };
+    Parser.prototype._handleChunkEnd = function() {
+      this.read(4, this._parseChunkEnd.bind(this));
+    };
+    Parser.prototype._parseChunkEnd = function(data) {
+      let fileCrc = data.readInt32BE(0);
+      let calcCrc = this._crc.crc32();
+      if (this._options.checkCRC && calcCrc !== fileCrc) {
+        this.error(new Error("Crc error - " + fileCrc + " - " + calcCrc));
+        return;
+      }
+      if (!this._hasIEND) {
+        this.read(8, this._parseChunkBegin.bind(this));
+      }
+    };
+    Parser.prototype._handleIHDR = function(length) {
+      this.read(length, this._parseIHDR.bind(this));
+    };
+    Parser.prototype._parseIHDR = function(data) {
+      this._crc.write(data);
+      let width = data.readUInt32BE(0);
+      let height = data.readUInt32BE(4);
+      let depth = data[8];
+      let colorType = data[9];
+      let compr = data[10];
+      let filter = data[11];
+      let interlace = data[12];
+      if (depth !== 8 && depth !== 4 && depth !== 2 && depth !== 1 && depth !== 16) {
+        this.error(new Error("Unsupported bit depth " + depth));
+        return;
+      }
+      if (!(colorType in constants.COLORTYPE_TO_BPP_MAP)) {
+        this.error(new Error("Unsupported color type"));
+        return;
+      }
+      if (compr !== 0) {
+        this.error(new Error("Unsupported compression method"));
+        return;
+      }
+      if (filter !== 0) {
+        this.error(new Error("Unsupported filter method"));
+        return;
+      }
+      if (interlace !== 0 && interlace !== 1) {
+        this.error(new Error("Unsupported interlace method"));
+        return;
+      }
+      this._colorType = colorType;
+      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._colorType];
+      this._hasIHDR = true;
+      this.metadata({
+        width,
+        height,
+        depth,
+        interlace: Boolean(interlace),
+        palette: Boolean(colorType & constants.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants.COLORTYPE_ALPHA),
+        bpp,
+        colorType
+      });
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handlePLTE = function(length) {
+      this.read(length, this._parsePLTE.bind(this));
+    };
+    Parser.prototype._parsePLTE = function(data) {
+      this._crc.write(data);
+      let entries = Math.floor(data.length / 3);
+      for (let i = 0; i < entries; i++) {
+        this._palette.push([data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 255]);
+      }
+      this.palette(this._palette);
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleTRNS = function(length) {
+      this.simpleTransparency();
+      this.read(length, this._parseTRNS.bind(this));
+    };
+    Parser.prototype._parseTRNS = function(data) {
+      this._crc.write(data);
+      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR) {
+        if (this._palette.length === 0) {
+          this.error(new Error("Transparency chunk must be after palette"));
+          return;
+        }
+        if (data.length > this._palette.length) {
+          this.error(new Error("More transparent colors than palette size"));
+          return;
+        }
+        for (let i = 0; i < data.length; i++) {
+          this._palette[i][3] = data[i];
+        }
+        this.palette(this._palette);
+      }
+      if (this._colorType === constants.COLORTYPE_GRAYSCALE) {
+        this.transColor([data.readUInt16BE(0)]);
+      }
+      if (this._colorType === constants.COLORTYPE_COLOR) {
+        this.transColor([
+          data.readUInt16BE(0),
+          data.readUInt16BE(2),
+          data.readUInt16BE(4)
+        ]);
+      }
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleGAMA = function(length) {
+      this.read(length, this._parseGAMA.bind(this));
+    };
+    Parser.prototype._parseGAMA = function(data) {
+      this._crc.write(data);
+      this.gamma(data.readUInt32BE(0) / constants.GAMMA_DIVISION);
+      this._handleChunkEnd();
+    };
+    Parser.prototype._handleIDAT = function(length) {
+      if (!this._emittedHeadersFinished) {
+        this._emittedHeadersFinished = true;
+        this.headersFinished();
+      }
+      this.read(-length, this._parseIDAT.bind(this, length));
+    };
+    Parser.prototype._parseIDAT = function(length, data) {
+      this._crc.write(data);
+      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+        throw new Error("Expected palette not found");
+      }
+      this.inflateData(data);
+      let leftOverLength = length - data.length;
+      if (leftOverLength > 0) {
+        this._handleIDAT(leftOverLength);
+      } else {
+        this._handleChunkEnd();
+      }
+    };
+    Parser.prototype._handleIEND = function(length) {
+      this.read(length, this._parseIEND.bind(this));
+    };
+    Parser.prototype._parseIEND = function(data) {
+      this._crc.write(data);
+      this._hasIEND = true;
+      this._handleChunkEnd();
+      if (this.finished) {
+        this.finished();
+      }
+    };
+  }
+});
+
+// node_modules/pngjs/lib/bitmapper.js
+var require_bitmapper = __commonJS({
+  "node_modules/pngjs/lib/bitmapper.js"(exports2) {
+    "use strict";
+    var interlaceUtils = require_interlace();
+    var pixelBppMapper = [
+      // 0 - dummy entry
+      function() {
+      },
+      // 1 - L
+      // 0: 0, 1: 0, 2: 0, 3: 0xff
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos === data.length) {
+          throw new Error("Ran out of data");
+        }
+        let pixel = data[rawPos];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = 255;
+      },
+      // 2 - LA
+      // 0: 0, 1: 0, 2: 0, 3: 1
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 1 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        let pixel = data[rawPos];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = data[rawPos + 1];
+      },
+      // 3 - RGB
+      // 0: 0, 1: 1, 2: 2, 3: 0xff
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 2 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        pxData[pxPos] = data[rawPos];
+        pxData[pxPos + 1] = data[rawPos + 1];
+        pxData[pxPos + 2] = data[rawPos + 2];
+        pxData[pxPos + 3] = 255;
+      },
+      // 4 - RGBA
+      // 0: 0, 1: 1, 2: 2, 3: 3
+      function(pxData, data, pxPos, rawPos) {
+        if (rawPos + 3 >= data.length) {
+          throw new Error("Ran out of data");
+        }
+        pxData[pxPos] = data[rawPos];
+        pxData[pxPos + 1] = data[rawPos + 1];
+        pxData[pxPos + 2] = data[rawPos + 2];
+        pxData[pxPos + 3] = data[rawPos + 3];
+      }
+    ];
+    var pixelBppCustomMapper = [
+      // 0 - dummy entry
+      function() {
+      },
+      // 1 - L
+      // 0: 0, 1: 0, 2: 0, 3: 0xff
+      function(pxData, pixelData, pxPos, maxBit) {
+        let pixel = pixelData[0];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = maxBit;
+      },
+      // 2 - LA
+      // 0: 0, 1: 0, 2: 0, 3: 1
+      function(pxData, pixelData, pxPos) {
+        let pixel = pixelData[0];
+        pxData[pxPos] = pixel;
+        pxData[pxPos + 1] = pixel;
+        pxData[pxPos + 2] = pixel;
+        pxData[pxPos + 3] = pixelData[1];
+      },
+      // 3 - RGB
+      // 0: 0, 1: 1, 2: 2, 3: 0xff
+      function(pxData, pixelData, pxPos, maxBit) {
+        pxData[pxPos] = pixelData[0];
+        pxData[pxPos + 1] = pixelData[1];
+        pxData[pxPos + 2] = pixelData[2];
+        pxData[pxPos + 3] = maxBit;
+      },
+      // 4 - RGBA
+      // 0: 0, 1: 1, 2: 2, 3: 3
+      function(pxData, pixelData, pxPos) {
+        pxData[pxPos] = pixelData[0];
+        pxData[pxPos + 1] = pixelData[1];
+        pxData[pxPos + 2] = pixelData[2];
+        pxData[pxPos + 3] = pixelData[3];
+      }
+    ];
+    function bitRetriever(data, depth) {
+      let leftOver = [];
+      let i = 0;
+      function split() {
+        if (i === data.length) {
+          throw new Error("Ran out of data");
+        }
+        let byte = data[i];
+        i++;
+        let byte8, byte7, byte6, byte5, byte4, byte3, byte2, byte1;
+        switch (depth) {
+          default:
+            throw new Error("unrecognised depth");
+          case 16:
+            byte2 = data[i];
+            i++;
+            leftOver.push((byte << 8) + byte2);
+            break;
+          case 4:
+            byte2 = byte & 15;
+            byte1 = byte >> 4;
+            leftOver.push(byte1, byte2);
+            break;
+          case 2:
+            byte4 = byte & 3;
+            byte3 = byte >> 2 & 3;
+            byte2 = byte >> 4 & 3;
+            byte1 = byte >> 6 & 3;
+            leftOver.push(byte1, byte2, byte3, byte4);
+            break;
+          case 1:
+            byte8 = byte & 1;
+            byte7 = byte >> 1 & 1;
+            byte6 = byte >> 2 & 1;
+            byte5 = byte >> 3 & 1;
+            byte4 = byte >> 4 & 1;
+            byte3 = byte >> 5 & 1;
+            byte2 = byte >> 6 & 1;
+            byte1 = byte >> 7 & 1;
+            leftOver.push(byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8);
+            break;
+        }
+      }
+      return {
+        get: function(count) {
+          while (leftOver.length < count) {
+            split();
+          }
+          let returner = leftOver.slice(0, count);
+          leftOver = leftOver.slice(count);
+          return returner;
+        },
+        resetAfterLine: function() {
+          leftOver.length = 0;
+        },
+        end: function() {
+          if (i !== data.length) {
+            throw new Error("extra data found");
+          }
+        }
+      };
+    }
+    function mapImage8Bit(image, pxData, getPxPos, bpp, data, rawPos) {
+      let imageWidth = image.width;
+      let imageHeight = image.height;
+      let imagePass = image.index;
+      for (let y = 0; y < imageHeight; y++) {
+        for (let x = 0; x < imageWidth; x++) {
+          let pxPos = getPxPos(x, y, imagePass);
+          pixelBppMapper[bpp](pxData, data, pxPos, rawPos);
+          rawPos += bpp;
+        }
+      }
+      return rawPos;
+    }
+    function mapImageCustomBit(image, pxData, getPxPos, bpp, bits, maxBit) {
+      let imageWidth = image.width;
+      let imageHeight = image.height;
+      let imagePass = image.index;
+      for (let y = 0; y < imageHeight; y++) {
+        for (let x = 0; x < imageWidth; x++) {
+          let pixelData = bits.get(bpp);
+          let pxPos = getPxPos(x, y, imagePass);
+          pixelBppCustomMapper[bpp](pxData, pixelData, pxPos, maxBit);
+        }
+        bits.resetAfterLine();
+      }
+    }
+    exports2.dataToBitMap = function(data, bitmapInfo) {
+      let width = bitmapInfo.width;
+      let height = bitmapInfo.height;
+      let depth = bitmapInfo.depth;
+      let bpp = bitmapInfo.bpp;
+      let interlace = bitmapInfo.interlace;
+      let bits;
+      if (depth !== 8) {
+        bits = bitRetriever(data, depth);
+      }
+      let pxData;
+      if (depth <= 8) {
+        pxData = Buffer.alloc(width * height * 4);
+      } else {
+        pxData = new Uint16Array(width * height * 4);
+      }
+      let maxBit = Math.pow(2, depth) - 1;
+      let rawPos = 0;
+      let images;
+      let getPxPos;
+      if (interlace) {
+        images = interlaceUtils.getImagePasses(width, height);
+        getPxPos = interlaceUtils.getInterlaceIterator(width, height);
+      } else {
+        let nonInterlacedPxPos = 0;
+        getPxPos = function() {
+          let returner = nonInterlacedPxPos;
+          nonInterlacedPxPos += 4;
+          return returner;
+        };
+        images = [{ width, height }];
+      }
+      for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
+        if (depth === 8) {
+          rawPos = mapImage8Bit(
+            images[imageIndex],
+            pxData,
+            getPxPos,
+            bpp,
+            data,
+            rawPos
+          );
+        } else {
+          mapImageCustomBit(
+            images[imageIndex],
+            pxData,
+            getPxPos,
+            bpp,
+            bits,
+            maxBit
+          );
+        }
+      }
+      if (depth === 8) {
+        if (rawPos !== data.length) {
+          throw new Error("extra data found");
+        }
+      } else {
+        bits.end();
+      }
+      return pxData;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/format-normaliser.js
+var require_format_normaliser = __commonJS({
+  "node_modules/pngjs/lib/format-normaliser.js"(exports2, module2) {
+    "use strict";
+    function dePalette(indata, outdata, width, height, palette) {
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let color = palette[indata[pxPos]];
+          if (!color) {
+            throw new Error("index " + indata[pxPos] + " not in palette");
+          }
+          for (let i = 0; i < 4; i++) {
+            outdata[pxPos + i] = color[i];
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    function replaceTransparentColor(indata, outdata, width, height, transColor) {
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let makeTrans = false;
+          if (transColor.length === 1) {
+            if (transColor[0] === indata[pxPos]) {
+              makeTrans = true;
+            }
+          } else if (transColor[0] === indata[pxPos] && transColor[1] === indata[pxPos + 1] && transColor[2] === indata[pxPos + 2]) {
+            makeTrans = true;
+          }
+          if (makeTrans) {
+            for (let i = 0; i < 4; i++) {
+              outdata[pxPos + i] = 0;
+            }
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    function scaleDepth(indata, outdata, width, height, depth) {
+      let maxOutSample = 255;
+      let maxInSample = Math.pow(2, depth) - 1;
+      let pxPos = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          for (let i = 0; i < 4; i++) {
+            outdata[pxPos + i] = Math.floor(
+              indata[pxPos + i] * maxOutSample / maxInSample + 0.5
+            );
+          }
+          pxPos += 4;
+        }
+      }
+    }
+    module2.exports = function(indata, imageData, skipRescale = false) {
+      let depth = imageData.depth;
+      let width = imageData.width;
+      let height = imageData.height;
+      let colorType = imageData.colorType;
+      let transColor = imageData.transColor;
+      let palette = imageData.palette;
+      let outdata = indata;
+      if (colorType === 3) {
+        dePalette(indata, outdata, width, height, palette);
+      } else {
+        if (transColor) {
+          replaceTransparentColor(indata, outdata, width, height, transColor);
+        }
+        if (depth !== 8 && !skipRescale) {
+          if (depth === 16) {
+            outdata = Buffer.alloc(width * height * 4);
+          }
+          scaleDepth(indata, outdata, width, height, depth);
+        }
+      }
+      return outdata;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/parser-async.js
+var require_parser_async = __commonJS({
+  "node_modules/pngjs/lib/parser-async.js"(exports2, module2) {
+    "use strict";
+    var util2 = require("util");
+    var zlib = require("zlib");
+    var ChunkStream = require_chunkstream();
+    var FilterAsync = require_filter_parse_async();
+    var Parser = require_parser();
+    var bitmapper = require_bitmapper();
+    var formatNormaliser = require_format_normaliser();
+    var ParserAsync = module2.exports = function(options) {
+      ChunkStream.call(this);
+      this._parser = new Parser(options, {
+        read: this.read.bind(this),
+        error: this._handleError.bind(this),
+        metadata: this._handleMetaData.bind(this),
+        gamma: this.emit.bind(this, "gamma"),
+        palette: this._handlePalette.bind(this),
+        transColor: this._handleTransColor.bind(this),
+        finished: this._finished.bind(this),
+        inflateData: this._inflateData.bind(this),
+        simpleTransparency: this._simpleTransparency.bind(this),
+        headersFinished: this._headersFinished.bind(this)
+      });
+      this._options = options;
+      this.writable = true;
+      this._parser.start();
+    };
+    util2.inherits(ParserAsync, ChunkStream);
+    ParserAsync.prototype._handleError = function(err) {
+      this.emit("error", err);
+      this.writable = false;
+      this.destroy();
+      if (this._inflate && this._inflate.destroy) {
+        this._inflate.destroy();
+      }
+      if (this._filter) {
+        this._filter.destroy();
+        this._filter.on("error", function() {
+        });
+      }
+      this.errord = true;
+    };
+    ParserAsync.prototype._inflateData = function(data) {
+      if (!this._inflate) {
+        if (this._bitmapInfo.interlace) {
+          this._inflate = zlib.createInflate();
+          this._inflate.on("error", this.emit.bind(this, "error"));
+          this._filter.on("complete", this._complete.bind(this));
+          this._inflate.pipe(this._filter);
+        } else {
+          let rowSize = (this._bitmapInfo.width * this._bitmapInfo.bpp * this._bitmapInfo.depth + 7 >> 3) + 1;
+          let imageSize = rowSize * this._bitmapInfo.height;
+          let chunkSize = Math.max(imageSize, zlib.Z_MIN_CHUNK);
+          this._inflate = zlib.createInflate({ chunkSize });
+          let leftToInflate = imageSize;
+          let emitError = this.emit.bind(this, "error");
+          this._inflate.on("error", function(err) {
+            if (!leftToInflate) {
+              return;
+            }
+            emitError(err);
+          });
+          this._filter.on("complete", this._complete.bind(this));
+          let filterWrite = this._filter.write.bind(this._filter);
+          this._inflate.on("data", function(chunk) {
+            if (!leftToInflate) {
+              return;
+            }
+            if (chunk.length > leftToInflate) {
+              chunk = chunk.slice(0, leftToInflate);
+            }
+            leftToInflate -= chunk.length;
+            filterWrite(chunk);
+          });
+          this._inflate.on("end", this._filter.end.bind(this._filter));
+        }
+      }
+      this._inflate.write(data);
+    };
+    ParserAsync.prototype._handleMetaData = function(metaData) {
+      this._metaData = metaData;
+      this._bitmapInfo = Object.create(metaData);
+      this._filter = new FilterAsync(this._bitmapInfo);
+    };
+    ParserAsync.prototype._handleTransColor = function(transColor) {
+      this._bitmapInfo.transColor = transColor;
+    };
+    ParserAsync.prototype._handlePalette = function(palette) {
+      this._bitmapInfo.palette = palette;
+    };
+    ParserAsync.prototype._simpleTransparency = function() {
+      this._metaData.alpha = true;
+    };
+    ParserAsync.prototype._headersFinished = function() {
+      this.emit("metadata", this._metaData);
+    };
+    ParserAsync.prototype._finished = function() {
+      if (this.errord) {
+        return;
+      }
+      if (!this._inflate) {
+        this.emit("error", "No Inflate block");
+      } else {
+        this._inflate.end();
+      }
+    };
+    ParserAsync.prototype._complete = function(filteredData) {
+      if (this.errord) {
+        return;
+      }
+      let normalisedBitmapData;
+      try {
+        let bitmapData = bitmapper.dataToBitMap(filteredData, this._bitmapInfo);
+        normalisedBitmapData = formatNormaliser(
+          bitmapData,
+          this._bitmapInfo,
+          this._options.skipRescale
+        );
+        bitmapData = null;
+      } catch (ex) {
+        this._handleError(ex);
+        return;
+      }
+      this.emit("parsed", normalisedBitmapData);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/bitpacker.js
+var require_bitpacker = __commonJS({
+  "node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
+    "use strict";
+    var constants = require_constants();
+    module2.exports = function(dataIn, width, height, options) {
+      let outHasAlpha = [constants.COLORTYPE_COLOR_ALPHA, constants.COLORTYPE_ALPHA].indexOf(
+        options.colorType
+      ) !== -1;
+      if (options.colorType === options.inputColorType) {
+        let bigEndian = function() {
+          let buffer = new ArrayBuffer(2);
+          new DataView(buffer).setInt16(
+            0,
+            256,
+            true
+            /* littleEndian */
+          );
+          return new Int16Array(buffer)[0] !== 256;
+        }();
+        if (options.bitDepth === 8 || options.bitDepth === 16 && bigEndian) {
+          return dataIn;
+        }
+      }
+      let data = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
+      let maxValue = 255;
+      let inBpp = constants.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      if (inBpp === 4 && !options.inputHasAlpha) {
+        inBpp = 3;
+      }
+      let outBpp = constants.COLORTYPE_TO_BPP_MAP[options.colorType];
+      if (options.bitDepth === 16) {
+        maxValue = 65535;
+        outBpp *= 2;
+      }
+      let outData = Buffer.alloc(width * height * outBpp);
+      let inIndex = 0;
+      let outIndex = 0;
+      let bgColor = options.bgColor || {};
+      if (bgColor.red === void 0) {
+        bgColor.red = maxValue;
+      }
+      if (bgColor.green === void 0) {
+        bgColor.green = maxValue;
+      }
+      if (bgColor.blue === void 0) {
+        bgColor.blue = maxValue;
+      }
+      function getRGBA() {
+        let red;
+        let green;
+        let blue;
+        let alpha = maxValue;
+        switch (options.inputColorType) {
+          case constants.COLORTYPE_COLOR_ALPHA:
+            alpha = data[inIndex + 3];
+            red = data[inIndex];
+            green = data[inIndex + 1];
+            blue = data[inIndex + 2];
+            break;
+          case constants.COLORTYPE_COLOR:
+            red = data[inIndex];
+            green = data[inIndex + 1];
+            blue = data[inIndex + 2];
+            break;
+          case constants.COLORTYPE_ALPHA:
+            alpha = data[inIndex + 1];
+            red = data[inIndex];
+            green = red;
+            blue = red;
+            break;
+          case constants.COLORTYPE_GRAYSCALE:
+            red = data[inIndex];
+            green = red;
+            blue = red;
+            break;
+          default:
+            throw new Error(
+              "input color type:" + options.inputColorType + " is not supported at present"
+            );
+        }
+        if (options.inputHasAlpha) {
+          if (!outHasAlpha) {
+            alpha /= maxValue;
+            red = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.red + alpha * red), 0),
+              maxValue
+            );
+            green = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.green + alpha * green), 0),
+              maxValue
+            );
+            blue = Math.min(
+              Math.max(Math.round((1 - alpha) * bgColor.blue + alpha * blue), 0),
+              maxValue
+            );
+          }
+        }
+        return { red, green, blue, alpha };
+      }
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let rgba = getRGBA(data, inIndex);
+          switch (options.colorType) {
+            case constants.COLORTYPE_COLOR_ALPHA:
+            case constants.COLORTYPE_COLOR:
+              if (options.bitDepth === 8) {
+                outData[outIndex] = rgba.red;
+                outData[outIndex + 1] = rgba.green;
+                outData[outIndex + 2] = rgba.blue;
+                if (outHasAlpha) {
+                  outData[outIndex + 3] = rgba.alpha;
+                }
+              } else {
+                outData.writeUInt16BE(rgba.red, outIndex);
+                outData.writeUInt16BE(rgba.green, outIndex + 2);
+                outData.writeUInt16BE(rgba.blue, outIndex + 4);
+                if (outHasAlpha) {
+                  outData.writeUInt16BE(rgba.alpha, outIndex + 6);
+                }
+              }
+              break;
+            case constants.COLORTYPE_ALPHA:
+            case constants.COLORTYPE_GRAYSCALE: {
+              let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
+              if (options.bitDepth === 8) {
+                outData[outIndex] = grayscale;
+                if (outHasAlpha) {
+                  outData[outIndex + 1] = rgba.alpha;
+                }
+              } else {
+                outData.writeUInt16BE(grayscale, outIndex);
+                if (outHasAlpha) {
+                  outData.writeUInt16BE(rgba.alpha, outIndex + 2);
+                }
+              }
+              break;
+            }
+            default:
+              throw new Error("unrecognised color Type " + options.colorType);
+          }
+          inIndex += inBpp;
+          outIndex += outBpp;
+        }
+      }
+      return outData;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/filter-pack.js
+var require_filter_pack = __commonJS({
+  "node_modules/pngjs/lib/filter-pack.js"(exports2, module2) {
+    "use strict";
+    var paethPredictor = require_paeth_predictor();
+    function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
+      for (let x = 0; x < byteWidth; x++) {
+        rawData[rawPos + x] = pxData[pxPos + x];
+      }
+    }
+    function filterSumNone(pxData, pxPos, byteWidth) {
+      let sum = 0;
+      let length = pxPos + byteWidth;
+      for (let i = pxPos; i < length; i++) {
+        sum += Math.abs(pxData[i]);
+      }
+      return sum;
+    }
+    function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let val = pxData[pxPos + x] - left;
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumSub(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let val = pxData[pxPos + x] - left;
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterUp(pxData, pxPos, byteWidth, rawData, rawPos) {
+      for (let x = 0; x < byteWidth; x++) {
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - up;
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumUp(pxData, pxPos, byteWidth) {
+      let sum = 0;
+      let length = pxPos + byteWidth;
+      for (let x = pxPos; x < length; x++) {
+        let up = pxPos > 0 ? pxData[x - byteWidth] : 0;
+        let val = pxData[x] - up;
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - (left + up >> 1);
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumAvg(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let val = pxData[pxPos + x] - (left + up >> 1);
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        rawData[rawPos + x] = val;
+      }
+    }
+    function filterSumPaeth(pxData, pxPos, byteWidth, bpp) {
+      let sum = 0;
+      for (let x = 0; x < byteWidth; x++) {
+        let left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        let up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        let upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        let val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        sum += Math.abs(val);
+      }
+      return sum;
+    }
+    var filters = {
+      0: filterNone,
+      1: filterSub,
+      2: filterUp,
+      3: filterAvg,
+      4: filterPaeth
+    };
+    var filterSums = {
+      0: filterSumNone,
+      1: filterSumSub,
+      2: filterSumUp,
+      3: filterSumAvg,
+      4: filterSumPaeth
+    };
+    module2.exports = function(pxData, width, height, options, bpp) {
+      let filterTypes;
+      if (!("filterType" in options) || options.filterType === -1) {
+        filterTypes = [0, 1, 2, 3, 4];
+      } else if (typeof options.filterType === "number") {
+        filterTypes = [options.filterType];
+      } else {
+        throw new Error("unrecognised filter types");
+      }
+      if (options.bitDepth === 16) {
+        bpp *= 2;
+      }
+      let byteWidth = width * bpp;
+      let rawPos = 0;
+      let pxPos = 0;
+      let rawData = Buffer.alloc((byteWidth + 1) * height);
+      let sel = filterTypes[0];
+      for (let y = 0; y < height; y++) {
+        if (filterTypes.length > 1) {
+          let min = Infinity;
+          for (let i = 0; i < filterTypes.length; i++) {
+            let sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
+            if (sum < min) {
+              sel = filterTypes[i];
+              min = sum;
+            }
+          }
+        }
+        rawData[rawPos] = sel;
+        rawPos++;
+        filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
+        rawPos += byteWidth;
+        pxPos += byteWidth;
+      }
+      return rawData;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/packer.js
+var require_packer = __commonJS({
+  "node_modules/pngjs/lib/packer.js"(exports2, module2) {
+    "use strict";
+    var constants = require_constants();
+    var CrcStream = require_crc();
+    var bitPacker = require_bitpacker();
+    var filter = require_filter_pack();
+    var zlib = require("zlib");
+    var Packer = module2.exports = function(options) {
+      this._options = options;
+      options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
+      options.deflateLevel = options.deflateLevel != null ? options.deflateLevel : 9;
+      options.deflateStrategy = options.deflateStrategy != null ? options.deflateStrategy : 3;
+      options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
+      options.deflateFactory = options.deflateFactory || zlib.createDeflate;
+      options.bitDepth = options.bitDepth || 8;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants.COLORTYPE_COLOR_ALPHA;
+      if ([
+        constants.COLORTYPE_GRAYSCALE,
+        constants.COLORTYPE_COLOR,
+        constants.COLORTYPE_COLOR_ALPHA,
+        constants.COLORTYPE_ALPHA
+      ].indexOf(options.colorType) === -1) {
+        throw new Error(
+          "option color type:" + options.colorType + " is not supported at present"
+        );
+      }
+      if ([
+        constants.COLORTYPE_GRAYSCALE,
+        constants.COLORTYPE_COLOR,
+        constants.COLORTYPE_COLOR_ALPHA,
+        constants.COLORTYPE_ALPHA
+      ].indexOf(options.inputColorType) === -1) {
+        throw new Error(
+          "option input color type:" + options.inputColorType + " is not supported at present"
+        );
+      }
+      if (options.bitDepth !== 8 && options.bitDepth !== 16) {
+        throw new Error(
+          "option bit depth:" + options.bitDepth + " is not supported at present"
+        );
+      }
+    };
+    Packer.prototype.getDeflateOptions = function() {
+      return {
+        chunkSize: this._options.deflateChunkSize,
+        level: this._options.deflateLevel,
+        strategy: this._options.deflateStrategy
+      };
+    };
+    Packer.prototype.createDeflate = function() {
+      return this._options.deflateFactory(this.getDeflateOptions());
+    };
+    Packer.prototype.filterData = function(data, width, height) {
+      let packedData = bitPacker(data, width, height, this._options);
+      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let filteredData = filter(packedData, width, height, this._options, bpp);
+      return filteredData;
+    };
+    Packer.prototype._packChunk = function(type, data) {
+      let len = data ? data.length : 0;
+      let buf = Buffer.alloc(len + 12);
+      buf.writeUInt32BE(len, 0);
+      buf.writeUInt32BE(type, 4);
+      if (data) {
+        data.copy(buf, 8);
+      }
+      buf.writeInt32BE(
+        CrcStream.crc32(buf.slice(4, buf.length - 4)),
+        buf.length - 4
+      );
+      return buf;
+    };
+    Packer.prototype.packGAMA = function(gamma) {
+      let buf = Buffer.alloc(4);
+      buf.writeUInt32BE(Math.floor(gamma * constants.GAMMA_DIVISION), 0);
+      return this._packChunk(constants.TYPE_gAMA, buf);
+    };
+    Packer.prototype.packIHDR = function(width, height) {
+      let buf = Buffer.alloc(13);
+      buf.writeUInt32BE(width, 0);
+      buf.writeUInt32BE(height, 4);
+      buf[8] = this._options.bitDepth;
+      buf[9] = this._options.colorType;
+      buf[10] = 0;
+      buf[11] = 0;
+      buf[12] = 0;
+      return this._packChunk(constants.TYPE_IHDR, buf);
+    };
+    Packer.prototype.packIDAT = function(data) {
+      return this._packChunk(constants.TYPE_IDAT, data);
+    };
+    Packer.prototype.packIEND = function() {
+      return this._packChunk(constants.TYPE_IEND, null);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/packer-async.js
+var require_packer_async = __commonJS({
+  "node_modules/pngjs/lib/packer-async.js"(exports2, module2) {
+    "use strict";
+    var util2 = require("util");
+    var Stream = require("stream");
+    var constants = require_constants();
+    var Packer = require_packer();
+    var PackerAsync = module2.exports = function(opt) {
+      Stream.call(this);
+      let options = opt || {};
+      this._packer = new Packer(options);
+      this._deflate = this._packer.createDeflate();
+      this.readable = true;
+    };
+    util2.inherits(PackerAsync, Stream);
+    PackerAsync.prototype.pack = function(data, width, height, gamma) {
+      this.emit("data", Buffer.from(constants.PNG_SIGNATURE));
+      this.emit("data", this._packer.packIHDR(width, height));
+      if (gamma) {
+        this.emit("data", this._packer.packGAMA(gamma));
+      }
+      let filteredData = this._packer.filterData(data, width, height);
+      this._deflate.on("error", this.emit.bind(this, "error"));
+      this._deflate.on(
+        "data",
+        function(compressedData) {
+          this.emit("data", this._packer.packIDAT(compressedData));
+        }.bind(this)
+      );
+      this._deflate.on(
+        "end",
+        function() {
+          this.emit("data", this._packer.packIEND());
+          this.emit("end");
+        }.bind(this)
+      );
+      this._deflate.end(filteredData);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/sync-inflate.js
+var require_sync_inflate = __commonJS({
+  "node_modules/pngjs/lib/sync-inflate.js"(exports2, module2) {
+    "use strict";
+    var assert = require("assert").ok;
+    var zlib = require("zlib");
+    var util2 = require("util");
+    var kMaxLength = require("buffer").kMaxLength;
+    function Inflate(opts) {
+      if (!(this instanceof Inflate)) {
+        return new Inflate(opts);
+      }
+      if (opts && opts.chunkSize < zlib.Z_MIN_CHUNK) {
+        opts.chunkSize = zlib.Z_MIN_CHUNK;
+      }
+      zlib.Inflate.call(this, opts);
+      this._offset = this._offset === void 0 ? this._outOffset : this._offset;
+      this._buffer = this._buffer || this._outBuffer;
+      if (opts && opts.maxLength != null) {
+        this._maxLength = opts.maxLength;
+      }
+    }
+    function createInflate(opts) {
+      return new Inflate(opts);
+    }
+    function _close(engine, callback) {
+      if (callback) {
+        process.nextTick(callback);
+      }
+      if (!engine._handle) {
+        return;
+      }
+      engine._handle.close();
+      engine._handle = null;
+    }
+    Inflate.prototype._processChunk = function(chunk, flushFlag, asyncCb) {
+      if (typeof asyncCb === "function") {
+        return zlib.Inflate._processChunk.call(this, chunk, flushFlag, asyncCb);
+      }
+      let self = this;
+      let availInBefore = chunk && chunk.length;
+      let availOutBefore = this._chunkSize - this._offset;
+      let leftToInflate = this._maxLength;
+      let inOff = 0;
+      let buffers = [];
+      let nread = 0;
+      let error;
+      this.on("error", function(err) {
+        error = err;
+      });
+      function handleChunk(availInAfter, availOutAfter) {
+        if (self._hadError) {
+          return;
+        }
+        let have = availOutBefore - availOutAfter;
+        assert(have >= 0, "have should not go down");
+        if (have > 0) {
+          let out = self._buffer.slice(self._offset, self._offset + have);
+          self._offset += have;
+          if (out.length > leftToInflate) {
+            out = out.slice(0, leftToInflate);
+          }
+          buffers.push(out);
+          nread += out.length;
+          leftToInflate -= out.length;
+          if (leftToInflate === 0) {
+            return false;
+          }
+        }
+        if (availOutAfter === 0 || self._offset >= self._chunkSize) {
+          availOutBefore = self._chunkSize;
+          self._offset = 0;
+          self._buffer = Buffer.allocUnsafe(self._chunkSize);
+        }
+        if (availOutAfter === 0) {
+          inOff += availInBefore - availInAfter;
+          availInBefore = availInAfter;
+          return true;
+        }
+        return false;
+      }
+      assert(this._handle, "zlib binding closed");
+      let res;
+      do {
+        res = this._handle.writeSync(
+          flushFlag,
+          chunk,
+          // in
+          inOff,
+          // in_off
+          availInBefore,
+          // in_len
+          this._buffer,
+          // out
+          this._offset,
+          //out_off
+          availOutBefore
+        );
+        res = res || this._writeState;
+      } while (!this._hadError && handleChunk(res[0], res[1]));
+      if (this._hadError) {
+        throw error;
+      }
+      if (nread >= kMaxLength) {
+        _close(this);
+        throw new RangeError(
+          "Cannot create final Buffer. It would be larger than 0x" + kMaxLength.toString(16) + " bytes"
+        );
+      }
+      let buf = Buffer.concat(buffers, nread);
+      _close(this);
+      return buf;
+    };
+    util2.inherits(Inflate, zlib.Inflate);
+    function zlibBufferSync(engine, buffer) {
+      if (typeof buffer === "string") {
+        buffer = Buffer.from(buffer);
+      }
+      if (!(buffer instanceof Buffer)) {
+        throw new TypeError("Not a string or buffer");
+      }
+      let flushFlag = engine._finishFlushFlag;
+      if (flushFlag == null) {
+        flushFlag = zlib.Z_FINISH;
+      }
+      return engine._processChunk(buffer, flushFlag);
+    }
+    function inflateSync(buffer, opts) {
+      return zlibBufferSync(new Inflate(opts), buffer);
+    }
+    module2.exports = exports2 = inflateSync;
+    exports2.Inflate = Inflate;
+    exports2.createInflate = createInflate;
+    exports2.inflateSync = inflateSync;
+  }
+});
+
+// node_modules/pngjs/lib/sync-reader.js
+var require_sync_reader = __commonJS({
+  "node_modules/pngjs/lib/sync-reader.js"(exports2, module2) {
+    "use strict";
+    var SyncReader = module2.exports = function(buffer) {
+      this._buffer = buffer;
+      this._reads = [];
+    };
+    SyncReader.prototype.read = function(length, callback) {
+      this._reads.push({
+        length: Math.abs(length),
+        // if length < 0 then at most this length
+        allowLess: length < 0,
+        func: callback
+      });
+    };
+    SyncReader.prototype.process = function() {
+      while (this._reads.length > 0 && this._buffer.length) {
+        let read = this._reads[0];
+        if (this._buffer.length && (this._buffer.length >= read.length || read.allowLess)) {
+          this._reads.shift();
+          let buf = this._buffer;
+          this._buffer = buf.slice(read.length);
+          read.func.call(this, buf.slice(0, read.length));
+        } else {
+          break;
+        }
+      }
+      if (this._reads.length > 0) {
+        throw new Error("There are some read requests waitng on finished stream");
+      }
+      if (this._buffer.length > 0) {
+        throw new Error("unrecognised content at end of stream");
+      }
+    };
+  }
+});
+
+// node_modules/pngjs/lib/filter-parse-sync.js
+var require_filter_parse_sync = __commonJS({
+  "node_modules/pngjs/lib/filter-parse-sync.js"(exports2) {
+    "use strict";
+    var SyncReader = require_sync_reader();
+    var Filter = require_filter_parse();
+    exports2.process = function(inBuffer, bitmapInfo) {
+      let outBuffers = [];
+      let reader = new SyncReader(inBuffer);
+      let filter = new Filter(bitmapInfo, {
+        read: reader.read.bind(reader),
+        write: function(bufferPart) {
+          outBuffers.push(bufferPart);
+        },
+        complete: function() {
+        }
+      });
+      filter.start();
+      reader.process();
+      return Buffer.concat(outBuffers);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/parser-sync.js
+var require_parser_sync = __commonJS({
+  "node_modules/pngjs/lib/parser-sync.js"(exports2, module2) {
+    "use strict";
+    var hasSyncZlib = true;
+    var zlib = require("zlib");
+    var inflateSync = require_sync_inflate();
+    if (!zlib.deflateSync) {
+      hasSyncZlib = false;
+    }
+    var SyncReader = require_sync_reader();
+    var FilterSync = require_filter_parse_sync();
+    var Parser = require_parser();
+    var bitmapper = require_bitmapper();
+    var formatNormaliser = require_format_normaliser();
+    module2.exports = function(buffer, options) {
+      if (!hasSyncZlib) {
+        throw new Error(
+          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
+        );
+      }
+      let err;
+      function handleError(_err_) {
+        err = _err_;
+      }
+      let metaData;
+      function handleMetaData(_metaData_) {
+        metaData = _metaData_;
+      }
+      function handleTransColor(transColor) {
+        metaData.transColor = transColor;
+      }
+      function handlePalette(palette) {
+        metaData.palette = palette;
+      }
+      function handleSimpleTransparency() {
+        metaData.alpha = true;
+      }
+      let gamma;
+      function handleGamma(_gamma_) {
+        gamma = _gamma_;
+      }
+      let inflateDataList = [];
+      function handleInflateData(inflatedData2) {
+        inflateDataList.push(inflatedData2);
+      }
+      let reader = new SyncReader(buffer);
+      let parser = new Parser(options, {
+        read: reader.read.bind(reader),
+        error: handleError,
+        metadata: handleMetaData,
+        gamma: handleGamma,
+        palette: handlePalette,
+        transColor: handleTransColor,
+        inflateData: handleInflateData,
+        simpleTransparency: handleSimpleTransparency
+      });
+      parser.start();
+      reader.process();
+      if (err) {
+        throw err;
+      }
+      let inflateData = Buffer.concat(inflateDataList);
+      inflateDataList.length = 0;
+      let inflatedData;
+      if (metaData.interlace) {
+        inflatedData = zlib.inflateSync(inflateData);
+      } else {
+        let rowSize = (metaData.width * metaData.bpp * metaData.depth + 7 >> 3) + 1;
+        let imageSize = rowSize * metaData.height;
+        inflatedData = inflateSync(inflateData, {
+          chunkSize: imageSize,
+          maxLength: imageSize
+        });
+      }
+      inflateData = null;
+      if (!inflatedData || !inflatedData.length) {
+        throw new Error("bad png - invalid inflate data response");
+      }
+      let unfilteredData = FilterSync.process(inflatedData, metaData);
+      inflateData = null;
+      let bitmapData = bitmapper.dataToBitMap(unfilteredData, metaData);
+      unfilteredData = null;
+      let normalisedBitmapData = formatNormaliser(
+        bitmapData,
+        metaData,
+        options.skipRescale
+      );
+      metaData.data = normalisedBitmapData;
+      metaData.gamma = gamma || 0;
+      return metaData;
+    };
+  }
+});
+
+// node_modules/pngjs/lib/packer-sync.js
+var require_packer_sync = __commonJS({
+  "node_modules/pngjs/lib/packer-sync.js"(exports2, module2) {
+    "use strict";
+    var hasSyncZlib = true;
+    var zlib = require("zlib");
+    if (!zlib.deflateSync) {
+      hasSyncZlib = false;
+    }
+    var constants = require_constants();
+    var Packer = require_packer();
+    module2.exports = function(metaData, opt) {
+      if (!hasSyncZlib) {
+        throw new Error(
+          "To use the sync capability of this library in old node versions, please pin pngjs to v2.3.0"
+        );
+      }
+      let options = opt || {};
+      let packer = new Packer(options);
+      let chunks = [];
+      chunks.push(Buffer.from(constants.PNG_SIGNATURE));
+      chunks.push(packer.packIHDR(metaData.width, metaData.height));
+      if (metaData.gamma) {
+        chunks.push(packer.packGAMA(metaData.gamma));
+      }
+      let filteredData = packer.filterData(
+        metaData.data,
+        metaData.width,
+        metaData.height
+      );
+      let compressedData = zlib.deflateSync(
+        filteredData,
+        packer.getDeflateOptions()
+      );
+      filteredData = null;
+      if (!compressedData || !compressedData.length) {
+        throw new Error("bad png - invalid compressed data response");
+      }
+      chunks.push(packer.packIDAT(compressedData));
+      chunks.push(packer.packIEND());
+      return Buffer.concat(chunks);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/png-sync.js
+var require_png_sync = __commonJS({
+  "node_modules/pngjs/lib/png-sync.js"(exports2) {
+    "use strict";
+    var parse = require_parser_sync();
+    var pack = require_packer_sync();
+    exports2.read = function(buffer, options) {
+      return parse(buffer, options || {});
+    };
+    exports2.write = function(png, options) {
+      return pack(png, options);
+    };
+  }
+});
+
+// node_modules/pngjs/lib/png.js
+var require_png = __commonJS({
+  "node_modules/pngjs/lib/png.js"(exports2) {
+    "use strict";
+    var util2 = require("util");
+    var Stream = require("stream");
+    var Parser = require_parser_async();
+    var Packer = require_packer_async();
+    var PNGSync = require_png_sync();
+    var PNG2 = exports2.PNG = function(options) {
+      Stream.call(this);
+      options = options || {};
+      this.width = options.width | 0;
+      this.height = options.height | 0;
+      this.data = this.width > 0 && this.height > 0 ? Buffer.alloc(4 * this.width * this.height) : null;
+      if (options.fill && this.data) {
+        this.data.fill(0);
+      }
+      this.gamma = 0;
+      this.readable = this.writable = true;
+      this._parser = new Parser(options);
+      this._parser.on("error", this.emit.bind(this, "error"));
+      this._parser.on("close", this._handleClose.bind(this));
+      this._parser.on("metadata", this._metadata.bind(this));
+      this._parser.on("gamma", this._gamma.bind(this));
+      this._parser.on(
+        "parsed",
+        function(data) {
+          this.data = data;
+          this.emit("parsed", data);
+        }.bind(this)
+      );
+      this._packer = new Packer(options);
+      this._packer.on("data", this.emit.bind(this, "data"));
+      this._packer.on("end", this.emit.bind(this, "end"));
+      this._parser.on("close", this._handleClose.bind(this));
+      this._packer.on("error", this.emit.bind(this, "error"));
+    };
+    util2.inherits(PNG2, Stream);
+    PNG2.sync = PNGSync;
+    PNG2.prototype.pack = function() {
+      if (!this.data || !this.data.length) {
+        this.emit("error", "No data provided");
+        return this;
+      }
+      process.nextTick(
+        function() {
+          this._packer.pack(this.data, this.width, this.height, this.gamma);
+        }.bind(this)
+      );
+      return this;
+    };
+    PNG2.prototype.parse = function(data, callback) {
+      if (callback) {
+        let onParsed, onError;
+        onParsed = function(parsedData) {
+          this.removeListener("error", onError);
+          this.data = parsedData;
+          callback(null, this);
+        }.bind(this);
+        onError = function(err) {
+          this.removeListener("parsed", onParsed);
+          callback(err, null);
+        }.bind(this);
+        this.once("parsed", onParsed);
+        this.once("error", onError);
+      }
+      this.end(data);
+      return this;
+    };
+    PNG2.prototype.write = function(data) {
+      this._parser.write(data);
+      return true;
+    };
+    PNG2.prototype.end = function(data) {
+      this._parser.end(data);
+    };
+    PNG2.prototype._metadata = function(metadata) {
+      this.width = metadata.width;
+      this.height = metadata.height;
+      this.emit("metadata", metadata);
+    };
+    PNG2.prototype._gamma = function(gamma) {
+      this.gamma = gamma;
+    };
+    PNG2.prototype._handleClose = function() {
+      if (!this._parser.writable && !this._packer.readable) {
+        this.emit("close");
+      }
+    };
+    PNG2.bitblt = function(src, dst, srcX, srcY, width, height, deltaX, deltaY) {
+      srcX |= 0;
+      srcY |= 0;
+      width |= 0;
+      height |= 0;
+      deltaX |= 0;
+      deltaY |= 0;
+      if (srcX > src.width || srcY > src.height || srcX + width > src.width || srcY + height > src.height) {
+        throw new Error("bitblt reading outside image");
+      }
+      if (deltaX > dst.width || deltaY > dst.height || deltaX + width > dst.width || deltaY + height > dst.height) {
+        throw new Error("bitblt writing outside image");
+      }
+      for (let y = 0; y < height; y++) {
+        src.data.copy(
+          dst.data,
+          (deltaY + y) * dst.width + deltaX << 2,
+          (srcY + y) * src.width + srcX << 2,
+          (srcY + y) * src.width + srcX + width << 2
+        );
+      }
+    };
+    PNG2.prototype.bitblt = function(dst, srcX, srcY, width, height, deltaX, deltaY) {
+      PNG2.bitblt(this, dst, srcX, srcY, width, height, deltaX, deltaY);
+      return this;
+    };
+    PNG2.adjustGamma = function(src) {
+      if (src.gamma) {
+        for (let y = 0; y < src.height; y++) {
+          for (let x = 0; x < src.width; x++) {
+            let idx = src.width * y + x << 2;
+            for (let i = 0; i < 3; i++) {
+              let sample = src.data[idx + i] / 255;
+              sample = Math.pow(sample, 1 / 2.2 / src.gamma);
+              src.data[idx + i] = Math.round(sample * 255);
+            }
+          }
+        }
+        src.gamma = 0;
+      }
+    };
+    PNG2.prototype.adjustGamma = function() {
+      PNG2.adjustGamma(this);
+    };
+  }
+});
+
 // src/panel-entry.ts
 var panel_entry_exports = {};
 __export(panel_entry_exports, {
@@ -35,7 +2126,7 @@ __export(panel_entry_exports, {
   handleRpc: () => handleRpc
 });
 module.exports = __toCommonJS(panel_entry_exports);
-var path4 = __toESM(require("node:path"), 1);
+var path8 = __toESM(require("node:path"), 1);
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -515,8 +2606,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -632,11 +2723,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -4494,13 +6585,13 @@ var SingleWriterQueue = class {
       return Promise.resolve(this.createLease(op, 0, null));
     }
     const behind = this.holder ?? this.waiting.find((w) => !w.done)?.op ?? "unknown";
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const waiter = {
         op,
         enqueuedAt: Date.now(),
         behind,
         done: false,
-        resolve,
+        resolve: resolve2,
         reject,
         cleanup: () => {
         }
@@ -4660,12 +6751,11 @@ function formatToolError(err) {
   };
 }
 
-// src/tools/ext/index.ts
-var extTools = [];
-
-// src/tools/mutate.ts
-var fs2 = __toESM(require("node:fs"), 1);
-var path2 = __toESM(require("node:path"), 1);
+// src/tools/ext/aerender.ts
+var childProcess = __toESM(require("node:child_process"), 1);
+var crypto = __toESM(require("node:crypto"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
+var path3 = __toESM(require("node:path"), 1);
 
 // src/jsx.ts
 function encodeJsxArg(value) {
@@ -4710,6 +6800,8 @@ function pathsMatchForGuard(expectedPath, actualPath, isWindows = process.platfo
 }
 
 // src/tools/mutate.ts
+var fs2 = __toESM(require("node:fs"), 1);
+var path2 = __toESM(require("node:path"), 1);
 var KeyframeItemSchema = external_exports.object({
   time: external_exports.number().describe("Keyframe time in seconds."),
   value: external_exports.unknown().describe("Keyframe value at `time`."),
@@ -5077,134 +7169,1734 @@ var mutateTools = [
   }
 ];
 
-// src/tools/quarantine.ts
-var AeQuarantineStatusSchema = external_exports.object({});
-var AeAcknowledgeSchema = external_exports.object({
-  op_id: external_exports.string().min(1).describe("The quarantined operation ID (`op_id`) to acknowledge and clear."),
-  note: external_exports.string().min(1).describe(
-    "Explanation of what read tools showed about the operation's actual outcome in After Effects."
+// src/tools/ext/aerender.ts
+var WINDOWS_FALLBACK_AERENDER = "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
+var MACOS_FALLBACK_AERENDER = "/Applications/Adobe After Effects 2026/aerender";
+function defaultRendersDir() {
+  return path3.join(defaultDataDir(), "renders");
+}
+function defaultAerenderJobsFilePath() {
+  return path3.join(defaultRendersDir(), "jobs.json");
+}
+function resolveAerenderPath(options) {
+  const platform = options?.platform ?? process.platform;
+  const exists = options?.existsSync ?? fs3.existsSync;
+  const afterFxPath = options?.afterFxPath?.trim();
+  let versionYear = null;
+  if (options?.aeVersion) {
+    const m = /^(\d+)/.exec(options.aeVersion.trim());
+    if (m) {
+      const major = parseInt(m[1], 10);
+      if (major >= 20 && major <= 40) {
+        versionYear = 2e3 + major;
+      }
+    }
+  }
+  if (platform === "darwin") {
+    if (afterFxPath) {
+      const norm = afterFxPath.replace(/\\/g, "/");
+      const appIdx = norm.toLowerCase().indexOf(".app");
+      if (appIdx !== -1) {
+        const appBundlePath = norm.slice(0, appIdx + 4);
+        const parentDir = path3.posix.dirname(appBundlePath);
+        const candidate2 = path3.posix.join(parentDir, "aerender");
+        if (exists(candidate2)) {
+          return candidate2;
+        }
+        return candidate2;
+      }
+      const dir = path3.posix.dirname(norm);
+      const candidate = path3.posix.join(dir, "aerender");
+      if (exists(candidate)) {
+        return candidate;
+      }
+    }
+    const years2 = versionYear ? [versionYear, 2026, 2025, 2024] : [2026, 2025, 2024];
+    for (const yr of years2) {
+      const appParent = `/Applications/Adobe After Effects ${yr}`;
+      const candidate = `${appParent}/aerender`;
+      if (exists(candidate)) {
+        return candidate;
+      }
+    }
+    return MACOS_FALLBACK_AERENDER;
+  }
+  if (afterFxPath) {
+    const norm = afterFxPath.replace(/\\/g, "/");
+    const dir = norm.toLowerCase().endsWith(".exe") ? path3.posix.dirname(norm) : norm.replace(/\/+$/, "");
+    const candidate = `${dir}/aerender.exe`;
+    if (exists(candidate)) {
+      return candidate;
+    }
+    return candidate;
+  }
+  if (typeof process.execPath === "string" && process.execPath.length > 0) {
+    const execDir = path3.dirname(process.execPath).replace(/\\/g, "/");
+    if (exists(`${execDir}/AfterFX.exe`) && exists(`${execDir}/aerender.exe`)) {
+      return `${execDir}/aerender.exe`;
+    }
+  }
+  const years = versionYear ? [versionYear, 2026, 2025, 2024] : [2026, 2025, 2024];
+  for (const yr of years) {
+    const supportDir = `C:/Program Files/Adobe/Adobe After Effects ${yr}/Support Files`;
+    const candidate = `${supportDir}/aerender.exe`;
+    if (exists(`${supportDir}/AfterFX.exe`) || exists(candidate)) {
+      return candidate;
+    }
+  }
+  return WINDOWS_FALLBACK_AERENDER;
+}
+function buildAerenderArgs(params) {
+  const cliArgs = [
+    "-project",
+    params.project_path,
+    "-comp",
+    params.comp_name,
+    "-output",
+    params.output_path
+  ];
+  if (params.render_settings_template) {
+    cliArgs.push("-RStemplate", params.render_settings_template);
+  }
+  if (params.output_module_template) {
+    cliArgs.push("-OMtemplate", params.output_module_template);
+  }
+  if (params.start_frame !== void 0) {
+    cliArgs.push("-s", String(params.start_frame));
+  }
+  if (params.end_frame !== void 0) {
+    cliArgs.push("-e", String(params.end_frame));
+  }
+  return cliArgs;
+}
+function parseAerenderProgress(logText, meta) {
+  const lines = logText.split(/\r?\n/);
+  const renderedFrames = [];
+  const seenFrames = /* @__PURE__ */ new Set();
+  let progressLinesCount = 0;
+  let lastProgressLine = null;
+  let inferredTotalFrames = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!/^PROGRESS:/i.test(line)) {
+      continue;
+    }
+    progressLinesCount++;
+    lastProgressLine = line;
+    const parenMatch = /^PROGRESS:\s*(?:[0-9:;.]+\s*)?\((\d+)\)\s*:/i.exec(
+      line
+    );
+    if (parenMatch) {
+      const frameNum = parseInt(parenMatch[1], 10);
+      if (!Number.isNaN(frameNum)) {
+        renderedFrames.push(frameNum);
+        seenFrames.add(frameNum);
+      }
+      continue;
+    }
+    const fracMatch = /^PROGRESS:\s*(?:frame\s+(\d+)\s+of\s+(\d+)|(\d+)\s*\/\s*(\d+))\s*$/i.exec(line);
+    if (fracMatch) {
+      const frameNum = parseInt(fracMatch[1] ?? fracMatch[3], 10);
+      const totalNum = parseInt(fracMatch[2] ?? fracMatch[4], 10);
+      if (!Number.isNaN(frameNum)) {
+        renderedFrames.push(frameNum);
+        seenFrames.add(frameNum);
+      }
+      if (!Number.isNaN(totalNum) && totalNum > 0) {
+        inferredTotalFrames = totalNum;
+      }
+    }
+  }
+  const currentFrame = renderedFrames.length > 0 ? renderedFrames[renderedFrames.length - 1] : null;
+  const startFrame = meta?.start_frame !== void 0 ? meta.start_frame : renderedFrames.length > 0 ? renderedFrames[0] : null;
+  const endFrame = meta?.end_frame !== void 0 ? meta.end_frame : null;
+  const totalFrames = meta?.start_frame !== void 0 && meta?.end_frame !== void 0 && meta.end_frame >= meta.start_frame ? meta.end_frame - meta.start_frame + 1 : inferredTotalFrames;
+  const framesCompleted = seenFrames.size;
+  let percent = null;
+  if (totalFrames !== null && totalFrames > 0) {
+    if (meta?.state === "succeeded") {
+      percent = 100;
+    } else if (currentFrame !== null && startFrame !== null && currentFrame >= startFrame) {
+      const doneBySpan = Math.max(
+        framesCompleted,
+        currentFrame - startFrame + 1
+      );
+      percent = Math.min(
+        100,
+        Math.max(0, Math.round(doneBySpan / totalFrames * 1e4) / 100)
+      );
+    } else {
+      percent = Math.min(
+        100,
+        Math.max(0, Math.round(framesCompleted / totalFrames * 1e4) / 100)
+      );
+    }
+  } else if (meta?.state === "succeeded") {
+    percent = 100;
+  }
+  return {
+    current_frame: currentFrame,
+    last_frame: currentFrame,
+    frames_completed: framesCompleted,
+    start_frame: startFrame,
+    end_frame: endFrame,
+    total_frames: totalFrames,
+    percent,
+    progress_lines_count: progressLinesCount,
+    last_progress_line: lastProgressLine
+  };
+}
+function readLogTail(logPath, maxLines = 60, maxChars = 16e3) {
+  try {
+    if (!fs3.existsSync(logPath)) {
+      return { fullText: "", tail: "" };
+    }
+    const fullText = fs3.readFileSync(logPath, "utf8");
+    const lines = fullText.split(/\r?\n/);
+    if (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+    const tailLines = lines.slice(-maxLines);
+    let tail = tailLines.join("\n");
+    if (tail.length > maxChars) {
+      tail = tail.slice(-maxChars);
+    }
+    return { fullText, tail };
+  } catch {
+    return { fullText: "", tail: "" };
+  }
+}
+var AerenderJobRegistry = class {
+  filePath;
+  jobs = /* @__PURE__ */ new Map();
+  procs = /* @__PURE__ */ new Map();
+  constructor(filePath = defaultAerenderJobsFilePath()) {
+    this.filePath = filePath;
+    this.loadFromDisk();
+  }
+  get path() {
+    return this.filePath;
+  }
+  get rendersDir() {
+    return path3.dirname(this.filePath);
+  }
+  newJobId() {
+    return `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  }
+  list() {
+    return Array.from(this.jobs.values());
+  }
+  get(jobId) {
+    return this.jobs.get(jobId);
+  }
+  getProcess(jobId) {
+    return this.procs.get(jobId);
+  }
+  register(record, proc) {
+    this.jobs.set(record.job_id, { ...record });
+    if (proc) {
+      this.procs.set(record.job_id, proc);
+    }
+    this.saveToDisk();
+    return this.jobs.get(record.job_id);
+  }
+  update(jobId, patch) {
+    const existing = this.jobs.get(jobId);
+    if (!existing) {
+      return void 0;
+    }
+    const updated = {
+      ...existing,
+      ...patch,
+      job_id: existing.job_id
+    };
+    this.jobs.set(jobId, updated);
+    if (updated.state !== "running") {
+      this.procs.delete(jobId);
+    }
+    this.saveToDisk();
+    return updated;
+  }
+  loadFromDisk() {
+    try {
+      if (!fs3.existsSync(this.filePath)) {
+        return;
+      }
+      const raw = fs3.readFileSync(this.filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
+      for (const item of list) {
+        if (item && typeof item === "object" && typeof item.job_id === "string") {
+          const rec = item;
+          this.jobs.set(rec.job_id, { ...rec });
+        }
+      }
+    } catch {
+    }
+  }
+  saveToDisk() {
+    const dir = path3.dirname(this.filePath);
+    fs3.mkdirSync(dir, { recursive: true });
+    const payload = JSON.stringify({ jobs: this.list() }, null, 2);
+    const tmpFile = `${this.filePath}.tmp-${process.pid}-${crypto.randomBytes(3).toString("hex")}`;
+    try {
+      fs3.writeFileSync(tmpFile, payload, { encoding: "utf8" });
+      fs3.renameSync(tmpFile, this.filePath);
+    } catch {
+      fs3.writeFileSync(this.filePath, payload, { encoding: "utf8" });
+      try {
+        if (fs3.existsSync(tmpFile)) fs3.unlinkSync(tmpFile);
+      } catch {
+      }
+    }
+  }
+};
+var defaultRegistry = null;
+function getDefaultAerenderRegistry() {
+  if (!defaultRegistry) {
+    defaultRegistry = new AerenderJobRegistry();
+  }
+  return defaultRegistry;
+}
+var AeAerenderStartSchema = external_exports.object({
+  expect: ExpectSchema,
+  comp_name: external_exports.string().min(1).describe("Name of the composition to render."),
+  output_path: external_exports.string().min(1).describe("Absolute output file path for aerender (-output)."),
+  output_module_template: external_exports.string().min(1).optional().describe("Optional Output Module template name (-OMtemplate)."),
+  render_settings_template: external_exports.string().min(1).optional().describe("Optional Render Settings template name (-RStemplate)."),
+  start_frame: external_exports.number().int().min(0).optional().describe("Optional start frame index (-s)."),
+  end_frame: external_exports.number().int().min(0).optional().describe("Optional end frame index (-e).")
+}).superRefine((val, ctx) => {
+  if (val.start_frame !== void 0 && val.end_frame !== void 0 && val.end_frame < val.start_frame) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["end_frame"],
+      message: "`end_frame` must be >= `start_frame`."
+    });
+  }
+});
+var AeAerenderStatusSchema = external_exports.object({
+  job_id: external_exports.string().min(1).describe("Background aerender job ID.")
+});
+var AeAerenderCancelSchema = external_exports.object({
+  job_id: external_exports.string().min(1).describe("Background aerender job ID to cancel.")
+});
+function createAerenderTools(options = {}) {
+  const getRegistry = () => options.registry ?? getDefaultAerenderRegistry();
+  const spawnFn = options.spawn ?? childProcess.spawn;
+  return [
+    {
+      name: "ae_aerender_start",
+      description: "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project, logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeAerenderStartSchema,
+      handler: async (args, ctx) => {
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const registry = getRegistry();
+        try {
+          return await ctx.queue.run(
+            `ae_aerender_start(${args.comp_name})`,
+            async () => {
+              ctx.quarantine.assertClear();
+              const statusResp = await ctx.bridge.evalRaw({
+                id: `${opId}_status`,
+                script: buildJsxCall("status", {}),
+                label: "ae_aerender_start (status)",
+                mutates: false,
+                toolName: "ae_aerender_start"
+              });
+              const statusInfo = statusResp.result ?? {};
+              const actualProjectPath = statusInfo.project_path ?? "<unsaved>";
+              if (actualProjectPath === "<unsaved>" || args.expect.project_path === "<unsaved>") {
+                throw new BridgeError({
+                  kind: "guard",
+                  op_id: opId,
+                  message: "Cannot start aerender on an unsaved project (<unsaved>). Save the project to disk first.",
+                  expected: {
+                    project_path: args.expect.project_path,
+                    dirty: false
+                  },
+                  actual: {
+                    project_path: actualProjectPath,
+                    dirty: Boolean(statusInfo.dirty)
+                  }
+                });
+              }
+              if (!pathsMatchForGuard(
+                args.expect.project_path,
+                actualProjectPath
+              )) {
+                throw new BridgeError({
+                  kind: "guard",
+                  op_id: opId,
+                  message: `Target guard refused ae_aerender_start: expected project_path "${args.expect.project_path}", but After Effects has "${actualProjectPath}" open.`,
+                  expected: args.expect,
+                  actual: {
+                    project_path: actualProjectPath,
+                    dirty: Boolean(statusInfo.dirty)
+                  }
+                });
+              }
+              if (statusInfo.dirty === true) {
+                throw new BridgeError({
+                  kind: "guard",
+                  op_id: opId,
+                  message: "Cannot start aerender because the open project has unsaved changes (dirty: true). Call ae_save first so aerender renders the latest state on disk.",
+                  expected: {
+                    project_path: args.expect.project_path,
+                    dirty: false
+                  },
+                  actual: {
+                    project_path: actualProjectPath,
+                    dirty: true
+                  }
+                });
+              }
+              if (args.expect.comp_id !== void 0) {
+                await verifyTargetGuard(ctx, args.expect, opId);
+              }
+              const aerenderBin = resolveAerenderPath({
+                platform: options.platform,
+                afterFxPath: options.afterFxPath ?? statusInfo.afterfx_path ?? statusInfo.app_path,
+                aeVersion: statusInfo.aeVersion,
+                existsSync: options.existsSync
+              });
+              const jobId = registry.newJobId();
+              const rendersDir = registry.rendersDir;
+              fs3.mkdirSync(rendersDir, { recursive: true });
+              const outDir = path3.dirname(args.output_path);
+              if (outDir && outDir !== ".") {
+                try {
+                  fs3.mkdirSync(outDir, { recursive: true });
+                } catch {
+                }
+              }
+              const logPath = path3.join(rendersDir, `${jobId}.log`);
+              fs3.writeFileSync(logPath, "", { encoding: "utf8" });
+              const cliArgs = buildAerenderArgs({
+                project_path: actualProjectPath,
+                comp_name: args.comp_name,
+                output_path: args.output_path,
+                output_module_template: args.output_module_template,
+                render_settings_template: args.render_settings_template,
+                start_frame: args.start_frame,
+                end_frame: args.end_frame
+              });
+              let logFd = null;
+              try {
+                logFd = fs3.openSync(logPath, "a");
+              } catch {
+                logFd = null;
+              }
+              const stdioConfig = logFd !== null ? ["ignore", logFd, logFd] : "pipe";
+              const child = spawnFn(aerenderBin, cliArgs, {
+                windowsHide: true,
+                detached: true,
+                stdio: stdioConfig
+              });
+              if (logFd !== null) {
+                try {
+                  fs3.closeSync(logFd);
+                } catch {
+                }
+              }
+              if (child.stdout) {
+                child.stdout.on("data", (chunk) => {
+                  try {
+                    fs3.appendFileSync(logPath, chunk);
+                  } catch {
+                  }
+                });
+              }
+              if (child.stderr) {
+                child.stderr.on("data", (chunk) => {
+                  try {
+                    fs3.appendFileSync(logPath, chunk);
+                  } catch {
+                  }
+                });
+              }
+              const initialRecord = {
+                job_id: jobId,
+                pid: typeof child.pid === "number" ? child.pid : null,
+                state: "running",
+                exit_code: null,
+                signal: null,
+                cancelled: false,
+                project_path: actualProjectPath,
+                comp_name: args.comp_name,
+                output_path: args.output_path,
+                ...args.output_module_template ? { output_module_template: args.output_module_template } : {},
+                ...args.render_settings_template ? { render_settings_template: args.render_settings_template } : {},
+                ...args.start_frame !== void 0 ? { start_frame: args.start_frame } : {},
+                ...args.end_frame !== void 0 ? { end_frame: args.end_frame } : {},
+                aerender_path: aerenderBin,
+                args: cliArgs,
+                log_path: logPath,
+                started_at: (/* @__PURE__ */ new Date()).toISOString(),
+                finished_at: null
+              };
+              registry.register(initialRecord, child);
+              child.on("error", (err) => {
+                try {
+                  fs3.appendFileSync(
+                    logPath,
+                    `
+AERENDER SPAWN ERROR: ${err.message}
+`
+                  );
+                } catch {
+                }
+                const current = registry.get(jobId);
+                registry.update(jobId, {
+                  state: "failed",
+                  exit_code: current?.exit_code ?? -1,
+                  error: err.message,
+                  finished_at: (/* @__PURE__ */ new Date()).toISOString()
+                });
+              });
+              child.on(
+                "exit",
+                (code, signal) => {
+                  const current = registry.get(jobId);
+                  if (current?.cancelled) {
+                    registry.update(jobId, {
+                      state: "failed",
+                      exit_code: code ?? current.exit_code,
+                      signal: signal ?? current.signal,
+                      finished_at: current.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
+                    });
+                    return;
+                  }
+                  let logError = null;
+                  try {
+                    const m = /^aerender ERROR:?\s*(.*)$/im.exec(
+                      fs3.readFileSync(logPath, "utf8")
+                    );
+                    if (m) logError = m[1].trim() || "aerender ERROR";
+                  } catch {
+                    logError = null;
+                  }
+                  const succeeded = code === 0 && logError === null;
+                  registry.update(jobId, {
+                    state: succeeded ? "succeeded" : "failed",
+                    ...logError ? { error: logError } : {},
+                    exit_code: code,
+                    signal: signal ?? null,
+                    finished_at: (/* @__PURE__ */ new Date()).toISOString()
+                  });
+                }
+              );
+              if (typeof child.unref === "function") {
+                child.unref();
+              }
+              return {
+                ok: true,
+                op_id: opId,
+                job_id: jobId,
+                pid: initialRecord.pid,
+                state: initialRecord.state,
+                project_path: initialRecord.project_path,
+                comp_name: initialRecord.comp_name,
+                output_path: initialRecord.output_path,
+                aerender_path: initialRecord.aerender_path,
+                args: initialRecord.args,
+                log_path: initialRecord.log_path,
+                started_at: initialRecord.started_at
+              };
+            }
+          );
+        } catch (err) {
+          if (err instanceof QueueWaitError) {
+            throw new BridgeError({
+              kind: "queued",
+              op_id: opId,
+              message: err.message
+            });
+          }
+          throw err;
+        }
+      }
+    },
+    {
+      name: "ae_aerender_status",
+      description: "Check the status of a background `aerender` job (`running`, `succeeded`, `failed`), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeAerenderStatusSchema,
+      handler: async (args) => {
+        const registry = getRegistry();
+        const job = registry.get(args.job_id);
+        if (!job) {
+          throw new Error(`No aerender job found with job_id "${args.job_id}".`);
+        }
+        const { fullText, tail } = readLogTail(job.log_path);
+        const progress = parseAerenderProgress(fullText, {
+          start_frame: job.start_frame,
+          end_frame: job.end_frame,
+          state: job.state
+        });
+        return {
+          ok: true,
+          job_id: job.job_id,
+          pid: job.pid,
+          state: job.state,
+          exit_code: job.exit_code,
+          signal: job.signal,
+          cancelled: job.cancelled,
+          project_path: job.project_path,
+          comp_name: job.comp_name,
+          output_path: job.output_path,
+          aerender_path: job.aerender_path,
+          log_path: job.log_path,
+          started_at: job.started_at,
+          finished_at: job.finished_at,
+          ...job.error ? { error: job.error } : {},
+          progress,
+          current_frame: progress.current_frame,
+          frames_completed: progress.frames_completed,
+          total_frames: progress.total_frames,
+          percent: progress.percent,
+          log_tail: tail
+        };
+      }
+    },
+    {
+      name: "ae_aerender_cancel",
+      description: "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). " + AGENT_SAFETY_GUIDANCE,
+      schema: AeAerenderCancelSchema,
+      handler: async (args) => {
+        const registry = getRegistry();
+        const job = registry.get(args.job_id);
+        if (!job) {
+          throw new Error(`No aerender job found with job_id "${args.job_id}".`);
+        }
+        if (job.state !== "running") {
+          return {
+            ok: true,
+            job_id: job.job_id,
+            state: job.state,
+            exit_code: job.exit_code,
+            cancelled: Boolean(job.cancelled),
+            already_finished: true
+          };
+        }
+        const proc = registry.getProcess(args.job_id);
+        if (proc) {
+          try {
+            proc.kill("SIGTERM");
+          } catch {
+          }
+        } else if (typeof job.pid === "number" && job.pid > 0) {
+          const killFn = options.killProcess ?? ((pid, sig) => process.kill(pid, sig));
+          try {
+            killFn(job.pid, "SIGTERM");
+          } catch {
+          }
+        }
+        try {
+          fs3.appendFileSync(
+            job.log_path,
+            `
+AERENDER CANCELLED by ae_aerender_cancel at ${(/* @__PURE__ */ new Date()).toISOString()}
+`
+          );
+        } catch {
+        }
+        const updated = registry.update(args.job_id, {
+          state: "failed",
+          cancelled: true,
+          finished_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+        return {
+          ok: true,
+          job_id: updated.job_id,
+          pid: updated.pid,
+          state: updated.state,
+          exit_code: updated.exit_code,
+          cancelled: true,
+          finished_at: updated.finished_at
+        };
+      }
+    }
+  ];
+}
+var aerenderTools = createAerenderTools();
+
+// src/tools/ext/animate.ts
+var KeyframeEaseEndSchema = external_exports.object({
+  speed: external_exports.number().describe(
+    "Temporal ease speed (units per second; typically 0 for smooth ease)."
+  ),
+  influence: external_exports.number().min(0).max(100).describe(
+    "Temporal ease influence percentage (0.1 to 100; values below 0.1 are clamped to 0.1 in After Effects)."
   )
 });
-var quarantineTools = [
+var KeyframeEasePairSchema = external_exports.object({
+  in: KeyframeEaseEndSchema.describe(
+    "Incoming temporal ease {speed, influence}."
+  ),
+  out: KeyframeEaseEndSchema.describe(
+    "Outgoing temporal ease {speed, influence}."
+  )
+});
+var KeyframeEasePresetSchema = external_exports.enum([
+  "easy_ease",
+  "linear",
+  "hold"
+]);
+var KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema]).describe(
+  'Either a preset ("easy_ease", "linear", or "hold") or an explicit `{ in: { speed, influence }, out: { speed, influence } }` object.'
+);
+var AeSetKeyframeEaseSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("Target CompItem ID."),
+  layer: LayerSelectorSchema,
+  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
+    "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'])."
+  ),
+  keys: external_exports.array(external_exports.number().int().positive()).optional().describe(
+    "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
+  ),
+  ease: KeyframeEaseInputSchema,
+  expect: ExpectSchema
+});
+function clampInfluenceValue(influence) {
+  if (influence < 0.1) return 0.1;
+  if (influence > 100) return 100;
+  return influence;
+}
+function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot) {
+  if (!afterSnapshot || typeof afterSnapshot !== "object") {
+    return null;
+  }
+  const afterObj = afterSnapshot;
+  if (!Array.isArray(afterObj.keyframes)) {
+    return null;
+  }
+  const rawKeys = afterObj.keyframes;
+  const keySet = requestedKeys && requestedKeys.length > 0 ? new Set(requestedKeys) : null;
+  const targeted = keySet ? rawKeys.filter(
+    (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
+  ) : rawKeys;
+  if (targeted.length === 0) {
+    return null;
+  }
+  if (ease === "hold" || ease === "linear") {
+    const expectedInterp = ease;
+    return {
+      expected: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: expectedInterp,
+          outInterp: expectedInterp
+        }))
+      },
+      actual: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: kf.inInterp,
+          outInterp: kf.outInterp
+        }))
+      }
+    };
+  }
+  const targetIn = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.in.speed,
+    influence: clampInfluenceValue(ease.in.influence)
+  };
+  const targetOut = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.out.speed,
+    influence: clampInfluenceValue(ease.out.influence)
+  };
+  return {
+    expected: {
+      keyframes: targeted.map((kf) => {
+        const dims = Array.isArray(kf.easeIn) && kf.easeIn.length > 0 ? kf.easeIn.length : 1;
+        return {
+          keyIndex: kf.keyIndex,
+          inInterp: "bezier",
+          outInterp: "bezier",
+          easeIn: Array.from({ length: dims }, () => ({ ...targetIn })),
+          easeOut: Array.from({ length: dims }, () => ({ ...targetOut }))
+        };
+      })
+    },
+    actual: {
+      keyframes: targeted.map((kf) => ({
+        keyIndex: kf.keyIndex,
+        inInterp: kf.inInterp,
+        outInterp: kf.outInterp,
+        easeIn: kf.easeIn,
+        easeOut: kf.easeOut
+      }))
+    }
+  };
+}
+var TextJustificationSchema = external_exports.enum(["left", "center", "right"]);
+var RgbColorSchema = external_exports.array(external_exports.number().min(0).max(1)).length(3).describe("RGB color array [r, g, b] with components in 0..1.");
+var TextStyleSchema = external_exports.object({
+  font: external_exports.string().min(1).optional().describe("PostScript font name (e.g. 'Inter-Bold' or 'ArialMT')."),
+  fontSize: external_exports.number().positive().optional().describe("Font size in pixels."),
+  tracking: external_exports.number().optional().describe("Character tracking value."),
+  leading: external_exports.number().optional().describe("Line leading in pixels."),
+  fillColor: RgbColorSchema.optional().describe(
+    "Fill color [r, g, b] in 0..1."
+  ),
+  strokeColor: RgbColorSchema.optional().describe(
+    "Stroke color [r, g, b] in 0..1."
+  ),
+  strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels."),
+  applyFill: external_exports.boolean().optional().describe("Whether fill is enabled on the text layer."),
+  applyStroke: external_exports.boolean().optional().describe("Whether stroke is enabled on the text layer."),
+  justification: TextJustificationSchema.optional().describe(
+    "Paragraph justification: 'left', 'center', or 'right'."
+  )
+}).describe("Optional TextDocument styling properties to update.");
+function hasAnyStyleField(style) {
+  if (!style) return false;
+  return style.font !== void 0 || style.fontSize !== void 0 || style.tracking !== void 0 || style.leading !== void 0 || style.fillColor !== void 0 || style.strokeColor !== void 0 || style.strokeWidth !== void 0 || style.applyFill !== void 0 || style.applyStroke !== void 0 || style.justification !== void 0;
+}
+var AeSetTextSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("Target CompItem ID."),
+  layer: LayerSelectorSchema,
+  text: external_exports.string().optional().describe("New text string to set on the TextLayer's Source Text."),
+  style: TextStyleSchema.optional(),
+  expect: ExpectSchema
+}).refine((val) => val.text !== void 0 || hasAnyStyleField(val.style), {
+  message: "ae_set_text requires at least `text` or one defined property in `style`."
+});
+var AeImportFootageSchema = external_exports.object({
+  paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).describe("Absolute file paths of footage files to import."),
+  sequence: external_exports.boolean().optional().describe(
+    "If true, import as an image sequence with ImportOptions.forceAlphabetical = true."
+  ),
+  fps: external_exports.number().positive().optional().describe(
+    "Optional frame rate (conformFrameRate) to assign to imported footage items."
+  ),
+  target_folder_id: external_exports.number().int().optional().describe(
+    "Optional FolderItem ID in the project to place the imported items into."
+  ),
+  expect: ExpectSchema
+});
+var AeReplaceFootageSchema = external_exports.object({
+  item_id: external_exports.number().int().describe("Project FootageItem ID to replace."),
+  path: external_exports.string().min(1).describe(
+    "Absolute file path to the replacement footage file (or first frame of a sequence)."
+  ),
+  sequence: external_exports.boolean().optional().describe(
+    "If true, use FootageItem.replaceWithSequence(file, true); otherwise use FootageItem.replace(file)."
+  ),
+  expect: ExpectSchema
+});
+var animateTools = [
   {
-    name: "ae_quarantine_status",
-    description: "Read the list of uncertain-outcome mutating operations currently in quarantine (`%LOCALAPPDATA%\\chroma-ae-mcp\\quarantine.json`). While any op is quarantined, all mutating tools refuse to run. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeQuarantineStatusSchema,
-    handler: async (_args, ctx) => {
-      const entries = ctx.quarantine.list();
-      return {
-        quarantined: entries.length > 0,
-        count: entries.length,
-        entries
+    name: "ae_set_keyframe_ease",
+    description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold') or explicit `{ in: { speed, influence }, out: { speed, influence } }`, automatically matching the property's temporal ease dimension count. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeSetKeyframeEaseSchema,
+    handler: async (args, ctx) => {
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
+      const effectiveExpect = {
+        project_path: args.expect.project_path,
+        comp_id: args.expect.comp_id ?? args.comp_id
       };
+      try {
+        return await ctx.queue.run(label, async () => {
+          ctx.quarantine.assertClear();
+          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const beforeSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_before`,
+            script: buildJsxCall("getKeyframeEase", {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              path: args.path
+            }),
+            label: `${label} (before)`,
+            mutates: false,
+            toolName: "ae_set_keyframe_ease"
+          });
+          const writeResp = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("setKeyframeEase", {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              path: args.path,
+              keys: args.keys,
+              ease: args.ease,
+              expect: effectiveExpect
+            }),
+            label,
+            mutates: true,
+            toolName: "ae_set_keyframe_ease"
+          });
+          const afterSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_after`,
+            script: buildJsxCall("getKeyframeEase", {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              path: args.path
+            }),
+            label: `${label} (after)`,
+            mutates: false,
+            toolName: "ae_set_keyframe_ease"
+          });
+          const easeCheck = extractKeyframeEaseCheck(
+            args.ease,
+            args.keys,
+            afterSnap.result
+          );
+          const receipt = buildReceipt({
+            before: beforeSnap.result,
+            after: afterSnap.result,
+            expected: easeCheck?.expected,
+            actualForExpected: easeCheck?.actual
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            result: writeResp.result,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
     }
   },
   {
-    name: "ae_acknowledge",
-    description: "Remove a timed-out operation from quarantine after calling `ae_status` and inspecting the project/comp state with read tools. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeAcknowledgeSchema,
+    name: "ae_set_text",
+    description: "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeSetTextSchema,
     handler: async (args, ctx) => {
-      return ctx.quarantine.acknowledge(args.op_id, args.note);
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      const label = `ae_set_text(comp ${args.comp_id})`;
+      const effectiveExpect = {
+        project_path: args.expect.project_path,
+        comp_id: args.expect.comp_id ?? args.comp_id
+      };
+      try {
+        return await ctx.queue.run(label, async () => {
+          ctx.quarantine.assertClear();
+          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const beforeSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_before`,
+            script: buildJsxCall("getTextDocument", {
+              comp_id: args.comp_id,
+              layer: args.layer
+            }),
+            label: `${label} (before)`,
+            mutates: false,
+            toolName: "ae_set_text"
+          });
+          const writeResp = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("setText", {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              text: args.text,
+              style: args.style,
+              expect: effectiveExpect
+            }),
+            label,
+            mutates: true,
+            toolName: "ae_set_text"
+          });
+          const afterSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_after`,
+            script: buildJsxCall("getTextDocument", {
+              comp_id: args.comp_id,
+              layer: args.layer
+            }),
+            label: `${label} (after)`,
+            mutates: false,
+            toolName: "ae_set_text"
+          });
+          const beforeObj = beforeSnap.result ?? {};
+          const beforeDoc = beforeObj.document && typeof beforeObj.document === "object" ? beforeObj.document : beforeObj;
+          const afterObj = afterSnap.result ?? {};
+          const afterDoc = afterObj.document && typeof afterObj.document === "object" ? afterObj.document : afterObj;
+          const expectedCheck = {};
+          const actualCheck = {};
+          if (args.text !== void 0) {
+            expectedCheck.text = args.text;
+            actualCheck.text = afterDoc.text;
+          }
+          if (args.style) {
+            const styleKeys = [
+              "font",
+              "fontSize",
+              "tracking",
+              "leading",
+              "fillColor",
+              "strokeColor",
+              "strokeWidth",
+              "applyFill",
+              "applyStroke",
+              "justification"
+            ];
+            for (const key of styleKeys) {
+              if (args.style[key] !== void 0) {
+                expectedCheck[key] = args.style[key];
+                actualCheck[key] = afterDoc[key];
+              }
+            }
+          }
+          if (expectedCheck.justification === void 0 && typeof beforeDoc.justification === "string" && typeof afterDoc.justification === "string") {
+            expectedCheck.justification = beforeDoc.justification;
+            actualCheck.justification = afterDoc.justification;
+          }
+          const receipt = buildReceipt({
+            before: beforeSnap.result,
+            after: afterSnap.result,
+            expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
+            actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            result: writeResp.result,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
+    }
+  },
+  {
+    name: "ae_import_footage",
+    description: "Import one or more footage files (or an image sequence with `ImportOptions.forceAlphabetical = true`) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeImportFootageSchema,
+    handler: async (args, ctx) => {
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      const label = `ae_import_footage(${args.paths.length} file${args.paths.length === 1 ? "" : "s"})`;
+      try {
+        return await ctx.queue.run(label, async () => {
+          ctx.quarantine.assertClear();
+          await verifyTargetGuard(ctx, args.expect, opId);
+          const beforeSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_before`,
+            script: buildJsxCall("getFootageItems", {}),
+            label: `${label} (before)`,
+            mutates: false,
+            toolName: "ae_import_footage"
+          });
+          const writeResp = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("importFootage", {
+              paths: args.paths,
+              sequence: Boolean(args.sequence),
+              fps: args.fps,
+              target_folder_id: args.target_folder_id,
+              expect: args.expect
+            }),
+            label,
+            timeoutMs: SLOW_TIMEOUT_MS,
+            mutates: true,
+            toolName: "ae_import_footage"
+          });
+          const itemIds = Array.isArray(writeResp.result?.item_ids) ? writeResp.result.item_ids : [];
+          const afterSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_after`,
+            script: buildJsxCall("getFootageItems", {
+              item_ids: itemIds
+            }),
+            label: `${label} (after)`,
+            mutates: false,
+            toolName: "ae_import_footage"
+          });
+          const afterIds = Array.isArray(afterSnap.result?.item_ids) ? afterSnap.result.item_ids : [];
+          const receipt = buildReceipt({
+            before: beforeSnap.result,
+            after: afterSnap.result,
+            expected: {
+              count: args.paths.length,
+              item_ids: itemIds
+            },
+            actualForExpected: {
+              count: afterIds.length,
+              item_ids: afterIds
+            }
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            item_ids: itemIds,
+            items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+            result: writeResp.result,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
+    }
+  },
+  {
+    name: "ae_replace_footage",
+    description: "Replace or relink an existing FootageItem using `FootageItem.replace` or `FootageItem.replaceWithSequence` within one undo group, guarded by `expect`, returning the before and after file paths, `footageMissing`, and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeReplaceFootageSchema,
+    handler: async (args, ctx) => {
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      const label = `ae_replace_footage(${args.item_id})`;
+      try {
+        return await ctx.queue.run(label, async () => {
+          ctx.quarantine.assertClear();
+          await verifyTargetGuard(ctx, args.expect, opId);
+          const beforeSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_before`,
+            script: buildJsxCall("getFootageItem", {
+              item_id: args.item_id
+            }),
+            label: `${label} (before)`,
+            mutates: false,
+            toolName: "ae_replace_footage"
+          });
+          const writeResp = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("replaceFootage", {
+              item_id: args.item_id,
+              path: args.path,
+              sequence: Boolean(args.sequence),
+              expect: args.expect
+            }),
+            label,
+            timeoutMs: SLOW_TIMEOUT_MS,
+            mutates: true,
+            toolName: "ae_replace_footage"
+          });
+          const afterSnap = await ctx.bridge.evalRaw({
+            id: `${opId}_after`,
+            script: buildJsxCall("getFootageItem", {
+              item_id: args.item_id
+            }),
+            label: `${label} (after)`,
+            mutates: false,
+            toolName: "ae_replace_footage"
+          });
+          const beforeObj = beforeSnap.result ?? {};
+          const writeObj = writeResp.result ?? {};
+          const afterObj = afterSnap.result ?? {};
+          const beforeFile = typeof beforeObj.file === "string" ? beforeObj.file : typeof writeObj.before_file === "string" ? writeObj.before_file : null;
+          const beforeMissing = typeof beforeObj.footageMissing === "boolean" ? beforeObj.footageMissing : typeof writeObj.before_footage_missing === "boolean" ? writeObj.before_footage_missing : false;
+          const afterFile = typeof afterObj.file === "string" ? afterObj.file : typeof writeObj.requested_path === "string" ? writeObj.requested_path : null;
+          const afterMissing = typeof afterObj.footageMissing === "boolean" ? afterObj.footageMissing : false;
+          const receipt = buildReceipt({
+            before: beforeSnap.result,
+            after: afterSnap.result,
+            expected: {
+              file: normalizeGuardPath(args.path),
+              footageMissing: false
+            },
+            actualForExpected: {
+              file: typeof afterFile === "string" ? normalizeGuardPath(afterFile) : null,
+              footageMissing: afterMissing
+            }
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            item_id: args.item_id,
+            before_path: beforeFile,
+            after_path: afterFile,
+            before_file: beforeFile,
+            after_file: afterFile,
+            before_footage_missing: beforeMissing,
+            footageMissing: afterMissing,
+            result: writeResp.result,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
     }
   }
 ];
 
-// src/tools/read.ts
-var AeStatusSchema = external_exports.object({});
-var AeGetProjectSchema = external_exports.object({
-  folder_id: external_exports.number().int().optional().describe("Optional folder item ID to start traversal from (defaults to root)."),
-  depth: external_exports.number().int().min(1).max(20).default(3).optional().describe("Maximum folder traversal depth (default: 3).")
-});
-var AeGetCompSchema = external_exports.object({
-  comp_id: external_exports.number().int().describe("The CompItem ID to inspect.")
-});
-var AeGetLayerPropsSchema = external_exports.object({
-  comp_id: external_exports.number().int().describe("The CompItem ID containing the layer."),
-  layer: LayerSelectorSchema,
-  path: external_exports.array(external_exports.string()).optional().describe(
-    "Optional property group path (e.g. ['ADBE Transform Group', 'ADBE Opacity'] or ['Transform', 'Opacity'])."
-  ),
-  depth: external_exports.number().int().min(1).max(10).default(2).optional().describe("Depth of property tree traversal (default: 2).")
-});
-var readTools = [
-  {
-    name: "ae_status",
-    description: "Read panel health (/health), AE version, current project path (or '<unsaved>'), dirty flag, active comp {id, name}, selected layers, and the server quarantine list. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeStatusSchema,
-    handler: async (_args, ctx) => {
-      const health = ctx.bridge.health ? await ctx.bridge.health() : { ok: true, transport: "panel" };
-      const hostStatus = await ctx.bridge.callHost(
-        "status",
-        {},
-        {
-          label: "ae_status",
-          mutates: false,
-          toolName: "ae_status"
+// src/tools/ext/dialogs.ts
+var import_node_child_process = require("node:child_process");
+var fs4 = __toESM(require("node:fs"), 1);
+var path4 = __toESM(require("node:path"), 1);
+var url = __toESM(require("node:url"), 1);
+var import_meta = {};
+var JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
+var DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
+var DIALOG_EXEC_TIMEOUT_MS = 15e3;
+var MAX_DIALOG_TEXT_CHARS = 4e3;
+var inFlightOps = [];
+var seenDialogs = /* @__PURE__ */ new Map();
+var runtimeOverrides = {};
+function noteOpStarted(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const existingIdx = inFlightOps.indexOf(opId);
+  if (existingIdx !== -1) {
+    inFlightOps.splice(existingIdx, 1);
+  }
+  inFlightOps.push(opId);
+}
+function noteOpFinished(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const idx = inFlightOps.indexOf(opId);
+  if (idx !== -1) {
+    inFlightOps.splice(idx, 1);
+  }
+}
+function getCurrentInFlightOp() {
+  return inFlightOps.length > 0 ? inFlightOps[inFlightOps.length - 1] : null;
+}
+function currentPlatform() {
+  return runtimeOverrides.platform ?? process.platform;
+}
+function currentNowIso() {
+  return runtimeOverrides.nowIso ? runtimeOverrides.nowIso() : (/* @__PURE__ */ new Date()).toISOString();
+}
+function defaultDialogsDir() {
+  if (runtimeOverrides.dialogsDir) {
+    return runtimeOverrides.dialogsDir;
+  }
+  return path4.join(defaultDataDir(), "dialogs");
+}
+function getRuntimeBaseDir() {
+  try {
+    if (typeof __dirname === "string" && __dirname.length > 0) {
+      return __dirname;
+    }
+  } catch {
+  }
+  try {
+    if (typeof import_meta?.url === "string" && import_meta.url.startsWith("file:")) {
+      return path4.dirname(url.fileURLToPath(import_meta.url));
+    }
+  } catch {
+  }
+  return process.cwd();
+}
+function locateDialogsPs1Script(startDir) {
+  if (runtimeOverrides.scriptPath !== void 0) {
+    return runtimeOverrides.scriptPath;
+  }
+  const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
+  const visited = /* @__PURE__ */ new Set();
+  for (const start of rootsToSearch) {
+    let dir = path4.resolve(start);
+    while (!visited.has(dir)) {
+      visited.add(dir);
+      const candidateA = path4.join(dir, "panel", "tools", "ae-dialogs.ps1");
+      if (fs4.existsSync(candidateA)) {
+        return candidateA;
+      }
+      const candidateB = path4.join(dir, "tools", "ae-dialogs.ps1");
+      if (fs4.existsSync(candidateB)) {
+        return candidateB;
+      }
+      const parent = path4.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+function parsePs1JsonOutput(stdout) {
+  const trimmed = (stdout ?? "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: "empty_ps1_output"
+    };
+  }
+  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
+        return parsed;
+      }
+    } catch {
+    }
+  }
+  try {
+    const parsedWhole = JSON.parse(trimmed);
+    if (parsedWhole && typeof parsedWhole === "object" && typeof parsedWhole.ok === "boolean") {
+      return parsedWhole;
+    }
+  } catch {
+  }
+  return {
+    ok: false,
+    error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
+  };
+}
+function normalizeRawDialog(raw, meta) {
+  const rawText = typeof raw.text === "string" ? raw.text : "";
+  const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
+  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
+  const buttons = rawButtons.map((b) => ({
+    name: typeof b?.name === "string" ? b.name : "",
+    automationId: typeof b?.automationId === "string" ? b.automationId : "",
+    enabled: Boolean(b?.enabled ?? true)
+  }));
+  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
+  const checkboxes = rawCheckboxes.map((c) => ({
+    name: typeof c?.name === "string" ? c.name : "",
+    checked: Boolean(c?.checked)
+  }));
+  const r = raw.boundingRect ?? raw.rect ?? {};
+  const boundingRect = {
+    x: typeof r.x === "number" ? r.x : 0,
+    y: typeof r.y === "number" ? r.y : 0,
+    width: typeof r.width === "number" ? r.width : 0,
+    height: typeof r.height === "number" ? r.height : 0
+  };
+  return {
+    handle: Number(raw.handle),
+    title: typeof raw.title === "string" ? raw.title : "",
+    class: typeof raw.class === "string" ? raw.class : "",
+    isModal: Boolean(raw.isModal),
+    text: boundedText,
+    buttons,
+    checkboxes,
+    boundingRect,
+    screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
+    first_seen: meta.first_seen,
+    caused_by_op: meta.caused_by_op
+  };
+}
+function enrichDialogsList(rawDialogs) {
+  const activeHandles = /* @__PURE__ */ new Set();
+  const now = currentNowIso();
+  const inFlight = getCurrentInFlightOp();
+  const result = [];
+  for (const raw of rawDialogs) {
+    const handle = Number(raw?.handle);
+    if (!Number.isFinite(handle) || handle <= 0) continue;
+    activeHandles.add(handle);
+    let meta = seenDialogs.get(handle);
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const text = typeof raw.text === "string" ? raw.text.slice(0, MAX_DIALOG_TEXT_CHARS) : "";
+    if (!meta) {
+      meta = {
+        handle,
+        first_seen: now,
+        caused_by_op: inFlight,
+        title,
+        text
+      };
+      seenDialogs.set(handle, meta);
+    } else {
+      if (title) meta.title = title;
+      if (text) meta.text = text;
+    }
+    result.push(normalizeRawDialog(raw, meta));
+  }
+  for (const existingHandle of Array.from(seenDialogs.keys())) {
+    if (!activeHandles.has(existingHandle)) {
+      seenDialogs.delete(existingHandle);
+    }
+  }
+  return result;
+}
+function runPowerShellScript(ps1Args) {
+  if (runtimeOverrides.ps1Runner) {
+    return runtimeOverrides.ps1Runner(ps1Args);
+  }
+  const scriptPath = locateDialogsPs1Script();
+  if (!scriptPath) {
+    return Promise.resolve(
+      JSON.stringify({
+        ok: false,
+        error: "ae_dialogs_ps1_not_found"
+      })
+    );
+  }
+  const fullArgs = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    ...ps1Args
+  ];
+  return new Promise((resolve2) => {
+    (0, import_node_child_process.execFile)(
+      "powershell.exe",
+      fullArgs,
+      {
+        windowsHide: true,
+        timeout: DIALOG_EXEC_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024
+      },
+      (err, stdout, stderr) => {
+        const outStr = typeof stdout === "string" ? stdout.trim() : "";
+        if (outStr.length > 0) {
+          resolve2(outStr);
+          return;
         }
-      );
+        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
+        resolve2(
+          JSON.stringify({
+            ok: false,
+            error: errMsg
+          })
+        );
+      }
+    );
+  });
+}
+function isDestructiveButton(buttonName) {
+  return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
+}
+function evaluateRespondPolicy(params) {
+  const hasUserInstruction = typeof params.user_instruction === "string" && params.user_instruction.trim().length > 0;
+  if (params.caused_by_op === null && !hasUserInstruction) {
+    return {
+      allowed: false,
+      error: "refused_not_caused_by_our_op",
+      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
+    };
+  }
+  if (isDestructiveButton(params.button)) {
+    if (params.allow_destructive !== true || !hasUserInstruction) {
       return {
-        health,
-        ...hostStatus.result ?? {},
-        quarantine: ctx.quarantine.list()
+        allowed: false,
+        error: "refused_destructive_button",
+        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
       };
     }
-  },
+  }
+  return { allowed: true };
+}
+function appendResponseLog(entry) {
+  const dir = defaultDialogsDir();
+  fs4.mkdirSync(dir, { recursive: true });
+  const logFile = path4.join(dir, "responses.jsonl");
+  fs4.appendFileSync(logFile, `${JSON.stringify(entry)}
+`, {
+    encoding: "utf8"
+  });
+}
+async function listDialogsInternal(opts) {
+  if (currentPlatform() !== "win32") {
+    return {
+      ok: false,
+      error: "not_implemented_on_this_os"
+    };
+  }
+  const psArgs = ["-Mode", "list"];
+  if (opts.screenshots) {
+    const dir = defaultDialogsDir();
+    fs4.mkdirSync(dir, { recursive: true });
+    psArgs.push("-ScreenshotDir", dir);
+  }
+  const rawStdout = await runPowerShellScript(psArgs);
+  const parsed = parsePs1JsonOutput(rawStdout);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error || "dialog_list_failed"
+    };
+  }
+  const rawList = Array.isArray(parsed.dialogs) ? parsed.dialogs : [];
+  const enriched = enrichDialogsList(rawList);
+  return {
+    ok: true,
+    ae_pid: parsed.ae_pid ?? null,
+    dialogs: enriched
+  };
+}
+async function describeBlockingDialogs() {
+  try {
+    const res = await listDialogsInternal({ screenshots: true });
+    if (!res.ok) {
+      return [];
+    }
+    return res.dialogs;
+  } catch {
+    return [];
+  }
+}
+var AeDialogsSchema = external_exports.object({
+  screenshots: external_exports.boolean().default(true).optional().describe(
+    "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
+  )
+});
+var AeDialogRespondSchema = external_exports.object({
+  handle: external_exports.number().int().positive().describe("NativeWindowHandle (HWND) of the dialog to respond to."),
+  button: external_exports.string().min(1).describe(
+    "Exact button name (case-insensitive) to press via UIA InvokePattern."
+  ),
+  check: external_exports.string().min(1).optional().describe(
+    "Optional checkbox name to toggle on before pressing the button."
+  ),
+  reason: external_exports.string().min(1).describe(
+    "Clear explanation of why this dialog is being answered and why this button was chosen."
+  ),
+  allow_destructive: external_exports.boolean().default(false).optional().describe(
+    "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
+  ),
+  user_instruction: external_exports.string().optional().describe(
+    "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
+  )
+});
+var dialogsTools = [
   {
-    name: "ae_get_project",
-    description: "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeGetProjectSchema,
-    handler: async (args, ctx) => {
-      const depth = args.depth ?? 3;
-      const res = await ctx.bridge.callHost(
-        "getProject",
-        {
-          folder_id: args.folder_id,
-          depth
-        },
-        {
-          label: "ae_get_project",
-          mutates: false,
-          toolName: "ae_get_project"
-        }
-      );
-      return res.result;
+    name: "ae_dialogs",
+    description: "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogsSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      const screenshots = args.screenshots ?? true;
+      return await listDialogsInternal({ screenshots });
     }
   },
   {
-    name: "ae_get_comp",
-    description: "Read composition settings, work area, and layers (index, name, id, type, in/out, parent, enabled, solo, locked, label, 3D, blending mode, track matte). " + AGENT_SAFETY_GUIDANCE,
-    schema: AeGetCompSchema,
-    handler: async (args, ctx) => {
-      const res = await ctx.bridge.callHost(
-        "getComp",
-        { comp_id: args.comp_id },
-        {
-          label: `ae_get_comp(${args.comp_id})`,
-          mutates: false,
-          toolName: "ae_get_comp"
-        }
-      );
-      return res.result;
+    name: "ae_dialog_respond",
+    description: "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse), logging every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogRespondSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      let meta = seenDialogs.get(args.handle);
+      if (!meta) {
+        await listDialogsInternal({ screenshots: false });
+        meta = seenDialogs.get(args.handle);
+      }
+      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
+      const policy = evaluateRespondPolicy({
+        button: args.button,
+        caused_by_op: causedByOp,
+        allow_destructive: args.allow_destructive ?? false,
+        user_instruction: args.user_instruction
+      });
+      if (!policy.allowed) {
+        return {
+          ok: false,
+          error: policy.error ?? "refused_by_policy",
+          message: policy.message,
+          handle: args.handle,
+          button: args.button,
+          caused_by_op: causedByOp
+        };
+      }
+      const psArgs = [
+        "-Mode",
+        "respond",
+        "-Handle",
+        String(args.handle),
+        "-Button",
+        args.button
+      ];
+      if (args.check) {
+        psArgs.push("-Check", args.check);
+      }
+      const rawStdout = await runPowerShellScript(psArgs);
+      const parsed = parsePs1JsonOutput(rawStdout);
+      const logTime = currentNowIso();
+      const title = meta?.title ?? "";
+      const textExcerpt = (meta?.text ?? "").slice(0, 500);
+      appendResponseLog({
+        time: logTime,
+        handle: args.handle,
+        title,
+        text_excerpt: textExcerpt,
+        button: args.button,
+        check: args.check,
+        reason: args.reason,
+        op: causedByOp,
+        allow_destructive: Boolean(args.allow_destructive),
+        user_instruction: args.user_instruction,
+        result: parsed
+      });
+      if (parsed.ok && parsed.closed) {
+        seenDialogs.delete(args.handle);
+      }
+      return parsed;
     }
-  },
+  }
+];
+
+// src/tools/ext/explore.ts
+var LAYER_INCLUDE_SECTIONS = [
+  "transform",
+  "effects",
+  "masks",
+  "text",
+  "shapes",
+  "expressions",
+  "keyframes",
+  "markers"
+];
+var LayerIncludeSectionSchema = external_exports.enum(LAYER_INCLUDE_SECTIONS);
+var AeGetLayerFullSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The CompItem ID containing the target layer."),
+  layer: LayerSelectorSchema,
+  include: external_exports.array(LayerIncludeSectionSchema).optional().describe(
+    "Optional subset of sections to include (defaults to all: transform, effects, masks, text, shapes, expressions, keyframes, markers)."
+  ),
+  max_keyframes: external_exports.number().int().min(1).max(500).default(100).describe(
+    "Maximum number of keyframes to return per animated property (default: 100, max: 500)."
+  ),
+  shape_depth: external_exports.number().int().min(1).max(12).default(4).describe(
+    "Maximum recursion depth into shape layer vector groups (default: 4, max: 12)."
+  )
+});
+var AeFindLayersSchema = external_exports.object({
+  comp_id: external_exports.number().int().optional().describe(
+    "Optional CompItem ID to search within. If omitted, searches across all compositions in the project."
+  ),
+  name_contains: external_exports.string().min(1).optional().describe("Case-insensitive substring match against layer name."),
+  type: external_exports.string().min(1).optional().describe(
+    "Layer type filter (e.g. 'text', 'shape', 'camera', 'light', 'null', 'adjustment', 'precomp', 'solid', 'av', 'audio', or AE class names like 'TextLayer', 'ShapeLayer', 'AVLayer')."
+  ),
+  has_effect_match_name: external_exports.string().min(1).optional().describe(
+    "Match layers that have an applied effect matching this matchName (or display name), case-insensitively."
+  ),
+  has_expression: external_exports.boolean().optional().describe(
+    "If true, only layers with at least one expression; if false, only layers with no expressions."
+  ),
+  source_id: external_exports.number().int().optional().describe("Match layers whose source item has this project item ID."),
+  limit: external_exports.number().int().min(1).max(500).default(200).describe("Maximum number of matching layers to return (default: 200, max: 500).")
+});
+var AeListEffectsSchema = external_exports.object({
+  filter: external_exports.string().optional().describe(
+    "Optional case-insensitive substring filter matched against displayName, matchName, or category."
+  )
+});
+var AeValidateExpressionsSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The CompItem ID whose layer expressions should be validated."),
+  layer: LayerSelectorSchema.optional().describe(
+    "Optional layer selector to restrict validation to a single layer (defaults to all layers in the comp)."
+  ),
+  time: external_exports.number().optional().describe(
+    "Optional evaluation time in seconds passed to prop.valueAtTime(t, false) (defaults to comp.time without changing comp.time)."
+  )
+});
+var exploreTools = [
   {
-    name: "ae_get_layer_props",
-    description: "Read a layer's property tree with matchName, name, value (serialised), numKeys, expression, and expressionEnabled. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeGetLayerPropsSchema,
+    name: "ae_get_layer_full",
+    description: "Read everything about a layer in one bounded call: layer metadata plus optional sections (transform, effects, masks, text, shapes, expressions, keyframes, markers). Read-only: never modifies project or composition state. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeGetLayerFullSchema,
     handler: async (args, ctx) => {
-      const depth = args.depth ?? 2;
+      const max_keyframes = args.max_keyframes ?? 100;
+      const shape_depth = args.shape_depth ?? 4;
       const res = await ctx.bridge.callHost(
-        "getLayerProps",
+        "getLayerFull",
         {
           comp_id: args.comp_id,
           layer: args.layer,
-          path: args.path,
-          depth
+          include: args.include,
+          max_keyframes,
+          shape_depth
         },
         {
-          label: `ae_get_layer_props(${args.comp_id})`,
+          label: `ae_get_layer_full(${args.comp_id})`,
           mutates: false,
-          toolName: "ae_get_layer_props"
+          toolName: "ae_get_layer_full"
+        }
+      );
+      return res.result;
+    }
+  },
+  {
+    name: "ae_find_layers",
+    description: "Search one composition or all compositions in the project for layers matching filters (name_contains, type, has_effect_match_name, has_expression, source_id), up to `limit` (default 200). Read-only: never modifies project or composition state. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeFindLayersSchema,
+    handler: async (args, ctx) => {
+      const limit = args.limit ?? 200;
+      const res = await ctx.bridge.callHost(
+        "findLayers",
+        {
+          comp_id: args.comp_id,
+          name_contains: args.name_contains,
+          type: args.type,
+          has_effect_match_name: args.has_effect_match_name,
+          has_expression: args.has_expression,
+          source_id: args.source_id,
+          limit
+        },
+        {
+          label: args.comp_id !== void 0 ? `ae_find_layers(${args.comp_id})` : "ae_find_layers(all)",
+          mutates: false,
+          toolName: "ae_find_layers"
+        }
+      );
+      return res.result;
+    }
+  },
+  {
+    name: "ae_list_effects",
+    description: "List installed After Effects effects from `app.effects` (displayName, matchName, category, version), optionally filtered by substring and bounded to 500 entries. Read-only: never modifies project or composition state. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeListEffectsSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "listEffects",
+        {
+          filter: args.filter
+        },
+        {
+          label: args.filter ? `ae_list_effects(${args.filter})` : "ae_list_effects",
+          mutates: false,
+          toolName: "ae_list_effects"
+        }
+      );
+      return res.result;
+    }
+  },
+  {
+    name: "ae_validate_expressions",
+    description: "Walk all properties with expressions in a composition (or a single layer), force evaluation via `prop.valueAtTime(t, false)` inside try/catch, and read `prop.expressionError` without ever toggling `expressionEnabled` or mutating `comp.time`. Returns `results: [{layer, path, expression, expressionEnabled, error}]` along with counts. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeValidateExpressionsSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "validateExpressions",
+        {
+          comp_id: args.comp_id,
+          layer: args.layer,
+          time: args.time
+        },
+        {
+          label: `ae_validate_expressions(${args.comp_id})`,
+          mutates: false,
+          toolName: "ae_validate_expressions"
         }
       );
       return res.result;
@@ -5212,10 +8904,16 @@ var readTools = [
   }
 ];
 
+// src/tools/ext/frames.ts
+var crypto3 = __toESM(require("node:crypto"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
+var path6 = __toESM(require("node:path"), 1);
+var import_pngjs = __toESM(require_png(), 1);
+
 // src/tools/render.ts
-var crypto = __toESM(require("node:crypto"), 1);
-var fs3 = __toESM(require("node:fs"), 1);
-var path3 = __toESM(require("node:path"), 1);
+var crypto2 = __toESM(require("node:crypto"), 1);
+var fs5 = __toESM(require("node:fs"), 1);
+var path5 = __toESM(require("node:path"), 1);
 var AeSnapshotFrameSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("The CompItem ID to snapshot."),
   time: external_exports.number().min(0).describe("Composition time in seconds at which to capture the frame."),
@@ -5232,14 +8930,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path3.join(defaultDataDir(), "frames");
+  return path5.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs3.existsSync(filePath)) {
+    if (!fs5.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs3.statSync(filePath);
+    const stat = fs5.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -5265,14 +8963,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs3.mkdirSync(framesDir, { recursive: true });
+      fs5.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
-            const uniqueSuffix1 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path3.join(
+            const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
+            const pngPath1 = path5.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -5305,8 +9003,8 @@ var renderTools = [
               };
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
-            const uniqueSuffix2 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path3.join(
+            const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
+            const pngPath2 = path5.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -5454,6 +9152,1151 @@ var renderTools = [
           label: "ae_render_queue_status",
           mutates: false,
           toolName: "ae_render_queue_status"
+        }
+      );
+      return res.result;
+    }
+  }
+];
+
+// src/tools/ext/frames.ts
+var AeCompareFramesSchema = external_exports.object({
+  comp_id: external_exports.number().int().optional().describe(
+    "CompItem ID to capture frames from (use with `times`, mutually exclusive with `a_path`/`b_path`)."
+  ),
+  times: external_exports.array(external_exports.number().min(0)).min(2).max(20).optional().describe(
+    "2 to 20 composition times in seconds to snapshot and compare sequentially."
+  ),
+  a_path: external_exports.string().min(1).optional().describe(
+    "Absolute path to the first PNG file on disk (use with `b_path`, mutually exclusive with `comp_id`/`times`)."
+  ),
+  b_path: external_exports.string().min(1).optional().describe(
+    "Absolute path to the second PNG file on disk (use with `a_path`, mutually exclusive with `comp_id`/`times`)."
+  ),
+  threshold: external_exports.number().min(0).max(1).default(0.02).describe(
+    "Per-pixel channel difference threshold in [0..1] above which a pixel is counted as changed (default: 0.02)."
+  ),
+  write_diff_png: external_exports.boolean().default(false).describe(
+    "If true, writes a visual diff PNG for each compared pair to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+  ),
+  diff_png: external_exports.boolean().optional().describe(
+    "Optional alias for `write_diff_png` to write diff PNGs to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+  )
+}).superRefine((val, ctx) => {
+  const hasComp = val.comp_id !== void 0;
+  const hasTimes = val.times !== void 0;
+  const hasA = val.a_path !== void 0;
+  const hasB = val.b_path !== void 0;
+  if (hasComp !== hasTimes) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: hasComp ? ["times"] : ["comp_id"],
+      message: "Both `comp_id` and `times` (2 to 20 entries) must be provided together."
+    });
+    return;
+  }
+  if (hasA !== hasB) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: hasA ? ["b_path"] : ["a_path"],
+      message: "Both `a_path` and `b_path` must be provided together."
+    });
+    return;
+  }
+  const modeComp = hasComp && hasTimes;
+  const modePaths = hasA && hasB;
+  if (!modeComp && !modePaths) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["comp_id"],
+      message: "Provide either `{ comp_id, times }` (2 to 20 times) or `{ a_path, b_path }`."
+    });
+    return;
+  }
+  if (modeComp && modePaths) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["a_path"],
+      message: "Provide either `{ comp_id, times }` or `{ a_path, b_path }`, not both."
+    });
+  }
+});
+function decodePngFile(filePath) {
+  if (!fs6.existsSync(filePath)) {
+    throw new Error(`PNG file not found: ${filePath}`);
+  }
+  const buf = fs6.readFileSync(filePath);
+  if (buf.length === 0) {
+    throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
+  }
+  return import_pngjs.PNG.sync.read(buf);
+}
+function analyzeDecodedFrame(png, meta) {
+  const { width, height, data } = png;
+  const totalPixels = width * height;
+  if (totalPixels <= 0 || data.length < totalPixels * 4) {
+    return {
+      index: meta.index,
+      path: meta.path,
+      ...meta.time !== void 0 ? { time: meta.time } : {},
+      width,
+      height,
+      is_blank: true,
+      is_black: false,
+      is_transparent: true,
+      is_uniform: true,
+      flags: ["blank", "transparent"],
+      mean_rgba: [0, 0, 0, 0]
+    };
+  }
+  const r0 = data[0];
+  const g0 = data[1];
+  const b0 = data[2];
+  const a0 = data[3];
+  let isUniform = true;
+  let allTransparent = true;
+  let allBlack = true;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let sumA = 0;
+  for (let i = 0; i < totalPixels * 4; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    sumR += r;
+    sumG += g;
+    sumB += b;
+    sumA += a;
+    if (a > 0) {
+      allTransparent = false;
+      if (r > 1 || g > 1 || b > 1) {
+        allBlack = false;
+      }
+    }
+    if (isUniform && (Math.abs(r - r0) > 1 || Math.abs(g - g0) > 1 || Math.abs(b - b0) > 1 || Math.abs(a - a0) > 1)) {
+      isUniform = false;
+    }
+  }
+  const isTransparent = allTransparent;
+  const isBlack = !allTransparent && allBlack;
+  const isBlank = isTransparent || isBlack || isUniform;
+  const flags = [];
+  if (isBlank) flags.push("blank");
+  if (isBlack) flags.push("black");
+  if (isTransparent) flags.push("transparent");
+  const round4 = (n) => Math.round(n * 1e4) / 1e4;
+  return {
+    index: meta.index,
+    path: meta.path,
+    ...meta.time !== void 0 ? { time: meta.time } : {},
+    width,
+    height,
+    is_blank: isBlank,
+    is_black: isBlack,
+    is_transparent: isTransparent,
+    is_uniform: isUniform,
+    flags,
+    mean_rgba: [
+      round4(sumR / (totalPixels * 255)),
+      round4(sumG / (totalPixels * 255)),
+      round4(sumB / (totalPixels * 255)),
+      round4(sumA / (totalPixels * 255))
+    ]
+  };
+}
+function compareDecodedFrames(pngA, pngB, options = {}) {
+  if (pngA.width !== pngB.width || pngA.height !== pngB.height) {
+    throw new Error(
+      `Frame dimensions do not match: ${pngA.width}x${pngA.height} vs ${pngB.width}x${pngB.height}`
+    );
+  }
+  const width = pngA.width;
+  const height = pngA.height;
+  const totalPixels = width * height;
+  const threshold = options.threshold ?? 0.02;
+  const buildDiff = Boolean(options.buildDiffPng);
+  const diffPng = buildDiff ? new import_pngjs.PNG({ width, height }) : void 0;
+  if (totalPixels === 0) {
+    return {
+      width,
+      height,
+      mean_abs_diff: 0,
+      max_diff: 0,
+      threshold,
+      changed_pixels: 0,
+      total_pixels: 0,
+      pct_pixels_changed: 0,
+      percent_changed: 0,
+      identical: true,
+      diffPng
+    };
+  }
+  let sumAbsDiff = 0;
+  let maxDiff = 0;
+  let changedPixels = 0;
+  const dataA = pngA.data;
+  const dataB = pngB.data;
+  for (let i = 0; i < totalPixels * 4; i += 4) {
+    const dr = Math.abs(dataA[i] - dataB[i]) / 255;
+    const dg = Math.abs(dataA[i + 1] - dataB[i + 1]) / 255;
+    const db = Math.abs(dataA[i + 2] - dataB[i + 2]) / 255;
+    const da = Math.abs(dataA[i + 3] - dataB[i + 3]) / 255;
+    const pixelMean = (dr + dg + db + da) / 4;
+    const pixelMax = Math.max(dr, dg, db, da);
+    sumAbsDiff += pixelMean;
+    if (pixelMax > maxDiff) {
+      maxDiff = pixelMax;
+    }
+    const isChanged = pixelMax > threshold;
+    if (isChanged) {
+      changedPixels++;
+    }
+    if (diffPng) {
+      if (isChanged) {
+        const intensity = Math.min(
+          255,
+          Math.max(64, Math.round(pixelMax * 255))
+        );
+        diffPng.data[i] = intensity;
+        diffPng.data[i + 1] = Math.round(dg * 128);
+        diffPng.data[i + 2] = intensity;
+        diffPng.data[i + 3] = 255;
+      } else {
+        const luma = Math.round(
+          (dataA[i] * 0.299 + dataA[i + 1] * 0.587 + dataA[i + 2] * 0.114) * 0.25
+        );
+        diffPng.data[i] = luma;
+        diffPng.data[i + 1] = luma;
+        diffPng.data[i + 2] = luma;
+        diffPng.data[i + 3] = 255;
+      }
+    }
+  }
+  const round6 = (n) => Math.round(n * 1e6) / 1e6;
+  const meanAbsDiff = round6(sumAbsDiff / totalPixels);
+  const maxDiffRounded = round6(maxDiff);
+  const pctChanged = round6(changedPixels / totalPixels * 100);
+  return {
+    width,
+    height,
+    mean_abs_diff: meanAbsDiff,
+    max_diff: maxDiffRounded,
+    threshold,
+    changed_pixels: changedPixels,
+    total_pixels: totalPixels,
+    pct_pixels_changed: pctChanged,
+    percent_changed: pctChanged,
+    identical: maxDiff === 0,
+    diffPng
+  };
+}
+async function captureCompFrame(params) {
+  const { ctx, opId, compId, time, frameIndex, framesDir } = params;
+  const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
+  const pngPath1 = path6.join(
+    framesDir,
+    `frame_c${compId}_f${frameIndex}_${suffix1}.png`
+  );
+  const reqStart1 = Date.now();
+  await ctx.bridge.evalRaw({
+    id: `${opId}_f${frameIndex}_try1`,
+    script: buildJsxCall("snapshotFrame", {
+      comp_id: compId,
+      time,
+      scale: 0.5,
+      output_path: pngPath1
+    }),
+    label: `ae_compare_frames(${compId} @ ${time}s)`,
+    timeoutMs: SLOW_TIMEOUT_MS,
+    mutates: false,
+    toolName: "ae_compare_frames"
+  });
+  const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
+  if (check1.fresh) {
+    return { path: pngPath1, time };
+  }
+  const nudgedTime = Math.max(0, time + 1e-3);
+  const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
+  const pngPath2 = path6.join(
+    framesDir,
+    `frame_c${compId}_f${frameIndex}_${suffix2}.png`
+  );
+  const reqStart2 = Date.now();
+  await ctx.bridge.evalRaw({
+    id: `${opId}_f${frameIndex}_try2`,
+    script: buildJsxCall("snapshotFrame", {
+      comp_id: compId,
+      time: nudgedTime,
+      scale: 0.5,
+      output_path: pngPath2
+    }),
+    label: `ae_compare_frames(${compId} @ ${nudgedTime}s retry)`,
+    timeoutMs: SLOW_TIMEOUT_MS,
+    mutates: false,
+    toolName: "ae_compare_frames"
+  });
+  const check2 = await waitForFreshPng(pngPath2, reqStart2, params.waitMs);
+  if (check2.fresh) {
+    return { path: pngPath2, time: nudgedTime };
+  }
+  throw new Error(
+    `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.`
+  );
+}
+var framesTools = [
+  {
+    name: "ae_compare_frames",
+    description: "Compare 2 to 20 composition frames captured at `times` (via `snapshotFrame` + `waitForFreshPng`) or two existing PNG files (`a_path`, `b_path`). Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to `%LOCALAPPDATA%\\chroma-ae-mcp\\frames`. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCompareFramesSchema,
+    handler: async (args, ctx) => {
+      const threshold = args.threshold ?? 0.02;
+      const shouldWriteDiff = Boolean(args.write_diff_png || args.diff_png);
+      const framesDir = defaultFramesDir();
+      const capturedItems = [];
+      if (args.comp_id !== void 0 && args.times !== void 0) {
+        fs6.mkdirSync(framesDir, { recursive: true });
+        const opId = ctx.bridge.newOpId();
+        const compId = args.comp_id;
+        const times = args.times;
+        try {
+          await ctx.queue.run(
+            `ae_compare_frames(${compId}, ${times.length} frames)`,
+            async () => {
+              for (let i = 0; i < times.length; i++) {
+                const snap = await captureCompFrame({
+                  ctx,
+                  opId,
+                  compId,
+                  time: times[i],
+                  frameIndex: i,
+                  framesDir
+                });
+                capturedItems.push({ path: snap.path, time: times[i] });
+              }
+            }
+          );
+        } catch (err) {
+          if (err instanceof QueueWaitError) {
+            throw new BridgeError({
+              kind: "queued",
+              op_id: opId,
+              message: err.message
+            });
+          }
+          throw err;
+        }
+      } else if (args.a_path !== void 0 && args.b_path !== void 0) {
+        capturedItems.push({ path: args.a_path }, { path: args.b_path });
+      } else {
+        throw new Error(
+          "Invalid arguments: provide either { comp_id, times } or { a_path, b_path }."
+        );
+      }
+      if (shouldWriteDiff) {
+        fs6.mkdirSync(framesDir, { recursive: true });
+      }
+      const decodedPngs = [];
+      const frameAnalyses = [];
+      for (let i = 0; i < capturedItems.length; i++) {
+        const item = capturedItems[i];
+        const png = decodePngFile(item.path);
+        decodedPngs.push(png);
+        frameAnalyses.push(
+          analyzeDecodedFrame(png, {
+            index: i,
+            path: item.path,
+            time: item.time
+          })
+        );
+      }
+      const pairs = [];
+      const diffPngPaths = [];
+      for (let i = 0; i < decodedPngs.length - 1; i++) {
+        const itemA = capturedItems[i];
+        const itemB = capturedItems[i + 1];
+        const cmp = compareDecodedFrames(decodedPngs[i], decodedPngs[i + 1], {
+          threshold,
+          buildDiffPng: shouldWriteDiff
+        });
+        let diffPngPath;
+        if (shouldWriteDiff && cmp.diffPng) {
+          const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
+          diffPngPath = path6.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          const outBuf = import_pngjs.PNG.sync.write(cmp.diffPng);
+          fs6.writeFileSync(diffPngPath, outBuf);
+          diffPngPaths.push(diffPngPath);
+        }
+        pairs.push({
+          pair_index: i,
+          a_index: i,
+          b_index: i + 1,
+          a_path: itemA.path,
+          b_path: itemB.path,
+          ...itemA.time !== void 0 ? { a_time: itemA.time } : {},
+          ...itemB.time !== void 0 ? { b_time: itemB.time } : {},
+          width: cmp.width,
+          height: cmp.height,
+          mean_abs_diff: cmp.mean_abs_diff,
+          max_diff: cmp.max_diff,
+          threshold: cmp.threshold,
+          changed_pixels: cmp.changed_pixels,
+          total_pixels: cmp.total_pixels,
+          pct_pixels_changed: cmp.pct_pixels_changed,
+          percent_changed: cmp.percent_changed,
+          identical: cmp.identical,
+          ...diffPngPath ? { diff_png: diffPngPath } : {}
+        });
+      }
+      const flaggedFrames = frameAnalyses.filter((f) => f.flags.length > 0).map((f) => ({
+        index: f.index,
+        path: f.path,
+        ...f.time !== void 0 ? { time: f.time } : {},
+        flags: f.flags
+      }));
+      const firstPair = pairs[0];
+      return {
+        ok: true,
+        mode: args.comp_id !== void 0 ? "comp_times" : "file_pair",
+        ...args.comp_id !== void 0 ? { comp_id: args.comp_id } : {},
+        threshold,
+        frames: frameAnalyses,
+        flagged_frames: flaggedFrames,
+        pairs,
+        // Convenience top-level summary fields when comparing a single pair
+        ...firstPair ? {
+          mean_abs_diff: firstPair.mean_abs_diff,
+          max_diff: firstPair.max_diff,
+          pct_pixels_changed: firstPair.pct_pixels_changed,
+          percent_changed: firstPair.percent_changed,
+          ...firstPair.diff_png ? { diff_png: firstPair.diff_png } : {}
+        } : {},
+        ...diffPngPaths.length > 0 ? { diff_pngs: diffPngPaths } : {}
+      };
+    }
+  }
+];
+
+// src/tools/ext/receipts.ts
+var fs7 = __toESM(require("node:fs"), 1);
+var path7 = __toESM(require("node:path"), 1);
+var DIFF_EPSILON = 1e-5;
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a === "number" && typeof b === "number") {
+    if (Number.isNaN(a) && Number.isNaN(b)) return true;
+    return Math.abs(a - b) <= DIFF_EPSILON;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!valuesEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) {
+    const aObj = a;
+    const bObj = b;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const k of aKeys) {
+      if (!(k in bObj)) return false;
+      if (!valuesEqual(aObj[k], bObj[k])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+function collectLeafProperties(nodes, prefix, out) {
+  if (!nodes) return;
+  if (!Array.isArray(nodes)) {
+    for (const [key, leaf] of Object.entries(nodes)) {
+      const p = leaf.path ?? `${prefix}/${key}`;
+      out.set(p, leaf);
+    }
+    return;
+  }
+  for (const node of nodes) {
+    const seg = node.matchName || node.name || String(node.propertyIndex ?? "");
+    const nodePath = node.path ?? `${prefix}/${seg}`;
+    if (node.kind === "group" || "properties" in node && Array.isArray(node.properties)) {
+      const grp = node;
+      collectLeafProperties(grp.properties, nodePath, out);
+    } else {
+      out.set(nodePath, node);
+    }
+  }
+}
+var COMP_SCALAR_FIELDS = [
+  "name",
+  "width",
+  "height",
+  "pixelAspect",
+  "fps",
+  "duration",
+  "workAreaStart",
+  "workAreaDuration",
+  "bgColor",
+  "markers"
+];
+var LAYER_SCALAR_FIELDS = [
+  "name",
+  "index",
+  "type",
+  "inPoint",
+  "outPoint",
+  "startTime",
+  "enabled",
+  "locked",
+  "label",
+  "parent",
+  "parentId",
+  "solo",
+  "threeDLayer",
+  "blendingMode",
+  "trackMatteType",
+  "sourceId"
+];
+function diffFingerprints(before, after) {
+  const changed = [];
+  const added = [];
+  const removed = [];
+  for (const field of COMP_SCALAR_FIELDS) {
+    const bVal = before[field];
+    const aVal = after[field];
+    if (bVal === void 0 && aVal === void 0) continue;
+    if (!valuesEqual(bVal, aVal)) {
+      changed.push({
+        path: `comp.${String(field)}`,
+        before: bVal,
+        after: aVal
+      });
+    }
+  }
+  const beforeLayers = Array.isArray(before.layers) ? before.layers : [];
+  const afterLayers = Array.isArray(after.layers) ? after.layers : [];
+  const beforeById = /* @__PURE__ */ new Map();
+  for (const l of beforeLayers) {
+    beforeById.set(l.id, l);
+  }
+  const afterById = /* @__PURE__ */ new Map();
+  for (const l of afterLayers) {
+    afterById.set(l.id, l);
+  }
+  for (const bLayer of beforeLayers) {
+    if (!afterById.has(bLayer.id)) {
+      removed.push({
+        path: `layer[${bLayer.id}]`,
+        kind: "layer",
+        id: bLayer.id,
+        name: bLayer.name,
+        index: bLayer.index,
+        type: bLayer.type
+      });
+    }
+  }
+  for (const aLayer of afterLayers) {
+    const bLayer = beforeById.get(aLayer.id);
+    const layerPrefix = `layer[${aLayer.id}]`;
+    if (!bLayer) {
+      added.push({
+        path: layerPrefix,
+        kind: "layer",
+        id: aLayer.id,
+        name: aLayer.name,
+        index: aLayer.index,
+        type: aLayer.type
+      });
+      continue;
+    }
+    for (const field of LAYER_SCALAR_FIELDS) {
+      const bVal = bLayer[field];
+      const aVal = aLayer[field];
+      if (bVal === void 0 && aVal === void 0) continue;
+      if (!valuesEqual(bVal, aVal)) {
+        changed.push({
+          path: `${layerPrefix}.${String(field)}`,
+          before: bVal,
+          after: aVal
+        });
+      }
+    }
+    const bProps = /* @__PURE__ */ new Map();
+    const aProps = /* @__PURE__ */ new Map();
+    collectLeafProperties(bLayer.properties, layerPrefix, bProps);
+    collectLeafProperties(aLayer.properties, layerPrefix, aProps);
+    for (const [propPath, bProp] of bProps.entries()) {
+      if (!aProps.has(propPath)) {
+        removed.push({
+          path: propPath,
+          kind: "property",
+          name: bProp.name,
+          matchName: bProp.matchName,
+          value: bProp.value
+        });
+      }
+    }
+    for (const [propPath, aProp] of aProps.entries()) {
+      const bProp = bProps.get(propPath);
+      if (!bProp) {
+        added.push({
+          path: propPath,
+          kind: "property",
+          name: aProp.name,
+          matchName: aProp.matchName,
+          value: aProp.value
+        });
+        continue;
+      }
+      if (!valuesEqual(bProp.value, aProp.value)) {
+        changed.push({
+          path: `${propPath}.value`,
+          before: bProp.value,
+          after: aProp.value
+        });
+      }
+      const bNumKeys = bProp.numKeys ?? 0;
+      const aNumKeys = aProp.numKeys ?? 0;
+      if (bNumKeys !== aNumKeys) {
+        changed.push({
+          path: `${propPath}.numKeys`,
+          before: bNumKeys,
+          after: aNumKeys
+        });
+      }
+      const bKeys = bProp.keyframes ?? [];
+      const aKeys = aProp.keyframes ?? [];
+      if (!valuesEqual(bKeys, aKeys)) {
+        changed.push({
+          path: `${propPath}.keyframes`,
+          before: bKeys,
+          after: aKeys
+        });
+      }
+      const bExpr = bProp.expression ?? "";
+      const aExpr = aProp.expression ?? "";
+      if (bExpr !== aExpr) {
+        changed.push({
+          path: `${propPath}.expression`,
+          before: bExpr,
+          after: aExpr
+        });
+      }
+      const bExprEnabled = Boolean(bProp.expressionEnabled);
+      const aExprEnabled = Boolean(aProp.expressionEnabled);
+      if (bExprEnabled !== aExprEnabled) {
+        changed.push({
+          path: `${propPath}.expressionEnabled`,
+          before: bExprEnabled,
+          after: aExprEnabled
+        });
+      }
+    }
+  }
+  return { changed, added, removed };
+}
+var MAX_STORED_FINGERPRINTS = 20;
+var fingerprintStore = /* @__PURE__ */ new Map();
+var nextFingerprintSeq = 1;
+function storeFingerprint(fp) {
+  const id = `fp_${nextFingerprintSeq++}`;
+  const entry = {
+    id,
+    comp_id: fp.comp_id,
+    created_at: (/* @__PURE__ */ new Date()).toISOString(),
+    fingerprint: fp
+  };
+  fingerprintStore.set(id, entry);
+  while (fingerprintStore.size > MAX_STORED_FINGERPRINTS) {
+    const oldestKey = fingerprintStore.keys().next().value;
+    if (oldestKey === void 0) break;
+    fingerprintStore.delete(oldestKey);
+  }
+  return entry;
+}
+function getStoredFingerprint(id) {
+  return fingerprintStore.get(id);
+}
+function sanitizeCheckpointLabel(label) {
+  const raw = (label ?? "checkpoint").trim();
+  if (!raw) return "checkpoint";
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "checkpoint";
+}
+var AeCompFingerprintSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The CompItem ID to fingerprint.")
+});
+var AeCompDiffSchema = external_exports.object({
+  before_id: external_exports.string().min(1).describe("The fingerprint ID previously returned by `ae_comp_fingerprint`."),
+  comp_id: external_exports.number().int().optional().describe(
+    "Target CompItem ID to fingerprint and compare against `before_id` (defaults to the comp_id stored on `before_id`)."
+  )
+});
+var AeCheckpointCreateSchema = external_exports.object({
+  expect: ExpectSchema,
+  label: external_exports.string().min(1).max(80).optional().describe(
+    "Optional label included in the checkpoint filename `<name>_<yyyyMMdd-HHmmss>_<label>.aep`."
+  )
+});
+var AeCheckpointListSchema = external_exports.object({
+  expect: ExpectSchema
+});
+var AeCheckpointRevertSchema = external_exports.object({
+  expect: ExpectSchema,
+  checkpoint_path: external_exports.string().min(1).describe("Absolute path to the `.aep` checkpoint file to open."),
+  discard_changes: external_exports.boolean().optional().describe(
+    "Must be true to close and revert when the currently open project has unsaved changes (`dirty: true`)."
+  )
+});
+var receiptsTools = [
+  {
+    name: "ae_comp_fingerprint",
+    description: "Read a deep, bounded fingerprint of a composition (every layer's settings and every property's value, numKeys, keyframe times/values, and expression, up to depth 6 and 5000 properties). Stores the fingerprint in server memory (retaining the 20 most recent) and returns its `id` and summary for use with `ae_comp_diff`. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCompFingerprintSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "compFingerprint",
+        { comp_id: args.comp_id },
+        {
+          label: `ae_comp_fingerprint(${args.comp_id})`,
+          mutates: false,
+          toolName: "ae_comp_fingerprint"
+        }
+      );
+      const fp = res.result;
+      const entry = storeFingerprint(fp);
+      const layers = Array.isArray(fp.layers) ? fp.layers : [];
+      return {
+        id: entry.id,
+        comp_id: fp.comp_id,
+        name: fp.name,
+        created_at: entry.created_at,
+        stored_count: fingerprintStore.size,
+        summary: {
+          comp_id: fp.comp_id,
+          name: fp.name,
+          width: fp.width,
+          height: fp.height,
+          fps: fp.fps,
+          duration: fp.duration,
+          numLayers: fp.numLayers ?? layers.length,
+          layerCount: layers.length,
+          propertyCount: fp.propertyCount ?? 0,
+          truncated: Boolean(fp.truncated)
+        }
+      };
+    }
+  },
+  {
+    name: "ae_comp_diff",
+    description: "Take a fresh composition fingerprint in a separate evalScript and return the exact property/layer diff (`{changed, added, removed}`) against a stored `before_id` fingerprint. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCompDiffSchema,
+    handler: async (args, ctx) => {
+      const beforeEntry = getStoredFingerprint(args.before_id);
+      if (!beforeEntry) {
+        throw new BridgeError({
+          kind: "evalscript_error",
+          message: `Unknown or evicted fingerprint before_id "${args.before_id}". Take a new fingerprint with ae_comp_fingerprint first.`
+        });
+      }
+      const compId = args.comp_id ?? beforeEntry.comp_id;
+      const res = await ctx.bridge.callHost(
+        "compFingerprint",
+        { comp_id: compId },
+        {
+          label: `ae_comp_diff(${compId})`,
+          mutates: false,
+          toolName: "ae_comp_diff"
+        }
+      );
+      const afterFp = res.result;
+      const afterEntry = storeFingerprint(afterFp);
+      const diff = diffFingerprints(beforeEntry.fingerprint, afterFp);
+      return {
+        before_id: beforeEntry.id,
+        after_id: afterEntry.id,
+        comp_id: compId,
+        truncated: Boolean(beforeEntry.fingerprint.truncated || afterFp.truncated),
+        changed: diff.changed,
+        added: diff.added,
+        removed: diff.removed,
+        diff
+      };
+    }
+  },
+  {
+    name: "ae_checkpoint_create",
+    description: "Create an `.aep` checkpoint of the currently saved project by copying the file on disk with Node fs to `<projectdir>/_mcp_checkpoints/<name>_<yyyyMMdd-HHmmss>_<label>.aep`. Never uses After Effects Save As so the active project path is never retargeted. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCheckpointCreateSchema,
+    handler: async (args, ctx) => {
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      try {
+        return await ctx.queue.run("ae_checkpoint_create", async () => {
+          ctx.quarantine.assertClear();
+          const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
+          const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
+          if (actualProjectPath === "<unsaved>") {
+            throw new BridgeError({
+              kind: "guard",
+              op_id: opId,
+              message: "Cannot create a checkpoint for an unsaved project (<unsaved>). Save the project in After Effects first.",
+              expected: args.expect,
+              actual: { project_path: "<unsaved>" }
+            });
+          }
+          if (!fs7.existsSync(actualProjectPath)) {
+            throw new BridgeError({
+              kind: "guard",
+              op_id: opId,
+              message: `Cannot create a checkpoint because the project file does not exist on disk: "${actualProjectPath}". Save the project first.`,
+              expected: args.expect,
+              actual: { project_path: actualProjectPath }
+            });
+          }
+          const projDir = path7.dirname(actualProjectPath);
+          const ext = path7.extname(actualProjectPath) || ".aep";
+          const baseName = path7.basename(actualProjectPath, ext);
+          const checkpointDir = path7.join(projDir, "_mcp_checkpoints");
+          fs7.mkdirSync(checkpointDir, { recursive: true });
+          const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
+          const safeLabel = sanitizeCheckpointLabel(args.label);
+          const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
+          const checkpointPath = path7.join(checkpointDir, checkpointFileName);
+          fs7.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs7.statSync(checkpointPath);
+          const receipt = buildReceipt({
+            before: {
+              project_path: actualProjectPath,
+              checkpoint_exists: false
+            },
+            after: {
+              project_path: actualProjectPath,
+              checkpoint_path: checkpointPath,
+              checkpoint_exists: true,
+              size: stat.size
+            },
+            expected: {
+              checkpoint_exists: true
+            },
+            actualForExpected: {
+              checkpoint_exists: fs7.existsSync(checkpointPath)
+            }
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            project_path: actualProjectPath,
+            checkpoint_path: checkpointPath,
+            label: safeLabel,
+            size: stat.size,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
+    }
+  },
+  {
+    name: "ae_checkpoint_list",
+    description: "List `.aep` checkpoint files in `<projectdir>/_mcp_checkpoints`, guarded by `expect`. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCheckpointListSchema,
+    handler: async (args, ctx) => {
+      const opId = ctx.bridge.newOpId();
+      const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
+      const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
+      if (actualProjectPath === "<unsaved>") {
+        throw new BridgeError({
+          kind: "guard",
+          op_id: opId,
+          message: "Cannot list checkpoints for an unsaved project (<unsaved>).",
+          expected: args.expect,
+          actual: { project_path: "<unsaved>" }
+        });
+      }
+      const projDir = path7.dirname(actualProjectPath);
+      const checkpointDir = path7.join(projDir, "_mcp_checkpoints");
+      if (!fs7.existsSync(checkpointDir)) {
+        return {
+          project_path: actualProjectPath,
+          checkpoint_dir: checkpointDir,
+          checkpoints: [],
+          truncated: false
+        };
+      }
+      const entries = fs7.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const items = entries.map((e) => {
+        const fullPath = path7.join(checkpointDir, e.name);
+        const stat = fs7.statSync(fullPath);
+        return {
+          name: e.name,
+          path: fullPath,
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+          created_at: stat.mtime.toISOString()
+        };
+      }).sort((a, b) => b.mtimeMs - a.mtimeMs || b.name.localeCompare(a.name));
+      const truncated = items.length > MAX_LIST_ENTRIES;
+      const bounded = items.slice(0, MAX_LIST_ENTRIES).map(({ mtimeMs: _m, ...rest }) => rest);
+      return {
+        project_path: actualProjectPath,
+        checkpoint_dir: checkpointDir,
+        checkpoints: bounded,
+        truncated
+      };
+    }
+  },
+  {
+    name: "ae_checkpoint_revert",
+    description: "Revert to a checkpoint `.aep` file using `openProject` (closes current project with `CloseOptions.DO_NOT_SAVE_CHANGES` only when allowed and calls `app.open`). Refuses if the open project is dirty unless `discard_changes: true` is explicitly passed. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCheckpointRevertSchema,
+    handler: async (args, ctx) => {
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      try {
+        return await ctx.queue.run("ae_checkpoint_revert", async () => {
+          ctx.quarantine.assertClear();
+          const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
+          const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
+          if (!fs7.existsSync(args.checkpoint_path)) {
+            throw new BridgeError({
+              kind: "guard",
+              op_id: opId,
+              message: `Checkpoint file does not exist on disk: "${args.checkpoint_path}".`,
+              expected: { checkpoint_path: args.checkpoint_path },
+              actual: { exists: false }
+            });
+          }
+          const beforeStatus = await ctx.bridge.evalRaw({
+            id: `${opId}_before`,
+            script: buildJsxCall("status", {}),
+            label: "ae_checkpoint_revert (before status)",
+            mutates: false,
+            toolName: "ae_checkpoint_revert"
+          });
+          const isDirty2 = Boolean(beforeStatus.result?.dirty);
+          const discardChanges = Boolean(args.discard_changes);
+          if (isDirty2 && !discardChanges) {
+            throw new BridgeError({
+              kind: "guard",
+              op_id: opId,
+              message: "Refusing to revert checkpoint: the open project has unsaved changes (dirty: true) and discard_changes is not true.",
+              expected: { dirty: false, discard_changes: true },
+              actual: {
+                project_path: actualProjectPath,
+                dirty: true
+              }
+            });
+          }
+          const openResp = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("openProject", {
+              path: args.checkpoint_path,
+              discard_changes: discardChanges,
+              expect: args.expect
+            }),
+            label: "ae_checkpoint_revert",
+            timeoutMs: SLOW_TIMEOUT_MS,
+            mutates: true,
+            toolName: "ae_checkpoint_revert"
+          });
+          const afterStatus = await ctx.bridge.evalRaw({
+            id: `${opId}_after`,
+            script: buildJsxCall("status", {}),
+            label: "ae_checkpoint_revert (after status)",
+            mutates: false,
+            toolName: "ae_checkpoint_revert"
+          });
+          const reopenedPath = afterStatus.result?.project_path ?? openResp.result?.project_path ?? args.checkpoint_path;
+          const receipt = buildReceipt({
+            before: beforeStatus.result ?? {
+              project_path: actualProjectPath,
+              dirty: isDirty2
+            },
+            after: afterStatus.result ?? {
+              project_path: reopenedPath,
+              dirty: false
+            },
+            expected: {
+              project_path: args.checkpoint_path
+            },
+            actualForExpected: {
+              project_path: reopenedPath
+            }
+          });
+          return {
+            op_id: opId,
+            applied: true,
+            previous_project_path: actualProjectPath,
+            project_path: reopenedPath,
+            checkpoint_path: args.checkpoint_path,
+            discarded_changes: isDirty2 && discardChanges,
+            result: openResp.result,
+            receipt
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({
+            kind: "queued",
+            op_id: opId,
+            message: err.message
+          });
+        }
+        throw err;
+      }
+    }
+  }
+];
+
+// src/tools/ext/index.ts
+var extTools = [
+  ...exploreTools,
+  ...receiptsTools,
+  ...animateTools,
+  ...framesTools,
+  ...aerenderTools,
+  ...dialogsTools
+];
+
+// src/tools/quarantine.ts
+var AeQuarantineStatusSchema = external_exports.object({});
+var AeAcknowledgeSchema = external_exports.object({
+  op_id: external_exports.string().min(1).describe("The quarantined operation ID (`op_id`) to acknowledge and clear."),
+  note: external_exports.string().min(1).describe(
+    "Explanation of what read tools showed about the operation's actual outcome in After Effects."
+  )
+});
+var quarantineTools = [
+  {
+    name: "ae_quarantine_status",
+    description: "Read the list of uncertain-outcome mutating operations currently in quarantine (`%LOCALAPPDATA%\\chroma-ae-mcp\\quarantine.json`). While any op is quarantined, all mutating tools refuse to run. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeQuarantineStatusSchema,
+    handler: async (_args, ctx) => {
+      const entries = ctx.quarantine.list();
+      return {
+        quarantined: entries.length > 0,
+        count: entries.length,
+        entries
+      };
+    }
+  },
+  {
+    name: "ae_acknowledge",
+    description: "Remove a timed-out operation from quarantine after calling `ae_status` and inspecting the project/comp state with read tools. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeAcknowledgeSchema,
+    handler: async (args, ctx) => {
+      return ctx.quarantine.acknowledge(args.op_id, args.note);
+    }
+  }
+];
+
+// src/tools/read.ts
+var AeStatusSchema = external_exports.object({});
+var AeGetProjectSchema = external_exports.object({
+  folder_id: external_exports.number().int().optional().describe("Optional folder item ID to start traversal from (defaults to root)."),
+  depth: external_exports.number().int().min(1).max(20).default(3).optional().describe("Maximum folder traversal depth (default: 3).")
+});
+var AeGetCompSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The CompItem ID to inspect.")
+});
+var AeGetLayerPropsSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The CompItem ID containing the layer."),
+  layer: LayerSelectorSchema,
+  path: external_exports.array(external_exports.string()).optional().describe(
+    "Optional property group path (e.g. ['ADBE Transform Group', 'ADBE Opacity'] or ['Transform', 'Opacity'])."
+  ),
+  depth: external_exports.number().int().min(1).max(10).default(2).optional().describe("Depth of property tree traversal (default: 2).")
+});
+var readTools = [
+  {
+    name: "ae_status",
+    description: "Read panel health (/health), AE version, current project path (or '<unsaved>'), dirty flag, active comp {id, name}, selected layers, and the server quarantine list. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeStatusSchema,
+    handler: async (_args, ctx) => {
+      const health = ctx.bridge.health ? await ctx.bridge.health() : { ok: true, transport: "panel" };
+      const hostStatus = await ctx.bridge.callHost(
+        "status",
+        {},
+        {
+          label: "ae_status",
+          mutates: false,
+          toolName: "ae_status"
+        }
+      );
+      return {
+        health,
+        ...hostStatus.result ?? {},
+        quarantine: ctx.quarantine.list()
+      };
+    }
+  },
+  {
+    name: "ae_get_project",
+    description: "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeGetProjectSchema,
+    handler: async (args, ctx) => {
+      const depth = args.depth ?? 3;
+      const res = await ctx.bridge.callHost(
+        "getProject",
+        {
+          folder_id: args.folder_id,
+          depth
+        },
+        {
+          label: "ae_get_project",
+          mutates: false,
+          toolName: "ae_get_project"
+        }
+      );
+      return res.result;
+    }
+  },
+  {
+    name: "ae_get_comp",
+    description: "Read composition settings, work area, and layers (index, name, id, type, in/out, parent, enabled, solo, locked, label, 3D, blending mode, track matte). " + AGENT_SAFETY_GUIDANCE,
+    schema: AeGetCompSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "getComp",
+        { comp_id: args.comp_id },
+        {
+          label: `ae_get_comp(${args.comp_id})`,
+          mutates: false,
+          toolName: "ae_get_comp"
+        }
+      );
+      return res.result;
+    }
+  },
+  {
+    name: "ae_get_layer_props",
+    description: "Read a layer's property tree with matchName, name, value (serialised), numKeys, expression, and expressionEnabled. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeGetLayerPropsSchema,
+    handler: async (args, ctx) => {
+      const depth = args.depth ?? 2;
+      const res = await ctx.bridge.callHost(
+        "getLayerProps",
+        {
+          comp_id: args.comp_id,
+          layer: args.layer,
+          path: args.path,
+          depth
+        },
+        {
+          label: `ae_get_layer_props(${args.comp_id})`,
+          mutates: false,
+          toolName: "ae_get_layer_props"
         }
       );
       return res.result;
@@ -5651,7 +10494,7 @@ async function handleRpc(message, ctx) {
 }
 
 // src/panel-host.ts
-var crypto2 = __toESM(require("node:crypto"), 1);
+var crypto4 = __toESM(require("node:crypto"), 1);
 var PanelTimeoutSignal = class extends Error {
   constructor() {
     super("PanelHost evalScript timed out");
@@ -5677,7 +10520,7 @@ var PanelHost = class {
     }
   }
   newOpId() {
-    return `op_${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
+    return `op_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
   }
   /**
    * Calls the panel's evalScript queue, racing against a timeout via setTimeout.
@@ -5688,6 +10531,7 @@ var PanelHost = class {
     const timeoutMs = params.timeoutMs ?? this.defaultTimeoutMs;
     const startedAt = Date.now();
     let rawPromise;
+    noteOpStarted(params.id);
     try {
       rawPromise = Promise.resolve(
         this.evalScript(params.script, params.label)
@@ -5700,10 +10544,8 @@ var PanelHost = class {
       });
     }
     rawPromise.then(
-      () => {
-      },
-      () => {
-      }
+      () => noteOpFinished(params.id),
+      () => noteOpFinished(params.id)
     );
     let timer;
     const timeoutPromise = new Promise((_resolve, reject) => {
@@ -5726,12 +10568,24 @@ var PanelHost = class {
             )}s; outcome unknown.`
           });
         }
+        let blocking = [];
+        try {
+          blocking = await describeBlockingDialogs();
+        } catch {
+          blocking = [];
+        }
+        const dialogNote = blocking.length > 0 ? ` AE is showing ${blocking.length} popup(s): ` + blocking.map((d) => {
+          const x = d;
+          const btns = (x.buttons ?? []).map((b) => b.name).filter(Boolean).join(" | ");
+          return `"${x.title ?? "untitled"}"${btns ? ` [${btns}]` : ""}`;
+        }).join("; ") + ". Read them with ae_dialogs; answer with ae_dialog_respond only under Jay's rules." : "";
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,
+          actual: blocking.length > 0 ? { blocking_dialogs: blocking } : void 0,
           message: `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
             timeoutMs / 1e3
-          )}s: outcome unknown. Do NOT resend this request \u2014 it may still be running or have completed in After Effects.` + (params.mutates ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.` : "")
+          )}s: outcome unknown. Do NOT resend this request \u2014 it may still be running or have completed in After Effects.` + (params.mutates ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.` : "") + dialogNote
         });
       }
       if (err instanceof BridgeError) {
@@ -5828,9 +10682,9 @@ function sendResponse(res, statusCode, headers, body) {
   res.end(body);
 }
 function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     if (typeof req.on !== "function") {
-      resolve("");
+      resolve2("");
       return;
     }
     const chunks = [];
@@ -5840,7 +10694,7 @@ function readRequestBody(req) {
       );
     });
     req.on("end", () => {
-      resolve(Buffer.concat(chunks).toString("utf8"));
+      resolve2(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", (err) => {
       reject(err instanceof Error ? err : new Error(String(err)));
@@ -5851,7 +10705,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path4.join(resolvedDataDir, "quarantine.json")
+    path8.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,

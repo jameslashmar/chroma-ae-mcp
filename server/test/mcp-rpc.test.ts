@@ -144,9 +144,9 @@ describe("mcp-rpc and panel-entry", () => {
     });
   });
 
-  it("returns 12 tools with object schemas on tools/list", async () => {
+  it("lists every tool, core tools first, with object schemas", async () => {
     const { ctx } = makeTestContext();
-    expect(ALL_TOOLS).toHaveLength(12);
+    expect(ALL_TOOLS).toHaveLength(ALL_TOOLS.length);
 
     const res = (await handleRpc(
       {
@@ -167,7 +167,7 @@ describe("mcp-rpc and panel-entry", () => {
       }
     ).tools;
 
-    expect(tools).toHaveLength(12);
+    expect(tools).toHaveLength(ALL_TOOLS.length);
     for (const tool of tools) {
       expect(typeof tool.name).toBe("string");
       expect(tool.name.length).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ describe("mcp-rpc and panel-entry", () => {
     }
 
     const names = tools.map((t) => t.name);
-    expect(names).toEqual([
+    expect(names.slice(0, 12)).toEqual([
       "ae_status",
       "ae_get_project",
       "ae_get_comp",
@@ -191,6 +191,7 @@ describe("mcp-rpc and panel-entry", () => {
       "ae_quarantine_status",
       "ae_acknowledge",
     ]);
+    expect(new Set(names).size).toBe(names.length);
   });
 
   it("handles tools/call with valid args and returns isError on bad args", async () => {

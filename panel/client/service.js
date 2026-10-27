@@ -67,11 +67,12 @@
     );
   }
 
-  function enqueueEval(id, script, label, sendResponse) {
+  function enqueueEval(id, script, label, sendResponse, raw) {
     var item = {
       id: id,
       script: script,
       label: label || "eval",
+      raw: Boolean(raw),
       enqueuedAt: Date.now(),
       expired: false,
       timer: null,
@@ -137,10 +138,10 @@
       return;
     }
 
-    var wrapped = wrapScriptForEval(item.script);
+    var scriptToRun = item.raw ? String(item.script || "") : wrapScriptForEval(item.script);
 
     try {
-      host.evalScript(wrapped, function (rawResult) {
+      host.evalScript(scriptToRun, function (rawResult) {
         var durationMs = Date.now() - startedAt;
         inFlight = null;
 
@@ -154,6 +155,18 @@
               message: "ExtendScript returned EvalScript_ErrMessage",
               kind: "evalscript_error"
             }
+          });
+          pumpQueue();
+          return;
+        }
+
+        if (item.raw) {
+          log("ok", "<- " + item.label + " [" + item.id + "] ok (" + durationMs + "ms)");
+          item.sendResponse(200, {
+            id: item.id,
+            ok: true,
+            result: rawStr,
+            durationMs: durationMs
           });
           pumpQueue();
           return;
@@ -518,10 +531,11 @@
         var label = typeof parsedBody.label === "string" && parsedBody.label.length > 0
           ? parsedBody.label
           : "eval";
+        var raw = parsedBody.raw === true;
 
         enqueueEval(id, parsedBody.script, label, function (statusCode, payload) {
           sendJson(res, statusCode, payload);
-        });
+        }, raw);
       });
       return;
     }

@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import { describeBlockingDialogs, noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
 import {
   BridgeError,
   DEFAULT_TIMEOUT_MS,
@@ -96,6 +97,8 @@ export class PanelHost implements HostTransport {
     const startedAt = Date.now();
 
     let rawPromise: Promise<PanelEvalScriptResult>;
+    // Lets ae_dialogs attribute a popup to the operation that was running when it appeared.
+    noteOpStarted(params.id);
     try {
       rawPromise = Promise.resolve(
         this.evalScript(params.script, params.label)
@@ -111,8 +114,8 @@ export class PanelHost implements HostTransport {
     // Attach a no-op rejection handler so that if the timeout wins the race
     // and rawPromise later rejects, Node does not emit an unhandledRejection.
     rawPromise.then(
-      () => {},
-      () => {}
+      () => noteOpFinished(params.id),
+      () => noteOpFinished(params.id)
     );
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -137,9 +140,30 @@ export class PanelHost implements HostTransport {
             )}s; outcome unknown.`,
           });
         }
+        // AE is usually blocked by a modal popup. Read it from outside AE's
+        // scripting thread so the agent sees what is waiting (never suppressed).
+        let blocking: object[] = [];
+        try {
+          blocking = await describeBlockingDialogs();
+        } catch {
+          blocking = [];
+        }
+        const dialogNote =
+          blocking.length > 0
+            ? ` AE is showing ${blocking.length} popup(s): ` +
+              blocking
+                .map((d) => {
+                  const x = d as { title?: string; buttons?: Array<{ name?: string }> };
+                  const btns = (x.buttons ?? []).map((b) => b.name).filter(Boolean).join(" | ");
+                  return `"${x.title ?? "untitled"}"${btns ? ` [${btns}]` : ""}`;
+                })
+                .join("; ") +
+              ". Read them with ae_dialogs; answer with ae_dialog_respond only under Jay's rules."
+            : "";
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,
+          actual: blocking.length > 0 ? { blocking_dialogs: blocking } : undefined,
           message:
             `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
               timeoutMs / 1000
@@ -147,7 +171,8 @@ export class PanelHost implements HostTransport {
             `Do NOT resend this request — it may still be running or have completed in After Effects.` +
             (params.mutates
               ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.`
-              : ""),
+              : "") +
+            dialogNote,
         });
       }
       if (err instanceof BridgeError) {
