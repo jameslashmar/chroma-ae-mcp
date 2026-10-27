@@ -1,0 +1,139 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  user-select: text;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 6px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #333333;
+  flex-shrink: 0;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 12px;
+  color: #f0f0f0;
+  letter-spacing: 0.2px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #3a3a3a;
+  color: #cccccc;
+}
+
+.badge.ok {
+  background: #1b4b2a;
+  color: #7ee29a;
+}
+
+.badge.busy {
+  background: #4d3812;
+  color: #f5c065;
+}
+
+.badge.err {
+  background: #541c1c;
+  color: #f48771;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta-label {
+  color: #888888;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.meta-value {
+  color: #dcdcdc;
+  font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-container {
+  flex: 1;
+  min-height: 0;
+  background: #161616;
+  border: 1px solid #2c2c2c;
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 6px;
+  font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+  font-size: 10.5px;
+}
+
+.log-entry {
+  padding: 1px 0;
+  word-break: break-word;
+  color: #bdbdbd;
+}
+
+.log-entry.warn {
+  color: #e6b450;
+}
+
+.log-entry.err {
+  color: #f48771;
+}
+
+.log-entry.ok {
+  color: #7ee29a;
+}

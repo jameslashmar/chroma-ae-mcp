@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chroma AE MCP</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="title-row">
+      <span class="title">Chroma AE MCP</span>
+      <span id="status-badge" class="badge">starting</span>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-item">
+        <span class="meta-label">Listen</span>
+        <span id="port-value" class="meta-value">127.0.0.1:7790</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Host</span>
+        <span id="ae-version" class="meta-value">AE —</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">In-Flight</span>
+        <span id="inflight-label" class="meta-value">idle</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Queue</span>
+        <span id="queue-depth" class="meta-value">0</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="log-container">
+    <div id="log" class="log" role="log" aria-live="polite"></div>
+  </main>
+
+  <script src="./main.js"></script>
+</body>
+</html>
