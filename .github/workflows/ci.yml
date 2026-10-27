@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build, test, lint
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Build
+        working-directory: server
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: server
+        run: npm test
+
+      - name: ExtendScript lint (ES3, no chained ternaries)
+        run: node scripts/lint-jsx.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-dist
+          path: server/dist
+
+  cep-node:
+    # AE 26's CEP panels run Node v17.7.2 (measured 2026-10-27 over the panel's
+    # debug port). The server is moving into the panel, so it must load there.
+    name: Loads on AE's CEP Node (17.7.2)
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install production dependencies
+        working-directory: server
+        run: npm ci --omit=dev
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: server/dist
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 17.7.2
+
+      - name: Import the server and list its tools under Node 17.7.2
+        working-directory: server
+        run: |
+          node --version
+          node --input-type=module -e "
+            const m = await import('./dist/index.js');
+            const names = m.ALL_TOOLS.map((t) => t.name);
+            if (names.length < 12) throw new Error('expected 12 tools, got ' + names.length);
+            const { server } = m.createMcpServer();
+            console.log('OK on', process.version, '-', names.length, 'tools:', names.join(', '));
+          "
