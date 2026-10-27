@@ -139,6 +139,88 @@ public static class ChromaWin32 {
         Add-Type -TypeDefinition $win32Source -ReferencedAssemblies "System.Drawing"
     }
 
+
+# ---------- OCR fallback ----------
+# AE paints many dialogs itself, so UIA and Win32 see no text and no buttons in them. Measured
+# 2026-10-27 on AE 26.0: a "Script Alert" (#32770) and an AE colour-profile warning both exposed no
+# child controls. Windows.Media.Ocr (Windows PowerShell 5.1) reads a 3x-upscaled screenshot instead.
+$script:OcrReady = $false
+function Initialize-Ocr {
+    if ($script:OcrReady) { return $true }
+    try {
+        Add-Type -AssemblyName System.Runtime.WindowsRuntime
+        $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+        $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+        $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+        $script:AsTaskOp = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+            $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+        })[0]
+        $script:OcrReady = $true
+    } catch { $script:OcrReady = $false }
+    return $script:OcrReady
+}
+function Wait-WinRt($op, [Type]$t) {
+    $task = $script:AsTaskOp.MakeGenericMethod($t).Invoke($null, @($op))
+    $task.Wait(-1) | Out-Null
+    return $task.Result
+}
+# Returns @{ lines = @(@{ text; words = @(@{ text; x; y; w; h }) }) } in the ORIGINAL image's pixels.
+function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
+    if (-not (Initialize-Ocr)) { return $null }
+    $tmp = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PngPath), "_ocr_" + [Guid]::NewGuid().ToString("N") + ".png")
+    try {
+        $src = [System.Drawing.Image]::FromFile($PngPath)
+        try {
+            $big = New-Object System.Drawing.Bitmap ($src.Width * $Scale), ($src.Height * $Scale)
+            $g = [System.Drawing.Graphics]::FromImage($big)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.DrawImage($src, 0, 0, $big.Width, $big.Height)
+            $g.Dispose()
+            $big.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
+            $big.Dispose()
+        } finally { $src.Dispose() }
+        $file = Wait-WinRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync($tmp)) ([Windows.Storage.StorageFile])
+        $stream = Wait-WinRt ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+        $dec = Wait-WinRt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+        $bmp = Wait-WinRt ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+        $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+        $res = Wait-WinRt ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])
+        $stream.Dispose()
+        $lines = @()
+        foreach ($ln in $res.Lines) {
+            $words = @()
+            foreach ($w in $ln.Words) {
+                $words += @{ text = [string]$w.Text; x = [int]($w.BoundingRect.X / $Scale); y = [int]($w.BoundingRect.Y / $Scale); w = [int]($w.BoundingRect.Width / $Scale); h = [int]($w.BoundingRect.Height / $Scale) }
+            }
+            $lines += @{ text = [string]$ln.Text; words = $words }
+        }
+        return @{ lines = $lines }
+    } catch {
+        return $null
+    } finally {
+        Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+# Button candidates: short OCR lines (1-3 words, at most 24 characters) in the lower 45% of the dialog.
+function Get-OcrButtons($Ocr, [int]$Height) {
+    $out = @()
+    if ($null -eq $Ocr) { return ,$out }
+    foreach ($ln in $Ocr.lines) {
+        if ($ln.words.Count -lt 1 -or $ln.words.Count -gt 3) { continue }
+        $t = ([string]$ln.text).Trim()
+        if ($t.Length -lt 1 -or $t.Length -gt 24) { continue }
+        $x1 = ($ln.words | ForEach-Object { $_.x } | Measure-Object -Minimum).Minimum
+        $y1 = ($ln.words | ForEach-Object { $_.y } | Measure-Object -Minimum).Minimum
+        $x2 = ($ln.words | ForEach-Object { $_.x + $_.w } | Measure-Object -Maximum).Maximum
+        $y2 = ($ln.words | ForEach-Object { $_.y + $_.h } | Measure-Object -Maximum).Maximum
+        if ($y1 -lt ($Height * 0.55)) { continue }
+        $out += @{ name = $t; automationId = ""; enabled = $true; source = "ocr"; x = [int]$x1; y = [int]$y1; w = [int]($x2 - $x1); h = [int]($y2 - $y1) }
+    }
+    return ,$out
+}
+# OCR often reads "OK" as "0K"; compare labels loosely.
+function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant() -replace '0', 'o') -replace '[^a-z ]', '').Trim() }
+
     if ($Mode -eq "list") {
         $targetPids = @()
         if ($AePid -gt 0) {
@@ -257,6 +339,8 @@ public static class ChromaWin32 {
                 # Any other window of AE counts only if it has a title and at least
                 # one button: AE's floating panel frames ("DroverLord - Window Class")
                 # are visible, untitled, button-less windows and are never popups.
+                # AE's panel frames report IsModal while a popup is up; they are never popups.
+                if ($cls -like "DroverLord*") { continue }
                 $isDialog = $isModal -or ($cls -eq "#32770")
                 if ($isMain -and (-not $isModal)) {
                     $isDialog = $false
@@ -384,7 +468,31 @@ public static class ChromaWin32 {
                     }
                 }
 
+                # UIA saw nothing (AE painted the dialog itself): fall back to OCR of a screenshot.
+                $textSource = "uia"
+                if ([string]::IsNullOrWhiteSpace($joinedText) -or $buttons.Count -eq 0) {
+                    $ocrPng = $screenshotPath
+                    $ocrTemp = $false
+                    if (-not $ocrPng) {
+                        $ocrPng = Join-Path ([System.IO.Path]::GetTempPath()) ("chroma_dlg_" + [Guid]::NewGuid().ToString("N") + ".png")
+                        $ocrTemp = [ChromaWin32]::CaptureWindowPng([IntPtr]$hwndVal, $bx, $by, $bw, $bh, $ocrPng)
+                    }
+                    if ($ocrPng -and (Test-Path -LiteralPath $ocrPng)) {
+                        $ocr = Invoke-DialogOcr $ocrPng
+                        if ($null -ne $ocr) {
+                            if ([string]::IsNullOrWhiteSpace($joinedText)) {
+                                $joinedText = (($ocr.lines | ForEach-Object { $_.text }) -join "`n")
+                                if ($joinedText.Length -gt 4000) { $joinedText = $joinedText.Substring(0, 4000) }
+                                $textSource = "ocr"
+                            }
+                            if ($buttons.Count -eq 0) { $buttons = Get-OcrButtons $ocr $bh }
+                        }
+                    }
+                    if ($ocrTemp) { Remove-Item -LiteralPath $ocrPng -ErrorAction SilentlyContinue }
+                }
+
                 $dialogs += @{
+                    text_source  = $textSource
                     handle       = $hwndVal
                     title        = $title
                     class        = $cls
@@ -414,6 +522,19 @@ public static class ChromaWin32 {
     }
 
     if ($Mode -eq "respond") {
+    Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class ChromaPost {
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
+  public static bool Key(IntPtr h, int vk) {
+    PostMessage(h, 0x0100, (IntPtr)vk, (IntPtr)0x00000001);
+    return PostMessage(h, 0x0101, (IntPtr)vk, unchecked((IntPtr)0xC0000001));
+  }
+}
+"@
+
         if ($Handle -le 0) {
             Write-JsonOut @{ ok = $false; error = "dialog_gone" }
             exit 0
@@ -498,7 +619,41 @@ public static class ChromaWin32 {
         }
 
         if ($null -eq $targetBtn) {
-            Write-JsonOut @{ ok = $false; error = "button_not_found" }
+            # No UIA button (AE painted the dialog). Measured on AE 26.0 (2026-10-27): posted mouse clicks
+            # and letter access keys are ignored, but a posted Enter presses the default button and a posted
+            # Escape answers Cancel/No. Neither brings AE to the front nor moves the cursor. So:
+            #  - Cancel / No / Close  -> Escape, if OCR shows that label on the dialog;
+            #  - OK / Yes / Continue  -> Enter, only when it is the dialog's ONLY button (otherwise Enter could
+            #    press a different default, e.g. "Don't Save").
+            $rect = New-Object ChromaWin32+RECT
+            $null = [ChromaWin32]::GetWindowRect($hwndPtr, [ref]$rect)
+            $rw = $rect.Right - $rect.Left; $rh = $rect.Bottom - $rect.Top
+            $shot = Join-Path ([System.IO.Path]::GetTempPath()) ("chroma_resp_" + [Guid]::NewGuid().ToString("N") + ".png")
+            $ocrBtns = @()
+            if ([ChromaWin32]::CaptureWindowPng($hwndPtr, $rect.Left, $rect.Top, $rw, $rh, $shot)) {
+                $ocrBtns = Get-OcrButtons (Invoke-DialogOcr $shot) $rh
+            }
+            Remove-Item -LiteralPath $shot -ErrorAction SilentlyContinue
+            $want = Get-NormalizedLabel $Button
+            $labels = @($ocrBtns | ForEach-Object { Get-NormalizedLabel $_.name })
+            $method = $null; $pressedName = $null
+            if (($want -in @("cancel", "no", "close")) -and ($labels -contains $want)) {
+                $null = [ChromaPost]::Key($hwndPtr, 0x1B)
+                $method = "post_escape"; $pressedName = $Button
+            } elseif (($want -in @("ok", "yes", "continue")) -and $ocrBtns.Count -eq 1 -and $labels[0] -eq $want) {
+                $null = [ChromaPost]::Key($hwndPtr, 0x0D)
+                $method = "post_enter"; $pressedName = $Button
+            } else {
+                Write-JsonOut @{ ok = $false; error = "button_not_answerable"; ocr_buttons = @($ocrBtns | ForEach-Object { $_.name }); hint = "AE-painted dialog: only Escape (Cancel/No/Close) or Enter (a single OK/Yes/Continue button) can be sent without focusing AE. Ask Jay to answer it." }
+                exit 0
+            }
+            $closed = $false
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($sw.ElapsedMilliseconds -lt 3000) {
+                if ((-not [ChromaWin32]::IsWindow($hwndPtr)) -or (-not [ChromaWin32]::IsWindowVisible($hwndPtr))) { $closed = $true; break }
+                Start-Sleep -Milliseconds 100
+            }
+            Write-JsonOut @{ ok = $true; handle = $Handle; pressed = $pressedName; method = $method; checked = $checkedName; closed = $closed }
             exit 0
         }
 

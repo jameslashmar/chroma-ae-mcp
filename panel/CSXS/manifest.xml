@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="7.0"
                    ExtensionBundleId="london.chroma.aemcp"
-                   ExtensionBundleVersion="0.2.0"
+                   ExtensionBundleVersion="0.2.1"
                    ExtensionBundleName="Chroma AE MCP"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="london.chroma.aemcp.service" Version="0.2.0" />
-    <Extension Id="london.chroma.aemcp.panel" Version="0.2.0" />
+    <Extension Id="london.chroma.aemcp.service" Version="0.2.1" />
+    <Extension Id="london.chroma.aemcp.panel" Version="0.2.1" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>

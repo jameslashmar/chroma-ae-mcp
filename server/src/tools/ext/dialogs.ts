@@ -653,7 +653,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
     description:
-      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. " +
+      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -673,7 +673,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialog_respond",
     description:
-      "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse), logging every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
+      "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
