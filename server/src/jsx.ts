@@ -29,7 +29,7 @@ export const HOST_FUNCTIONS = [
   "checkGuard",
 ] as const;
 
-export type HostFunctionName = (typeof HOST_FUNCTIONS)[number];
+export type HostFunctionName = (typeof HOST_FUNCTIONS)[number] | (string & {});
 
 /**
  * Safely encodes an arbitrary JS value into an ASCII-safe JavaScript literal
@@ -63,8 +63,10 @@ export function escapeForExtendScript(jsonLiteral: string): string {
 /**
  * Builds an ExtendScript call expression `__chromaAe.<fn>(<encodedArgs>)`.
  */
-export function buildJsxCall(fn: HostFunctionName, args: unknown = {}): string {
-  if (!(HOST_FUNCTIONS as readonly string[]).includes(fn)) {
+export function buildJsxCall(fn: HostFunctionName | string, args: unknown = {}): string {
+  // Core functions are listed in HOST_FUNCTIONS; tool groups in host/ext/*.jsx add
+  // their own, so any plain identifier is allowed.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(fn))) {
     throw new Error(`Invalid host function name: ${String(fn)}`);
   }
   return `__chromaAe.${fn}(${encodeJsxArg(args)})`;

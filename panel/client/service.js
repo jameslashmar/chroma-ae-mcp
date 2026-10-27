@@ -610,11 +610,21 @@
         reject(new Error("host/core.jsx not found at " + coreJsxPath));
         return;
       }
+      // host/ext/*.jsx add tool groups. Each attaches its functions to
+      // $.global.__chromaAe, so loading from inside this function is safe.
+      var extDirJsx = path.join(extDir, "host", "ext");
+      var extFiles = fs.existsSync(extDirJsx)
+        ? fs.readdirSync(extDirJsx).filter(function (n) { return /\.jsx$/i.test(n); }).sort()
+        : [];
+      var extLoads = extFiles.map(function (n) {
+        return "$.evalFile(" + JSON.stringify(path.join(extDirJsx, n)) + ");";
+      }).join("");
       var bootScript =
         "(function(){" +
         "if(typeof __chromaAe==='undefined'||!__chromaAe){" +
         "$.evalFile(" + JSON.stringify(coreJsxPath) + ");" +
         "}" +
+        extLoads +
         "if(typeof __chromaAe==='object'&&__chromaAe){" +
         "return String(app.version||'')+'|ok';" +
         "}" +

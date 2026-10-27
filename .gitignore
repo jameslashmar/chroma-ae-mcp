@@ -2,3 +2,5 @@ node_modules/
 dist/
 reference/
 *.log
+build/ZXPSignCmd.exe
+build/*.p12

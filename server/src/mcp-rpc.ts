@@ -6,17 +6,9 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "./tools/common.js";
-import { mutateTools } from "./tools/mutate.js";
-import { quarantineTools } from "./tools/quarantine.js";
-import { readTools } from "./tools/read.js";
-import { renderTools } from "./tools/render.js";
+import { ALL_TOOLS } from "./tools/registry.js";
 
-export const ALL_TOOLS: ToolDefinition<any>[] = [
-  ...readTools,
-  ...mutateTools,
-  ...renderTools,
-  ...quarantineTools,
-];
+export { ALL_TOOLS };
 
 const TOOL_MAP = new Map<string, ToolDefinition<any>>(
   ALL_TOOLS.map((t) => [t.name, t])

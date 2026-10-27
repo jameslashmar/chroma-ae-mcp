@@ -4660,25 +4660,14 @@ function formatToolError(err) {
   };
 }
 
+// src/tools/ext/index.ts
+var extTools = [];
+
 // src/tools/mutate.ts
 var fs2 = __toESM(require("node:fs"), 1);
 var path2 = __toESM(require("node:path"), 1);
 
 // src/jsx.ts
-var HOST_FUNCTIONS = [
-  "status",
-  "getProject",
-  "getComp",
-  "getLayerProps",
-  "runUserJsx",
-  "setProperty",
-  "snapshotFrame",
-  "rqAdd",
-  "rqStatus",
-  "save",
-  "snapshotForReceipt",
-  "checkGuard"
-];
 function encodeJsxArg(value) {
   const json = JSON.stringify(value === void 0 ? null : value);
   return escapeForExtendScript(json);
@@ -4696,7 +4685,7 @@ function escapeForExtendScript(jsonLiteral) {
   return out;
 }
 function buildJsxCall(fn, args = {}) {
-  if (!HOST_FUNCTIONS.includes(fn)) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(fn))) {
     throw new Error(`Invalid host function name: ${String(fn)}`);
   }
   return `__chromaAe.${fn}(${encodeJsxArg(args)})`;
@@ -5472,13 +5461,16 @@ var renderTools = [
   }
 ];
 
-// src/mcp-rpc.ts
+// src/tools/registry.ts
 var ALL_TOOLS = [
   ...readTools,
   ...mutateTools,
   ...renderTools,
-  ...quarantineTools
+  ...quarantineTools,
+  ...extTools
 ];
+
+// src/mcp-rpc.ts
 var TOOL_MAP = new Map(
   ALL_TOOLS.map((t) => [t.name, t])
 );
