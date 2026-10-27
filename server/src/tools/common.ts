@@ -53,10 +53,23 @@ export const LayerSelectorSchema = z
 
 export type LayerSelector = z.infer<typeof LayerSelectorSchema>;
 
+export interface CepExtensionInfo {
+  id: string;
+  name: string;
+  mainPath?: string;
+  type?: string;
+}
+
+export interface CepBridge {
+  listExtensions(): Promise<CepExtensionInfo[]> | CepExtensionInfo[];
+  openExtension(id: string): Promise<boolean> | boolean;
+}
+
 export interface ToolContext {
   bridge: HostTransport;
   queue: SingleWriterQueue;
   quarantine: QuarantineStore;
+  cep?: CepBridge;
 }
 
 export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {

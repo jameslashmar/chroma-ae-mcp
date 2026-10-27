@@ -4,6 +4,7 @@ import { animateTools } from "./animate.js";
 import { dialogsTools } from "./dialogs.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
+import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
 
 // Each tool group in this folder exports an array of tools; list it here.
@@ -14,4 +15,5 @@ export const extTools: ToolDefinition<any>[] = [
   ...framesTools,
   ...aerenderTools,
   ...dialogsTools,
+  ...panelsTools,
 ];

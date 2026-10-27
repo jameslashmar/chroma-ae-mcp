@@ -2611,8 +2611,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path9, errorMaps, issueData } = params;
-  const fullPath = [...path9, ...issueData.path || []];
+  const { data, path: path10, errorMaps, issueData } = params;
+  const fullPath = [...path10, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2728,11 +2728,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path9, key) {
+  constructor(parent, value, path10, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path9;
+    this._path = path10;
     this._key = key;
   }
   get path() {
@@ -7088,7 +7088,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path8 = __toESM(require("node:path"), 1);
+var path9 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -9582,9 +9582,267 @@ var framesTools = [
   }
 ];
 
-// src/tools/ext/receipts.ts
+// src/tools/ext/panels.ts
+var import_node_child_process2 = require("node:child_process");
 var fs7 = __toESM(require("node:fs"), 1);
 var path7 = __toESM(require("node:path"), 1);
+var CURATED_NATIVE_PANELS = [
+  "Align",
+  "Audio",
+  "Brushes",
+  "Character",
+  "Content-Aware Fill",
+  "Effects & Presets",
+  "Essential Graphics",
+  "Essential Properties",
+  "Info",
+  "Learn",
+  "Libraries",
+  "Lumetri Scopes",
+  "Mask Interpolation",
+  "Media Browser",
+  "Motion Sketch",
+  "Paint",
+  "Paragraph",
+  "Preview",
+  "Progress",
+  "Properties",
+  "Smoother",
+  "Tracker",
+  "Wiggler"
+];
+var runtimeOverrides2 = {};
+function currentPlatform2() {
+  return runtimeOverrides2.platform ?? process.platform;
+}
+function defaultUiDir() {
+  if (runtimeOverrides2.uiDir) {
+    return runtimeOverrides2.uiDir;
+  }
+  return path7.join(defaultDataDir(), "ui");
+}
+function runPowerShellScript2(ps1Args) {
+  if (runtimeOverrides2.ps1Runner) {
+    return runtimeOverrides2.ps1Runner(ps1Args);
+  }
+  const scriptPath = runtimeOverrides2.scriptPath !== void 0 ? runtimeOverrides2.scriptPath : locateDialogsPs1Script();
+  if (!scriptPath) {
+    return Promise.resolve(
+      JSON.stringify({
+        ok: false,
+        error: "ae_dialogs_ps1_not_found"
+      })
+    );
+  }
+  const fullArgs = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    ...ps1Args
+  ];
+  return new Promise((resolve2) => {
+    (0, import_node_child_process2.execFile)(
+      "powershell.exe",
+      fullArgs,
+      {
+        windowsHide: true,
+        timeout: 15e3,
+        maxBuffer: 4 * 1024 * 1024
+      },
+      (err, stdout, stderr) => {
+        const outStr = typeof stdout === "string" ? stdout.trim() : "";
+        if (outStr.length > 0) {
+          resolve2(outStr);
+          return;
+        }
+        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
+        resolve2(
+          JSON.stringify({
+            ok: false,
+            error: errMsg
+          })
+        );
+      }
+    );
+  });
+}
+var AeListPanelsSchema = external_exports.object({
+  filter: external_exports.string().optional().describe(
+    "Optional filter: 'native' for native panels only, 'extensions' for CEP extensions only, or a search substring matching panel names or IDs."
+  )
+});
+var AeOpenPanelSchema = external_exports.object({
+  name: external_exports.string().min(1).optional().describe(
+    "Native After Effects panel name from the Window menu (e.g. 'Effects & Presets', 'Align', 'Character'). NOTE: Window menu commands toggle the panel (open if closed, close if open) and scripting cannot query their open state. Opening a native panel requires allow_toggle: true after visually verifying via ae_ui_screenshot that the panel is currently closed."
+  ),
+  extension_id: external_exports.string().min(1).optional().describe(
+    "ID of a CEP extension to open (e.g. 'london.chroma.aemcp.panel'). Opening a CEP extension never toggles."
+  ),
+  allow_toggle: external_exports.boolean().default(false).optional().describe(
+    "Must be set to true to execute native Window menu panel commands. Because Window menu commands toggle (they close the panel if it is already open) and scripting cannot detect panel state, you must first take a screenshot with ae_ui_screenshot to verify the panel is closed before passing allow_toggle: true."
+  )
+}).refine((val) => Boolean(val.name || val.extension_id), {
+  message: "Must specify either 'name' (for a native panel) or 'extension_id' (for a CEP extension)."
+});
+var AeUiScreenshotSchema = external_exports.object({});
+var panelsTools = [
+  {
+    name: "ae_list_panels",
+    description: "READ-ONLY. Lists installed CEP extensions and native After Effects Window-menu panels with their ExtendScript command IDs (cmdId). Note: Native Window-menu commands toggle and their open/closed state cannot be queried via scripting; use ae_ui_screenshot to verify visibility. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeListPanelsSchema,
+    handler: async (args, ctx) => {
+      if (!ctx.cep) {
+        return { ok: false, error: "cep_unavailable" };
+      }
+      const rawExts = await ctx.cep.listExtensions();
+      const allExts = (Array.isArray(rawExts) ? rawExts : []).filter(
+        (ext) => ext && ext.id && ext.id !== "london.chroma.aemcp.service"
+      ).map((ext) => ({
+        id: ext.id,
+        name: ext.name || ext.id
+      }));
+      const jsxScript = "(function(){\nvar names=" + JSON.stringify(CURATED_NATIVE_PANELS) + ";\nvar out=[];\nfor(var i=0;i<names.length;i++){\nvar id=app.findMenuCommandId(names[i]);\nif(id!==0){\nout.push({name:names[i],cmdId:id});\n}\n}\nreturn out;\n})()";
+      const nativeRes = await ctx.bridge.evalRaw({
+        id: ctx.bridge.newOpId(),
+        script: jsxScript,
+        label: "ae_list_panels(native)",
+        mutates: false,
+        toolName: "ae_list_panels"
+      });
+      const allNative = Array.isArray(nativeRes.result) ? nativeRes.result : [];
+      const filter = typeof args.filter === "string" ? args.filter.trim() : "";
+      if (filter.length > 0) {
+        const lowerFilter = filter.toLowerCase();
+        if (lowerFilter === "native") {
+          return {
+            ok: true,
+            extensions: [],
+            native: allNative
+          };
+        }
+        if (lowerFilter === "extensions" || lowerFilter === "extension") {
+          return {
+            ok: true,
+            extensions: allExts,
+            native: []
+          };
+        }
+        return {
+          ok: true,
+          extensions: allExts.filter(
+            (e) => e.name.toLowerCase().includes(lowerFilter) || e.id.toLowerCase().includes(lowerFilter)
+          ),
+          native: allNative.filter(
+            (n) => n.name.toLowerCase().includes(lowerFilter)
+          )
+        };
+      }
+      return {
+        ok: true,
+        extensions: allExts,
+        native: allNative
+      };
+    }
+  },
+  {
+    name: "ae_open_panel",
+    description: "Opens an After Effects CEP extension or native Window-menu panel. CEP extensions (via extension_id) open directly and never toggle. IMPORTANT: Native Window-menu commands (via name) toggle (calling them when already open will close the panel). To prevent accidental closure, opening a native panel without allow_toggle: true is refused. First use ae_ui_screenshot to verify the panel is closed, then pass allow_toggle: true. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeOpenPanelSchema,
+    handler: async (args, ctx) => {
+      if (args.extension_id) {
+        if (!ctx.cep) {
+          return { ok: false, error: "cep_unavailable" };
+        }
+        const opened = await ctx.cep.openExtension(args.extension_id);
+        return {
+          ok: true,
+          extension_id: args.extension_id,
+          opened: Boolean(opened)
+        };
+      }
+      if (args.name) {
+        if (args.allow_toggle !== true) {
+          return {
+            ok: false,
+            error: "refused_toggle_risk",
+            message: `Refused to execute Window menu command for "${args.name}": Window-menu commands toggle After Effects panels and scripting cannot query whether the panel is currently open or closed. Executing this command when the panel is already open will close it. First use ae_ui_screenshot to verify that "${args.name}" is closed, then call ae_open_panel with allow_toggle: true.`
+          };
+        }
+        const jsxScript = "(function(){\nvar cmdId=app.findMenuCommandId(" + JSON.stringify(args.name) + ");\nif(!cmdId||cmdId===0){\nreturn {ok:false,error:'unknown_menu_command'};\n}\napp.executeCommand(cmdId);\nreturn {ok:true,cmdId:cmdId};\n})()";
+        const res = await ctx.bridge.evalRaw({
+          id: ctx.bridge.newOpId(),
+          script: jsxScript,
+          label: `ae_open_panel(${args.name})`,
+          mutates: false,
+          toolName: "ae_open_panel"
+        });
+        if (!res.result || !res.result.ok) {
+          return {
+            ok: false,
+            error: res.result?.error || "command_failed",
+            name: args.name,
+            message: `Menu command "${args.name}" was not recognized by After Effects (findMenuCommandId returned 0).`
+          };
+        }
+        return {
+          ok: true,
+          cmdId: res.result.cmdId,
+          executed: true,
+          note: "Window commands toggle; verify with ae_ui_screenshot"
+        };
+      }
+      return {
+        ok: false,
+        error: "invalid_arguments",
+        message: "Must specify either 'name' (for a native panel) or 'extension_id' (for a CEP extension)."
+      };
+    }
+  },
+  {
+    name: "ae_ui_screenshot",
+    description: "READ-ONLY. Captures a PNG screenshot of After Effects' main window (window class AE_CApplication_*) via Win32 PrintWindow into %LOCALAPPDATA%/chroma-ae-mcp/ui/ without bringing the window to the foreground or activating it. Returns { ok: true, path, width, height }. Use this to visually verify panel open/closed visibility because native Window-menu commands toggle and their state cannot be read via scripting. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeUiScreenshotSchema,
+    handler: async () => {
+      const platform = currentPlatform2();
+      if (platform !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      const outDir = defaultUiDir();
+      try {
+        fs7.mkdirSync(outDir, { recursive: true });
+      } catch {
+      }
+      const rawStdout = await runPowerShellScript2([
+        "-Mode",
+        "screenshot-main",
+        "-OutDir",
+        outDir
+      ]);
+      const parsed = parsePs1JsonOutput(rawStdout);
+      if (!parsed.ok) {
+        return {
+          ok: false,
+          error: parsed.error || "screenshot_failed"
+        };
+      }
+      return {
+        ok: true,
+        path: parsed.path,
+        width: parsed.width,
+        height: parsed.height
+      };
+    }
+  }
+];
+
+// src/tools/ext/receipts.ts
+var fs8 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -9951,7 +10209,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs7.existsSync(actualProjectPath)) {
+          if (!fs8.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -9960,17 +10218,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path7.dirname(actualProjectPath);
-          const ext = path7.extname(actualProjectPath) || ".aep";
-          const baseName = path7.basename(actualProjectPath, ext);
-          const checkpointDir = path7.join(projDir, "_mcp_checkpoints");
-          fs7.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path8.dirname(actualProjectPath);
+          const ext = path8.extname(actualProjectPath) || ".aep";
+          const baseName = path8.basename(actualProjectPath, ext);
+          const checkpointDir = path8.join(projDir, "_mcp_checkpoints");
+          fs8.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path7.join(checkpointDir, checkpointFileName);
-          fs7.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs7.statSync(checkpointPath);
+          const checkpointPath = path8.join(checkpointDir, checkpointFileName);
+          fs8.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs8.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -9986,7 +10244,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs7.existsSync(checkpointPath)
+              checkpoint_exists: fs8.existsSync(checkpointPath)
             }
           });
           return {
@@ -10028,9 +10286,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path7.dirname(actualProjectPath);
-      const checkpointDir = path7.join(projDir, "_mcp_checkpoints");
-      if (!fs7.existsSync(checkpointDir)) {
+      const projDir = path8.dirname(actualProjectPath);
+      const checkpointDir = path8.join(projDir, "_mcp_checkpoints");
+      if (!fs8.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -10038,10 +10296,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs7.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs8.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path7.join(checkpointDir, e.name);
-        const stat = fs7.statSync(fullPath);
+        const fullPath = path8.join(checkpointDir, e.name);
+        const stat = fs8.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -10072,7 +10330,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs7.existsSync(args.checkpoint_path)) {
+          if (!fs8.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -10170,7 +10428,8 @@ var extTools = [
   ...animateTools,
   ...framesTools,
   ...aerenderTools,
-  ...dialogsTools
+  ...dialogsTools,
+  ...panelsTools
 ];
 
 // src/tools/quarantine.ts
@@ -10723,7 +10982,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path8.join(resolvedDataDir, "quarantine.json")
+    path9.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -10734,7 +10993,8 @@ function createPanelMcp(opts) {
   const ctx = {
     bridge: host,
     queue,
-    quarantine
+    quarantine,
+    cep: opts.cep
   };
   const log = opts.log;
   async function handleHttp(req, res, bodyText) {

@@ -1,11 +1,13 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("list", "respond")]
+    [ValidateSet("list", "respond", "screenshot-main")]
     [string]$Mode,
 
     [int]$AePid = 0,
 
     [string]$ScreenshotDir = "",
+
+    [string]$OutDir = "",
 
     [long]$Handle = 0,
 
@@ -536,6 +538,145 @@ public static class ChromaWin32 {
             closed  = $closed
         }
         exit 0
+    }
+
+    if ($Mode -eq "screenshot-main") {
+        $targetPids = @()
+        if ($AePid -gt 0) {
+            $targetPids = @($AePid)
+        } else {
+            $procs = @(Get-Process -Name "AfterFX" -ErrorAction SilentlyContinue)
+            foreach ($p in $procs) {
+                $targetPids += [int]$p.Id
+            }
+        }
+
+        if ($targetPids.Count -eq 0) {
+            Write-JsonOut @{
+                ok    = $false
+                error = "ae_not_running"
+            }
+            exit 0
+        }
+
+        $targetDir = $OutDir
+        if ([string]::IsNullOrWhiteSpace($targetDir)) {
+            $targetDir = $ScreenshotDir
+        }
+        if ([string]::IsNullOrWhiteSpace($targetDir)) {
+            $localApp = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+            $targetDir = Join-Path $localApp "chroma-ae-mcp\ui"
+        }
+
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        $mainHwnd = [IntPtr]::Zero
+        $mainRect = $null
+
+        foreach ($tPid in $targetPids) {
+            $hwnds = [ChromaWin32]::GetProcessTopWindows($tPid)
+            foreach ($h in $hwnds) {
+                if ($h -eq [IntPtr]::Zero) { continue }
+                if (-not [ChromaWin32]::IsWindowVisible($h)) { continue }
+                try {
+                    $el = [System.Windows.Automation.AutomationElement]::FromHandle($h)
+                    if ($null -ne $el) {
+                        $cls = [string]$el.Current.ClassName
+                        if ($cls -like "AE_CApplication_*") {
+                            $mainHwnd = $h
+                            $mainRect = $el.Current.BoundingRectangle
+                            break
+                        }
+                    }
+                } catch {}
+            }
+            if ($mainHwnd -ne [IntPtr]::Zero) { break }
+
+            try {
+                $pidCond = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                    [int]$tPid
+                )
+                $rootChildren = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                    [System.Windows.Automation.TreeScope]::Children,
+                    $pidCond
+                )
+                if ($null -ne $rootChildren) {
+                    for ($i = 0; $i -lt $rootChildren.Count; $i++) {
+                        $rc = $rootChildren[$i]
+                        try {
+                            $cls = [string]$rc.Current.ClassName
+                            if ($cls -like "AE_CApplication_*") {
+                                $rcHandle = [long]$rc.Current.NativeWindowHandle
+                                $hPtr = [IntPtr]$rcHandle
+                                if ($hPtr -ne [IntPtr]::Zero -and [ChromaWin32]::IsWindowVisible($hPtr)) {
+                                    $mainHwnd = $hPtr
+                                    $mainRect = $rc.Current.BoundingRectangle
+                                    break
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+            } catch {}
+            if ($mainHwnd -ne [IntPtr]::Zero) { break }
+        }
+
+        if ($mainHwnd -eq [IntPtr]::Zero) {
+            Write-JsonOut @{
+                ok    = $false
+                error = "ae_main_window_not_found"
+            }
+            exit 0
+        }
+
+        $bx = 0; $by = 0; $bw = 0; $bh = 0
+        if ($null -ne $mainRect -and (-not [double]::IsInfinity($mainRect.Width)) -and (-not [double]::IsNaN($mainRect.Width))) {
+            $bx = [int][Math]::Round($mainRect.Left)
+            $by = [int][Math]::Round($mainRect.Top)
+            $bw = [int][Math]::Round($mainRect.Width)
+            $bh = [int][Math]::Round($mainRect.Height)
+        }
+        if ($bw -le 0 -or $bh -le 0) {
+            $r = New-Object ChromaWin32+RECT
+            if ([ChromaWin32]::GetWindowRect($mainHwnd, [ref]$r)) {
+                $bx = $r.Left
+                $by = $r.Top
+                $bw = $r.Right - $r.Left
+                $bh = $r.Bottom - $r.Top
+            }
+        }
+
+        if ($bw -le 0 -or $bh -le 0) {
+            Write-JsonOut @{
+                ok    = $false
+                error = "invalid_window_dimensions"
+            }
+            exit 0
+        }
+
+        $fileName = "ae_main_$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()).png"
+        $filePath = Join-Path $targetDir $fileName
+
+        $saved = [ChromaWin32]::CaptureWindowPng($mainHwnd, $bx, $by, $bw, $bh, $filePath)
+        if ($saved -and (Test-Path -LiteralPath $filePath)) {
+            Write-JsonOut @{
+                ok     = $true
+                path   = $filePath
+                width  = $bw
+                height = $bh
+                handle = $mainHwnd.ToInt64()
+            }
+            exit 0
+        } else {
+            Write-JsonOut @{
+                ok    = $false
+                error = "screenshot_capture_failed"
+            }
+            exit 0
+        }
     }
 } catch {
     $errMsg = $_.Exception.Message

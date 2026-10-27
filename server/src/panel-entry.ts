@@ -5,7 +5,7 @@ import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
-import type { ToolContext } from "./tools/common.js";
+import type { CepBridge, ToolContext } from "./tools/common.js";
 
 export { handleRpc, PanelHost, type JsonRpcResponse, type PanelEvalScriptFn };
 
@@ -13,6 +13,7 @@ export interface CreatePanelMcpOptions {
   evalScript: PanelEvalScriptFn;
   dataDir?: string;
   log?: (level: string, msg: string) => void;
+  cep?: CepBridge;
 }
 
 export interface HttpRequestLike {
@@ -93,6 +94,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     bridge: host,
     queue,
     quarantine,
+    cep: opts.cep,
   };
 
   const log = opts.log;

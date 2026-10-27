@@ -304,10 +304,42 @@
         }
         return null;
       }
+      var cepAdapter = (typeof window !== "undefined" && window.__adobe_cep__) ? {
+        listExtensions: function () {
+          try {
+            var raw = window.__adobe_cep__.getExtensions();
+            var list = typeof raw === "string" ? JSON.parse(raw) : (Array.isArray(raw) ? raw : []);
+            if (!Array.isArray(list)) list = [];
+            return list.map(function (ext) {
+              var item = {
+                id: ext && ext.id ? String(ext.id) : "",
+                name: ext && ext.name ? String(ext.name) : (ext && ext.id ? String(ext.id) : "")
+              };
+              if (ext && ext.mainPath) item.mainPath = String(ext.mainPath);
+              if (ext && ext.type) item.type = String(ext.type);
+              return item;
+            });
+          } catch (e) {
+            log("err", "Failed to get extensions from CEP: " + (e && e.message ? e.message : String(e)));
+            return [];
+          }
+        },
+        openExtension: function (id) {
+          try {
+            window.__adobe_cep__.requestOpenExtension(id, "");
+            return true;
+          } catch (e) {
+            log("err", "Failed to open extension " + id + ": " + (e && e.message ? e.message : String(e)));
+            return false;
+          }
+        }
+      } : undefined;
+
       panelMcp = createPanelMcp({
         evalScript: evalScriptForMcp,
         dataDir: paths.stateDir,
-        log: log
+        log: log,
+        cep: cepAdapter
       });
       log("ok", "Loaded MCP bundle (" + path.basename(bundlePath) + ")");
       return panelMcp;
