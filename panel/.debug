@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionList>
-  <Extension Id="london.chroma.aemcp">
+  <Extension Id="london.chroma.aemcp.service">
     <HostList>
       <Host Name="AEFT" Port="8097" />
+    </HostList>
+  </Extension>
+  <Extension Id="london.chroma.aemcp.panel">
+    <HostList>
+      <Host Name="AEFT" Port="8096" />
     </HostList>
   </Extension>
 </ExtensionList>

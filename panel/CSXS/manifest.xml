@@ -5,7 +5,8 @@
                    ExtensionBundleName="Chroma AE MCP"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="london.chroma.aemcp" Version="0.1.0" />
+    <Extension Id="london.chroma.aemcp.service" Version="0.1.0" />
+    <Extension Id="london.chroma.aemcp.panel" Version="0.1.0" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -19,10 +20,10 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="london.chroma.aemcp">
+    <Extension Id="london.chroma.aemcp.service">
       <DispatchInfo>
         <Resources>
-          <MainPath>./client/index.html</MainPath>
+          <MainPath>./client/service.html</MainPath>
           <ScriptPath>./host/core.jsx</ScriptPath>
           <CEFCommandLine>
             <Parameter>--enable-nodejs</Parameter>
@@ -30,10 +31,34 @@
           </CEFCommandLine>
         </Resources>
         <Lifecycle>
-          <AutoVisible>true</AutoVisible>
+          <AutoVisible>false</AutoVisible>
           <StartOn>
             <Event>com.adobe.csxs.events.ApplicationActivate</Event>
+            <Event>applicationActivate</Event>
           </StartOn>
+        </Lifecycle>
+        <UI>
+          <Type>Custom</Type>
+          <Geometry>
+            <Size>
+              <Height>1</Height>
+              <Width>1</Width>
+            </Size>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+    <Extension Id="london.chroma.aemcp.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./client/index.html</MainPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
         </Lifecycle>
         <UI>
           <Type>Panel</Type>

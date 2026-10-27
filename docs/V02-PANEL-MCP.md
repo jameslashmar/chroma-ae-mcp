@@ -80,3 +80,27 @@ Streamable HTTP, **stateless** (no session ids), JSON responses only (no SSE).
 ## Later in v0.2 (not this slice)
 - A background extension that starts at AE launch (CEP `StartOn` events), so the MCP is live even with the panel closed.
 - A signed ZXP via `release.ps1` and `op-sa`, a version check against a manifest, and the attribution/notices in the package.
+
+## Slice 2: start with AE, with no panel needed
+
+The bundle holds two CEP extensions (one manifest, bundle id `london.chroma.aemcp`):
+
+| Extension id | Type | Starts | Does |
+|---|---|---|---|
+| `london.chroma.aemcp.service` | `Custom`, `AutoVisible=false` | At AE launch: `<StartOn>` with `com.adobe.csxs.events.ApplicationActivate` **and** `applicationActivate` | Everything `main.js` does today except the UI: HTTP server, token, eval queue, the `core.jsx` boot, and the MCP bundle. Writes its log to `<stateDir>/service.log` (rotate at 1 MB). |
+| `london.chroma.aemcp.panel` | `Panel`, Window > Extensions > Chroma AE MCP | When opened | UI only. Shows status by polling `GET /health` (token read from the token file), the tail of `service.log`, and the Copy setup command and Regenerate token buttons. **It never starts a server.** |
+
+- Split `panel/client/main.js` into `client/service.js` (with `client/service.html`, a blank page that loads it) and `client/panel.js` (with `client/index.html`). Shared helpers go in `client/common.js`.
+- **Regenerate token:** the panel calls `POST /admin/regenerate-token` with the current token. The service writes the new token, swaps it in memory, and answers `{ok:true}`. The panel then re-reads the file.
+- Add a `/health` field `startedBy: "service"`.
+- `.debug`: the service on port 8097, the panel on 8096.
+- If port 7790 is already taken when the service starts (an old panel instance, for example), log it clearly and retry every 5 s. Never start a second server.
+
+## Slice 3: signed ZXP
+`scripts/package.ps1`:
+- stage `panel/` into `dist/stage/london.chroma.aemcp/` (no dev files: no `.debug`, no tests);
+- write the version from `VERSION` into the manifest;
+- sign with Adobe `ZXPSignCmd` and verify;
+- output `dist/chroma-ae-mcp-<version>.zxp`.
+
+The certificate password is read only through `op run` / `op-sa`, and the certificate path comes from an env var. Follow the Gulp pipeline (`AFX_Gulp`, vault note "Gulp build & install pipeline").
