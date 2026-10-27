@@ -30,7 +30,9 @@ export function isSafeProjectState(state) {
   const rawPath = String(state.projectPath || "").trim();
   const isUnsaved = !rawPath || rawPath === "<unsaved>";
   if (isUnsaved) {
-    return Number(state.numItems) === 0;
+    // Empty, or a project this runner made (marked in the project itself, not in
+    // $.global, which would survive into the next project Jay opens).
+    return Number(state.numItems) === 0 || state.qaOwned === true;
   }
   const normalized = rawPath.replace(/\\/g, "/").toLowerCase();
   return normalized.includes("/_work/qa");
@@ -44,7 +46,13 @@ export async function readProjectIsolationState(client) {
     `(function(){
       var f = (app.project && app.project.file) ? String(app.project.file.fsName) : "";
       var n = app.project ? Number(app.project.numItems) : 0;
-      var qaOwned = Boolean($.global.__chromaQaProject);
+      var qaOwned = false;
+      if (!f) {
+        for (var i = 1; i <= n; i++) {
+          var it = app.project.item(i);
+          if (it instanceof FolderItem && it.name === "__chroma_qa__" && it.parentFolder === app.project.rootFolder) { qaOwned = true; break; }
+        }
+      }
       return { projectPath: f, numItems: n, qaOwned: qaOwned };
     })()`,
     { label: "qa:checkProjectState" }
@@ -93,7 +101,8 @@ export async function resetQaProject(client) {
     `(function(){
       app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
       app.newProject();
-      $.global.__chromaQaProject = true;
+      // Ownership marker, checked by readProjectIsolationState.
+      app.project.items.addFolder("__chroma_qa__");
       return {
         projectPath: app.project.file ? String(app.project.file.fsName) : "",
         numItems: Number(app.project.numItems)

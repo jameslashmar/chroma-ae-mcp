@@ -62,6 +62,11 @@ function createMockAeBridge(initialState = {}) {
         state.loadedFiles.push(filePath);
         return "undefined";
       }
+      const src = /\/\/ qa-load: (.+)$/.exec(s);
+      if (src) {
+        state.loadedFiles.push(src[1].trim());
+        return "undefined";
+      }
       return "raw_ok";
     }
 
@@ -502,7 +507,7 @@ describe("QA harness unit & integration tests", () => {
       assert.equal(summary.passed, true);
       assert.equal(summary.scenarios.length, 3);
       assert.equal(bridge.state.newProjectCalls, 3);
-      assert.equal(bridge.state.loadedFiles.length, 3);
+      assert.equal(bridge.state.loadedFiles.length, 6);
       assert.ok(fs.existsSync(summary.junitPath));
       assert.ok(fs.existsSync(summary.markdownPath));
 

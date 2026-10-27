@@ -33,7 +33,12 @@ export const EDITED_SECOND_TEXT = "[Guest] Double-click one to fix a word.";
 export default {
   name: "VoxMark 02: edit in place",
   fixtures: { comp: { w: 1920, h: 1080, fps: 25, seconds: 15 } },
-  load: ["H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx"],
+  load: [
+    // Same order as the panel: hostscript.jsx (JSON polyfill) is the manifest ScriptPath,
+    // then host-adapter.js pipes in the AE shim.
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript.jsx",
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx",
+  ],
 
   async run(ae) {
     await ae.call("createCompMarkers", [

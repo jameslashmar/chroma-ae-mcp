@@ -36,7 +36,12 @@ export const TRANSCRIPT_MARKERS = [
 export default {
   name: "VoxMark 03: selective purge",
   fixtures: { comp: { w: 1920, h: 1080, fps: 25, seconds: 15 } },
-  load: ["H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx"],
+  load: [
+    // Same order as the panel: hostscript.jsx (JSON polyfill) is the manifest ScriptPath,
+    // then host-adapter.js pipes in the AE shim.
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript.jsx",
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx",
+  ],
 
   async run(ae) {
     // 1. Place a user marker directly on the composition.

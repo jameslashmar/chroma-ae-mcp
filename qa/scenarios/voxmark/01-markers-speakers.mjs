@@ -38,7 +38,12 @@ export const TWO_SPEAKERS = [
 export default {
   name: "VoxMark 01: markers and speaker colours",
   fixtures: { comp: { w: 1920, h: 1080, fps: 25, seconds: 15 } },
-  load: ["H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx"],
+  load: [
+    // Same order as the panel: hostscript.jsx (JSON polyfill) is the manifest ScriptPath,
+    // then host-adapter.js pipes in the AE shim.
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript.jsx",
+    "H:/Github_repos/AFX-VoxMark/src/jsx/hostscript-aeft.jsx",
+  ],
 
   async run(ae) {
     const res = await ae.call("createCompMarkers", [

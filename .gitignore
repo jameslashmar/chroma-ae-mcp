@@ -4,3 +4,4 @@ reference/
 *.log
 build/ZXPSignCmd.exe
 build/*.p12
+qa/out/

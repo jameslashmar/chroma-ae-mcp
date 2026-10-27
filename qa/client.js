@@ -207,7 +207,16 @@ export function createClient(options = {}) {
     if (!opts.skipExistsCheck && !fs.existsSync(absPath)) {
       throw new Error(`JSX file not found: ${absPath}`);
     }
-    const script = `$.evalFile(${JSON.stringify(absPath)});`;
+    // Send the file's source through a raw evalScript, as VoxMark's own loader
+    // (host-adapter.js) does: $.evalFile can trap declarations in the calling
+    // scope, while raw source sent to evalScript runs at global scope.
+    // The trailing comment names the file for logs and tests without shifting
+    // the line numbers AE reports for errors in it.
+    const script = opts.viaEvalFile
+      ? `$.evalFile(${JSON.stringify(absPath)});`
+      : `${fs.existsSync(absPath) ? fs.readFileSync(absPath, "utf8") : ""}
+// qa-load: ${absPath}
+`;
     return evalRaw(script, {
       label: opts.label || `evalFile:${path.basename(absPath)}`,
       timeoutMs: opts.timeoutMs,
