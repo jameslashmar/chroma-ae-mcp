@@ -2126,7 +2126,12 @@ __export(panel_entry_exports, {
   handleRpc: () => handleRpc
 });
 module.exports = __toCommonJS(panel_entry_exports);
-var path8 = __toESM(require("node:path"), 1);
+
+// src/tools/ext/dialogs.ts
+var import_node_child_process = require("node:child_process");
+var fs2 = __toESM(require("node:fs"), 1);
+var path2 = __toESM(require("node:path"), 1);
+var url = __toESM(require("node:url"), 1);
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -6169,124 +6174,6 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// src/schema.ts
-function zodToJsonSchema(schema) {
-  let current = schema;
-  while (current instanceof external_exports.ZodEffects || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodOptional) {
-    if (current instanceof external_exports.ZodEffects) {
-      current = current._def.schema;
-    } else if (current instanceof external_exports.ZodDefault) {
-      current = current._def.innerType;
-    } else if (current instanceof external_exports.ZodOptional) {
-      current = current._def.innerType;
-    }
-  }
-  if (!(current instanceof external_exports.ZodObject)) {
-    return { type: "object", properties: {} };
-  }
-  const shape = current.shape;
-  const properties = {};
-  const required = [];
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    const { propSchema, isOptional } = convertFieldSchema(fieldSchema);
-    properties[key] = propSchema;
-    if (!isOptional) {
-      required.push(key);
-    }
-  }
-  const out = {
-    type: "object",
-    properties
-  };
-  if (required.length > 0) {
-    out.required = required;
-  }
-  return out;
-}
-function convertFieldSchema(schema) {
-  let isOptional = false;
-  let current = schema;
-  let description = current.description;
-  while (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodEffects) {
-    if (!description && current.description) {
-      description = current.description;
-    }
-    if (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault) {
-      isOptional = true;
-      current = current._def.innerType;
-    } else if (current instanceof external_exports.ZodEffects) {
-      current = current._def.schema;
-    }
-  }
-  if (!description && current.description) {
-    description = current.description;
-  }
-  let propSchema = {};
-  if (current instanceof external_exports.ZodString) {
-    propSchema = { type: "string" };
-  } else if (current instanceof external_exports.ZodNumber) {
-    propSchema = { type: "number" };
-  } else if (current instanceof external_exports.ZodBoolean) {
-    propSchema = { type: "boolean" };
-  } else if (current instanceof external_exports.ZodEnum) {
-    propSchema = { type: "string", enum: current._def.values };
-  } else if (current instanceof external_exports.ZodArray) {
-    const elem = convertFieldSchema(current._def.type);
-    propSchema = { type: "array", items: elem.propSchema };
-  } else if (current instanceof external_exports.ZodObject) {
-    propSchema = zodToJsonSchema(current);
-  } else {
-    propSchema = {};
-  }
-  if (description) {
-    propSchema.description = description;
-  }
-  return { propSchema, isOptional };
-}
-
-// src/host.ts
-var BridgeError = class extends Error {
-  kind;
-  line;
-  actual;
-  expected;
-  op_id;
-  constructor(detail) {
-    super(detail.message);
-    this.name = "BridgeError";
-    this.kind = detail.kind;
-    this.line = detail.line;
-    this.actual = detail.actual;
-    this.expected = detail.expected;
-    this.op_id = detail.op_id;
-  }
-  toJSON() {
-    const out = {
-      kind: this.kind,
-      message: this.message
-    };
-    if (this.line !== void 0) out.line = this.line;
-    if (this.actual !== void 0) out.actual = this.actual;
-    if (this.expected !== void 0) out.expected = this.expected;
-    if (this.op_id !== void 0) out.op_id = this.op_id;
-    return out;
-  }
-};
-var DEFAULT_TIMEOUT_MS = 12e4;
-var SLOW_TIMEOUT_MS = 6e5;
-function normalizeErrorKind(kind) {
-  switch (kind) {
-    case "timeout":
-    case "unreachable":
-    case "queued":
-    case "evalscript_error":
-    case "guard":
-      return kind;
-    default:
-      return "evalscript_error";
-  }
-}
-
 // src/quarantine.ts
 var fs = __toESM(require("node:fs"), 1);
 var os = __toESM(require("node:os"), 1);
@@ -6418,6 +6305,49 @@ var QuarantineStore = class {
     fs.renameSync(tmpFile, this.filePath);
   }
 };
+
+// src/host.ts
+var BridgeError = class extends Error {
+  kind;
+  line;
+  actual;
+  expected;
+  op_id;
+  constructor(detail) {
+    super(detail.message);
+    this.name = "BridgeError";
+    this.kind = detail.kind;
+    this.line = detail.line;
+    this.actual = detail.actual;
+    this.expected = detail.expected;
+    this.op_id = detail.op_id;
+  }
+  toJSON() {
+    const out = {
+      kind: this.kind,
+      message: this.message
+    };
+    if (this.line !== void 0) out.line = this.line;
+    if (this.actual !== void 0) out.actual = this.actual;
+    if (this.expected !== void 0) out.expected = this.expected;
+    if (this.op_id !== void 0) out.op_id = this.op_id;
+    return out;
+  }
+};
+var DEFAULT_TIMEOUT_MS = 12e4;
+var SLOW_TIMEOUT_MS = 6e5;
+function normalizeErrorKind(kind) {
+  switch (kind) {
+    case "timeout":
+    case "unreachable":
+    case "queued":
+    case "evalscript_error":
+    case "guard":
+      return kind;
+    default:
+      return "evalscript_error";
+  }
+}
 
 // src/receipts.ts
 var FLOAT_EPSILON = 1e-4;
@@ -6751,11 +6681,495 @@ function formatToolError(err) {
   };
 }
 
+// src/tools/ext/dialogs.ts
+var import_meta = {};
+var JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
+var DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
+var DIALOG_EXEC_TIMEOUT_MS = 15e3;
+var MAX_DIALOG_TEXT_CHARS = 4e3;
+var inFlightOps = [];
+var seenDialogs = /* @__PURE__ */ new Map();
+var runtimeOverrides = {};
+function noteOpStarted(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const existingIdx = inFlightOps.indexOf(opId);
+  if (existingIdx !== -1) {
+    inFlightOps.splice(existingIdx, 1);
+  }
+  inFlightOps.push(opId);
+}
+function noteOpFinished(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const idx = inFlightOps.indexOf(opId);
+  if (idx !== -1) {
+    inFlightOps.splice(idx, 1);
+  }
+}
+function getCurrentInFlightOp() {
+  return inFlightOps.length > 0 ? inFlightOps[inFlightOps.length - 1] : null;
+}
+function currentPlatform() {
+  return runtimeOverrides.platform ?? process.platform;
+}
+function currentNowIso() {
+  return runtimeOverrides.nowIso ? runtimeOverrides.nowIso() : (/* @__PURE__ */ new Date()).toISOString();
+}
+function defaultDialogsDir() {
+  if (runtimeOverrides.dialogsDir) {
+    return runtimeOverrides.dialogsDir;
+  }
+  return path2.join(defaultDataDir(), "dialogs");
+}
+function getRuntimeBaseDir() {
+  try {
+    if (typeof __dirname === "string" && __dirname.length > 0) {
+      return __dirname;
+    }
+  } catch {
+  }
+  try {
+    if (typeof import_meta?.url === "string" && import_meta.url.startsWith("file:")) {
+      return path2.dirname(url.fileURLToPath(import_meta.url));
+    }
+  } catch {
+  }
+  return process.cwd();
+}
+function locateDialogsPs1Script(startDir) {
+  if (runtimeOverrides.scriptPath !== void 0) {
+    return runtimeOverrides.scriptPath;
+  }
+  const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
+  const visited = /* @__PURE__ */ new Set();
+  for (const start of rootsToSearch) {
+    let dir = path2.resolve(start);
+    while (!visited.has(dir)) {
+      visited.add(dir);
+      const candidateA = path2.join(dir, "panel", "tools", "ae-dialogs.ps1");
+      if (fs2.existsSync(candidateA)) {
+        return candidateA;
+      }
+      const candidateB = path2.join(dir, "tools", "ae-dialogs.ps1");
+      if (fs2.existsSync(candidateB)) {
+        return candidateB;
+      }
+      const parent = path2.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+function parsePs1JsonOutput(stdout) {
+  const trimmed = (stdout ?? "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: "empty_ps1_output"
+    };
+  }
+  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
+        return parsed;
+      }
+    } catch {
+    }
+  }
+  try {
+    const parsedWhole = JSON.parse(trimmed);
+    if (parsedWhole && typeof parsedWhole === "object" && typeof parsedWhole.ok === "boolean") {
+      return parsedWhole;
+    }
+  } catch {
+  }
+  return {
+    ok: false,
+    error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
+  };
+}
+function normalizeRawDialog(raw, meta) {
+  const rawText = typeof raw.text === "string" ? raw.text : "";
+  const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
+  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
+  const buttons = rawButtons.map((b) => ({
+    name: typeof b?.name === "string" ? b.name : "",
+    automationId: typeof b?.automationId === "string" ? b.automationId : "",
+    enabled: Boolean(b?.enabled ?? true)
+  }));
+  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
+  const checkboxes = rawCheckboxes.map((c) => ({
+    name: typeof c?.name === "string" ? c.name : "",
+    checked: Boolean(c?.checked)
+  }));
+  const r = raw.boundingRect ?? raw.rect ?? {};
+  const boundingRect = {
+    x: typeof r.x === "number" ? r.x : 0,
+    y: typeof r.y === "number" ? r.y : 0,
+    width: typeof r.width === "number" ? r.width : 0,
+    height: typeof r.height === "number" ? r.height : 0
+  };
+  return {
+    handle: Number(raw.handle),
+    title: typeof raw.title === "string" ? raw.title : "",
+    class: typeof raw.class === "string" ? raw.class : "",
+    isModal: Boolean(raw.isModal),
+    text: boundedText,
+    buttons,
+    checkboxes,
+    boundingRect,
+    screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
+    first_seen: meta.first_seen,
+    caused_by_op: meta.caused_by_op
+  };
+}
+function enrichDialogsList(rawDialogs) {
+  const activeHandles = /* @__PURE__ */ new Set();
+  const now = currentNowIso();
+  const inFlight = getCurrentInFlightOp();
+  const result = [];
+  for (const raw of rawDialogs) {
+    const handle = Number(raw?.handle);
+    if (!Number.isFinite(handle) || handle <= 0) continue;
+    activeHandles.add(handle);
+    let meta = seenDialogs.get(handle);
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const text = typeof raw.text === "string" ? raw.text.slice(0, MAX_DIALOG_TEXT_CHARS) : "";
+    if (!meta) {
+      meta = {
+        handle,
+        first_seen: now,
+        caused_by_op: inFlight,
+        title,
+        text
+      };
+      seenDialogs.set(handle, meta);
+    } else {
+      if (title) meta.title = title;
+      if (text) meta.text = text;
+    }
+    result.push(normalizeRawDialog(raw, meta));
+  }
+  for (const existingHandle of Array.from(seenDialogs.keys())) {
+    if (!activeHandles.has(existingHandle)) {
+      seenDialogs.delete(existingHandle);
+    }
+  }
+  return result;
+}
+function runPowerShellScript(ps1Args) {
+  if (runtimeOverrides.ps1Runner) {
+    return runtimeOverrides.ps1Runner(ps1Args);
+  }
+  const scriptPath = locateDialogsPs1Script();
+  if (!scriptPath) {
+    return Promise.resolve(
+      JSON.stringify({
+        ok: false,
+        error: "ae_dialogs_ps1_not_found"
+      })
+    );
+  }
+  const fullArgs = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    ...ps1Args
+  ];
+  return new Promise((resolve2) => {
+    (0, import_node_child_process.execFile)(
+      "powershell.exe",
+      fullArgs,
+      {
+        windowsHide: true,
+        timeout: DIALOG_EXEC_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024
+      },
+      (err, stdout, stderr) => {
+        const outStr = typeof stdout === "string" ? stdout.trim() : "";
+        if (outStr.length > 0) {
+          resolve2(outStr);
+          return;
+        }
+        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
+        resolve2(
+          JSON.stringify({
+            ok: false,
+            error: errMsg
+          })
+        );
+      }
+    );
+  });
+}
+function isDestructiveButton(buttonName) {
+  return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
+}
+function evaluateRespondPolicy(params) {
+  const hasUserInstruction = typeof params.user_instruction === "string" && params.user_instruction.trim().length > 0;
+  if (params.caused_by_op === null && !hasUserInstruction) {
+    return {
+      allowed: false,
+      error: "refused_not_caused_by_our_op",
+      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
+    };
+  }
+  if (isDestructiveButton(params.button)) {
+    if (params.allow_destructive !== true || !hasUserInstruction) {
+      return {
+        allowed: false,
+        error: "refused_destructive_button",
+        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
+      };
+    }
+  }
+  return { allowed: true };
+}
+function appendResponseLog(entry) {
+  const dir = defaultDialogsDir();
+  fs2.mkdirSync(dir, { recursive: true });
+  const logFile = path2.join(dir, "responses.jsonl");
+  fs2.appendFileSync(logFile, `${JSON.stringify(entry)}
+`, {
+    encoding: "utf8"
+  });
+}
+async function listDialogsInternal(opts) {
+  if (currentPlatform() !== "win32") {
+    return {
+      ok: false,
+      error: "not_implemented_on_this_os"
+    };
+  }
+  const psArgs = ["-Mode", "list"];
+  if (opts.screenshots) {
+    const dir = defaultDialogsDir();
+    fs2.mkdirSync(dir, { recursive: true });
+    psArgs.push("-ScreenshotDir", dir);
+  }
+  const rawStdout = await runPowerShellScript(psArgs);
+  const parsed = parsePs1JsonOutput(rawStdout);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error || "dialog_list_failed"
+    };
+  }
+  const rawList = Array.isArray(parsed.dialogs) ? parsed.dialogs : [];
+  const enriched = enrichDialogsList(rawList);
+  return {
+    ok: true,
+    ae_pid: parsed.ae_pid ?? null,
+    dialogs: enriched
+  };
+}
+async function describeBlockingDialogs() {
+  try {
+    const res = await listDialogsInternal({ screenshots: true });
+    if (!res.ok) {
+      return [];
+    }
+    return res.dialogs;
+  } catch {
+    return [];
+  }
+}
+var AeDialogsSchema = external_exports.object({
+  screenshots: external_exports.boolean().default(true).optional().describe(
+    "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
+  )
+});
+var AeDialogRespondSchema = external_exports.object({
+  handle: external_exports.number().int().positive().describe("NativeWindowHandle (HWND) of the dialog to respond to."),
+  button: external_exports.string().min(1).describe(
+    "Exact button name (case-insensitive) to press via UIA InvokePattern."
+  ),
+  check: external_exports.string().min(1).optional().describe(
+    "Optional checkbox name to toggle on before pressing the button."
+  ),
+  reason: external_exports.string().min(1).describe(
+    "Clear explanation of why this dialog is being answered and why this button was chosen."
+  ),
+  allow_destructive: external_exports.boolean().default(false).optional().describe(
+    "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
+  ),
+  user_instruction: external_exports.string().optional().describe(
+    "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
+  )
+});
+var dialogsTools = [
+  {
+    name: "ae_dialogs",
+    description: "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogsSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      const screenshots = args.screenshots ?? true;
+      return await listDialogsInternal({ screenshots });
+    }
+  },
+  {
+    name: "ae_dialog_respond",
+    description: "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse), logging every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogRespondSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      let meta = seenDialogs.get(args.handle);
+      if (!meta) {
+        await listDialogsInternal({ screenshots: false });
+        meta = seenDialogs.get(args.handle);
+      }
+      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
+      const policy = evaluateRespondPolicy({
+        button: args.button,
+        caused_by_op: causedByOp,
+        allow_destructive: args.allow_destructive ?? false,
+        user_instruction: args.user_instruction
+      });
+      if (!policy.allowed) {
+        return {
+          ok: false,
+          error: policy.error ?? "refused_by_policy",
+          message: policy.message,
+          handle: args.handle,
+          button: args.button,
+          caused_by_op: causedByOp
+        };
+      }
+      const psArgs = [
+        "-Mode",
+        "respond",
+        "-Handle",
+        String(args.handle),
+        "-Button",
+        args.button
+      ];
+      if (args.check) {
+        psArgs.push("-Check", args.check);
+      }
+      const rawStdout = await runPowerShellScript(psArgs);
+      const parsed = parsePs1JsonOutput(rawStdout);
+      const logTime = currentNowIso();
+      const title = meta?.title ?? "";
+      const textExcerpt = (meta?.text ?? "").slice(0, 500);
+      appendResponseLog({
+        time: logTime,
+        handle: args.handle,
+        title,
+        text_excerpt: textExcerpt,
+        button: args.button,
+        check: args.check,
+        reason: args.reason,
+        op: causedByOp,
+        allow_destructive: Boolean(args.allow_destructive),
+        user_instruction: args.user_instruction,
+        result: parsed
+      });
+      if (parsed.ok && parsed.closed) {
+        seenDialogs.delete(args.handle);
+      }
+      return parsed;
+    }
+  }
+];
+
+// src/panel-entry.ts
+var path8 = __toESM(require("node:path"), 1);
+
+// src/schema.ts
+function zodToJsonSchema(schema) {
+  let current = schema;
+  while (current instanceof external_exports.ZodEffects || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodOptional) {
+    if (current instanceof external_exports.ZodEffects) {
+      current = current._def.schema;
+    } else if (current instanceof external_exports.ZodDefault) {
+      current = current._def.innerType;
+    } else if (current instanceof external_exports.ZodOptional) {
+      current = current._def.innerType;
+    }
+  }
+  if (!(current instanceof external_exports.ZodObject)) {
+    return { type: "object", properties: {} };
+  }
+  const shape = current.shape;
+  const properties = {};
+  const required = [];
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    const { propSchema, isOptional } = convertFieldSchema(fieldSchema);
+    properties[key] = propSchema;
+    if (!isOptional) {
+      required.push(key);
+    }
+  }
+  const out = {
+    type: "object",
+    properties
+  };
+  if (required.length > 0) {
+    out.required = required;
+  }
+  return out;
+}
+function convertFieldSchema(schema) {
+  let isOptional = false;
+  let current = schema;
+  let description = current.description;
+  while (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodEffects) {
+    if (!description && current.description) {
+      description = current.description;
+    }
+    if (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault) {
+      isOptional = true;
+      current = current._def.innerType;
+    } else if (current instanceof external_exports.ZodEffects) {
+      current = current._def.schema;
+    }
+  }
+  if (!description && current.description) {
+    description = current.description;
+  }
+  let propSchema = {};
+  if (current instanceof external_exports.ZodString) {
+    propSchema = { type: "string" };
+  } else if (current instanceof external_exports.ZodNumber) {
+    propSchema = { type: "number" };
+  } else if (current instanceof external_exports.ZodBoolean) {
+    propSchema = { type: "boolean" };
+  } else if (current instanceof external_exports.ZodEnum) {
+    propSchema = { type: "string", enum: current._def.values };
+  } else if (current instanceof external_exports.ZodArray) {
+    const elem = convertFieldSchema(current._def.type);
+    propSchema = { type: "array", items: elem.propSchema };
+  } else if (current instanceof external_exports.ZodObject) {
+    propSchema = zodToJsonSchema(current);
+  } else {
+    propSchema = {};
+  }
+  if (description) {
+    propSchema.description = description;
+  }
+  return { propSchema, isOptional };
+}
+
 // src/tools/ext/aerender.ts
 var childProcess = __toESM(require("node:child_process"), 1);
 var crypto = __toESM(require("node:crypto"), 1);
-var fs3 = __toESM(require("node:fs"), 1);
-var path3 = __toESM(require("node:path"), 1);
+var fs4 = __toESM(require("node:fs"), 1);
+var path4 = __toESM(require("node:path"), 1);
 
 // src/jsx.ts
 function encodeJsxArg(value) {
@@ -6800,8 +7214,8 @@ function pathsMatchForGuard(expectedPath, actualPath, isWindows = process.platfo
 }
 
 // src/tools/mutate.ts
-var fs2 = __toESM(require("node:fs"), 1);
-var path2 = __toESM(require("node:path"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
+var path3 = __toESM(require("node:path"), 1);
 var KeyframeItemSchema = external_exports.object({
   time: external_exports.number().describe("Keyframe time in seconds."),
   value: external_exports.unknown().describe("Keyframe value at `time`."),
@@ -7097,18 +7511,18 @@ var mutateTools = [
           let backupPath = null;
           let backupSize = null;
           let beforeSize = null;
-          if (fs2.existsSync(actualProjectPath)) {
-            beforeSize = fs2.statSync(actualProjectPath).size;
+          if (fs3.existsSync(actualProjectPath)) {
+            beforeSize = fs3.statSync(actualProjectPath).size;
             if (doBackup) {
-              const projDir = path2.dirname(actualProjectPath);
-              const ext = path2.extname(actualProjectPath) || ".aep";
-              const baseName = path2.basename(actualProjectPath, ext);
-              const backupDir = path2.join(projDir, "_mcp_backups");
-              fs2.mkdirSync(backupDir, { recursive: true });
+              const projDir = path3.dirname(actualProjectPath);
+              const ext = path3.extname(actualProjectPath) || ".aep";
+              const baseName = path3.basename(actualProjectPath, ext);
+              const backupDir = path3.join(projDir, "_mcp_backups");
+              fs3.mkdirSync(backupDir, { recursive: true });
               const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
-              backupPath = path2.join(backupDir, `${baseName}_${stamp}${ext}`);
-              fs2.copyFileSync(actualProjectPath, backupPath);
-              backupSize = fs2.statSync(backupPath).size;
+              backupPath = path3.join(backupDir, `${baseName}_${stamp}${ext}`);
+              fs3.copyFileSync(actualProjectPath, backupPath);
+              backupSize = fs3.statSync(backupPath).size;
             }
           }
           const saveResp = await ctx.bridge.evalRaw({
@@ -7128,7 +7542,7 @@ var mutateTools = [
             mutates: false,
             toolName: "ae_save"
           });
-          const savedSize = fs2.existsSync(actualProjectPath) ? fs2.statSync(actualProjectPath).size : null;
+          const savedSize = fs3.existsSync(actualProjectPath) ? fs3.statSync(actualProjectPath).size : null;
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -7173,14 +7587,14 @@ var mutateTools = [
 var WINDOWS_FALLBACK_AERENDER = "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
 var MACOS_FALLBACK_AERENDER = "/Applications/Adobe After Effects 2026/aerender";
 function defaultRendersDir() {
-  return path3.join(defaultDataDir(), "renders");
+  return path4.join(defaultDataDir(), "renders");
 }
 function defaultAerenderJobsFilePath() {
-  return path3.join(defaultRendersDir(), "jobs.json");
+  return path4.join(defaultRendersDir(), "jobs.json");
 }
 function resolveAerenderPath(options) {
   const platform = options?.platform ?? process.platform;
-  const exists = options?.existsSync ?? fs3.existsSync;
+  const exists = options?.existsSync ?? fs4.existsSync;
   const afterFxPath = options?.afterFxPath?.trim();
   let versionYear = null;
   if (options?.aeVersion) {
@@ -7198,15 +7612,15 @@ function resolveAerenderPath(options) {
       const appIdx = norm.toLowerCase().indexOf(".app");
       if (appIdx !== -1) {
         const appBundlePath = norm.slice(0, appIdx + 4);
-        const parentDir = path3.posix.dirname(appBundlePath);
-        const candidate2 = path3.posix.join(parentDir, "aerender");
+        const parentDir = path4.posix.dirname(appBundlePath);
+        const candidate2 = path4.posix.join(parentDir, "aerender");
         if (exists(candidate2)) {
           return candidate2;
         }
         return candidate2;
       }
-      const dir = path3.posix.dirname(norm);
-      const candidate = path3.posix.join(dir, "aerender");
+      const dir = path4.posix.dirname(norm);
+      const candidate = path4.posix.join(dir, "aerender");
       if (exists(candidate)) {
         return candidate;
       }
@@ -7223,7 +7637,7 @@ function resolveAerenderPath(options) {
   }
   if (afterFxPath) {
     const norm = afterFxPath.replace(/\\/g, "/");
-    const dir = norm.toLowerCase().endsWith(".exe") ? path3.posix.dirname(norm) : norm.replace(/\/+$/, "");
+    const dir = norm.toLowerCase().endsWith(".exe") ? path4.posix.dirname(norm) : norm.replace(/\/+$/, "");
     const candidate = `${dir}/aerender.exe`;
     if (exists(candidate)) {
       return candidate;
@@ -7231,7 +7645,7 @@ function resolveAerenderPath(options) {
     return candidate;
   }
   if (typeof process.execPath === "string" && process.execPath.length > 0) {
-    const execDir = path3.dirname(process.execPath).replace(/\\/g, "/");
+    const execDir = path4.dirname(process.execPath).replace(/\\/g, "/");
     if (exists(`${execDir}/AfterFX.exe`) && exists(`${execDir}/aerender.exe`)) {
       return `${execDir}/aerender.exe`;
     }
@@ -7348,10 +7762,10 @@ function parseAerenderProgress(logText, meta) {
 }
 function readLogTail(logPath, maxLines = 60, maxChars = 16e3) {
   try {
-    if (!fs3.existsSync(logPath)) {
+    if (!fs4.existsSync(logPath)) {
       return { fullText: "", tail: "" };
     }
-    const fullText = fs3.readFileSync(logPath, "utf8");
+    const fullText = fs4.readFileSync(logPath, "utf8");
     const lines = fullText.split(/\r?\n/);
     if (lines.length > 0 && lines[lines.length - 1] === "") {
       lines.pop();
@@ -7378,7 +7792,7 @@ var AerenderJobRegistry = class {
     return this.filePath;
   }
   get rendersDir() {
-    return path3.dirname(this.filePath);
+    return path4.dirname(this.filePath);
   }
   newJobId() {
     return `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -7419,10 +7833,10 @@ var AerenderJobRegistry = class {
   }
   loadFromDisk() {
     try {
-      if (!fs3.existsSync(this.filePath)) {
+      if (!fs4.existsSync(this.filePath)) {
         return;
       }
-      const raw = fs3.readFileSync(this.filePath, "utf8");
+      const raw = fs4.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
       const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
       for (const item of list) {
@@ -7435,17 +7849,17 @@ var AerenderJobRegistry = class {
     }
   }
   saveToDisk() {
-    const dir = path3.dirname(this.filePath);
-    fs3.mkdirSync(dir, { recursive: true });
+    const dir = path4.dirname(this.filePath);
+    fs4.mkdirSync(dir, { recursive: true });
     const payload = JSON.stringify({ jobs: this.list() }, null, 2);
     const tmpFile = `${this.filePath}.tmp-${process.pid}-${crypto.randomBytes(3).toString("hex")}`;
     try {
-      fs3.writeFileSync(tmpFile, payload, { encoding: "utf8" });
-      fs3.renameSync(tmpFile, this.filePath);
+      fs4.writeFileSync(tmpFile, payload, { encoding: "utf8" });
+      fs4.renameSync(tmpFile, this.filePath);
     } catch {
-      fs3.writeFileSync(this.filePath, payload, { encoding: "utf8" });
+      fs4.writeFileSync(this.filePath, payload, { encoding: "utf8" });
       try {
-        if (fs3.existsSync(tmpFile)) fs3.unlinkSync(tmpFile);
+        if (fs4.existsSync(tmpFile)) fs4.unlinkSync(tmpFile);
       } catch {
       }
     }
@@ -7563,16 +7977,16 @@ function createAerenderTools(options = {}) {
               });
               const jobId = registry.newJobId();
               const rendersDir = registry.rendersDir;
-              fs3.mkdirSync(rendersDir, { recursive: true });
-              const outDir = path3.dirname(args.output_path);
+              fs4.mkdirSync(rendersDir, { recursive: true });
+              const outDir = path4.dirname(args.output_path);
               if (outDir && outDir !== ".") {
                 try {
-                  fs3.mkdirSync(outDir, { recursive: true });
+                  fs4.mkdirSync(outDir, { recursive: true });
                 } catch {
                 }
               }
-              const logPath = path3.join(rendersDir, `${jobId}.log`);
-              fs3.writeFileSync(logPath, "", { encoding: "utf8" });
+              const logPath = path4.join(rendersDir, `${jobId}.log`);
+              fs4.writeFileSync(logPath, "", { encoding: "utf8" });
               const cliArgs = buildAerenderArgs({
                 project_path: actualProjectPath,
                 comp_name: args.comp_name,
@@ -7584,7 +7998,7 @@ function createAerenderTools(options = {}) {
               });
               let logFd = null;
               try {
-                logFd = fs3.openSync(logPath, "a");
+                logFd = fs4.openSync(logPath, "a");
               } catch {
                 logFd = null;
               }
@@ -7596,14 +8010,14 @@ function createAerenderTools(options = {}) {
               });
               if (logFd !== null) {
                 try {
-                  fs3.closeSync(logFd);
+                  fs4.closeSync(logFd);
                 } catch {
                 }
               }
               if (child.stdout) {
                 child.stdout.on("data", (chunk) => {
                   try {
-                    fs3.appendFileSync(logPath, chunk);
+                    fs4.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -7611,7 +8025,7 @@ function createAerenderTools(options = {}) {
               if (child.stderr) {
                 child.stderr.on("data", (chunk) => {
                   try {
-                    fs3.appendFileSync(logPath, chunk);
+                    fs4.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -7639,7 +8053,7 @@ function createAerenderTools(options = {}) {
               registry.register(initialRecord, child);
               child.on("error", (err) => {
                 try {
-                  fs3.appendFileSync(
+                  fs4.appendFileSync(
                     logPath,
                     `
 AERENDER SPAWN ERROR: ${err.message}
@@ -7671,7 +8085,7 @@ AERENDER SPAWN ERROR: ${err.message}
                   let logError = null;
                   try {
                     const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-                      fs3.readFileSync(logPath, "utf8")
+                      fs4.readFileSync(logPath, "utf8")
                     );
                     if (m) logError = m[1].trim() || "aerender ERROR";
                   } catch {
@@ -7793,7 +8207,7 @@ AERENDER SPAWN ERROR: ${err.message}
           }
         }
         try {
-          fs3.appendFileSync(
+          fs4.appendFileSync(
             job.log_path,
             `
 AERENDER CANCELLED by ae_aerender_cancel at ${(/* @__PURE__ */ new Date()).toISOString()}
@@ -8340,416 +8754,6 @@ var animateTools = [
         }
         throw err;
       }
-    }
-  }
-];
-
-// src/tools/ext/dialogs.ts
-var import_node_child_process = require("node:child_process");
-var fs4 = __toESM(require("node:fs"), 1);
-var path4 = __toESM(require("node:path"), 1);
-var url = __toESM(require("node:url"), 1);
-var import_meta = {};
-var JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
-var DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
-var DIALOG_EXEC_TIMEOUT_MS = 15e3;
-var MAX_DIALOG_TEXT_CHARS = 4e3;
-var inFlightOps = [];
-var seenDialogs = /* @__PURE__ */ new Map();
-var runtimeOverrides = {};
-function noteOpStarted(opId) {
-  if (!opId || typeof opId !== "string") return;
-  const existingIdx = inFlightOps.indexOf(opId);
-  if (existingIdx !== -1) {
-    inFlightOps.splice(existingIdx, 1);
-  }
-  inFlightOps.push(opId);
-}
-function noteOpFinished(opId) {
-  if (!opId || typeof opId !== "string") return;
-  const idx = inFlightOps.indexOf(opId);
-  if (idx !== -1) {
-    inFlightOps.splice(idx, 1);
-  }
-}
-function getCurrentInFlightOp() {
-  return inFlightOps.length > 0 ? inFlightOps[inFlightOps.length - 1] : null;
-}
-function currentPlatform() {
-  return runtimeOverrides.platform ?? process.platform;
-}
-function currentNowIso() {
-  return runtimeOverrides.nowIso ? runtimeOverrides.nowIso() : (/* @__PURE__ */ new Date()).toISOString();
-}
-function defaultDialogsDir() {
-  if (runtimeOverrides.dialogsDir) {
-    return runtimeOverrides.dialogsDir;
-  }
-  return path4.join(defaultDataDir(), "dialogs");
-}
-function getRuntimeBaseDir() {
-  try {
-    if (typeof __dirname === "string" && __dirname.length > 0) {
-      return __dirname;
-    }
-  } catch {
-  }
-  try {
-    if (typeof import_meta?.url === "string" && import_meta.url.startsWith("file:")) {
-      return path4.dirname(url.fileURLToPath(import_meta.url));
-    }
-  } catch {
-  }
-  return process.cwd();
-}
-function locateDialogsPs1Script(startDir) {
-  if (runtimeOverrides.scriptPath !== void 0) {
-    return runtimeOverrides.scriptPath;
-  }
-  const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
-  const visited = /* @__PURE__ */ new Set();
-  for (const start of rootsToSearch) {
-    let dir = path4.resolve(start);
-    while (!visited.has(dir)) {
-      visited.add(dir);
-      const candidateA = path4.join(dir, "panel", "tools", "ae-dialogs.ps1");
-      if (fs4.existsSync(candidateA)) {
-        return candidateA;
-      }
-      const candidateB = path4.join(dir, "tools", "ae-dialogs.ps1");
-      if (fs4.existsSync(candidateB)) {
-        return candidateB;
-      }
-      const parent = path4.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-  return null;
-}
-function parsePs1JsonOutput(stdout) {
-  const trimmed = (stdout ?? "").trim();
-  if (!trimmed) {
-    return {
-      ok: false,
-      error: "empty_ps1_output"
-    };
-  }
-  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const parsed = JSON.parse(lines[i]);
-      if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
-        return parsed;
-      }
-    } catch {
-    }
-  }
-  try {
-    const parsedWhole = JSON.parse(trimmed);
-    if (parsedWhole && typeof parsedWhole === "object" && typeof parsedWhole.ok === "boolean") {
-      return parsedWhole;
-    }
-  } catch {
-  }
-  return {
-    ok: false,
-    error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
-  };
-}
-function normalizeRawDialog(raw, meta) {
-  const rawText = typeof raw.text === "string" ? raw.text : "";
-  const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
-  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
-  const buttons = rawButtons.map((b) => ({
-    name: typeof b?.name === "string" ? b.name : "",
-    automationId: typeof b?.automationId === "string" ? b.automationId : "",
-    enabled: Boolean(b?.enabled ?? true)
-  }));
-  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
-  const checkboxes = rawCheckboxes.map((c) => ({
-    name: typeof c?.name === "string" ? c.name : "",
-    checked: Boolean(c?.checked)
-  }));
-  const r = raw.boundingRect ?? raw.rect ?? {};
-  const boundingRect = {
-    x: typeof r.x === "number" ? r.x : 0,
-    y: typeof r.y === "number" ? r.y : 0,
-    width: typeof r.width === "number" ? r.width : 0,
-    height: typeof r.height === "number" ? r.height : 0
-  };
-  return {
-    handle: Number(raw.handle),
-    title: typeof raw.title === "string" ? raw.title : "",
-    class: typeof raw.class === "string" ? raw.class : "",
-    isModal: Boolean(raw.isModal),
-    text: boundedText,
-    buttons,
-    checkboxes,
-    boundingRect,
-    screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
-    first_seen: meta.first_seen,
-    caused_by_op: meta.caused_by_op
-  };
-}
-function enrichDialogsList(rawDialogs) {
-  const activeHandles = /* @__PURE__ */ new Set();
-  const now = currentNowIso();
-  const inFlight = getCurrentInFlightOp();
-  const result = [];
-  for (const raw of rawDialogs) {
-    const handle = Number(raw?.handle);
-    if (!Number.isFinite(handle) || handle <= 0) continue;
-    activeHandles.add(handle);
-    let meta = seenDialogs.get(handle);
-    const title = typeof raw.title === "string" ? raw.title : "";
-    const text = typeof raw.text === "string" ? raw.text.slice(0, MAX_DIALOG_TEXT_CHARS) : "";
-    if (!meta) {
-      meta = {
-        handle,
-        first_seen: now,
-        caused_by_op: inFlight,
-        title,
-        text
-      };
-      seenDialogs.set(handle, meta);
-    } else {
-      if (title) meta.title = title;
-      if (text) meta.text = text;
-    }
-    result.push(normalizeRawDialog(raw, meta));
-  }
-  for (const existingHandle of Array.from(seenDialogs.keys())) {
-    if (!activeHandles.has(existingHandle)) {
-      seenDialogs.delete(existingHandle);
-    }
-  }
-  return result;
-}
-function runPowerShellScript(ps1Args) {
-  if (runtimeOverrides.ps1Runner) {
-    return runtimeOverrides.ps1Runner(ps1Args);
-  }
-  const scriptPath = locateDialogsPs1Script();
-  if (!scriptPath) {
-    return Promise.resolve(
-      JSON.stringify({
-        ok: false,
-        error: "ae_dialogs_ps1_not_found"
-      })
-    );
-  }
-  const fullArgs = [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    scriptPath,
-    ...ps1Args
-  ];
-  return new Promise((resolve2) => {
-    (0, import_node_child_process.execFile)(
-      "powershell.exe",
-      fullArgs,
-      {
-        windowsHide: true,
-        timeout: DIALOG_EXEC_TIMEOUT_MS,
-        maxBuffer: 4 * 1024 * 1024
-      },
-      (err, stdout, stderr) => {
-        const outStr = typeof stdout === "string" ? stdout.trim() : "";
-        if (outStr.length > 0) {
-          resolve2(outStr);
-          return;
-        }
-        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
-        resolve2(
-          JSON.stringify({
-            ok: false,
-            error: errMsg
-          })
-        );
-      }
-    );
-  });
-}
-function isDestructiveButton(buttonName) {
-  return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
-}
-function evaluateRespondPolicy(params) {
-  const hasUserInstruction = typeof params.user_instruction === "string" && params.user_instruction.trim().length > 0;
-  if (params.caused_by_op === null && !hasUserInstruction) {
-    return {
-      allowed: false,
-      error: "refused_not_caused_by_our_op",
-      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
-    };
-  }
-  if (isDestructiveButton(params.button)) {
-    if (params.allow_destructive !== true || !hasUserInstruction) {
-      return {
-        allowed: false,
-        error: "refused_destructive_button",
-        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
-      };
-    }
-  }
-  return { allowed: true };
-}
-function appendResponseLog(entry) {
-  const dir = defaultDialogsDir();
-  fs4.mkdirSync(dir, { recursive: true });
-  const logFile = path4.join(dir, "responses.jsonl");
-  fs4.appendFileSync(logFile, `${JSON.stringify(entry)}
-`, {
-    encoding: "utf8"
-  });
-}
-async function listDialogsInternal(opts) {
-  if (currentPlatform() !== "win32") {
-    return {
-      ok: false,
-      error: "not_implemented_on_this_os"
-    };
-  }
-  const psArgs = ["-Mode", "list"];
-  if (opts.screenshots) {
-    const dir = defaultDialogsDir();
-    fs4.mkdirSync(dir, { recursive: true });
-    psArgs.push("-ScreenshotDir", dir);
-  }
-  const rawStdout = await runPowerShellScript(psArgs);
-  const parsed = parsePs1JsonOutput(rawStdout);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      error: parsed.error || "dialog_list_failed"
-    };
-  }
-  const rawList = Array.isArray(parsed.dialogs) ? parsed.dialogs : [];
-  const enriched = enrichDialogsList(rawList);
-  return {
-    ok: true,
-    ae_pid: parsed.ae_pid ?? null,
-    dialogs: enriched
-  };
-}
-async function describeBlockingDialogs() {
-  try {
-    const res = await listDialogsInternal({ screenshots: true });
-    if (!res.ok) {
-      return [];
-    }
-    return res.dialogs;
-  } catch {
-    return [];
-  }
-}
-var AeDialogsSchema = external_exports.object({
-  screenshots: external_exports.boolean().default(true).optional().describe(
-    "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
-  )
-});
-var AeDialogRespondSchema = external_exports.object({
-  handle: external_exports.number().int().positive().describe("NativeWindowHandle (HWND) of the dialog to respond to."),
-  button: external_exports.string().min(1).describe(
-    "Exact button name (case-insensitive) to press via UIA InvokePattern."
-  ),
-  check: external_exports.string().min(1).optional().describe(
-    "Optional checkbox name to toggle on before pressing the button."
-  ),
-  reason: external_exports.string().min(1).describe(
-    "Clear explanation of why this dialog is being answered and why this button was chosen."
-  ),
-  allow_destructive: external_exports.boolean().default(false).optional().describe(
-    "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
-  ),
-  user_instruction: external_exports.string().optional().describe(
-    "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
-  )
-});
-var dialogsTools = [
-  {
-    name: "ae_dialogs",
-    description: "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
-    schema: AeDialogsSchema,
-    handler: async (args) => {
-      if (currentPlatform() !== "win32") {
-        return {
-          ok: false,
-          error: "not_implemented_on_this_os"
-        };
-      }
-      const screenshots = args.screenshots ?? true;
-      return await listDialogsInternal({ screenshots });
-    }
-  },
-  {
-    name: "ae_dialog_respond",
-    description: "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse), logging every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
-    schema: AeDialogRespondSchema,
-    handler: async (args) => {
-      if (currentPlatform() !== "win32") {
-        return {
-          ok: false,
-          error: "not_implemented_on_this_os"
-        };
-      }
-      let meta = seenDialogs.get(args.handle);
-      if (!meta) {
-        await listDialogsInternal({ screenshots: false });
-        meta = seenDialogs.get(args.handle);
-      }
-      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
-      const policy = evaluateRespondPolicy({
-        button: args.button,
-        caused_by_op: causedByOp,
-        allow_destructive: args.allow_destructive ?? false,
-        user_instruction: args.user_instruction
-      });
-      if (!policy.allowed) {
-        return {
-          ok: false,
-          error: policy.error ?? "refused_by_policy",
-          message: policy.message,
-          handle: args.handle,
-          button: args.button,
-          caused_by_op: causedByOp
-        };
-      }
-      const psArgs = [
-        "-Mode",
-        "respond",
-        "-Handle",
-        String(args.handle),
-        "-Button",
-        args.button
-      ];
-      if (args.check) {
-        psArgs.push("-Check", args.check);
-      }
-      const rawStdout = await runPowerShellScript(psArgs);
-      const parsed = parsePs1JsonOutput(rawStdout);
-      const logTime = currentNowIso();
-      const title = meta?.title ?? "";
-      const textExcerpt = (meta?.text ?? "").slice(0, 500);
-      appendResponseLog({
-        time: logTime,
-        handle: args.handle,
-        title,
-        text_excerpt: textExcerpt,
-        button: args.button,
-        check: args.check,
-        reason: args.reason,
-        op: causedByOp,
-        allow_destructive: Boolean(args.allow_destructive),
-        user_instruction: args.user_instruction,
-        result: parsed
-      });
-      if (parsed.ok && parsed.closed) {
-        seenDialogs.delete(args.handle);
-      }
-      return parsed;
     }
   }
 ];
@@ -10495,6 +10499,7 @@ async function handleRpc(message, ctx) {
 
 // src/panel-host.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
+var DESCRIBE_DIALOGS_BUDGET_MS = 4e3;
 var PanelTimeoutSignal = class extends Error {
   constructor() {
     super("PanelHost evalScript timed out");
@@ -10506,17 +10511,20 @@ var PanelHost = class {
   queue;
   quarantine;
   defaultTimeoutMs;
+  describeDialogs;
   constructor(optsOrFn, extraOpts) {
     if (typeof optsOrFn === "function") {
       this.evalScript = optsOrFn;
       this.queue = extraOpts?.queue;
       this.quarantine = extraOpts?.quarantine;
       this.defaultTimeoutMs = extraOpts?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+      this.describeDialogs = extraOpts?.describeDialogs;
     } else {
       this.evalScript = optsOrFn.evalScript;
       this.queue = optsOrFn.queue;
       this.quarantine = optsOrFn.quarantine;
       this.defaultTimeoutMs = optsOrFn.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+      this.describeDialogs = optsOrFn.describeDialogs;
     }
   }
   newOpId() {
@@ -10569,10 +10577,20 @@ var PanelHost = class {
           });
         }
         let blocking = [];
-        try {
-          blocking = await describeBlockingDialogs();
-        } catch {
-          blocking = [];
+        if (this.describeDialogs) {
+          let budget;
+          try {
+            blocking = await Promise.race([
+              this.describeDialogs(),
+              new Promise((resolve2) => {
+                budget = setTimeout(() => resolve2([]), DESCRIBE_DIALOGS_BUDGET_MS);
+              })
+            ]);
+          } catch {
+            blocking = [];
+          } finally {
+            if (budget !== void 0) clearTimeout(budget);
+          }
         }
         const dialogNote = blocking.length > 0 ? ` AE is showing ${blocking.length} popup(s): ` + blocking.map((d) => {
           const x = d;
@@ -10710,7 +10728,8 @@ function createPanelMcp(opts) {
   const host = new PanelHost({
     evalScript: opts.evalScript,
     queue,
-    quarantine
+    quarantine,
+    describeDialogs: describeBlockingDialogs
   });
   const ctx = {
     bridge: host,

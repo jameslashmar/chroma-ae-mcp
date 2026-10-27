@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
@@ -86,6 +87,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     evalScript: opts.evalScript,
     queue,
     quarantine,
+    describeDialogs: describeBlockingDialogs,
   });
   const ctx: ToolContext = {
     bridge: host,

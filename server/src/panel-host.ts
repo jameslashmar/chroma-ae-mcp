@@ -1,5 +1,5 @@
 import * as crypto from "node:crypto";
-import { describeBlockingDialogs, noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
+import { noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
 import {
   BridgeError,
   DEFAULT_TIMEOUT_MS,
@@ -44,7 +44,12 @@ export interface PanelHostOptions {
   queue?: SingleWriterQueue;
   quarantine?: QuarantineStore;
   defaultTimeoutMs?: number;
+  /** Reads popups blocking AE when a call times out (the panel passes describeBlockingDialogs). */
+  describeDialogs?: () => Promise<object[]>;
 }
+
+/** Upper bound on reading popups after a timeout, so a stuck UI Automation call can't delay the report. */
+const DESCRIBE_DIALOGS_BUDGET_MS = 4_000;
 
 class PanelTimeoutSignal extends Error {
   constructor() {
@@ -58,6 +63,7 @@ export class PanelHost implements HostTransport {
   private readonly queue?: SingleWriterQueue;
   private readonly quarantine?: QuarantineStore;
   private readonly defaultTimeoutMs: number;
+  private readonly describeDialogs?: () => Promise<object[]>;
 
   constructor(
     optsOrFn: PanelHostOptions | PanelEvalScriptFn,
@@ -68,11 +74,13 @@ export class PanelHost implements HostTransport {
       this.queue = extraOpts?.queue;
       this.quarantine = extraOpts?.quarantine;
       this.defaultTimeoutMs = extraOpts?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+      this.describeDialogs = extraOpts?.describeDialogs;
     } else {
       this.evalScript = optsOrFn.evalScript;
       this.queue = optsOrFn.queue;
       this.quarantine = optsOrFn.quarantine;
       this.defaultTimeoutMs = optsOrFn.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+      this.describeDialogs = optsOrFn.describeDialogs;
     }
   }
 
@@ -143,10 +151,20 @@ export class PanelHost implements HostTransport {
         // AE is usually blocked by a modal popup. Read it from outside AE's
         // scripting thread so the agent sees what is waiting (never suppressed).
         let blocking: object[] = [];
-        try {
-          blocking = await describeBlockingDialogs();
-        } catch {
-          blocking = [];
+        if (this.describeDialogs) {
+          let budget: ReturnType<typeof setTimeout> | undefined;
+          try {
+            blocking = await Promise.race([
+              this.describeDialogs(),
+              new Promise<object[]>((resolve) => {
+                budget = setTimeout(() => resolve([]), DESCRIBE_DIALOGS_BUDGET_MS);
+              }),
+            ]);
+          } catch {
+            blocking = [];
+          } finally {
+            if (budget !== undefined) clearTimeout(budget);
+          }
         }
         const dialogNote =
           blocking.length > 0
