@@ -39,10 +39,18 @@ $bytes = [byte[]]::new(32)
 $pass = ([Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', '').Substring(0, 32)
 
 Write-Host 'Creating self-signed certificate...' -ForegroundColor Cyan
-$p = Start-Process -FilePath $zxpSignCmd -NoNewWindow -Wait -PassThru -ArgumentList @(
-    '-selfSignedCert', 'GB', 'London', 'Chroma Studios Ltd', 'Chroma AE MCP', $pass, $certPath, '-validityDays', '3650'
-)
-if ($p.ExitCode -ne 0 -or -not (Test-Path $certPath)) { throw "ZXPSignCmd failed (exit $($p.ExitCode))." }
+# Call operator, not Start-Process: Start-Process does not quote array arguments that contain
+# spaces, so "Chroma Studios Ltd" split into three and shifted the password and output path.
+# ZXPSignCmd's OpenSSL also writes a .rnd seed to the home folder; remove it if we created it.
+$rnd = Join-Path $HOME '.rnd'
+$rndExisted = Test-Path $rnd
+try {
+    & $zxpSignCmd -selfSignedCert GB London 'Chroma Studios Ltd' 'Chroma AE MCP' $pass $certPath -validityDays 3650 | Out-Host
+    $code = $LASTEXITCODE
+} finally {
+    if (-not $rndExisted) { Remove-Item $rnd -ErrorAction SilentlyContinue }
+}
+if ($code -ne 0 -or -not (Test-Path $certPath)) { throw "ZXPSignCmd failed (exit $code)." }
 Write-Host "  wrote $certPath" -ForegroundColor Green
 
 Write-Host "Storing passphrase and certificate in 1Password ($Vault / $ItemTitle)..." -ForegroundColor Cyan
