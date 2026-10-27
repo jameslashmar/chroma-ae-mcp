@@ -150,3 +150,21 @@ These are ordered so each step makes the next one safer.
 11. **Packaging:** panel-hosted HTTP MCP, signed ZXP, Copy setup command.
 
 Each item ships with a live AE check, added to the smoke test. v0.1 found two AE behaviours the docs don't mention: `saveFrameToPng` writes asynchronously, and changing `resolutionFactor` adds undo steps.
+
+## From the Atom review (2026-10-27, `docs/ATOM-REVIEW.md`)
+
+| Idea | Why | Effort | Priority |
+|---|---|---|---|
+| **Automatic checkpoints around writes.** Copy the .aep before (and optionally after) every mutating tool call, with a setting to turn it off for big projects. Branch, never overwrite, on revert. | Atom does this per change. We have only manual `ae_checkpoint_*`. With it, every write can be undone across sessions. | S | P1 |
+| **AE skills bundle:** `SKILL.md` plus `1.jsx`, `2.jsx`, scoped to the project (`<project>/…/skills/`) or global. Add an `ae_skill_run` tool, and an `ae_skill_save` tool that captures a working `ae_run_jsx`. | This is the format Atom proved, and it matches Claude Code's own skills. It replaces our P3 "saved-snippet library". Good for house rigs, lower thirds and kinetic type. | M | P2 |
+| **One-click registration:** the panel runs `claude mcp add …` itself (the Claude Code CLI), with toggles for Codex and Cursor. | Removes the copy and paste step from installs. | S | P2 |
+| **Asset staging plus auto-import.** Generated assets (Flora, Higgsfield, ElevenLabs, renders) land in a known folder and are imported into an `_Assets` bin. | Atom auto-imports generated images. We already generate elsewhere, so the value is in the import pipeline. | S | P2 |
+| **Social reframe:** duplicate a comp to 16:9, 1:1 and 9:16, re-anchor controllers, apply safe areas. | A common Atom workflow, and real time saved on social cut-downs. | M | P2 |
+| **Data-driven builds from CSV/JSON** (charts, localisation). | Strengthens the planned template population. | S (recipes) | P2 |
+| **Diagnostics bundle:** logs, quarantine state, AE version and popups in one file. | Faster triage when automation is blocked. | S | P3 |
+| **Access tiers** like Atom's Adobe Only / Project Folder / Full Access. | Probably **not needed**: our MCP exposes no shell or file tools, and Claude Code has its own permissions. Note it, don't build it. | – | – |
+
+**Not copying:**
+- an in-panel chat (Claude Code is the client);
+- API keys pasted into the panel (keys stay in 1Password and env vars);
+- turning off revert confirmations.
