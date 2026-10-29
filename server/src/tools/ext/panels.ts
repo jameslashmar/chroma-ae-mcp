@@ -392,6 +392,7 @@ export const panelsTools: ToolDefinition<any>[] = [
     name: "ae_ui_screenshot",
     description:
       "READ-ONLY. Captures a PNG screenshot of After Effects' main window (window class AE_CApplication_*) via Win32 PrintWindow into %LOCALAPPDATA%/chroma-ae-mcp/ui/ without bringing the window to the foreground or activating it. Returns { ok: true, path, width, height }. Use this to visually verify panel open/closed visibility because native Window-menu commands toggle and their state cannot be read via scripting. " +
+      "When AE is minimized it returns `error: 'ae_minimized'` instead of an image: ask the user to restore the window (this tool never does). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeUiScreenshotSchema,
     handler: async () => {
@@ -418,6 +419,14 @@ export const panelsTools: ToolDefinition<any>[] = [
       const parsed = parsePs1JsonOutput<Ps1ScreenshotOutput>(rawStdout);
 
       if (!parsed.ok) {
+        if (parsed.error === "ae_minimized") {
+          return {
+            ok: false,
+            error: "ae_minimized",
+            message:
+              "After Effects is minimized, so Windows only draws its title bar. Ask the user to restore the AE window, then try again.",
+          };
+        }
         return {
           ok: false,
           error: parsed.error || "screenshot_failed",

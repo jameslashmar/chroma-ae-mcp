@@ -48,6 +48,9 @@ public static class ChromaWin32 {
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
@@ -783,6 +786,15 @@ public class ChromaPost {
             Write-JsonOut @{
                 ok    = $false
                 error = "ae_main_window_not_found"
+            }
+            exit 0
+        }
+
+        # A minimized window only paints a title-bar stub (measured: 199x34 on AE 26.2.1).
+        if ([ChromaWin32]::IsIconic($mainHwnd)) {
+            Write-JsonOut @{
+                ok    = $false
+                error = "ae_minimized"
             }
             exit 0
         }
