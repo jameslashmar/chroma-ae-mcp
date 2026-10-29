@@ -1990,7 +1990,7 @@ var require_png = __commonJS({
     var Parser = require_parser_async();
     var Packer = require_packer_async();
     var PNGSync = require_png_sync();
-    var PNG2 = exports2.PNG = function(options) {
+    var PNG3 = exports2.PNG = function(options) {
       Stream.call(this);
       options = options || {};
       this.width = options.width | 0;
@@ -2019,9 +2019,9 @@ var require_png = __commonJS({
       this._parser.on("close", this._handleClose.bind(this));
       this._packer.on("error", this.emit.bind(this, "error"));
     };
-    util2.inherits(PNG2, Stream);
-    PNG2.sync = PNGSync;
-    PNG2.prototype.pack = function() {
+    util2.inherits(PNG3, Stream);
+    PNG3.sync = PNGSync;
+    PNG3.prototype.pack = function() {
       if (!this.data || !this.data.length) {
         this.emit("error", "No data provided");
         return this;
@@ -2033,7 +2033,7 @@ var require_png = __commonJS({
       );
       return this;
     };
-    PNG2.prototype.parse = function(data, callback) {
+    PNG3.prototype.parse = function(data, callback) {
       if (callback) {
         let onParsed, onError;
         onParsed = function(parsedData) {
@@ -2051,27 +2051,27 @@ var require_png = __commonJS({
       this.end(data);
       return this;
     };
-    PNG2.prototype.write = function(data) {
+    PNG3.prototype.write = function(data) {
       this._parser.write(data);
       return true;
     };
-    PNG2.prototype.end = function(data) {
+    PNG3.prototype.end = function(data) {
       this._parser.end(data);
     };
-    PNG2.prototype._metadata = function(metadata) {
+    PNG3.prototype._metadata = function(metadata) {
       this.width = metadata.width;
       this.height = metadata.height;
       this.emit("metadata", metadata);
     };
-    PNG2.prototype._gamma = function(gamma) {
+    PNG3.prototype._gamma = function(gamma) {
       this.gamma = gamma;
     };
-    PNG2.prototype._handleClose = function() {
+    PNG3.prototype._handleClose = function() {
       if (!this._parser.writable && !this._packer.readable) {
         this.emit("close");
       }
     };
-    PNG2.bitblt = function(src, dst, srcX, srcY, width, height, deltaX, deltaY) {
+    PNG3.bitblt = function(src, dst, srcX, srcY, width, height, deltaX, deltaY) {
       srcX |= 0;
       srcY |= 0;
       width |= 0;
@@ -2093,11 +2093,11 @@ var require_png = __commonJS({
         );
       }
     };
-    PNG2.prototype.bitblt = function(dst, srcX, srcY, width, height, deltaX, deltaY) {
-      PNG2.bitblt(this, dst, srcX, srcY, width, height, deltaX, deltaY);
+    PNG3.prototype.bitblt = function(dst, srcX, srcY, width, height, deltaX, deltaY) {
+      PNG3.bitblt(this, dst, srcX, srcY, width, height, deltaX, deltaY);
       return this;
     };
-    PNG2.adjustGamma = function(src) {
+    PNG3.adjustGamma = function(src) {
       if (src.gamma) {
         for (let y = 0; y < src.height; y++) {
           for (let x = 0; x < src.width; x++) {
@@ -2112,8 +2112,8 @@ var require_png = __commonJS({
         src.gamma = 0;
       }
     };
-    PNG2.prototype.adjustGamma = function() {
-      PNG2.adjustGamma(this);
+    PNG3.prototype.adjustGamma = function() {
+      PNG3.adjustGamma(this);
     };
   }
 });
@@ -2611,8 +2611,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path10, errorMaps, issueData } = params;
-  const fullPath = [...path10, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2728,11 +2728,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path10, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path10;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -7088,7 +7088,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path9 = __toESM(require("node:path"), 1);
+var path10 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -8910,19 +8910,256 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs6 = __toESM(require("node:fs"), 1);
+var fs7 = __toESM(require("node:fs"), 1);
 var path6 = __toESM(require("node:path"), 1);
-var import_pngjs = __toESM(require_png(), 1);
+var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs5 = __toESM(require("node:fs"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var path5 = __toESM(require("node:path"), 1);
+
+// src/tools/ext/png-utils.ts
+var fs5 = __toESM(require("node:fs"), 1);
+var import_pngjs = __toESM(require_png(), 1);
+function fitWithin(width, height, maxSize) {
+  const longEdge = Math.max(width, height);
+  if (longEdge <= maxSize) return { width, height };
+  const k = maxSize / longEdge;
+  return {
+    width: Math.max(1, Math.round(width * k)),
+    height: Math.max(1, Math.round(height * k))
+  };
+}
+function areaSpans(srcLen, dstLen) {
+  const ratio = srcLen / dstLen;
+  const spans = [];
+  for (let d = 0; d < dstLen; d++) {
+    const s0 = d * ratio;
+    const s1 = Math.min(srcLen, (d + 1) * ratio);
+    const start = Math.floor(s0);
+    const end = Math.min(srcLen, Math.ceil(s1));
+    const weights = [];
+    for (let s = start; s < end; s++) {
+      weights.push(Math.min(s + 1, s1) - Math.max(s, s0));
+    }
+    spans.push({ start, weights, norm: s1 - s0 });
+  }
+  return spans;
+}
+function resizeArea(src, dstWidth, dstHeight) {
+  const sw = src.width;
+  const sh = src.height;
+  const dw = Math.max(1, Math.min(sw, Math.round(dstWidth)));
+  const dh = Math.max(1, Math.min(sh, Math.round(dstHeight)));
+  const out = new import_pngjs.PNG({ width: dw, height: dh });
+  if (dw === sw && dh === sh) {
+    Buffer.from(src.data.buffer, src.data.byteOffset, sw * sh * 4).copy(out.data);
+    return out;
+  }
+  const xSpans = areaSpans(sw, dw);
+  const tmp = new Float32Array(dw * sh * 4);
+  const data = src.data;
+  for (let y = 0; y < sh; y++) {
+    const rowIn = y * sw * 4;
+    const rowOut = y * dw * 4;
+    for (let dx = 0; dx < dw; dx++) {
+      const span = xSpans[dx];
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let k = 0; k < span.weights.length; k++) {
+        const i = rowIn + (span.start + k) * 4;
+        const w = span.weights[k];
+        const alpha = data[i + 3] / 255;
+        r += data[i] * alpha * w;
+        g += data[i + 1] * alpha * w;
+        b += data[i + 2] * alpha * w;
+        a += alpha * w;
+      }
+      const o = rowOut + dx * 4;
+      tmp[o] = r / span.norm;
+      tmp[o + 1] = g / span.norm;
+      tmp[o + 2] = b / span.norm;
+      tmp[o + 3] = a / span.norm;
+    }
+  }
+  const ySpans = areaSpans(sh, dh);
+  for (let dy = 0; dy < dh; dy++) {
+    const span = ySpans[dy];
+    for (let dx = 0; dx < dw; dx++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      for (let k = 0; k < span.weights.length; k++) {
+        const i = ((span.start + k) * dw + dx) * 4;
+        const w = span.weights[k];
+        r += tmp[i] * w;
+        g += tmp[i + 1] * w;
+        b += tmp[i + 2] * w;
+        a += tmp[i + 3] * w;
+      }
+      r /= span.norm;
+      g /= span.norm;
+      b /= span.norm;
+      a /= span.norm;
+      const o = (dy * dw + dx) * 4;
+      if (a > 0) {
+        out.data[o] = clamp255(r / a);
+        out.data[o + 1] = clamp255(g / a);
+        out.data[o + 2] = clamp255(b / a);
+      }
+      out.data[o + 3] = clamp255(a * 255);
+    }
+  }
+  return out;
+}
+function clamp255(v) {
+  return v <= 0 ? 0 : v >= 255 ? 255 : Math.round(v);
+}
+function flattenOnChecker(src, cell = 8, light = 204, dark = 153) {
+  const { width, height, data } = src;
+  const out = new import_pngjs.PNG({ width, height });
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const bg = (Math.floor(x / cell) + Math.floor(y / cell)) % 2 === 0 ? light : dark;
+      const a = data[i + 3] / 255;
+      out.data[i] = Math.round(data[i] * a + bg * (1 - a));
+      out.data[i + 1] = Math.round(data[i + 1] * a + bg * (1 - a));
+      out.data[i + 2] = Math.round(data[i + 2] * a + bg * (1 - a));
+      out.data[i + 3] = 255;
+    }
+  }
+  return out;
+}
+function createCanvas(width, height, fill) {
+  const out = new import_pngjs.PNG({ width, height });
+  for (let i = 0; i < width * height * 4; i += 4) {
+    out.data[i] = fill[0];
+    out.data[i + 1] = fill[1];
+    out.data[i + 2] = fill[2];
+    out.data[i + 3] = fill[3];
+  }
+  return out;
+}
+function blit(dst, src, x, y) {
+  for (let sy = 0; sy < src.height; sy++) {
+    const dy = y + sy;
+    if (dy < 0 || dy >= dst.height) continue;
+    for (let sx = 0; sx < src.width; sx++) {
+      const dx = x + sx;
+      if (dx < 0 || dx >= dst.width) continue;
+      const si = (sy * src.width + sx) * 4;
+      const di = (dy * dst.width + dx) * 4;
+      dst.data[di] = src.data[si];
+      dst.data[di + 1] = src.data[si + 1];
+      dst.data[di + 2] = src.data[si + 2];
+      dst.data[di + 3] = src.data[si + 3];
+    }
+  }
+}
+function fillRect(dst, x, y, w, h, rgba) {
+  const a = rgba[3] / 255;
+  const x0 = Math.max(0, x);
+  const y0 = Math.max(0, y);
+  const x1 = Math.min(dst.width, x + w);
+  const y1 = Math.min(dst.height, y + h);
+  for (let py = y0; py < y1; py++) {
+    for (let px = x0; px < x1; px++) {
+      const i = (py * dst.width + px) * 4;
+      dst.data[i] = Math.round(rgba[0] * a + dst.data[i] * (1 - a));
+      dst.data[i + 1] = Math.round(rgba[1] * a + dst.data[i + 1] * (1 - a));
+      dst.data[i + 2] = Math.round(rgba[2] * a + dst.data[i + 2] * (1 - a));
+      dst.data[i + 3] = Math.max(dst.data[i + 3], rgba[3]);
+    }
+  }
+}
+function strokeRect(dst, x, y, w, h, thickness, rgba) {
+  fillRect(dst, x, y, w, thickness, rgba);
+  fillRect(dst, x, y + h - thickness, w, thickness, rgba);
+  fillRect(dst, x, y, thickness, h, rgba);
+  fillRect(dst, x + w - thickness, y, thickness, h, rgba);
+}
+function drawLine(dst, x0, y0, x1, y1, thickness, rgba) {
+  const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+  const off = Math.floor(thickness / 2);
+  for (let i = 0; i <= steps; i++) {
+    const x = Math.round(x0 + (x1 - x0) * i / steps);
+    const y = Math.round(y0 + (y1 - y0) * i / steps);
+    fillRect(dst, x - off, y - off, thickness, thickness, rgba);
+  }
+}
+var GLYPHS = {
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
+  ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
+  "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+  "#": ["01010", "01010", "11111", "01010", "11111", "01010", "01010"],
+  s: ["00000", "00000", "01110", "10000", "01110", "00001", "11110"],
+  f: ["00110", "01001", "01000", "11100", "01000", "01000", "01000"]
+};
+var GLYPH_WIDTH = 5;
+var GLYPH_HEIGHT = 7;
+var GLYPH_ADVANCE = GLYPH_WIDTH + 1;
+function textWidth(text, scale) {
+  return text.length === 0 ? 0 : (text.length * GLYPH_ADVANCE - 1) * scale;
+}
+function drawText(dst, text, x, y, scale, rgba) {
+  for (let ci = 0; ci < text.length; ci++) {
+    const glyph = GLYPHS[text[ci]];
+    if (!glyph) continue;
+    for (let row = 0; row < GLYPH_HEIGHT; row++) {
+      for (let col = 0; col < GLYPH_WIDTH; col++) {
+        if (glyph[row][col] === "1") {
+          fillRect(dst, x + (ci * GLYPH_ADVANCE + col) * scale, y + row * scale, scale, scale, rgba);
+        }
+      }
+    }
+  }
+}
+function encodePng(img) {
+  return import_pngjs.PNG.sync.write(img);
+}
+function writeScaledCopy(srcPath, dstPath, opts) {
+  const src = import_pngjs.PNG.sync.read(fs5.readFileSync(srcPath));
+  let target = { width: src.width, height: src.height };
+  if (opts.maxSize !== void 0) {
+    target = fitWithin(src.width, src.height, opts.maxSize);
+  } else if (opts.scale !== void 0 && opts.scale < 1) {
+    target = {
+      width: Math.max(1, Math.round(src.width * opts.scale)),
+      height: Math.max(1, Math.round(src.height * opts.scale))
+    };
+  }
+  if (target.width >= src.width && target.height >= src.height) {
+    return { path: srcPath, width: src.width, height: src.height, scaled: false };
+  }
+  const out = resizeArea(src, target.width, target.height);
+  fs5.writeFileSync(dstPath, encodePng(out));
+  return { path: dstPath, width: out.width, height: out.height, scaled: true };
+}
+
+// src/tools/render.ts
 var AeSnapshotFrameSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("The CompItem ID to snapshot."),
   time: external_exports.number().min(0).describe("Composition time in seconds at which to capture the frame."),
   scale: external_exports.number().gt(0).max(1).default(0.5).optional().describe(
-    "Ignored in v0.1: frames are saved at full comp resolution, because changing the comp's resolution to scale them put steps on the user's undo stack."
+    "Size of the returned PNG as a fraction of the comp (default 0.5). AE always renders at full resolution (changing the comp's resolution would put steps on the user's undo stack); the server shrinks the PNG afterwards and keeps the full-size file as `full_path`."
+  ),
+  max_size: external_exports.number().int().min(16).max(8192).optional().describe(
+    "Long edge in pixels of the returned PNG. Overrides `scale`. 512 to 1024 is enough for most visual checks and costs far fewer image tokens."
   )
 });
 var AeRenderQueueAddSchema = external_exports.object({
@@ -8938,10 +9175,10 @@ function defaultFramesDir() {
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs5.existsSync(filePath)) {
+    if (!fs6.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs5.statSync(filePath);
+    const stat = fs6.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -8959,15 +9196,29 @@ async function waitForFreshPng(filePath, requestStartMs, timeoutMs = 1e4, interv
     last = next;
   }
 }
+function snapshotOutput(fullPath, check, scale, maxSize) {
+  const copy = writeScaledCopy(fullPath, fullPath.replace(/\.png$/i, "_small.png"), {
+    scale,
+    maxSize
+  });
+  return {
+    path: copy.path,
+    full_path: fullPath,
+    size: copy.scaled ? fs6.statSync(copy.path).size : check.size,
+    mtimeMs: check.mtimeMs,
+    width: copy.width,
+    height: copy.height
+  };
+}
 var renderTools = [
   {
     name: "ae_snapshot_frame",
-    description: "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " + AGENT_SAFETY_GUIDANCE,
+    description: "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. " + AGENT_SAFETY_GUIDANCE,
     schema: AeSnapshotFrameSchema,
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs5.mkdirSync(framesDir, { recursive: true });
+      fs6.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
@@ -8996,14 +9247,14 @@ var renderTools = [
             if (check1.fresh) {
               return {
                 ok: true,
-                path: pngPath1,
-                size: check1.size,
-                mtimeMs: check1.mtimeMs,
+                ...snapshotOutput(pngPath1, check1, scale, args.max_size),
                 comp_id: args.comp_id,
                 time: args.time,
                 scale,
+                ...args.max_size !== void 0 ? { max_size: args.max_size } : {},
                 retried: false,
-                ...resp1.result ?? {}
+                comp_width: resp1.result?.width,
+                comp_height: resp1.result?.height
               };
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
@@ -9030,14 +9281,14 @@ var renderTools = [
             if (check2.fresh) {
               return {
                 ok: true,
-                path: pngPath2,
-                size: check2.size,
-                mtimeMs: check2.mtimeMs,
+                ...snapshotOutput(pngPath2, check2, scale, args.max_size),
                 comp_id: args.comp_id,
                 time: nudgedTime,
                 scale,
+                ...args.max_size !== void 0 ? { max_size: args.max_size } : {},
                 retried: true,
-                ...resp2.result ?? {}
+                comp_width: resp2.result?.width,
+                comp_height: resp2.result?.height
               };
             }
             return {
@@ -9226,14 +9477,14 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs6.existsSync(filePath)) {
+  if (!fs7.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs6.readFileSync(filePath);
+  const buf = fs7.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
-  return import_pngjs.PNG.sync.read(buf);
+  return import_pngjs2.PNG.sync.read(buf);
 }
 function analyzeDecodedFrame(png, meta) {
   const { width, height, data } = png;
@@ -9321,7 +9572,7 @@ function compareDecodedFrames(pngA, pngB, options = {}) {
   const totalPixels = width * height;
   const threshold = options.threshold ?? 0.02;
   const buildDiff = Boolean(options.buildDiffPng);
-  const diffPng = buildDiff ? new import_pngjs.PNG({ width, height }) : void 0;
+  const diffPng = buildDiff ? new import_pngjs2.PNG({ width, height }) : void 0;
   if (totalPixels === 0) {
     return {
       width,
@@ -9398,6 +9649,7 @@ function compareDecodedFrames(pngA, pngB, options = {}) {
 }
 async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
+  const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
   const pngPath1 = path6.join(
     framesDir,
@@ -9412,10 +9664,10 @@ async function captureCompFrame(params) {
       scale: 0.5,
       output_path: pngPath1
     }),
-    label: `ae_compare_frames(${compId} @ ${time}s)`,
+    label: `${toolName}(${compId} @ ${time}s)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
-    toolName: "ae_compare_frames"
+    toolName
   });
   const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
   if (check1.fresh) {
@@ -9436,10 +9688,10 @@ async function captureCompFrame(params) {
       scale: 0.5,
       output_path: pngPath2
     }),
-    label: `ae_compare_frames(${compId} @ ${nudgedTime}s retry)`,
+    label: `${toolName}(${compId} @ ${nudgedTime}s retry)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
-    toolName: "ae_compare_frames"
+    toolName
   });
   const check2 = await waitForFreshPng(pngPath2, reqStart2, params.waitMs);
   if (check2.fresh) {
@@ -9460,7 +9712,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs6.mkdirSync(framesDir, { recursive: true });
+        fs7.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -9499,7 +9751,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs6.mkdirSync(framesDir, { recursive: true });
+        fs7.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -9528,8 +9780,8 @@ var framesTools = [
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
           diffPngPath = path6.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
-          const outBuf = import_pngjs.PNG.sync.write(cmp.diffPng);
-          fs6.writeFileSync(diffPngPath, outBuf);
+          const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
+          fs7.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -9582,10 +9834,525 @@ var framesTools = [
   }
 ];
 
+// src/tools/ext/motion.ts
+var crypto4 = __toESM(require("node:crypto"), 1);
+var fs8 = __toESM(require("node:fs"), 1);
+var path7 = __toESM(require("node:path"), 1);
+var MAX_SHEET_FRAMES = 24;
+var MAX_SHEET_EDGE = 2400;
+var SHEET_GAP = 6;
+var SHEET_BG = [24, 24, 24, 255];
+var FLAG_COLOUR = [230, 40, 40, 255];
+var AeContactSheetSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("CompItem ID to sample."),
+  times: external_exports.array(external_exports.number().min(0)).min(2).max(MAX_SHEET_FRAMES).optional().describe(
+    `Explicit comp times in seconds (2 to ${MAX_SHEET_FRAMES}). Mutually exclusive with start/end/count.`
+  ),
+  start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the work area start."),
+  end: external_exports.number().min(0).optional().describe("Range end in comp seconds (exclusive, like the work area end). Default: the work area end."),
+  count: external_exports.number().int().min(2).max(MAX_SHEET_FRAMES).optional().describe(
+    `How many frames to sample evenly across the range, first and last frame included (2 to ${MAX_SHEET_FRAMES}, default 12).`
+  ),
+  tile_size: external_exports.number().int().min(64).max(768).optional().describe(
+    `Long edge in pixels of each tile (default 320). Tiles shrink further if the sheet would exceed ${MAX_SHEET_EDGE} px.`
+  ),
+  columns: external_exports.number().int().min(1).max(12).optional().describe("Number of columns. Default: chosen so the sheet is roughly 16:9."),
+  labels: external_exports.boolean().optional().describe("Draw the frame number and time on each tile (default true).")
+}).superRefine((val, ctx) => {
+  if (val.times !== void 0 && (val.start !== void 0 || val.end !== void 0 || val.count !== void 0)) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["times"],
+      message: "Give either `times`, or a range (`start`/`end`/`count`), not both."
+    });
+  }
+  if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["end"],
+      message: "`end` must be after `start`."
+    });
+  }
+});
+function contactSheetTimes(comp, opts) {
+  const fps = comp.fps > 0 ? comp.fps : 25;
+  if (opts.times !== void 0) {
+    return opts.times.map((t) => {
+      if (t > comp.duration) {
+        throw new Error(`Time ${t}s is past the comp's duration (${comp.duration}s).`);
+      }
+      return { time: t, frame: Math.round(t * fps) };
+    });
+  }
+  const start = opts.start ?? comp.workAreaStart;
+  const end = Math.min(opts.end ?? comp.workAreaStart + comp.workAreaDuration, comp.duration);
+  if (end <= start) {
+    throw new Error(`Empty range: start ${start}s, end ${end}s (comp duration ${comp.duration}s).`);
+  }
+  const firstFrame = Math.round(start * fps);
+  const lastFrame = Math.max(firstFrame, Math.ceil(end * fps - 1e-6) - 1);
+  const span = lastFrame - firstFrame;
+  const count = Math.min(opts.count ?? 12, span + 1);
+  const frames = [];
+  for (let i = 0; i < count; i++) {
+    const f = count === 1 ? firstFrame : Math.round(firstFrame + i * span / (count - 1));
+    if (frames[frames.length - 1] !== f) frames.push(f);
+  }
+  return frames.map((frame) => ({ frame, time: frame / fps }));
+}
+function chooseColumns(n, tileWidth, tileHeight) {
+  const cols = Math.round(Math.sqrt(n * (16 / 9) * tileHeight / tileWidth));
+  return Math.max(1, Math.min(n, cols));
+}
+function labelMetrics(tileHeight, labels) {
+  const textScale = tileHeight >= 90 ? 2 : 1;
+  return { labelHeight: labels ? GLYPH_HEIGHT * textScale + 4 * textScale : 0, textScale };
+}
+function sheetLayout(n, compWidth, compHeight, tileSize, columns, labels = true) {
+  let tile = fitWithin(compWidth, compHeight, tileSize);
+  const cols = Math.max(1, Math.min(n, columns ?? chooseColumns(n, tile.width, tile.height)));
+  const rows = Math.ceil(n / cols);
+  const sheetW = (t) => cols * t.width + (cols + 1) * SHEET_GAP;
+  const sheetH = (t) => rows * (t.height + labelMetrics(t.height, labels).labelHeight) + (rows + 1) * SHEET_GAP;
+  let longest = Math.max(sheetW(tile), sheetH(tile));
+  for (let size = Math.max(tile.width, tile.height); longest > MAX_SHEET_EDGE && size > 16; ) {
+    size = Math.max(16, Math.floor(size * MAX_SHEET_EDGE / longest) - 1);
+    tile = fitWithin(compWidth, compHeight, size);
+    longest = Math.max(sheetW(tile), sheetH(tile));
+  }
+  const { labelHeight, textScale } = labelMetrics(tile.height, labels);
+  return {
+    tileWidth: tile.width,
+    tileHeight: tile.height,
+    labelHeight,
+    textScale,
+    columns: cols,
+    rows,
+    width: sheetW(tile),
+    height: sheetH(tile)
+  };
+}
+function buildContactSheet(tiles, layout) {
+  const sheet = createCanvas(layout.width, layout.height, SHEET_BG);
+  const pad = 2 * layout.textScale;
+  tiles.forEach((tile, i) => {
+    const col = i % layout.columns;
+    const row = Math.floor(i / layout.columns);
+    const x = SHEET_GAP + col * (layout.tileWidth + SHEET_GAP);
+    const y = SHEET_GAP + row * (layout.tileHeight + layout.labelHeight + SHEET_GAP);
+    const small = tile.image.width === layout.tileWidth && tile.image.height === layout.tileHeight ? tile.image : resizeArea(tile.image, layout.tileWidth, layout.tileHeight);
+    blit(sheet, flattenOnChecker(small, 8, 112, 88), x, y);
+    if (tile.label && layout.labelHeight > 0) {
+      fillRect(sheet, x, y + layout.tileHeight, layout.tileWidth, layout.labelHeight, [0, 0, 0, 255]);
+      drawText(sheet, tile.label, x + pad, y + layout.tileHeight + pad, layout.textScale, [255, 255, 255, 255]);
+    }
+    if (tile.flagged) {
+      strokeRect(sheet, x, y, layout.tileWidth, layout.tileHeight, 3, FLAG_COLOUR);
+    }
+  });
+  return sheet;
+}
+function frameLabel(sample) {
+  return `f${sample.frame} ${sample.time.toFixed(2)}s`;
+}
+var DIM_COLOURS = [
+  [235, 80, 80, 255],
+  [90, 200, 90, 255],
+  [90, 150, 255, 255],
+  [200, 200, 200, 255]
+];
+var SPEED_COLOUR = [240, 240, 240, 255];
+var KEY_COLOUR = [255, 200, 60, 255];
+var KEY_LINE = [255, 200, 60, 90];
+var PANEL_BG = [40, 40, 40, 255];
+var GRID_COLOUR = [62, 62, 62, 255];
+var AXIS_LABEL = [200, 200, 200, 255];
+var AeMotionGraphSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("CompItem ID that holds the layer."),
+  layer: LayerSelectorSchema,
+  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
+    "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour."
+  ),
+  start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the first keyframe, or the work area start without keyframes."),
+  end: external_exports.number().min(0).optional().describe("Range end in comp seconds. Default: the last keyframe, or the work area end without keyframes."),
+  step: external_exports.number().positive().optional().describe("Seconds between samples. Default: one comp frame. Capped at 1000 samples by widening the step."),
+  width: external_exports.number().int().min(320).max(2048).optional().describe("Graph width in pixels (default 960)."),
+  height: external_exports.number().int().min(200).max(2048).optional().describe("Graph height in pixels (default 540)."),
+  include_samples: external_exports.boolean().optional().describe("Also return every sample as `sample_table` (default false; the graph and summary are usually enough).")
+}).superRefine((val, ctx) => {
+  if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["end"],
+      message: "`end` must be after `start`."
+    });
+  }
+});
+function distanceBetween(a, b) {
+  let sum = 0;
+  for (let d = 0; d < Math.min(a.length, b.length); d++) sum += (b[d] - a[d]) ** 2;
+  return Math.sqrt(sum);
+}
+function sampleSpeeds(s) {
+  const jumps = s.keys.filter((_k, i) => i > 0 && s.keys[i - 1].out_interp === "hold").map((k) => k.time);
+  const out = [];
+  for (let i = 0; i + 1 < s.times.length; i++) {
+    const t0 = s.times[i];
+    const t1 = s.times[i + 1];
+    const isJump = jumps.some((t) => t > t0 + 1e-6 && t <= t1 + 1e-6);
+    out.push({
+      time: (t0 + t1) / 2,
+      speed: isJump || t1 <= t0 ? null : distanceBetween(s.values[i], s.values[i + 1]) / (t1 - t0)
+    });
+  }
+  return out;
+}
+function segmentProfile(startSpeed, endSpeed, peak, hold) {
+  if (hold) return "hold";
+  if (peak < 1e-6) return "static";
+  const s = startSpeed / peak;
+  const e = endSpeed / peak;
+  if (s > 0.8 && e > 0.8) return "constant";
+  if (s < 0.5 && e < 0.5) return "ease in-out";
+  if (s < 0.5 && e > 0.8) return "speeds up";
+  if (s > 0.8 && e < 0.5) return "slows down";
+  return "uneven";
+}
+var r3 = (x) => Math.round(x * 1e3) / 1e3;
+function analyzeMotion(s, speeds) {
+  const dims = s.values[0]?.length ?? 0;
+  const min = [];
+  const max = [];
+  for (let d = 0; d < dims; d++) {
+    min.push(Math.min(...s.values.map((v) => v[d])));
+    max.push(Math.max(...s.values.map((v) => v[d])));
+  }
+  let peak = 0;
+  let peakTime = null;
+  let distance = 0;
+  let movingTime = 0;
+  speeds.forEach((sp, i) => {
+    if (sp.speed === null) return;
+    const dt = s.times[i + 1] - s.times[i];
+    distance += sp.speed * dt;
+    movingTime += dt;
+    if (sp.speed > peak) {
+      peak = sp.speed;
+      peakTime = sp.time;
+    }
+  });
+  const overshoot = [];
+  if (s.keys.length >= 2) {
+    for (let d = 0; d < dims; d++) {
+      const keyMin = Math.min(...s.keys.map((k) => k.value[d]));
+      const keyMax = Math.max(...s.keys.map((k) => k.value[d]));
+      const tol = Math.max(1e-3, (keyMax - keyMin) * 1e-3);
+      const below = keyMin - min[d] > tol ? keyMin - min[d] : 0;
+      const above = max[d] - keyMax > tol ? max[d] - keyMax : 0;
+      if (below > 0 || above > 0) {
+        overshoot.push({ dimension: d, below_keys_by: r3(below), above_keys_by: r3(above) });
+      }
+    }
+  }
+  const segments = [];
+  for (let k = 0; k + 1 < s.keys.length; k++) {
+    const a = s.keys[k];
+    const b = s.keys[k + 1];
+    const inside = [];
+    speeds.forEach((sp, i) => {
+      if (sp.speed === null || sp.time < a.time || sp.time > b.time) return;
+      inside.push({ speed: sp.speed, time: sp.time, dt: s.times[i + 1] - s.times[i] });
+    });
+    if (inside.length === 0) continue;
+    let segPeak = inside[0];
+    for (const p of inside) if (p.speed > segPeak.speed) segPeak = p;
+    const startSpeed = inside[0].speed;
+    const endSpeed = inside[inside.length - 1].speed;
+    segments.push({
+      from_key: a.index,
+      to_key: b.index,
+      start: r3(a.time),
+      end: r3(b.time),
+      distance: r3(inside.reduce((sum, p) => sum + p.speed * p.dt, 0)),
+      start_speed: r3(startSpeed),
+      end_speed: r3(endSpeed),
+      peak_speed: r3(segPeak.speed),
+      peak_at: segPeak.speed < 1e-6 ? null : Math.round((segPeak.time - a.time) / (b.time - a.time) * 100) / 100,
+      profile: segmentProfile(startSpeed, endSpeed, segPeak.speed, a.out_interp === "hold")
+    });
+  }
+  return {
+    speed: { peak: r3(peak), peak_time: peakTime === null ? null : r3(peakTime), mean: movingTime > 0 ? r3(distance / movingTime) : 0 },
+    distance: r3(distance),
+    value: {
+      start: (s.values[0] ?? []).map(r3),
+      end: (s.values[s.values.length - 1] ?? []).map(r3),
+      min: min.map(r3),
+      max: max.map(r3)
+    },
+    overshoot,
+    segments
+  };
+}
+function formatNumber(v) {
+  const a = Math.abs(v);
+  if (a >= 1e3) return v.toFixed(0);
+  if (a >= 100) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+function renderMotionGraph(s, speeds, width, height) {
+  const scale = height >= 300 ? 2 : 1;
+  const glyphH = GLYPH_HEIGHT * scale;
+  const dims = s.values[0]?.length ?? 0;
+  let vmin = Infinity;
+  let vmax = -Infinity;
+  for (const v of s.values) {
+    for (const x of v) {
+      vmin = Math.min(vmin, x);
+      vmax = Math.max(vmax, x);
+    }
+  }
+  if (!Number.isFinite(vmin)) {
+    vmin = 0;
+    vmax = 1;
+  } else if (vmax - vmin < 1e-9) {
+    const pad = Math.max(1, Math.abs(vmin) * 0.1);
+    vmin -= pad;
+    vmax += pad;
+  }
+  let peak = 0;
+  for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
+  const speedMax = peak > 0 ? peak : 1;
+  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(peak), "0"];
+  const left = Math.max(...yLabels.map((l) => textWidth(l, scale))) + 4 * scale + 6;
+  const right = 4 * scale + 6;
+  const top = glyphH + 8;
+  const bottom = glyphH + 8;
+  const gap = glyphH + 8;
+  const plotW = Math.max(1, width - left - right);
+  const plotH = Math.max(1, Math.floor((height - top - bottom - gap) / 2));
+  const valueTop = top;
+  const speedTop = top + plotH + gap;
+  const span = s.end - s.start > 0 ? s.end - s.start : 1;
+  const xOf = (t) => left + Math.round((t - s.start) / span * (plotW - 1));
+  const yValue = (v) => valueTop + Math.round((1 - (v - vmin) / (vmax - vmin)) * (plotH - 1));
+  const ySpeed = (v) => speedTop + Math.round((1 - v / speedMax) * (plotH - 1));
+  const img = createCanvas(width, height, SHEET_BG);
+  for (const panelTop of [valueTop, speedTop]) {
+    fillRect(img, left, panelTop, plotW, plotH, PANEL_BG);
+    fillRect(img, left, panelTop + Math.floor(plotH / 2), plotW, 1, GRID_COLOUR);
+  }
+  const keysInRange = s.keys.filter((k) => k.time >= s.start - 1e-6 && k.time <= s.end + 1e-6);
+  let labelRight = -Infinity;
+  for (const k of keysInRange) {
+    const x = xOf(k.time);
+    fillRect(img, x, valueTop, 1, speedTop + plotH - valueTop, KEY_LINE);
+    const label = `#${k.index}`;
+    const w = textWidth(label, scale);
+    const lx = Math.min(Math.max(0, x - Math.floor(w / 2)), width - w);
+    if (lx > labelRight + 2 * scale) {
+      drawText(img, label, lx, top - glyphH - 4, scale, KEY_COLOUR);
+      labelRight = lx + w;
+    }
+  }
+  for (let d = 0; d < dims; d++) {
+    const colour = DIM_COLOURS[d % DIM_COLOURS.length];
+    for (let i = 0; i + 1 < s.times.length; i++) {
+      drawLine(img, xOf(s.times[i]), yValue(s.values[i][d]), xOf(s.times[i + 1]), yValue(s.values[i + 1][d]), 2, colour);
+    }
+  }
+  for (const k of keysInRange) {
+    for (let d = 0; d < Math.min(dims, k.value.length); d++) {
+      fillRect(img, xOf(k.time) - 2, yValue(k.value[d]) - 2, 5, 5, KEY_COLOUR);
+    }
+  }
+  for (let i = 0; i < speeds.length; i++) {
+    const sp = speeds[i].speed;
+    if (sp === null) continue;
+    const next = speeds[i + 1]?.speed ?? null;
+    const prev = speeds[i - 1]?.speed ?? null;
+    if (next !== null) {
+      drawLine(img, xOf(speeds[i].time), ySpeed(sp), xOf(speeds[i + 1].time), ySpeed(next), 2, SPEED_COLOUR);
+    } else if (prev === null) {
+      drawLine(img, xOf(s.times[i]), ySpeed(sp), xOf(s.times[i + 1]), ySpeed(sp), 2, SPEED_COLOUR);
+    }
+  }
+  const rightAlign = (text, x, y) => drawText(img, text, x - textWidth(text, scale), y, scale, AXIS_LABEL);
+  rightAlign(yLabels[0], left - 6, valueTop);
+  rightAlign(yLabels[1], left - 6, valueTop + plotH - glyphH);
+  rightAlign(yLabels[2], left - 6, speedTop);
+  rightAlign(yLabels[3], left - 6, speedTop + plotH - glyphH);
+  drawText(img, `${s.start.toFixed(2)}s`, left, height - bottom + 4, scale, AXIS_LABEL);
+  rightAlign(`${s.end.toFixed(2)}s`, left + plotW, height - bottom + 4);
+  return img;
+}
+async function runQueued(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+var motionTools = [
+  {
+    name: "ae_contact_sheet",
+    description: "READ-ONLY. Shows how a comp moves over time in ONE image: samples 2 to 24 frames (default 12, evenly across the work area, or a `start`/`end` range, or explicit `times`), renders each at full resolution with saveFrameToPng, shrinks them on the server and tiles them into a single PNG with frame/time labels. Transparency shows as a checkerboard; blank, black or fully transparent frames get a red border and are listed in `flagged_frames`. Look at the returned `path` to judge timing, spacing and composition across the shot; each tile's full-resolution PNG is in `frames[].path`. Every frame is a render, so heavy comps take a while: start with fewer frames. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeContactSheetSchema,
+    handler: async (args, ctx) => {
+      const framesDir = defaultFramesDir();
+      fs8.mkdirSync(framesDir, { recursive: true });
+      const opId = ctx.bridge.newOpId();
+      const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
+        const compResp = await ctx.bridge.evalRaw({
+          id: `${opId}_comp`,
+          script: buildJsxCall("getComp", { comp_id: args.comp_id }),
+          label: `ae_contact_sheet(${args.comp_id}) getComp`,
+          mutates: false,
+          toolName: "ae_contact_sheet"
+        });
+        const comp2 = compResp.result;
+        const samples = contactSheetTimes(
+          {
+            fps: Number(comp2.fps),
+            duration: Number(comp2.duration),
+            workAreaStart: Number(comp2.workAreaStart),
+            workAreaDuration: Number(comp2.workAreaDuration)
+          },
+          args
+        );
+        const shots2 = [];
+        for (let i = 0; i < samples.length; i++) {
+          const snap = await captureCompFrame({
+            ctx,
+            opId,
+            compId: args.comp_id,
+            time: samples[i].time,
+            frameIndex: i,
+            framesDir,
+            toolName: "ae_contact_sheet"
+          });
+          shots2.push({ ...samples[i], path: snap.path });
+        }
+        return { comp: comp2, shots: shots2 };
+      });
+      const { comp, shots } = captured;
+      const showLabels = args.labels ?? true;
+      const layout = sheetLayout(
+        shots.length,
+        Number(comp.width),
+        Number(comp.height),
+        args.tile_size ?? 320,
+        args.columns,
+        showLabels
+      );
+      const tiles = [];
+      const frames = [];
+      shots.forEach((shot, index) => {
+        const full = decodePngFile(shot.path);
+        const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
+        tiles.push({
+          image: resizeArea(full, layout.tileWidth, layout.tileHeight),
+          label: showLabels ? frameLabel(shot) : void 0,
+          flagged: analysis.flags.length > 0
+        });
+        frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
+      });
+      const sheet = buildContactSheet(tiles, layout);
+      const sheetPath = path7.join(
+        framesDir,
+        `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
+      );
+      fs8.writeFileSync(sheetPath, encodePng(sheet));
+      return {
+        ok: true,
+        path: sheetPath,
+        width: layout.width,
+        height: layout.height,
+        columns: layout.columns,
+        rows: layout.rows,
+        tile_width: layout.tileWidth,
+        tile_height: layout.tileHeight,
+        comp: {
+          id: comp.id,
+          name: comp.name,
+          width: comp.width,
+          height: comp.height,
+          fps: comp.fps,
+          duration: comp.duration
+        },
+        frames,
+        flagged_frames: frames.filter((f) => f.flags.length > 0).map((f) => ({ index: f.index, time: f.time, flags: f.flags }))
+      };
+    }
+  },
+  {
+    name: "ae_motion_graph",
+    description: "READ-ONLY. Graphs how one property changes over time, like AE's graph editor, in one PNG: the value per dimension on top (red, green, blue for X, Y, Z), the speed underneath, and keyframes as yellow lines labelled #1, #2... The property is sampled with expressions applied (one sample per frame by default, at most 1000), so the graph shows what the viewer sees. Also returns the numbers: peak and mean speed, the value range, `overshoot` past the keyframe values, and per pair of keyframes a `segments[].profile` (constant, ease in-out, speeds up, slows down, hold, static, uneven). Use it to check easing and timing, or to compare before and after an ease change. Speed is the change across all dimensions per second (px/s for position). The comp is never modified, not even its current time. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeMotionGraphSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "sampleProperty",
+        {
+          comp_id: args.comp_id,
+          layer: args.layer,
+          path: args.path,
+          start: args.start,
+          end: args.end,
+          step: args.step
+        },
+        { label: `ae_motion_graph(${args.comp_id})`, mutates: false, toolName: "ae_motion_graph" }
+      );
+      const samples = res.result;
+      const speeds = sampleSpeeds(samples);
+      const analysis = analyzeMotion(samples, speeds);
+      const width = args.width ?? 960;
+      const height = args.height ?? 540;
+      const framesDir = defaultFramesDir();
+      fs8.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path7.join(
+        framesDir,
+        `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
+      );
+      fs8.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      return {
+        ok: true,
+        path: graphPath,
+        width,
+        height,
+        comp: samples.comp,
+        layer: samples.layer,
+        property: samples.property,
+        start: r3(samples.start),
+        end: r3(samples.end),
+        step: Math.round(samples.step * 1e6) / 1e6,
+        samples: samples.times.length,
+        speed: { unit: samples.property.spatial ? "px/s" : "units/s", ...analysis.speed },
+        distance: analysis.distance,
+        value: analysis.value,
+        overshoot: analysis.overshoot,
+        segments: analysis.segments,
+        keys: samples.keys.map((k) => ({ ...k, time: r3(k.time), value: k.value.map(r3) })),
+        ...args.include_samples ? {
+          // speed_after: speed from this sample to the next (null at the last sample and across a hold jump).
+          sample_table: samples.times.map((t, i) => ({
+            time: r3(t),
+            value: samples.values[i].map(r3),
+            speed_after: i < speeds.length && speeds[i].speed !== null ? r3(speeds[i].speed) : null
+          }))
+        } : {}
+      };
+    }
+  }
+];
+
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs7 = __toESM(require("node:fs"), 1);
-var path7 = __toESM(require("node:path"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -9619,7 +10386,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path7.join(defaultDataDir(), "ui");
+  return path8.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -9814,7 +10581,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs7.mkdirSync(outDir, { recursive: true });
+        fs9.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -9841,8 +10608,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs8 = __toESM(require("node:fs"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
+var path9 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -10209,7 +10976,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs8.existsSync(actualProjectPath)) {
+          if (!fs10.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -10218,17 +10985,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path8.dirname(actualProjectPath);
-          const ext = path8.extname(actualProjectPath) || ".aep";
-          const baseName = path8.basename(actualProjectPath, ext);
-          const checkpointDir = path8.join(projDir, "_mcp_checkpoints");
-          fs8.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path9.dirname(actualProjectPath);
+          const ext = path9.extname(actualProjectPath) || ".aep";
+          const baseName = path9.basename(actualProjectPath, ext);
+          const checkpointDir = path9.join(projDir, "_mcp_checkpoints");
+          fs10.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path8.join(checkpointDir, checkpointFileName);
-          fs8.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs8.statSync(checkpointPath);
+          const checkpointPath = path9.join(checkpointDir, checkpointFileName);
+          fs10.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs10.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -10244,7 +11011,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs8.existsSync(checkpointPath)
+              checkpoint_exists: fs10.existsSync(checkpointPath)
             }
           });
           return {
@@ -10286,9 +11053,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path8.dirname(actualProjectPath);
-      const checkpointDir = path8.join(projDir, "_mcp_checkpoints");
-      if (!fs8.existsSync(checkpointDir)) {
+      const projDir = path9.dirname(actualProjectPath);
+      const checkpointDir = path9.join(projDir, "_mcp_checkpoints");
+      if (!fs10.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -10296,10 +11063,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs8.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs10.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path8.join(checkpointDir, e.name);
-        const stat = fs8.statSync(fullPath);
+        const fullPath = path9.join(checkpointDir, e.name);
+        const stat = fs10.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -10330,7 +11097,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs8.existsSync(args.checkpoint_path)) {
+          if (!fs10.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -10427,6 +11194,7 @@ var extTools = [
   ...receiptsTools,
   ...animateTools,
   ...framesTools,
+  ...motionTools,
   ...aerenderTools,
   ...dialogsTools,
   ...panelsTools
@@ -10757,7 +11525,7 @@ async function handleRpc(message, ctx) {
 }
 
 // src/panel-host.ts
-var crypto4 = __toESM(require("node:crypto"), 1);
+var crypto5 = __toESM(require("node:crypto"), 1);
 var DESCRIBE_DIALOGS_BUDGET_MS = 4e3;
 var PanelTimeoutSignal = class extends Error {
   constructor() {
@@ -10787,7 +11555,7 @@ var PanelHost = class {
     }
   }
   newOpId() {
-    return `op_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
+    return `op_${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
   }
   /**
    * Calls the panel's evalScript queue, racing against a timeout via setTimeout.
@@ -10982,7 +11750,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path9.join(resolvedDataDir, "quarantine.json")
+    path10.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,

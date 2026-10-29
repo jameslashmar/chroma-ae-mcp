@@ -12,6 +12,7 @@ import {
   ExpectSchema,
   type ToolDefinition,
 } from "./common.js";
+import { writeScaledCopy } from "./ext/png-utils.js";
 import { verifyTargetGuard } from "./mutate.js";
 
 export const AeSnapshotFrameSchema = z.object({
@@ -27,7 +28,16 @@ export const AeSnapshotFrameSchema = z.object({
     .default(0.5)
     .optional()
     .describe(
-      "Ignored in v0.1: frames are saved at full comp resolution, because changing the comp's resolution to scale them put steps on the user's undo stack."
+      "Size of the returned PNG as a fraction of the comp (default 0.5). AE always renders at full resolution (changing the comp's resolution would put steps on the user's undo stack); the server shrinks the PNG afterwards and keeps the full-size file as `full_path`."
+    ),
+  max_size: z
+    .number()
+    .int()
+    .min(16)
+    .max(8192)
+    .optional()
+    .describe(
+      "Long edge in pixels of the returned PNG. Overrides `scale`. 512 to 1024 is enough for most visual checks and costs far fewer image tokens."
     ),
 });
 
@@ -94,12 +104,44 @@ export async function waitForFreshPng(
   }
 }
 
+/**
+ * Shrinks a fresh full-resolution snapshot on the server (never in AE) and
+ * describes the file the agent should look at.
+ */
+function snapshotOutput(
+  fullPath: string,
+  check: { size: number; mtimeMs: number },
+  scale: number,
+  maxSize: number | undefined
+): {
+  path: string;
+  full_path: string;
+  size: number;
+  mtimeMs: number;
+  width: number;
+  height: number;
+} {
+  const copy = writeScaledCopy(fullPath, fullPath.replace(/\.png$/i, "_small.png"), {
+    scale,
+    maxSize,
+  });
+  return {
+    path: copy.path,
+    full_path: fullPath,
+    size: copy.scaled ? fs.statSync(copy.path).size : check.size,
+    mtimeMs: check.mtimeMs,
+    width: copy.width,
+    height: copy.height,
+  };
+}
+
 export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_snapshot_frame",
     description:
       "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. " +
       "saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
+      "`path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeSnapshotFrameSchema,
     handler: async (args, ctx) => {
@@ -140,14 +182,14 @@ export const renderTools: ToolDefinition<any>[] = [
             if (check1.fresh) {
               return {
                 ok: true,
-                path: pngPath1,
-                size: check1.size,
-                mtimeMs: check1.mtimeMs,
+                ...snapshotOutput(pngPath1, check1, scale, args.max_size),
                 comp_id: args.comp_id,
                 time: args.time,
                 scale,
+                ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
                 retried: false,
-                ...(resp1.result ?? {}),
+                comp_width: resp1.result?.width,
+                comp_height: resp1.result?.height,
               };
             }
 
@@ -180,14 +222,14 @@ export const renderTools: ToolDefinition<any>[] = [
             if (check2.fresh) {
               return {
                 ok: true,
-                path: pngPath2,
-                size: check2.size,
-                mtimeMs: check2.mtimeMs,
+                ...snapshotOutput(pngPath2, check2, scale, args.max_size),
                 comp_id: args.comp_id,
                 time: nudgedTime,
                 scale,
+                ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
                 retried: true,
-                ...(resp2.result ?? {}),
+                comp_width: resp2.result?.width,
+                comp_height: resp2.result?.height,
               };
             }
 

@@ -4,6 +4,7 @@ import { animateTools } from "./animate.js";
 import { dialogsTools } from "./dialogs.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
+import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
 
@@ -13,6 +14,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...receiptsTools,
   ...animateTools,
   ...framesTools,
+  ...motionTools,
   ...aerenderTools,
   ...dialogsTools,
   ...panelsTools,
