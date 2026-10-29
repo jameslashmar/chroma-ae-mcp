@@ -25,6 +25,17 @@ This is an internal Chroma tool, not a consumer product.
 
 The token belongs to this machine and survives restarts. **Regenerate token** in the panel replaces it; after that, paste the setup command again.
 
+**Claude Desktop (Chat and Cowork)** can only launch a command, so it uses the stdio relay that ships with the panel. Open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
+
+```json
+"chroma-ae": {
+  "command": "node",
+  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"]
+}
+```
+
+`<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
+
 No Node, npm or git is needed. The MCP runs on the Node that is built into AE's CEP.
 
 ## Develop (Chroma)
@@ -52,6 +63,7 @@ node qa/smoke-mcp.mjs                                             # live: every 
 
 ```
 Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hidden CEP extension, starts with AE)
+Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──┘
                                       ├─ MCP endpoint (stateless JSON-RPC, no SDK: AE's Node 17 is too old for it)
                                       ├─ single-writer queue · guard · quarantine · receipts
                                       ├─ Node side: PNG decode, aerender jobs, UI Automation (popups, screenshots)
