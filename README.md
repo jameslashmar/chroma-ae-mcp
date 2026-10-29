@@ -102,7 +102,7 @@ Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──�
 
 ---
 
-## Tools (44)
+## Tools (46)
 
 | Group | Tools |
 |---|---|
@@ -112,9 +112,10 @@ Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──�
 | Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment), `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
 | Effects | `ae_add_effect`, `ae_set_effect` (on/off, rename, parameter values), `ae_remove_effect`, `ae_apply_preset` (.ffx onto one layer), `ae_list_presets` (the user's User Presets and AE's own). Parameters scripts can't set, such as Colorama's Output Cycle, are listed as `settable: false`; a preset saved from AE carries them. |
 | Ask the user | `ae_ask_user`: a question in the panel with buttons, pictures (e.g. a contact sheet per variant), or ease curves the user can preview and reshape by dragging the handles. Waits for the answer. |
+| Context | `ae_brief` (the project's goal, audience, format, feel, references and no-go areas, kept next to the .aep, with questions for what is missing), `ae_taste` (the user's motion preferences across projects; `ae_motion_review` follows them) |
 | Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
 | Frames | `ae_snapshot_frame` (AE renders at full resolution and the server shrinks the PNG to `scale` or `max_size`; waits for the PNG, which AE writes asynchronously), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
-| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` easy-ease fix) |
+| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` fix, easy ease or the user's preferred ease) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |

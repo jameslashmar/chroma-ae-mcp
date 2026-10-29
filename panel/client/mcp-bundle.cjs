@@ -2705,8 +2705,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path14, errorMaps, issueData } = params;
-  const fullPath = [...path14, ...issueData.path || []];
+  const { data, path: path15, errorMaps, issueData } = params;
+  const fullPath = [...path15, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2822,11 +2822,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path14, key) {
+  constructor(parent, value, path15, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path14;
+    this._path = path15;
     this._key = key;
   }
   get path() {
@@ -7182,7 +7182,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path13 = __toESM(require("node:path"), 1);
+var path14 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -7315,13 +7315,23 @@ var path4 = __toESM(require("node:path"), 1);
 var fs3 = __toESM(require("node:fs"), 1);
 var path3 = __toESM(require("node:path"), 1);
 var DEFAULT_SETTINGS = {
-  auto_checkpoint: { enabled: true, max_mb: 250 }
+  auto_checkpoint: { enabled: true, max_mb: 250 },
+  taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" }
 };
 function defaultSettingsFilePath() {
   return path3.join(defaultDataDir(), "settings.json");
 }
+function cloneTaste(t) {
+  return { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+}
 function cloneDefaults() {
-  return { auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint } };
+  return {
+    auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
+    taste: cloneTaste(DEFAULT_SETTINGS.taste)
+  };
+}
+function isCurve(v) {
+  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1;
 }
 var SettingsStore = class {
   filePath;
@@ -7334,7 +7344,17 @@ var SettingsStore = class {
     return this.filePath;
   }
   get() {
-    return { auto_checkpoint: { ...this.settings.auto_checkpoint } };
+    return { auto_checkpoint: { ...this.settings.auto_checkpoint }, taste: cloneTaste(this.settings.taste) };
+  }
+  updateTaste(patch) {
+    const next = cloneTaste(this.settings.taste);
+    if (patch.preferred_ease !== void 0) next.preferred_ease = isCurve(patch.preferred_ease) ? [...patch.preferred_ease] : null;
+    if (patch.allow_linear_non_motion !== void 0) next.allow_linear_non_motion = patch.allow_linear_non_motion;
+    if (patch.avoid_overshoot !== void 0) next.avoid_overshoot = patch.avoid_overshoot;
+    if (patch.notes !== void 0) next.notes = patch.notes;
+    this.settings = { ...this.settings, taste: next };
+    this.saveToDisk();
+    return this.get();
   }
   updateAutoCheckpoint(patch) {
     const next = { ...this.settings.auto_checkpoint };
@@ -7352,6 +7372,13 @@ var SettingsStore = class {
       if (ac && typeof ac === "object") {
         if (typeof ac.enabled === "boolean") this.settings.auto_checkpoint.enabled = ac.enabled;
         if (typeof ac.max_mb === "number" && ac.max_mb > 0) this.settings.auto_checkpoint.max_mb = ac.max_mb;
+      }
+      const t = parsed?.taste;
+      if (t && typeof t === "object") {
+        if (isCurve(t.preferred_ease)) this.settings.taste.preferred_ease = [...t.preferred_ease];
+        if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
+        if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
+        if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
       }
     } catch {
     }
@@ -8662,14 +8689,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path14 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path15 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path14,
+          path: path15,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path14} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path15} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -9187,7 +9214,7 @@ function presentAnswer(q, a) {
     ...a.curve ? {
       curve: a.curve,
       edited: !a.choice_ids.some((id) => sameCurve(byId.get(id)?.curve, a.curve)),
-      next: "Apply it with ae_set_keyframe_ease { ease: { curve } }."
+      next: "Apply it with ae_set_keyframe_ease { ease: { curve } }. Ask whether it should become the user's default; if so, save it with ae_taste."
     } : {},
     answered_after_s: Math.round((a.answered_at - q.asked_at) / 100) / 10
   };
@@ -9248,9 +9275,181 @@ var askTools = [
   }
 ];
 
-// src/tools/ext/effects.ts
+// src/tools/ext/brief.ts
 var fs7 = __toESM(require("node:fs"), 1);
 var path7 = __toESM(require("node:path"), 1);
+var BriefFieldsSchema = external_exports.object({
+  goal: external_exports.string().max(1e3).optional().describe("What the piece is for and the one thing it must get across."),
+  audience: external_exports.string().max(500).optional().describe("Who watches it, and where (platform, screen)."),
+  format: external_exports.object({
+    width: external_exports.number().int().positive().optional(),
+    height: external_exports.number().int().positive().optional(),
+    fps: external_exports.number().positive().optional(),
+    duration_s: external_exports.number().positive().optional()
+  }).optional().describe("Delivery size, frame rate and length."),
+  feel: external_exports.array(external_exports.string().min(1).max(40)).max(6).optional().describe("A few words for the feel, e.g. ['confident', 'clean', 'snappy']."),
+  references: external_exports.array(external_exports.string().min(1).max(500)).max(20).optional().describe("Links, file paths, or descriptions of work to match."),
+  brand_colors: external_exports.array(external_exports.string().regex(/^#[0-9a-fA-F]{6}$/, "colors are #rrggbb")).max(12).optional().describe("Brand colours as #rrggbb."),
+  fonts: external_exports.array(external_exports.string().min(1).max(100)).max(6).optional(),
+  do_not_change: external_exports.array(external_exports.string().min(1).max(300)).max(20).optional().describe("Layers, comps or decisions to leave alone."),
+  notes: external_exports.string().max(4e3).optional()
+});
+var AeBriefSchema = external_exports.object({
+  set: BriefFieldsSchema.optional().describe(
+    "Fields to save. Omitted fields keep their value; an empty string or list clears one. Save only what the user said or confirmed."
+  ),
+  expect: external_exports.object({ project_path: external_exports.string().min(1) }).optional().describe("Required with `set`: the open project's path, so the brief lands next to the right .aep.")
+}).refine((v) => !v.set || v.expect !== void 0, { message: "Saving a brief needs expect.project_path." });
+var BRIEF_FIELDS = ["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change"];
+var BRIEF_QUESTIONS = {
+  goal: { question: "What is this piece for, and what is the one thing it must get across?" },
+  audience: {
+    question: "Who will watch it, and where?",
+    options: [
+      { id: "social_vertical", label: "Social, vertical (Reels, TikTok, Shorts)" },
+      { id: "web_16x9", label: "YouTube or web, 16:9" },
+      { id: "broadcast", label: "Broadcast or TV" },
+      { id: "event", label: "Event screen or presentation" }
+    ]
+  },
+  format: { question: "What size, frame rate and length should it be delivered at?" },
+  feel: {
+    question: "Which words fit the feel?",
+    options: [
+      { id: "calm", label: "Calm" },
+      { id: "energetic", label: "Energetic" },
+      { id: "playful", label: "Playful" },
+      { id: "premium", label: "Premium" },
+      { id: "technical", label: "Technical" },
+      { id: "bold", label: "Bold" }
+    ],
+    multi_select: true
+  },
+  references: { question: "Is there any work (links or files) it should feel like?" },
+  brand_colors: { question: "Which brand colours should it use (hex codes)?" },
+  fonts: { question: "Which fonts should it use?" },
+  do_not_change: { question: "Is there anything I must leave alone?" }
+};
+function briefPath(projectPath) {
+  return path7.join(path7.dirname(projectPath), `${path7.basename(projectPath, path7.extname(projectPath))}.brief.json`);
+}
+function isEmpty(v) {
+  if (v === void 0 || v === null || v === "") return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v).length === 0;
+  return false;
+}
+function readBrief(file) {
+  try {
+    const parsed = JSON.parse(fs7.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function mergeBrief(current, patch, now) {
+  const next = { ...current ?? {} };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === void 0) continue;
+    if (isEmpty(v)) delete next[k];
+    else next[k] = v;
+  }
+  next.updated_at = now.toISOString();
+  return next;
+}
+function missingFields(brief) {
+  return BRIEF_FIELDS.filter((f) => isEmpty(brief?.[f]));
+}
+async function openProjectPath(ctx) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${ctx.bridge.newOpId()}_brief_status`,
+    script: buildJsxCall("status", {}),
+    label: "ae_brief (project path)",
+    mutates: false,
+    toolName: "ae_brief"
+  });
+  return res.result.project_path;
+}
+var AeTasteSchema = external_exports.object({
+  set: external_exports.object({
+    preferred_ease: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, { message: "curve x1 and x2 must be within 0..1" }).optional().describe("The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."),
+    allow_linear_non_motion: external_exports.boolean().optional().describe("Linear timing on opacity and effect parameters is on purpose: the review stops flagging it."),
+    avoid_overshoot: external_exports.boolean().optional().describe("The user doesn't want overshoot: the review reports it as low instead of info."),
+    notes: external_exports.string().max(2e3).optional().describe("What the user has said about their taste, in their words. Replaces the earlier notes.")
+  }).optional().describe("Fields to change. Save only what the user said or confirmed.")
+});
+function isLinear(c) {
+  return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
+}
+var briefTools = [
+  {
+    name: "ae_brief",
+    description: "Read or save the open project's brief: goal, audience, format, feel, references, brand colours and fonts, and what not to change. It lives next to the .aep as <name>.brief.json, so it travels with the project. Call it at the start of any creative job. The result lists `missing` fields with `questions`; ask the ones that matter for the task, choices through ae_ask_user (pass the question and options as given) and open questions in the chat, then save the answers with `set`. Respect `do_not_change` in everything you do. Unsaved projects have no brief until they are saved. Never touches the AE project.",
+    schema: AeBriefSchema,
+    handler: async (args, ctx) => {
+      const projectPath = await openProjectPath(ctx);
+      if (projectPath === "<unsaved>") {
+        return {
+          ok: false,
+          error: "unsaved_project",
+          message: "The project has not been saved, so there is nowhere to keep a brief yet. Ask the user to save it (or keep the brief in the chat for now)."
+        };
+      }
+      const file = briefPath(projectPath);
+      let brief = readBrief(file);
+      let saved = false;
+      if (args.set) {
+        if (normalizeGuardPath(args.expect.project_path) !== normalizeGuardPath(projectPath)) {
+          return {
+            ok: false,
+            error: "guard",
+            message: `The open project is ${projectPath}, not ${args.expect.project_path}. Re-read state; nothing was saved.`
+          };
+        }
+        brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
+        const tmp = `${file}.tmp-${process.pid}`;
+        fs7.writeFileSync(tmp, JSON.stringify(brief, null, 2), "utf8");
+        fs7.renameSync(tmp, file);
+        saved = true;
+      }
+      const missing = missingFields(brief);
+      return {
+        ok: true,
+        project_path: projectPath,
+        brief_path: file,
+        exists: brief !== null,
+        saved,
+        brief,
+        missing,
+        questions: missing.map((field) => ({ field, ...BRIEF_QUESTIONS[field] }))
+      };
+    }
+  },
+  {
+    name: "ae_taste",
+    description: "Read or change the user's motion taste, kept across projects: a preferred ease curve, whether linear opacity and effect timing is deliberate, whether overshoot is unwanted, and notes in their words. ae_motion_review follows it (its fixes use the preferred curve's handle lengths). Read it before animating so first passes already match. Change it only on the user's word: after they pick an ease with ae_ask_user, ask whether it should become their default. Call with no arguments to read.",
+    schema: AeTasteSchema,
+    handler: async (args, ctx) => {
+      if (!ctx.settings) {
+        return { ok: false, error: "no_settings", message: "This server has no settings store, so taste can't be kept." };
+      }
+      let saved = false;
+      if (args.set) {
+        const patch = { ...args.set };
+        if (patch.preferred_ease && isLinear(patch.preferred_ease)) {
+          patch.preferred_ease = null;
+        }
+        ctx.settings.updateTaste(patch);
+        saved = true;
+      }
+      return { ok: true, saved, taste: ctx.settings.get().taste, settings_path: ctx.settings.path };
+    }
+  }
+];
+
+// src/tools/ext/effects.ts
+var fs8 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
 var EffectSelectorSchema = external_exports.object({
   index: external_exports.number().int().positive().optional().describe("1-based position in the layer's Effects."),
   name: external_exports.string().min(1).optional().describe("Effect name as shown on the layer (refused if several share it).")
@@ -9394,20 +9593,20 @@ function findPresets(folders, filter, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs7.readdirSync(dir, { withFileTypes: true });
+        entries = fs8.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path7.join(dir, e.name);
+        const full = path8.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const category = path7.relative(folder.path, dir).split(path7.sep).join("/");
+          const category = path8.relative(folder.path, dir).split(path8.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
-            presets.push({ name, path: full, category: category || path7.basename(folder.path), source: kind });
+            presets.push({ name, path: full, category: category || path8.basename(folder.path), source: kind });
           }
         }
       }
@@ -9481,12 +9680,12 @@ var effectsTools = [
     description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
     schema: AeApplyPresetSchema,
     handler: async (args, ctx) => {
-      if (!path7.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs7.existsSync(args.preset_path)) {
+      if (!path8.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs8.existsSync(args.preset_path)) {
         return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
       }
       return runEffectWrite(args, ctx, {
         toolName: "ae_apply_preset",
-        label: `ae_apply_preset(${path7.basename(args.preset_path)})`,
+        label: `ae_apply_preset(${path8.basename(args.preset_path)})`,
         host: "applyPreset",
         hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
         check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -9676,17 +9875,17 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs10 = __toESM(require("node:fs"), 1);
-var path9 = __toESM(require("node:path"), 1);
+var fs11 = __toESM(require("node:fs"), 1);
+var path10 = __toESM(require("node:path"), 1);
 var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs9 = __toESM(require("node:fs"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
+var path9 = __toESM(require("node:path"), 1);
 
 // src/tools/ext/png-utils.ts
-var fs8 = __toESM(require("node:fs"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
 var import_pngjs = __toESM(require_png(), 1);
 function fitWithin(width, height, maxSize) {
   const longEdge = Math.max(width, height);
@@ -9899,7 +10098,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs8.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs9.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -9913,7 +10112,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs8.writeFileSync(dstPath, encodePng(out));
+  fs9.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 
@@ -9937,14 +10136,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path8.join(defaultDataDir(), "frames");
+  return path9.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs9.existsSync(filePath)) {
+    if (!fs10.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs9.statSync(filePath);
+    const stat = fs10.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -9970,7 +10169,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs9.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs10.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -9984,14 +10183,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs9.mkdirSync(framesDir, { recursive: true });
+      fs10.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path8.join(
+            const pngPath1 = path9.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -10025,7 +10224,7 @@ var renderTools = [
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
             const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path8.join(
+            const pngPath2 = path9.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -10245,10 +10444,10 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs10.existsSync(filePath)) {
+  if (!fs11.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs10.readFileSync(filePath);
+  const buf = fs11.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -10419,7 +10618,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path9.join(
+  const pngPath1 = path10.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -10443,7 +10642,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path9.join(
+  const pngPath2 = path10.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -10480,7 +10679,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs10.mkdirSync(framesDir, { recursive: true });
+        fs11.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -10519,7 +10718,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs10.mkdirSync(framesDir, { recursive: true });
+        fs11.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -10547,9 +10746,9 @@ var framesTools = [
         let diffPngPath;
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-          diffPngPath = path9.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          diffPngPath = path10.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
           const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-          fs10.writeFileSync(diffPngPath, outBuf);
+          fs11.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -10604,8 +10803,8 @@ var framesTools = [
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs11 = __toESM(require("node:fs"), 1);
-var path10 = __toESM(require("node:path"), 1);
+var fs12 = __toESM(require("node:fs"), 1);
+var path11 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -10969,22 +11168,33 @@ var MOTION_MATCH_NAMES = /* @__PURE__ */ new Set([
 ]);
 var SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
 var isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
-function reviewProperty(s, analysis, path14, target) {
+function fixEase(taste) {
+  const c = taste?.preferred_ease;
+  if (!c || c.length !== 4) return { ease: "easy_ease", name: "Easy ease" };
+  const influence = (v) => Math.min(100, Math.max(0.1, Math.round(v * 1e3) / 10));
+  return {
+    ease: { in: { speed: 0, influence: influence(1 - c[2]) }, out: { speed: 0, influence: influence(c[0]) } },
+    name: "Your preferred ease"
+  };
+}
+function reviewProperty(s, analysis, path15, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
+  const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path14 }
+    property: { name: s.property.name, path: path15 }
   };
+  const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys) => ({
     tool: "ae_set_keyframe_ease",
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path14,
+      path: path15,
       keys,
-      ease: "easy_ease",
+      ease: easeArg,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
     }
   });
@@ -10996,7 +11206,7 @@ function reviewProperty(s, analysis, path14, target) {
     return next !== void 0 && next.speed > 0.3 * speed;
   };
   for (let i = 0; i < segs.length; i++) {
-    if (segs[i].profile !== "constant") continue;
+    if (timingOk || segs[i].profile !== "constant") continue;
     let j = i;
     while (j + 1 < segs.length && segs[j + 1].profile === "constant" && Math.min(segs[j].peak_speed, segs[j + 1].peak_speed) / Math.max(segs[j].peak_speed, segs[j + 1].peak_speed) > 0.75) {
       j++;
@@ -11010,14 +11220,14 @@ function reviewProperty(s, analysis, path14, target) {
       kind: "linear",
       keys: [from, to],
       time: segs[i].start,
-      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. Easy ease on keys ${from} and ${to} softens both ends.${middle}`,
+      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
       fix: fix([from, to])
     });
     i = j;
   }
   for (let i = 0; i < segs.length; i++) {
     const g = segs[i];
-    if (!isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
+    if (timingOk || !isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
     const startsHere = i === 0 || !isMoving(segs[i - 1]) || segs[i - 1].to_key !== g.from_key;
     const endsHere = i === segs.length - 1 || !isMoving(segs[i + 1]) || segs[i + 1].from_key !== g.to_key;
     if (startsHere && g.start_speed / g.peak_speed > 0.5) {
@@ -11027,7 +11237,7 @@ function reviewProperty(s, analysis, path14, target) {
         kind: "abrupt_start",
         keys: [g.from_key],
         time: g.start,
-        message: `${s.property.name} starts moving at ${Math.round(g.start_speed / g.peak_speed * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. Easy ease on key ${g.from_key} eases it in.`,
+        message: `${s.property.name} starts moving at ${Math.round(g.start_speed / g.peak_speed * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. ${easeName} on key ${g.from_key} eases it in.`,
         fix: fix([g.from_key])
       });
     }
@@ -11038,7 +11248,7 @@ function reviewProperty(s, analysis, path14, target) {
         kind: "abrupt_stop",
         keys: [g.to_key],
         time: g.end,
-        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round(g.end_speed / g.peak_speed * 100)}% of its top speed. Easy ease on key ${g.to_key} lets it settle.`,
+        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round(g.end_speed / g.peak_speed * 100)}% of its top speed. ${easeName} on key ${g.to_key} lets it settle.`,
         fix: fix([g.to_key])
       });
     }
@@ -11057,7 +11267,7 @@ function reviewProperty(s, analysis, path14, target) {
       kind: "speed_jump",
       keys: [a.to_key],
       time: a.end,
-      message: `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` + (nearlyStopped ? ` Easy ease on key ${a.to_key} smooths the hand-over.` : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
+      message: `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` + (nearlyStopped ? ` ${easeName} on key ${a.to_key} smooths the hand-over.` : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
       ...nearlyStopped ? { fix: fix([a.to_key]) } : {}
     });
   }
@@ -11068,13 +11278,14 @@ function reviewProperty(s, analysis, path14, target) {
     for (let i = 1; i < s.values.length; i++) {
       if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
     }
+    const unwanted = taste?.avoid_overshoot === true;
     findings.push({
       ...base,
-      severity: "info",
+      severity: unwanted ? "low" : "info",
       kind: "overshoot",
       keys: [],
       time: r3(s.times[at]),
-      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. Fine for a bounce or settle; a mistake otherwise.`
+      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. ` + (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.")
     });
   }
   const fps = s.comp.fps > 0 ? s.comp.fps : 25;
@@ -11121,7 +11332,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs11.mkdirSync(framesDir, { recursive: true });
+      fs12.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -11179,11 +11390,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path10.join(
+      const sheetPath = path11.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs11.writeFileSync(sheetPath, encodePng(sheet));
+      fs12.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -11229,12 +11440,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs11.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path10.join(
+      fs12.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path11.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs11.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs12.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -11266,7 +11477,7 @@ var motionTools = [
   },
   {
     name: "ae_motion_review",
-    description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
+    description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
     schema: AeMotionReviewSchema,
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
@@ -11297,10 +11508,11 @@ var motionTools = [
         return { list, sampled };
       });
       const target = { comp_id: args.comp_id, project_path: scanned.list.project_path };
+      const taste = ctx.settings?.get().taste;
       let findings = [];
       for (const { path: propPath, samples } of scanned.sampled) {
         const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), propPath, target));
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), propPath, target, taste));
       }
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);
@@ -11322,7 +11534,14 @@ var motionTools = [
         counts,
         by_kind: byKind,
         findings: findings.slice(0, max),
-        findings_truncated: findings.length > max
+        findings_truncated: findings.length > max,
+        ...taste && (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot) ? {
+          taste: {
+            preferred_ease: taste.preferred_ease,
+            allow_linear_non_motion: taste.allow_linear_non_motion,
+            avoid_overshoot: taste.avoid_overshoot
+          }
+        } : {}
       };
     }
   }
@@ -11330,8 +11549,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs12 = __toESM(require("node:fs"), 1);
-var path11 = __toESM(require("node:path"), 1);
+var fs13 = __toESM(require("node:fs"), 1);
+var path12 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -11365,7 +11584,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path11.join(defaultDataDir(), "ui");
+  return path12.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -11560,7 +11779,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs12.mkdirSync(outDir, { recursive: true });
+        fs13.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -11594,8 +11813,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs13 = __toESM(require("node:fs"), 1);
-var path12 = __toESM(require("node:path"), 1);
+var fs14 = __toESM(require("node:fs"), 1);
+var path13 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -11979,7 +12198,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs13.existsSync(actualProjectPath)) {
+          if (!fs14.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -11988,17 +12207,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path12.dirname(actualProjectPath);
-          const ext = path12.extname(actualProjectPath) || ".aep";
-          const baseName = path12.basename(actualProjectPath, ext);
-          const checkpointDir = path12.join(projDir, "_mcp_checkpoints");
-          fs13.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path13.dirname(actualProjectPath);
+          const ext = path13.extname(actualProjectPath) || ".aep";
+          const baseName = path13.basename(actualProjectPath, ext);
+          const checkpointDir = path13.join(projDir, "_mcp_checkpoints");
+          fs14.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path12.join(checkpointDir, checkpointFileName);
-          fs13.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs13.statSync(checkpointPath);
+          const checkpointPath = path13.join(checkpointDir, checkpointFileName);
+          fs14.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs14.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -12014,7 +12233,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs13.existsSync(checkpointPath)
+              checkpoint_exists: fs14.existsSync(checkpointPath)
             }
           });
           return {
@@ -12056,9 +12275,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path12.dirname(actualProjectPath);
-      const checkpointDir = path12.join(projDir, "_mcp_checkpoints");
-      if (!fs13.existsSync(checkpointDir)) {
+      const projDir = path13.dirname(actualProjectPath);
+      const checkpointDir = path13.join(projDir, "_mcp_checkpoints");
+      if (!fs14.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -12066,10 +12285,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs13.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs14.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path12.join(checkpointDir, e.name);
-        const stat = fs13.statSync(fullPath);
+        const fullPath = path13.join(checkpointDir, e.name);
+        const stat = fs14.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -12122,7 +12341,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs13.existsSync(args.checkpoint_path)) {
+          if (!fs14.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -12222,6 +12441,7 @@ var extTools = [
   ...framesTools,
   ...motionTools,
   ...askTools,
+  ...briefTools,
   ...aerenderTools,
   ...dialogsTools,
   ...panelsTools
@@ -12777,7 +12997,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path13.join(resolvedDataDir, "quarantine.json")
+    path14.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -12790,7 +13010,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path13.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path14.join(resolvedDataDir, "settings.json")),
     asks: new AskStore()
   };
   const log = opts.log;

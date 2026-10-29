@@ -122,7 +122,7 @@ export function presentAnswer(q: AskQuestion, a: AskAnswer | undefined | null) {
       ? {
           curve: a.curve,
           edited: !a.choice_ids.some((id) => sameCurve(byId.get(id)?.curve, a.curve)),
-          next: "Apply it with ae_set_keyframe_ease { ease: { curve } }.",
+          next: "Apply it with ae_set_keyframe_ease { ease: { curve } }. Ask whether it should become the user's default; if so, save it with ae_taste.",
         }
       : {}),
     answered_after_s: Math.round((a.answered_at - q.asked_at) / 100) / 10,

@@ -238,6 +238,11 @@ async function main() {
   // ---------- reads ----------
   r = await call("ae_status");
   check("ae_status", /Smoke\.aep$/i.test(String(r.project_path)), `dirty ${r.dirty}`);
+  r = await call("ae_brief", { set: { goal: "QA smoke", feel: ["clean"] }, expect });
+  check("ae_brief", r.saved && fs.existsSync(String(r.brief_path)) && !r.missing?.includes("goal"), `${path.basename(String(r.brief_path))}, ${r.missing?.length} missing`);
+  // Read only: the taste is the user's own, across projects.
+  r = await call("ae_taste");
+  check("ae_taste", r.ok && typeof r.taste?.allow_linear_non_motion === "boolean", JSON.stringify(r.taste));
   r = await call("ae_get_project", { depth: 2 });
   check("ae_get_project", JSON.stringify(r).includes("Smoke"));
   r = await call("ae_get_comp", { comp_id: COMP });

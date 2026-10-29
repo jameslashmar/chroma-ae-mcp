@@ -133,8 +133,9 @@ Everything else stays in `ae_run_jsx`.
 | VO to markers (VoxMark's engine as a tool) | P2 | Reuse AFX VoxMark's transcript-to-marker logic. It avoids rebuilding what we already ship. |
 | Shot versioning: swap a shot's footage for the latest version and log the change | P2 | Builds on replace/relink, plus the Premiere naming convention. |
 | Premiere round trip: send a comp to Premiere, bring renders back | P3 | `premiere-pro-mcp` already has the AE handoff tools; pair with them. |
-| House style / brand checks (fonts, colours, safe areas) | P3 | Engine-Room `get_house_style` and `set_house_style` is the model. Chroma brand tokens come from the `chroma-brand-guidelines` skill. |
+| House style / brand checks (fonts, colours, safe areas) | P3 | Engine-Room `get_house_style` and `set_house_style` is the model. Chroma brand tokens come from the `chroma-brand-guidelines` skill. `ae_brief` now holds a project's brand colours and fonts, so a check has something to check against. |
 | **Ask the user in the panel** (`ae_ask_user`): buttons, pictures per option, or ease curves with a moving preview and draggable handles | ✅ (done) | Choices are shown rather than described. The answer goes straight into a tool call (a curve into `ae_set_keyframe_ease`). Questions live in the service; the panel polls `/ask`. |
+| **Brief and taste** (`ae_brief`, `ae_taste`) | ✅ (done) | The brief sits next to the .aep (`<name>.brief.json`) and returns questions for what is missing. Taste is per user, across projects; `ae_motion_review` uses the preferred ease's handle lengths in its fixes, can leave deliberate linear fades alone, and can treat overshoot as unwanted. |
 
 ## Proposed P1 slice (v0.2)
 

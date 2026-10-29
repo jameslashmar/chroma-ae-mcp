@@ -9,20 +9,50 @@ export interface AutoCheckpointSettings {
   max_mb: number;
 }
 
+/** The user's motion taste, kept across projects (ae_taste); ae_motion_review follows it. */
+export interface TasteSettings {
+  /** cubic-bezier [x1, y1, x2, y2] whose handle lengths review fixes use instead of easy ease. */
+  preferred_ease: number[] | null;
+  /** Linear timing on opacity and effect parameters is deliberate, so the review leaves it alone. */
+  allow_linear_non_motion: boolean;
+  /** Overshoot past keyframe values is unwanted, so the review reports it as low instead of info. */
+  avoid_overshoot: boolean;
+  /** What the user has said about their taste, for the agent to read. */
+  notes: string;
+}
+
 export interface Settings {
   auto_checkpoint: AutoCheckpointSettings;
+  taste: TasteSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
+  taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
 };
 
 export function defaultSettingsFilePath(): string {
   return path.join(defaultDataDir(), "settings.json");
 }
 
+function cloneTaste(t: TasteSettings): TasteSettings {
+  return { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+}
+
 function cloneDefaults(): Settings {
-  return { auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint } };
+  return {
+    auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
+    taste: cloneTaste(DEFAULT_SETTINGS.taste),
+  };
+}
+
+function isCurve(v: unknown): v is number[] {
+  return (
+    Array.isArray(v) &&
+    v.length === 4 &&
+    v.every((n) => typeof n === "number" && Number.isFinite(n)) &&
+    v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1
+  );
 }
 
 /**
@@ -44,7 +74,18 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { auto_checkpoint: { ...this.settings.auto_checkpoint } };
+    return { auto_checkpoint: { ...this.settings.auto_checkpoint }, taste: cloneTaste(this.settings.taste) };
+  }
+
+  updateTaste(patch: Partial<TasteSettings>): Settings {
+    const next = cloneTaste(this.settings.taste);
+    if (patch.preferred_ease !== undefined) next.preferred_ease = isCurve(patch.preferred_ease) ? [...patch.preferred_ease] : null;
+    if (patch.allow_linear_non_motion !== undefined) next.allow_linear_non_motion = patch.allow_linear_non_motion;
+    if (patch.avoid_overshoot !== undefined) next.avoid_overshoot = patch.avoid_overshoot;
+    if (patch.notes !== undefined) next.notes = patch.notes;
+    this.settings = { ...this.settings, taste: next };
+    this.saveToDisk();
+    return this.get();
   }
 
   updateAutoCheckpoint(patch: Partial<AutoCheckpointSettings>): Settings {
@@ -61,11 +102,19 @@ export class SettingsStore {
       if (!fs.existsSync(this.filePath)) return;
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as {
         auto_checkpoint?: Partial<AutoCheckpointSettings>;
+        taste?: Partial<TasteSettings>;
       };
       const ac = parsed?.auto_checkpoint;
       if (ac && typeof ac === "object") {
         if (typeof ac.enabled === "boolean") this.settings.auto_checkpoint.enabled = ac.enabled;
         if (typeof ac.max_mb === "number" && ac.max_mb > 0) this.settings.auto_checkpoint.max_mb = ac.max_mb;
+      }
+      const t = parsed?.taste;
+      if (t && typeof t === "object") {
+        if (isCurve(t.preferred_ease)) this.settings.taste.preferred_ease = [...t.preferred_ease];
+        if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
+        if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
+        if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
       }
     } catch {
       // Ignore a corrupt or unreadable file on startup; keep the defaults
