@@ -16,7 +16,7 @@ import { z } from "zod";
 import { BridgeError, SLOW_TIMEOUT_MS } from "../../host.js";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
-import { buildReceipt } from "../../receipts.js";
+import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
@@ -58,10 +58,23 @@ export const KeyframeEasePresetSchema = z.enum([
   "hold",
 ]);
 
+export const KeyframeEaseCurveSchema = z.object({
+  curve: z
+    .array(z.number())
+    .length(4)
+    .refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, {
+      message: "curve x1 and x2 must be within 0..1",
+    })
+    .describe(
+      "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
+    ),
+});
+
 export const KeyframeEaseInputSchema = z
-  .union([KeyframeEasePresetSchema, KeyframeEasePairSchema])
+  .union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema])
   .describe(
-    'Either a preset ("easy_ease", "linear", or "hold") or an explicit `{ in: { speed, influence }, out: { speed, influence } }` object.'
+    'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. ' +
+      "A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment's first key and the in ease of its last, from that segment's duration and distance, and leaves every other side alone."
   );
 
 export type KeyframeEaseInput = z.infer<typeof KeyframeEaseInputSchema>;
@@ -96,7 +109,7 @@ export function extractKeyframeEaseCheck(
   requestedKeys: number[] | undefined,
   afterSnapshot: unknown
 ): { expected: unknown; actual: unknown } | null {
-  if (!afterSnapshot || typeof afterSnapshot !== "object") {
+  if (!afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
     return null;
   }
   const afterObj = afterSnapshot as Record<string, unknown>;
@@ -179,6 +192,196 @@ export function extractKeyframeEaseCheck(
       })),
     },
   };
+}
+
+// ---------- 1b. Curve easing ----------
+
+export type BezierCurve = [number, number, number, number];
+
+export interface EaseEnd {
+  speed: number;
+  influence: number;
+}
+
+export interface EaseSides {
+  key: number;
+  in?: EaseEnd[];
+  out?: EaseEnd[];
+}
+
+interface KeySnapshot {
+  keyIndex: number;
+  time: number;
+  value: unknown;
+  easeIn?: EaseEnd[];
+  easeOut?: EaseEnd[];
+  inTangent?: unknown;
+  outTangent?: unknown;
+  inInterp?: string;
+  outInterp?: string;
+}
+
+interface PropertySnapshot {
+  isSpatial?: boolean;
+  truncated?: boolean;
+  keyframes: KeySnapshot[];
+}
+
+// AE's influence floor is 0.1%, so a handle can't sit exactly on its key.
+const MIN_HANDLE = 0.001;
+
+export function isCurveEase(ease: KeyframeEaseInput): ease is { curve: number[] } {
+  return typeof ease === "object" && ease !== null && "curve" in ease;
+}
+
+function asVector(v: unknown): number[] | null {
+  if (typeof v === "number") return [v];
+  if (Array.isArray(v) && v.every((n) => typeof n === "number")) return v as number[];
+  return null;
+}
+
+/** Length of a spatial segment's motion path (cubic Bezier through the tangents). */
+export function pathLength(from: number[], outTangent: number[] | null, inTangent: number[] | null, to: number[]): number {
+  const dims = Math.min(from.length, to.length);
+  const p1 = from.slice(0, dims).map((v, d) => v + (outTangent?.[d] ?? 0));
+  const p2 = to.slice(0, dims).map((v, d) => v + (inTangent?.[d] ?? 0));
+  const steps = 200;
+  let length = 0;
+  let prev = from.slice(0, dims);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const point = from.slice(0, dims).map(
+      (v, d) => u * u * u * v + 3 * u * u * t * p1[d] + 3 * u * t * t * p2[d] + t * t * t * to[d]
+    );
+    length += Math.hypot(...point.map((v, d) => v - prev[d]));
+    prev = point;
+  }
+  return length;
+}
+
+/**
+ * Turns a cubic-bezier into AE temporal ease for each segment between
+ * neighbouring selected keys. On a segment of duration T and distance D
+ * (signed per dimension, or path length for spatial properties), the out
+ * handle of its first key gets influence x1 and speed (y1 / x1) * D / T, and
+ * the in handle of its last key gets influence 1 - x2 and speed
+ * ((1 - y2) / (1 - x2)) * D / T.
+ */
+export function curveToSides(
+  snapshot: unknown,
+  keys: number[] | undefined,
+  curve: number[]
+): { sides: EaseSides[]; segments: Array<[number, number]>; warnings: string[] } {
+  const snap = snapshot as PropertySnapshot | null;
+  if (!snap || !Array.isArray(snap.keyframes)) {
+    throw new Error("Could not read the property's keyframes");
+  }
+  const byIndex = new Map(snap.keyframes.map((k) => [k.keyIndex, k]));
+  const selected = (keys && keys.length > 0 ? [...new Set(keys)] : snap.keyframes.map((k) => k.keyIndex)).sort(
+    (a, b) => a - b
+  );
+  const segments: Array<[number, number]> = [];
+  for (let i = 0; i + 1 < selected.length; i++) {
+    if (selected[i + 1] === selected[i] + 1) segments.push([selected[i], selected[i + 1]]);
+  }
+  if (segments.length === 0) {
+    throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
+  }
+
+  const x1 = Math.min(1, Math.max(MIN_HANDLE, curve[0]));
+  const x2 = Math.min(1 - MIN_HANDLE, Math.max(0, curve[2]));
+  const y1 = curve[1];
+  const y2 = curve[3];
+  const warnings: string[] = [];
+  const sides = new Map<number, EaseSides>();
+  const sideFor = (key: number) => {
+    let s = sides.get(key);
+    if (!s) {
+      s = { key };
+      sides.set(key, s);
+    }
+    return s;
+  };
+
+  for (const [ai, bi] of segments) {
+    const a = byIndex.get(ai);
+    const b = byIndex.get(bi);
+    if (!a || !b) {
+      throw new Error(`Keyframe ${a ? bi : ai} was not read (the property has too many keys)`);
+    }
+    const duration = b.time - a.time;
+    if (!(duration > 0)) throw new Error(`Keys ${ai} and ${bi} share a time`);
+    const from = asVector(a.value);
+    const to = asVector(b.value);
+    if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
+    const dims = Math.max(1, a.easeOut?.length ?? 1);
+
+    let distances: number[];
+    if (snap.isSpatial) {
+      distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
+    } else if (dims === 1) {
+      distances = [to[0] - from[0]];
+    } else {
+      distances = Array.from({ length: dims }, (_, d) => (to[d] ?? 0) - (from[d] ?? 0));
+    }
+
+    const speeds = (factor: number) =>
+      distances.map((dist) => {
+        const speed = (factor * dist) / duration;
+        if (snap.isSpatial && speed < 0) {
+          warnings.push(`Keys ${ai}-${bi}: a spatial speed can't go negative, so the anticipation was dropped.`);
+          return 0;
+        }
+        return speed === 0 ? 0 : speed; // no -0
+      });
+    const outSpeeds = speeds(y1 / x1);
+    const inSpeeds = speeds((1 - y2) / (1 - x2));
+    sideFor(ai).out = outSpeeds.map((speed) => ({ speed, influence: x1 * 100 }));
+    sideFor(bi).in = inSpeeds.map((speed) => ({ speed, influence: (1 - x2) * 100 }));
+  }
+
+  return {
+    sides: [...sides.values()].sort((p, q) => p.key - q.key),
+    segments,
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function easeMatches(expected: EaseEnd, actual: EaseEnd | undefined): boolean {
+  if (!actual) return false;
+  const speedTol = Math.max(1e-3, Math.abs(expected.speed) * 1e-3);
+  return (
+    Math.abs(expected.speed - actual.speed) <= speedTol &&
+    Math.abs(clampInfluenceValue(expected.influence) - actual.influence) <= 0.01
+  );
+}
+
+/** Read-back check for curve easing, with a relative tolerance on speed. */
+export function curveEaseMismatches(sides: EaseSides[], afterSnapshot: unknown): ReceiptMismatch[] {
+  const snap = afterSnapshot as PropertySnapshot | null;
+  const mismatches: ReceiptMismatch[] = [];
+  const byIndex = new Map((snap?.keyframes ?? []).map((k) => [k.keyIndex, k]));
+  for (const side of sides) {
+    const kf = byIndex.get(side.key);
+    for (const which of ["in", "out"] as const) {
+      const expected = side[which];
+      if (!expected) continue;
+      const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
+      const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
+      const path = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
+      if (!ok) {
+        mismatches.push({
+          path,
+          expected: { interp: "bezier", ease: expected },
+          actual: { interp, ease: actualList },
+          message: `Expected ${path} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`,
+        });
+      }
+    }
+  }
+  return mismatches;
 }
 
 // ---------- 2. ae_set_text ----------
@@ -329,7 +532,7 @@ export const animateTools: ToolDefinition<any>[] = [
     name: "ae_set_keyframe_ease",
     description:
       "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. " +
-      "Supports presets ('easy_ease', 'linear', 'hold') or explicit `{ in: { speed, influence }, out: { speed, influence } }`, automatically matching the property's temporal ease dimension count. " +
+      "Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeSetKeyframeEaseSchema,
     handler: async (args, ctx) => {
@@ -360,16 +563,29 @@ export const animateTools: ToolDefinition<any>[] = [
             toolName: "ae_set_keyframe_ease",
           });
 
+          // A curve becomes per-key sides here, from the keys' times and values.
+          const curvePlan = isCurveEase(args.ease)
+            ? curveToSides(beforeSnap.result, args.keys, args.ease.curve)
+            : null;
+
           const writeResp = await ctx.bridge.evalRaw<Record<string, unknown>>({
             id: opId,
-            script: buildJsxCall("setKeyframeEase", {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-              keys: args.keys,
-              ease: args.ease,
-              expect: effectiveExpect,
-            }),
+            script: curvePlan
+              ? buildJsxCall("setKeyframeEaseSides", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  sides: curvePlan.sides,
+                  expect: effectiveExpect,
+                })
+              : buildJsxCall("setKeyframeEase", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  keys: args.keys,
+                  ease: args.ease,
+                  expect: effectiveExpect,
+                }),
             label,
             mutates: true,
             toolName: "ae_set_keyframe_ease",
@@ -399,12 +615,22 @@ export const animateTools: ToolDefinition<any>[] = [
             after: afterSnap.result,
             expected: easeCheck?.expected,
             actualForExpected: easeCheck?.actual,
+            customMismatches: curvePlan
+              ? curveEaseMismatches(curvePlan.sides, afterSnap.result)
+              : undefined,
           });
 
           return {
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
+            ...(curvePlan
+              ? {
+                  curve: args.ease,
+                  segments: curvePlan.segments,
+                  ...(curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}),
+                }
+              : {}),
             checkpoint,
             receipt,
           };

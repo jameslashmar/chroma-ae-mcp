@@ -38,14 +38,14 @@ const BLUE_PNG =
 const token = readToken();
 let seq = 0;
 
-function postMcp(body) {
+function postMcp(body, route = "/mcp") {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         host: DEFAULT_HOST,
         port: Number(process.env.CHROMA_AE_MCP_PORT) || DEFAULT_PORT,
         method: "POST",
-        path: "/mcp",
+        path: route,
         timeout: 600_000,
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       },
@@ -158,6 +158,33 @@ async function main() {
 
   r = await call("ae_motion_review", { comp_id: COMP });
   check("ae_motion_review (after)", r.ok && r.counts?.medium === 0, `${r.counts?.medium} medium, ${r.counts?.low} low`);
+
+  // Ask for an ease the way an agent would, answer it the way the panel does
+  // (POST /ask/answer), collect the answer, and apply the curve.
+  r = await call("ae_ask_user", {
+    question: "QA smoke: which ease?",
+    kind: "ease",
+    options: [
+      { id: "in_out", label: "Ease in-out", curve: [0.42, 0, 0.58, 1] },
+      { id: "snappy", label: "Snappy", curve: [0.2, 0, 0, 1] },
+    ],
+    wait_seconds: 0,
+  });
+  const askId = r.ask_id;
+  const answered = await postMcp({ id: askId, choice_ids: ["in_out"], curve: [0.42, 0, 0.58, 1] }, "/ask/answer");
+  r = await call("ae_ask_user", { ask_id: askId, wait_seconds: 0 });
+  check(
+    "ae_ask_user",
+    answered?.ok === true && r.status === "answered" && r.chosen?.[0]?.id === "in_out" && r.edited === false,
+    `${r.status}, curve ${JSON.stringify(r.curve)}`
+  );
+
+  r = await call("ae_set_keyframe_ease", { comp_id: COMP, layer: dot, path: ["ADBE Transform Group", "ADBE Position"], ease: { curve: r.curve ?? [0.42, 0, 0.58, 1] }, expect });
+  check(
+    "ae_set_keyframe_ease (curve)",
+    r.applied && r.receipt?.matches === true && r.segments?.length === 2 && r.checkpoint?.status === want("reused"),
+    `segments ${JSON.stringify(r.segments)}; ${cpNote(r)}`
+  );
 
   r = await call("ae_set_text", { comp_id: COMP, layer: { name: "Title" }, text: "Smoke test", style: { fontSize: 40, fillColor: [1, 1, 1] }, expect });
   check("ae_set_text", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));

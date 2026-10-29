@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "../common.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
+import { askTools } from "./ask.js";
 import { dialogsTools } from "./dialogs.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
@@ -15,6 +16,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...animateTools,
   ...framesTools,
   ...motionTools,
+  ...askTools,
   ...aerenderTools,
   ...dialogsTools,
   ...panelsTools,

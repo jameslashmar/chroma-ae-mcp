@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AskStore } from "../asks.js";
 import { BridgeError, type HostTransport } from "../host.js";
 import { QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
@@ -73,6 +74,8 @@ export interface ToolContext {
   cep?: CepBridge;
   /** Server settings (auto checkpoints). Without it, the defaults apply. */
   settings?: SettingsStore;
+  /** Questions for the user, shown in the panel. Only the panel-hosted MCP has it. */
+  asks?: AskStore;
 }
 
 export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {

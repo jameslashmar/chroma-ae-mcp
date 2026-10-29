@@ -63,7 +63,7 @@ Everything else stays in `ae_run_jsx`.
 | Capability | Status | Priority | Borrow from |
 |---|---|---|---|
 | Set a value, keyframes or an expression, with read-back | ✅ `ae_set_property` | (done) | |
-| **Keyframe easing**: temporal ease (speed and influence), spatial tangents, interpolation per key, roving | 🟡 the trap-prone part | **P1** | Engine-Room `keyframes.jsx` (`set_temporal_ease`, `set_spatial_tangents`, `set_interpolation`); kumo `operations/keyframe.ts` |
+| **Keyframe easing**: temporal ease (speed and influence), spatial tangents, interpolation per key, roving | ✅ `ae_set_keyframe_ease`: presets, explicit speed and influence, or a CSS cubic-bezier `curve` turned into speed and influence per segment (path length on spatial properties; matched sampled motion to within 0.01% on AE 26.2.1). Spatial tangents and roving are still 🟡. | (done) | Engine-Room `keyframes.jsx` (`set_temporal_ease`, `set_spatial_tangents`, `set_interpolation`); kumo `operations/keyframe.ts` |
 | Remove keyframes (a range or all), and read keyframes with easing | 🟡 | P2 | Engine-Room `remove_keyframe`, `get_keyframes` |
 | **Expression validation**: force-evaluate and report expression errors per property | 🟡 (JSX can force-evaluate each property and read `expressionError`; nothing does it for a whole comp yet) | **P1** | JUNKDOGE `plugin/jsx/templates/validate_expressions.jsx` (`ae_validateExpressions`) |
 | Create layers (solid, null, adjustment, text, shape, camera, light, precomp, footage) | 🟡 | P2 | One `ae_create_layer` covering every type, modelled on Engine-Room's `create_*_layer` ops |
@@ -134,6 +134,7 @@ Everything else stays in `ae_run_jsx`.
 | Shot versioning: swap a shot's footage for the latest version and log the change | P2 | Builds on replace/relink, plus the Premiere naming convention. |
 | Premiere round trip: send a comp to Premiere, bring renders back | P3 | `premiere-pro-mcp` already has the AE handoff tools; pair with them. |
 | House style / brand checks (fonts, colours, safe areas) | P3 | Engine-Room `get_house_style` and `set_house_style` is the model. Chroma brand tokens come from the `chroma-brand-guidelines` skill. |
+| **Ask the user in the panel** (`ae_ask_user`): buttons, pictures per option, or ease curves with a moving preview and draggable handles | ✅ (done) | Choices are shown rather than described. The answer goes straight into a tool call (a curve into `ae_set_keyframe_ease`). Questions live in the service; the panel polls `/ask`. |
 
 ## Proposed P1 slice (v0.2)
 
