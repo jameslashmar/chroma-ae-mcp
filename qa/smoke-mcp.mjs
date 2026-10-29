@@ -200,6 +200,41 @@ async function main() {
   r = await call("ae_remove_effect", { comp_id: COMP, layer: bg, effect: { index: 1 }, expect });
   check("ae_remove_effect", r.applied && r.receipt?.matches === true && r.removed?.matchName === "ADBE Gaussian Blur 2", `removed ${r.removed?.name}`);
 
+  // Track the Dot's right edge for a few frames (its middle is flat), then
+  // write the track to a null.
+  r = await call("ae_track_point", { comp_id: COMP, point: [110, 240], end: 0.4, apply: { null_name: "Smoke Track", expect } });
+  check(
+    "ae_track_point",
+    r.ok && r.frames_tracked === r.frames_requested && r.applied && r.receipt?.matches === true && fs.existsSync(String(r.preview_path)),
+    `${r.frames_tracked}/${r.frames_requested} frames, min confidence ${r.min_confidence}, null ${r.null?.name}`
+  );
+  await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: remove track null",
+    expect: { ...expect, comp_id: COMP },
+    code: `app.project.itemByID(${COMP}).layer("Smoke Track").remove(); return 0;`,
+  });
+
+  // A green screen plate in its own comp: key it, and the check must measure it.
+  const plate = await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: green plate",
+    expect,
+    code: [
+      'var k = app.project.items.addComp("Smoke Key", 320, 180, 1, 1, 25);',
+      'k.layers.addSolid([0.1, 0.72, 0.22], "Screen", 320, 180, 1);',
+      'k.layers.addSolid([0.85, 0.65, 0.55], "Subject", 120, 100, 1);',
+      'var p = app.project.items.addComp("Smoke Key Test", 320, 180, 1, 1, 25); p.layers.add(k);',
+      "return p.id;",
+    ].join("\n"),
+  });
+  r = await call("ae_key_greenscreen", { comp_id: plate.result, layer: { index: 1 }, clip_black: 20, expect });
+  check(
+    "ae_key_greenscreen",
+    r.ok && r.applied && r.receipt?.matches === true && r.screen_detected?.kind === "green" && r.metrics && r.metrics.screen_left_pct < 1,
+    `verdict ${r.verdict}, screen left ${r.metrics?.screen_left_pct}%, holes ${r.metrics?.holes_pct}%`
+  );
+
   r = await call("ae_set_text", { comp_id: COMP, layer: { name: "Title" }, text: "Smoke test", style: { fontSize: 40, fillColor: [1, 1, 1] }, expect });
   check("ae_set_text", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));
 

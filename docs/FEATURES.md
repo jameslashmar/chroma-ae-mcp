@@ -1,6 +1,6 @@
 # Feature list and gap analysis
 
-Last updated: 2026-10-27, after the v0.1 live smoke test.
+Last updated: 2026-10-29: curve easing, ask the user, effects and presets, brief and taste, point tracking, green screen keying.
 
 This file answers two questions: what we have, and what to add next. For the things to add, it also says what to borrow from the community AE MCP servers we surveyed. Every source repo is **MIT**. Borrowed code keeps its notice in `ATTRIBUTION.md`, and each borrowed file says which file it came from.
 
@@ -107,6 +107,8 @@ Everything else stays in `ae_run_jsx`.
 | Motion graph of one property: value and speed over time, easing per keyframe pair, overshoot | ✅ `ae_motion_graph` (samples with `valueAtTime`, so expressions count) | (done) | Our own. |
 | **Motion review of a whole comp**: what an animator would flag, with fixes | ✅ `ae_motion_review`. It covers linear moves, starts and stops at full speed, speed jolts at a key, overshoot (info), and keys between frames. Most findings carry a ready `ae_set_keyframe_ease` easy-ease call, so the agent can review, fix (with the user's OK) and review again. Expression-driven properties are sampled past their last key, so a settle isn't called a dead stop. | (done) | Our own. Next: roving middle keys (the easy-ease fix leaves a slight speed dip at them), frame and safe-area bounds. |
 | Match to a reference frame | ❌ | P3 | a-y-ibrahim `match-reference` |
+| **Point tracking** | ✅ `ae_track_point`: NCC pattern matching with sub-pixel refinement on frames AE renders, adapting the pattern below 80% confidence like AE's tracker; stops when the point is lost; optional null with one key per frame. On a 75-frame eased curve: worst error 0.036 px, about 250 ms a frame (AE 26.2.1). AE's own Track Motion can't be driven from scripts, and no outside tool is used (the user's rule). | (done) | Our own. |
+| **Green screen keying with a check** | ✅ `ae_key_greenscreen`: detects the screen colour, applies Keylight, Key Cleaner and Advanced Spill Suppressor (Ultra: Standard crushed a navy subject's blue, measured), then measures screen left, holes, spill and recoloured subject against frames rendered before the key, with ready `ae_set_effect` fixes. Roto Brush can't be scripted; rough masks for non-screen shots were ruled out by the user. | (done) | Our own. |
 
 ## 7. Audio
 

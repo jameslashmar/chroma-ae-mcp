@@ -7,9 +7,11 @@ import { dialogsTools } from "./dialogs.js";
 import { effectsTools } from "./effects.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
+import { keyTools } from "./key.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
+import { trackTools } from "./track.js";
 
 // Each tool group in this folder exports an array of tools; list it here.
 export const extTools: ToolDefinition<any>[] = [
@@ -24,4 +26,6 @@ export const extTools: ToolDefinition<any>[] = [
   ...aerenderTools,
   ...dialogsTools,
   ...panelsTools,
+  ...trackTools,
+  ...keyTools,
 ];

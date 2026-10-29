@@ -491,6 +491,8 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_set_effect",
   "ae_remove_effect",
   "ae_apply_preset",
+  "ae_track_point",
+  "ae_key_greenscreen",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

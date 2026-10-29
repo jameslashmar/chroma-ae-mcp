@@ -5,6 +5,7 @@
 //   whether a script can set it
 // - addEffect / setEffect / removeEffect / applyPreset (guarded writes)
 // - presetFolders (read): where AE keeps its .ffx animation presets
+// - keyLayerInfo (read) / applyGreenScreenKey (guarded write): ae_key_greenscreen
 //
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or ternaries.
@@ -406,6 +407,121 @@
         preset: f.fsName,
         layers_added: c.numLayers - before
       };
+    });
+  };
+
+  // ---------- Green screen keying (ae_key_greenscreen) ----------
+  // Keylight's parameters are addressed by match name: several share a
+  // display name (two "Replace Method", two "Saturation").
+
+  var KEYLIGHT = "Keylight 906";
+  var KEY_CLEANER = "ADBE KeyCleaner";
+  var SPILL = "ADBE Spill2";
+  var KEYLIGHT_PARAMS = {
+    screen_gain: "Keylight 906-0005",
+    screen_balance: "Keylight 906-0006",
+    clip_black: "Keylight 906-0012",
+    clip_white: "Keylight 906-0013",
+    screen_shrink_grow: "Keylight 906-0015",
+    screen_softness: "Keylight 906-0016"
+  };
+
+  function effectByMatchName(parade, matchName) {
+    for (var i = 1; i <= parade.numProperties; i++) {
+      if (parade.property(i).matchName === matchName) return parade.property(i);
+    }
+    return null;
+  }
+
+  // Read: the plate layer, its keyer, and any visible layer below it, which
+  // would show through the key and spoil the alpha check.
+  A.keyLayerInfo = function (args) {
+    var c = requireComp(args.comp_id);
+    var l = findLayer(c, args.layer);
+    var parade = effectParade(l);
+    var kl = effectByMatchName(parade, KEYLIGHT);
+    var times = args.times || [];
+    var below = [];
+    for (var i = l.index + 1; i <= c.numLayers; i++) {
+      var x = c.layer(i);
+      var shows = false;
+      try {
+        shows = x.enabled && x.hasVideo && !x.adjustmentLayer && !x.guideLayer;
+      } catch (eShow) {}
+      if (!shows) continue;
+      for (var t = 0; t < times.length; t++) {
+        if (x.activeAtTime(times[t])) {
+          below.push(x.name);
+          break;
+        }
+      }
+    }
+    var keylight = null;
+    if (kl) {
+      keylight = { index: kl.propertyIndex, name: kl.name, enabled: kl.enabled, screen_colour: plainValue(kl.property("Keylight 906-0004").value) };
+      for (var k in KEYLIGHT_PARAMS) {
+        if (KEYLIGHT_PARAMS.hasOwnProperty(k)) keylight[k] = kl.property(KEYLIGHT_PARAMS[k]).value;
+      }
+    }
+    var projectPath = "<unsaved>";
+    if (app.project.file) projectPath = app.project.file.fsName;
+    return {
+      project_path: projectPath,
+      comp: {
+        id: c.id,
+        width: c.width,
+        height: c.height,
+        fps: c.frameRate,
+        workAreaStart: c.workAreaStart,
+        workAreaDuration: c.workAreaDuration
+      },
+      layer: { id: l.id, index: l.index, name: l.name, inPoint: l.inPoint, outPoint: l.outPoint },
+      keylight: keylight,
+      has_key_cleaner: effectByMatchName(parade, KEY_CLEANER) !== null,
+      has_spill_suppressor: effectByMatchName(parade, SPILL) !== null,
+      layers_below_visible: below
+    };
+  };
+
+  // Write: Keylight on the screen colour (reused if the layer has one), plus
+  // Key Cleaner and Advanced Spill Suppressor when asked, in one undo group.
+  A.applyGreenScreenKey = function (args) {
+    assertGuard(args.expect);
+    var c = requireComp(args.comp_id);
+    var l = findLayer(c, args.layer);
+    var parade = effectParade(l);
+    var col = args.screen_color;
+    if (!(col instanceof Array) || col.length < 3) fail("bad_args", "screen_color must be [r, g, b] in 0..1");
+    return A.withUndo("Chroma AE MCP: key " + l.name, function () {
+      var added = [];
+      var kl = effectByMatchName(parade, KEYLIGHT);
+      if (!kl) {
+        kl = parade.addProperty(KEYLIGHT);
+        added.push(kl.name);
+      }
+      kl.property("Keylight 906-0004").setValue([col[0], col[1], col[2], 1]);
+      for (var k in KEYLIGHT_PARAMS) {
+        if (KEYLIGHT_PARAMS.hasOwnProperty(k) && args[k] !== undefined && args[k] !== null) {
+          kl.property(KEYLIGHT_PARAMS[k]).setValue(args[k]);
+        }
+      }
+      // Adding effects below invalidates `kl` ("Object is invalid", AE 26.2.1).
+      var klIndex = kl.propertyIndex;
+      if (args.cleanup) {
+        if (!effectByMatchName(parade, KEY_CLEANER)) {
+          added.push(parade.addProperty(KEY_CLEANER).name);
+        }
+        var sp = effectByMatchName(parade, SPILL);
+        if (!sp) {
+          sp = parade.addProperty(SPILL);
+          added.push(sp.name);
+        }
+        // Ultra, which uses this Key Color. Standard picks its own and crushed
+        // the blue of a navy subject (82 to 36 of 255, measured on AE 26.2.1).
+        sp.property("ADBE Spill2-0001").setValue(2);
+        sp.property("ADBE Spill2-0003").setValue([col[0], col[1], col[2], 1]);
+      }
+      return { comp_id: c.id, layer_id: l.id, keylight_index: klIndex, added: added };
     });
   };
 

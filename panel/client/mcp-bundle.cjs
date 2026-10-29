@@ -2705,8 +2705,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path15, errorMaps, issueData } = params;
-  const fullPath = [...path15, ...issueData.path || []];
+  const { data, path: path17, errorMaps, issueData } = params;
+  const fullPath = [...path17, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2822,11 +2822,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path15, key) {
+  constructor(parent, value, path17, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path15;
+    this._path = path17;
     this._key = key;
   }
   get path() {
@@ -7182,7 +7182,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path14 = __toESM(require("node:path"), 1);
+var path16 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -8689,14 +8689,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path15 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path17 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path15,
+          path: path17,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path15} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path17} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -10801,10 +10801,356 @@ var framesTools = [
   }
 ];
 
-// src/tools/ext/motion.ts
-var crypto4 = __toESM(require("node:crypto"), 1);
+// src/tools/ext/key.ts
 var fs12 = __toESM(require("node:fs"), 1);
 var path11 = __toESM(require("node:path"), 1);
+function screenLean(r, g, b, dominant, screenLeanValue) {
+  const lean = dominant === 1 ? g - Math.max(r, b) : b - Math.max(r, g);
+  return screenLeanValue > 0 ? lean / screenLeanValue : 0;
+}
+function detectScreenColor(img, minCoverage = 0.1) {
+  const n = img.width * img.height;
+  const pick = (dominant) => {
+    const rs = [];
+    const gs = [];
+    const bs = [];
+    for (let i = 0; i < n; i++) {
+      const j = i * 4;
+      if (img.data[j + 3] < 250) continue;
+      const r = img.data[j] / 255;
+      const g = img.data[j + 1] / 255;
+      const b = img.data[j + 2] / 255;
+      const lean = dominant === 1 ? g - Math.max(r, b) : b - Math.max(r, g);
+      if (lean > 0.15) {
+        rs.push(r);
+        gs.push(g);
+        bs.push(b);
+      }
+    }
+    return { rs, gs, bs, coverage: rs.length / n };
+  };
+  const green = pick(1);
+  const blue = pick(2);
+  const best = green.coverage >= blue.coverage ? { ...green, kind: "green" } : { ...blue, kind: "blue" };
+  if (best.coverage < minCoverage) return null;
+  const median = (v) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  const round = (v) => Math.round(v * 1e3) / 1e3;
+  return { color: [round(median(best.rs)), round(median(best.gs)), round(median(best.bs))], kind: best.kind, coverage: round(best.coverage) };
+}
+function measureKey(before, after, screen, edge = 3) {
+  const { width: w, height: h } = before;
+  if (after.width !== w || after.height !== h) throw new Error("Before and after frames differ in size");
+  const dominant = screen[1] >= screen[2] ? 1 : 2;
+  const sLean = dominant === 1 ? screen[1] - Math.max(screen[0], screen[2]) : screen[2] - Math.max(screen[0], screen[1]);
+  const n = w * h;
+  const cls = new Uint8Array(n);
+  const leanBefore = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    const lean = screenLean(before.data[j] / 255, before.data[j + 1] / 255, before.data[j + 2] / 255, dominant, sLean);
+    leanBefore[i] = lean;
+    if (lean >= 0.7) cls[i] = 1;
+    else if (lean < 0.2 && before.data[j + 3] > 250) cls[i] = 2;
+  }
+  const nearScreen = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (cls[y * w + x] !== 1) continue;
+      for (let dy = -edge; dy <= edge; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -edge; dx <= edge; dx++) {
+          const xx = x + dx;
+          if (xx >= 0 && xx < w) nearScreen[yy * w + xx] = 1;
+        }
+      }
+    }
+  }
+  let screenCount = 0;
+  let screenLeft = 0;
+  let residual = 0;
+  let subject = 0;
+  let holes = 0;
+  let spillB = 0;
+  let spillA = 0;
+  let spillN = 0;
+  let shift = 0;
+  let recoloured = 0;
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    const a = after.data[j + 3] / 255;
+    if (cls[i] === 1) {
+      screenCount++;
+      residual += a;
+      if (a > 0.05) screenLeft++;
+    } else if (cls[i] === 2 && !nearScreen[i]) {
+      subject++;
+      if (a < 0.95) holes++;
+      if (a > 0.5) {
+        spillB += Math.max(0, leanBefore[i] * sLean);
+        spillA += Math.max(0, screenLean(after.data[j] / 255, after.data[j + 1] / 255, after.data[j + 2] / 255, dominant, 1));
+        const dr = Math.abs(after.data[j] - before.data[j]);
+        const dg = Math.abs(after.data[j + 1] - before.data[j + 1]);
+        const db = Math.abs(after.data[j + 2] - before.data[j + 2]);
+        shift += (dr + dg + db) / (3 * 255);
+        if (Math.max(dr, dg, db) / 255 > 0.12) recoloured++;
+        spillN++;
+      }
+    }
+  }
+  const pct = (v, of) => of > 0 ? Math.round(v / of * 1e4) / 100 : 0;
+  const r4 = (v) => Math.round(v * 1e4) / 1e4;
+  return {
+    screen_pixels_pct: pct(screenCount, n),
+    subject_pixels_pct: pct(subject, n),
+    screen_left_pct: pct(screenLeft, screenCount),
+    screen_residual_alpha: screenCount ? r4(residual / screenCount) : 0,
+    holes_pct: pct(holes, subject),
+    spill_before: spillN ? r4(spillB / spillN) : 0,
+    spill_after: spillN ? r4(spillA / spillN) : 0,
+    subject_color_shift: spillN ? r4(shift / spillN) : 0,
+    recoloured_pct: pct(recoloured, spillN)
+  };
+}
+function worstMetrics(all) {
+  const max = (k) => Math.max(...all.map((m) => m[k]));
+  return {
+    screen_pixels_pct: Math.min(...all.map((m) => m.screen_pixels_pct)),
+    subject_pixels_pct: Math.min(...all.map((m) => m.subject_pixels_pct)),
+    screen_left_pct: max("screen_left_pct"),
+    screen_residual_alpha: max("screen_residual_alpha"),
+    holes_pct: max("holes_pct"),
+    spill_before: max("spill_before"),
+    spill_after: max("spill_after"),
+    subject_color_shift: max("subject_color_shift"),
+    recoloured_pct: max("recoloured_pct")
+  };
+}
+function keyAdvice(m, kl, target) {
+  const findings = [];
+  const fix = (param, value) => ({
+    tool: "ae_set_effect",
+    args: {
+      comp_id: target.comp_id,
+      layer: { id: target.layer_id },
+      effect: { index: kl.index },
+      params: [{ param, value: Math.round(value * 10) / 10 }],
+      expect: target.expect
+    }
+  });
+  if (m.screen_left_pct >= 0.5) {
+    const next = Math.min(kl.clip_white - 5, kl.clip_black + (m.screen_left_pct > 5 ? 20 : 10));
+    findings.push({
+      issue: "screen_left",
+      message: `${m.screen_left_pct}% of the screen is still visible (mean alpha ${m.screen_residual_alpha}). Raising Clip Black from ${kl.clip_black} to ${next} pushes it out.`,
+      fix: fix("Keylight 906-0012", next)
+    });
+  }
+  if (m.holes_pct >= 0.5) {
+    const next = Math.max(kl.clip_black + 5, kl.clip_white - (m.holes_pct > 5 ? 20 : 10));
+    findings.push({
+      issue: "holes",
+      message: `${m.holes_pct}% of the subject is see-through. Lowering Clip White from ${kl.clip_white} to ${next} fills it in; if the subject itself is greenish, lower Screen Gain instead.`,
+      fix: fix("Keylight 906-0013", next)
+    });
+  }
+  if (m.spill_after > 0.05) {
+    findings.push({
+      issue: "spill",
+      message: `The subject still leans to the screen colour (spill ${m.spill_after}, ${m.spill_before} before). Raise Suppression on Advanced Spill Suppressor.`
+    });
+  }
+  if (m.subject_color_shift > 0.06 || m.recoloured_pct > 2) {
+    findings.push({
+      issue: "color_shift",
+      message: `The key recoloured ${m.recoloured_pct}% of the subject (mean shift ${m.subject_color_shift} per channel). Despill takes the screen colour out of anything greenish (or bluish) on the subject; compare in the preview, and if a prop or costume changed, set Keylight's Despill Bias to that colour or mask the area.`
+    });
+  }
+  return { verdict: findings.length === 0 ? "clean" : "needs_work", findings };
+}
+function keyPreview(pairs, tile = 480) {
+  const fit = fitWithin(pairs[0].before.width, pairs[0].before.height, tile);
+  const gap = 6;
+  const out = createCanvas(fit.width * 2 + gap * 3, (fit.height + gap) * pairs.length + gap, [24, 24, 24, 255]);
+  pairs.forEach((p, row) => {
+    const y = gap + row * (fit.height + gap);
+    blit(out, resizeArea(p.before, fit.width, fit.height), gap, y);
+    blit(out, flattenOnChecker(resizeArea(p.after, fit.width, fit.height), 8, 90, 60), gap * 2 + fit.width, y);
+  });
+  return out;
+}
+function keyTimes(info) {
+  const fps = info.comp.fps > 0 ? info.comp.fps : 25;
+  const start = Math.max(info.layer.inPoint, info.comp.workAreaStart);
+  const end = Math.min(info.layer.outPoint, info.comp.workAreaStart + info.comp.workAreaDuration) - 1 / fps;
+  if (end < start) return [Math.round(start * fps) / fps];
+  const snap = (t) => Math.round(t * fps) / fps;
+  return [.../* @__PURE__ */ new Set([snap(start), snap((start + end) / 2), snap(end)])];
+}
+var AeKeyGreenScreenSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.describe("The plate layer to key."),
+  times: external_exports.array(external_exports.number().min(0)).min(1).max(5).optional().describe("Frames to analyse and check, in seconds. Default: start, middle and end of the layer within the work area."),
+  screen_color: external_exports.array(external_exports.number().min(0).max(1)).length(3).optional().describe("Screen colour [r, g, b] in 0..1. Default: detected from the plate."),
+  clip_black: external_exports.number().min(0).max(100).optional().describe("Keylight Clip Black: raise it when screen is left behind."),
+  clip_white: external_exports.number().min(0).max(100).optional().describe("Keylight Clip White: lower it when the subject has holes."),
+  screen_gain: external_exports.number().min(0).max(200).optional().describe("Keylight Screen Gain (default 100)."),
+  screen_balance: external_exports.number().min(0).max(100).optional(),
+  screen_softness: external_exports.number().min(0).max(100).optional(),
+  screen_shrink_grow: external_exports.number().min(-100).max(100).optional(),
+  cleanup: external_exports.boolean().optional().describe("Also add Key Cleaner and Advanced Spill Suppressor (default true)."),
+  check_only: external_exports.boolean().optional().describe("Only measure the current key; changes nothing."),
+  expect: ExpectSchema.optional().describe("Required unless check_only.")
+}).refine((v) => v.check_only === true || v.expect !== void 0, { message: "Keying needs expect; pass check_only to only measure." });
+var beforeFrames = /* @__PURE__ */ new Map();
+var beforeKey = (compId, layerId, t) => `${compId}:${layerId}:${t.toFixed(4)}`;
+async function queued(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+var KEYLIGHT_ARG_KEYS = ["clip_black", "clip_white", "screen_gain", "screen_balance", "screen_softness", "screen_shrink_grow"];
+var keyTools = [
+  {
+    name: "ae_key_greenscreen",
+    description: "Key a green or blue screen plate with AE's own Keylight (1.2), plus Key Cleaner and Advanced Spill Suppressor, in one undo step guarded by `expect`; then CHECK the key. Frames rendered before keying tell screen from subject (the screen colour is detected from them unless given); frames rendered after are measured: `screen_left_pct` (screen still visible), `holes_pct` (see-through subject), `spill_after` (screen colour on the subject). The result has `verdict`, `findings` with ready ae_set_effect fixes (apply them with the user's OK, then call again with check_only), and `preview_path`: before and after over a checkerboard, one row per frame. Look at it. A layer that already has Keylight is re-tuned, not keyed twice. The check needs the plate to be the lowest visible layer (precomp it otherwise); without frames from before the key (another session, or a key made by hand) only the preview is returned. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeKeyGreenScreenSchema,
+    handler: async (args, ctx) => {
+      const opId = ctx.bridge.newOpId();
+      const framesDir = defaultFramesDir();
+      fs12.mkdirSync(framesDir, { recursive: true });
+      const label = `ae_key_greenscreen(${args.comp_id})`;
+      const readInfo = async (times, suffix) => (await ctx.bridge.evalRaw({
+        id: `${opId}_${suffix}`,
+        script: buildJsxCall("keyLayerInfo", { comp_id: args.comp_id, layer: args.layer, times }),
+        label: `${label} ${suffix}`,
+        mutates: false,
+        toolName: "ae_key_greenscreen"
+      })).result;
+      const capture = async (t, i) => (await captureCompFrame({ ctx, opId, compId: args.comp_id, time: t, frameIndex: i, framesDir, toolName: "ae_key_greenscreen" })).path;
+      const run = await queued(ctx, label, opId, async () => {
+        const first = await readInfo(args.times, "info");
+        const times = args.times ?? keyTimes(first);
+        const info = args.times ? first : await readInfo(times, "info2");
+        const layerId = info.layer.id;
+        const before = [];
+        for (let i = 0; i < times.length; i++) {
+          const k = beforeKey(args.comp_id, layerId, times[i]);
+          if (!info.keylight && !args.check_only) {
+            const p = await capture(times[i], i);
+            beforeFrames.set(k, p);
+            before.push(p);
+          } else {
+            before.push(beforeFrames.get(k) ?? null);
+          }
+        }
+        let screen = args.screen_color ?? null;
+        let detected = null;
+        if (!screen && info.keylight) screen = info.keylight.screen_colour.slice(0, 3);
+        if (!screen && before[0]) {
+          detected = detectScreenColor(decodePngFile(before[0]));
+          screen = detected?.color ?? null;
+        }
+        let write = null;
+        if (!args.check_only) {
+          if (!screen) {
+            return { error: "no_screen", times };
+          }
+          const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+          const guard = await verifyTargetGuard(ctx, expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_key_greenscreen");
+          const params = {};
+          for (const k of KEYLIGHT_ARG_KEYS) if (args[k] !== void 0) params[k] = args[k];
+          const res = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("applyGreenScreenKey", {
+              comp_id: args.comp_id,
+              layer: { id: layerId },
+              screen_color: screen,
+              cleanup: args.cleanup ?? true,
+              expect,
+              ...params
+            }),
+            label: `${label} key`,
+            mutates: true,
+            toolName: "ae_key_greenscreen"
+          });
+          const after2 = await readInfo(times, "after");
+          write = { checkpoint, result: res.result, after: after2 };
+        }
+        const after = [];
+        for (let i = 0; i < times.length; i++) after.push(await capture(times[i], times.length + i));
+        const finalInfo = write?.after ?? info;
+        return { times, before, after, screen, detected, write, info: finalInfo };
+      });
+      if ("error" in run) {
+        return {
+          ok: false,
+          error: "no_screen",
+          message: "No green or blue screen covers at least 10% of the plate. Pass screen_color, or check that the layer is the plate."
+        };
+      }
+      const kl = run.info.keylight;
+      const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
+      const previewPath = path11.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+      fs12.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+      const below = run.info.layers_below_visible;
+      const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
+      const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before, p.after, run.screen)) : [];
+      const worst = perFrame.length ? worstMetrics(perFrame) : null;
+      const target = {
+        comp_id: args.comp_id,
+        layer_id: run.info.layer.id,
+        expect: { project_path: run.info.project_path, comp_id: args.comp_id }
+      };
+      const advice = worst && kl ? keyAdvice(worst, kl, target) : null;
+      let receipt;
+      if (run.write) {
+        const mismatches = [];
+        if (!kl) {
+          mismatches.push({ path: "keylight", expected: "present", actual: null, message: "No Keylight on the layer after keying" });
+        } else {
+          compareValues([...run.screen, 1], kl.screen_colour, "keylight.screen_colour", mismatches);
+          for (const k of KEYLIGHT_ARG_KEYS) if (args[k] !== void 0) compareValues(args[k], kl[k], `keylight.${k}`, mismatches);
+        }
+        if ((args.cleanup ?? true) && !(run.info.has_key_cleaner && run.info.has_spill_suppressor)) {
+          mismatches.push({ path: "cleanup", expected: "Key Cleaner and Advanced Spill Suppressor", actual: run.info, message: "Cleanup effects missing after keying" });
+        }
+        receipt = buildReceipt({ before: null, after: run.info, customMismatches: mismatches });
+      }
+      let note;
+      if (below.length > 0) note = `Layers below the plate show through (${below.join(", ")}), so the alpha can't be measured; precomp the plate or check the preview.`;
+      else if (!canMeasure) note = "No frames from before the key are kept for this layer (a key made by hand or in another session), so only the preview is returned.";
+      return {
+        ok: true,
+        applied: run.write !== null,
+        layer: run.info.layer,
+        times: run.times,
+        screen_color: run.screen,
+        ...run.detected ? { screen_detected: { kind: run.detected.kind, coverage: run.detected.coverage } } : {},
+        keylight: kl,
+        ...run.write ? { added: run.write.result.added, checkpoint: run.write.checkpoint, receipt } : {},
+        metrics: worst,
+        per_frame: perFrame.length > 1 ? perFrame : void 0,
+        verdict: advice?.verdict ?? "unchecked",
+        findings: advice?.findings ?? [],
+        ...note ? { note } : {},
+        preview_path: previewPath
+      };
+    }
+  }
+];
+
+// src/tools/ext/motion.ts
+var crypto4 = __toESM(require("node:crypto"), 1);
+var fs13 = __toESM(require("node:fs"), 1);
+var path12 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -11177,14 +11523,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, path15, target, taste) {
+function reviewProperty(s, analysis, path17, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path15 }
+    property: { name: s.property.name, path: path17 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys) => ({
@@ -11192,7 +11538,7 @@ function reviewProperty(s, analysis, path15, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path15,
+      path: path17,
       keys,
       ease: easeArg,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
@@ -11332,7 +11678,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs12.mkdirSync(framesDir, { recursive: true });
+      fs13.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -11390,11 +11736,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path11.join(
+      const sheetPath = path12.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs12.writeFileSync(sheetPath, encodePng(sheet));
+      fs13.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -11440,12 +11786,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs12.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path11.join(
+      fs13.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path12.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs12.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs13.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -11549,8 +11895,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs13 = __toESM(require("node:fs"), 1);
-var path12 = __toESM(require("node:path"), 1);
+var fs14 = __toESM(require("node:fs"), 1);
+var path13 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -11584,7 +11930,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path12.join(defaultDataDir(), "ui");
+  return path13.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -11779,7 +12125,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs13.mkdirSync(outDir, { recursive: true });
+        fs14.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -11813,8 +12159,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs14 = __toESM(require("node:fs"), 1);
-var path13 = __toESM(require("node:path"), 1);
+var fs15 = __toESM(require("node:fs"), 1);
+var path14 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -12092,7 +12438,9 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_add_effect",
   "ae_set_effect",
   "ae_remove_effect",
-  "ae_apply_preset"
+  "ae_apply_preset",
+  "ae_track_point",
+  "ae_key_greenscreen"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -12198,7 +12546,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs14.existsSync(actualProjectPath)) {
+          if (!fs15.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -12207,17 +12555,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path13.dirname(actualProjectPath);
-          const ext = path13.extname(actualProjectPath) || ".aep";
-          const baseName = path13.basename(actualProjectPath, ext);
-          const checkpointDir = path13.join(projDir, "_mcp_checkpoints");
-          fs14.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path14.dirname(actualProjectPath);
+          const ext = path14.extname(actualProjectPath) || ".aep";
+          const baseName = path14.basename(actualProjectPath, ext);
+          const checkpointDir = path14.join(projDir, "_mcp_checkpoints");
+          fs15.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path13.join(checkpointDir, checkpointFileName);
-          fs14.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs14.statSync(checkpointPath);
+          const checkpointPath = path14.join(checkpointDir, checkpointFileName);
+          fs15.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs15.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -12233,7 +12581,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs14.existsSync(checkpointPath)
+              checkpoint_exists: fs15.existsSync(checkpointPath)
             }
           });
           return {
@@ -12275,9 +12623,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path13.dirname(actualProjectPath);
-      const checkpointDir = path13.join(projDir, "_mcp_checkpoints");
-      if (!fs14.existsSync(checkpointDir)) {
+      const projDir = path14.dirname(actualProjectPath);
+      const checkpointDir = path14.join(projDir, "_mcp_checkpoints");
+      if (!fs15.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -12285,10 +12633,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs14.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs15.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path13.join(checkpointDir, e.name);
-        const stat = fs14.statSync(fullPath);
+        const fullPath = path14.join(checkpointDir, e.name);
+        const stat = fs15.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -12341,7 +12689,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs14.existsSync(args.checkpoint_path)) {
+          if (!fs15.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -12432,6 +12780,344 @@ var receiptsTools = [
   }
 ];
 
+// src/tools/ext/track.ts
+var fs16 = __toESM(require("node:fs"), 1);
+var path15 = __toESM(require("node:path"), 1);
+function toGray(img) {
+  const n = img.width * img.height;
+  const data = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    data[i] = 0.2126 * img.data[j] + 0.7152 * img.data[j + 1] + 0.0722 * img.data[j + 2];
+  }
+  return { width: img.width, height: img.height, data };
+}
+function extractPatch(img, cx, cy, size) {
+  const h = (size - 1) / 2;
+  if (cx - h < 0 || cy - h < 0 || cx + h > img.width - 1 || cy + h > img.height - 1) return null;
+  const data = new Float32Array(size * size);
+  for (let py = 0; py < size; py++) {
+    const y = cy - h + py;
+    const y0 = Math.min(img.height - 2, Math.floor(y));
+    const fy = y - y0;
+    for (let px = 0; px < size; px++) {
+      const x = cx - h + px;
+      const x0 = Math.min(img.width - 2, Math.floor(x));
+      const fx = x - x0;
+      const i = y0 * img.width + x0;
+      const top = img.data[i] * (1 - fx) + img.data[i + 1] * fx;
+      const bottom = img.data[i + img.width] * (1 - fx) + img.data[i + img.width + 1] * fx;
+      data[py * size + px] = top * (1 - fy) + bottom * fy;
+    }
+  }
+  return { width: size, height: size, data };
+}
+function makeTemplate(patch) {
+  const n = patch.data.length;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += patch.data[i];
+  const mean = sum / n;
+  const centred = new Float32Array(n);
+  let sq = 0;
+  for (let i = 0; i < n; i++) {
+    centred[i] = patch.data[i] - mean;
+    sq += centred[i] * centred[i];
+  }
+  return { size: patch.width, centred, norm: Math.sqrt(sq), std: Math.sqrt(sq / n) };
+}
+function subPixel(a, b, c) {
+  const denom = a - 2 * b + c;
+  if (!(denom < 0)) return 0;
+  return Math.max(-0.5, Math.min(0.5, (a - c) / (2 * denom)));
+}
+function matchTemplate(img, tpl, cx, cy, radius) {
+  const size = tpl.size;
+  const h = (size - 1) / 2;
+  const n = size * size;
+  const icx = Math.round(cx);
+  const icy = Math.round(cy);
+  const side = 2 * radius + 1;
+  const scores = new Float32Array(side * side).fill(-2);
+  let best = -2;
+  let bx = 0;
+  let by = 0;
+  for (let dy = -radius; dy <= radius; dy++) {
+    const top = icy + dy - h;
+    if (top < 0 || top + size > img.height) continue;
+    for (let dx = -radius; dx <= radius; dx++) {
+      const left = icx + dx - h;
+      if (left < 0 || left + size > img.width) continue;
+      let sum = 0;
+      let sq = 0;
+      let cross = 0;
+      for (let py = 0; py < size; py++) {
+        const row = (top + py) * img.width + left;
+        const trow = py * size;
+        for (let px = 0; px < size; px++) {
+          const v = img.data[row + px];
+          sum += v;
+          sq += v * v;
+          cross += v * tpl.centred[trow + px];
+        }
+      }
+      const variance = sq - sum * sum / n;
+      const score = variance > 1e-6 && tpl.norm > 0 ? cross / (Math.sqrt(variance) * tpl.norm) : 0;
+      scores[(dy + radius) * side + dx + radius] = score;
+      if (score > best) {
+        best = score;
+        bx = dx;
+        by = dy;
+      }
+    }
+  }
+  if (best <= -2) return null;
+  const at = (dx, dy) => {
+    if (Math.abs(dx) > radius || Math.abs(dy) > radius) return NaN;
+    const s = scores[(dy + radius) * side + dx + radius];
+    return s <= -2 ? NaN : s;
+  };
+  const sx = [at(bx - 1, by), best, at(bx + 1, by)];
+  const sy = [at(bx, by - 1), best, at(bx, by + 1)];
+  const offX = sx.every(Number.isFinite) ? subPixel(sx[0], sx[1], sx[2]) : 0;
+  const offY = sy.every(Number.isFinite) ? subPixel(sy[0], sy[1], sy[2]) : 0;
+  return { x: icx + bx + offX, y: icy + by + offY, score: best };
+}
+var MIN_PATTERN_STD = 3;
+var PointTracker = class {
+  constructor(frame, x, y, opts) {
+    this.opts = opts;
+    const patch = extractPatch(frame, x, y, opts.patchSize);
+    if (!patch) throw new Error("The pattern around that point reaches outside the frame; pick a point further in or use a smaller pattern_size.");
+    this.first = makeTemplate(patch);
+    if (this.first.std < MIN_PATTERN_STD) {
+      throw new Error(
+        `The pattern at that point is almost flat (contrast ${this.first.std.toFixed(1)} of 255), so there is nothing to follow. Pick a corner, a mark or an edge crossing, or use a larger pattern_size.`
+      );
+    }
+    this.current = this.first;
+    this.last = { x, y };
+  }
+  first;
+  current;
+  last;
+  velocity = { x: 0, y: 0 };
+  get contrast() {
+    return this.first.std;
+  }
+  /** The next frame's position, or null when the point is lost. */
+  step(frame) {
+    const px = this.last.x + this.velocity.x;
+    const py = this.last.y + this.velocity.y;
+    const r = this.opts.searchRadius;
+    let pick = matchTemplate(frame, this.first, px, py, r);
+    let adapted = false;
+    if (!pick || pick.score < this.opts.adaptBelow) {
+      const alt = this.current === this.first ? null : matchTemplate(frame, this.current, px, py, r);
+      if (alt && (!pick || alt.score > pick.score)) {
+        pick = alt;
+        adapted = true;
+      }
+    }
+    if (!pick || pick.score < this.opts.minConfidence) return null;
+    this.velocity = { x: pick.x - this.last.x, y: pick.y - this.last.y };
+    this.last = { x: pick.x, y: pick.y };
+    const next = extractPatch(frame, pick.x, pick.y, this.opts.patchSize);
+    if (next && pick.score < this.opts.adaptBelow) {
+      const t = makeTemplate(next);
+      if (t.std >= MIN_PATTERN_STD) this.current = t;
+    }
+    return { x: pick.x, y: pick.y, confidence: pick.score, adapted };
+  }
+};
+function trackTimes(start, end, fps, maxFrames) {
+  const times = [];
+  const first = Math.round(start * fps);
+  const last = Math.round(end * fps);
+  const step = last >= first ? 1 : -1;
+  for (let f = first; step > 0 ? f <= last : f >= last; f += step) {
+    times.push(f / fps);
+    if (times.length >= maxFrames) break;
+  }
+  return times;
+}
+function drawTrackPreview(frame, points, patchSize, lost, maxSize = 960) {
+  const fit = fitWithin(frame.width, frame.height, maxSize);
+  const img = resizeArea(frame, fit.width, fit.height);
+  const k = fit.width / frame.width;
+  const yellow = [255, 214, 0, 255];
+  for (let i = 1; i < points.length; i++) {
+    drawLine(img, points[i - 1].x * k, points[i - 1].y * k, points[i].x * k, points[i].y * k, 2, yellow);
+  }
+  const box = Math.max(4, Math.round(patchSize * k));
+  const p0 = points[0];
+  strokeRect(img, Math.round(p0.x * k - box / 2), Math.round(p0.y * k - box / 2), box, box, 2, [0, 220, 255, 255]);
+  const end = points[points.length - 1];
+  const mark = Math.max(6, Math.round(box / 2));
+  strokeRect(img, Math.round(end.x * k - mark / 2), Math.round(end.y * k - mark / 2), mark, mark, 2, lost ? [255, 60, 60, 255] : [80, 255, 120, 255]);
+  return img;
+}
+var AeTrackPointSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  point: external_exports.array(external_exports.number()).length(2).describe("The feature to follow, [x, y] in comp pixels at the start time. Pick a corner, a mark or an edge crossing, not a flat area."),
+  start: external_exports.number().min(0).optional().describe("Seconds. Default: the work area start."),
+  end: external_exports.number().min(0).optional().describe("Seconds. Default: the work area end. An end before the start tracks backwards."),
+  pattern_size: external_exports.number().int().min(9).max(201).optional().describe("Side of the square pattern in comp pixels (odd). Default 31."),
+  search_radius: external_exports.number().int().min(2).max(300).optional().describe("How far (px) from the predicted position to look each frame. Default 40; raise it for fast motion."),
+  min_confidence: external_exports.number().min(0).max(1).optional().describe("Below this match score (0..1) the point counts as lost and tracking stops. Default 0.6."),
+  apply: external_exports.object({
+    null_name: external_exports.string().min(1).max(200).describe("Name of the new null layer that gets the track as Position keys, one per frame."),
+    expect: ExpectSchema
+  }).optional().describe("Write the track to a new null, in one undo step guarded by `expect`. Without it the tool only measures.")
+});
+var MAX_TRACK_FRAMES = 1e3;
+async function queued2(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+var trackTools = [
+  {
+    name: "ae_track_point",
+    description: "Track one point through a comp, inside the MCP (nothing to install): AE renders each frame and the server follows the pattern around `point` by normalized cross-correlation with sub-pixel refinement, adapting the pattern when confidence drops below 80% as AE's own tracker does. It tracks the comp's rendered image, so layers above the plate (titles, overlays) can get in the way; track in a comp or precomp that shows the plate. Returns the path in comp pixels with a confidence per frame, where the point was lost if it was, and `preview_path`: the first frame with the path drawn (cyan box = pattern, green = end, red = lost). Look at the preview before using the track. With `apply`, the path becomes Position keys on a new null in one undo step (guarded, read back); parent layers to it with ae_run_jsx. Every frame is a render, so long shots take a while. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeTrackPointSchema,
+    handler: async (args, ctx) => {
+      const opId = ctx.bridge.newOpId();
+      const framesDir = defaultFramesDir();
+      fs16.mkdirSync(framesDir, { recursive: true });
+      const patchSize = (args.pattern_size ?? 31) | 1;
+      const opts = {
+        patchSize,
+        searchRadius: args.search_radius ?? 40,
+        minConfidence: args.min_confidence ?? 0.6,
+        adaptBelow: 0.8
+      };
+      const label = `ae_track_point(${args.comp_id})`;
+      const tracked = await queued2(ctx, label, opId, async () => {
+        const compResp = await ctx.bridge.evalRaw({
+          id: `${opId}_comp`,
+          script: buildJsxCall("getComp", { comp_id: args.comp_id }),
+          label: `${label} getComp`,
+          mutates: false,
+          toolName: "ae_track_point"
+        });
+        const comp = compResp.result;
+        const fps = Number(comp.fps) > 0 ? Number(comp.fps) : 25;
+        const start = args.start ?? Number(comp.workAreaStart);
+        const end = args.end ?? Number(comp.workAreaStart) + Number(comp.workAreaDuration) - 1 / fps;
+        const times2 = trackTimes(start, end, fps, MAX_TRACK_FRAMES);
+        let tracker = null;
+        let firstFrame = null;
+        let scale = 1;
+        const points2 = [];
+        let lostAt2 = null;
+        for (let i = 0; i < times2.length; i++) {
+          const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: times2[i], frameIndex: i, framesDir, toolName: "ae_track_point" });
+          const png = decodePngFile(snap.path);
+          const gray = toGray(png);
+          if (i === 0) {
+            firstFrame = png;
+            scale = png.width / Number(comp.width);
+            tracker = new PointTracker(gray, args.point[0] * scale - 0.5, args.point[1] * scale - 0.5, {
+              ...opts,
+              patchSize: Math.max(9, Math.round(patchSize * scale) | 1),
+              searchRadius: Math.max(2, Math.round(opts.searchRadius * scale))
+            });
+            points2.push({ time: times2[0], x: args.point[0], y: args.point[1], confidence: 1, adapted: false });
+          } else {
+            const s = tracker.step(gray);
+            if (!s) {
+              lostAt2 = { time: times2[i], frame: Math.round(times2[i] * fps) };
+            } else {
+              points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
+            }
+          }
+          fs16.rmSync(snap.path, { force: true });
+          if (lostAt2) break;
+        }
+        return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker.contrast };
+      });
+      const { points, lostAt } = tracked;
+      const previewPath = path15.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+      fs16.writeFileSync(
+        previewPath,
+        encodePng(
+          drawTrackPreview(
+            tracked.firstFrame,
+            points.map((p) => ({ x: p.x * tracked.scale - 0.5, y: p.y * tracked.scale - 0.5 })),
+            patchSize * tracked.scale,
+            lostAt !== null
+          )
+        )
+      );
+      const conf = points.slice(1).map((p) => p.confidence);
+      const r2 = (v) => Math.round(v * 100) / 100;
+      const result = {
+        ok: true,
+        comp_id: args.comp_id,
+        start: r2(tracked.start),
+        end: r2(tracked.end),
+        frames_requested: tracked.times.length,
+        frames_tracked: points.length,
+        lost_at: lostAt,
+        mean_confidence: conf.length ? r2(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
+        min_confidence: conf.length ? r2(Math.min(...conf)) : null,
+        adapted_frames: points.filter((p) => p.adapted).length,
+        pattern_contrast: r2(tracked.contrast),
+        preview_path: previewPath,
+        path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r2(p.x), r2(p.y), r2(p.confidence)]),
+        path_format: "[time_s, x_px, y_px, confidence]"
+      };
+      if (!args.apply) return result;
+      if (points.length < 2) {
+        return { ...result, applied: false, message: "Fewer than two frames tracked, so no null was made." };
+      }
+      const expect = { project_path: args.apply.expect.project_path, comp_id: args.apply.expect.comp_id ?? args.comp_id };
+      const times = points.map((p) => p.time);
+      const values = points.map((p) => [p.x, p.y]);
+      const write = await queued2(ctx, `${label} apply`, opId, async () => {
+        const guard = await verifyTargetGuard(ctx, expect, opId);
+        const checkpoint = await autoCheckpoint(ctx, guard, "ae_track_point");
+        const made = await ctx.bridge.evalRaw({
+          id: `${opId}_null`,
+          script: buildJsxCall("createTrackNull", { comp_id: args.comp_id, name: args.apply.null_name, times, values, expect }),
+          label: `${label} create null`,
+          mutates: true,
+          toolName: "ae_track_point"
+        });
+        const after = await ctx.bridge.evalRaw({
+          id: `${opId}_after`,
+          script: buildJsxCall("getKeyframeEase", {
+            comp_id: args.comp_id,
+            layer: { id: made.result.layer_id },
+            path: ["ADBE Transform Group", "ADBE Position"]
+          }),
+          label: `${label} (after)`,
+          mutates: false,
+          toolName: "ae_track_point"
+        });
+        return { checkpoint, made: made.result, after: after.result };
+      });
+      const mismatches = [];
+      const keys = write.after?.keyframes ?? [];
+      if (write.made.numKeys !== points.length) {
+        mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
+      }
+      keys.forEach((k, i) => compareValues(values[i].map(r2), k.value.slice(0, 2).map(r2), `keyframes[${i + 1}].value`, mismatches));
+      const receipt = buildReceipt({ before: null, after: { null: write.made, keys_read: keys.length }, customMismatches: mismatches });
+      return {
+        ...result,
+        applied: true,
+        null: { id: write.made.layer_id, index: write.made.layer_index, name: write.made.name, keys: write.made.numKeys },
+        checkpoint: write.checkpoint,
+        receipt
+      };
+    }
+  }
+];
+
 // src/tools/ext/index.ts
 var extTools = [
   ...exploreTools,
@@ -12444,7 +13130,9 @@ var extTools = [
   ...briefTools,
   ...aerenderTools,
   ...dialogsTools,
-  ...panelsTools
+  ...panelsTools,
+  ...trackTools,
+  ...keyTools
 ];
 
 // src/tools/quarantine.ts
@@ -12997,7 +13685,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path14.join(resolvedDataDir, "quarantine.json")
+    path16.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -13010,7 +13698,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path14.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path16.join(resolvedDataDir, "settings.json")),
     asks: new AskStore()
   };
   const log = opts.log;

@@ -102,7 +102,7 @@ Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──�
 
 ---
 
-## Tools (46)
+## Tools (48)
 
 | Group | Tools |
 |---|---|
@@ -111,6 +111,7 @@ Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──�
 | Script | `ae_run_jsx` (read, or guarded write with a receipt) |
 | Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment), `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
 | Effects | `ae_add_effect`, `ae_set_effect` (on/off, rename, parameter values), `ae_remove_effect`, `ae_apply_preset` (.ffx onto one layer), `ae_list_presets` (the user's User Presets and AE's own). Parameters scripts can't set, such as Colorama's Output Cycle, are listed as `settable: false`; a preset saved from AE carries them. |
+| Tracking & keying | `ae_track_point` (a point tracker inside the MCP: AE renders the frames, the server follows the pattern with sub-pixel accuracy and writes the path to a null; within 0.04 px of the true position on a test shot), `ae_key_greenscreen` (Keylight + Key Cleaner + Advanced Spill Suppressor, then a measured check: screen left, holes, spill, recoloured subject, with ready fixes and a before/after preview). Nothing outside AE is installed. |
 | Ask the user | `ae_ask_user`: a question in the panel with buttons, pictures (e.g. a contact sheet per variant), or ease curves the user can preview and reshape by dragging the handles. Waits for the answer. |
 | Context | `ae_brief` (the project's goal, audience, format, feel, references and no-go areas, kept next to the .aep, with questions for what is missing), `ae_taste` (the user's motion preferences across projects; `ae_motion_review` follows them) |
 | Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
