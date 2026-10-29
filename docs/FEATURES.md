@@ -77,8 +77,8 @@ Everything else stays in `ae_run_jsx`.
 
 | Capability | Status | Priority | Borrow from |
 |---|---|---|---|
-| Add or remove an effect, set params by matchName, enable or disable | 🟡 | P2 | Engine-Room `add_effect`, `set_effect_param`, `set_effect_enabled`; kumo `effect.ts` |
-| Apply an animation preset (.ffx) | 🟡 | P3 | a-y-ibrahim `apply-preset`, `search-presets` |
+| Add or remove an effect, set params by matchName, enable or disable | ✅ `ae_add_effect`, `ae_set_effect`, `ae_remove_effect`. Parameters of custom data (Colorama's Output Cycle, the Curves curve) can't be read or set by script ("CUSTOM_VALUE has not been implemented", AE 26.2.1): they are listed `settable: false`. Measured routes in, all inside AE: an expression linking to the same parameter of a hand-set effect (`linkable_by_expression`; the render matched pixel for pixel), a saved .ffx preset, or the effect's own preset menu (Colorama's Use Preset Palette is settable). | (done) | Engine-Room `add_effect`, `set_effect_param`, `set_effect_enabled`; kumo `effect.ts` |
+| Apply an animation preset (.ffx) | ✅ `ae_apply_preset` (selects the target alone, then restores the selection; works without the comp being active), `ae_list_presets` (User Presets of every installed AE version, then AE's own) | (done) | a-y-ibrahim `apply-preset`, `search-presets` |
 | **Text**: set the text, its style (font, size, tracking, leading, fill, stroke), paragraph and box text. TextDocument round-trip traps. | 🟡 | **P1** | kumo `operations/text.ts` (1,099 lines, the most complete); Engine-Room `text.jsx` plus the TextDocument notes in `fragile-areas-ae.md` |
 | Text animators | 🟡 | P3 | Engine-Room `add_text_animator` |
 | Shape layers: add contents, set paths, set shape properties | 🟡 | P2 | Engine-Room `shapes.jsx`; kumo `operations/shape.ts`, `shape-contents.ts` |

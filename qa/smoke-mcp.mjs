@@ -186,6 +186,20 @@ async function main() {
     `segments ${JSON.stringify(r.segments)}; ${cpNote(r)}`
   );
 
+  // Effects on the BG: add, switch off, apply a preset from AE's own folder, remove.
+  const bg = { name: "BG" };
+  r = await call("ae_add_effect", { comp_id: COMP, layer: bg, effect: "ADBE Gaussian Blur 2", params: [{ param: "Blurriness", value: 4 }], expect });
+  check("ae_add_effect", r.applied && r.receipt?.matches === true && r.checkpoint?.status === want("reused"), `${r.effect?.name}, ${r.effect?.params?.length} params`);
+  r = await call("ae_set_effect", { comp_id: COMP, layer: bg, effect: { index: 1 }, enabled: false, expect });
+  check("ae_set_effect", r.applied && r.receipt?.matches === true && r.effect?.enabled === false, `enabled ${r.effect?.enabled}`);
+  r = await call("ae_list_presets", { filter: "Colorize", source: "app", limit: 1 });
+  const smokePreset = r.presets?.[0]?.path;
+  check("ae_list_presets", r.count > 0 && /\.ffx$/i.test(String(smokePreset)), `${r.count} match, ${r.scanned} scanned`);
+  r = await call("ae_apply_preset", { comp_id: COMP, layer: bg, preset_path: smokePreset, expect });
+  check("ae_apply_preset", r.applied && r.receipt?.matches === true && r.effects_added?.length >= 1, `added ${(r.effects_added ?? []).map((e) => e.name).join(", ")}`);
+  r = await call("ae_remove_effect", { comp_id: COMP, layer: bg, effect: { index: 1 }, expect });
+  check("ae_remove_effect", r.applied && r.receipt?.matches === true && r.removed?.matchName === "ADBE Gaussian Blur 2", `removed ${r.removed?.name}`);
+
   r = await call("ae_set_text", { comp_id: COMP, layer: { name: "Title" }, text: "Smoke test", style: { fontSize: 40, fillColor: [1, 1, 1] }, expect });
   check("ae_set_text", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));
 

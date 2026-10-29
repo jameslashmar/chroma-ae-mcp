@@ -34,6 +34,8 @@ Exception: an edit your task names explicitly.
 - **Read back in a separate evalScript.** A read in the same script as the write returns stale values.
 - **`saveFrameToPng` writes asynchronously.** Wait for the file on the Node side (see `waitForFreshPng` in `tools/render.ts`).
 - **`app.executeCommand` DOES work through CEP for Window-menu commands** (measured 2026-10-27, AE 26.0: `findMenuCommandId("Effects & Presets")` = 3718 reopened the panel). This contradicts Engine-Room's note. Window commands **toggle**, so check the state first. Other commands are untested.
+- **Effect section headers share names with parameters** (Colorama's "Output Cycle", Fractal Noise's "Transform"): `property(name)` can return the valueless header. Address effect parameters by match name.
+- **Custom-data parameters** (`PropertyValueType.CUSTOM_VALUE`, e.g. Colorama's Output Cycle) can't be read or set by script ("has not been implemented"). An expression linking to the same parameter on another effect does work, and so do presets.
 - **Never suppress AE dialogs** (no `app.beginSuppressDialogs`). Jay's rule: popups are read and answered through `ae_dialogs` / `ae_dialog_respond`, never hidden.
 - **Node code that runs in the panel** (anything reachable from `panel-entry.ts`) must work on **Node 17.7.2**: no `fetch`, no `Headers`, no `AbortSignal.timeout`, no `structuredClone`, no native modules. Pure-JS deps only.
 - **Child processes:** `windowsHide: true` always. Never block the eval queue waiting on a long process; run it as a background job with a status tool.

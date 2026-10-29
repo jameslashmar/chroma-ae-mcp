@@ -2705,8 +2705,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path13, errorMaps, issueData } = params;
-  const fullPath = [...path13, ...issueData.path || []];
+  const { data, path: path14, errorMaps, issueData } = params;
+  const fullPath = [...path14, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2822,11 +2822,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path13, key) {
+  constructor(parent, value, path14, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path13;
+    this._path = path14;
     this._key = key;
   }
   get path() {
@@ -7182,7 +7182,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path12 = __toESM(require("node:path"), 1);
+var path13 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -8662,14 +8662,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path13 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path14 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path13,
+          path: path14,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path13} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path14} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -9248,6 +9248,282 @@ var askTools = [
   }
 ];
 
+// src/tools/ext/effects.ts
+var fs7 = __toESM(require("node:fs"), 1);
+var path7 = __toESM(require("node:path"), 1);
+var EffectSelectorSchema = external_exports.object({
+  index: external_exports.number().int().positive().optional().describe("1-based position in the layer's Effects."),
+  name: external_exports.string().min(1).optional().describe("Effect name as shown on the layer (refused if several share it).")
+}).refine((v) => v.index !== void 0 || v.name !== void 0, {
+  message: "Effect selector needs index or name."
+}).describe("Which effect on the layer, by index or name.");
+var EffectParamSchema = external_exports.object({
+  param: external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()]).describe("Parameter display name (e.g. 'Blurriness'), match name, or 1-based index."),
+  value: external_exports.union([external_exports.number(), external_exports.boolean(), external_exports.array(external_exports.number())]).describe(
+    "Number, boolean (checkboxes), or array (points, colors as [r, g, b] or [r, g, b, a] in 0..1). Popups take their 1-based item number; layer pickers take a layer index (0 for none)."
+  )
+});
+var ParamsSchema = external_exports.array(EffectParamSchema).max(100).optional().describe(
+  "Static values to set. An animated parameter gets the value at the comp's current time; for keyframes or expressions use ae_set_property with the path ['ADBE Effect Parade', <effect name>, <param>]."
+);
+var AeAddEffectSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  effect: external_exports.string().min(1).describe("Match name (e.g. 'ADBE Gaussian Blur 2', 'APC Colorama') or display name. Look it up with ae_list_effects."),
+  name: external_exports.string().min(1).max(200).optional().describe("Rename the new effect."),
+  params: ParamsSchema,
+  expect: ExpectSchema
+});
+var AeSetEffectSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  effect: EffectSelectorSchema,
+  enabled: external_exports.boolean().optional().describe("Turn the effect on or off (the fx switch)."),
+  name: external_exports.string().min(1).max(200).optional().describe("Rename the effect."),
+  params: ParamsSchema,
+  expect: ExpectSchema
+}).refine((v) => v.enabled !== void 0 || v.name !== void 0 || (v.params?.length ?? 0) > 0, {
+  message: "Give at least one of enabled, name, or params."
+});
+var AeRemoveEffectSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  effect: EffectSelectorSchema,
+  expect: ExpectSchema
+});
+var AeApplyPresetSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  preset_path: external_exports.string().min(1).describe("Absolute path of the .ffx animation preset (see ae_list_presets)."),
+  expect: ExpectSchema
+});
+var AeListPresetsSchema = external_exports.object({
+  filter: external_exports.string().optional().describe("Case-insensitive text to match in the preset's folder and file name, e.g. 'glow' or 'Transitions - Wipes'."),
+  source: external_exports.enum(["all", "user", "app"]).optional().describe("'user' is the user's own User Presets folders. Default all."),
+  limit: external_exports.number().int().min(1).max(500).optional().describe("Default 100.")
+});
+function findParamSnapshot(effect, key) {
+  if (!effect) return void 0;
+  if (typeof key === "number") return effect.params.find((p) => p.path.length === 1 && p.index === key);
+  return effect.params.find((p) => p.name === key || p.matchName === key);
+}
+function expectedParamValue(type, value) {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (type === "color" && Array.isArray(value) && value.length === 3) return [...value, 1];
+  return value;
+}
+function paramMismatches(effect, params, written) {
+  const mismatches = [];
+  (params ?? []).forEach((p, i) => {
+    if (written?.[i]?.how === "value_at_current_time") return;
+    const snap = findParamSnapshot(effect, p.param);
+    if (!snap) {
+      mismatches.push({ path: `params.${p.param}`, expected: p.value, actual: void 0, message: `Parameter ${p.param} not found in read-back` });
+      return;
+    }
+    compareValues(expectedParamValue(snap.type, p.value), snap.value, `params.${snap.name}`, mismatches);
+  });
+  return mismatches;
+}
+function effectAt(snapshot, index) {
+  const effects = snapshot?.effects ?? [];
+  return effects.find((e) => e.index === index);
+}
+function effectCount(snapshot) {
+  return (snapshot?.effects ?? []).length;
+}
+async function runEffectWrite(args, ctx, spec) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const effectiveExpect = {
+    project_path: args.expect.project_path,
+    comp_id: args.expect.comp_id ?? args.comp_id
+  };
+  const readEffects = (suffix) => ctx.bridge.evalRaw({
+    id: `${opId}_${suffix}`,
+    script: buildJsxCall("listLayerEffects", { comp_id: args.comp_id, layer: args.layer }),
+    label: `${spec.label} (${suffix})`,
+    mutates: false,
+    toolName: spec.toolName
+  });
+  try {
+    return await ctx.queue.run(spec.label, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+      const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
+      const before = await readEffects("before");
+      const write = await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall(spec.host, spec.hostArgs(args, effectiveExpect)),
+        label: spec.label,
+        mutates: true,
+        toolName: spec.toolName
+      });
+      const after = await readEffects("after");
+      const written = write.result ?? {};
+      const receipt = buildReceipt({
+        before: before.result,
+        after: after.result,
+        customMismatches: spec.check(args, before.result, after.result, written)
+      });
+      return {
+        op_id: opId,
+        applied: true,
+        ...spec.present(args, before.result, after.result, written),
+        checkpoint,
+        receipt
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+var MAX_PRESET_FILES = 2e4;
+var MAX_PRESET_DEPTH = 8;
+function findPresets(folders, filter, source) {
+  const needle = filter?.trim().toLowerCase() ?? "";
+  const presets = [];
+  let scanned = 0;
+  for (const folder of folders) {
+    const kind = folder.kind === "user" ? "user" : "app";
+    if (source !== "all" && source !== kind) continue;
+    const walk = (dir, depth) => {
+      if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
+      let entries;
+      try {
+        entries = fs7.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const full = path7.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (/\.ffx$/i.test(e.name)) {
+          scanned++;
+          const category = path7.relative(folder.path, dir).split(path7.sep).join("/");
+          const name = e.name.replace(/\.ffx$/i, "");
+          if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
+            presets.push({ name, path: full, category: category || path7.basename(folder.path), source: kind });
+          }
+        }
+      }
+    };
+    walk(folder.path, 0);
+  }
+  presets.sort((a, b) => a.source === b.source ? a.path.localeCompare(b.path) : a.source === "user" ? -1 : 1);
+  return { presets, scanned };
+}
+var PRESET_HINT = `Parameters marked settable: false (custom data such as Colorama's Output Cycle or the Curves curve) can't be read or set by script; AE refuses it. Measured routes, all inside AE: (1) link it by expression to the same parameter of an effect the user set up by hand (ae_set_property on the path ['ADBE Effect Parade', <effect name>, <param matchName>], since a section header can share the param's display name, with an expression such as thisComp.layer("Look").effect("Colorama")("Output Cycle"); \`linkable_by_expression\` says when this works); (2) apply an animation preset saved from AE (Animation > Save Animation Preset) with ae_apply_preset; (3) the effect's own preset menu, if any (Colorama's 'Use Preset Palette' is an ordinary settable popup).`;
+var effectsTools = [
+  {
+    name: "ae_add_effect",
+    description: "Add an effect to a layer, optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect's index and every parameter (name, match name, type, value, settable), read back in a separate evalScript. Find the effect's match name with ae_list_effects; display names vary by AE language. " + PRESET_HINT + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeAddEffectSchema,
+    handler: (args, ctx) => runEffectWrite(args, ctx, {
+      toolName: "ae_add_effect",
+      label: `ae_add_effect(${args.effect})`,
+      host: "addEffect",
+      hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, effect: a.effect, name: a.name, params: a.params, expect }),
+      check: (a, before, after, w) => {
+        const mismatches = [];
+        if (effectCount(after) !== effectCount(before) + 1) {
+          mismatches.push({ path: "effects.length", expected: effectCount(before) + 1, actual: effectCount(after), message: "Effect count did not grow by one" });
+        }
+        const fx = effectAt(after, w.index);
+        compareValues(w.matchName, fx?.matchName, "effect.matchName", mismatches);
+        if (a.name) compareValues(a.name, fx?.name, "effect.name", mismatches);
+        return [...mismatches, ...paramMismatches(fx, a.params, w.params_set)];
+      },
+      present: (_a, _before, after, w) => ({ effect: effectAt(after, w.index) ?? w })
+    })
+  },
+  {
+    name: "ae_set_effect",
+    description: "Change an effect on a layer: turn it on or off, rename it, or set static parameter values, in one undo group guarded by `expect`, with a read-back in a separate evalScript. For keyframes or expressions on a parameter, use ae_set_property with the path ['ADBE Effect Parade', <effect name>, <param>]. " + PRESET_HINT + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeSetEffectSchema,
+    handler: (args, ctx) => runEffectWrite(args, ctx, {
+      toolName: "ae_set_effect",
+      label: `ae_set_effect(${args.effect.name ?? `#${args.effect.index}`})`,
+      host: "setEffect",
+      hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, effect: a.effect, enabled: a.enabled, name: a.name, params: a.params, expect }),
+      check: (a, _before, after, w) => {
+        const mismatches = [];
+        const fx = effectAt(after, w.index);
+        if (a.enabled !== void 0) compareValues(a.enabled, fx?.enabled, "effect.enabled", mismatches);
+        if (a.name) compareValues(a.name, fx?.name, "effect.name", mismatches);
+        return [...mismatches, ...paramMismatches(fx, a.params, w.params_set)];
+      },
+      present: (_a, _before, after, w) => ({ effect: effectAt(after, w.index) ?? w })
+    })
+  },
+  {
+    name: "ae_remove_effect",
+    description: "Remove one effect from a layer, in one undo group guarded by `expect` (Edit > Undo brings it back). The read-back confirms the layer has one effect fewer. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeRemoveEffectSchema,
+    handler: (args, ctx) => runEffectWrite(args, ctx, {
+      toolName: "ae_remove_effect",
+      label: `ae_remove_effect(${args.effect.name ?? `#${args.effect.index}`})`,
+      host: "removeEffect",
+      hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, effect: a.effect, expect }),
+      check: (_a, before, after) => effectCount(after) === effectCount(before) - 1 ? [] : [{ path: "effects.length", expected: effectCount(before) - 1, actual: effectCount(after), message: "Effect count did not drop by one" }],
+      present: (_a, _before, after, w) => ({
+        removed: w.removed,
+        remaining: (after?.effects ?? []).map((e) => ({ index: e.index, name: e.name, matchName: e.matchName }))
+      })
+    })
+  },
+  {
+    name: "ae_apply_preset",
+    description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeApplyPresetSchema,
+    handler: async (args, ctx) => {
+      if (!path7.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs7.existsSync(args.preset_path)) {
+        return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
+      }
+      return runEffectWrite(args, ctx, {
+        toolName: "ae_apply_preset",
+        label: `ae_apply_preset(${path7.basename(args.preset_path)})`,
+        host: "applyPreset",
+        hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
+        check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
+        present: (_a, before, after, w) => ({
+          preset: w.preset,
+          effects_added: (after?.effects ?? []).slice(effectCount(before)).map((e) => ({ index: e.index, name: e.name, matchName: e.matchName })),
+          layers_added: w.layers_added
+        })
+      });
+    }
+  },
+  {
+    name: "ae_list_presets",
+    description: "List animation presets (.ffx) in the user's User Presets folders (every installed AE version, listed first) and AE's own Presets folder, with a text filter. Use the path with ae_apply_preset. Read-only.",
+    schema: AeListPresetsSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.evalRaw({
+        id: `${ctx.bridge.newOpId()}_presets`,
+        script: buildJsxCall("presetFolders", {}),
+        label: "ae_list_presets (folders)",
+        mutates: false,
+        toolName: "ae_list_presets"
+      });
+      const folders = res.result?.folders ?? [];
+      const { presets, scanned } = findPresets(folders, args.filter, args.source ?? "all");
+      const limit = args.limit ?? 100;
+      return {
+        folders,
+        scanned,
+        count: presets.length,
+        truncated: presets.length > limit,
+        presets: presets.slice(0, limit)
+      };
+    }
+  }
+];
+
 // src/tools/ext/explore.ts
 var LAYER_INCLUDE_SECTIONS = [
   "transform",
@@ -9400,17 +9676,17 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs9 = __toESM(require("node:fs"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
+var path9 = __toESM(require("node:path"), 1);
 var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs8 = __toESM(require("node:fs"), 1);
-var path7 = __toESM(require("node:path"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
 
 // src/tools/ext/png-utils.ts
-var fs7 = __toESM(require("node:fs"), 1);
+var fs8 = __toESM(require("node:fs"), 1);
 var import_pngjs = __toESM(require_png(), 1);
 function fitWithin(width, height, maxSize) {
   const longEdge = Math.max(width, height);
@@ -9623,7 +9899,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs7.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs8.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -9637,7 +9913,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs7.writeFileSync(dstPath, encodePng(out));
+  fs8.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 
@@ -9661,14 +9937,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path7.join(defaultDataDir(), "frames");
+  return path8.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs8.existsSync(filePath)) {
+    if (!fs9.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs8.statSync(filePath);
+    const stat = fs9.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -9694,7 +9970,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs8.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs9.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -9708,14 +9984,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs8.mkdirSync(framesDir, { recursive: true });
+      fs9.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path7.join(
+            const pngPath1 = path8.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -9749,7 +10025,7 @@ var renderTools = [
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
             const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path7.join(
+            const pngPath2 = path8.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -9969,10 +10245,10 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs9.existsSync(filePath)) {
+  if (!fs10.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs9.readFileSync(filePath);
+  const buf = fs10.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -10143,7 +10419,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path8.join(
+  const pngPath1 = path9.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -10167,7 +10443,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path8.join(
+  const pngPath2 = path9.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -10204,7 +10480,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs9.mkdirSync(framesDir, { recursive: true });
+        fs10.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -10243,7 +10519,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs9.mkdirSync(framesDir, { recursive: true });
+        fs10.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -10271,9 +10547,9 @@ var framesTools = [
         let diffPngPath;
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-          diffPngPath = path8.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          diffPngPath = path9.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
           const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-          fs9.writeFileSync(diffPngPath, outBuf);
+          fs10.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -10328,8 +10604,8 @@ var framesTools = [
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs10 = __toESM(require("node:fs"), 1);
-var path9 = __toESM(require("node:path"), 1);
+var fs11 = __toESM(require("node:fs"), 1);
+var path10 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -10693,20 +10969,20 @@ var MOTION_MATCH_NAMES = /* @__PURE__ */ new Set([
 ]);
 var SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
 var isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
-function reviewProperty(s, analysis, path13, target) {
+function reviewProperty(s, analysis, path14, target) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path13 }
+    property: { name: s.property.name, path: path14 }
   };
   const fix = (keys) => ({
     tool: "ae_set_keyframe_ease",
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path13,
+      path: path14,
       keys,
       ease: "easy_ease",
       expect: { project_path: target.project_path, comp_id: target.comp_id }
@@ -10845,7 +11121,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs10.mkdirSync(framesDir, { recursive: true });
+      fs11.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -10903,11 +11179,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path9.join(
+      const sheetPath = path10.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs10.writeFileSync(sheetPath, encodePng(sheet));
+      fs11.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -10953,12 +11229,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs10.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path9.join(
+      fs11.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path10.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs10.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs11.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -11054,8 +11330,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs11 = __toESM(require("node:fs"), 1);
-var path10 = __toESM(require("node:path"), 1);
+var fs12 = __toESM(require("node:fs"), 1);
+var path11 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -11089,7 +11365,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path10.join(defaultDataDir(), "ui");
+  return path11.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -11284,7 +11560,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs11.mkdirSync(outDir, { recursive: true });
+        fs12.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -11318,8 +11594,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs12 = __toESM(require("node:fs"), 1);
-var path11 = __toESM(require("node:path"), 1);
+var fs13 = __toESM(require("node:fs"), 1);
+var path12 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -11593,7 +11869,11 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_set_text",
   "ae_import_footage",
   "ae_replace_footage",
-  "ae_render_queue_add"
+  "ae_render_queue_add",
+  "ae_add_effect",
+  "ae_set_effect",
+  "ae_remove_effect",
+  "ae_apply_preset"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -11699,7 +11979,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs12.existsSync(actualProjectPath)) {
+          if (!fs13.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -11708,17 +11988,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path11.dirname(actualProjectPath);
-          const ext = path11.extname(actualProjectPath) || ".aep";
-          const baseName = path11.basename(actualProjectPath, ext);
-          const checkpointDir = path11.join(projDir, "_mcp_checkpoints");
-          fs12.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path12.dirname(actualProjectPath);
+          const ext = path12.extname(actualProjectPath) || ".aep";
+          const baseName = path12.basename(actualProjectPath, ext);
+          const checkpointDir = path12.join(projDir, "_mcp_checkpoints");
+          fs13.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path11.join(checkpointDir, checkpointFileName);
-          fs12.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs12.statSync(checkpointPath);
+          const checkpointPath = path12.join(checkpointDir, checkpointFileName);
+          fs13.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs13.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -11734,7 +12014,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs12.existsSync(checkpointPath)
+              checkpoint_exists: fs13.existsSync(checkpointPath)
             }
           });
           return {
@@ -11776,9 +12056,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path11.dirname(actualProjectPath);
-      const checkpointDir = path11.join(projDir, "_mcp_checkpoints");
-      if (!fs12.existsSync(checkpointDir)) {
+      const projDir = path12.dirname(actualProjectPath);
+      const checkpointDir = path12.join(projDir, "_mcp_checkpoints");
+      if (!fs13.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -11786,10 +12066,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs12.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs13.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path11.join(checkpointDir, e.name);
-        const stat = fs12.statSync(fullPath);
+        const fullPath = path12.join(checkpointDir, e.name);
+        const stat = fs13.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -11842,7 +12122,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs12.existsSync(args.checkpoint_path)) {
+          if (!fs13.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -11938,6 +12218,7 @@ var extTools = [
   ...exploreTools,
   ...receiptsTools,
   ...animateTools,
+  ...effectsTools,
   ...framesTools,
   ...motionTools,
   ...askTools,
@@ -12496,7 +12777,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path12.join(resolvedDataDir, "quarantine.json")
+    path13.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -12509,7 +12790,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path12.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path13.join(resolvedDataDir, "settings.json")),
     asks: new AskStore()
   };
   const log = opts.log;
