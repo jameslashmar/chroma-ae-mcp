@@ -33,6 +33,7 @@ No Node, npm or git is needed. The MCP runs on the Node that is built into AE's 
 cd server; npm install; npm run build; npm test; npm run bundle   # bundle -> panel/client/mcp-bundle.cjs
 node scripts/lint-jsx.mjs                                         # ES3 + no chained ternaries in panel/host
 pwsh scripts/install-dev.ps1                                      # junction panel/ into CEP extensions, PlayerDebugMode=1
+node qa/smoke-mcp.mjs                                             # live: every tool against the running AE (about a minute)
 ```
 
 - Restart AE after any manifest change.

@@ -35,6 +35,23 @@ node qa/runner.js qa/scenarios/voxmark/01-markers-speakers.mjs
 
 Reports are written to `qa/out/junit.xml` and `qa/out/report.md`.
 
+## Live smoke test of the MCP tools
+
+`qa/smoke-mcp.mjs` calls every chroma-ae-mcp tool through the panel's MCP endpoint (`POST /mcp`) against the After Effects on this machine:
+- It builds its own comp, saves it, and runs each write tool, checking the auto checkpoint each one reports.
+- It runs each read tool, plus a five-frame background `aerender`.
+- It takes about a minute.
+
+```bash
+node qa/smoke-mcp.mjs                       # work dir: <tmp>/_work/qa/mcp-smoke/<stamp>
+node qa/smoke-mcp.mjs --dir D:/_work/qa/smoke
+```
+
+- It uses the same isolation guard as `runner.js`, so it refuses to start if anything but an empty, QA-owned or `/_work/qa` project is open.
+- The project it leaves open sits under `/_work/qa`, so it can be run again straight away.
+- Results go to `qa/out/smoke.json`, and the exit code is 1 on any failure.
+- `ae_ui_screenshot` passes when AE is minimized too, because it then reports `ae_minimized` instead of an image.
+
 ## Running Offline Unit Tests
 
 ```bash
