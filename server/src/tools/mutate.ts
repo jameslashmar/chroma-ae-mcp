@@ -2,9 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { BridgeError, SLOW_TIMEOUT_MS } from "../host.js";
-import { buildJsxCall, pathsMatchForGuard } from "../jsx.js";
+import { buildJsxCall, normalizeGuardPath, pathsMatchForGuard } from "../jsx.js";
 import { buildReceipt } from "../receipts.js";
 import { QueueWaitError } from "../queue.js";
+import { DEFAULT_SETTINGS } from "../settings.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
@@ -105,6 +106,8 @@ interface GuardCheckResult {
   project_path?: string;
   comp_id?: number | null;
   comp_is_valid?: boolean;
+  /** Unsaved changes in the open project (null when AE couldn't say). */
+  dirty?: boolean | null;
 }
 
 /**
@@ -166,6 +169,91 @@ export function formatBackupTimestamp(date: Date = new Date()): string {
   return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
 }
 
+export interface AutoCheckpointResult {
+  /**
+   * created: copied now. reused: the saved file hasn't changed since the
+   * last auto checkpoint, which still holds it. skipped: see `reason`.
+   */
+  status: "created" | "reused" | "skipped";
+  path?: string;
+  reason?: string;
+  /**
+   * True when AE had unsaved changes: the checkpoint holds the last save,
+   * not what is open in AE right now.
+   */
+  unsaved_changes_not_included?: boolean;
+}
+
+// Saved-file state of the last auto checkpoint per project, so a run of
+// writes between two saves makes one copy, not one per write.
+const lastAutoCheckpoint = new Map<string, { size: number; mtimeMs: number; path: string }>();
+
+export function resetAutoCheckpointMemory(): void {
+  lastAutoCheckpoint.clear();
+}
+
+/**
+ * Copies the saved project to `<projectdir>/_mcp_checkpoints/<name>_<stamp>_auto-<tool>.aep`
+ * before a write, so the write can be undone across sessions with
+ * ae_checkpoint_revert. AE can't write its in-memory state to another file
+ * without retargeting the project (Save As), so this copies the last save
+ * and says so when there are unsaved changes. Call it inside the queue
+ * lease, after the target guard passes. It never throws: a failed copy is
+ * reported as skipped and the write goes ahead.
+ */
+export async function autoCheckpoint(
+  ctx: ToolContext,
+  guard: GuardCheckResult,
+  toolName: string
+): Promise<AutoCheckpointResult> {
+  const settings = ctx.settings?.get().auto_checkpoint ?? DEFAULT_SETTINGS.auto_checkpoint;
+  if (!settings.enabled) {
+    return { status: "skipped", reason: "Auto checkpoints are off (see ae_auto_checkpoint)." };
+  }
+  const projectPath = guard.project_path ?? "<unsaved>";
+  if (projectPath === "<unsaved>") {
+    return { status: "skipped", reason: "The project has never been saved, so there is no file to copy." };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.stat(projectPath);
+  } catch {
+    return { status: "skipped", reason: `The project file is not on disk: "${projectPath}".` };
+  }
+  const sizeMb = stat.size / (1024 * 1024);
+  if (sizeMb > settings.max_mb) {
+    return {
+      status: "skipped",
+      reason: `The project file is ${sizeMb.toFixed(0)} MB, over the ${settings.max_mb} MB limit (see ae_auto_checkpoint).`,
+    };
+  }
+
+  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  const key = normalizeGuardPath(projectPath);
+  const last = lastAutoCheckpoint.get(key);
+  if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs.existsSync(last.path)) {
+    return { status: "reused", path: last.path, ...unsaved };
+  }
+
+  const ext = path.extname(projectPath) || ".aep";
+  const dir = path.join(path.dirname(projectPath), "_mcp_checkpoints");
+  const stem = `${path.basename(projectPath, ext)}_${formatBackupTimestamp(new Date())}_auto-${toolName}`;
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    let target = path.join(dir, `${stem}${ext}`);
+    for (let n = 2; fs.existsSync(target); n++) target = path.join(dir, `${stem}-${n}${ext}`);
+    await fs.promises.copyFile(projectPath, target, fs.constants.COPYFILE_EXCL);
+    lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    return { status: "created", path: target, ...unsaved };
+  } catch (err) {
+    return {
+      status: "skipped",
+      reason: `Copying the project failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 export const mutateTools: ToolDefinition<any>[] = [
   {
     name: "ae_run_jsx",
@@ -204,7 +292,8 @@ export const mutateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(`ae_run_jsx: ${args.label}`, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, expect, opId);
+          const guard = await verifyTargetGuard(ctx, expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_run_jsx");
 
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
@@ -249,6 +338,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });
@@ -285,7 +375,8 @@ export const mutateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_property");
 
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
@@ -369,6 +460,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });

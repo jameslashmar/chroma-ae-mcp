@@ -3,6 +3,7 @@ import { BridgeError, type HostTransport } from "../host.js";
 import { QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
 import { QueueWaitError, type SingleWriterQueue } from "../queue.js";
+import type { SettingsStore } from "../settings.js";
 
 export const AGENT_SAFETY_GUIDANCE =
   "IMPORTANT: (1) Always re-read project/comp state before writing. " +
@@ -70,6 +71,8 @@ export interface ToolContext {
   queue: SingleWriterQueue;
   quarantine: QuarantineStore;
   cep?: CepBridge;
+  /** Server settings (auto checkpoints). Without it, the defaults apply. */
+  settings?: SettingsStore;
 }
 
 export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {

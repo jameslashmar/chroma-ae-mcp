@@ -68,6 +68,10 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 
 - **Target guard.** Every write names the `project_path` (and `comp_id`) it expects. If AE has something else open, the write is refused before anything changes (`kind: "guard"`). A guard failure means stop and re-read the state, not retry.
 - **One undo step per write.** The undo group begins and ends inside one evalScript, so one Ctrl+Z backs out a whole tool call.
+- **Automatic checkpoints.** Before every write, the saved `.aep` is copied to `<projectdir>/_mcp_checkpoints/` (`..._auto-<tool>.aep`), so a write can be undone across sessions with `ae_checkpoint_revert`.
+  - The copy is the last save: AE can't write its unsaved state to another file without retargeting the project. When AE has unsaved changes, the write's `checkpoint` says so.
+  - Writes between two saves share one copy. Unsaved projects and projects over the size limit (250 MB by default) are skipped.
+  - `ae_auto_checkpoint` turns it off or changes the limit.
 - **Receipts.** Writes return a before/after comparison, read back in a *separate* evalScript, because AE returns stale values when a read follows a write in the same script. For a full picture, `ae_comp_fingerprint` and `ae_comp_diff` show every changed property and keyframe.
 - **Quarantine.** A write that times out has an unknown outcome. It is quarantined, and further writes are blocked until someone inspects the state and calls `ae_acknowledge`. Nothing is retried automatically.
 - **Never kills AE mid-script.** Aborting an evalScript wedges the ExtendScript bridge, so calls queue and wait.
@@ -84,7 +88,7 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 
 ---
 
-## Tools (36)
+## Tools (37)
 
 | Group | Tools |
 |---|---|
@@ -92,7 +96,7 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 | Read | `ae_get_project`, `ae_get_comp`, `ae_get_layer_props`, `ae_get_layer_full`, `ae_find_layers`, `ae_list_effects`, `ae_validate_expressions` |
 | Script | `ae_run_jsx` (read, or guarded write with a receipt) |
 | Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease`, `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
-| Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_save` (copies the .aep first; never save-as) |
+| Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
 | Frames | `ae_snapshot_frame` (AE renders at full resolution and the server shrinks the PNG to `scale` or `max_size`; waits for the PNG, which AE writes asynchronously), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
 | Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code) |
@@ -136,7 +140,7 @@ node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.x
 
 Priorities and reasons are in `docs/FEATURES.md`. The items marked "Atom" come from the review in `docs/ATOM-REVIEW.md`.
 
-- [ ] **P1: automatic checkpoints around every write** (Atom). Copy the .aep before (and optionally after) each mutating tool call, with a setting to turn it off for big projects. Restore to a branch copy, never overwrite.
+- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size, and `ae_checkpoint_revert` opens a copy without overwriting anything. There is no "after" copy: the file on disk only changes when the user saves.
 - [ ] **P2: AE skills bundle** (Atom). `SKILL.md` plus numbered `1.jsx`, `2.jsx`, per project or global, with `ae_skill_run` and `ae_skill_save` (capture a working `ae_run_jsx`). For house rigs, lower thirds and kinetic type.
 - [ ] **P2: one-click registration** (Atom). The panel runs `claude mcp add` itself, with toggles for Codex and Cursor.
 - [ ] **P2: asset staging plus auto-import** (Atom). Generated assets (Flora, Higgsfield, ElevenLabs) land in a known folder and are imported into an `_Assets` bin.

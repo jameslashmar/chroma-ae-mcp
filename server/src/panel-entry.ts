@@ -5,6 +5,7 @@ import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
+import { SettingsStore } from "./settings.js";
 import type { CepBridge, ToolContext } from "./tools/common.js";
 
 export { handleRpc, PanelHost, type JsonRpcResponse, type PanelEvalScriptFn };
@@ -95,6 +96,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     queue,
     quarantine,
     cep: opts.cep,
+    settings: new SettingsStore(path.join(resolvedDataDir, "settings.json")),
   };
 
   const log = opts.log;

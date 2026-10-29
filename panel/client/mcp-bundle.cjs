@@ -517,7 +517,7 @@ var require_crc = __commonJS({
 var require_parser = __commonJS({
   "node_modules/pngjs/lib/parser.js"(exports2, module2) {
     "use strict";
-    var constants = require_constants();
+    var constants2 = require_constants();
     var CrcCalculator = require_crc();
     var Parser = module2.exports = function(options, dependencies) {
       this._options = options;
@@ -528,12 +528,12 @@ var require_parser = __commonJS({
       this._palette = [];
       this._colorType = 0;
       this._chunks = {};
-      this._chunks[constants.TYPE_IHDR] = this._handleIHDR.bind(this);
-      this._chunks[constants.TYPE_IEND] = this._handleIEND.bind(this);
-      this._chunks[constants.TYPE_IDAT] = this._handleIDAT.bind(this);
-      this._chunks[constants.TYPE_PLTE] = this._handlePLTE.bind(this);
-      this._chunks[constants.TYPE_tRNS] = this._handleTRNS.bind(this);
-      this._chunks[constants.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this._chunks[constants2.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants2.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants2.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants2.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants2.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants2.TYPE_gAMA] = this._handleGAMA.bind(this);
       this.read = dependencies.read;
       this.error = dependencies.error;
       this.metadata = dependencies.metadata;
@@ -548,10 +548,10 @@ var require_parser = __commonJS({
       };
     };
     Parser.prototype.start = function() {
-      this.read(constants.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+      this.read(constants2.PNG_SIGNATURE.length, this._parseSignature.bind(this));
     };
     Parser.prototype._parseSignature = function(data) {
-      let signature = constants.PNG_SIGNATURE;
+      let signature = constants2.PNG_SIGNATURE;
       for (let i = 0; i < signature.length; i++) {
         if (data[i] !== signature[i]) {
           this.error(new Error("Invalid file signature"));
@@ -568,7 +568,7 @@ var require_parser = __commonJS({
         name += String.fromCharCode(data[i]);
       }
       let ancillary = Boolean(data[4] & 32);
-      if (!this._hasIHDR && type !== constants.TYPE_IHDR) {
+      if (!this._hasIHDR && type !== constants2.TYPE_IHDR) {
         this.error(new Error("Expected IHDR on beggining"));
         return;
       }
@@ -616,7 +616,7 @@ var require_parser = __commonJS({
         this.error(new Error("Unsupported bit depth " + depth));
         return;
       }
-      if (!(colorType in constants.COLORTYPE_TO_BPP_MAP)) {
+      if (!(colorType in constants2.COLORTYPE_TO_BPP_MAP)) {
         this.error(new Error("Unsupported color type"));
         return;
       }
@@ -633,16 +633,16 @@ var require_parser = __commonJS({
         return;
       }
       this._colorType = colorType;
-      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._colorType];
+      let bpp = constants2.COLORTYPE_TO_BPP_MAP[this._colorType];
       this._hasIHDR = true;
       this.metadata({
         width,
         height,
         depth,
         interlace: Boolean(interlace),
-        palette: Boolean(colorType & constants.COLORTYPE_PALETTE),
-        color: Boolean(colorType & constants.COLORTYPE_COLOR),
-        alpha: Boolean(colorType & constants.COLORTYPE_ALPHA),
+        palette: Boolean(colorType & constants2.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants2.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants2.COLORTYPE_ALPHA),
         bpp,
         colorType
       });
@@ -666,7 +666,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseTRNS = function(data) {
       this._crc.write(data);
-      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR) {
+      if (this._colorType === constants2.COLORTYPE_PALETTE_COLOR) {
         if (this._palette.length === 0) {
           this.error(new Error("Transparency chunk must be after palette"));
           return;
@@ -680,10 +680,10 @@ var require_parser = __commonJS({
         }
         this.palette(this._palette);
       }
-      if (this._colorType === constants.COLORTYPE_GRAYSCALE) {
+      if (this._colorType === constants2.COLORTYPE_GRAYSCALE) {
         this.transColor([data.readUInt16BE(0)]);
       }
-      if (this._colorType === constants.COLORTYPE_COLOR) {
+      if (this._colorType === constants2.COLORTYPE_COLOR) {
         this.transColor([
           data.readUInt16BE(0),
           data.readUInt16BE(2),
@@ -697,7 +697,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseGAMA = function(data) {
       this._crc.write(data);
-      this.gamma(data.readUInt32BE(0) / constants.GAMMA_DIVISION);
+      this.gamma(data.readUInt32BE(0) / constants2.GAMMA_DIVISION);
       this._handleChunkEnd();
     };
     Parser.prototype._handleIDAT = function(length) {
@@ -709,7 +709,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseIDAT = function(length, data) {
       this._crc.write(data);
-      if (this._colorType === constants.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+      if (this._colorType === constants2.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
         throw new Error("Expected palette not found");
       }
       this.inflateData(data);
@@ -1197,9 +1197,9 @@ var require_parser_async = __commonJS({
 var require_bitpacker = __commonJS({
   "node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
     "use strict";
-    var constants = require_constants();
+    var constants2 = require_constants();
     module2.exports = function(dataIn, width, height, options) {
-      let outHasAlpha = [constants.COLORTYPE_COLOR_ALPHA, constants.COLORTYPE_ALPHA].indexOf(
+      let outHasAlpha = [constants2.COLORTYPE_COLOR_ALPHA, constants2.COLORTYPE_ALPHA].indexOf(
         options.colorType
       ) !== -1;
       if (options.colorType === options.inputColorType) {
@@ -1219,11 +1219,11 @@ var require_bitpacker = __commonJS({
       }
       let data = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
       let maxValue = 255;
-      let inBpp = constants.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      let inBpp = constants2.COLORTYPE_TO_BPP_MAP[options.inputColorType];
       if (inBpp === 4 && !options.inputHasAlpha) {
         inBpp = 3;
       }
-      let outBpp = constants.COLORTYPE_TO_BPP_MAP[options.colorType];
+      let outBpp = constants2.COLORTYPE_TO_BPP_MAP[options.colorType];
       if (options.bitDepth === 16) {
         maxValue = 65535;
         outBpp *= 2;
@@ -1247,24 +1247,24 @@ var require_bitpacker = __commonJS({
         let blue;
         let alpha = maxValue;
         switch (options.inputColorType) {
-          case constants.COLORTYPE_COLOR_ALPHA:
+          case constants2.COLORTYPE_COLOR_ALPHA:
             alpha = data[inIndex + 3];
             red = data[inIndex];
             green = data[inIndex + 1];
             blue = data[inIndex + 2];
             break;
-          case constants.COLORTYPE_COLOR:
+          case constants2.COLORTYPE_COLOR:
             red = data[inIndex];
             green = data[inIndex + 1];
             blue = data[inIndex + 2];
             break;
-          case constants.COLORTYPE_ALPHA:
+          case constants2.COLORTYPE_ALPHA:
             alpha = data[inIndex + 1];
             red = data[inIndex];
             green = red;
             blue = red;
             break;
-          case constants.COLORTYPE_GRAYSCALE:
+          case constants2.COLORTYPE_GRAYSCALE:
             red = data[inIndex];
             green = red;
             blue = red;
@@ -1297,8 +1297,8 @@ var require_bitpacker = __commonJS({
         for (let x = 0; x < width; x++) {
           let rgba = getRGBA(data, inIndex);
           switch (options.colorType) {
-            case constants.COLORTYPE_COLOR_ALPHA:
-            case constants.COLORTYPE_COLOR:
+            case constants2.COLORTYPE_COLOR_ALPHA:
+            case constants2.COLORTYPE_COLOR:
               if (options.bitDepth === 8) {
                 outData[outIndex] = rgba.red;
                 outData[outIndex + 1] = rgba.green;
@@ -1315,8 +1315,8 @@ var require_bitpacker = __commonJS({
                 }
               }
               break;
-            case constants.COLORTYPE_ALPHA:
-            case constants.COLORTYPE_GRAYSCALE: {
+            case constants2.COLORTYPE_ALPHA:
+            case constants2.COLORTYPE_GRAYSCALE: {
               let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
               if (options.bitDepth === 8) {
                 outData[outIndex] = grayscale;
@@ -1489,7 +1489,7 @@ var require_filter_pack = __commonJS({
 var require_packer = __commonJS({
   "node_modules/pngjs/lib/packer.js"(exports2, module2) {
     "use strict";
-    var constants = require_constants();
+    var constants2 = require_constants();
     var CrcStream = require_crc();
     var bitPacker = require_bitpacker();
     var filter = require_filter_pack();
@@ -1502,23 +1502,23 @@ var require_packer = __commonJS({
       options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
       options.deflateFactory = options.deflateFactory || zlib.createDeflate;
       options.bitDepth = options.bitDepth || 8;
-      options.colorType = typeof options.colorType === "number" ? options.colorType : constants.COLORTYPE_COLOR_ALPHA;
-      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants.COLORTYPE_COLOR_ALPHA;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants2.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants2.COLORTYPE_COLOR_ALPHA;
       if ([
-        constants.COLORTYPE_GRAYSCALE,
-        constants.COLORTYPE_COLOR,
-        constants.COLORTYPE_COLOR_ALPHA,
-        constants.COLORTYPE_ALPHA
+        constants2.COLORTYPE_GRAYSCALE,
+        constants2.COLORTYPE_COLOR,
+        constants2.COLORTYPE_COLOR_ALPHA,
+        constants2.COLORTYPE_ALPHA
       ].indexOf(options.colorType) === -1) {
         throw new Error(
           "option color type:" + options.colorType + " is not supported at present"
         );
       }
       if ([
-        constants.COLORTYPE_GRAYSCALE,
-        constants.COLORTYPE_COLOR,
-        constants.COLORTYPE_COLOR_ALPHA,
-        constants.COLORTYPE_ALPHA
+        constants2.COLORTYPE_GRAYSCALE,
+        constants2.COLORTYPE_COLOR,
+        constants2.COLORTYPE_COLOR_ALPHA,
+        constants2.COLORTYPE_ALPHA
       ].indexOf(options.inputColorType) === -1) {
         throw new Error(
           "option input color type:" + options.inputColorType + " is not supported at present"
@@ -1542,7 +1542,7 @@ var require_packer = __commonJS({
     };
     Packer.prototype.filterData = function(data, width, height) {
       let packedData = bitPacker(data, width, height, this._options);
-      let bpp = constants.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let bpp = constants2.COLORTYPE_TO_BPP_MAP[this._options.colorType];
       let filteredData = filter(packedData, width, height, this._options, bpp);
       return filteredData;
     };
@@ -1562,8 +1562,8 @@ var require_packer = __commonJS({
     };
     Packer.prototype.packGAMA = function(gamma) {
       let buf = Buffer.alloc(4);
-      buf.writeUInt32BE(Math.floor(gamma * constants.GAMMA_DIVISION), 0);
-      return this._packChunk(constants.TYPE_gAMA, buf);
+      buf.writeUInt32BE(Math.floor(gamma * constants2.GAMMA_DIVISION), 0);
+      return this._packChunk(constants2.TYPE_gAMA, buf);
     };
     Packer.prototype.packIHDR = function(width, height) {
       let buf = Buffer.alloc(13);
@@ -1574,13 +1574,13 @@ var require_packer = __commonJS({
       buf[10] = 0;
       buf[11] = 0;
       buf[12] = 0;
-      return this._packChunk(constants.TYPE_IHDR, buf);
+      return this._packChunk(constants2.TYPE_IHDR, buf);
     };
     Packer.prototype.packIDAT = function(data) {
-      return this._packChunk(constants.TYPE_IDAT, data);
+      return this._packChunk(constants2.TYPE_IDAT, data);
     };
     Packer.prototype.packIEND = function() {
-      return this._packChunk(constants.TYPE_IEND, null);
+      return this._packChunk(constants2.TYPE_IEND, null);
     };
   }
 });
@@ -1591,7 +1591,7 @@ var require_packer_async = __commonJS({
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
-    var constants = require_constants();
+    var constants2 = require_constants();
     var Packer = require_packer();
     var PackerAsync = module2.exports = function(opt) {
       Stream.call(this);
@@ -1602,7 +1602,7 @@ var require_packer_async = __commonJS({
     };
     util2.inherits(PackerAsync, Stream);
     PackerAsync.prototype.pack = function(data, width, height, gamma) {
-      this.emit("data", Buffer.from(constants.PNG_SIGNATURE));
+      this.emit("data", Buffer.from(constants2.PNG_SIGNATURE));
       this.emit("data", this._packer.packIHDR(width, height));
       if (gamma) {
         this.emit("data", this._packer.packGAMA(gamma));
@@ -1930,7 +1930,7 @@ var require_packer_sync = __commonJS({
     if (!zlib.deflateSync) {
       hasSyncZlib = false;
     }
-    var constants = require_constants();
+    var constants2 = require_constants();
     var Packer = require_packer();
     module2.exports = function(metaData, opt) {
       if (!hasSyncZlib) {
@@ -1941,7 +1941,7 @@ var require_packer_sync = __commonJS({
       let options = opt || {};
       let packer = new Packer(options);
       let chunks = [];
-      chunks.push(Buffer.from(constants.PNG_SIGNATURE));
+      chunks.push(Buffer.from(constants2.PNG_SIGNATURE));
       chunks.push(packer.packIHDR(metaData.width, metaData.height));
       if (metaData.gamma) {
         chunks.push(packer.packGAMA(metaData.gamma));
@@ -2611,8 +2611,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path12, errorMaps, issueData } = params;
+  const fullPath = [...path12, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2728,11 +2728,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path12, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path12;
     this._key = key;
   }
   get path() {
@@ -7088,7 +7088,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path10 = __toESM(require("node:path"), 1);
+var path11 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -7168,8 +7168,8 @@ function convertFieldSchema(schema) {
 // src/tools/ext/aerender.ts
 var childProcess = __toESM(require("node:child_process"), 1);
 var crypto = __toESM(require("node:crypto"), 1);
-var fs4 = __toESM(require("node:fs"), 1);
-var path4 = __toESM(require("node:path"), 1);
+var fs5 = __toESM(require("node:fs"), 1);
+var path5 = __toESM(require("node:path"), 1);
 
 // src/jsx.ts
 function encodeJsxArg(value) {
@@ -7214,8 +7214,63 @@ function pathsMatchForGuard(expectedPath, actualPath, isWindows = process.platfo
 }
 
 // src/tools/mutate.ts
+var fs4 = __toESM(require("node:fs"), 1);
+var path4 = __toESM(require("node:path"), 1);
+
+// src/settings.ts
 var fs3 = __toESM(require("node:fs"), 1);
 var path3 = __toESM(require("node:path"), 1);
+var DEFAULT_SETTINGS = {
+  auto_checkpoint: { enabled: true, max_mb: 250 }
+};
+function defaultSettingsFilePath() {
+  return path3.join(defaultDataDir(), "settings.json");
+}
+function cloneDefaults() {
+  return { auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint } };
+}
+var SettingsStore = class {
+  filePath;
+  settings = cloneDefaults();
+  constructor(filePath = defaultSettingsFilePath()) {
+    this.filePath = filePath;
+    this.loadFromDisk();
+  }
+  get path() {
+    return this.filePath;
+  }
+  get() {
+    return { auto_checkpoint: { ...this.settings.auto_checkpoint } };
+  }
+  updateAutoCheckpoint(patch) {
+    const next = { ...this.settings.auto_checkpoint };
+    if (patch.enabled !== void 0) next.enabled = patch.enabled;
+    if (patch.max_mb !== void 0) next.max_mb = patch.max_mb;
+    this.settings = { ...this.settings, auto_checkpoint: next };
+    this.saveToDisk();
+    return this.get();
+  }
+  loadFromDisk() {
+    try {
+      if (!fs3.existsSync(this.filePath)) return;
+      const parsed = JSON.parse(fs3.readFileSync(this.filePath, "utf8"));
+      const ac = parsed?.auto_checkpoint;
+      if (ac && typeof ac === "object") {
+        if (typeof ac.enabled === "boolean") this.settings.auto_checkpoint.enabled = ac.enabled;
+        if (typeof ac.max_mb === "number" && ac.max_mb > 0) this.settings.auto_checkpoint.max_mb = ac.max_mb;
+      }
+    } catch {
+    }
+  }
+  saveToDisk() {
+    fs3.mkdirSync(path3.dirname(this.filePath), { recursive: true, mode: 448 });
+    const tmpFile = `${this.filePath}.tmp-${process.pid}`;
+    fs3.writeFileSync(tmpFile, JSON.stringify(this.settings, null, 2), { encoding: "utf8", mode: 384 });
+    fs3.renameSync(tmpFile, this.filePath);
+  }
+};
+
+// src/tools/mutate.ts
 var KeyframeItemSchema = external_exports.object({
   time: external_exports.number().describe("Keyframe time in seconds."),
   value: external_exports.unknown().describe("Keyframe value at `time`."),
@@ -7308,6 +7363,52 @@ function formatBackupTimestamp(date = /* @__PURE__ */ new Date()) {
   const ss = String(date.getSeconds()).padStart(2, "0");
   return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
 }
+var lastAutoCheckpoint = /* @__PURE__ */ new Map();
+async function autoCheckpoint(ctx, guard, toolName) {
+  const settings = ctx.settings?.get().auto_checkpoint ?? DEFAULT_SETTINGS.auto_checkpoint;
+  if (!settings.enabled) {
+    return { status: "skipped", reason: "Auto checkpoints are off (see ae_auto_checkpoint)." };
+  }
+  const projectPath = guard.project_path ?? "<unsaved>";
+  if (projectPath === "<unsaved>") {
+    return { status: "skipped", reason: "The project has never been saved, so there is no file to copy." };
+  }
+  let stat;
+  try {
+    stat = await fs4.promises.stat(projectPath);
+  } catch {
+    return { status: "skipped", reason: `The project file is not on disk: "${projectPath}".` };
+  }
+  const sizeMb = stat.size / (1024 * 1024);
+  if (sizeMb > settings.max_mb) {
+    return {
+      status: "skipped",
+      reason: `The project file is ${sizeMb.toFixed(0)} MB, over the ${settings.max_mb} MB limit (see ae_auto_checkpoint).`
+    };
+  }
+  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  const key = normalizeGuardPath(projectPath);
+  const last = lastAutoCheckpoint.get(key);
+  if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs4.existsSync(last.path)) {
+    return { status: "reused", path: last.path, ...unsaved };
+  }
+  const ext = path4.extname(projectPath) || ".aep";
+  const dir = path4.join(path4.dirname(projectPath), "_mcp_checkpoints");
+  const stem = `${path4.basename(projectPath, ext)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
+  try {
+    await fs4.promises.mkdir(dir, { recursive: true });
+    let target = path4.join(dir, `${stem}${ext}`);
+    for (let n = 2; fs4.existsSync(target); n++) target = path4.join(dir, `${stem}-${n}${ext}`);
+    await fs4.promises.copyFile(projectPath, target, fs4.constants.COPYFILE_EXCL);
+    lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    return { status: "created", path: target, ...unsaved };
+  } catch (err) {
+    return {
+      status: "skipped",
+      reason: `Copying the project failed: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+}
 var mutateTools = [
   {
     name: "ae_run_jsx",
@@ -7336,7 +7437,8 @@ var mutateTools = [
       try {
         return await ctx.queue.run(`ae_run_jsx: ${args.label}`, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, expect, opId);
+          const guard = await verifyTargetGuard(ctx, expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_run_jsx");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("snapshotForReceipt", {
@@ -7375,6 +7477,7 @@ var mutateTools = [
             op_id: opId,
             applied: true,
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -7405,7 +7508,8 @@ var mutateTools = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_property");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getLayerProps", {
@@ -7471,6 +7575,7 @@ var mutateTools = [
             op_id: opId,
             applied: true,
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -7511,18 +7616,18 @@ var mutateTools = [
           let backupPath = null;
           let backupSize = null;
           let beforeSize = null;
-          if (fs3.existsSync(actualProjectPath)) {
-            beforeSize = fs3.statSync(actualProjectPath).size;
+          if (fs4.existsSync(actualProjectPath)) {
+            beforeSize = fs4.statSync(actualProjectPath).size;
             if (doBackup) {
-              const projDir = path3.dirname(actualProjectPath);
-              const ext = path3.extname(actualProjectPath) || ".aep";
-              const baseName = path3.basename(actualProjectPath, ext);
-              const backupDir = path3.join(projDir, "_mcp_backups");
-              fs3.mkdirSync(backupDir, { recursive: true });
+              const projDir = path4.dirname(actualProjectPath);
+              const ext = path4.extname(actualProjectPath) || ".aep";
+              const baseName = path4.basename(actualProjectPath, ext);
+              const backupDir = path4.join(projDir, "_mcp_backups");
+              fs4.mkdirSync(backupDir, { recursive: true });
               const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
-              backupPath = path3.join(backupDir, `${baseName}_${stamp}${ext}`);
-              fs3.copyFileSync(actualProjectPath, backupPath);
-              backupSize = fs3.statSync(backupPath).size;
+              backupPath = path4.join(backupDir, `${baseName}_${stamp}${ext}`);
+              fs4.copyFileSync(actualProjectPath, backupPath);
+              backupSize = fs4.statSync(backupPath).size;
             }
           }
           const saveResp = await ctx.bridge.evalRaw({
@@ -7542,7 +7647,7 @@ var mutateTools = [
             mutates: false,
             toolName: "ae_save"
           });
-          const savedSize = fs3.existsSync(actualProjectPath) ? fs3.statSync(actualProjectPath).size : null;
+          const savedSize = fs4.existsSync(actualProjectPath) ? fs4.statSync(actualProjectPath).size : null;
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -7587,14 +7692,14 @@ var mutateTools = [
 var WINDOWS_FALLBACK_AERENDER = "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
 var MACOS_FALLBACK_AERENDER = "/Applications/Adobe After Effects 2026/aerender";
 function defaultRendersDir() {
-  return path4.join(defaultDataDir(), "renders");
+  return path5.join(defaultDataDir(), "renders");
 }
 function defaultAerenderJobsFilePath() {
-  return path4.join(defaultRendersDir(), "jobs.json");
+  return path5.join(defaultRendersDir(), "jobs.json");
 }
 function resolveAerenderPath(options) {
   const platform = options?.platform ?? process.platform;
-  const exists = options?.existsSync ?? fs4.existsSync;
+  const exists = options?.existsSync ?? fs5.existsSync;
   const afterFxPath = options?.afterFxPath?.trim();
   let versionYear = null;
   if (options?.aeVersion) {
@@ -7612,15 +7717,15 @@ function resolveAerenderPath(options) {
       const appIdx = norm.toLowerCase().indexOf(".app");
       if (appIdx !== -1) {
         const appBundlePath = norm.slice(0, appIdx + 4);
-        const parentDir = path4.posix.dirname(appBundlePath);
-        const candidate2 = path4.posix.join(parentDir, "aerender");
+        const parentDir = path5.posix.dirname(appBundlePath);
+        const candidate2 = path5.posix.join(parentDir, "aerender");
         if (exists(candidate2)) {
           return candidate2;
         }
         return candidate2;
       }
-      const dir = path4.posix.dirname(norm);
-      const candidate = path4.posix.join(dir, "aerender");
+      const dir = path5.posix.dirname(norm);
+      const candidate = path5.posix.join(dir, "aerender");
       if (exists(candidate)) {
         return candidate;
       }
@@ -7637,7 +7742,7 @@ function resolveAerenderPath(options) {
   }
   if (afterFxPath) {
     const norm = afterFxPath.replace(/\\/g, "/");
-    const dir = norm.toLowerCase().endsWith(".exe") ? path4.posix.dirname(norm) : norm.replace(/\/+$/, "");
+    const dir = norm.toLowerCase().endsWith(".exe") ? path5.posix.dirname(norm) : norm.replace(/\/+$/, "");
     const candidate = `${dir}/aerender.exe`;
     if (exists(candidate)) {
       return candidate;
@@ -7645,7 +7750,7 @@ function resolveAerenderPath(options) {
     return candidate;
   }
   if (typeof process.execPath === "string" && process.execPath.length > 0) {
-    const execDir = path4.dirname(process.execPath).replace(/\\/g, "/");
+    const execDir = path5.dirname(process.execPath).replace(/\\/g, "/");
     if (exists(`${execDir}/AfterFX.exe`) && exists(`${execDir}/aerender.exe`)) {
       return `${execDir}/aerender.exe`;
     }
@@ -7762,10 +7867,10 @@ function parseAerenderProgress(logText, meta) {
 }
 function readLogTail(logPath, maxLines = 60, maxChars = 16e3) {
   try {
-    if (!fs4.existsSync(logPath)) {
+    if (!fs5.existsSync(logPath)) {
       return { fullText: "", tail: "" };
     }
-    const fullText = fs4.readFileSync(logPath, "utf8");
+    const fullText = fs5.readFileSync(logPath, "utf8");
     const lines = fullText.split(/\r?\n/);
     if (lines.length > 0 && lines[lines.length - 1] === "") {
       lines.pop();
@@ -7792,7 +7897,7 @@ var AerenderJobRegistry = class {
     return this.filePath;
   }
   get rendersDir() {
-    return path4.dirname(this.filePath);
+    return path5.dirname(this.filePath);
   }
   newJobId() {
     return `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -7833,10 +7938,10 @@ var AerenderJobRegistry = class {
   }
   loadFromDisk() {
     try {
-      if (!fs4.existsSync(this.filePath)) {
+      if (!fs5.existsSync(this.filePath)) {
         return;
       }
-      const raw = fs4.readFileSync(this.filePath, "utf8");
+      const raw = fs5.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
       const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
       for (const item of list) {
@@ -7849,17 +7954,17 @@ var AerenderJobRegistry = class {
     }
   }
   saveToDisk() {
-    const dir = path4.dirname(this.filePath);
-    fs4.mkdirSync(dir, { recursive: true });
+    const dir = path5.dirname(this.filePath);
+    fs5.mkdirSync(dir, { recursive: true });
     const payload = JSON.stringify({ jobs: this.list() }, null, 2);
     const tmpFile = `${this.filePath}.tmp-${process.pid}-${crypto.randomBytes(3).toString("hex")}`;
     try {
-      fs4.writeFileSync(tmpFile, payload, { encoding: "utf8" });
-      fs4.renameSync(tmpFile, this.filePath);
+      fs5.writeFileSync(tmpFile, payload, { encoding: "utf8" });
+      fs5.renameSync(tmpFile, this.filePath);
     } catch {
-      fs4.writeFileSync(this.filePath, payload, { encoding: "utf8" });
+      fs5.writeFileSync(this.filePath, payload, { encoding: "utf8" });
       try {
-        if (fs4.existsSync(tmpFile)) fs4.unlinkSync(tmpFile);
+        if (fs5.existsSync(tmpFile)) fs5.unlinkSync(tmpFile);
       } catch {
       }
     }
@@ -7977,16 +8082,16 @@ function createAerenderTools(options = {}) {
               });
               const jobId = registry.newJobId();
               const rendersDir = registry.rendersDir;
-              fs4.mkdirSync(rendersDir, { recursive: true });
-              const outDir = path4.dirname(args.output_path);
+              fs5.mkdirSync(rendersDir, { recursive: true });
+              const outDir = path5.dirname(args.output_path);
               if (outDir && outDir !== ".") {
                 try {
-                  fs4.mkdirSync(outDir, { recursive: true });
+                  fs5.mkdirSync(outDir, { recursive: true });
                 } catch {
                 }
               }
-              const logPath = path4.join(rendersDir, `${jobId}.log`);
-              fs4.writeFileSync(logPath, "", { encoding: "utf8" });
+              const logPath = path5.join(rendersDir, `${jobId}.log`);
+              fs5.writeFileSync(logPath, "", { encoding: "utf8" });
               const cliArgs = buildAerenderArgs({
                 project_path: actualProjectPath,
                 comp_name: args.comp_name,
@@ -7998,7 +8103,7 @@ function createAerenderTools(options = {}) {
               });
               let logFd = null;
               try {
-                logFd = fs4.openSync(logPath, "a");
+                logFd = fs5.openSync(logPath, "a");
               } catch {
                 logFd = null;
               }
@@ -8010,14 +8115,14 @@ function createAerenderTools(options = {}) {
               });
               if (logFd !== null) {
                 try {
-                  fs4.closeSync(logFd);
+                  fs5.closeSync(logFd);
                 } catch {
                 }
               }
               if (child.stdout) {
                 child.stdout.on("data", (chunk) => {
                   try {
-                    fs4.appendFileSync(logPath, chunk);
+                    fs5.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -8025,7 +8130,7 @@ function createAerenderTools(options = {}) {
               if (child.stderr) {
                 child.stderr.on("data", (chunk) => {
                   try {
-                    fs4.appendFileSync(logPath, chunk);
+                    fs5.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -8053,7 +8158,7 @@ function createAerenderTools(options = {}) {
               registry.register(initialRecord, child);
               child.on("error", (err) => {
                 try {
-                  fs4.appendFileSync(
+                  fs5.appendFileSync(
                     logPath,
                     `
 AERENDER SPAWN ERROR: ${err.message}
@@ -8085,7 +8190,7 @@ AERENDER SPAWN ERROR: ${err.message}
                   let logError = null;
                   try {
                     const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-                      fs4.readFileSync(logPath, "utf8")
+                      fs5.readFileSync(logPath, "utf8")
                     );
                     if (m) logError = m[1].trim() || "aerender ERROR";
                   } catch {
@@ -8207,7 +8312,7 @@ AERENDER SPAWN ERROR: ${err.message}
           }
         }
         try {
-          fs4.appendFileSync(
+          fs5.appendFileSync(
             job.log_path,
             `
 AERENDER CANCELLED by ae_aerender_cancel at ${(/* @__PURE__ */ new Date()).toISOString()}
@@ -8416,7 +8521,8 @@ var animateTools = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getKeyframeEase", {
@@ -8468,6 +8574,7 @@ var animateTools = [
             op_id: opId,
             applied: true,
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -8498,7 +8605,8 @@ var animateTools = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getTextDocument", {
@@ -8576,6 +8684,7 @@ var animateTools = [
             op_id: opId,
             applied: true,
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -8602,7 +8711,8 @@ var animateTools = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, args.expect, opId);
+          const guard = await verifyTargetGuard(ctx, args.expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getFootageItems", {}),
@@ -8653,6 +8763,7 @@ var animateTools = [
             item_ids: itemIds,
             items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -8679,7 +8790,8 @@ var animateTools = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
-          await verifyTargetGuard(ctx, args.expect, opId);
+          const guard = await verifyTargetGuard(ctx, args.expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getFootageItem", {
@@ -8741,6 +8853,7 @@ var animateTools = [
             before_footage_missing: beforeMissing,
             footageMissing: afterMissing,
             result: writeResp.result,
+            checkpoint,
             receipt
           };
         });
@@ -8910,17 +9023,17 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs7 = __toESM(require("node:fs"), 1);
-var path6 = __toESM(require("node:path"), 1);
+var fs8 = __toESM(require("node:fs"), 1);
+var path7 = __toESM(require("node:path"), 1);
 var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs6 = __toESM(require("node:fs"), 1);
-var path5 = __toESM(require("node:path"), 1);
+var fs7 = __toESM(require("node:fs"), 1);
+var path6 = __toESM(require("node:path"), 1);
 
 // src/tools/ext/png-utils.ts
-var fs5 = __toESM(require("node:fs"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var import_pngjs = __toESM(require_png(), 1);
 function fitWithin(width, height, maxSize) {
   const longEdge = Math.max(width, height);
@@ -9133,7 +9246,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs5.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs6.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -9147,7 +9260,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs5.writeFileSync(dstPath, encodePng(out));
+  fs6.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 
@@ -9171,14 +9284,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path5.join(defaultDataDir(), "frames");
+  return path6.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs6.existsSync(filePath)) {
+    if (!fs7.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs6.statSync(filePath);
+    const stat = fs7.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -9204,7 +9317,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs6.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs7.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -9218,14 +9331,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs6.mkdirSync(framesDir, { recursive: true });
+      fs7.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path5.join(
+            const pngPath1 = path6.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -9259,7 +9372,7 @@ var renderTools = [
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
             const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path5.join(
+            const pngPath2 = path6.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -9335,7 +9448,8 @@ var renderTools = [
           `ae_render_queue_add(${args.comp_id})`,
           async () => {
             ctx.quarantine.assertClear();
-            await verifyTargetGuard(ctx, effectiveExpect, opId);
+            const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+            const checkpoint = await autoCheckpoint(ctx, guard, "ae_render_queue_add");
             const beforeRq = await ctx.bridge.evalRaw({
               id: `${opId}_before`,
               script: buildJsxCall("rqStatus", {}),
@@ -9379,6 +9493,7 @@ var renderTools = [
               applied: true,
               index: rqIndex,
               result: addResp.result,
+              checkpoint,
               receipt
             };
           }
@@ -9477,10 +9592,10 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs7.existsSync(filePath)) {
+  if (!fs8.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs7.readFileSync(filePath);
+  const buf = fs8.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -9651,7 +9766,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path6.join(
+  const pngPath1 = path7.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -9675,7 +9790,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path6.join(
+  const pngPath2 = path7.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -9712,7 +9827,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs7.mkdirSync(framesDir, { recursive: true });
+        fs8.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -9751,7 +9866,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs7.mkdirSync(framesDir, { recursive: true });
+        fs8.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -9779,9 +9894,9 @@ var framesTools = [
         let diffPngPath;
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-          diffPngPath = path6.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          diffPngPath = path7.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
           const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-          fs7.writeFileSync(diffPngPath, outBuf);
+          fs8.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -9836,8 +9951,8 @@ var framesTools = [
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs8 = __toESM(require("node:fs"), 1);
-var path7 = __toESM(require("node:path"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -10204,7 +10319,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs8.mkdirSync(framesDir, { recursive: true });
+      fs9.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -10262,11 +10377,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path7.join(
+      const sheetPath = path8.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs8.writeFileSync(sheetPath, encodePng(sheet));
+      fs9.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -10312,12 +10427,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs8.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path7.join(
+      fs9.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path8.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs8.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs9.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -10351,8 +10466,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs9 = __toESM(require("node:fs"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
+var path9 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -10386,7 +10501,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path8.join(defaultDataDir(), "ui");
+  return path9.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -10581,7 +10696,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs9.mkdirSync(outDir, { recursive: true });
+        fs10.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -10608,8 +10723,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs10 = __toESM(require("node:fs"), 1);
-var path9 = __toESM(require("node:path"), 1);
+var fs11 = __toESM(require("node:fs"), 1);
+var path10 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -10872,6 +10987,19 @@ var AeCheckpointCreateSchema = external_exports.object({
 var AeCheckpointListSchema = external_exports.object({
   expect: ExpectSchema
 });
+var AeAutoCheckpointSchema = external_exports.object({
+  enabled: external_exports.boolean().optional().describe("Turn automatic checkpoints on or off. Omit to leave unchanged."),
+  max_mb: external_exports.number().positive().max(1e5).optional().describe("Skip projects whose .aep is larger than this many megabytes (default 250). Omit to leave unchanged.")
+});
+var AUTO_CHECKPOINT_TOOLS = [
+  "ae_run_jsx",
+  "ae_set_property",
+  "ae_set_keyframe_ease",
+  "ae_set_text",
+  "ae_import_footage",
+  "ae_replace_footage",
+  "ae_render_queue_add"
+];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
   checkpoint_path: external_exports.string().min(1).describe("Absolute path to the `.aep` checkpoint file to open."),
@@ -10976,7 +11104,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs10.existsSync(actualProjectPath)) {
+          if (!fs11.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -10985,17 +11113,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path9.dirname(actualProjectPath);
-          const ext = path9.extname(actualProjectPath) || ".aep";
-          const baseName = path9.basename(actualProjectPath, ext);
-          const checkpointDir = path9.join(projDir, "_mcp_checkpoints");
-          fs10.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path10.dirname(actualProjectPath);
+          const ext = path10.extname(actualProjectPath) || ".aep";
+          const baseName = path10.basename(actualProjectPath, ext);
+          const checkpointDir = path10.join(projDir, "_mcp_checkpoints");
+          fs11.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path9.join(checkpointDir, checkpointFileName);
-          fs10.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs10.statSync(checkpointPath);
+          const checkpointPath = path10.join(checkpointDir, checkpointFileName);
+          fs11.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs11.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -11011,7 +11139,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs10.existsSync(checkpointPath)
+              checkpoint_exists: fs11.existsSync(checkpointPath)
             }
           });
           return {
@@ -11053,9 +11181,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path9.dirname(actualProjectPath);
-      const checkpointDir = path9.join(projDir, "_mcp_checkpoints");
-      if (!fs10.existsSync(checkpointDir)) {
+      const projDir = path10.dirname(actualProjectPath);
+      const checkpointDir = path10.join(projDir, "_mcp_checkpoints");
+      if (!fs11.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -11063,13 +11191,14 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs10.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs11.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path9.join(checkpointDir, e.name);
-        const stat = fs10.statSync(fullPath);
+        const fullPath = path10.join(checkpointDir, e.name);
+        const stat = fs11.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
+          auto: /_auto-[A-Za-z0-9_]+(-\d+)?\.aepx?$/i.test(e.name),
           size: stat.size,
           mtimeMs: stat.mtimeMs,
           created_at: stat.mtime.toISOString()
@@ -11086,6 +11215,27 @@ var receiptsTools = [
     }
   },
   {
+    name: "ae_auto_checkpoint",
+    description: `Read or change automatic checkpoints. Before every write (${AUTO_CHECKPOINT_TOOLS.join(", ")}; ae_run_jsx only with mutates: true), the server copies the saved .aep to \`<projectdir>/_mcp_checkpoints/<name>_<stamp>_auto-<tool>.aep\` and reports it as \`checkpoint\` in the write's result. ae_checkpoint_list shows them (\`auto: true\`) and ae_checkpoint_revert opens one. AE can't write its unsaved state to another file without retargeting the project, so the copy is the LAST SAVE: when AE has unsaved changes, \`checkpoint.unsaved_changes_not_included\` is true. Writes between two saves share one copy. Unsaved projects and projects over \`max_mb\` are skipped, and a failed copy never blocks the write. Call with no arguments to read the settings. Change them only when the user asks (for example, to turn checkpoints off for a very large project); they persist across restarts. ` + AGENT_SAFETY_GUIDANCE,
+    schema: AeAutoCheckpointSchema,
+    handler: async (args, ctx) => {
+      if (!ctx.settings) {
+        throw new BridgeError({
+          kind: "evalscript_error",
+          message: "This server has no settings store, so auto checkpoints use the defaults and can't be changed."
+        });
+      }
+      const changed = args.enabled !== void 0 || args.max_mb !== void 0;
+      const settings = changed ? ctx.settings.updateAutoCheckpoint({ enabled: args.enabled, max_mb: args.max_mb }) : ctx.settings.get();
+      return {
+        changed,
+        auto_checkpoint: settings.auto_checkpoint,
+        applies_to: AUTO_CHECKPOINT_TOOLS,
+        settings_path: ctx.settings.path
+      };
+    }
+  },
+  {
     name: "ae_checkpoint_revert",
     description: "Revert to a checkpoint `.aep` file using `openProject` (closes current project with `CloseOptions.DO_NOT_SAVE_CHANGES` only when allowed and calls `app.open`). Refuses if the open project is dirty unless `discard_changes: true` is explicitly passed. " + AGENT_SAFETY_GUIDANCE,
     schema: AeCheckpointRevertSchema,
@@ -11097,7 +11247,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs10.existsSync(args.checkpoint_path)) {
+          if (!fs11.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -11750,7 +11900,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path10.join(resolvedDataDir, "quarantine.json")
+    path11.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -11762,7 +11912,8 @@ function createPanelMcp(opts) {
     bridge: host,
     queue,
     quarantine,
-    cep: opts.cep
+    cep: opts.cep,
+    settings: new SettingsStore(path11.join(resolvedDataDir, "settings.json"))
   };
   const log = opts.log;
   async function handleHttp(req, res, bodyText) {

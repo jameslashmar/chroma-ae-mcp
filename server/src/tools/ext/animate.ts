@@ -24,7 +24,7 @@ import {
   type ExpectGuard,
   type ToolDefinition,
 } from "../common.js";
-import { verifyTargetGuard } from "../mutate.js";
+import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
 
 // ---------- 1. ae_set_keyframe_ease ----------
 
@@ -345,7 +345,8 @@ export const animateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
 
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
@@ -404,6 +405,7 @@ export const animateTools: ToolDefinition<any>[] = [
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });
@@ -438,7 +440,8 @@ export const animateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
 
           const beforeSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
             id: `${opId}_before`,
@@ -541,6 +544,7 @@ export const animateTools: ToolDefinition<any>[] = [
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });
@@ -573,7 +577,8 @@ export const animateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, args.expect, opId);
+          const guard = await verifyTargetGuard(ctx, args.expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
 
           const beforeSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
             id: `${opId}_before`,
@@ -638,6 +643,7 @@ export const animateTools: ToolDefinition<any>[] = [
               ? writeResp.result.items
               : [],
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });
@@ -668,7 +674,8 @@ export const animateTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
 
-          await verifyTargetGuard(ctx, args.expect, opId);
+          const guard = await verifyTargetGuard(ctx, args.expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
 
           const beforeSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
             id: `${opId}_before`,
@@ -762,6 +769,7 @@ export const animateTools: ToolDefinition<any>[] = [
             before_footage_missing: beforeMissing,
             footageMissing: afterMissing,
             result: writeResp.result,
+            checkpoint,
             receipt,
           };
         });
