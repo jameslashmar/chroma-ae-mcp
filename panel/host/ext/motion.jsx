@@ -1,4 +1,4 @@
-// motion.jsx: read a property's value over time, for the motion tools.
+// motion.jsx: read properties over time for the motion tools (graph and review).
 //
 // Rules (see docs/BUILDERS.md):
 // - ES3 only: no let/const/arrows/template strings/classes, no chained ternaries.
@@ -13,6 +13,9 @@
 
   var MAX_SAMPLES = 1000;
   var MAX_KEYS = 500;
+  var MAX_ANIMATED = 200;
+  var MAX_VISITED = 20000;
+  var MAX_DEPTH = 10;
   // On a 2D layer AE still reports these as 3D values with a constant Z
   // (measured on AE 26.2), which would flatten the value graph.
   var TWO_D_ON_2D_LAYERS = { "ADBE Anchor Point": true, "ADBE Position": true, "ADBE Scale": true };
@@ -202,6 +205,93 @@
       times: times,
       values: values,
       keys: keys
+    };
+  };
+
+  // Lists the keyframed numeric properties (2+ keys) of a comp's layers, for
+  // the motion review. args: { comp_id, layers? }. Each path step is a match
+  // name, except inside indexed groups (effects, masks, shape contents),
+  // where siblings can share a match name, so the display name is used.
+  // Bounded by MAX_ANIMATED results and MAX_VISITED properties.
+  A.listAnimatedProperties = function (args) {
+    var c = requireComp(args.comp_id);
+    var layers = [];
+    var i;
+    if (args.layers && args.layers.length > 0) {
+      for (i = 0; i < args.layers.length; i++) layers.push(findLayer(c, args.layers[i]));
+    } else {
+      for (i = 1; i <= c.numLayers; i++) layers.push(c.layer(i));
+    }
+
+    var found = [];
+    var visited = 0;
+    var truncated = false;
+
+    function walk(group, path, depth, layer, indexed) {
+      if (depth > MAX_DEPTH) return;
+      var n = 0;
+      try { n = group.numProperties; } catch (e0) { n = 0; }
+      for (var k = 1; k <= n; k++) {
+        if (found.length >= MAX_ANIMATED || visited >= MAX_VISITED) {
+          truncated = true;
+          return;
+        }
+        visited++;
+        var p = null;
+        try { p = group.property(k); } catch (e1) { p = null; }
+        if (!p) continue;
+        var step;
+        if (indexed) {
+          step = p.name;
+        } else {
+          step = p.matchName;
+        }
+        var nextPath = path.concat([step]);
+        if (p.propertyType === PropertyType.PROPERTY) {
+          var keys = 0;
+          try { keys = p.numKeys; } catch (e2) { keys = 0; }
+          if (keys >= 2 && valueTypeName(p) !== null) {
+            var expr = false;
+            try { expr = p.canSetExpression && p.expressionEnabled && p.expression !== ""; } catch (e3) { expr = false; }
+            found.push({
+              layer: { index: layer.index, id: layer.id, name: layer.name },
+              path: nextPath,
+              name: p.name,
+              matchName: p.matchName,
+              num_keys: keys,
+              first_key_time: p.keyTime(1),
+              last_key_time: p.keyTime(keys),
+              expression: expr
+            });
+          }
+        } else {
+          walk(p, nextPath, depth + 1, layer, p.propertyType === PropertyType.INDEXED_GROUP);
+        }
+      }
+    }
+
+    for (i = 0; i < layers.length; i++) {
+      walk(layers[i], [], 1, layers[i], false);
+      if (truncated) break;
+    }
+
+    var projectPath = "<unsaved>";
+    try { if (app.project.file) projectPath = app.project.file.fsName; } catch (e4) {}
+
+    return {
+      comp: {
+        id: c.id,
+        name: c.name,
+        fps: c.frameRate,
+        width: c.width,
+        height: c.height,
+        workAreaStart: c.workAreaStart,
+        workAreaDuration: c.workAreaDuration
+      },
+      project_path: projectPath,
+      layers_scanned: layers.length,
+      properties: found,
+      truncated: truncated
     };
   };
 })($.global);

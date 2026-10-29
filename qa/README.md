@@ -39,6 +39,7 @@ Reports are written to `qa/out/junit.xml` and `qa/out/report.md`.
 
 `qa/smoke-mcp.mjs` calls every chroma-ae-mcp tool through the panel's MCP endpoint (`POST /mcp`) against the After Effects on this machine:
 - It builds its own comp, saves it, and runs each write tool, checking the auto checkpoint each one reports.
+- It runs `ae_motion_review` before and after `ae_set_keyframe_ease` easy-eases the linear Dot, so the review, fix and re-review loop is covered.
 - It runs each read tool, plus a five-frame background `aerender`.
 - It takes about a minute.
 
