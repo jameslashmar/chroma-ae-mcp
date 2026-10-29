@@ -105,6 +105,7 @@ Everything else stays in `ae_run_jsx`.
 | Single-layer snapshot (solo-free) | 🟡 (JSX, but soloing touches the undo stack; needs care) | P3 | Engine-Room `vision.jsx` `screenshot_layer` |
 | Contact sheet of a comp (N frames tiled) | ✅ `ae_contact_sheet` (labelled tiles, checkerboard alpha, blank frames outlined in red) | (done) | a-y-ibrahim `contact-sheet`. Mirrors premiere-pro-mcp's `generate_media_contact_sheet`. |
 | Motion graph of one property: value and speed over time, easing per keyframe pair, overshoot | ✅ `ae_motion_graph` (samples with `valueAtTime`, so expressions count) | (done) | Our own. |
+| **Motion review of a whole comp**: what an animator would flag, with fixes | ✅ `ae_motion_review`. It covers linear moves, starts and stops at full speed, speed jolts at a key, overshoot (info), and keys between frames. Most findings carry a ready `ae_set_keyframe_ease` easy-ease call, so the agent can review, fix (with the user's OK) and review again. Expression-driven properties are sampled past their last key, so a settle isn't called a dead stop. | (done) | Our own. Next: roving middle keys (the easy-ease fix leaves a slight speed dip at them), frame and safe-area bounds. |
 | Match to a reference frame | ❌ | P3 | a-y-ibrahim `match-reference` |
 
 ## 7. Audio

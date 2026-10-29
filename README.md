@@ -89,7 +89,7 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 
 ---
 
-## Tools (37)
+## Tools (38)
 
 | Group | Tools |
 |---|---|
@@ -99,7 +99,7 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 | Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease`, `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
 | Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
 | Frames | `ae_snapshot_frame` (AE renders at full resolution and the server shrinks the PNG to `scale` or `max_size`; waits for the PNG, which AE writes asynchronously), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
-| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot) |
+| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` easy-ease fix) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |

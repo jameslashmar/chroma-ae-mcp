@@ -120,7 +120,9 @@ async function main() {
       'g.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size").setValue([60, 60]);',
       'g.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([1, 0.8, 0.1, 1]);',
       'var p = d.property("ADBE Transform Group").property("ADBE Position");',
-      "p.setValueAtTime(0, [80, 240]); p.setValueAtTime(1.5, [560, 240]); p.setValueAtTime(2.5, [560, 300]);",
+      // A straight, linear move, so the review has something definite to flag.
+      "p.setValueAtTime(0, [80, 240]); p.setValueAtTime(1.5, [320, 240]); p.setValueAtTime(2.5, [560, 240]);",
+      "for (var k = 1; k <= 3; k++) p.setInterpolationTypeAtKey(k, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       "return { comp_id: c.id };",
     ].join("\n"),
   });
@@ -142,8 +144,20 @@ async function main() {
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 80, expect });
   check("ae_set_property", r.applied && r.receipt?.matches !== false && r.checkpoint?.status === want("created"), cpNote(r));
 
+  // Review, fix with easy_ease, review again: the Dot's keys start out linear.
+  r = await call("ae_motion_review", { comp_id: COMP });
+  const dotLinear = (r.findings ?? []).filter((f) => f.kind === "linear" && f.severity === "medium" && f.layer.name === "Dot");
+  check(
+    "ae_motion_review (before)",
+    r.ok && dotLinear.length >= 1 && dotLinear.every((f) => f.fix?.tool === "ae_set_keyframe_ease"),
+    `${r.counts?.medium} medium, kinds ${Object.keys(r.by_kind ?? {}).join(", ")}`
+  );
+
   r = await call("ae_set_keyframe_ease", { comp_id: COMP, layer: dot, path: ["ADBE Transform Group", "ADBE Position"], ease: "easy_ease", expect });
   check("ae_set_keyframe_ease", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));
+
+  r = await call("ae_motion_review", { comp_id: COMP });
+  check("ae_motion_review (after)", r.ok && r.counts?.medium === 0, `${r.counts?.medium} medium, ${r.counts?.low} low`);
 
   r = await call("ae_set_text", { comp_id: COMP, layer: { name: "Title" }, text: "Smoke test", style: { fontSize: 40, fillColor: [1, 1, 1] }, expect });
   check("ae_set_text", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));
