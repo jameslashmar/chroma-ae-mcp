@@ -99,11 +99,12 @@ Everything else stays in `ae_run_jsx`.
 
 | Capability | Status | Priority | Borrow from |
 |---|---|---|---|
-| Frame snapshot, checked for freshness | ✅ `ae_snapshot_frame` (full resolution) | (done) | |
-| Scaled snapshot that doesn't touch the comp (resize the PNG on the server, not in AE) | ❌ | P2 | Resize the PNG with sharp, or with ffmpeg (the global build). Never via `resolutionFactor`. |
-| **Frame compare and sampling**: diff two frames, sample a time range, detect a blank or black frame | ❌ | **P1** | JUNKDOGE `ae_previewFrame` (sample a range, compare two frames, pixel diff) |
+| Frame snapshot, checked for freshness | ✅ `ae_snapshot_frame` | (done) | |
+| Scaled snapshot that doesn't touch the comp (resize the PNG on the server, not in AE) | ✅ `ae_snapshot_frame` `scale` / `max_size` (pure-JS area resize; the full render stays as `full_path`) | (done) | |
+| **Frame compare and sampling**: diff two frames, sample a time range, detect a blank or black frame | ✅ `ae_compare_frames`, `ae_contact_sheet` | (done) | JUNKDOGE `ae_previewFrame` (sample a range, compare two frames, pixel diff) |
 | Single-layer snapshot (solo-free) | 🟡 (JSX, but soloing touches the undo stack; needs care) | P3 | Engine-Room `vision.jsx` `screenshot_layer` |
-| Contact sheet of a comp (N frames tiled) | ❌ | P2 | a-y-ibrahim `contact-sheet`. Mirrors premiere-pro-mcp's `generate_media_contact_sheet`. |
+| Contact sheet of a comp (N frames tiled) | ✅ `ae_contact_sheet` (labelled tiles, checkerboard alpha, blank frames outlined in red) | (done) | a-y-ibrahim `contact-sheet`. Mirrors premiere-pro-mcp's `generate_media_contact_sheet`. |
+| Motion graph of one property: value and speed over time, easing per keyframe pair, overshoot | ✅ `ae_motion_graph` (samples with `valueAtTime`, so expressions count) | (done) | Our own. |
 | Match to a reference frame | ❌ | P3 | a-y-ibrahim `match-reference` |
 
 ## 7. Audio

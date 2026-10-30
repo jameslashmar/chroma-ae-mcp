@@ -396,9 +396,10 @@ export function compareDecodedFrames(
 /**
  * Captures a single composition frame inside an active queue lease using the
  * `snapshotFrame` host function and `waitForFreshPng`, retrying once with a
- * +0.001s time nudge if the first write is stale.
+ * +0.001s time nudge if the first write is stale. Callers must already hold
+ * the queue (it uses `evalRaw`, never `callHost`).
  */
-async function captureCompFrame(params: {
+export async function captureCompFrame(params: {
   ctx: ToolContext;
   opId: string;
   compId: number;
@@ -406,8 +407,10 @@ async function captureCompFrame(params: {
   frameIndex: number;
   framesDir: string;
   waitMs?: number;
+  toolName?: string;
 }): Promise<{ path: string; time: number }> {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
+  const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const pngPath1 = path.join(
     framesDir,
@@ -423,10 +426,10 @@ async function captureCompFrame(params: {
       scale: 0.5,
       output_path: pngPath1,
     }),
-    label: `ae_compare_frames(${compId} @ ${time}s)`,
+    label: `${toolName}(${compId} @ ${time}s)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
-    toolName: "ae_compare_frames",
+    toolName,
   });
 
   const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
@@ -451,10 +454,10 @@ async function captureCompFrame(params: {
       scale: 0.5,
       output_path: pngPath2,
     }),
-    label: `ae_compare_frames(${compId} @ ${nudgedTime}s retry)`,
+    label: `${toolName}(${compId} @ ${nudgedTime}s retry)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
-    toolName: "ae_compare_frames",
+    toolName,
   });
 
   const check2 = await waitForFreshPng(pngPath2, reqStart2, params.waitMs);
