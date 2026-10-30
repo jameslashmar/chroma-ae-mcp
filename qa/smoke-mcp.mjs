@@ -123,10 +123,13 @@ async function main() {
       // A straight, linear move, so the review has something definite to flag.
       "p.setValueAtTime(0, [80, 240]); p.setValueAtTime(1.5, [320, 240]); p.setValueAtTime(2.5, [560, 240]);",
       "for (var k = 1; k <= 3; k++) p.setInterpolationTypeAtKey(k, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
-      "return { comp_id: c.id };",
+      // An empty comp for ae_skill_run to write into, so the Smoke comp keeps its three layers.
+      'var sk = app.project.items.addComp("Skill target", 320, 180, 1, 1, 25);',
+      "return { comp_id: c.id, skill_comp_id: sk.id };",
     ].join("\n"),
   });
   const COMP = scene.result?.comp_id;
+  const SKILL_COMP = scene.result?.skill_comp_id;
   if (typeof COMP !== "number") throw new Error("Could not build the smoke scene: " + JSON.stringify(scene));
 
   let r = await call("ae_run_jsx", {
@@ -256,6 +259,45 @@ async function main() {
   });
   check("ae_run_jsx (write)", r.applied && r.result === 1 && r.checkpoint?.status === want("reused"), cpNote(r));
 
+  // A project skill with two steps (args, prev and results), listed, then run into its own comp.
+  r = await call("ae_skill_save", {
+    name: "smoke-null",
+    description: "Adds a null named from args.",
+    steps: ["var c = app.project.itemByID(args.comp_id);\nvar n = c.layers.addNull();\nn.name = args.name;\nreturn n;", 'return prev.name + " " + results.length;'],
+    scope: "project",
+    overwrite: true,
+    args_example: { comp_id: 1, name: "Rig" },
+    expect: { project_path: AEP },
+  });
+  check("ae_skill_save", r.ok && fs.existsSync(path.join(ROOT, "ae-skills", "smoke-null", "2.jsx")), (r.files ?? []).join(", "));
+  r = await call("ae_skill_list");
+  check("ae_skill_list", r.ok && (r.skills ?? []).some((x) => x.name === "smoke-null" && x.scope === "project"), `${r.count} skill(s)`);
+  r = await call("ae_skill_run", { name: "smoke-null", args: { comp_id: SKILL_COMP, name: "Rig" }, expect: { ...expect, comp_id: SKILL_COMP } });
+  check("ae_skill_run", r.applied && r.value === "Rig 1" && r.receipt?.matches === true && r.checkpoint?.status === want("reused"), cpNote(r));
+
+  // Two copies of the Smoke comp with the title from data, and a 9:16 reframe of it.
+  r = await call("ae_build_from_data", {
+    template_comp_id: COMP,
+    rows: [{ lang: "en", t: "Hello" }, { lang: "tr", t: "Merhaba" }],
+    mapping: [{ column: "t", layer: { name: "Title" }, target: "text" }],
+    name: "{{template}} {{lang}}",
+    expect,
+  });
+  check("ae_build_from_data", r.applied && r.receipt?.matches === true && r.comps?.length === 2 && r.checkpoint?.status === want("reused"), (r.comps ?? []).map((c) => c.name).join(", "));
+  r = await call("ae_reframe", { comp_id: COMP, targets: [{ aspect: "9:16" }], expect });
+  const vertical = r.comps?.[0];
+  check("ae_reframe", r.applied && r.receipt?.matches === true && vertical?.width === 360 && vertical?.height === 640, `${vertical?.name}, ${(vertical?.outside_safe ?? []).length} outside the safe area`);
+
+  // A still dropped in the asset folder goes into the _Assets bin, once.
+  const staged = path.join(ROOT, "_assets", "stills", "red.png");
+  fs.mkdirSync(path.dirname(staged), { recursive: true });
+  fs.writeFileSync(staged, Buffer.from(RED_PNG, "base64"));
+  const settled = new Date(Date.now() - 10_000);
+  fs.utimesSync(staged, settled, settled);
+  r = await call("ae_import_assets", { expect: { project_path: AEP } });
+  const again = await call("ae_import_assets", { dry_run: true, expect: { project_path: AEP } });
+  check("ae_import_assets", r.ok && r.imported?.length === 1 && r.receipt?.matches === true && again.to_import?.length === 0, `${r.imported?.[0]?.name} into ${r.bin}; ${cpNote(r)}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
 
@@ -312,6 +354,8 @@ async function main() {
   check("ae_quarantine_status", r.quarantined === false, `${r.count} quarantined`);
   r = await call("ae_dialogs", { screenshots: false });
   check("ae_dialogs", !r.__isError && !r.__error, `${(r.dialogs ?? []).length} dialog(s)`);
+  r = await call("ae_diagnostics", { log_lines: 20, include_dialogs: false });
+  check("ae_diagnostics", r.ok && fs.existsSync(String(r.path)) && r.summary?.ae_answered === true, path.basename(String(r.path)));
   r = await call("ae_list_panels", { filter: "Chroma" });
   check("ae_list_panels", JSON.stringify(r).includes("london.chroma.aemcp"));
   r = await call("ae_ui_screenshot");

@@ -12,7 +12,7 @@ Exception: an edit your task names explicitly.
 - **ExtendScript side:** `panel/host/ext/<group>.jsx`. The service loads it after `core.jsx`.
   - Attach functions to the existing object: `(function(G){ var A = G.__chromaAe; A.myFn = function(args){...}; })($.global);`
   - Each function takes ONE args object and returns a plain serialisable object.
-  - Reuse the helpers that `core.jsx` exposes on `A`: `A.withUndo(label, fn)`, `A.stringify`, `A.checkGuard`, `A.formatError`.
+  - Reuse the helpers that `core.jsx` exposes on `A`: `A.withUndo(label, fn)`, `A.stringify`, `A.checkGuard`, `A.formatError`, `A.plainResult(value)` (a script's return value as plain data; AE objects become summaries such as `[TextLayer "Title" #26]`).
   - `core.jsx` keeps `assertGuard`, `requireComp`, `findLayer`, `resolvePath`, `serialiseValue` and `describeProp` private. Re-implement small equivalents inside your file, or read `core.jsx` and copy them.
   - Throw guard errors as an `Error` with `e.__kind = "guard"` plus `e.__actual` / `e.__expected` (see `fail()` in `core.jsx`).
 - **Server side:** `server/src/tools/ext/<group>.ts` exports `export const <group>Tools: ToolDefinition<any>[]`, with the same shape as `tools/read.ts` and `tools/mutate.ts`.
@@ -37,6 +37,11 @@ Exception: an edit your task names explicitly.
 - **Adding an effect invalidates references to the others on that layer** (measured 2026-10-29, AE 26.2.1: "Object is invalid" on a Keylight reference after adding Key Cleaner). Read what you need (`propertyIndex`, values) before the next `addProperty`, or look the effect up again.
 - **Effect section headers share names with parameters** (Colorama's "Output Cycle", Fractal Noise's "Transform"): `property(name)` can return the valueless header. Address effect parameters by match name.
 - **Custom-data parameters** (`PropertyValueType.CUSTOM_VALUE`, e.g. Colorama's Output Cycle) can't be read or set by script ("has not been implemented"). An expression linking to the same parameter on another effect does work, and so do presets.
+- **2D layers keep three-dimensional Scale and Position** (measured 2026-10-30, AE 26.2.1): setting Scale to `[100, 75]` works and reads back as `[100, 75, 100]`. Compare only the dimensions you set.
+- **A duplicated comp's layers get new ids** but keep their indexes, so resolve a layer in the original and use its index in the copy (`ae_build_from_data`, `ae_reframe`).
+- **Changing a comp's `width` and `height` leaves every layer at the same pixel position** from the top-left corner: content shifts off-centre unless you move it (what `ae_reframe` does).
+- **Audio-only layers still have a Transform group** in scripting (measured 2026-10-30, AE 26.2.1; `hasVideo` is false), and **a separated Position still reads as one value** through `ADBE Position`. `layer.trackMatteLayer` exists on AE 26.
+- **Polling evals stay out of the log:** the service doesn't log an eval whose label starts with `quiet:` unless it fails (the asset watcher's status checks). Use it only for background polling; anything that writes must log.
 - **Never suppress AE dialogs** (no `app.beginSuppressDialogs`). Jay's rule: popups are read and answered through `ae_dialogs` / `ae_dialog_respond`, never hidden.
 - **Node code that runs in the panel** (anything reachable from `panel-entry.ts`) must work on **Node 17.7.2**: no `fetch`, no `Headers`, no `AbortSignal.timeout`, no `structuredClone`, no native modules. Pure-JS deps only.
 - **Child processes:** `windowsHide: true` always. Never block the eval queue waiting on a long process; run it as a background job with a status tool.
