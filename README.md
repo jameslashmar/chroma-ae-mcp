@@ -1,35 +1,47 @@
 # chroma-ae-mcp
 
-An MCP server that lets Claude Code drive **Adobe After Effects 2026** (AE 26.x, CEP 12) safely, alongside a person who is editing live. The MCP runs **inside After Effects**. It starts with AE, so there is no separate server to install or run.
+An MCP server that lets Claude Code, Claude Desktop, Cursor and Codex drive **Adobe After Effects 2026** (AE 26.x, CEP 12) safely, alongside a person who is editing live. It runs **inside After Effects** and starts with it, so there is no separate server to install or run.
 
 This is an internal Chroma tool, not a consumer product.
 
-> **Status: v0.2.0, released 2026-10-27** (signed ZXP on the [v0.2.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.2.0)).
-> - 34 tools, all live-tested on AE 26.0 (Windows).
-> - The QA harness passes VoxMark scenarios 1–3.
-> - CI (GitHub Actions) runs the build, 74 unit tests, the ExtendScript lint, and the in-panel MCP end to end on AE's own Node (17.7.2).
-> - macOS should work, but it is untested, and reading popups is Windows-only for now.
+> **Status: v0.3.0, released 2026-10-30** (signed ZXP on the [v0.3.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.3.0)).
+> - 55 tools, live-tested on AE 26.2.1 (Windows). The live smoke test exercises every tool.
+> - CI runs the build, 258 unit tests, the ExtendScript lint, and the in-panel MCP end to end on AE's own Node (17.7.2).
+> - macOS should work but is untested. Popup reading on macOS is written and unit-tested, but has not been run on a Mac.
+
+## What it can do
+
+- **Read** the project, comps, layers, effects and keyframes, in bounded, paged calls.
+- **Write** values, keyframes, expressions, text, footage and effects. Every write is guarded, one undo step, checkpointed and read back.
+- **Look at motion**: render frames, tile them into contact sheets, graph a property's value and speed, and review a comp's animation the way an animator would, with ready easing fixes.
+- **Produce versions**: one comp per CSV/JSON row, social reframes to 16:9, 1:1, 4:5 and 9:16, assets dropped in a folder imported into a bin, and saved recipes ("skills") for house rigs and lower thirds.
+- **Track and key** inside AE: a sub-pixel point tracker and a measured green-screen key, with nothing extra installed.
+- **Ask the user** in the panel, with buttons, pictures or ease curves they can reshape, and remember the project brief and their motion taste.
+- **Render** through the render queue or `aerender` in the background, **read and answer popups**, and **save a diagnostics file** when something is stuck.
 
 ---
 
 ## Install (users)
 
-1. **Install the ZXP.** Download `chroma-ae-mcp-<version>.zxp` from the release and install it with the [aescripts ZXP Installer](https://aescripts.com/learn/zxp-installer/) (or Anastasiy's). The certificate is self-signed ("Chroma AE MCP"), so expect a one-time warning.
+1. **Install the ZXP.** Download `chroma-ae-mcp-<version>.zxp` from the latest release and install it with the [aescripts ZXP Installer](https://aescripts.com/learn/zxp-installer/) (or Anastasiy's). The certificate is self-signed ("Chroma AE MCP"), so expect a one-time warning.
 2. **Start After Effects.** The MCP service starts by itself, invisibly, about 30 s after launch.
 3. **Open Window > Extensions > Chroma AE MCP.** The status panel should show **READY**.
-4. Under **Register with**, click each client you use: **Claude Code**, **Claude Desktop**, **Cursor**, **Codex**. A tick means it is registered; clicking again removes it.
-   - **Claude Code** is registered through its own CLI, at user scope.
-   - **The other three** get the stdio relay (below), started with the machine's Node, so their config files never hold the token. Each config file is backed up as `<file>.chroma-bak` before it is changed.
+4. **Register your clients.** Under **Register with**, click each one you use: **Claude Code**, **Claude Desktop**, **Cursor**, **Codex**. A tick means it is registered; clicking again removes it.
+5. **Restart the client** (in Claude Code, `/mcp`). The `ae_*` tools appear.
 
-   Without the panel's buttons, **Copy setup command** gives the Claude Code command to paste into a terminal:
-   ```
-   claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp --header "Authorization: Bearer <token>"
-   ```
-5. Restart the client (in Claude Code, `/mcp`), and the `ae_*` tools appear.
+**What you need:** Claude Code needs nothing but AE: the MCP runs on the Node built into AE's CEP. Claude Desktop, Cursor and Codex go through a small stdio relay, which needs Node 16 or later on the machine.
 
-The token belongs to this machine and survives restarts. **Regenerate token** in the panel replaces it. Claude Code's user-scope `chroma-ae` entry is registered again automatically, whether it was added from the panel or with the pasted command. Claude Desktop, Cursor and Codex use the relay and need nothing.
+**The token** belongs to this machine and survives restarts. **Regenerate token** in the panel replaces it, and Claude Code's user-scope `chroma-ae` entry is registered again automatically. The relay clients read the token themselves and need nothing.
 
-**Claude Desktop (Chat and Cowork)** can only launch a command, so it uses the stdio relay that ships with the panel. The panel's **Claude Desktop** button writes this for you. By hand: open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
+### Registering by hand
+
+**Claude Code.** **Copy setup command** in the panel gives this, to paste into a terminal:
+
+```
+claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp --header "Authorization: Bearer <token>"
+```
+
+**Claude Desktop (Chat and Cowork), Cursor, Codex.** These can only launch a command, so they use the relay that ships with the panel. For Claude Desktop, open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
 
 ```json
 "chroma-ae": {
@@ -38,82 +50,49 @@ The token belongs to this machine and survives restarts. **Regenerate token** in
 }
 ```
 
-`<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
-
-**Claude Desktop (Chat and Cowork)** can only launch a command, so it uses the stdio relay that ships with the panel. Open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
-
-```json
-"chroma-ae": {
-  "command": "node",
-  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"]
-}
-```
-
-`<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
-
-No Node, npm or git is needed. The MCP runs on the Node that is built into AE's CEP.
-
-## Develop (Chroma)
-
-```powershell
-cd server; npm install; npm run build; npm test; npm run bundle   # bundle -> panel/client/mcp-bundle.cjs
-node scripts/lint-jsx.mjs                                         # ES3 + no chained ternaries in panel/host
-pwsh scripts/install-dev.ps1                                      # junction panel/ into CEP extensions, PlayerDebugMode=1
-node qa/smoke-mcp.mjs                                             # live: every tool against the running AE (about a minute)
-```
-
-- Restart AE after any manifest change.
-- For code changes, reload the service: its CEP debugger is at `http://localhost:8097`, the panel's at `8096`.
-- `npm run bundle` must be committed: CI checks that the bundle is up to date.
-- **Never install the ZXP on a machine that has the dev junction.** An installer could delete through it into the repo. Run `install-dev.ps1 -Uninstall` first.
-
-**Releasing:**
-1. Bump `VERSION`.
-2. Run `op-sa op run --env-file scripts/release.env -- pwsh -NoProfile -File scripts/package.ps1`. It stages, stamps the version, signs with ZXPSignCmd and verifies. The certificate passphrase is in 1Password: Release Signing / "Chroma AE MCP ZXP cert".
-3. Tag `vX.Y.Z` on the build commit, then create the GitHub release with the `.zxp`.
+- `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS.
+- The relay forwards to the same `/mcp` as Claude Code, so every client shares one write queue.
+- While AE is closed the tools stay listed, and calling one says to start AE.
+- The panel's buttons back up each config file as `<file>.chroma-bak` before changing it.
 
 ---
 
 ## How it works
 
 ```
-Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hidden CEP extension, starts with AE)
-Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──┘
-                                      ├─ MCP endpoint (stateless JSON-RPC, no SDK: AE's Node 17 is too old for it)
-                                      ├─ single-writer queue · guard · quarantine · receipts
-                                      ├─ questions for the user (ae_ask_user), served to the panel on /ask
-                                      ├─ Node side: PNG decode, aerender jobs, UI Automation (popups, screenshots)
-                                      └─ evalScript ──► host/core.jsx + host/ext/*.jsx (ExtendScript)
-                                    london.chroma.aemcp.panel     (Window > Extensions: status, log, setup command, questions)
+Claude Code ───────────HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hidden CEP extension, starts with AE)
+Claude Desktop, Cursor,                       ├─ MCP endpoint (stateless JSON-RPC, no SDK: AE's Node 17 is too old for it)
+Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-writer queue · guard · quarantine · receipts · checkpoints
+                                              ├─ questions for the user (ae_ask_user), served to the panel on /ask
+                                              ├─ Node side: PNG decode and analysis, aerender jobs, popups, asset watcher
+                                              └─ evalScript ──► host/core.jsx + host/ext/*.jsx (ExtendScript)
+                                            london.chroma.aemcp.panel   (Window > Extensions: status, log, register, questions, diagnostics)
 ```
 
 **Why a thin guarded listener?** AE's ExtendScript DOM is complete, so `ae_run_jsx` can do almost anything. The typed tools exist where they add something `ae_run_jsx` cannot:
 - verification (read-back, stale-frame checks, pixel checks);
 - safety (guard, checkpoints, undo hygiene);
 - a known AE trap, encoded once;
-- large bounded reads.
+- large bounded reads;
+- work ExtendScript can't do at all (pixel analysis, tracking, background renders).
 
 ## Safety model
 
 - **Target guard.** Every write names the `project_path` (and `comp_id`) it expects. If AE has something else open, the write is refused before anything changes (`kind: "guard"`). A guard failure means stop and re-read the state, not retry.
 - **One undo step per write.** The undo group begins and ends inside one evalScript, so one Ctrl+Z backs out a whole tool call.
-- **Automatic checkpoints.** Before every write, the saved `.aep` is copied to `<projectdir>/_mcp_checkpoints/` (`..._auto-<tool>.aep`), so a write can be undone across sessions with `ae_checkpoint_revert`.
-  - The copy is the last save: AE can't write its unsaved state to another file without retargeting the project. When AE has unsaved changes, the write's `checkpoint` says so.
-  - Writes between two saves share one copy. Unsaved projects and projects over the size limit (250 MB by default) are skipped.
-  - `ae_auto_checkpoint` turns it off or changes the limit.
-- **Receipts.** Writes return a before/after comparison, read back in a *separate* evalScript, because AE returns stale values when a read follows a write in the same script. For a full picture, `ae_comp_fingerprint` and `ae_comp_diff` show every changed property and keyframe.
+- **Automatic checkpoints.** Before every write, the saved `.aep` is copied to `<projectdir>/_mcp_checkpoints/` (`..._auto-<tool>.aep`).
+  - The copy is the last save: AE can't write its unsaved state to another file without retargeting the project. When AE has unsaved changes, or can't say, the write's `checkpoint` says so.
+  - Writes between two saves share one copy. Unsaved projects and projects over the size limit (250 MB by default) are skipped. `ae_auto_checkpoint` turns it off or changes the limit.
+  - `ae_checkpoint_revert` opens the checkpoint file itself, not a copy, so saving afterwards overwrites that checkpoint. Make a new checkpoint first if you need to keep it.
+- **Receipts.** Writes return a before/after comparison, read back in a *separate* evalScript, because AE returns stale values when a read follows a write in the same script. `ae_comp_fingerprint` and `ae_comp_diff` show every changed property and keyframe.
 - **Quarantine.** A write that times out has an unknown outcome. It is quarantined, and further writes are blocked until someone inspects the state and calls `ae_acknowledge`. Nothing is retried automatically.
 - **Never kills AE mid-script.** Aborting an evalScript wedges the ExtendScript bridge, so calls queue and wait.
 - **Read tools change nothing,** not even a comp's resolution: that would land on the user's undo stack (measured).
 - **Popups are never suppressed** (Jay's rule).
-  - `ae_dialogs` reads AE's modal popups (title, text, buttons, screenshot) from outside AE's scripting thread.
+  - `ae_dialogs` reads AE's modal popups (title, text, buttons, screenshot) from outside AE's scripting thread, with OCR for the dialogs AE paints itself.
   - A timeout names any popup that is blocking AE.
   - `ae_dialog_respond` answers only popups our own operation caused, and refuses Save, Don't Save, Replace, Delete or Discard without an explicit instruction from the user. Every answer is logged.
-- **Locked-down bridge.**
-  - It binds to localhost only.
-  - Every request needs the Bearer token, which is stored in a folder only the current user can read.
-  - Any request with an `Origin` header (from a browser) is rejected.
-  - The `Host` header is checked strictly.
+- **Locked-down bridge.** It binds to localhost only. Every request needs the Bearer token, stored in a folder only the current user can read. Any request with an `Origin` header (from a browser) is rejected, and the `Host` header is checked strictly.
 
 ---
 
@@ -123,81 +102,97 @@ Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──�
 |---|---|
 | Status & control | `ae_status`, `ae_quarantine_status`, `ae_acknowledge` |
 | Read | `ae_get_project`, `ae_get_comp`, `ae_get_layer_props`, `ae_get_layer_full`, `ae_find_layers`, `ae_list_effects`, `ae_validate_expressions` |
-| Script | `ae_run_jsx` (read, or guarded write with a receipt) |
-| Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment), `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
-| Effects | `ae_add_effect`, `ae_set_effect` (on/off, rename, parameter values), `ae_remove_effect`, `ae_apply_preset` (.ffx onto one layer), `ae_list_presets` (the user's User Presets and AE's own). Parameters scripts can't set, such as Colorama's Output Cycle, are listed as `settable: false`; a preset saved from AE carries them. |
-| Tracking & keying | `ae_track_point` (a point tracker inside the MCP: AE renders the frames, the server follows the pattern with sub-pixel accuracy and writes the path to a null; within 0.04 px of the true position on a test shot), `ae_key_greenscreen` (Keylight + Key Cleaner + Advanced Spill Suppressor, then a measured check: screen left, holes, spill, recoloured subject, with ready fixes and a before/after preview). Nothing outside AE is installed. |
-| Ask the user | `ae_ask_user`: a question in the panel with buttons, pictures (e.g. a contact sheet per variant), or ease curves the user can preview and reshape by dragging the handles. Waits for the answer. |
-| Context | `ae_brief` (the project's goal, audience, format, feel, references and no-go areas, kept next to the .aep, with questions for what is missing), `ae_taste` (the user's motion preferences across projects; `ae_motion_review` follows them) |
-| Skills | `ae_skill_list`, `ae_skill_save`, `ae_skill_run`: recipes such as house rigs, lower thirds and kinetic type, kept as `SKILL.md` plus numbered ExtendScript steps (`1.jsx`, `2.jsx` ...). Project skills sit next to the .aep in `ae-skills/`; global ones in the data dir. A script that worked through `ae_run_jsx` can be saved by its `op_id`, and steps run in the same scope as `ae_run_jsx` code. Steps are checked for ES3 on save and before a run. A run given `expect` is always guarded, checkpointed and one undo group, whatever the skill's `mutates` says. |
-| Builds | `ae_build_from_data` (one copy of a template comp per CSV or JSON row: text, numbers, colours and footage from the columns; for localisation, versions and charts; every cell is checked against the template's properties before AE is touched, so `1,5` on a slider is refused with a hint; text that now runs off the frame is flagged), `ae_reframe` (copies a comp to 16:9, 1:1, 4:5 or 9:16: backgrounds cover the frame, other layers and controller nulls (measured with their children) are pinned to the nearest edge of the safe area at their resting pose and shrunk to fit, track mattes follow their layer, audio is left alone, a guide layer shows the safe area, and anything still outside it is listed) |
-| Assets | `ae_import_assets`: files in `_assets/` next to the .aep (renders, generated stills, voice-overs) go into an `_Assets` bin with the subfolders mirrored and numbered stills (3 or more frames, not `_v002` versions) as sequences; files already in the project are skipped, and a sequence waits 10 s after its newest frame. `watch: true` imports new arrivals automatically, including files copied in with old dates. |
-| Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
-| Frames | `ae_snapshot_frame` (AE renders at full resolution and the server shrinks the PNG to `scale` or `max_size`; waits for the PNG, which AE writes asynchronously), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
-| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` fix, easy ease or the user's preferred ease) |
+| Script | `ae_run_jsx`: a read, or a guarded write with a receipt |
+| Write | `ae_set_property` (value, keyframes or expression), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment), `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
+| Effects | `ae_add_effect`, `ae_set_effect`, `ae_remove_effect`, `ae_apply_preset` (.ffx), `ae_list_presets`. Parameters scripts can't set (Colorama's Output Cycle, the Curves curve) are listed as `settable: false`; a preset saved from AE carries them. |
+| Motion | `ae_contact_sheet` (up to 24 frames in one labelled PNG), `ae_motion_graph` (value and speed of one property, with the easing per key pair), `ae_motion_review` (linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` fix in the user's preferred ease) |
+| Frames | `ae_snapshot_frame` (rendered at full size, shrunk on the server to `scale` or `max_size`), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
+| Tracking & keying | `ae_track_point` (a sub-pixel point tracker that writes the path to a null; within 0.04 px on a test shot), `ae_key_greenscreen` (Keylight, Key Cleaner and Spill Suppressor, then a measured check for screen left, holes, spill and recoloured subject, with ready fixes and a before/after preview) |
+| Builds | `ae_build_from_data` (a copy of a template comp per CSV or JSON row; every cell checked against the template before AE is touched; text that runs off the frame is flagged), `ae_reframe` (16:9, 1:1, 4:5, 9:16 or any size: backgrounds cover, other layers and controller nulls pin to the safe area at rest, mattes follow, a guide layer shows the safe area, and anything still outside it is listed) |
+| Assets | `ae_import_assets`: files in `_assets/` next to the .aep go into an `_Assets` bin with subfolders mirrored and numbered stills as sequences; files already imported are skipped. `watch: true` imports new arrivals automatically. |
+| Skills | `ae_skill_list`, `ae_skill_save`, `ae_skill_run`: `SKILL.md` plus numbered ExtendScript steps, per project (`ae-skills/` next to the .aep) or global. A working `ae_run_jsx` can be saved by its `op_id`. Steps are checked for ES3; a run is one undo group, and is always guarded and checkpointed when given `expect`. |
+| Ask & context | `ae_ask_user` (a question in the panel with buttons, pictures, or ease curves to preview and drag; waits for the answer), `ae_brief` (the project's goal, audience, format, feel and no-go areas, kept next to the .aep), `ae_taste` (the user's motion preferences across projects; `ae_motion_review` follows them) |
+| Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint`, `ae_save` (copies the .aep first; never save-as) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` (Windows through UI Automation; macOS through System Events, which needs Accessibility permission for After Effects) |
-| Diagnostics | `ae_diagnostics` (one file for triage: versions, what is in flight and for how long, queue, quarantine, settings, popups and the end of the log, with the token redacted; also the panel's **Save diagnostics** button) |
+| Diagnostics | `ae_diagnostics`: one file for triage with versions, what is in flight and for how long, queue, quarantine, settings, popups and the end of the log, token redacted. The panel's **Save diagnostics** button writes the same file. |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |
 
 Each tool's schema and description, as the agent sees them, live in `server/src/tools/`.
 
-**Panels.**
-- CEP extensions open directly.
-- AE's native Window-menu panels open through `app.executeCommand`, which does work through CEP (measured). Those commands **toggle**, though, so `ae_open_panel` refuses a native panel unless `allow_toggle` is set after checking with `ae_ui_screenshot`.
+**Native panels.** CEP extensions open directly. AE's own Window-menu panels open through `app.executeCommand`, which does work through CEP (measured), but those commands **toggle**, so `ae_open_panel` refuses a native panel unless `allow_toggle` is set after checking with `ae_ui_screenshot`.
+
+**Where it keeps things.**
+- Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/`.
+- Next to a project: `<name>.brief.json`, `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
 
 ---
 
-## QA harness
+## Develop (Chroma)
 
-`qa/` runs a product's real ExtendScript in a real AE against throwaway projects. It is used for **VoxMark** and **Gulp**.
-
+```powershell
+cd server; npm install; npm run build; npm test; npm run bundle   # bundle -> panel/client/mcp-bundle.cjs
+node scripts/lint-jsx.mjs                                         # ES3 + no chained ternaries in panel/host
+pwsh scripts/install-dev.ps1                                      # junction panel/ into CEP extensions, PlayerDebugMode=1
+node qa/smoke-mcp.mjs --dir <a fresh /_work/qa/ folder>           # live: every tool against the running AE
 ```
-node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.xml
-```
 
-- It refuses to start unless AE has an empty unsaved project open, or a QA project (marked with a `__chroma_qa__` folder, or saved under `/_work/qa`). It never touches real work.
-- It loads product JSX the way the product does: raw source through evalScript, `hostscript.jsx` first.
-- Assertions read AE state in separate calls.
-- Plan and the next scenarios: `docs/QA-HARNESS.md`.
+- Read `CLAUDE.md` and `docs/BUILDERS.md` before writing code: they hold the ExtendScript rules and the AE 26 traps we have measured.
+- Restart AE after any manifest change. For code changes, reload the service page at `http://localhost:8097` (the panel is on `8096`); no AE restart is needed. After a `core.jsx` change, clear `$.global.__chromaAe` first.
+- Commit the output of `npm run bundle`: CI checks that the bundle is up to date.
+- **Never install the ZXP on a machine that has the dev junction.** An installer could delete through it into the repo. Run `install-dev.ps1 -Uninstall` first.
+
+**Releasing:**
+1. Bump `VERSION`.
+2. Put `ZXPSignCmd.exe` in `build/` (gitignored). Copies live in `AFX-VoxMark/build/` and `AFX_Gulp/builds/signing/win/`.
+3. Run `op-sa op run --env-file scripts/release.env -- pwsh -NoProfile -File scripts/package.ps1`. It stages the panel, stamps the version, signs, verifies and prints the SHA256. The certificate passphrase is in 1Password: Release Signing / "Chroma AE MCP ZXP cert".
+4. Tag `vX.Y.Z` on the build commit, then create the GitHub release with the `.zxp` and its SHA256.
+
+## QA
+
+- **Live smoke test** (`qa/smoke-mcp.mjs`): every tool against a running AE in a throwaway project. It refuses to start unless AE has an empty, QA-owned or `/_work/qa` project open.
+- **Product scenarios** (`qa/runner.js`): runs a product's real ExtendScript (**VoxMark**, **Gulp**) in a real AE against throwaway projects, loading it the way the product does, and asserts AE state in separate calls.
+  ```
+  node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.xml
+  ```
+- **Self-hosted runner** (`qa/ci-live.mjs`, `.github/workflows/ae-live.yml`): runs the smoke test on a machine with AE. Ready, but no runner is registered yet (`docs/CI-RUNNER.md`).
+
+Details in `qa/README.md` and `docs/QA-HARNESS.md`.
 
 ## Troubleshooting
 
-- **Tools fail with `unreachable`:**
-  - Is AE running? Is the service up? The status panel shows READY, and `curl -H "Authorization: Bearer <token>" http://127.0.0.1:7790/health` answers.
-  - The service starts about 30 s after AE launches.
+- **Tools fail with `unreachable`:** is AE running and the service up? The status panel shows READY, and `curl -H "Authorization: Bearer <token>" http://127.0.0.1:7790/health` answers. The service starts about 30 s after AE launches.
 - **401 errors:** the token was regenerated. Click **Claude Code** under Register with (twice if it is ticked), or paste the setup command again.
 - **Something is stuck:** click **Save diagnostics** in the panel (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
+- **A call times out:** the message names any popup blocking AE. Answer it in AE, or with `ae_dialog_respond` under the rules above, then check the state and `ae_acknowledge` the op.
 - **Port 7790 is busy:** the service retries every 5 s and never starts a second server. Check that an old AE instance isn't still running.
-- **A call times out:** read the message. It names any popup blocking AE. Answer the popup in AE, or with `ae_dialog_respond` under the rules above, then check the state and `ae_acknowledge` the op.
 - **Windows Firewall prompt when rendering:** `aerender` starts a background AE. Renders don't need network access, so cancelling the prompt is fine.
-- **The ZXP installer says it can't parse the package:** `ExtensionManifest Version` must be the manifest *schema* version (7.0), not the CEP version (12.0).
+- **The ZXP installer can't parse the package:** `ExtensionManifest Version` must be the manifest *schema* version (7.0), not the CEP version (12.0).
 - **Blank panel or JavaScript errors:** open `http://localhost:8097` (service) or `8096` (panel) in Chrome or Edge.
 
 ## Roadmap
 
-Priorities and reasons are in `docs/FEATURES.md`. The items marked "Atom" come from the review in `docs/ATOM-REVIEW.md`.
+Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `docs/ATOM-REVIEW.md`.
 
-- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size. There is no "after" copy: the file on disk only changes when the user saves. `ae_checkpoint_revert` opens the checkpoint file itself, not a copy of it — After Effects' open project becomes that file, so saving afterwards overwrites the checkpoint. Make another checkpoint first if you need to keep it.
-- [x] **P2: AE skills bundle** (Atom). Done: `ae_skill_list`, `ae_skill_save` (from code, or from `ae_run_jsx` calls by `op_id`) and `ae_skill_run` (every step in one undo group). Project skills in `ae-skills/` next to the .aep, global ones in the data dir.
-- [x] **P2: one-click registration** (Atom). Done: the panel's Register with buttons for Claude Code (its CLI), Claude Desktop, Cursor and Codex (the stdio relay, so no token in their configs). Claude Code is registered again when the token is regenerated.
-- [x] **P2: asset staging plus auto-import** (Atom). Done: `ae_import_assets` imports `_assets/` next to the .aep into an `_Assets` bin (subfolders mirrored, numbered stills as sequences); `watch: true` imports new files within seconds.
-- [x] **P2: social reframe** (Atom). Done: `ae_reframe` to 16:9, 1:1, 4:5, 9:16 or any size; backgrounds cover, controllers and other layers are pinned to the safe area, a guide layer shows it, and what is still outside is listed.
-- [x] **P2: data-driven builds from CSV/JSON** (Atom). Done: `ae_build_from_data`, one comp per row (or the template in place), with every cell checked before AE is touched.
-- [x] **P3: diagnostics bundle** (Atom). Done: `ae_diagnostics` and the panel's Save diagnostics button.
-- [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. Gulp 5 measures whether `app.executeCommand` works from CEP for AEGP commands. They need the VoxMark and Gulp repos on the machine that runs them.
-- [ ] **macOS popup reading** for `ae_dialogs` and `ae_dialog_respond`. Written (`panel/tools/ae-dialogs-mac.js`, JavaScript for Automation through System Events, needing Accessibility permission for After Effects); not yet tried on a Mac.
-- [ ] **A self-hosted CI runner** on a machine with AE. The workflow (`.github/workflows/ae-live.yml`, manual for now) and `qa/ci-live.mjs` are ready; a runner still has to be set up and registered (`docs/CI-RUNNER.md`).
+**Done in 0.3.0:** automatic checkpoints around every write, the AE skills bundle, one-click registration, asset staging with auto-import, social reframe, data-driven builds and the diagnostics bundle (all from the Atom review), plus motion preview and review, curve easing, asking the user, effects and presets, brief and taste, point tracking and green-screen keying.
+
+**Open:**
+- [ ] **macOS popup reading:** written (`panel/tools/ae-dialogs-mac.js`, through System Events, needing Accessibility permission for After Effects); not yet tried on a Mac.
+- [ ] **A self-hosted CI runner** on a machine with AE. The workflow and `qa/ci-live.mjs` are ready; a runner has to be set up and registered.
+- [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. They need the VoxMark and Gulp repos on the machine that runs them.
+
+**Next candidates (P2):** audio waveform and beat cues (inside AE, from the render), track mattes and layer creation tools, and roving keys in `ae_motion_review`.
 
 ## Docs
 
 - `SPEC.md`: the original design.
-- `docs/V02-PANEL-MCP.md`: the MCP inside the panel.
+- `CLAUDE.md`: the ExtendScript and CEP rules every change must follow, and how to verify a change.
+- `docs/BUILDERS.md`: how to add a tool group, with the AE 26 behaviour we have measured. Read it before writing code.
 - `docs/FEATURES.md`: the full feature list, the gaps, and what to borrow.
+- `docs/V02-PANEL-MCP.md`: how the MCP runs inside the panel.
 - `docs/QA-HARNESS.md`: the QA harness plan.
 - `docs/CI-RUNNER.md`: setting up the self-hosted runner with After Effects.
-- `docs/HANDOVER.md`: where the work stands: the open PRs, what each adds, how it was checked, the review and what is still open.
-- `docs/BUILDERS.md`: the rules for adding tool groups. These include measured AE 26 behaviour; read them before writing code.
+- `docs/HANDOVER.md`: notes from the 0.3.0 work: what each PR added, how it was checked, and what was left open.
 
 ## Credits
 
