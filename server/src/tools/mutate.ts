@@ -185,11 +185,36 @@ export interface AutoCheckpointResult {
 }
 
 // Saved-file state of the last auto checkpoint per project, so a run of
-// writes between two saves makes one copy, not one per write.
+// writes between two saves makes one copy, not one per write. Capped and
+// evicted oldest-first so a long-running server that touches many different
+// projects over days/weeks doesn't grow this map without bound.
+const MAX_TRACKED_PROJECTS = 200;
 const lastAutoCheckpoint = new Map<string, { size: number; mtimeMs: number; path: string }>();
+
+function rememberAutoCheckpoint(key: string, entry: { size: number; mtimeMs: number; path: string }): void {
+  lastAutoCheckpoint.delete(key); // re-insert at the end (most-recently-used)
+  lastAutoCheckpoint.set(key, entry);
+  while (lastAutoCheckpoint.size > MAX_TRACKED_PROJECTS) {
+    const oldestKey = lastAutoCheckpoint.keys().next().value;
+    if (oldestKey === undefined) break;
+    lastAutoCheckpoint.delete(oldestKey);
+  }
+}
 
 export function resetAutoCheckpointMemory(): void {
   lastAutoCheckpoint.clear();
+}
+
+/**
+ * The `_mcp_checkpoints` directory for a project path. If the path is
+ * already inside a `_mcp_checkpoints` directory (e.g. the project now open
+ * because of an earlier ae_checkpoint_revert, which opens the checkpoint
+ * file itself rather than a copy of it), reuses that same directory instead
+ * of nesting `_mcp_checkpoints/_mcp_checkpoints/` inside it.
+ */
+export function checkpointDirFor(projectPath: string): string {
+  const dir = path.dirname(projectPath);
+  return path.basename(dir) === "_mcp_checkpoints" ? dir : path.join(dir, "_mcp_checkpoints");
 }
 
 /**
@@ -229,22 +254,26 @@ export async function autoCheckpoint(
     };
   }
 
-  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  // dirty is `true`, `false`, or `null` (AE couldn't say). Only a confirmed
+  // `false` means the checkpoint is known-complete; treat unknown the same
+  // as dirty, since it's the one case most worth flagging.
+  const unsaved = guard.dirty === false ? {} : { unsaved_changes_not_included: true };
   const key = normalizeGuardPath(projectPath);
   const last = lastAutoCheckpoint.get(key);
   if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs.existsSync(last.path)) {
+    rememberAutoCheckpoint(key, last);
     return { status: "reused", path: last.path, ...unsaved };
   }
 
   const ext = path.extname(projectPath) || ".aep";
-  const dir = path.join(path.dirname(projectPath), "_mcp_checkpoints");
+  const dir = checkpointDirFor(projectPath);
   const stem = `${path.basename(projectPath, ext)}_${formatBackupTimestamp(new Date())}_auto-${toolName}`;
   try {
     await fs.promises.mkdir(dir, { recursive: true });
     let target = path.join(dir, `${stem}${ext}`);
     for (let n = 2; fs.existsSync(target); n++) target = path.join(dir, `${stem}-${n}${ext}`);
     await fs.promises.copyFile(projectPath, target, fs.constants.COPYFILE_EXCL);
-    lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
     return { status: "created", path: target, ...unsaved };
   } catch (err) {
     return {

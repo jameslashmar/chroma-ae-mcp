@@ -7363,7 +7363,21 @@ function formatBackupTimestamp(date = /* @__PURE__ */ new Date()) {
   const ss = String(date.getSeconds()).padStart(2, "0");
   return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
 }
+var MAX_TRACKED_PROJECTS = 200;
 var lastAutoCheckpoint = /* @__PURE__ */ new Map();
+function rememberAutoCheckpoint(key, entry) {
+  lastAutoCheckpoint.delete(key);
+  lastAutoCheckpoint.set(key, entry);
+  while (lastAutoCheckpoint.size > MAX_TRACKED_PROJECTS) {
+    const oldestKey = lastAutoCheckpoint.keys().next().value;
+    if (oldestKey === void 0) break;
+    lastAutoCheckpoint.delete(oldestKey);
+  }
+}
+function checkpointDirFor(projectPath) {
+  const dir = path4.dirname(projectPath);
+  return path4.basename(dir) === "_mcp_checkpoints" ? dir : path4.join(dir, "_mcp_checkpoints");
+}
 async function autoCheckpoint(ctx, guard, toolName) {
   const settings = ctx.settings?.get().auto_checkpoint ?? DEFAULT_SETTINGS.auto_checkpoint;
   if (!settings.enabled) {
@@ -7386,21 +7400,22 @@ async function autoCheckpoint(ctx, guard, toolName) {
       reason: `The project file is ${sizeMb.toFixed(0)} MB, over the ${settings.max_mb} MB limit (see ae_auto_checkpoint).`
     };
   }
-  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  const unsaved = guard.dirty === false ? {} : { unsaved_changes_not_included: true };
   const key = normalizeGuardPath(projectPath);
   const last = lastAutoCheckpoint.get(key);
   if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs4.existsSync(last.path)) {
+    rememberAutoCheckpoint(key, last);
     return { status: "reused", path: last.path, ...unsaved };
   }
   const ext = path4.extname(projectPath) || ".aep";
-  const dir = path4.join(path4.dirname(projectPath), "_mcp_checkpoints");
+  const dir = checkpointDirFor(projectPath);
   const stem = `${path4.basename(projectPath, ext)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
   try {
     await fs4.promises.mkdir(dir, { recursive: true });
     let target = path4.join(dir, `${stem}${ext}`);
     for (let n = 2; fs4.existsSync(target); n++) target = path4.join(dir, `${stem}-${n}${ext}`);
     await fs4.promises.copyFile(projectPath, target, fs4.constants.COPYFILE_EXCL);
-    lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
     return { status: "created", path: target, ...unsaved };
   } catch (err) {
     return {
@@ -9362,7 +9377,9 @@ var renderTools = [
                 ok: true,
                 ...snapshotOutput(pngPath1, check1, scale, args.max_size),
                 comp_id: args.comp_id,
-                time: args.time,
+                // snapshotFrame clamps time to the comp's duration; report what was
+                // actually rendered when the host tells us, not the raw request.
+                time: resp1.result?.time ?? args.time,
                 scale,
                 ...args.max_size !== void 0 ? { max_size: args.max_size } : {},
                 retried: false,
@@ -9396,7 +9413,7 @@ var renderTools = [
                 ok: true,
                 ...snapshotOutput(pngPath2, check2, scale, args.max_size),
                 comp_id: args.comp_id,
-                time: nudgedTime,
+                time: resp2.result?.time ?? nudgedTime,
                 scale,
                 ...args.max_size !== void 0 ? { max_size: args.max_size } : {},
                 retried: true,
@@ -10007,6 +10024,11 @@ function contactSheetTimes(comp, opts) {
   const firstFrame = Math.round(start * fps);
   const lastFrame = Math.max(firstFrame, Math.ceil(end * fps - 1e-6) - 1);
   const span = lastFrame - firstFrame;
+  if (span === 0) {
+    throw new Error(
+      `Range ${start}s to ${end}s covers only one frame at ${fps}fps; widen it to sample at least 2 frames.`
+    );
+  }
   const count = Math.min(opts.count ?? 12, span + 1);
   const frames = [];
   for (let i = 0; i < count; i++) {
@@ -10239,7 +10261,7 @@ function renderMotionGraph(s, speeds, width, height) {
   let peak = 0;
   for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
   const speedMax = peak > 0 ? peak : 1;
-  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(peak), "0"];
+  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(speedMax), "0"];
   const left = Math.max(...yLabels.map((l) => textWidth(l, scale))) + 4 * scale + 6;
   const right = 4 * scale + 6;
   const top = glyphH + 8;
@@ -10973,8 +10995,10 @@ function getStoredFingerprint(id) {
 function sanitizeCheckpointLabel(label) {
   const raw = (label ?? "checkpoint").trim();
   if (!raw) return "checkpoint";
-  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "checkpoint";
+  let cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned) return "checkpoint";
+  if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
+  return cleaned;
 }
 var AeCompFingerprintSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("The CompItem ID to fingerprint.")
@@ -11120,10 +11144,9 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path10.dirname(actualProjectPath);
           const ext = path10.extname(actualProjectPath) || ".aep";
           const baseName = path10.basename(actualProjectPath, ext);
-          const checkpointDir = path10.join(projDir, "_mcp_checkpoints");
+          const checkpointDir = checkpointDirFor(actualProjectPath);
           fs11.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
@@ -11188,8 +11211,7 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path10.dirname(actualProjectPath);
-      const checkpointDir = path10.join(projDir, "_mcp_checkpoints");
+      const checkpointDir = checkpointDirFor(actualProjectPath);
       if (!fs11.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,

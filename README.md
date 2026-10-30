@@ -141,7 +141,7 @@ node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.x
 
 Priorities and reasons are in `docs/FEATURES.md`. The items marked "Atom" come from the review in `docs/ATOM-REVIEW.md`.
 
-- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size, and `ae_checkpoint_revert` opens a copy without overwriting anything. There is no "after" copy: the file on disk only changes when the user saves.
+- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size. There is no "after" copy: the file on disk only changes when the user saves. `ae_checkpoint_revert` opens the checkpoint file itself, not a copy of it — After Effects' open project becomes that file, so saving afterwards overwrites the checkpoint. Make another checkpoint first if you need to keep it.
 - [ ] **P2: AE skills bundle** (Atom). `SKILL.md` plus numbered `1.jsx`, `2.jsx`, per project or global, with `ae_skill_run` and `ae_skill_save` (capture a working `ae_run_jsx`). For house rigs, lower thirds and kinetic type.
 - [ ] **P2: one-click registration** (Atom). The panel runs `claude mcp add` itself, with toggles for Codex and Cursor.
 - [ ] **P2: asset staging plus auto-import** (Atom). Generated assets (Flora, Higgsfield, ElevenLabs) land in a known folder and are imported into an `_Assets` bin.
