@@ -16,10 +16,10 @@ Everything here is on GitHub as stacked pull requests; nothing is merged yet.
 | #2 | `feat/auto-checkpoints` | #1 | automatic checkpoints before every write, minimized-AE screenshots, the live smoke test |
 | #3 | `feat/motion-review` | #2 | `ae_motion_review` with easy-ease fixes |
 | #4 | `feat/ae-control` | #3 | Claude Desktop relay, `ae_ask_user` and curve easing, effect tools, `ae_brief` and `ae_taste`, `ae_track_point`, `ae_key_greenscreen` |
-| #5 | `feat/roadmap-p2` | #4 | this round: skills, data builds, reframe, asset import, diagnostics, panel registration, macOS popups, runner prep |
+| #6 | `feat/roadmap-p2` | #4 | this round: skills, data builds, reframe, asset import, diagnostics, panel registration, macOS popups, runner prep |
 
 **Merging:**
-- Merge in order, #1 to #5.
+- Merge in order: #1, #2, #3, #4, then #6. Number 5 was never used: GitHub skipped it.
 - After #1 lands, rebase the rest onto `main` and retarget each PR.
 - The earlier PRs were merged by rebase, which keeps the topic commits.
 
@@ -28,7 +28,7 @@ Everything here is on GitHub as stacked pull requests; nothing is merged yet.
 - Popups are never suppressed.
 - Jay commits and pushes, or says when to.
 
-**#5's commits:**
+**#6's commits:**
 
 Each commit builds, passes its tests and has an up-to-date bundle on its own.
 
@@ -41,7 +41,7 @@ Each commit builds, passes its tests and has an up-to-date bundle on its own.
 | `f2d2086` | macOS popups |
 | last | runner prep, smoke checks, docs and this file |
 
-## What #5 adds (tools 48 → 55)
+## What #6 adds (tools 48 → 55)
 
 | Area | Tools and files | What it does |
 |---|---|---|
@@ -214,7 +214,7 @@ Each commit builds, passes its tests and has an up-to-date bundle on its own.
 - **Reload after a bundle or `host/ext/*.jsx` change:** reload the service page at `http://localhost:8097` (CDP `Runtime.evaluate location.reload()`), with no AE restart needed. After a `core.jsx` change, clear `$.global.__chromaAe` first.
 
 ## Suggested next steps
-1. Merge #1 to #5 in order, then cut a release. Bump `VERSION` and run `scripts/package.ps1`; the new files under `panel/tools` ship automatically.
+1. Merge #1 to #4 and then #6, in order, then cut a release. Bump `VERSION` and run `scripts/package.ps1`; the new files under `panel/tools` ship automatically.
 2. On a Mac:
    - try `ae_dialogs` and `ae_dialog_respond` on a Save prompt;
    - check the panel's Register chips;
