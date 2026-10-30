@@ -21,14 +21,23 @@ export interface TasteSettings {
   notes: string;
 }
 
+/** Auto-import of new files in `<project dir>/_assets/` into the `_Assets` bin (ae_import_assets watch). */
+export interface AssetWatchSettings {
+  enabled: boolean;
+  /** When watching was turned on (ISO); only files changed after it are imported automatically. */
+  since: string | null;
+}
+
 export interface Settings {
   auto_checkpoint: AutoCheckpointSettings;
   taste: TasteSettings;
+  asset_watch: AssetWatchSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
   taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
+  asset_watch: { enabled: false, since: null },
 };
 
 export function defaultSettingsFilePath(): string {
@@ -43,6 +52,7 @@ function cloneDefaults(): Settings {
   return {
     auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
     taste: cloneTaste(DEFAULT_SETTINGS.taste),
+    asset_watch: { ...DEFAULT_SETTINGS.asset_watch },
   };
 }
 
@@ -74,7 +84,20 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { auto_checkpoint: { ...this.settings.auto_checkpoint }, taste: cloneTaste(this.settings.taste) };
+    return {
+      auto_checkpoint: { ...this.settings.auto_checkpoint },
+      taste: cloneTaste(this.settings.taste),
+      asset_watch: { ...this.settings.asset_watch },
+    };
+  }
+
+  updateAssetWatch(patch: Partial<AssetWatchSettings>): Settings {
+    const next = { ...this.settings.asset_watch };
+    if (patch.enabled !== undefined) next.enabled = patch.enabled;
+    if (patch.since !== undefined) next.since = patch.since;
+    this.settings = { ...this.settings, asset_watch: next };
+    this.saveToDisk();
+    return this.get();
   }
 
   updateTaste(patch: Partial<TasteSettings>): Settings {
@@ -103,6 +126,7 @@ export class SettingsStore {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as {
         auto_checkpoint?: Partial<AutoCheckpointSettings>;
         taste?: Partial<TasteSettings>;
+        asset_watch?: Partial<AssetWatchSettings>;
       };
       const ac = parsed?.auto_checkpoint;
       if (ac && typeof ac === "object") {
@@ -115,6 +139,11 @@ export class SettingsStore {
         if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
         if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
         if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
+      }
+      const aw = parsed?.asset_watch;
+      if (aw && typeof aw === "object") {
+        if (typeof aw.enabled === "boolean") this.settings.asset_watch.enabled = aw.enabled;
+        if (typeof aw.since === "string" && !Number.isNaN(Date.parse(aw.since))) this.settings.asset_watch.since = aw.since;
       }
     } catch {
       // Ignore a corrupt or unreadable file on startup; keep the defaults

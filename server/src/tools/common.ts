@@ -79,6 +79,8 @@ export interface ToolContext {
   asks?: AskStore;
   /** Where the server keeps its files (token, settings, global skills). */
   dataDir?: string;
+  /** The panel service's own state (versions, eval queue, log paths), for ae_diagnostics. */
+  serviceInfo?: () => Record<string, unknown>;
 }
 
 export function dataDirOf(ctx: ToolContext): string {

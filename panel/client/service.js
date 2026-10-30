@@ -122,7 +122,9 @@
       label: item.label,
       startedAt: startedAt
     };
-    log("", "-> " + item.label + " [" + item.id + "]");
+    // Labels starting "quiet:" (the asset watcher's polling) log only on failure.
+    var quiet = String(item.label).indexOf("quiet:") === 0;
+    if (!quiet) log("", "-> " + item.label + " [" + item.id + "]");
 
     if (!host) {
       inFlight = null;
@@ -161,7 +163,7 @@
         }
 
         if (item.raw) {
-          log("ok", "<- " + item.label + " [" + item.id + "] ok (" + durationMs + "ms)");
+          if (!quiet) log("ok", "<- " + item.label + " [" + item.id + "] ok (" + durationMs + "ms)");
           item.sendResponse(200, {
             id: item.id,
             ok: true,
@@ -203,7 +205,7 @@
         }
 
         if (parsed.ok === true) {
-          log("ok", "<- " + item.label + " [" + item.id + "] ok (" + durationMs + "ms)");
+          if (!quiet) log("ok", "<- " + item.label + " [" + item.id + "] ok (" + durationMs + "ms)");
           item.sendResponse(200, {
             id: item.id,
             ok: true,
@@ -339,7 +341,21 @@
         evalScript: evalScriptForMcp,
         dataDir: paths.stateDir,
         log: log,
-        cep: cepAdapter
+        cep: cepAdapter,
+        serviceInfo: function () {
+          return {
+            panelVersion: PANEL_VERSION,
+            aeVersion: aeVersion,
+            port: boundPort,
+            evalQueueDepth: queue.length,
+            inFlight: inFlight
+              ? { id: inFlight.id, label: inFlight.label, runningMs: Date.now() - inFlight.startedAt }
+              : null,
+            logPath: paths.logPath,
+            rotatedLogPath: paths.rotatedLogPath,
+            tokenPath: paths.tokenPath
+          };
+        }
       });
       log("ok", "Loaded MCP bundle (" + path.basename(bundlePath) + ")");
       return panelMcp;
@@ -492,6 +508,26 @@
             }
           });
         }
+      });
+      return;
+    }
+
+    // Save diagnostics button: the same file as the ae_diagnostics tool.
+    if (req.method === "POST" && reqUrl === "/admin/diagnostics") {
+      readRequestBody(req, res, function () {
+        var mcpDiag = getPanelMcp();
+        if (!mcpDiag || typeof mcpDiag.saveDiagnostics !== "function") {
+          sendJson(res, 503, { ok: false, error: { kind: "unavailable", message: "The MCP bundle is not loaded" } });
+          return;
+        }
+        Promise.resolve(mcpDiag.saveDiagnostics())
+          .then(function (out) {
+            log("ok", "Diagnostics saved to " + out.path);
+            sendJson(res, 200, { ok: true, path: out.path, summary: out.summary });
+          })
+          .catch(function (err) {
+            sendJson(res, 500, { ok: false, error: { kind: "internal", message: err && err.message ? err.message : String(err) } });
+          });
       });
       return;
     }

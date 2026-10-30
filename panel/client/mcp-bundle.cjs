@@ -2221,11 +2221,9 @@ function validCurve(curve) {
   return curve.map((n) => Math.round(n * 1e3) / 1e3);
 }
 
-// src/tools/ext/dialogs.ts
-var import_node_child_process = require("node:child_process");
-var fs2 = __toESM(require("node:fs"), 1);
-var path3 = __toESM(require("node:path"), 1);
-var url = __toESM(require("node:url"), 1);
+// src/tools/ext/assets.ts
+var fs6 = __toESM(require("node:fs"), 1);
+var path7 = __toESM(require("node:path"), 1);
 
 // node_modules/zod/v3/external.js
 var external_exports = {};
@@ -2705,8 +2703,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path20, errorMaps, issueData } = params;
-  const fullPath = [...path20, ...issueData.path || []];
+  const { data, path: path23, errorMaps, issueData } = params;
+  const fullPath = [...path23, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2822,11 +2820,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path20, key) {
+  constructor(parent, value, path23, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path20;
+    this._path = path23;
     this._key = key;
   }
   get path() {
@@ -6268,140 +6266,128 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// src/quarantine.ts
+// src/assets.ts
 var fs = __toESM(require("node:fs"), 1);
-var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
-var QuarantineBlockedError = class extends Error {
-  kind = "quarantined";
-  entries;
-  constructor(entries) {
-    const ids = entries.map((e) => e.op_id).join(", ");
-    super(
-      `Mutating tool refused: operation(s) [${ids}] are in quarantine because a previous mutation timed out with an unknown outcome. To clear quarantine: 1) call ae_status to check the panel's /health, 2) inspect the project/comp state with read tools (ae_get_project, ae_get_comp, ae_get_layer_props), and 3) call ae_acknowledge with { op_id, note } for each quarantined op.`
-    );
-    this.name = "QuarantineBlockedError";
-    this.entries = entries;
-  }
-};
-function defaultDataDir() {
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-    return path.join(localAppData, "chroma-ae-mcp");
-  }
-  if (process.platform === "darwin") {
-    return path.join(
-      os.homedir(),
-      "Library",
-      "Application Support",
-      "chroma-ae-mcp"
-    );
-  }
-  return path.join(os.homedir(), ".local", "share", "chroma-ae-mcp");
+var DEFAULT_ASSET_FOLDER = "_assets";
+var DEFAULT_ASSET_BIN = "_Assets";
+var IMPORTABLE = /* @__PURE__ */ new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "tif",
+  "tiff",
+  "psd",
+  "exr",
+  "dpx",
+  "tga",
+  "bmp",
+  "gif",
+  "svg",
+  "ai",
+  "eps",
+  "pdf",
+  "mov",
+  "mp4",
+  "m4v",
+  "avi",
+  "mxf",
+  "webm",
+  "mpg",
+  "mpeg",
+  "wav",
+  "mp3",
+  "aif",
+  "aiff",
+  "m4a",
+  "aac"
+]);
+var SEQUENCE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "psd", "bmp"]);
+var SEQ_RE = /^(.*?)(\d+)\.([A-Za-z0-9]+)$/;
+var MIN_SEQUENCE_FRAMES = 3;
+var MIN_DIGITS = 3;
+var MAX_DIGITS = 7;
+var MAX_FILES = 5e3;
+var MAX_DEPTH = 6;
+function ext(name) {
+  return path.extname(name).slice(1).toLowerCase();
 }
-function defaultQuarantineFilePath() {
-  return path.join(defaultDataDir(), "quarantine.json");
-}
-var QuarantineStore = class {
-  filePath;
-  entries = /* @__PURE__ */ new Map();
-  constructor(filePath = defaultQuarantineFilePath()) {
-    this.filePath = filePath;
-    this.loadFromDisk();
-  }
-  get path() {
-    return this.filePath;
-  }
-  get isQuarantined() {
-    return this.entries.size > 0;
-  }
-  list() {
-    return Array.from(this.entries.values());
-  }
-  get(opId) {
-    return this.entries.get(opId);
-  }
-  /**
-   * Throws QuarantineBlockedError if any operation is currently in quarantine.
-   */
-  assertClear() {
-    if (this.entries.size > 0) {
-      throw new QuarantineBlockedError(this.list());
-    }
-  }
-  /**
-   * Adds a timed-out mutating operation to quarantine and persists to disk.
-   */
-  add(entry) {
-    const record = {
-      op_id: entry.op_id,
-      tool: entry.tool,
-      label: entry.label,
-      quarantined_at: entry.quarantined_at ?? (/* @__PURE__ */ new Date()).toISOString(),
-      reason: entry.reason ?? "Mutating operation timed out; outcome in After Effects is unknown."
-    };
-    this.entries.set(record.op_id, record);
-    this.saveToDisk();
-    return record;
-  }
-  /**
-   * Removes an operation from quarantine by op_id and updates the JSON mirror.
-   */
-  acknowledge(opId, note) {
-    const existing = this.entries.get(opId);
-    if (!existing) {
-      return {
-        acknowledged: false,
-        op_id: opId,
-        note,
-        remaining: this.list()
-      };
-    }
-    this.entries.delete(opId);
-    this.saveToDisk();
-    return {
-      acknowledged: true,
-      op_id: opId,
-      note,
-      removed: existing,
-      remaining: this.list()
-    };
-  }
-  loadFromDisk() {
+function scanAssets(root, opts = {}) {
+  const recursive = opts.recursive !== false;
+  const sequences = opts.sequences !== false;
+  const out = [];
+  let count = 0;
+  const walk = (dir, rel, depth) => {
+    let entries;
     try {
-      if (!fs.existsSync(this.filePath)) {
-        return;
-      }
-      const raw = fs.readFileSync(this.filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.entries) ? parsed.entries : [];
-      for (const item of list) {
-        if (item && typeof item === "object" && typeof item.op_id === "string") {
-          const e = item;
-          this.entries.set(e.op_id, {
-            op_id: e.op_id,
-            tool: typeof e.tool === "string" ? e.tool : "unknown",
-            label: typeof e.label === "string" ? e.label : "",
-            quarantined_at: typeof e.quarantined_at === "string" ? e.quarantined_at : (/* @__PURE__ */ new Date()).toISOString(),
-            reason: typeof e.reason === "string" ? e.reason : ""
-          });
-        }
-      }
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
+      return;
     }
+    const files = [];
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.startsWith(".")) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (recursive && depth < MAX_DEPTH && !e.name.startsWith("_")) walk(full, [...rel, e.name], depth + 1);
+        continue;
+      }
+      if (!e.isFile() || !IMPORTABLE.has(ext(e.name)) || ++count > MAX_FILES) continue;
+      let mtimeMs = 0;
+      let arrivedMs = 0;
+      try {
+        const st = fs.statSync(full);
+        mtimeMs = st.mtimeMs;
+        arrivedMs = Math.max(st.mtimeMs, st.ctimeMs || 0, st.birthtimeMs || 0);
+      } catch {
+        continue;
+      }
+      files.push({ name: e.name, full, mtimeMs, arrivedMs });
+    }
+    const groups = /* @__PURE__ */ new Map();
+    const singles = [];
+    for (const f of files) {
+      const m = sequences ? SEQ_RE.exec(f.name) : null;
+      if (m && SEQUENCE_EXT.has(m[3].toLowerCase()) && m[2].length >= MIN_DIGITS && m[2].length <= MAX_DIGITS && !/[vV]$/.test(m[1])) {
+        const key = `${m[1]}\0${m[2].length}\0${m[3].toLowerCase()}`;
+        groups.set(key, [...groups.get(key) ?? [], f]);
+      } else singles.push(f);
+    }
+    for (const g of groups.values()) {
+      if (g.length < MIN_SEQUENCE_FRAMES) {
+        singles.push(...g);
+        continue;
+      }
+      out.push({
+        path: g[0].full,
+        subfolder: rel,
+        sequence: true,
+        frames: g.length,
+        mtimeMs: Math.max(...g.map((f) => f.mtimeMs)),
+        arrivedMs: Math.max(...g.map((f) => f.arrivedMs))
+      });
+    }
+    for (const f of singles) out.push({ path: f.full, subfolder: rel, sequence: false, mtimeMs: f.mtimeMs, arrivedMs: f.arrivedMs });
+  };
+  walk(root, [], 0);
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+function normPath(p) {
+  const s = p.replace(/\\/g, "/").normalize("NFC");
+  return process.platform === "win32" ? s.toLowerCase() : s;
+}
+function pickNewAssets(candidates, inProject, now, settleMs, sequenceSettleMs = settleMs) {
+  const have = new Set(inProject.map(normPath));
+  const fresh = [];
+  const already = [];
+  const settling = [];
+  for (const c of candidates) {
+    if (have.has(normPath(c.path))) already.push(c);
+    else if (now - c.mtimeMs < (c.sequence ? sequenceSettleMs : settleMs)) settling.push(c);
+    else fresh.push(c);
   }
-  saveToDisk() {
-    const dir = path.dirname(this.filePath);
-    fs.mkdirSync(dir, { recursive: true, mode: 448 });
-    const payload = JSON.stringify({ entries: this.list() }, null, 2);
-    const tmpFile = `${this.filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmpFile, payload, { encoding: "utf8", mode: 384 });
-    fs.renameSync(tmpFile, this.filePath);
-  }
-};
-
-// src/tools/common.ts
-var path2 = __toESM(require("node:path"), 1);
+  return { fresh, already, settling };
+}
 
 // src/host.ts
 var BridgeError = class extends Error {
@@ -6445,6 +6431,146 @@ function normalizeErrorKind(kind) {
       return "evalscript_error";
   }
 }
+
+// src/jsx.ts
+function encodeJsxArg(value) {
+  const json = JSON.stringify(value === void 0 ? null : value);
+  return escapeForExtendScript(json);
+}
+function escapeForExtendScript(jsonLiteral) {
+  let out = "";
+  for (let i = 0; i < jsonLiteral.length; i++) {
+    const code = jsonLiteral.charCodeAt(i);
+    if (code >= 32 && code <= 126) {
+      out += jsonLiteral.charAt(i);
+    } else {
+      out += "\\u" + code.toString(16).padStart(4, "0");
+    }
+  }
+  return out;
+}
+function buildJsxCall(fn, args = {}) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(fn))) {
+    throw new Error(`Invalid host function name: ${String(fn)}`);
+  }
+  return `__chromaAe.${fn}(${encodeJsxArg(args)})`;
+}
+function normalizeGuardPath(projectPath, isWindows = process.platform === "win32") {
+  const trimmed = projectPath.trim();
+  if (trimmed === "<unsaved>") {
+    return "<unsaved>";
+  }
+  let normalized = trimmed.replace(/\\/g, "/");
+  if (normalized.length > 1 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (isWindows) {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized;
+}
+function pathsMatchForGuard(expectedPath, actualPath, isWindows = process.platform === "win32") {
+  const actual = actualPath ? actualPath : "<unsaved>";
+  return normalizeGuardPath(expectedPath, isWindows) === normalizeGuardPath(actual, isWindows);
+}
+
+// src/queue.ts
+var QueueWaitError = class extends Error {
+  kind = "queued";
+  op;
+  waitedMs;
+  behindOp;
+  constructor(op, waitedMs, behindOp) {
+    super(
+      `Operation "${op}" waited ${Math.round(waitedMs / 1e3)}s in the server queue behind "${behindOp}" and was dropped before being sent to After Effects. Nothing was executed; it is safe to retry once the queue drains.`
+    );
+    this.name = "QueueWaitError";
+    this.op = op;
+    this.waitedMs = waitedMs;
+    this.behindOp = behindOp;
+  }
+};
+var DEFAULT_MAX_WAIT_MS = 6e5;
+var SingleWriterQueue = class {
+  holder = null;
+  waiting = [];
+  maxWaitMs;
+  constructor(opts = {}) {
+    this.maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+  }
+  get depth() {
+    return this.waiting.filter((w) => !w.done).length;
+  }
+  get inFlight() {
+    return this.holder;
+  }
+  acquire(op) {
+    if (this.holder === null && this.depth === 0) {
+      this.holder = op;
+      return Promise.resolve(this.createLease(op, 0, null));
+    }
+    const behind = this.holder ?? this.waiting.find((w) => !w.done)?.op ?? "unknown";
+    return new Promise((resolve2, reject) => {
+      const waiter = {
+        op,
+        enqueuedAt: Date.now(),
+        behind,
+        done: false,
+        resolve: resolve2,
+        reject,
+        cleanup: () => {
+        }
+      };
+      const timer = setTimeout(() => {
+        if (waiter.done) return;
+        waiter.done = true;
+        waiter.cleanup();
+        reject(new QueueWaitError(op, this.maxWaitMs, waiter.behind));
+        this.pump();
+      }, this.maxWaitMs);
+      timer.unref?.();
+      waiter.cleanup = () => {
+        clearTimeout(timer);
+      };
+      this.waiting.push(waiter);
+    });
+  }
+  async run(op, fn) {
+    const lease = await this.acquire(op);
+    try {
+      return await fn(lease);
+    } finally {
+      lease.release();
+    }
+  }
+  createLease(op, waitedMs, queuedBehind) {
+    let released = false;
+    return {
+      op,
+      waitedMs,
+      queuedBehind,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.holder = null;
+        this.pump();
+      }
+    };
+  }
+  pump() {
+    if (this.holder !== null) return;
+    while (this.waiting.length > 0) {
+      const next = this.waiting.shift();
+      if (next.done) continue;
+      next.done = true;
+      next.cleanup();
+      this.holder = next.op;
+      const waitedMs = Date.now() - next.enqueuedAt;
+      next.resolve(this.createLease(next.op, waitedMs, next.behind));
+      return;
+    }
+  }
+};
 
 // src/receipts.ts
 var FLOAT_EPSILON = 1e-4;
@@ -6576,101 +6702,138 @@ function boundRecursive(value) {
   return value;
 }
 
-// src/queue.ts
-var QueueWaitError = class extends Error {
-  kind = "queued";
-  op;
-  waitedMs;
-  behindOp;
-  constructor(op, waitedMs, behindOp) {
+// src/tools/common.ts
+var path3 = __toESM(require("node:path"), 1);
+
+// src/quarantine.ts
+var fs2 = __toESM(require("node:fs"), 1);
+var os = __toESM(require("node:os"), 1);
+var path2 = __toESM(require("node:path"), 1);
+var QuarantineBlockedError = class extends Error {
+  kind = "quarantined";
+  entries;
+  constructor(entries) {
+    const ids = entries.map((e) => e.op_id).join(", ");
     super(
-      `Operation "${op}" waited ${Math.round(waitedMs / 1e3)}s in the server queue behind "${behindOp}" and was dropped before being sent to After Effects. Nothing was executed; it is safe to retry once the queue drains.`
+      `Mutating tool refused: operation(s) [${ids}] are in quarantine because a previous mutation timed out with an unknown outcome. To clear quarantine: 1) call ae_status to check the panel's /health, 2) inspect the project/comp state with read tools (ae_get_project, ae_get_comp, ae_get_layer_props), and 3) call ae_acknowledge with { op_id, note } for each quarantined op.`
     );
-    this.name = "QueueWaitError";
-    this.op = op;
-    this.waitedMs = waitedMs;
-    this.behindOp = behindOp;
+    this.name = "QuarantineBlockedError";
+    this.entries = entries;
   }
 };
-var DEFAULT_MAX_WAIT_MS = 6e5;
-var SingleWriterQueue = class {
-  holder = null;
-  waiting = [];
-  maxWaitMs;
-  constructor(opts = {}) {
-    this.maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+function defaultDataDir() {
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path2.join(os.homedir(), "AppData", "Local");
+    return path2.join(localAppData, "chroma-ae-mcp");
   }
-  get depth() {
-    return this.waiting.filter((w) => !w.done).length;
+  if (process.platform === "darwin") {
+    return path2.join(
+      os.homedir(),
+      "Library",
+      "Application Support",
+      "chroma-ae-mcp"
+    );
   }
-  get inFlight() {
-    return this.holder;
+  return path2.join(os.homedir(), ".local", "share", "chroma-ae-mcp");
+}
+function defaultQuarantineFilePath() {
+  return path2.join(defaultDataDir(), "quarantine.json");
+}
+var QuarantineStore = class {
+  filePath;
+  entries = /* @__PURE__ */ new Map();
+  constructor(filePath = defaultQuarantineFilePath()) {
+    this.filePath = filePath;
+    this.loadFromDisk();
   }
-  acquire(op) {
-    if (this.holder === null && this.depth === 0) {
-      this.holder = op;
-      return Promise.resolve(this.createLease(op, 0, null));
-    }
-    const behind = this.holder ?? this.waiting.find((w) => !w.done)?.op ?? "unknown";
-    return new Promise((resolve2, reject) => {
-      const waiter = {
-        op,
-        enqueuedAt: Date.now(),
-        behind,
-        done: false,
-        resolve: resolve2,
-        reject,
-        cleanup: () => {
-        }
-      };
-      const timer = setTimeout(() => {
-        if (waiter.done) return;
-        waiter.done = true;
-        waiter.cleanup();
-        reject(new QueueWaitError(op, this.maxWaitMs, waiter.behind));
-        this.pump();
-      }, this.maxWaitMs);
-      timer.unref?.();
-      waiter.cleanup = () => {
-        clearTimeout(timer);
-      };
-      this.waiting.push(waiter);
-    });
+  get path() {
+    return this.filePath;
   }
-  async run(op, fn) {
-    const lease = await this.acquire(op);
-    try {
-      return await fn(lease);
-    } finally {
-      lease.release();
+  get isQuarantined() {
+    return this.entries.size > 0;
+  }
+  list() {
+    return Array.from(this.entries.values());
+  }
+  get(opId) {
+    return this.entries.get(opId);
+  }
+  /**
+   * Throws QuarantineBlockedError if any operation is currently in quarantine.
+   */
+  assertClear() {
+    if (this.entries.size > 0) {
+      throw new QuarantineBlockedError(this.list());
     }
   }
-  createLease(op, waitedMs, queuedBehind) {
-    let released = false;
+  /**
+   * Adds a timed-out mutating operation to quarantine and persists to disk.
+   */
+  add(entry) {
+    const record = {
+      op_id: entry.op_id,
+      tool: entry.tool,
+      label: entry.label,
+      quarantined_at: entry.quarantined_at ?? (/* @__PURE__ */ new Date()).toISOString(),
+      reason: entry.reason ?? "Mutating operation timed out; outcome in After Effects is unknown."
+    };
+    this.entries.set(record.op_id, record);
+    this.saveToDisk();
+    return record;
+  }
+  /**
+   * Removes an operation from quarantine by op_id and updates the JSON mirror.
+   */
+  acknowledge(opId, note) {
+    const existing = this.entries.get(opId);
+    if (!existing) {
+      return {
+        acknowledged: false,
+        op_id: opId,
+        note,
+        remaining: this.list()
+      };
+    }
+    this.entries.delete(opId);
+    this.saveToDisk();
     return {
-      op,
-      waitedMs,
-      queuedBehind,
-      release: () => {
-        if (released) return;
-        released = true;
-        this.holder = null;
-        this.pump();
-      }
+      acknowledged: true,
+      op_id: opId,
+      note,
+      removed: existing,
+      remaining: this.list()
     };
   }
-  pump() {
-    if (this.holder !== null) return;
-    while (this.waiting.length > 0) {
-      const next = this.waiting.shift();
-      if (next.done) continue;
-      next.done = true;
-      next.cleanup();
-      this.holder = next.op;
-      const waitedMs = Date.now() - next.enqueuedAt;
-      next.resolve(this.createLease(next.op, waitedMs, next.behind));
-      return;
+  loadFromDisk() {
+    try {
+      if (!fs2.existsSync(this.filePath)) {
+        return;
+      }
+      const raw = fs2.readFileSync(this.filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.entries) ? parsed.entries : [];
+      for (const item of list) {
+        if (item && typeof item === "object" && typeof item.op_id === "string") {
+          const e = item;
+          this.entries.set(e.op_id, {
+            op_id: e.op_id,
+            tool: typeof e.tool === "string" ? e.tool : "unknown",
+            label: typeof e.label === "string" ? e.label : "",
+            quarantined_at: typeof e.quarantined_at === "string" ? e.quarantined_at : (/* @__PURE__ */ new Date()).toISOString(),
+            reason: typeof e.reason === "string" ? e.reason : ""
+          });
+        }
+      }
+    } catch {
     }
+  }
+  saveToDisk() {
+    const dir = path2.dirname(this.filePath);
+    fs2.mkdirSync(dir, { recursive: true, mode: 448 });
+    const payload = JSON.stringify({ entries: this.list() }, null, 2);
+    const tmpFile = `${this.filePath}.tmp-${process.pid}`;
+    fs2.writeFileSync(tmpFile, payload, { encoding: "utf8", mode: 384 });
+    fs2.renameSync(tmpFile, this.filePath);
   }
 };
 
@@ -6698,7 +6861,7 @@ var LayerSelectorSchema = external_exports.object({
 ).describe("Identifies a layer within a composition by id, index, or name.");
 function dataDirOf(ctx) {
   if (ctx.dataDir) return ctx.dataDir;
-  if (ctx.settings) return path2.dirname(ctx.settings.path);
+  if (ctx.settings) return path3.dirname(ctx.settings.path);
   return defaultDataDir();
 }
 function formatToolResponse(data) {
@@ -6783,538 +6946,6 @@ function formatToolError(err) {
   };
 }
 
-// src/tools/ext/dialogs.ts
-var import_meta = {};
-var JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
-var DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
-var DIALOG_EXEC_TIMEOUT_MS = 15e3;
-var MAX_DIALOG_TEXT_CHARS = 4e3;
-var inFlightOps = [];
-var seenDialogs = /* @__PURE__ */ new Map();
-var runtimeOverrides = {};
-function noteOpStarted(opId) {
-  if (!opId || typeof opId !== "string") return;
-  const existingIdx = inFlightOps.indexOf(opId);
-  if (existingIdx !== -1) {
-    inFlightOps.splice(existingIdx, 1);
-  }
-  inFlightOps.push(opId);
-}
-function noteOpFinished(opId) {
-  if (!opId || typeof opId !== "string") return;
-  const idx = inFlightOps.indexOf(opId);
-  if (idx !== -1) {
-    inFlightOps.splice(idx, 1);
-  }
-}
-function getCurrentInFlightOp() {
-  return inFlightOps.length > 0 ? inFlightOps[inFlightOps.length - 1] : null;
-}
-function currentPlatform() {
-  return runtimeOverrides.platform ?? process.platform;
-}
-function currentNowIso() {
-  return runtimeOverrides.nowIso ? runtimeOverrides.nowIso() : (/* @__PURE__ */ new Date()).toISOString();
-}
-function defaultDialogsDir() {
-  if (runtimeOverrides.dialogsDir) {
-    return runtimeOverrides.dialogsDir;
-  }
-  return path3.join(defaultDataDir(), "dialogs");
-}
-function getRuntimeBaseDir() {
-  try {
-    if (typeof __dirname === "string" && __dirname.length > 0) {
-      return __dirname;
-    }
-  } catch {
-  }
-  try {
-    if (typeof import_meta?.url === "string" && import_meta.url.startsWith("file:")) {
-      return path3.dirname(url.fileURLToPath(import_meta.url));
-    }
-  } catch {
-  }
-  return process.cwd();
-}
-function locateDialogsPs1Script(startDir) {
-  if (runtimeOverrides.scriptPath !== void 0) {
-    return runtimeOverrides.scriptPath;
-  }
-  const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
-  const visited = /* @__PURE__ */ new Set();
-  for (const start of rootsToSearch) {
-    let dir = path3.resolve(start);
-    while (!visited.has(dir)) {
-      visited.add(dir);
-      const candidateA = path3.join(dir, "panel", "tools", "ae-dialogs.ps1");
-      if (fs2.existsSync(candidateA)) {
-        return candidateA;
-      }
-      const candidateB = path3.join(dir, "tools", "ae-dialogs.ps1");
-      if (fs2.existsSync(candidateB)) {
-        return candidateB;
-      }
-      const parent = path3.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
-  return null;
-}
-function parsePs1JsonOutput(stdout) {
-  const trimmed = (stdout ?? "").trim();
-  if (!trimmed) {
-    return {
-      ok: false,
-      error: "empty_ps1_output"
-    };
-  }
-  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const parsed = JSON.parse(lines[i]);
-      if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
-        return parsed;
-      }
-    } catch {
-    }
-  }
-  try {
-    const parsedWhole = JSON.parse(trimmed);
-    if (parsedWhole && typeof parsedWhole === "object" && typeof parsedWhole.ok === "boolean") {
-      return parsedWhole;
-    }
-  } catch {
-  }
-  return {
-    ok: false,
-    error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
-  };
-}
-function normalizeRawDialog(raw, meta) {
-  const rawText = typeof raw.text === "string" ? raw.text : "";
-  const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
-  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
-  const buttons = rawButtons.map((b) => ({
-    name: typeof b?.name === "string" ? b.name : "",
-    automationId: typeof b?.automationId === "string" ? b.automationId : "",
-    enabled: Boolean(b?.enabled ?? true)
-  }));
-  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
-  const checkboxes = rawCheckboxes.map((c) => ({
-    name: typeof c?.name === "string" ? c.name : "",
-    checked: Boolean(c?.checked)
-  }));
-  const r = raw.boundingRect ?? raw.rect ?? {};
-  const boundingRect = {
-    x: typeof r.x === "number" ? r.x : 0,
-    y: typeof r.y === "number" ? r.y : 0,
-    width: typeof r.width === "number" ? r.width : 0,
-    height: typeof r.height === "number" ? r.height : 0
-  };
-  return {
-    handle: Number(raw.handle),
-    title: typeof raw.title === "string" ? raw.title : "",
-    class: typeof raw.class === "string" ? raw.class : "",
-    isModal: Boolean(raw.isModal),
-    text: boundedText,
-    buttons,
-    checkboxes,
-    boundingRect,
-    screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
-    first_seen: meta.first_seen,
-    caused_by_op: meta.caused_by_op
-  };
-}
-function enrichDialogsList(rawDialogs) {
-  const activeHandles = /* @__PURE__ */ new Set();
-  const now = currentNowIso();
-  const inFlight = getCurrentInFlightOp();
-  const result = [];
-  for (const raw of rawDialogs) {
-    const handle = Number(raw?.handle);
-    if (!Number.isFinite(handle) || handle <= 0) continue;
-    activeHandles.add(handle);
-    let meta = seenDialogs.get(handle);
-    const title = typeof raw.title === "string" ? raw.title : "";
-    const text = typeof raw.text === "string" ? raw.text.slice(0, MAX_DIALOG_TEXT_CHARS) : "";
-    if (!meta) {
-      meta = {
-        handle,
-        first_seen: now,
-        caused_by_op: inFlight,
-        title,
-        text
-      };
-      seenDialogs.set(handle, meta);
-    } else {
-      if (title) meta.title = title;
-      if (text) meta.text = text;
-    }
-    result.push(normalizeRawDialog(raw, meta));
-  }
-  for (const existingHandle of Array.from(seenDialogs.keys())) {
-    if (!activeHandles.has(existingHandle)) {
-      seenDialogs.delete(existingHandle);
-    }
-  }
-  return result;
-}
-function runPowerShellScript(ps1Args) {
-  if (runtimeOverrides.ps1Runner) {
-    return runtimeOverrides.ps1Runner(ps1Args);
-  }
-  const scriptPath = locateDialogsPs1Script();
-  if (!scriptPath) {
-    return Promise.resolve(
-      JSON.stringify({
-        ok: false,
-        error: "ae_dialogs_ps1_not_found"
-      })
-    );
-  }
-  const fullArgs = [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    scriptPath,
-    ...ps1Args
-  ];
-  return new Promise((resolve2) => {
-    (0, import_node_child_process.execFile)(
-      "powershell.exe",
-      fullArgs,
-      {
-        windowsHide: true,
-        timeout: DIALOG_EXEC_TIMEOUT_MS,
-        maxBuffer: 4 * 1024 * 1024
-      },
-      (err, stdout, stderr) => {
-        const outStr = typeof stdout === "string" ? stdout.trim() : "";
-        if (outStr.length > 0) {
-          resolve2(outStr);
-          return;
-        }
-        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
-        resolve2(
-          JSON.stringify({
-            ok: false,
-            error: errMsg
-          })
-        );
-      }
-    );
-  });
-}
-function isDestructiveButton(buttonName) {
-  return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
-}
-function evaluateRespondPolicy(params) {
-  const hasUserInstruction = typeof params.user_instruction === "string" && params.user_instruction.trim().length > 0;
-  if (params.caused_by_op === null && !hasUserInstruction) {
-    return {
-      allowed: false,
-      error: "refused_not_caused_by_our_op",
-      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
-    };
-  }
-  if (isDestructiveButton(params.button)) {
-    if (params.allow_destructive !== true || !hasUserInstruction) {
-      return {
-        allowed: false,
-        error: "refused_destructive_button",
-        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
-      };
-    }
-  }
-  return { allowed: true };
-}
-function appendResponseLog(entry) {
-  const dir = defaultDialogsDir();
-  fs2.mkdirSync(dir, { recursive: true });
-  const logFile = path3.join(dir, "responses.jsonl");
-  fs2.appendFileSync(logFile, `${JSON.stringify(entry)}
-`, {
-    encoding: "utf8"
-  });
-}
-async function listDialogsInternal(opts) {
-  if (currentPlatform() !== "win32") {
-    return {
-      ok: false,
-      error: "not_implemented_on_this_os"
-    };
-  }
-  const psArgs = ["-Mode", "list"];
-  if (opts.screenshots) {
-    const dir = defaultDialogsDir();
-    fs2.mkdirSync(dir, { recursive: true });
-    psArgs.push("-ScreenshotDir", dir);
-  }
-  const rawStdout = await runPowerShellScript(psArgs);
-  const parsed = parsePs1JsonOutput(rawStdout);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      error: parsed.error || "dialog_list_failed"
-    };
-  }
-  const rawList = Array.isArray(parsed.dialogs) ? parsed.dialogs : [];
-  const enriched = enrichDialogsList(rawList);
-  return {
-    ok: true,
-    ae_pid: parsed.ae_pid ?? null,
-    dialogs: enriched
-  };
-}
-async function describeBlockingDialogs() {
-  try {
-    const res = await listDialogsInternal({ screenshots: true });
-    if (!res.ok) {
-      return [];
-    }
-    return res.dialogs;
-  } catch {
-    return [];
-  }
-}
-var AeDialogsSchema = external_exports.object({
-  screenshots: external_exports.boolean().default(true).optional().describe(
-    "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
-  )
-});
-var AeDialogRespondSchema = external_exports.object({
-  handle: external_exports.number().int().positive().describe("NativeWindowHandle (HWND) of the dialog to respond to."),
-  button: external_exports.string().min(1).describe(
-    "Exact button name (case-insensitive) to press via UIA InvokePattern."
-  ),
-  check: external_exports.string().min(1).optional().describe(
-    "Optional checkbox name to toggle on before pressing the button."
-  ),
-  reason: external_exports.string().min(1).describe(
-    "Clear explanation of why this dialog is being answered and why this button was chosen."
-  ),
-  allow_destructive: external_exports.boolean().default(false).optional().describe(
-    "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
-  ),
-  user_instruction: external_exports.string().optional().describe(
-    "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
-  )
-});
-var dialogsTools = [
-  {
-    name: "ae_dialogs",
-    description: `READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. ` + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
-    schema: AeDialogsSchema,
-    handler: async (args) => {
-      if (currentPlatform() !== "win32") {
-        return {
-          ok: false,
-          error: "not_implemented_on_this_os"
-        };
-      }
-      const screenshots = args.screenshots ?? true;
-      return await listDialogsInternal({ screenshots });
-    }
-  },
-  {
-    name: "ae_dialog_respond",
-    description: "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
-    schema: AeDialogRespondSchema,
-    handler: async (args) => {
-      if (currentPlatform() !== "win32") {
-        return {
-          ok: false,
-          error: "not_implemented_on_this_os"
-        };
-      }
-      let meta = seenDialogs.get(args.handle);
-      if (!meta) {
-        await listDialogsInternal({ screenshots: false });
-        meta = seenDialogs.get(args.handle);
-      }
-      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
-      const policy = evaluateRespondPolicy({
-        button: args.button,
-        caused_by_op: causedByOp,
-        allow_destructive: args.allow_destructive ?? false,
-        user_instruction: args.user_instruction
-      });
-      if (!policy.allowed) {
-        return {
-          ok: false,
-          error: policy.error ?? "refused_by_policy",
-          message: policy.message,
-          handle: args.handle,
-          button: args.button,
-          caused_by_op: causedByOp
-        };
-      }
-      const psArgs = [
-        "-Mode",
-        "respond",
-        "-Handle",
-        String(args.handle),
-        "-Button",
-        args.button
-      ];
-      if (args.check) {
-        psArgs.push("-Check", args.check);
-      }
-      const rawStdout = await runPowerShellScript(psArgs);
-      const parsed = parsePs1JsonOutput(rawStdout);
-      const logTime = currentNowIso();
-      const title = meta?.title ?? "";
-      const textExcerpt = (meta?.text ?? "").slice(0, 500);
-      appendResponseLog({
-        time: logTime,
-        handle: args.handle,
-        title,
-        text_excerpt: textExcerpt,
-        button: args.button,
-        check: args.check,
-        reason: args.reason,
-        op: causedByOp,
-        allow_destructive: Boolean(args.allow_destructive),
-        user_instruction: args.user_instruction,
-        result: parsed
-      });
-      if (parsed.ok && parsed.closed) {
-        seenDialogs.delete(args.handle);
-      }
-      return parsed;
-    }
-  }
-];
-
-// src/panel-entry.ts
-var path19 = __toESM(require("node:path"), 1);
-
-// src/schema.ts
-function zodToJsonSchema(schema) {
-  let current = schema;
-  while (current instanceof external_exports.ZodEffects || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodOptional) {
-    if (current instanceof external_exports.ZodEffects) {
-      current = current._def.schema;
-    } else if (current instanceof external_exports.ZodDefault) {
-      current = current._def.innerType;
-    } else if (current instanceof external_exports.ZodOptional) {
-      current = current._def.innerType;
-    }
-  }
-  if (!(current instanceof external_exports.ZodObject)) {
-    return { type: "object", properties: {} };
-  }
-  const shape = current.shape;
-  const properties = {};
-  const required = [];
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    const { propSchema, isOptional } = convertFieldSchema(fieldSchema);
-    properties[key] = propSchema;
-    if (!isOptional) {
-      required.push(key);
-    }
-  }
-  const out = {
-    type: "object",
-    properties
-  };
-  if (required.length > 0) {
-    out.required = required;
-  }
-  return out;
-}
-function convertFieldSchema(schema) {
-  let isOptional = false;
-  let current = schema;
-  let description = current.description;
-  while (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodEffects) {
-    if (!description && current.description) {
-      description = current.description;
-    }
-    if (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault) {
-      isOptional = true;
-      current = current._def.innerType;
-    } else if (current instanceof external_exports.ZodEffects) {
-      current = current._def.schema;
-    }
-  }
-  if (!description && current.description) {
-    description = current.description;
-  }
-  let propSchema = {};
-  if (current instanceof external_exports.ZodString) {
-    propSchema = { type: "string" };
-  } else if (current instanceof external_exports.ZodNumber) {
-    propSchema = { type: "number" };
-  } else if (current instanceof external_exports.ZodBoolean) {
-    propSchema = { type: "boolean" };
-  } else if (current instanceof external_exports.ZodEnum) {
-    propSchema = { type: "string", enum: current._def.values };
-  } else if (current instanceof external_exports.ZodArray) {
-    const elem = convertFieldSchema(current._def.type);
-    propSchema = { type: "array", items: elem.propSchema };
-  } else if (current instanceof external_exports.ZodObject) {
-    propSchema = zodToJsonSchema(current);
-  } else {
-    propSchema = {};
-  }
-  if (description) {
-    propSchema.description = description;
-  }
-  return { propSchema, isOptional };
-}
-
-// src/tools/ext/aerender.ts
-var childProcess = __toESM(require("node:child_process"), 1);
-var crypto = __toESM(require("node:crypto"), 1);
-var fs6 = __toESM(require("node:fs"), 1);
-var path7 = __toESM(require("node:path"), 1);
-
-// src/jsx.ts
-function encodeJsxArg(value) {
-  const json = JSON.stringify(value === void 0 ? null : value);
-  return escapeForExtendScript(json);
-}
-function escapeForExtendScript(jsonLiteral) {
-  let out = "";
-  for (let i = 0; i < jsonLiteral.length; i++) {
-    const code = jsonLiteral.charCodeAt(i);
-    if (code >= 32 && code <= 126) {
-      out += jsonLiteral.charAt(i);
-    } else {
-      out += "\\u" + code.toString(16).padStart(4, "0");
-    }
-  }
-  return out;
-}
-function buildJsxCall(fn, args = {}) {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(fn))) {
-    throw new Error(`Invalid host function name: ${String(fn)}`);
-  }
-  return `__chromaAe.${fn}(${encodeJsxArg(args)})`;
-}
-function normalizeGuardPath(projectPath, isWindows = process.platform === "win32") {
-  const trimmed = projectPath.trim();
-  if (trimmed === "<unsaved>") {
-    return "<unsaved>";
-  }
-  let normalized = trimmed.replace(/\\/g, "/");
-  if (normalized.length > 1 && normalized.endsWith("/")) {
-    normalized = normalized.slice(0, -1);
-  }
-  if (isWindows) {
-    normalized = normalized.toLowerCase();
-  }
-  return normalized;
-}
-function pathsMatchForGuard(expectedPath, actualPath, isWindows = process.platform === "win32") {
-  const actual = actualPath ? actualPath : "<unsaved>";
-  return normalizeGuardPath(expectedPath, isWindows) === normalizeGuardPath(actual, isWindows);
-}
-
 // src/tools/mutate.ts
 var fs5 = __toESM(require("node:fs"), 1);
 var path6 = __toESM(require("node:path"), 1);
@@ -7324,7 +6955,8 @@ var fs3 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var DEFAULT_SETTINGS = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
-  taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" }
+  taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
+  asset_watch: { enabled: false, since: null }
 };
 function defaultSettingsFilePath() {
   return path4.join(defaultDataDir(), "settings.json");
@@ -7335,7 +6967,8 @@ function cloneTaste(t) {
 function cloneDefaults() {
   return {
     auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
-    taste: cloneTaste(DEFAULT_SETTINGS.taste)
+    taste: cloneTaste(DEFAULT_SETTINGS.taste),
+    asset_watch: { ...DEFAULT_SETTINGS.asset_watch }
   };
 }
 function isCurve(v) {
@@ -7352,7 +6985,19 @@ var SettingsStore = class {
     return this.filePath;
   }
   get() {
-    return { auto_checkpoint: { ...this.settings.auto_checkpoint }, taste: cloneTaste(this.settings.taste) };
+    return {
+      auto_checkpoint: { ...this.settings.auto_checkpoint },
+      taste: cloneTaste(this.settings.taste),
+      asset_watch: { ...this.settings.asset_watch }
+    };
+  }
+  updateAssetWatch(patch) {
+    const next = { ...this.settings.asset_watch };
+    if (patch.enabled !== void 0) next.enabled = patch.enabled;
+    if (patch.since !== void 0) next.since = patch.since;
+    this.settings = { ...this.settings, asset_watch: next };
+    this.saveToDisk();
+    return this.get();
   }
   updateTaste(patch) {
     const next = cloneTaste(this.settings.taste);
@@ -7387,6 +7032,11 @@ var SettingsStore = class {
         if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
         if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
         if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
+      }
+      const aw = parsed?.asset_watch;
+      if (aw && typeof aw === "object") {
+        if (typeof aw.enabled === "boolean") this.settings.asset_watch.enabled = aw.enabled;
+        if (typeof aw.since === "string" && !Number.isNaN(Date.parse(aw.since))) this.settings.asset_watch.since = aw.since;
       }
     } catch {
     }
@@ -7672,13 +7322,13 @@ async function autoCheckpoint(ctx, guard, toolName) {
   if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs5.existsSync(last.path)) {
     return { status: "reused", path: last.path, ...unsaved };
   }
-  const ext = path6.extname(projectPath) || ".aep";
+  const ext2 = path6.extname(projectPath) || ".aep";
   const dir = path6.join(path6.dirname(projectPath), "_mcp_checkpoints");
-  const stem = `${path6.basename(projectPath, ext)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
+  const stem = `${path6.basename(projectPath, ext2)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
   try {
     await fs5.promises.mkdir(dir, { recursive: true });
-    let target = path6.join(dir, `${stem}${ext}`);
-    for (let n = 2; fs5.existsSync(target); n++) target = path6.join(dir, `${stem}-${n}${ext}`);
+    let target = path6.join(dir, `${stem}${ext2}`);
+    for (let n = 2; fs5.existsSync(target); n++) target = path6.join(dir, `${stem}-${n}${ext2}`);
     await fs5.promises.copyFile(projectPath, target, fs5.constants.COPYFILE_EXCL);
     lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
     return { status: "created", path: target, ...unsaved };
@@ -7902,12 +7552,12 @@ var mutateTools = [
             beforeSize = fs5.statSync(actualProjectPath).size;
             if (doBackup) {
               const projDir = path6.dirname(actualProjectPath);
-              const ext = path6.extname(actualProjectPath) || ".aep";
-              const baseName = path6.basename(actualProjectPath, ext);
+              const ext2 = path6.extname(actualProjectPath) || ".aep";
+              const baseName = path6.basename(actualProjectPath, ext2);
               const backupDir = path6.join(projDir, "_mcp_backups");
               fs5.mkdirSync(backupDir, { recursive: true });
               const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
-              backupPath = path6.join(backupDir, `${baseName}_${stamp}${ext}`);
+              backupPath = path6.join(backupDir, `${baseName}_${stamp}${ext2}`);
               fs5.copyFileSync(actualProjectPath, backupPath);
               backupSize = fs5.statSync(backupPath).size;
             }
@@ -7970,18 +7620,850 @@ var mutateTools = [
   }
 ];
 
+// src/tools/ext/assets.ts
+var SETTLE_MS = 2e3;
+var SEQUENCE_SETTLE_MS = 1e4;
+var BACKOFF_BASE_MS = 5e3;
+var BACKOFF_MAX_MS = 6e4;
+var MAX_IMPORT = 200;
+var AeImportAssetsSchema = external_exports.object({
+  folder: external_exports.string().min(1).optional().describe(`Absolute folder to import from. Default: ${DEFAULT_ASSET_FOLDER}/ next to the open .aep (created if missing).`),
+  bin: external_exports.string().min(1).max(200).optional().describe(`Project folder to import into; subfolders mirror the asset folder's. Default '${DEFAULT_ASSET_BIN}'.`),
+  recursive: external_exports.boolean().optional().describe("Include subfolders (except ones starting with _ or .). Default true."),
+  sequences: external_exports.boolean().optional().describe("Import numbered stills (shot_0001.png ...) as one sequence. Default true."),
+  dry_run: external_exports.boolean().optional().describe("List what would be imported without importing."),
+  watch: external_exports.boolean().optional().describe(`Turn auto-import on or off: while on, files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported into ${DEFAULT_ASSET_BIN} within seconds. Persists across restarts.`),
+  expect: external_exports.object({ project_path: external_exports.string().min(1) }).describe("The open project's path; the import is refused if another project is open.")
+});
+async function readFootagePaths(ctx, label, toolName) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${ctx.bridge.newOpId()}_footage`,
+    script: buildJsxCall("footagePaths", {}),
+    label,
+    mutates: false,
+    toolName
+  });
+  return res.result;
+}
+function plan(c) {
+  return { path: c.path.replace(/\\/g, "/"), subfolder: c.subfolder, sequence: c.sequence };
+}
+async function importAssetFiles(ctx, projectPath, bin, fresh, toolName) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const expect = { project_path: projectPath };
+  const noop = { op_id: opId, imported: [], failed: [], checkpoint: null, receipt: null };
+  const readBin = (suffix) => ctx.bridge.evalRaw({
+    id: `${opId}_${suffix}`,
+    script: buildJsxCall("assetBinContents", { bin }),
+    label: `${toolName} (${suffix} bin)`,
+    mutates: false,
+    toolName
+  });
+  try {
+    return await ctx.queue.run(`${toolName}: import ${fresh.length}`, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, expect, opId);
+      const current = await readFootagePaths(ctx, `${toolName} (footage, recheck)`, toolName);
+      const have = new Set((current.paths ?? []).map(normPath));
+      const todo = fresh.filter((c) => !have.has(normPath(c.path)));
+      if (todo.length === 0) return noop;
+      const checkpoint = await autoCheckpoint(ctx, guard, toolName);
+      const before = await readBin("before");
+      const write = await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall("importAssets", { expect, bin, items: todo.map(plan) }),
+        label: `${toolName}: import ${todo.length} file(s) into ${bin}`,
+        mutates: true,
+        toolName
+      });
+      const after = await readBin("after");
+      const inBin = new Set((after.result?.items ?? []).map((i) => i.path ? normPath(i.path) : ""));
+      const mismatches = write.result.imported.filter((i) => !inBin.has(normPath(i.path))).map((i) => ({ path: `bin.${i.name}`, expected: i.path, actual: void 0, message: `${i.name} is not in ${bin} after the import` }));
+      return {
+        op_id: opId,
+        imported: write.result.imported,
+        failed: write.result.failed,
+        checkpoint,
+        receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches })
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+var AssetWatcher = class {
+  constructor(ctx, opts = {}) {
+    this.ctx = ctx;
+    this.opts = opts;
+  }
+  timer = null;
+  busy = false;
+  failures = 0;
+  skipUntil = 0;
+  /** Files already imported or found in the project, per project, so they are not asked about again. */
+  seen = /* @__PURE__ */ new Map();
+  start() {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.tick(), this.opts.intervalMs ?? 5e3);
+    this.timer.unref?.();
+  }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+  /** One look at the asset folder; returns what it imported (for tests and the log). */
+  async tick() {
+    const settings = this.ctx.settings?.get().asset_watch;
+    if (!settings?.enabled || this.busy) return null;
+    if (this.ctx.quarantine.isQuarantined) return null;
+    const clock = this.opts.now ?? Date.now;
+    if (clock() < this.skipUntil) return null;
+    this.busy = true;
+    try {
+      const out = await this.look(settings);
+      if (this.failures > 0) {
+        this.failures = 0;
+        this.skipUntil = 0;
+        this.opts.log?.("ok", "Asset watch is working again");
+      }
+      return out;
+    } catch (err) {
+      this.failures++;
+      this.skipUntil = clock() + Math.min(BACKOFF_BASE_MS * Math.pow(2, this.failures - 1), BACKOFF_MAX_MS);
+      if (this.failures === 1) this.opts.log?.("warn", `Asset watch: ${err instanceof Error ? err.message : String(err)} (retrying with backoff)`);
+      return null;
+    } finally {
+      this.busy = false;
+    }
+  }
+  async look(settings) {
+    {
+      const status = await this.ctx.bridge.evalRaw({
+        id: `${this.ctx.bridge.newOpId()}_watch`,
+        script: buildJsxCall("status", {}),
+        label: "quiet: asset watch (status)",
+        mutates: false,
+        toolName: "asset_watch"
+      });
+      const projectPath = status.result?.project_path ?? "<unsaved>";
+      if (projectPath === "<unsaved>") return null;
+      const folder = path7.join(path7.dirname(projectPath), DEFAULT_ASSET_FOLDER);
+      if (!fs6.existsSync(folder)) return null;
+      const key = normalizeGuardPath(projectPath);
+      const seen = this.seen.get(key) ?? /* @__PURE__ */ new Set();
+      this.seen.set(key, seen);
+      const since = settings.since ? Date.parse(settings.since) : 0;
+      const candidates = scanAssets(folder).filter((c) => !seen.has(normPath(c.path)) && c.arrivedMs >= since);
+      if (candidates.length === 0) return null;
+      const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
+      const now = (this.opts.now ?? Date.now)();
+      const { fresh, already } = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+      for (const c of already) seen.add(normPath(c.path));
+      if (fresh.length === 0) return null;
+      const res = await importAssetFiles(this.ctx, projectPath, DEFAULT_ASSET_BIN, fresh.slice(0, MAX_IMPORT), "asset_watch");
+      for (const i of res.imported) seen.add(normPath(i.path));
+      for (const f of res.failed) seen.add(normPath(f.path));
+      this.opts.log?.("ok", `Asset watch imported ${res.imported.length} file(s) into ${DEFAULT_ASSET_BIN}${res.failed.length ? `, ${res.failed.length} failed` : ""}`);
+      return { imported: res.imported.length, failed: res.failed.length };
+    }
+  }
+};
+var assetsTools = [
+  {
+    name: "ae_import_assets",
+    description: `Import staged assets: files in the asset folder (${DEFAULT_ASSET_FOLDER}/ next to the open .aep unless \`folder\` says otherwise) that are not in the project yet go into the ${DEFAULT_ASSET_BIN} bin, with subfolders mirrored and numbered stills (shot_0001.png ...; at least 3 frames, 3-7 digits, not v002-style versions) as one sequence, which waits until 10 s after its newest frame so a render in progress is not imported half-done. Save generated or delivered files (images, renders, voice-overs) there, then call this; files already in the project are skipped, and files still being written wait. \`watch: true\` turns on auto-import: files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported within seconds, until \`watch: false\` (turn it on only when the user wants it). The import is one undo group guarded by \`expect\`, with an auto checkpoint, and the bin is read back in a separate evalScript. ` + AGENT_SAFETY_GUIDANCE,
+    schema: AeImportAssetsSchema,
+    handler: async (args, ctx) => {
+      const current = await readFootagePaths(ctx, "ae_import_assets (footage)", "ae_import_assets");
+      const projectPath = current.project_path;
+      if (normalizeGuardPath(args.expect.project_path) !== normalizeGuardPath(projectPath)) {
+        return { ok: false, error: "guard", message: `The open project is ${projectPath}, not ${args.expect.project_path}. Re-read state; nothing was imported.` };
+      }
+      let watch;
+      if (args.watch !== void 0) {
+        if (!ctx.settings) return { ok: false, error: "no_settings", message: "This server has no settings store, so the watcher can't be set." };
+        const prev = ctx.settings.get().asset_watch;
+        let since = null;
+        if (args.watch) since = prev.enabled && prev.since ? prev.since : (/* @__PURE__ */ new Date()).toISOString();
+        const s = ctx.settings.updateAssetWatch({ enabled: args.watch, since });
+        watch = { ...s.asset_watch, folder: DEFAULT_ASSET_FOLDER, bin: DEFAULT_ASSET_BIN, note: args.watch ? "Files changed from now on are imported automatically." : "Auto-import is off." };
+      }
+      if (projectPath === "<unsaved>" && !args.folder) {
+        return { ok: false, error: "unsaved_project", message: "The project has not been saved, so it has no asset folder. Save it, or pass an absolute folder.", watch };
+      }
+      const folder = args.folder ?? path7.join(path7.dirname(projectPath), DEFAULT_ASSET_FOLDER);
+      if (!path7.isAbsolute(folder)) return { ok: false, error: "bad_args", message: `folder must be absolute: ${folder}` };
+      if (!args.folder && (!args.dry_run || args.watch === true)) fs6.mkdirSync(folder, { recursive: true });
+      const bin = args.bin ?? DEFAULT_ASSET_BIN;
+      if (!fs6.existsSync(folder)) {
+        if (args.dry_run) {
+          return { ok: true, folder, bin, already_in_project: 0, still_writing: [], ...watch ? { watch } : {}, dry_run: true, to_import: [], imported: [], failed: [] };
+        }
+        return { ok: false, error: "not_found", message: `No such folder: ${folder}` };
+      }
+      const candidates = scanAssets(folder, { recursive: args.recursive, sequences: args.sequences });
+      const { fresh, already, settling } = pickNewAssets(candidates, current.paths, Date.now(), SETTLE_MS, SEQUENCE_SETTLE_MS);
+      const base = {
+        ok: true,
+        folder,
+        bin,
+        already_in_project: already.length,
+        still_writing: settling.map((c) => c.path),
+        ...watch ? { watch } : {}
+      };
+      if (args.dry_run || fresh.length === 0) {
+        return {
+          ...base,
+          dry_run: args.dry_run === true,
+          to_import: fresh.map((c) => ({ ...plan(c), frames: c.frames })),
+          imported: [],
+          failed: []
+        };
+      }
+      if (fresh.length > MAX_IMPORT) {
+        return { ok: false, error: "too_many", message: `${fresh.length} new files; import up to ${MAX_IMPORT} a call (use a subfolder as \`folder\`).` };
+      }
+      const res = await importAssetFiles(ctx, projectPath, bin, fresh, "ae_import_assets");
+      return { ...base, ...res };
+    }
+  }
+];
+
+// src/tools/ext/diagnostics.ts
+var fs8 = __toESM(require("node:fs"), 1);
+var os2 = __toESM(require("node:os"), 1);
+var path9 = __toESM(require("node:path"), 1);
+
+// src/tools/ext/dialogs.ts
+var import_node_child_process = require("node:child_process");
+var fs7 = __toESM(require("node:fs"), 1);
+var path8 = __toESM(require("node:path"), 1);
+var url = __toESM(require("node:url"), 1);
+var import_meta = {};
+var JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
+var DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
+var DIALOG_EXEC_TIMEOUT_MS = 15e3;
+var MAX_DIALOG_TEXT_CHARS = 4e3;
+var inFlightOps = [];
+var seenDialogs = /* @__PURE__ */ new Map();
+var runtimeOverrides = {};
+function noteOpStarted(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const existingIdx = inFlightOps.indexOf(opId);
+  if (existingIdx !== -1) {
+    inFlightOps.splice(existingIdx, 1);
+  }
+  inFlightOps.push(opId);
+}
+function noteOpFinished(opId) {
+  if (!opId || typeof opId !== "string") return;
+  const idx = inFlightOps.indexOf(opId);
+  if (idx !== -1) {
+    inFlightOps.splice(idx, 1);
+  }
+}
+function getCurrentInFlightOp() {
+  return inFlightOps.length > 0 ? inFlightOps[inFlightOps.length - 1] : null;
+}
+function currentPlatform() {
+  return runtimeOverrides.platform ?? process.platform;
+}
+function currentNowIso() {
+  return runtimeOverrides.nowIso ? runtimeOverrides.nowIso() : (/* @__PURE__ */ new Date()).toISOString();
+}
+function defaultDialogsDir() {
+  if (runtimeOverrides.dialogsDir) {
+    return runtimeOverrides.dialogsDir;
+  }
+  return path8.join(defaultDataDir(), "dialogs");
+}
+function getRuntimeBaseDir() {
+  try {
+    if (typeof __dirname === "string" && __dirname.length > 0) {
+      return __dirname;
+    }
+  } catch {
+  }
+  try {
+    if (typeof import_meta?.url === "string" && import_meta.url.startsWith("file:")) {
+      return path8.dirname(url.fileURLToPath(import_meta.url));
+    }
+  } catch {
+  }
+  return process.cwd();
+}
+function locateDialogsPs1Script(startDir) {
+  if (runtimeOverrides.scriptPath !== void 0) {
+    return runtimeOverrides.scriptPath;
+  }
+  const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
+  const visited = /* @__PURE__ */ new Set();
+  for (const start of rootsToSearch) {
+    let dir = path8.resolve(start);
+    while (!visited.has(dir)) {
+      visited.add(dir);
+      const candidateA = path8.join(dir, "panel", "tools", "ae-dialogs.ps1");
+      if (fs7.existsSync(candidateA)) {
+        return candidateA;
+      }
+      const candidateB = path8.join(dir, "tools", "ae-dialogs.ps1");
+      if (fs7.existsSync(candidateB)) {
+        return candidateB;
+      }
+      const parent = path8.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+function parsePs1JsonOutput(stdout) {
+  const trimmed = (stdout ?? "").trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: "empty_ps1_output"
+    };
+  }
+  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") {
+        return parsed;
+      }
+    } catch {
+    }
+  }
+  try {
+    const parsedWhole = JSON.parse(trimmed);
+    if (parsedWhole && typeof parsedWhole === "object" && typeof parsedWhole.ok === "boolean") {
+      return parsedWhole;
+    }
+  } catch {
+  }
+  return {
+    ok: false,
+    error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
+  };
+}
+function normalizeRawDialog(raw, meta) {
+  const rawText = typeof raw.text === "string" ? raw.text : "";
+  const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
+  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
+  const buttons = rawButtons.map((b) => ({
+    name: typeof b?.name === "string" ? b.name : "",
+    automationId: typeof b?.automationId === "string" ? b.automationId : "",
+    enabled: Boolean(b?.enabled ?? true)
+  }));
+  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
+  const checkboxes = rawCheckboxes.map((c) => ({
+    name: typeof c?.name === "string" ? c.name : "",
+    checked: Boolean(c?.checked)
+  }));
+  const r = raw.boundingRect ?? raw.rect ?? {};
+  const boundingRect = {
+    x: typeof r.x === "number" ? r.x : 0,
+    y: typeof r.y === "number" ? r.y : 0,
+    width: typeof r.width === "number" ? r.width : 0,
+    height: typeof r.height === "number" ? r.height : 0
+  };
+  return {
+    handle: Number(raw.handle),
+    title: typeof raw.title === "string" ? raw.title : "",
+    class: typeof raw.class === "string" ? raw.class : "",
+    isModal: Boolean(raw.isModal),
+    text: boundedText,
+    buttons,
+    checkboxes,
+    boundingRect,
+    screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
+    first_seen: meta.first_seen,
+    caused_by_op: meta.caused_by_op
+  };
+}
+function enrichDialogsList(rawDialogs) {
+  const activeHandles = /* @__PURE__ */ new Set();
+  const now = currentNowIso();
+  const inFlight = getCurrentInFlightOp();
+  const result = [];
+  for (const raw of rawDialogs) {
+    const handle = Number(raw?.handle);
+    if (!Number.isFinite(handle) || handle <= 0) continue;
+    activeHandles.add(handle);
+    let meta = seenDialogs.get(handle);
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const text = typeof raw.text === "string" ? raw.text.slice(0, MAX_DIALOG_TEXT_CHARS) : "";
+    if (!meta) {
+      meta = {
+        handle,
+        first_seen: now,
+        caused_by_op: inFlight,
+        title,
+        text
+      };
+      seenDialogs.set(handle, meta);
+    } else {
+      if (title) meta.title = title;
+      if (text) meta.text = text;
+    }
+    result.push(normalizeRawDialog(raw, meta));
+  }
+  for (const existingHandle of Array.from(seenDialogs.keys())) {
+    if (!activeHandles.has(existingHandle)) {
+      seenDialogs.delete(existingHandle);
+    }
+  }
+  return result;
+}
+function runPowerShellScript(ps1Args) {
+  if (runtimeOverrides.ps1Runner) {
+    return runtimeOverrides.ps1Runner(ps1Args);
+  }
+  const scriptPath = locateDialogsPs1Script();
+  if (!scriptPath) {
+    return Promise.resolve(
+      JSON.stringify({
+        ok: false,
+        error: "ae_dialogs_ps1_not_found"
+      })
+    );
+  }
+  const fullArgs = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    ...ps1Args
+  ];
+  return new Promise((resolve2) => {
+    (0, import_node_child_process.execFile)(
+      "powershell.exe",
+      fullArgs,
+      {
+        windowsHide: true,
+        timeout: DIALOG_EXEC_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024
+      },
+      (err, stdout, stderr) => {
+        const outStr = typeof stdout === "string" ? stdout.trim() : "";
+        if (outStr.length > 0) {
+          resolve2(outStr);
+          return;
+        }
+        const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
+        resolve2(
+          JSON.stringify({
+            ok: false,
+            error: errMsg
+          })
+        );
+      }
+    );
+  });
+}
+function isDestructiveButton(buttonName) {
+  return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
+}
+function evaluateRespondPolicy(params) {
+  const hasUserInstruction = typeof params.user_instruction === "string" && params.user_instruction.trim().length > 0;
+  if (params.caused_by_op === null && !hasUserInstruction) {
+    return {
+      allowed: false,
+      error: "refused_not_caused_by_our_op",
+      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
+    };
+  }
+  if (isDestructiveButton(params.button)) {
+    if (params.allow_destructive !== true || !hasUserInstruction) {
+      return {
+        allowed: false,
+        error: "refused_destructive_button",
+        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
+      };
+    }
+  }
+  return { allowed: true };
+}
+function appendResponseLog(entry) {
+  const dir = defaultDialogsDir();
+  fs7.mkdirSync(dir, { recursive: true });
+  const logFile = path8.join(dir, "responses.jsonl");
+  fs7.appendFileSync(logFile, `${JSON.stringify(entry)}
+`, {
+    encoding: "utf8"
+  });
+}
+async function listDialogsInternal(opts) {
+  if (currentPlatform() !== "win32") {
+    return {
+      ok: false,
+      error: "not_implemented_on_this_os"
+    };
+  }
+  const psArgs = ["-Mode", "list"];
+  if (opts.screenshots) {
+    const dir = defaultDialogsDir();
+    fs7.mkdirSync(dir, { recursive: true });
+    psArgs.push("-ScreenshotDir", dir);
+  }
+  const rawStdout = await runPowerShellScript(psArgs);
+  const parsed = parsePs1JsonOutput(rawStdout);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error || "dialog_list_failed"
+    };
+  }
+  const rawList = Array.isArray(parsed.dialogs) ? parsed.dialogs : [];
+  const enriched = enrichDialogsList(rawList);
+  return {
+    ok: true,
+    ae_pid: parsed.ae_pid ?? null,
+    dialogs: enriched
+  };
+}
+async function describeBlockingDialogs() {
+  try {
+    const res = await listDialogsInternal({ screenshots: true });
+    if (!res.ok) {
+      return [];
+    }
+    return res.dialogs;
+  } catch {
+    return [];
+  }
+}
+var AeDialogsSchema = external_exports.object({
+  screenshots: external_exports.boolean().default(true).optional().describe(
+    "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
+  )
+});
+var AeDialogRespondSchema = external_exports.object({
+  handle: external_exports.number().int().positive().describe("NativeWindowHandle (HWND) of the dialog to respond to."),
+  button: external_exports.string().min(1).describe(
+    "Exact button name (case-insensitive) to press via UIA InvokePattern."
+  ),
+  check: external_exports.string().min(1).optional().describe(
+    "Optional checkbox name to toggle on before pressing the button."
+  ),
+  reason: external_exports.string().min(1).describe(
+    "Clear explanation of why this dialog is being answered and why this button was chosen."
+  ),
+  allow_destructive: external_exports.boolean().default(false).optional().describe(
+    "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
+  ),
+  user_instruction: external_exports.string().optional().describe(
+    "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
+  )
+});
+var dialogsTools = [
+  {
+    name: "ae_dialogs",
+    description: `READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. ` + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogsSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      const screenshots = args.screenshots ?? true;
+      return await listDialogsInternal({ screenshots });
+    }
+  },
+  {
+    name: "ae_dialog_respond",
+    description: "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+    schema: AeDialogRespondSchema,
+    handler: async (args) => {
+      if (currentPlatform() !== "win32") {
+        return {
+          ok: false,
+          error: "not_implemented_on_this_os"
+        };
+      }
+      let meta = seenDialogs.get(args.handle);
+      if (!meta) {
+        await listDialogsInternal({ screenshots: false });
+        meta = seenDialogs.get(args.handle);
+      }
+      const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
+      const policy = evaluateRespondPolicy({
+        button: args.button,
+        caused_by_op: causedByOp,
+        allow_destructive: args.allow_destructive ?? false,
+        user_instruction: args.user_instruction
+      });
+      if (!policy.allowed) {
+        return {
+          ok: false,
+          error: policy.error ?? "refused_by_policy",
+          message: policy.message,
+          handle: args.handle,
+          button: args.button,
+          caused_by_op: causedByOp
+        };
+      }
+      const psArgs = [
+        "-Mode",
+        "respond",
+        "-Handle",
+        String(args.handle),
+        "-Button",
+        args.button
+      ];
+      if (args.check) {
+        psArgs.push("-Check", args.check);
+      }
+      const rawStdout = await runPowerShellScript(psArgs);
+      const parsed = parsePs1JsonOutput(rawStdout);
+      const logTime = currentNowIso();
+      const title = meta?.title ?? "";
+      const textExcerpt = (meta?.text ?? "").slice(0, 500);
+      appendResponseLog({
+        time: logTime,
+        handle: args.handle,
+        title,
+        text_excerpt: textExcerpt,
+        button: args.button,
+        check: args.check,
+        reason: args.reason,
+        op: causedByOp,
+        allow_destructive: Boolean(args.allow_destructive),
+        user_instruction: args.user_instruction,
+        result: parsed
+      });
+      if (parsed.ok && parsed.closed) {
+        seenDialogs.delete(args.handle);
+      }
+      return parsed;
+    }
+  }
+];
+
+// src/tools/ext/diagnostics.ts
+var AE_STATUS_WAIT_MS = 5e3;
+var DEFAULT_LOG_LINES = 300;
+var AeDiagnosticsSchema = external_exports.object({
+  log_lines: external_exports.number().int().min(0).max(5e3).optional().describe(`Lines from the end of the service log. Default ${DEFAULT_LOG_LINES}.`),
+  include_dialogs: external_exports.boolean().optional().describe("Read AE's open popups (Windows and macOS; default true).")
+});
+function redact(text, secret) {
+  let out = text.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1[redacted]");
+  if (secret && secret.length >= 8) out = out.split(secret).join("[redacted]");
+  return out;
+}
+function tailLines(text, n) {
+  if (n <= 0) return "";
+  const lines = text.split(/\r?\n/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines.slice(-n).join("\n");
+}
+function readIfExists(p) {
+  if (!p) return "";
+  try {
+    return fs8.readFileSync(p, "utf8");
+  } catch {
+    return "";
+  }
+}
+var pendingStatus = /* @__PURE__ */ new WeakMap();
+async function aeStatusWithin(ctx, ms) {
+  let call = pendingStatus.get(ctx);
+  if (!call) {
+    call = ctx.bridge.evalRaw({
+      id: `${ctx.bridge.newOpId()}_diag`,
+      script: buildJsxCall("status", {}),
+      label: "ae_diagnostics (status)",
+      mutates: false,
+      toolName: "ae_diagnostics"
+    }).then((r) => ({ answered: true, status: r.result })).catch((err) => ({ answered: true, error: err instanceof Error ? err.message : String(err) }));
+    const mine = call;
+    pendingStatus.set(ctx, mine);
+    void mine.then(() => {
+      if (pendingStatus.get(ctx) === mine) pendingStatus.delete(ctx);
+    });
+  }
+  let timer;
+  const late2 = new Promise((resolve2) => {
+    timer = setTimeout(
+      () => resolve2({ answered: false, error: `AE did not answer within ${ms / 1e3} s (busy with a script or render, or a popup is open).` }),
+      ms
+    );
+  });
+  try {
+    return await Promise.race([call, late2]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
+  const now = /* @__PURE__ */ new Date();
+  const token = readIfExists(serviceInfo?.tokenPath).trim() || null;
+  const ae = await aeStatusWithin(ctx, opts.aeWaitMs ?? AE_STATUS_WAIT_MS);
+  const dialogs = opts.includeDialogs === false ? [] : await describeBlockingDialogs();
+  const quarantine = ctx.quarantine.list();
+  const logText = readIfExists(serviceInfo?.rotatedLogPath) + readIfExists(serviceInfo?.logPath);
+  const log = redact(tailLines(logText, opts.logLines ?? DEFAULT_LOG_LINES), token);
+  const { tokenPath: _omit, ...service } = serviceInfo ?? {};
+  const summary2 = {
+    created_at: now.toISOString(),
+    ae_answered: ae.answered,
+    service_in_flight: service.inFlight ?? null,
+    write_queue: { depth: ctx.queue.depth, in_flight: ctx.queue.inFlight },
+    quarantined: quarantine.length,
+    open_dialogs: dialogs.length
+  };
+  const sections = [
+    ["Summary", summary2],
+    ["Service", service],
+    ["After Effects", ae],
+    ["Quarantine", quarantine],
+    ["Settings", ctx.settings?.get() ?? null],
+    ["Open popups", dialogs.map((d) => ({ ...d, screenshot_path: d.screenshot_path }))],
+    ["System", { platform: process.platform, release: os2.release(), arch: process.arch, node: process.version }]
+  ];
+  const md = [
+    `# chroma-ae-mcp diagnostics, ${now.toISOString()}`,
+    "",
+    "The token is not included. Attach this file when reporting a problem.",
+    "",
+    ...sections.flatMap(([title, value]) => [`## ${title}`, "", "```json", redact(JSON.stringify(value, null, 2), token), "```", ""]),
+    `## Service log (last ${opts.logLines ?? DEFAULT_LOG_LINES} lines)`,
+    "",
+    "```",
+    log,
+    "```",
+    ""
+  ].join("\n");
+  const dir = path9.join(dataDirOf(ctx), "diagnostics");
+  fs8.mkdirSync(dir, { recursive: true });
+  const stem = `chroma-ae-diagnostics_${formatBackupTimestamp(now)}`;
+  let file = path9.join(dir, `${stem}.md`);
+  for (let n = 2; ; n++) {
+    try {
+      fs8.writeFileSync(file, md, { encoding: "utf8", flag: "wx" });
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST" || n > 1e3) throw err;
+      file = path9.join(dir, `${stem}-${n}.md`);
+    }
+  }
+  return { path: file, summary: summary2 };
+}
+var diagnosticsTools = [
+  {
+    name: "ae_diagnostics",
+    description: "Write a diagnostics file for triage when automation is stuck or failing: versions, the service's eval queue and what is in flight (and for how long), the write queue, quarantine, settings, AE's status (if AE answers within 5 s; nothing is aborted), AE's open popups, and the end of the service log. The token is redacted. Returns the file's path and a summary; the user can attach the file to a bug report. Never touches the AE project.",
+    schema: AeDiagnosticsSchema,
+    handler: async (args, ctx) => {
+      const res = await writeDiagnostics(ctx, ctx.serviceInfo?.(), { logLines: args.log_lines, includeDialogs: args.include_dialogs });
+      return { ok: true, ...res };
+    }
+  }
+];
+
+// src/panel-entry.ts
+var path22 = __toESM(require("node:path"), 1);
+
+// src/schema.ts
+function zodToJsonSchema(schema) {
+  let current = schema;
+  while (current instanceof external_exports.ZodEffects || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodOptional) {
+    if (current instanceof external_exports.ZodEffects) {
+      current = current._def.schema;
+    } else if (current instanceof external_exports.ZodDefault) {
+      current = current._def.innerType;
+    } else if (current instanceof external_exports.ZodOptional) {
+      current = current._def.innerType;
+    }
+  }
+  if (!(current instanceof external_exports.ZodObject)) {
+    return { type: "object", properties: {} };
+  }
+  const shape = current.shape;
+  const properties = {};
+  const required = [];
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    const { propSchema, isOptional } = convertFieldSchema(fieldSchema);
+    properties[key] = propSchema;
+    if (!isOptional) {
+      required.push(key);
+    }
+  }
+  const out = {
+    type: "object",
+    properties
+  };
+  if (required.length > 0) {
+    out.required = required;
+  }
+  return out;
+}
+function convertFieldSchema(schema) {
+  let isOptional = false;
+  let current = schema;
+  let description = current.description;
+  while (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault || current instanceof external_exports.ZodEffects) {
+    if (!description && current.description) {
+      description = current.description;
+    }
+    if (current instanceof external_exports.ZodOptional || current instanceof external_exports.ZodDefault) {
+      isOptional = true;
+      current = current._def.innerType;
+    } else if (current instanceof external_exports.ZodEffects) {
+      current = current._def.schema;
+    }
+  }
+  if (!description && current.description) {
+    description = current.description;
+  }
+  let propSchema = {};
+  if (current instanceof external_exports.ZodString) {
+    propSchema = { type: "string" };
+  } else if (current instanceof external_exports.ZodNumber) {
+    propSchema = { type: "number" };
+  } else if (current instanceof external_exports.ZodBoolean) {
+    propSchema = { type: "boolean" };
+  } else if (current instanceof external_exports.ZodEnum) {
+    propSchema = { type: "string", enum: current._def.values };
+  } else if (current instanceof external_exports.ZodArray) {
+    const elem = convertFieldSchema(current._def.type);
+    propSchema = { type: "array", items: elem.propSchema };
+  } else if (current instanceof external_exports.ZodObject) {
+    propSchema = zodToJsonSchema(current);
+  } else {
+    propSchema = {};
+  }
+  if (description) {
+    propSchema.description = description;
+  }
+  return { propSchema, isOptional };
+}
+
 // src/tools/ext/aerender.ts
+var childProcess = __toESM(require("node:child_process"), 1);
+var crypto = __toESM(require("node:crypto"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
+var path10 = __toESM(require("node:path"), 1);
 var WINDOWS_FALLBACK_AERENDER = "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
 var MACOS_FALLBACK_AERENDER = "/Applications/Adobe After Effects 2026/aerender";
 function defaultRendersDir() {
-  return path7.join(defaultDataDir(), "renders");
+  return path10.join(defaultDataDir(), "renders");
 }
 function defaultAerenderJobsFilePath() {
-  return path7.join(defaultRendersDir(), "jobs.json");
+  return path10.join(defaultRendersDir(), "jobs.json");
 }
 function resolveAerenderPath(options) {
   const platform = options?.platform ?? process.platform;
-  const exists = options?.existsSync ?? fs6.existsSync;
+  const exists = options?.existsSync ?? fs9.existsSync;
   const afterFxPath = options?.afterFxPath?.trim();
   let versionYear = null;
   if (options?.aeVersion) {
@@ -7999,15 +8481,15 @@ function resolveAerenderPath(options) {
       const appIdx = norm.toLowerCase().indexOf(".app");
       if (appIdx !== -1) {
         const appBundlePath = norm.slice(0, appIdx + 4);
-        const parentDir = path7.posix.dirname(appBundlePath);
-        const candidate2 = path7.posix.join(parentDir, "aerender");
+        const parentDir = path10.posix.dirname(appBundlePath);
+        const candidate2 = path10.posix.join(parentDir, "aerender");
         if (exists(candidate2)) {
           return candidate2;
         }
         return candidate2;
       }
-      const dir = path7.posix.dirname(norm);
-      const candidate = path7.posix.join(dir, "aerender");
+      const dir = path10.posix.dirname(norm);
+      const candidate = path10.posix.join(dir, "aerender");
       if (exists(candidate)) {
         return candidate;
       }
@@ -8024,7 +8506,7 @@ function resolveAerenderPath(options) {
   }
   if (afterFxPath) {
     const norm = afterFxPath.replace(/\\/g, "/");
-    const dir = norm.toLowerCase().endsWith(".exe") ? path7.posix.dirname(norm) : norm.replace(/\/+$/, "");
+    const dir = norm.toLowerCase().endsWith(".exe") ? path10.posix.dirname(norm) : norm.replace(/\/+$/, "");
     const candidate = `${dir}/aerender.exe`;
     if (exists(candidate)) {
       return candidate;
@@ -8032,7 +8514,7 @@ function resolveAerenderPath(options) {
     return candidate;
   }
   if (typeof process.execPath === "string" && process.execPath.length > 0) {
-    const execDir = path7.dirname(process.execPath).replace(/\\/g, "/");
+    const execDir = path10.dirname(process.execPath).replace(/\\/g, "/");
     if (exists(`${execDir}/AfterFX.exe`) && exists(`${execDir}/aerender.exe`)) {
       return `${execDir}/aerender.exe`;
     }
@@ -8149,16 +8631,16 @@ function parseAerenderProgress(logText, meta) {
 }
 function readLogTail(logPath, maxLines = 60, maxChars = 16e3) {
   try {
-    if (!fs6.existsSync(logPath)) {
+    if (!fs9.existsSync(logPath)) {
       return { fullText: "", tail: "" };
     }
-    const fullText = fs6.readFileSync(logPath, "utf8");
+    const fullText = fs9.readFileSync(logPath, "utf8");
     const lines = fullText.split(/\r?\n/);
     if (lines.length > 0 && lines[lines.length - 1] === "") {
       lines.pop();
     }
-    const tailLines = lines.slice(-maxLines);
-    let tail = tailLines.join("\n");
+    const tailLines2 = lines.slice(-maxLines);
+    let tail = tailLines2.join("\n");
     if (tail.length > maxChars) {
       tail = tail.slice(-maxChars);
     }
@@ -8179,7 +8661,7 @@ var AerenderJobRegistry = class {
     return this.filePath;
   }
   get rendersDir() {
-    return path7.dirname(this.filePath);
+    return path10.dirname(this.filePath);
   }
   newJobId() {
     return `job_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
@@ -8220,10 +8702,10 @@ var AerenderJobRegistry = class {
   }
   loadFromDisk() {
     try {
-      if (!fs6.existsSync(this.filePath)) {
+      if (!fs9.existsSync(this.filePath)) {
         return;
       }
-      const raw = fs6.readFileSync(this.filePath, "utf8");
+      const raw = fs9.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
       const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
       for (const item of list) {
@@ -8236,17 +8718,17 @@ var AerenderJobRegistry = class {
     }
   }
   saveToDisk() {
-    const dir = path7.dirname(this.filePath);
-    fs6.mkdirSync(dir, { recursive: true });
+    const dir = path10.dirname(this.filePath);
+    fs9.mkdirSync(dir, { recursive: true });
     const payload = JSON.stringify({ jobs: this.list() }, null, 2);
     const tmpFile = `${this.filePath}.tmp-${process.pid}-${crypto.randomBytes(3).toString("hex")}`;
     try {
-      fs6.writeFileSync(tmpFile, payload, { encoding: "utf8" });
-      fs6.renameSync(tmpFile, this.filePath);
+      fs9.writeFileSync(tmpFile, payload, { encoding: "utf8" });
+      fs9.renameSync(tmpFile, this.filePath);
     } catch {
-      fs6.writeFileSync(this.filePath, payload, { encoding: "utf8" });
+      fs9.writeFileSync(this.filePath, payload, { encoding: "utf8" });
       try {
-        if (fs6.existsSync(tmpFile)) fs6.unlinkSync(tmpFile);
+        if (fs9.existsSync(tmpFile)) fs9.unlinkSync(tmpFile);
       } catch {
       }
     }
@@ -8364,16 +8846,16 @@ function createAerenderTools(options = {}) {
               });
               const jobId = registry.newJobId();
               const rendersDir = registry.rendersDir;
-              fs6.mkdirSync(rendersDir, { recursive: true });
-              const outDir = path7.dirname(args.output_path);
+              fs9.mkdirSync(rendersDir, { recursive: true });
+              const outDir = path10.dirname(args.output_path);
               if (outDir && outDir !== ".") {
                 try {
-                  fs6.mkdirSync(outDir, { recursive: true });
+                  fs9.mkdirSync(outDir, { recursive: true });
                 } catch {
                 }
               }
-              const logPath = path7.join(rendersDir, `${jobId}.log`);
-              fs6.writeFileSync(logPath, "", { encoding: "utf8" });
+              const logPath = path10.join(rendersDir, `${jobId}.log`);
+              fs9.writeFileSync(logPath, "", { encoding: "utf8" });
               const cliArgs = buildAerenderArgs({
                 project_path: actualProjectPath,
                 comp_name: args.comp_name,
@@ -8385,7 +8867,7 @@ function createAerenderTools(options = {}) {
               });
               let logFd = null;
               try {
-                logFd = fs6.openSync(logPath, "a");
+                logFd = fs9.openSync(logPath, "a");
               } catch {
                 logFd = null;
               }
@@ -8397,14 +8879,14 @@ function createAerenderTools(options = {}) {
               });
               if (logFd !== null) {
                 try {
-                  fs6.closeSync(logFd);
+                  fs9.closeSync(logFd);
                 } catch {
                 }
               }
               if (child.stdout) {
                 child.stdout.on("data", (chunk) => {
                   try {
-                    fs6.appendFileSync(logPath, chunk);
+                    fs9.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -8412,7 +8894,7 @@ function createAerenderTools(options = {}) {
               if (child.stderr) {
                 child.stderr.on("data", (chunk) => {
                   try {
-                    fs6.appendFileSync(logPath, chunk);
+                    fs9.appendFileSync(logPath, chunk);
                   } catch {
                   }
                 });
@@ -8440,7 +8922,7 @@ function createAerenderTools(options = {}) {
               registry.register(initialRecord, child);
               child.on("error", (err) => {
                 try {
-                  fs6.appendFileSync(
+                  fs9.appendFileSync(
                     logPath,
                     `
 AERENDER SPAWN ERROR: ${err.message}
@@ -8472,7 +8954,7 @@ AERENDER SPAWN ERROR: ${err.message}
                   let logError = null;
                   try {
                     const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-                      fs6.readFileSync(logPath, "utf8")
+                      fs9.readFileSync(logPath, "utf8")
                     );
                     if (m) logError = m[1].trim() || "aerender ERROR";
                   } catch {
@@ -8594,7 +9076,7 @@ AERENDER SPAWN ERROR: ${err.message}
           }
         }
         try {
-          fs6.appendFileSync(
+          fs9.appendFileSync(
             job.log_path,
             `
 AERENDER CANCELLED by ae_aerender_cancel at ${(/* @__PURE__ */ new Date()).toISOString()}
@@ -8850,14 +9332,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path20 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path23 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path20,
+          path: path23,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path20} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path23} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -9300,8 +9782,8 @@ var animateTools = [
 ];
 
 // src/tools/ext/ask.ts
-var fs7 = __toESM(require("node:fs"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
+var path11 = __toESM(require("node:path"), 1);
 var PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
 var DEFAULT_WAIT_SECONDS = 120;
 var MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -9337,10 +9819,10 @@ var AeAskUserSchema = external_exports.object({
   message: "Option ids must be unique."
 });
 function checkImagePath(p) {
-  if (!path8.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!path11.isAbsolute(p)) return `image_path must be absolute: ${p}`;
   if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
   try {
-    const st = fs7.statSync(p);
+    const st = fs10.statSync(p);
     if (!st.isFile()) return `image_path is not a file: ${p}`;
     if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
   } catch {
@@ -9437,8 +9919,8 @@ var askTools = [
 ];
 
 // src/tools/ext/brief.ts
-var fs8 = __toESM(require("node:fs"), 1);
-var path9 = __toESM(require("node:path"), 1);
+var fs11 = __toESM(require("node:fs"), 1);
+var path12 = __toESM(require("node:path"), 1);
 var BriefFieldsSchema = external_exports.object({
   goal: external_exports.string().max(1e3).optional().describe("What the piece is for and the one thing it must get across."),
   audience: external_exports.string().max(500).optional().describe("Who watches it, and where (platform, screen)."),
@@ -9492,7 +9974,7 @@ var BRIEF_QUESTIONS = {
   do_not_change: { question: "Is there anything I must leave alone?" }
 };
 function briefPath(projectPath) {
-  return path9.join(path9.dirname(projectPath), `${path9.basename(projectPath, path9.extname(projectPath))}.brief.json`);
+  return path12.join(path12.dirname(projectPath), `${path12.basename(projectPath, path12.extname(projectPath))}.brief.json`);
 }
 function isEmpty(v) {
   if (v === void 0 || v === null || v === "") return true;
@@ -9502,7 +9984,7 @@ function isEmpty(v) {
 }
 function readBrief(file) {
   try {
-    const parsed = JSON.parse(fs8.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs11.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -9569,8 +10051,8 @@ var briefTools = [
         }
         brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
         const tmp = `${file}.tmp-${process.pid}`;
-        fs8.writeFileSync(tmp, JSON.stringify(brief, null, 2), "utf8");
-        fs8.renameSync(tmp, file);
+        fs11.writeFileSync(tmp, JSON.stringify(brief, null, 2), "utf8");
+        fs11.renameSync(tmp, file);
         saved = true;
       }
       const missing = missingFields(brief);
@@ -9609,8 +10091,8 @@ var briefTools = [
 ];
 
 // src/tools/ext/data.ts
-var fs9 = __toESM(require("node:fs"), 1);
-var path10 = __toESM(require("node:path"), 1);
+var fs12 = __toESM(require("node:fs"), 1);
+var path13 = __toESM(require("node:path"), 1);
 function parseCsv(text) {
   const src = text.replace(/^﻿/, "");
   const records = [];
@@ -9672,7 +10154,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs9.readFileSync(filePath, "utf8");
+  const text = fs12.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -9693,8 +10175,8 @@ function cellValue(target, cell) {
   if (target === "text") return { value: String(cell) };
   if (target === "footage") {
     const p = String(cell).trim();
-    if (!path10.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs9.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!path13.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs12.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -9888,7 +10370,7 @@ var dataTools = [
     handler: async (args, ctx) => {
       let rows;
       if (args.data_path) {
-        if (!path10.isAbsolute(args.data_path) || !fs9.existsSync(args.data_path)) {
+        if (!path13.isAbsolute(args.data_path) || !fs12.existsSync(args.data_path)) {
           return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
         }
         try {
@@ -9989,8 +10471,8 @@ var dataTools = [
 ];
 
 // src/tools/ext/effects.ts
-var fs10 = __toESM(require("node:fs"), 1);
-var path11 = __toESM(require("node:path"), 1);
+var fs13 = __toESM(require("node:fs"), 1);
+var path14 = __toESM(require("node:path"), 1);
 var EffectSelectorSchema = external_exports.object({
   index: external_exports.number().int().positive().optional().describe("1-based position in the layer's Effects."),
   name: external_exports.string().min(1).optional().describe("Effect name as shown on the layer (refused if several share it).")
@@ -10134,20 +10616,20 @@ function findPresets(folders, filter, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs10.readdirSync(dir, { withFileTypes: true });
+        entries = fs13.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path11.join(dir, e.name);
+        const full = path14.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const category = path11.relative(folder.path, dir).split(path11.sep).join("/");
+          const category = path14.relative(folder.path, dir).split(path14.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
-            presets.push({ name, path: full, category: category || path11.basename(folder.path), source: kind });
+            presets.push({ name, path: full, category: category || path14.basename(folder.path), source: kind });
           }
         }
       }
@@ -10221,12 +10703,12 @@ var effectsTools = [
     description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
     schema: AeApplyPresetSchema,
     handler: async (args, ctx) => {
-      if (!path11.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs10.existsSync(args.preset_path)) {
+      if (!path14.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs13.existsSync(args.preset_path)) {
         return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
       }
       return runEffectWrite(args, ctx, {
         toolName: "ae_apply_preset",
-        label: `ae_apply_preset(${path11.basename(args.preset_path)})`,
+        label: `ae_apply_preset(${path14.basename(args.preset_path)})`,
         host: "applyPreset",
         hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
         check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -10416,17 +10898,17 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs13 = __toESM(require("node:fs"), 1);
-var path13 = __toESM(require("node:path"), 1);
+var fs16 = __toESM(require("node:fs"), 1);
+var path16 = __toESM(require("node:path"), 1);
 var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs12 = __toESM(require("node:fs"), 1);
-var path12 = __toESM(require("node:path"), 1);
+var fs15 = __toESM(require("node:fs"), 1);
+var path15 = __toESM(require("node:path"), 1);
 
 // src/tools/ext/png-utils.ts
-var fs11 = __toESM(require("node:fs"), 1);
+var fs14 = __toESM(require("node:fs"), 1);
 var import_pngjs = __toESM(require_png(), 1);
 function fitWithin(width, height, maxSize) {
   const longEdge = Math.max(width, height);
@@ -10639,7 +11121,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs11.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs14.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -10653,7 +11135,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs11.writeFileSync(dstPath, encodePng(out));
+  fs14.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 
@@ -10677,14 +11159,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path12.join(defaultDataDir(), "frames");
+  return path15.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs12.existsSync(filePath)) {
+    if (!fs15.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs12.statSync(filePath);
+    const stat = fs15.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -10710,7 +11192,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs12.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs15.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -10724,14 +11206,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs12.mkdirSync(framesDir, { recursive: true });
+      fs15.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path12.join(
+            const pngPath1 = path15.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -10767,7 +11249,7 @@ var renderTools = [
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
             const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path12.join(
+            const pngPath2 = path15.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -10987,10 +11469,10 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs13.existsSync(filePath)) {
+  if (!fs16.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs13.readFileSync(filePath);
+  const buf = fs16.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -11161,7 +11643,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path13.join(
+  const pngPath1 = path16.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -11185,7 +11667,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path13.join(
+  const pngPath2 = path16.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -11222,7 +11704,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs13.mkdirSync(framesDir, { recursive: true });
+        fs16.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -11261,7 +11743,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs13.mkdirSync(framesDir, { recursive: true });
+        fs16.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -11289,9 +11771,9 @@ var framesTools = [
         let diffPngPath;
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-          diffPngPath = path13.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          diffPngPath = path16.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
           const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-          fs13.writeFileSync(diffPngPath, outBuf);
+          fs16.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -11345,8 +11827,8 @@ var framesTools = [
 ];
 
 // src/tools/ext/key.ts
-var fs14 = __toESM(require("node:fs"), 1);
-var path14 = __toESM(require("node:path"), 1);
+var fs17 = __toESM(require("node:fs"), 1);
+var path17 = __toESM(require("node:path"), 1);
 function screenLean(r, g, b, dominant, screenLeanValue) {
   const lean = dominant === 1 ? g - Math.max(r, b) : b - Math.max(r, g);
   return screenLeanValue > 0 ? lean / screenLeanValue : 0;
@@ -11567,7 +12049,7 @@ var keyTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs14.mkdirSync(framesDir, { recursive: true });
+      fs17.mkdirSync(framesDir, { recursive: true });
       const label = `ae_key_greenscreen(${args.comp_id})`;
       const readInfo = async (times, suffix) => (await ctx.bridge.evalRaw({
         id: `${opId}_${suffix}`,
@@ -11641,8 +12123,8 @@ var keyTools = [
       }
       const kl = run.info.keylight;
       const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-      const previewPath = path14.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-      fs14.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+      const previewPath = path17.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+      fs17.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
       const below = run.info.layers_below_visible;
       const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
       const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -11692,8 +12174,8 @@ var keyTools = [
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs15 = __toESM(require("node:fs"), 1);
-var path15 = __toESM(require("node:path"), 1);
+var fs18 = __toESM(require("node:fs"), 1);
+var path18 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -12071,14 +12553,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, path20, target, taste) {
+function reviewProperty(s, analysis, path23, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path20 }
+    property: { name: s.property.name, path: path23 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys) => ({
@@ -12086,7 +12568,7 @@ function reviewProperty(s, analysis, path20, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path20,
+      path: path23,
       keys,
       ease: easeArg,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
@@ -12226,7 +12708,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs15.mkdirSync(framesDir, { recursive: true });
+      fs18.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -12284,11 +12766,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path15.join(
+      const sheetPath = path18.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs15.writeFileSync(sheetPath, encodePng(sheet));
+      fs18.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -12334,12 +12816,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs15.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path15.join(
+      fs18.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path18.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs15.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs18.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -12443,8 +12925,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs16 = __toESM(require("node:fs"), 1);
-var path16 = __toESM(require("node:path"), 1);
+var fs19 = __toESM(require("node:fs"), 1);
+var path19 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -12478,7 +12960,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path16.join(defaultDataDir(), "ui");
+  return path19.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -12557,10 +13039,10 @@ var panelsTools = [
       }
       const rawExts = await ctx.cep.listExtensions();
       const allExts = (Array.isArray(rawExts) ? rawExts : []).filter(
-        (ext) => ext && ext.id && ext.id !== "london.chroma.aemcp.service"
-      ).map((ext) => ({
-        id: ext.id,
-        name: ext.name || ext.id
+        (ext2) => ext2 && ext2.id && ext2.id !== "london.chroma.aemcp.service"
+      ).map((ext2) => ({
+        id: ext2.id,
+        name: ext2.name || ext2.id
       }));
       const jsxScript = "(function(){\nvar names=" + JSON.stringify(CURATED_NATIVE_PANELS) + ";\nvar out=[];\nfor(var i=0;i<names.length;i++){\nvar id=app.findMenuCommandId(names[i]);\nif(id!==0){\nout.push({name:names[i],cmdId:id});\n}\n}\nreturn out;\n})()";
       const nativeRes = await ctx.bridge.evalRaw({
@@ -12673,7 +13155,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs16.mkdirSync(outDir, { recursive: true });
+        fs19.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -12707,8 +13189,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs17 = __toESM(require("node:fs"), 1);
-var path17 = __toESM(require("node:path"), 1);
+var fs20 = __toESM(require("node:fs"), 1);
+var path20 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -12991,7 +13473,8 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_key_greenscreen",
   "ae_skill_run",
   "ae_build_from_data",
-  "ae_reframe"
+  "ae_reframe",
+  "ae_import_assets"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -13097,7 +13580,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs17.existsSync(actualProjectPath)) {
+          if (!fs20.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -13106,17 +13589,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path17.dirname(actualProjectPath);
-          const ext = path17.extname(actualProjectPath) || ".aep";
-          const baseName = path17.basename(actualProjectPath, ext);
-          const checkpointDir = path17.join(projDir, "_mcp_checkpoints");
-          fs17.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path20.dirname(actualProjectPath);
+          const ext2 = path20.extname(actualProjectPath) || ".aep";
+          const baseName = path20.basename(actualProjectPath, ext2);
+          const checkpointDir = path20.join(projDir, "_mcp_checkpoints");
+          fs20.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
-          const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path17.join(checkpointDir, checkpointFileName);
-          fs17.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs17.statSync(checkpointPath);
+          const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext2}`;
+          const checkpointPath = path20.join(checkpointDir, checkpointFileName);
+          fs20.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs20.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -13132,7 +13615,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs17.existsSync(checkpointPath)
+              checkpoint_exists: fs20.existsSync(checkpointPath)
             }
           });
           return {
@@ -13174,9 +13657,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path17.dirname(actualProjectPath);
-      const checkpointDir = path17.join(projDir, "_mcp_checkpoints");
-      if (!fs17.existsSync(checkpointDir)) {
+      const projDir = path20.dirname(actualProjectPath);
+      const checkpointDir = path20.join(projDir, "_mcp_checkpoints");
+      if (!fs20.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -13184,10 +13667,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs17.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs20.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path17.join(checkpointDir, e.name);
-        const stat = fs17.statSync(fullPath);
+        const fullPath = path20.join(checkpointDir, e.name);
+        const stat = fs20.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -13240,7 +13723,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs17.existsSync(args.checkpoint_path)) {
+          if (!fs20.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -13953,8 +14436,8 @@ ${args.description}`,
 ];
 
 // src/tools/ext/track.ts
-var fs18 = __toESM(require("node:fs"), 1);
-var path18 = __toESM(require("node:path"), 1);
+var fs21 = __toESM(require("node:fs"), 1);
+var path21 = __toESM(require("node:path"), 1);
 function toGray(img) {
   const n = img.width * img.height;
   const data = new Float32Array(n);
@@ -14158,7 +14641,7 @@ var trackTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs18.mkdirSync(framesDir, { recursive: true });
+      fs21.mkdirSync(framesDir, { recursive: true });
       const patchSize = (args.pattern_size ?? 31) | 1;
       const opts = {
         patchSize,
@@ -14206,14 +14689,14 @@ var trackTools = [
               points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
             }
           }
-          fs18.rmSync(snap.path, { force: true });
+          fs21.rmSync(snap.path, { force: true });
           if (lostAt2) break;
         }
         return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker.contrast };
       });
       const { points, lostAt } = tracked;
-      const previewPath = path18.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-      fs18.writeFileSync(
+      const previewPath = path21.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+      fs21.writeFileSync(
         previewPath,
         encodePng(
           drawTrackPreview(
@@ -14298,6 +14781,7 @@ var extTools = [
   ...effectsTools,
   ...dataTools,
   ...reframeTools,
+  ...assetsTools,
   ...framesTools,
   ...motionTools,
   ...askTools,
@@ -14305,6 +14789,7 @@ var extTools = [
   ...briefTools,
   ...aerenderTools,
   ...dialogsTools,
+  ...diagnosticsTools,
   ...panelsTools,
   ...trackTools,
   ...keyTools
@@ -14860,7 +15345,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path19.join(resolvedDataDir, "quarantine.json")
+    path22.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -14873,11 +15358,14 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path19.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path22.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
-    dataDir: resolvedDataDir
+    dataDir: resolvedDataDir,
+    serviceInfo: opts.serviceInfo
   };
   const log = opts.log;
+  const assetWatcher = new AssetWatcher(ctx, { log });
+  if (opts.watchAssets !== false) assetWatcher.start();
   async function handleHttp(req, res, bodyText) {
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "POST") {
@@ -14963,7 +15451,9 @@ function createPanelMcp(opts) {
     handleHttp,
     ctx,
     host,
-    asks: ctx.asks
+    asks: ctx.asks,
+    assetWatcher,
+    saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.())
   };
 }
 // Annotate the CommonJS export names for ESM import in node:

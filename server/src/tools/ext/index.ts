@@ -2,8 +2,10 @@ import type { ToolDefinition } from "../common.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { askTools } from "./ask.js";
+import { assetsTools } from "./assets.js";
 import { briefTools } from "./brief.js";
 import { dataTools } from "./data.js";
+import { diagnosticsTools } from "./diagnostics.js";
 import { dialogsTools } from "./dialogs.js";
 import { effectsTools } from "./effects.js";
 import { exploreTools } from "./explore.js";
@@ -24,6 +26,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...effectsTools,
   ...dataTools,
   ...reframeTools,
+  ...assetsTools,
   ...framesTools,
   ...motionTools,
   ...askTools,
@@ -31,6 +34,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...briefTools,
   ...aerenderTools,
   ...dialogsTools,
+  ...diagnosticsTools,
   ...panelsTools,
   ...trackTools,
   ...keyTools,

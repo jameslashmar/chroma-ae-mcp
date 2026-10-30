@@ -496,6 +496,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_skill_run",
   "ae_build_from_data",
   "ae_reframe",
+  "ae_import_assets",
 ];
 
 export const AeCheckpointRevertSchema = z.object({
