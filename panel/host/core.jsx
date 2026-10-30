@@ -182,8 +182,12 @@
       ok: true,
       project_path: actual,
       comp_id: null,
-      comp_is_valid: true
+      comp_is_valid: true,
+      dirty: null
     };
+    // Auto checkpoints copy the saved .aep, so the server reports whether
+    // unsaved changes are left out of it.
+    try { out.dirty = app.project.dirty === true; } catch (eDirty) { out.dirty = null; }
     if (expect.project_path !== undefined && normPath(expect.project_path) !== normPath(actual)) {
       out.ok = false;
     }

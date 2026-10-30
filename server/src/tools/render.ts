@@ -13,7 +13,7 @@ import {
   type ToolDefinition,
 } from "./common.js";
 import { writeScaledCopy } from "./ext/png-utils.js";
-import { verifyTargetGuard } from "./mutate.js";
+import { autoCheckpoint, verifyTargetGuard } from "./mutate.js";
 
 export const AeSnapshotFrameSchema = z.object({
   comp_id: z.number().int().describe("The CompItem ID to snapshot."),
@@ -284,7 +284,8 @@ export const renderTools: ToolDefinition<any>[] = [
           async () => {
             ctx.quarantine.assertClear();
 
-            await verifyTargetGuard(ctx, effectiveExpect, opId);
+            const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+            const checkpoint = await autoCheckpoint(ctx, guard, "ae_render_queue_add");
 
             const beforeRq = await ctx.bridge.evalRaw({
               id: `${opId}_before`,
@@ -351,6 +352,7 @@ export const renderTools: ToolDefinition<any>[] = [
               applied: true as const,
               index: rqIndex,
               result: addResp.result,
+              checkpoint,
               receipt,
             };
           }

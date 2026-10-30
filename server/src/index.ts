@@ -10,6 +10,7 @@ import { BridgeClient } from "./bridge.js";
 import { QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
 import { convertFieldSchema, zodToJsonSchema } from "./schema.js";
+import { SettingsStore } from "./settings.js";
 import {
   formatToolError,
   formatToolResponse,
@@ -35,7 +36,8 @@ export function createMcpServer(customCtx?: Partial<ToolContext>): {
       quarantine,
     });
 
-  const ctx: ToolContext = { bridge, queue, quarantine };
+  const settings = customCtx?.settings ?? new SettingsStore();
+  const ctx: ToolContext = { bridge, queue, quarantine, settings };
   const toolMap = new Map<string, ToolDefinition<any>>(
     ALL_TOOLS.map((t) => [t.name, t])
   );

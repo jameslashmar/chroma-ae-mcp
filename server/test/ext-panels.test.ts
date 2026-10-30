@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import * as os from "node:os";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ToolContext } from "../src/tools/common.js";
-import { panelsTools } from "../src/tools/ext/panels.js";
+import { panelsTools, resetPanelsTestOverrides, setPanelsTestOverrides } from "../src/tools/ext/panels.js";
 
 const tool = (name: string) => panelsTools.find((t) => t.name === name)!;
 const baseCtx = {} as unknown as ToolContext;
@@ -34,5 +35,30 @@ describe("ext/panels", () => {
     } as unknown as ToolContext;
     await tool("ae_open_panel").handler({ extension_id: "com.example.panel" }, ctx);
     expect(opened).toEqual(["com.example.panel"]);
+  });
+
+  describe("ae_ui_screenshot", () => {
+    afterEach(() => resetPanelsTestOverrides());
+
+    it("asks for the window to be restored when AE is minimized, instead of returning a title-bar stub", async () => {
+      setPanelsTestOverrides({
+        platform: "win32",
+        uiDir: os.tmpdir(),
+        ps1Runner: async () => JSON.stringify({ ok: false, error: "ae_minimized" }),
+      });
+      const res = (await tool("ae_ui_screenshot").handler({}, baseCtx)) as Record<string, unknown>;
+      expect(res).toMatchObject({ ok: false, error: "ae_minimized" });
+      expect(String(res.message)).toMatch(/restore the AE window/);
+    });
+
+    it("passes a capture through", async () => {
+      setPanelsTestOverrides({
+        platform: "win32",
+        uiDir: os.tmpdir(),
+        ps1Runner: async () => JSON.stringify({ ok: true, path: "C:/ui/ae_main_1.png", width: 1920, height: 1040 }),
+      });
+      const res = await tool("ae_ui_screenshot").handler({}, baseCtx);
+      expect(res).toEqual({ ok: true, path: "C:/ui/ae_main_1.png", width: 1920, height: 1040 });
+    });
   });
 });

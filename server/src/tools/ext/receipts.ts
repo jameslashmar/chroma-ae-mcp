@@ -11,7 +11,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { formatBackupTimestamp, verifyTargetGuard } from "../mutate.js";
+import { checkpointDirFor, formatBackupTimestamp, verifyTargetGuard } from "../mutate.js";
 
 export interface FingerprintKeyframe {
   time: number;
@@ -422,8 +422,14 @@ export function getStoredFingerprintCount(): number {
 export function sanitizeCheckpointLabel(label?: string): string {
   const raw = (label ?? "checkpoint").trim();
   if (!raw) return "checkpoint";
-  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "checkpoint";
+  let cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned) return "checkpoint";
+  // A manual label starting with "auto-" would produce a filename
+  // (`<name>_<stamp>_auto-<label>.aep`) indistinguishable from an automatic
+  // checkpoint's own naming, so ae_checkpoint_list's filename-based `auto`
+  // detection (see AUTO_CHECKPOINT_TOOLS below) would misclassify it.
+  if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
+  return cleaned;
 }
 
 // ---------- Zod Schemas ----------
@@ -464,6 +470,30 @@ export const AeCheckpointCreateSchema = z.object({
 export const AeCheckpointListSchema = z.object({
   expect: ExpectSchema,
 });
+
+export const AeAutoCheckpointSchema = z.object({
+  enabled: z
+    .boolean()
+    .optional()
+    .describe("Turn automatic checkpoints on or off. Omit to leave unchanged."),
+  max_mb: z
+    .number()
+    .positive()
+    .max(100000)
+    .optional()
+    .describe("Skip projects whose .aep is larger than this many megabytes (default 250). Omit to leave unchanged."),
+});
+
+/** Write tools that copy the saved project before they run (see autoCheckpoint in mutate.ts). */
+export const AUTO_CHECKPOINT_TOOLS = [
+  "ae_run_jsx",
+  "ae_set_property",
+  "ae_set_keyframe_ease",
+  "ae_set_text",
+  "ae_import_footage",
+  "ae_replace_footage",
+  "ae_render_queue_add",
+];
 
 export const AeCheckpointRevertSchema = z.object({
   expect: ExpectSchema,
@@ -607,10 +637,9 @@ export const receiptsTools: ToolDefinition<any>[] = [
             });
           }
 
-          const projDir = path.dirname(actualProjectPath);
           const ext = path.extname(actualProjectPath) || ".aep";
           const baseName = path.basename(actualProjectPath, ext);
-          const checkpointDir = path.join(projDir, "_mcp_checkpoints");
+          const checkpointDir = checkpointDirFor(actualProjectPath);
           fs.mkdirSync(checkpointDir, { recursive: true });
 
           const stamp = formatBackupTimestamp(new Date());
@@ -685,8 +714,7 @@ export const receiptsTools: ToolDefinition<any>[] = [
         });
       }
 
-      const projDir = path.dirname(actualProjectPath);
-      const checkpointDir = path.join(projDir, "_mcp_checkpoints");
+      const checkpointDir = checkpointDirFor(actualProjectPath);
 
       if (!fs.existsSync(checkpointDir)) {
         return {
@@ -708,6 +736,7 @@ export const receiptsTools: ToolDefinition<any>[] = [
           return {
             name: e.name,
             path: fullPath,
+            auto: /_auto-[A-Za-z0-9_]+(-\d+)?\.aepx?$/i.test(e.name),
             size: stat.size,
             mtimeMs: stat.mtimeMs,
             created_at: stat.mtime.toISOString(),
@@ -725,6 +754,34 @@ export const receiptsTools: ToolDefinition<any>[] = [
         checkpoint_dir: checkpointDir,
         checkpoints: bounded,
         truncated,
+      };
+    },
+  },
+  {
+    name: "ae_auto_checkpoint",
+    description:
+      `Read or change automatic checkpoints. Before every write (${AUTO_CHECKPOINT_TOOLS.join(", ")}; ae_run_jsx only with mutates: true), the server copies the saved .aep to \`<projectdir>/_mcp_checkpoints/<name>_<stamp>_auto-<tool>.aep\` and reports it as \`checkpoint\` in the write's result. ` +
+      "ae_checkpoint_list shows them (`auto: true`) and ae_checkpoint_revert opens one. " +
+      "AE can't write its unsaved state to another file without retargeting the project, so the copy is the LAST SAVE: when AE has unsaved changes, `checkpoint.unsaved_changes_not_included` is true. Writes between two saves share one copy. Unsaved projects and projects over `max_mb` are skipped, and a failed copy never blocks the write. " +
+      "Call with no arguments to read the settings. Change them only when the user asks (for example, to turn checkpoints off for a very large project); they persist across restarts. " +
+      AGENT_SAFETY_GUIDANCE,
+    schema: AeAutoCheckpointSchema,
+    handler: async (args: z.infer<typeof AeAutoCheckpointSchema>, ctx) => {
+      if (!ctx.settings) {
+        throw new BridgeError({
+          kind: "evalscript_error",
+          message: "This server has no settings store, so auto checkpoints use the defaults and can't be changed.",
+        });
+      }
+      const changed = args.enabled !== undefined || args.max_mb !== undefined;
+      const settings = changed
+        ? ctx.settings.updateAutoCheckpoint({ enabled: args.enabled, max_mb: args.max_mb })
+        : ctx.settings.get();
+      return {
+        changed,
+        auto_checkpoint: settings.auto_checkpoint,
+        applies_to: AUTO_CHECKPOINT_TOOLS,
+        settings_path: ctx.settings.path,
       };
     },
   },

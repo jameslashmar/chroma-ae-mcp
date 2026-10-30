@@ -21,6 +21,7 @@ Exception: an edit your task names explicitly.
     - `ctx.quarantine.assertClear()`;
     - `ctx.queue.run(...)`;
     - `verifyTargetGuard` (import it from `../mutate.js`);
+    - `autoCheckpoint(ctx, guard, "<tool name>")` right after the guard, with its result returned as `checkpoint`. Add the tool to `AUTO_CHECKPOINT_TOOLS` in `ext/receipts.ts`;
     - a before read → the write → an after read in a **separate** `evalRaw`;
     - `buildReceipt`.
   - Every mutating tool takes `expect: ExpectSchema` (from `../common.js`), and its description ends with `AGENT_SAFETY_GUIDANCE`.
