@@ -23,6 +23,11 @@ Everything here is on GitHub as stacked pull requests. Jay merged #1 into `main`
 - #1 is in `main`. When #2 merges, retarget #3 to `main`, and so on down the stack, rebasing each onto the new base. `mcp-bundle.cjs` conflicts in a rebase are resolved by running `npm run bundle` in `server/` at that commit, never by merging the text.
 - The earlier PRs were merged by rebase, which keeps the topic commits.
 
+**Heads-up: `main`'s CI is red** since the #1 merge (run 41069493864).
+- The cause: `c8bd645` changed `motion.ts`, `motion.jsx` and `render.ts` without `npm run bundle`, so the "Panel bundle is up to date" step fails.
+- The fix: run `npm run bundle` in `server/` on `main` (or in the next PR to land there) and commit `panel/client/mcp-bundle.cjs`.
+- #6 is not affected: it carries a bundle built from its own sources, and its CI is green.
+
 **The user's ground rules** (they apply to anything built on this):
 - Everything happens inside After Effects. No outside tools such as SAM, OpenCV or Python.
 - Popups are never suppressed.
