@@ -590,7 +590,10 @@ describe("panel/host/ext/motion.jsx sampleProperty in a simulated AE DOM", () =>
 describe("ext/motion review rules", () => {
   const target = { comp_id: 7, project_path: "C:/jobs/Shot.aep" };
   const POS = ["ADBE Transform Group", "ADBE Position"];
-  const review = (s: PropertySamples, propPath = POS) => reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), propPath, target);
+  const review = (s: PropertySamples, propPath = POS) => {
+    const speeds = sampleSpeeds(s);
+    return reviewProperty(s, analyzeMotion(s, speeds), speeds, propPath, target);
+  };
   const named = (s: PropertySamples, name: string, matchName: string, spatial = false): PropertySamples => ({
     ...s,
     property: { ...s.property, name, matchName, spatial },
@@ -828,6 +831,11 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     const blur = group("Blur 2", "ADBE Gaussian Blur 2", PropertyType.NAMED_GROUP, [
       prop("Blurriness", "ADBE Gaussian Blur 2-0001", 3, PropertyValueType.OneD, "value + wiggle(2, 5)"),
     ]);
+    // Same display name as `blur` above (e.g. the user duplicated it without
+    // renaming) - an indexed-group sibling can't be addressed by name here.
+    const blur2 = group("Blur 2", "ADBE Gaussian Blur 3", PropertyType.NAMED_GROUP, [
+      prop("Blurriness", "ADBE Gaussian Blur 3-0001", 2),
+    ]);
     const layer = {
       ...group("Ball", "ADBE Vector Layer", PropertyType.NAMED_GROUP, [
         prop("Marker", "ADBE Marker", 4, PropertyValueType.NO_VALUE),
@@ -836,7 +844,7 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
           prop("Opacity", "ADBE Opacity", 1),
           prop("Rotation", "ADBE Rotate Z", 0),
         ]),
-        group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [blur]),
+        group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [blur, blur2]),
       ]),
       index: 1,
       id: 11,
@@ -866,14 +874,17 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     return G.__chromaAe;
   }
 
-  it("finds keyframed numeric properties, naming effects by display name, and skips markers and single keys", () => {
+  it("finds keyframed numeric properties, addressing same-named effects by position, and skips markers and single keys", () => {
     const res = simulatedComp().listAnimatedProperties({ comp_id: 5 });
     expect(res.project_path).toBe("C:\\jobs\\Shot.aep");
     expect(res.comp).toMatchObject({ id: 5, fps: 25, width: 640 });
     expect(res.truncated).toBe(false);
+    // Both effects display as "Blur 2" (one's a duplicate), so the indexed
+    // step is each sibling's 1-based position, not its (colliding) name.
     expect(res.properties.map((p: any) => p.path)).toEqual([
       ["ADBE Transform Group", "ADBE Position"],
-      ["ADBE Effect Parade", "Blur 2", "ADBE Gaussian Blur 2-0001"],
+      ["ADBE Effect Parade", 1, "ADBE Gaussian Blur 2-0001"],
+      ["ADBE Effect Parade", 2, "ADBE Gaussian Blur 3-0001"],
     ]);
     expect(res.properties[0]).toMatchObject({
       layer: { id: 11, name: "Ball" },
@@ -884,6 +895,7 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
       expression: false,
     });
     expect(res.properties[1].expression).toBe(true);
+    expect(res.properties[2]).toMatchObject({ name: "Blurriness", num_keys: 2, expression: false });
   });
 
   it("limits the scan to the given layers", () => {

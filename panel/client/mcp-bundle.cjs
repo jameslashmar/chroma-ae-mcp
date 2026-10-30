@@ -8383,8 +8383,8 @@ var KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, 
 var AeSetKeyframeEaseSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("Target CompItem ID."),
   layer: LayerSelectorSchema,
-  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
-    "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'])."
+  path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+    "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
   ),
   keys: external_exports.array(external_exports.number().int().positive()).optional().describe(
     "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
@@ -10107,8 +10107,8 @@ var AXIS_LABEL = [200, 200, 200, 255];
 var AeMotionGraphSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("CompItem ID that holds the layer."),
   layer: LayerSelectorSchema,
-  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
-    "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour."
+  path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+    "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
   ),
   start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the first keyframe, or the work area start without keyframes."),
   end: external_exports.number().min(0).optional().describe("Range end in comp seconds. Default: the last keyframe, or the work area end without keyframes."),
@@ -10338,7 +10338,7 @@ var MOTION_MATCH_NAMES = /* @__PURE__ */ new Set([
 ]);
 var SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
 var isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
-function reviewProperty(s, analysis, path12, target) {
+function reviewProperty(s, analysis, speeds, path12, target) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const unit = s.property.spatial ? "px/s" : "/s";
@@ -10359,7 +10359,6 @@ function reviewProperty(s, analysis, path12, target) {
   });
   const segs = analysis.segments;
   const propPeak = analysis.speed.peak;
-  const speeds = sampleSpeeds(s);
   const keepsMovingAfter = (time, speed) => {
     const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
     return next !== void 0 && next.speed > 0.3 * speed;
@@ -10669,7 +10668,7 @@ var motionTools = [
       let findings = [];
       for (const { path: propPath, samples } of scanned.sampled) {
         const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), propPath, target));
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target));
       }
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);

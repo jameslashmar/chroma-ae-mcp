@@ -211,7 +211,9 @@
   // Lists the keyframed numeric properties (2+ keys) of a comp's layers, for
   // the motion review. args: { comp_id, layers? }. Each path step is a match
   // name, except inside indexed groups (effects, masks, shape contents),
-  // where siblings can share a match name, so the display name is used.
+  // where siblings can share both a match name and a display name - so the
+  // step there is the sibling's 1-based position, which property() also
+  // accepts and which can't collide.
   // Bounded by MAX_ANIMATED results and MAX_VISITED properties.
   A.listAnimatedProperties = function (args) {
     var c = requireComp(args.comp_id);
@@ -242,7 +244,7 @@
         if (!p) continue;
         var step;
         if (indexed) {
-          step = p.name;
+          step = k; // 1-based position: siblings here can share a name, this can't collide.
         } else {
           step = p.matchName;
         }

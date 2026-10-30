@@ -70,10 +70,12 @@ export const AeSetKeyframeEaseSchema = z.object({
   comp_id: z.number().int().describe("Target CompItem ID."),
   layer: LayerSelectorSchema,
   path: z
-    .array(z.string().min(1))
+    .array(z.union([z.string().min(1), z.number().int().positive()]))
     .min(1)
     .describe(
-      "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'])."
+      "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). " +
+        "A step may be a 1-based positional index instead of a name for a sibling inside an indexed group " +
+        "(effects, masks, shape layer contents), where siblings can share a display name."
     ),
   keys: z
     .array(z.number().int().positive())
