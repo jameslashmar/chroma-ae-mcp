@@ -542,6 +542,9 @@
     return undefined;
   }
 
+  // ext/*.jsx use this so code compiles in core's scope, like ae_run_jsx code.
+  A.compileInCore = function (src) { return eval(src); };
+
   function plainResult(v, depth) {
     if (v === null || v === undefined) return null;
     var t = typeof v;
@@ -570,6 +573,11 @@
     }
     return o;
   }
+
+  // Plain copy of a script's return value (AE objects become summaries), for ext/*.jsx.
+  A.plainResult = function (v) {
+    return plainResult(v, 0);
+  };
 
   A.runUserJsx = function (args) {
     var code = args.code;

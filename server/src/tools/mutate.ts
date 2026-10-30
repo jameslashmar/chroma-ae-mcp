@@ -6,6 +6,7 @@ import { buildJsxCall, normalizeGuardPath, pathsMatchForGuard } from "../jsx.js"
 import { buildReceipt } from "../receipts.js";
 import { QueueWaitError } from "../queue.js";
 import { DEFAULT_SETTINGS } from "../settings.js";
+import { recordRunJsx } from "../skills.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
@@ -263,6 +264,7 @@ export const mutateTools: ToolDefinition<any>[] = [
       "and a separate read-back evalScript produces a before/after receipt of `expect.comp_id` (or project summary). " +
       "Note: `app.executeCommand` silently does nothing through CEP; use DOM methods instead (e.g. `layer.duplicate()`). " +
       "Never use chained ternaries (`a ? b : c ? d : e`) in ExtendScript as it parses them left-associatively; use `if/else`. " +
+      "The result's `op_id` can be passed to ae_skill_save to keep a script that worked as a reusable skill. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRunJsxSchema,
     handler: async (args, ctx) => {
@@ -280,7 +282,8 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_run_jsx",
           }
         );
-        return { result: res.result };
+        recordRunJsx({ op_id: res.id, label: args.label, code: args.code, mutates: false, at: new Date().toISOString() });
+        return { op_id: res.id, result: res.result };
       }
 
       // Mutating path
@@ -333,6 +336,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             before: beforeSnap.result,
             after: afterSnap.result,
           });
+          recordRunJsx({ op_id: opId, label: args.label, code: args.code, mutates: true, at: new Date().toISOString() });
 
           return {
             op_id: opId,

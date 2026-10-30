@@ -101,6 +101,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     cep: opts.cep,
     settings: new SettingsStore(path.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
+    dataDir: resolvedDataDir,
   };
 
   const log = opts.log;

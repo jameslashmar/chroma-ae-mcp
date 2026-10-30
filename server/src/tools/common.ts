@@ -1,7 +1,8 @@
+import * as path from "node:path";
 import { z } from "zod";
 import type { AskStore } from "../asks.js";
 import { BridgeError, type HostTransport } from "../host.js";
-import { QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
+import { defaultDataDir, QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
 import { QueueWaitError, type SingleWriterQueue } from "../queue.js";
 import type { SettingsStore } from "../settings.js";
@@ -76,6 +77,14 @@ export interface ToolContext {
   settings?: SettingsStore;
   /** Questions for the user, shown in the panel. Only the panel-hosted MCP has it. */
   asks?: AskStore;
+  /** Where the server keeps its files (token, settings, global skills). */
+  dataDir?: string;
+}
+
+export function dataDirOf(ctx: ToolContext): string {
+  if (ctx.dataDir) return ctx.dataDir;
+  if (ctx.settings) return path.dirname(ctx.settings.path);
+  return defaultDataDir();
 }
 
 export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {

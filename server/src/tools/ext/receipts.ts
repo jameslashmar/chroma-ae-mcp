@@ -493,6 +493,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_apply_preset",
   "ae_track_point",
   "ae_key_greenscreen",
+  "ae_skill_run",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

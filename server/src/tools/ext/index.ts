@@ -11,6 +11,7 @@ import { keyTools } from "./key.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
+import { skillsTools } from "./skills.js";
 import { trackTools } from "./track.js";
 
 // Each tool group in this folder exports an array of tools; list it here.
@@ -22,6 +23,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...framesTools,
   ...motionTools,
   ...askTools,
+  ...skillsTools,
   ...briefTools,
   ...aerenderTools,
   ...dialogsTools,
