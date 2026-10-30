@@ -19,7 +19,6 @@ import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import {
   AGENT_SAFETY_GUIDANCE,
-  BezierCurveSchema,
   ExpectSchema,
   LayerSelectorSchema,
   type ExpectGuard,
@@ -59,10 +58,32 @@ export const KeyframeEasePresetSchema = z.enum([
   "hold",
 ]);
 
-export const KeyframeEaseCurveSchema = z.object({
-  curve: BezierCurveSchema.describe(
+/**
+ * curveToSides() below floors x1 and caps x2 to this distance from 0/1 (AE
+ * keyframe handles can't sit exactly on the segment's start/end). Validation
+ * uses the same bound so a curve with x1 (or 1 - x2) closer to the edge than
+ * this is rejected up front, instead of being accepted, stored (e.g. as a
+ * taste/preference elsewhere), and then silently clamped to a different
+ * value whenever it's actually applied.
+ */
+export const MIN_HANDLE = 0.001;
+
+export const EASE_CURVE_ARRAY_SCHEMA = z
+  .array(z.number())
+  .length(4)
+  // Matches curveToSides()'s own clamp exactly: x1 (handle influence on the
+  // out side) can't be 0, x2 (1 - influence on the in side) can't be 1 --
+  // AE's influence floor is 0.1%, so a handle can't sit exactly on its key.
+  // x1 = 1 and x2 = 0 are both fine (no clamp applies to those ends).
+  .refine((c) => c[0] >= MIN_HANDLE && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE, {
+    message: `curve x1 must be within ${MIN_HANDLE}..1 and x2 within 0..${1 - MIN_HANDLE}`,
+  })
+  .describe(
     "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
-  ),
+  );
+
+export const KeyframeEaseCurveSchema = z.object({
+  curve: EASE_CURVE_ARRAY_SCHEMA,
 });
 
 export const KeyframeEaseInputSchema = z
@@ -225,7 +246,8 @@ interface PropertySnapshot {
 }
 
 // AE's influence floor is 0.1%, so a handle can't sit exactly on its key.
-const MIN_HANDLE = 0.001;
+// (MIN_HANDLE itself is declared above, next to KeyframeEaseCurveSchema, so
+// the one bound governs both validation and clamping.)
 
 export function isCurveEase(ease: KeyframeEaseInput): ease is { curve: number[] } {
   return typeof ease === "object" && ease !== null && "curve" in ease;

@@ -52,6 +52,15 @@ node qa/smoke-mcp.mjs --dir D:/_work/qa/smoke
 - The project it leaves open sits under `/_work/qa`, so it can be run again straight away.
 - Results go to `qa/out/smoke.json`, and the exit code is 1 on any failure.
 - `ae_ui_screenshot` passes when AE is minimized too, because it then reports `ae_minimized` instead of an image.
+- It covers the skills (a project skill saved, listed and run into its own comp), data builds, a 9:16 reframe, the asset import and diagnostics. The global skills folder and the asset watcher setting are left alone.
+
+## Live job for a self-hosted runner
+
+`qa/ci-live.mjs` is what `.github/workflows/ae-live.yml` runs on a runner with After Effects (`docs/CI-RUNNER.md`). It waits for the panel service, checks that the CEP extension points at this checkout, reloads the service through its debug port (8097) so this checkout's bundle and `host/ext/*.jsx` load, then runs the smoke test in a fresh `_work/qa/ci/<stamp>` folder.
+
+```bash
+node qa/ci-live.mjs --wait 300 [--start-ae "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/AfterFX.exe"]
+```
 
 ## Running Offline Unit Tests
 

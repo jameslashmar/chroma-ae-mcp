@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
-import { BezierCurveSchema, type ToolContext, type ToolDefinition } from "../common.js";
+import type { ToolContext, ToolDefinition } from "../common.js";
 
 // ---------- brief ----------
 
@@ -142,9 +142,15 @@ async function openProjectPath(ctx: ToolContext): Promise<string> {
 export const AeTasteSchema = z.object({
   set: z
     .object({
-      preferred_ease: BezierCurveSchema.optional().describe(
-        "The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."
-      ),
+      // Deliberately not EASE_CURVE_ARRAY_SCHEMA/MIN_HANDLE-bounded: [0, 0, 1, 1] (x1=0,
+      // x2=1) is a meaningful "clear to linear" sentinel here, checked by isLinear() below
+      // before it's ever applied as a curve - the tighter apply-time bound would reject it.
+      preferred_ease: z
+        .array(z.number())
+        .length(4)
+        .refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, { message: "curve x1 and x2 must be within 0..1" })
+        .optional()
+        .describe("The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."),
       allow_linear_non_motion: z
         .boolean()
         .optional()

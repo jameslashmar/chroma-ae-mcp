@@ -10,7 +10,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import type { AskAnswer, AskQuestion } from "../../asks.js";
-import { BezierCurveSchema, type ToolDefinition } from "../common.js";
+import type { ToolDefinition } from "../common.js";
+import { EASE_CURVE_ARRAY_SCHEMA } from "./animate.js";
 
 export const PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
 export const DEFAULT_WAIT_SECONDS = 120;
@@ -20,7 +21,7 @@ const AskOptionSchema = z.object({
   id: z.string().min(1).max(40).describe("Short id returned when the user picks this option."),
   label: z.string().min(1).max(120),
   description: z.string().max(400).optional(),
-  curve: BezierCurveSchema.optional().describe(
+  curve: EASE_CURVE_ARRAY_SCHEMA.optional().describe(
     "cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."
   ),
   image_path: z

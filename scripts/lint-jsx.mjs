@@ -41,6 +41,16 @@ function findJsxFiles(dir) {
   return results;
 }
 
+const REGEX_AFTER_PUNCT = /^[([{:;,=+\-*!&|?~^%<>]$/;
+const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'case', 'in', 'instanceof', 'new', 'delete', 'void', 'throw', 'else', 'do']);
+
+// A '/' starts a regex literal at the start, after an operator, or after a keyword; otherwise it divides.
+function startsRegex(prev, postfix) {
+  if (prev === '') return true;
+  if (postfix) return false;
+  return REGEX_AFTER_PUNCT.test(prev) || REGEX_AFTER_WORD.has(prev);
+}
+
 function getLineNumber(source, index) {
   let line = 1;
   for (let i = 0; i < index && i < source.length; i++) {
@@ -59,7 +69,9 @@ function stripStringsAndComments(source, filePath) {
   const output = [];
   const len = source.length;
   let i = 0;
+  // The previous significant token: a word, a number, or one punctuation char.
   let prevNonWhitespace = '';
+  let postfix = false; // prev is the second char of a postfix ++ or --
 
   while (i < len) {
     const ch = source[i];
@@ -120,6 +132,7 @@ function stripStringsAndComments(source, filePath) {
         i++;
       }
       prevNonWhitespace = "'";
+      postfix = false;
       continue;
     }
 
@@ -147,6 +160,7 @@ function stripStringsAndComments(source, filePath) {
         i++;
       }
       prevNonWhitespace = '"';
+      postfix = false;
       continue;
     }
 
@@ -181,12 +195,13 @@ function stripStringsAndComments(source, filePath) {
         i++;
       }
       prevNonWhitespace = '`';
+      postfix = false;
       continue;
     }
 
     // 6. Regular expression literal /.../
     // A '/' begins a regex if preceded by start of expression, operator, punctuation, or certain keywords
-    if (ch === '/' && /^[([{:;,=+\-*!&|?~^%<>\n]$/.test(prevNonWhitespace)) {
+    if (ch === '/' && startsRegex(prevNonWhitespace, postfix)) {
       output.push(' ');
       i++;
       let inCharClass = false;
@@ -219,11 +234,23 @@ function stripStringsAndComments(source, filePath) {
         i++;
       }
       prevNonWhitespace = '/';
+      postfix = false;
+      continue;
+    }
+
+    if (/[A-Za-z0-9_$]/.test(ch)) {
+      let end = i;
+      while (end < len && /[A-Za-z0-9_$]/.test(source[end])) end++;
+      output.push(source.substring(i, end));
+      prevNonWhitespace = source.substring(i, end);
+      postfix = false;
+      i = end;
       continue;
     }
 
     output.push(ch);
     if (!/\s/.test(ch)) {
+      postfix = (ch === '+' || ch === '-') && prevNonWhitespace === ch && !postfix;
       prevNonWhitespace = ch;
     }
     i++;

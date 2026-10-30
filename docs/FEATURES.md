@@ -1,6 +1,6 @@
 # Feature list and gap analysis
 
-Last updated: 2026-10-29: curve easing, ask the user, effects and presets, brief and taste, point tracking, green screen keying.
+Last updated: 2026-10-30: AE skills, data-driven builds, social reframe, asset import with a watcher, diagnostics, one-click registration, and macOS popup reading (written, not yet tried on a Mac). Before that (2026-10-29): curve easing, ask the user, effects and presets, brief and taste, point tracking, green screen keying.
 
 This file answers two questions: what we have, and what to add next. For the things to add, it also says what to borrow from the community AE MCP servers we surveyed. Every source repo is **MIT**. Borrowed code keeps its notice in `ATTRIBUTION.md`, and each borrowed file says which file it came from.
 
@@ -40,7 +40,7 @@ Everything else stays in `ae_run_jsx`.
 | **Batch with one undo group, and chunked long jobs** (≤500 ops in one group; larger jobs yield in chunks so AE's UI doesn't freeze) | 🟡 | **P2** | Engine-Room `packages/jsx/batch.jsx` (`run_batch`, `_continue_job`, `_get_job`) |
 | Failure recovery: retry a failed exec by recovery id, without resending | ❌ | P3 | JUNKDOGE `ae_execRecover`. Our quarantine covers the safety half already. |
 | Multiple AE instances (bind to a project path) | ❌ | P3 | JUNKDOGE `ae_instances` and `ae_workspace` (`docs/MULTI_INSTANCE_EXECUTION_PLAN.md`) |
-| Saved-snippet library (store a working JSX as a reusable tool) | ❌ | P3 | JUNKDOGE `ae_toolSave`, `ae_toolUse`, `ae_toolSearch`. A Claude skill holding recipes may do the job more simply. |
+| Saved-snippet library (store a working JSX as a reusable tool) | ✅ `ae_skill_save`, `ae_skill_run`, `ae_skill_list`: SKILL.md plus numbered steps, per project (`ae-skills/` next to the .aep) or global. A working `ae_run_jsx` is kept by its `op_id`. | (done) | Atom's skills format; JUNKDOGE `ae_toolSave` was the earlier idea. |
 | Panel-hosted MCP over HTTP, signed ZXP, copyable setup command, stable token | ❌ | **P1** (packaging) | Engine-Room and JUNKDOGE both host MCP in the panel. Signing reuses VoxMark's `sign.ps1`. See the install discussion in the vault. |
 
 ## 2. Reading the project
@@ -91,7 +91,7 @@ Everything else stays in `ae_run_jsx`.
 | **Import footage and image sequences**, into a target folder | 🟡 | **P1** | Engine-Room `footage.jsx` (`import_footage`; includes an SVG viewBox check). Gulp's sequence detection is ours already. |
 | **Replace and relink footage** (versioning: a stable name with the latest render behind it) | 🟡 | **P1** | a-y-ibrahim `relink-footage`. Matches the "stable filename per shot" pipeline idea from the Premiere notes. |
 | Purge unused footage and solids | 🟡 | P3 | Engine-Room `purge_unused_footage` |
-| **Template population**: fill text and footage placeholders from data (CSV or JSON), one comp per row | 🟡 | **P2** | a-y-ibrahim `populate-template`, `animate-from-data`, `localize-comp` |
+| **Template population**: fill text and footage placeholders from data (CSV or JSON), one comp per row | ✅ `ae_build_from_data`: text (style kept), numbers and lists (on the last key of an animated property by default, for charts), colours and footage per row; every cell checked before AE is touched; text that runs off the frame is flagged in the read-back. | (done) | a-y-ibrahim `populate-template`, `animate-from-data`, `localize-comp` |
 | Essential Graphics properties (read and set) | 🟡 | P2 | kumo `operations/egp.ts` |
 | Export MOGRT | 🟡 (`exportAsMotionGraphicsTemplate`) | P3 | Engine-Room `mogrt.jsx` (checks preconditions, saves, suppresses dialogs, exports outside the undo group). Pairs with premiere-pro-mcp's MOGRT handoff. |
 
@@ -162,12 +162,12 @@ Each item ships with a live AE check, added to the smoke test. v0.1 found two AE
 | Idea | Why | Effort | Priority |
 |---|---|---|---|
 | **Automatic checkpoints around writes.** Copy the .aep before (and optionally after) every mutating tool call, with a setting to turn it off for big projects. Branch, never overwrite, on revert. | Atom does this per change. We have only manual `ae_checkpoint_*`. With it, every write can be undone across sessions. | S | ✅ Done. The copy is the last save, because AE has no way to write its unsaved state to another file without retargeting the project (measured on AE 26.2.1; the undocumented `app.project.serializeToXML` takes an unknown enum). Writes between two saves share one copy. `ae_auto_checkpoint` sets it. |
-| **AE skills bundle:** `SKILL.md` plus `1.jsx`, `2.jsx`, scoped to the project (`<project>/…/skills/`) or global. Add an `ae_skill_run` tool, and an `ae_skill_save` tool that captures a working `ae_run_jsx`. | This is the format Atom proved, and it matches Claude Code's own skills. It replaces our P3 "saved-snippet library". Good for house rigs, lower thirds and kinetic type. | M | P2 |
-| **One-click registration:** the panel runs `claude mcp add …` itself (the Claude Code CLI), with toggles for Codex and Cursor. | Removes the copy and paste step from installs. | S | P2 |
-| **Asset staging plus auto-import.** Generated assets (Flora, Higgsfield, ElevenLabs, renders) land in a known folder and are imported into an `_Assets` bin. | Atom auto-imports generated images. We already generate elsewhere, so the value is in the import pipeline. | S | P2 |
-| **Social reframe:** duplicate a comp to 16:9, 1:1 and 9:16, re-anchor controllers, apply safe areas. | A common Atom workflow, and real time saved on social cut-downs. | M | P2 |
-| **Data-driven builds from CSV/JSON** (charts, localisation). | Strengthens the planned template population. | S (recipes) | P2 |
-| **Diagnostics bundle:** logs, quarantine state, AE version and popups in one file. | Faster triage when automation is blocked. | S | P3 |
+| **AE skills bundle:** `SKILL.md` plus `1.jsx`, `2.jsx`, scoped to the project (`<project>/…/skills/`) or global. Add an `ae_skill_run` tool, and an `ae_skill_save` tool that captures a working `ae_run_jsx`. | This is the format Atom proved, and it matches Claude Code's own skills. It replaces our P3 "saved-snippet library". Good for house rigs, lower thirds and kinetic type. | M | ✅ Done. Each step sees `args`, `prev` and `results`; a run is one evalScript, so one undo group. Steps are linted for ES3 on save and before a run. |
+| **One-click registration:** the panel runs `claude mcp add …` itself (the Claude Code CLI), with toggles for Codex and Cursor. | Removes the copy and paste step from installs. | S | ✅ Done (`panel/tools/register.cjs`). Claude Desktop, Cursor and Codex get the stdio relay, so their configs never hold the token; Claude Code is registered again after a token change. |
+| **Asset staging plus auto-import.** Generated assets (Flora, Higgsfield, ElevenLabs, renders) land in a known folder and are imported into an `_Assets` bin. | Atom auto-imports generated images. We already generate elsewhere, so the value is in the import pipeline. | S | ✅ Done: `ae_import_assets` (`_assets/` next to the .aep, mirrored into `_Assets`, sequences detected) and an opt-in watcher whose polling stays out of the log. |
+| **Social reframe:** duplicate a comp to 16:9, 1:1 and 9:16, re-anchor controllers, apply safe areas. | A common Atom workflow, and real time saved on social cut-downs. | M | ✅ Done: `ae_reframe`. Backgrounds cover; other top-level layers and controller nulls pin to the nearest edge or centre of the safe area and shrink to fit; 9:16 margins leave room for platform UI. |
+| **Data-driven builds from CSV/JSON** (charts, localisation). | Strengthens the planned template population. | S (recipes) | ✅ Done: `ae_build_from_data`. |
+| **Diagnostics bundle:** logs, quarantine state, AE version and popups in one file. | Faster triage when automation is blocked. | S | ✅ Done: `ae_diagnostics` and the panel's Save diagnostics button. It waits 5 s for AE and never aborts the eval. |
 | **Access tiers** like Atom's Adobe Only / Project Folder / Full Access. | Probably **not needed**: our MCP exposes no shell or file tools, and Claude Code has its own permissions. Note it, don't build it. | – | – |
 
 **Not copying:**

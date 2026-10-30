@@ -1,0 +1,56 @@
+name: AE live
+
+# Runs the live smoke test against a real After Effects on a self-hosted
+# runner labelled `after-effects` (setup: docs/CI-RUNNER.md). Manual until
+# such a runner is registered; then add `push: branches: [main]` here.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ae-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Live smoke on After Effects
+    runs-on: [self-hosted, windows, after-effects]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Build
+        working-directory: server
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: server
+        run: npm test
+
+      - name: Bundle the panel
+        working-directory: server
+        run: npm run bundle
+
+      - name: ExtendScript lint
+        run: node scripts/lint-jsx.mjs
+
+      - name: Live smoke (reloads the panel service from this checkout)
+        run: node qa/ci-live.mjs --wait 300
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ae-live-report
+          path: qa/out/
+          if-no-files-found: ignore

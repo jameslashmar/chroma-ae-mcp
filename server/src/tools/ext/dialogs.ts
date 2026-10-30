@@ -119,6 +119,8 @@ interface DialogsRuntimeOverrides {
   dialogsDir?: string;
   scriptPath?: string | null;
   nowIso?: () => string;
+  /** Replaces the osascript run of ae-dialogs-mac.js on macOS (tests). */
+  macRunner?: Ps1RunnerFn;
 }
 
 const inFlightOps: string[] = [];
@@ -198,6 +200,12 @@ function currentPlatform(): NodeJS.Platform {
   return runtimeOverrides.platform ?? process.platform;
 }
 
+/** Windows reads popups with UI Automation (ae-dialogs.ps1), macOS with System Events (ae-dialogs-mac.js). */
+function dialogsSupported(): boolean {
+  const p = currentPlatform();
+  return p === "win32" || p === "darwin";
+}
+
 function currentNowIso(): string {
   return runtimeOverrides.nowIso
     ? runtimeOverrides.nowIso()
@@ -240,7 +248,11 @@ export function locateDialogsPs1Script(startDir?: string): string | null {
   if (runtimeOverrides.scriptPath !== undefined) {
     return runtimeOverrides.scriptPath;
   }
+  return locateToolScript("ae-dialogs.ps1", startDir);
+}
 
+/** Searches upwards for `panel/tools/<fileName>` or `tools/<fileName>`. */
+export function locateToolScript(fileName: string, startDir?: string): string | null {
   const rootsToSearch = [startDir ?? getRuntimeBaseDir(), process.cwd()];
   const visited = new Set<string>();
 
@@ -248,11 +260,11 @@ export function locateDialogsPs1Script(startDir?: string): string | null {
     let dir = path.resolve(start);
     while (!visited.has(dir)) {
       visited.add(dir);
-      const candidateA = path.join(dir, "panel", "tools", "ae-dialogs.ps1");
+      const candidateA = path.join(dir, "panel", "tools", fileName);
       if (fs.existsSync(candidateA)) {
         return candidateA;
       }
-      const candidateB = path.join(dir, "tools", "ae-dialogs.ps1");
+      const candidateB = path.join(dir, "tools", fileName);
       if (fs.existsSync(candidateB)) {
         return candidateB;
       }
@@ -469,6 +481,38 @@ function runPowerShellScript(ps1Args: string[]): Promise<string> {
   });
 }
 
+/** Runs ae-dialogs-mac.js with osascript (JavaScript for Automation) on macOS. */
+function runMacScript(args: string[]): Promise<string> {
+  if (runtimeOverrides.macRunner) {
+    return runtimeOverrides.macRunner(args);
+  }
+  const scriptPath = locateToolScript("ae-dialogs-mac.js");
+  if (!scriptPath) {
+    return Promise.resolve(JSON.stringify({ ok: false, error: "ae_dialogs_mac_script_not_found" }));
+  }
+  return new Promise<string>((resolve) => {
+    execFile(
+      "osascript",
+      ["-l", "JavaScript", scriptPath, ...args],
+      { timeout: DIALOG_EXEC_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const outStr = typeof stdout === "string" ? stdout.trim() : "";
+        if (outStr.length > 0) {
+          resolve(outStr);
+          return;
+        }
+        const errMsg =
+          typeof stderr === "string" && stderr.trim().length > 0
+            ? stderr.trim()
+            : err instanceof Error
+            ? err.message
+            : "osascript_exec_failed";
+        resolve(JSON.stringify({ ok: false, error: errMsg }));
+      }
+    );
+  });
+}
+
 export function isDestructiveButton(buttonName: string): boolean {
   return DESTRUCTIVE_BUTTON_PATTERN.test(buttonName ?? "");
 }
@@ -550,10 +594,22 @@ async function listDialogsInternal(opts: {
       error: string;
     }
 > {
-  if (currentPlatform() !== "win32") {
+  if (!dialogsSupported()) {
     return {
       ok: false,
       error: "not_implemented_on_this_os",
+    };
+  }
+
+  if (currentPlatform() === "darwin") {
+    const macParsed = parsePs1JsonOutput<Ps1ListOutput>(await runMacScript(["list"]));
+    if (!macParsed.ok) {
+      return { ok: false, error: macParsed.error || "dialog_list_failed" };
+    }
+    return {
+      ok: true,
+      ae_pid: macParsed.ae_pid ?? null,
+      dialogs: enrichDialogsList(Array.isArray(macParsed.dialogs) ? macParsed.dialogs : []),
     };
   }
 
@@ -653,13 +709,13 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
     description:
-      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread, returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. " +
+      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeDialogsSchema,
     handler: async (args) => {
-      if (currentPlatform() !== "win32") {
+      if (!dialogsSupported()) {
         return {
           ok: false,
           error: "not_implemented_on_this_os",
@@ -673,13 +729,13 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialog_respond",
     description:
-      "Responds to an open After Effects modal dialog by NativeWindowHandle using Windows UI Automation (never brings windows to the foreground or moves the mouse). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
+      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeDialogRespondSchema,
     handler: async (args) => {
-      if (currentPlatform() !== "win32") {
+      if (!dialogsSupported()) {
         return {
           ok: false,
           error: "not_implemented_on_this_os",
@@ -711,19 +767,24 @@ export const dialogsTools: ToolDefinition<any>[] = [
         };
       }
 
-      const psArgs = [
-        "-Mode",
-        "respond",
-        "-Handle",
-        String(args.handle),
-        "-Button",
-        args.button,
-      ];
-      if (args.check) {
-        psArgs.push("-Check", args.check);
+      let rawStdout: string;
+      if (currentPlatform() === "darwin") {
+        // The title and the start of the text guard against another window having taken this index.
+        rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
+      } else {
+        const psArgs = [
+          "-Mode",
+          "respond",
+          "-Handle",
+          String(args.handle),
+          "-Button",
+          args.button,
+        ];
+        if (args.check) {
+          psArgs.push("-Check", args.check);
+        }
+        rawStdout = await runPowerShellScript(psArgs);
       }
-
-      const rawStdout = await runPowerShellScript(psArgs);
       const parsed = parsePs1JsonOutput<Ps1RespondOutput>(rawStdout);
 
       const logTime = currentNowIso();

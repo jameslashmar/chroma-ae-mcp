@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AskStore } from "./asks.js";
+import { AssetWatcher } from "./tools/ext/assets.js";
+import { writeDiagnostics } from "./tools/ext/diagnostics.js";
 import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
@@ -16,6 +18,10 @@ export interface CreatePanelMcpOptions {
   dataDir?: string;
   log?: (level: string, msg: string) => void;
   cep?: CepBridge;
+  /** Start the asset watcher's timer (default true; tests turn it off). */
+  watchAssets?: boolean;
+  /** The service's own state for ae_diagnostics (versions, eval queue, log paths). */
+  serviceInfo?: () => Record<string, unknown>;
 }
 
 export interface HttpRequestLike {
@@ -82,6 +88,9 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   host: PanelHost;
   /** Questions for the panel: service.js serves them on GET /ask and POST /ask/answer. */
   asks: AskStore;
+  assetWatcher: AssetWatcher;
+  /** For the panel's Save diagnostics button (POST /admin/diagnostics). */
+  saveDiagnostics: () => Promise<{ path: string; summary: Record<string, unknown> }>;
 } {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
@@ -101,9 +110,14 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     cep: opts.cep,
     settings: new SettingsStore(path.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
+    dataDir: resolvedDataDir,
+    serviceInfo: opts.serviceInfo,
   };
 
   const log = opts.log;
+  // Polls only while ae_import_assets { watch: true } has turned it on.
+  const assetWatcher = new AssetWatcher(ctx, { log });
+  if (opts.watchAssets !== false) assetWatcher.start();
 
   async function handleHttp(
     req: IncomingMessage | HttpRequestLike,
@@ -205,5 +219,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     ctx,
     host,
     asks: ctx.asks as AskStore,
+    assetWatcher,
+    saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
   };
 }
