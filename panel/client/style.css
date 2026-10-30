@@ -125,6 +125,57 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.register-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.register-label {
+  color: #8a8a8a;
+  font-size: 10px;
+}
+
+.register-clients {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.register-chip {
+  appearance: none;
+  border: 1px solid #3c3c3c;
+  background: #222;
+  color: #bdbdbd;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.register-chip:hover {
+  border-color: #5a5a5a;
+  color: #e6e6e6;
+}
+
+.register-chip.on {
+  border-color: #2f7d4f;
+  background: #17301f;
+  color: #8fe0ad;
+}
+
+.register-chip.on::before {
+  content: "\2713  ";
+}
+
+.register-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .btn {

@@ -154,8 +154,9 @@
 
   // ---------- HTTP client to service ----------
   // body is optional: requestService(method, path, callback) sends none.
-  function requestService(method, routePath, body, callback) {
+  function requestService(method, routePath, body, callback, timeoutMs) {
     if (typeof body === "function") {
+      timeoutMs = callback;
       callback = body;
       body = null;
     }
@@ -210,7 +211,7 @@
       }
     );
 
-    req.setTimeout(HTTP_TIMEOUT_MS, function () {
+    req.setTimeout(timeoutMs || HTTP_TIMEOUT_MS, function () {
       req.destroy(new Error("Request timed out"));
     });
 
@@ -291,7 +292,7 @@
       $regenTokenBtn.addEventListener("click", function () {
         if (typeof window !== "undefined" && typeof window.confirm === "function") {
           var confirmed = window.confirm(
-            "Regenerate the MCP Bearer token? You must copy and paste the setup command again."
+            "Regenerate the MCP Bearer token? Claude Code's user-scope chroma-ae entry is registered again automatically (whether it was added from this panel or with the pasted command). Claude Desktop, Cursor and Codex use the relay and need nothing."
           );
           if (!confirmed) return;
         }
@@ -310,11 +311,107 @@
           }
           refreshTokenFromDisk();
           updateSetupUi();
+          reregisterClaudeCode();
           pollServiceLog();
           pollHealth();
         });
       });
     }
+  }
+
+  // ---------- Register with clients, and Save diagnostics ----------
+  // tools/register.cjs adds or removes the chroma-ae entry for Claude Code
+  // (its CLI), Claude Desktop, Cursor and Codex (the stdio relay).
+  var $registerClients = typeof document !== "undefined" ? document.getElementById("register-clients") : null;
+  var $diagnosticsBtn = typeof document !== "undefined" ? document.getElementById("diagnostics-btn") : null;
+  var register = null;
+
+  function loadRegister() {
+    if (register) return register;
+    try {
+      register = require(path.join(common.resolveExtensionDir(host), "tools", "register.cjs"));
+    } catch (e) {
+      logUi("err", "Register helper unavailable: " + (e && e.message ? e.message : String(e)));
+    }
+    return register;
+  }
+
+  function renderRegister() {
+    if (!$registerClients || !loadRegister()) return;
+    var clients = register.status();
+    $registerClients.innerHTML = "";
+    clients.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "register-chip" + (c.registered ? " on" : "");
+      chip.textContent = c.label;
+      chip.title = c.registered ? "Registered. Click to remove." : "Click to register chroma-ae with " + c.label + ".";
+      chip.addEventListener("click", function () {
+        toggleRegistration(c, chip);
+      });
+      $registerClients.appendChild(chip);
+    });
+  }
+
+  function toggleRegistration(c, chip) {
+    var on = !c.registered;
+    if (!on && typeof window !== "undefined" && typeof window.confirm === "function") {
+      if (!window.confirm("Remove chroma-ae from " + c.label + "?")) return;
+    }
+    refreshTokenFromDisk();
+    if (on && c.id === "claude-code" && !common.isValidToken(sessionToken)) {
+      logUi("err", "Token file is unavailable at " + paths.tokenPath);
+      return;
+    }
+    chip.disabled = true;
+    register.setRegistered(c.id, on, { port: boundPort, token: sessionToken }).then(
+      function (msg) {
+        logUi("ok", c.label + ": " + msg);
+        renderRegister();
+      },
+      function (e) {
+        logUi("err", c.label + ": " + (e && e.message ? e.message : String(e)));
+        renderRegister();
+      }
+    );
+  }
+
+  // Claude Code holds the token itself, so a new token means registering again.
+  function reregisterClaudeCode() {
+    if (!loadRegister()) return;
+    var cc = register.status().filter(function (c) { return c.id === "claude-code"; })[0];
+    if (!cc || !cc.registered) return;
+    if (!common.isValidToken(sessionToken)) {
+      logUi("err", "Claude Code was not registered again: the new token could not be read from " + paths.tokenPath + ". Copy the setup command instead.");
+      return;
+    }
+    register.setRegistered("claude-code", true, { port: boundPort, token: sessionToken }).then(
+      function () {
+        logUi("ok", "Claude Code registered again with the new token");
+        renderRegister();
+      },
+      function (e) {
+        logUi("err", "Claude Code: " + (e && e.message ? e.message : String(e)) + " Copy the setup command instead.");
+        renderRegister();
+      }
+    );
+  }
+
+  function bindDiagnostics() {
+    if (!$diagnosticsBtn) return;
+    $diagnosticsBtn.addEventListener("click", function () {
+      $diagnosticsBtn.disabled = true;
+      requestService("POST", "/admin/diagnostics", function (err, statusCode, body) {
+        $diagnosticsBtn.disabled = false;
+        if (err || statusCode !== 200 || !body || body.ok !== true) {
+          var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
+          logUi("err", "Diagnostics failed: " + why);
+          return;
+        }
+        common.copyTextToClipboard(body.path, function () {});
+        logUi("ok", "Diagnostics saved (path copied): " + body.path);
+      }, 30000);
+    });
   }
 
   // ---------- Questions from the agent (ae_ask_user) ----------
@@ -728,6 +825,8 @@
     updateSetupUi();
     bindSetupActions();
     bindAskActions();
+    bindDiagnostics();
+    renderRegister();
 
     tick();
     pollTimer = setInterval(tick, POLL_INTERVAL_MS);
