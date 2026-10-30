@@ -184,7 +184,9 @@ export const renderTools: ToolDefinition<any>[] = [
                 ok: true,
                 ...snapshotOutput(pngPath1, check1, scale, args.max_size),
                 comp_id: args.comp_id,
-                time: args.time,
+                // snapshotFrame clamps time to the comp's duration; report what was
+                // actually rendered when the host tells us, not the raw request.
+                time: (resp1.result?.time as number | undefined) ?? args.time,
                 scale,
                 ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
                 retried: false,
@@ -224,7 +226,7 @@ export const renderTools: ToolDefinition<any>[] = [
                 ok: true,
                 ...snapshotOutput(pngPath2, check2, scale, args.max_size),
                 comp_id: args.comp_id,
-                time: nudgedTime,
+                time: (resp2.result?.time as number | undefined) ?? nudgedTime,
                 scale,
                 ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
                 retried: true,

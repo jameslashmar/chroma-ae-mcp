@@ -157,6 +157,14 @@ export function contactSheetTimes(
   const firstFrame = Math.round(start * fps);
   const lastFrame = Math.max(firstFrame, Math.ceil(end * fps - 1e-6) - 1);
   const span = lastFrame - firstFrame;
+  // A range narrower than one frame would otherwise silently collapse to a
+  // single-tile "sheet", breaking the 2-to-24-frame contract this tool
+  // promises (and its own schema's `count` minimum of 2).
+  if (span === 0) {
+    throw new Error(
+      `Range ${start}s to ${end}s covers only one frame at ${fps}fps; widen it to sample at least 2 frames.`
+    );
+  }
   const count = Math.min(opts.count ?? 12, span + 1);
 
   const frames: number[] = [];
@@ -353,6 +361,7 @@ export interface PropertySamples {
     dimensions: number;
     num_keys: number;
     keys_truncated: boolean;
+    samples_capped: boolean;
     expression: boolean;
   };
   start: number;
@@ -568,7 +577,11 @@ export function renderMotionGraph(s: PropertySamples, speeds: SpeedSample[], wid
   for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
   const speedMax = peak > 0 ? peak : 1;
 
-  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(peak), "0"];
+  // The speed panel's top always maps to speedMax (not necessarily the real
+  // peak: when nothing moves, peak is 0 but speedMax falls back to 1 so the
+  // panel has a scale to draw against) - label it with what the axis top
+  // actually represents, or "peak 0" would be drawn at a position that isn't 0.
+  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(speedMax), "0"];
   const left = Math.max(...yLabels.map((l) => textWidth(l, scale))) + 4 * scale + 6;
   const right = 4 * scale + 6;
   const top = glyphH + 8;

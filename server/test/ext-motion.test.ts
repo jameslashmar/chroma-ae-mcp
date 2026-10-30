@@ -72,6 +72,7 @@ function samplesOf(
       dimensions: values[0].length,
       num_keys: keys.length,
       keys_truncated: false,
+      samples_capped: false,
       expression: false,
     },
     start,

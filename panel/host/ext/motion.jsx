@@ -142,7 +142,11 @@
 
     var step = 1 / fps;
     if (args.step !== undefined && args.step !== null && args.step > 0) step = args.step;
-    if ((end - start) / step > MAX_SAMPLES - 1) step = (end - start) / (MAX_SAMPLES - 1);
+    var samplesCapped = false;
+    if ((end - start) / step > MAX_SAMPLES - 1) {
+      step = (end - start) / (MAX_SAMPLES - 1);
+      samplesCapped = true;
+    }
 
     var times = [];
     var values = [];
@@ -187,6 +191,9 @@
         dimensions: values[0].length,
         num_keys: p.numKeys,
         keys_truncated: p.numKeys > MAX_KEYS,
+        // step was widened to stay under MAX_SAMPLES: fewer samples than the
+        // comp's frame grid would give, so fast detail between samples can be missed.
+        samples_capped: samplesCapped,
         expression: expr
       },
       start: start,
