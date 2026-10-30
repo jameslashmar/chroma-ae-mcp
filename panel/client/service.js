@@ -496,6 +496,50 @@
       return;
     }
 
+    // Questions from ae_ask_user: the panel polls GET /ask and posts the answer.
+    if (req.method === "GET" && reqUrl === "/ask") {
+      var mcpAsks = getPanelMcp();
+      sendJson(res, 200, {
+        ok: true,
+        questions: mcpAsks && mcpAsks.asks ? mcpAsks.asks.open() : []
+      });
+      return;
+    }
+
+    if (req.method === "POST" && reqUrl === "/ask/answer") {
+      readRequestBody(req, res, function (rawBody) {
+        var reply;
+        try {
+          reply = JSON.parse(rawBody);
+        } catch (e) {
+          sendJson(res, 400, {
+            ok: false,
+            error: { kind: "invalid_request", message: "Invalid JSON body: " + e.message }
+          });
+          return;
+        }
+        var mcpAnswer = getPanelMcp();
+        if (!mcpAnswer || !mcpAnswer.asks || !reply || typeof reply !== "object") {
+          sendJson(res, 503, {
+            ok: false,
+            error: { kind: "unavailable", message: "MCP bundle (mcp-bundle.cjs) is not loaded" }
+          });
+          return;
+        }
+        var outcome = mcpAnswer.asks.answer(String(reply.id || ""), reply);
+        if (outcome.ok) {
+          log("ok", (reply.dismissed ? "Question dismissed " : "Question answered ") + String(reply.id));
+          sendJson(res, 200, { ok: true });
+        } else {
+          sendJson(res, 409, {
+            ok: false,
+            error: { kind: "invalid_request", message: outcome.error }
+          });
+        }
+      });
+      return;
+    }
+
     if ((req.method === "POST" || req.method === "GET") && reqUrl === "/mcp") {
       readRequestBody(req, res, function (rawBody) {
         var mcp = getPanelMcp();

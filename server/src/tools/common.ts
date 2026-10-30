@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AskStore } from "../asks.js";
 import { BridgeError, type HostTransport } from "../host.js";
 import { QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
@@ -31,6 +32,19 @@ export const ExpectSchema = z
   );
 
 export type ExpectGuard = z.infer<typeof ExpectSchema>;
+
+/**
+ * A CSS cubic-bezier [x1, y1, x2, y2]: x is time and y is progress across one
+ * segment, both 0..1 for x; y may leave 0..1 for anticipation/overshoot. Shared
+ * so animate.ts (ae_set_keyframe_ease), ask.ts (ae_ask_user's ease options) and
+ * brief.ts (ae_taste's preferred_ease) validate the same bezier the same way.
+ */
+export const BezierCurveSchema = z
+  .array(z.number())
+  .length(4)
+  .refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, {
+    message: "curve x1 and x2 must be within 0..1",
+  });
 
 export const LayerSelectorSchema = z
   .object({
@@ -73,6 +87,8 @@ export interface ToolContext {
   cep?: CepBridge;
   /** Server settings (auto checkpoints). Without it, the defaults apply. */
   settings?: SettingsStore;
+  /** Questions for the user, shown in the panel. Only the panel-hosted MCP has it. */
+  asks?: AskStore;
 }
 
 export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {

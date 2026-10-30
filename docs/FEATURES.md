@@ -1,6 +1,6 @@
 # Feature list and gap analysis
 
-Last updated: 2026-10-27, after the v0.1 live smoke test.
+Last updated: 2026-10-29: curve easing, ask the user, effects and presets, brief and taste, point tracking, green screen keying.
 
 This file answers two questions: what we have, and what to add next. For the things to add, it also says what to borrow from the community AE MCP servers we surveyed. Every source repo is **MIT**. Borrowed code keeps its notice in `ATTRIBUTION.md`, and each borrowed file says which file it came from.
 
@@ -63,7 +63,7 @@ Everything else stays in `ae_run_jsx`.
 | Capability | Status | Priority | Borrow from |
 |---|---|---|---|
 | Set a value, keyframes or an expression, with read-back | ✅ `ae_set_property` | (done) | |
-| **Keyframe easing**: temporal ease (speed and influence), spatial tangents, interpolation per key, roving | 🟡 the trap-prone part | **P1** | Engine-Room `keyframes.jsx` (`set_temporal_ease`, `set_spatial_tangents`, `set_interpolation`); kumo `operations/keyframe.ts` |
+| **Keyframe easing**: temporal ease (speed and influence), spatial tangents, interpolation per key, roving | ✅ `ae_set_keyframe_ease`: presets, explicit speed and influence, or a CSS cubic-bezier `curve` turned into speed and influence per segment (path length on spatial properties; matched sampled motion to within 0.01% on AE 26.2.1). Spatial tangents and roving are still 🟡. | (done) | Engine-Room `keyframes.jsx` (`set_temporal_ease`, `set_spatial_tangents`, `set_interpolation`); kumo `operations/keyframe.ts` |
 | Remove keyframes (a range or all), and read keyframes with easing | 🟡 | P2 | Engine-Room `remove_keyframe`, `get_keyframes` |
 | **Expression validation**: force-evaluate and report expression errors per property | 🟡 (JSX can force-evaluate each property and read `expressionError`; nothing does it for a whole comp yet) | **P1** | JUNKDOGE `plugin/jsx/templates/validate_expressions.jsx` (`ae_validateExpressions`) |
 | Create layers (solid, null, adjustment, text, shape, camera, light, precomp, footage) | 🟡 | P2 | One `ae_create_layer` covering every type, modelled on Engine-Room's `create_*_layer` ops |
@@ -77,8 +77,8 @@ Everything else stays in `ae_run_jsx`.
 
 | Capability | Status | Priority | Borrow from |
 |---|---|---|---|
-| Add or remove an effect, set params by matchName, enable or disable | 🟡 | P2 | Engine-Room `add_effect`, `set_effect_param`, `set_effect_enabled`; kumo `effect.ts` |
-| Apply an animation preset (.ffx) | 🟡 | P3 | a-y-ibrahim `apply-preset`, `search-presets` |
+| Add or remove an effect, set params by matchName, enable or disable | ✅ `ae_add_effect`, `ae_set_effect`, `ae_remove_effect`. Parameters of custom data (Colorama's Output Cycle, the Curves curve) can't be read or set by script ("CUSTOM_VALUE has not been implemented", AE 26.2.1): they are listed `settable: false`. Measured routes in, all inside AE: an expression linking to the same parameter of a hand-set effect (`linkable_by_expression`; the render matched pixel for pixel), a saved .ffx preset, or the effect's own preset menu (Colorama's Use Preset Palette is settable). | (done) | Engine-Room `add_effect`, `set_effect_param`, `set_effect_enabled`; kumo `effect.ts` |
+| Apply an animation preset (.ffx) | ✅ `ae_apply_preset` (selects the target alone, then restores the selection; works without the comp being active), `ae_list_presets` (User Presets of every installed AE version, then AE's own) | (done) | a-y-ibrahim `apply-preset`, `search-presets` |
 | **Text**: set the text, its style (font, size, tracking, leading, fill, stroke), paragraph and box text. TextDocument round-trip traps. | 🟡 | **P1** | kumo `operations/text.ts` (1,099 lines, the most complete); Engine-Room `text.jsx` plus the TextDocument notes in `fragile-areas-ae.md` |
 | Text animators | 🟡 | P3 | Engine-Room `add_text_animator` |
 | Shape layers: add contents, set paths, set shape properties | 🟡 | P2 | Engine-Room `shapes.jsx`; kumo `operations/shape.ts`, `shape-contents.ts` |
@@ -107,6 +107,8 @@ Everything else stays in `ae_run_jsx`.
 | Motion graph of one property: value and speed over time, easing per keyframe pair, overshoot | ✅ `ae_motion_graph` (samples with `valueAtTime`, so expressions count) | (done) | Our own. |
 | **Motion review of a whole comp**: what an animator would flag, with fixes | ✅ `ae_motion_review`. It covers linear moves, starts and stops at full speed, speed jolts at a key, overshoot (info), and keys between frames. Most findings carry a ready `ae_set_keyframe_ease` easy-ease call, so the agent can review, fix (with the user's OK) and review again. Expression-driven properties are sampled past their last key, so a settle isn't called a dead stop. | (done) | Our own. Next: roving middle keys (the easy-ease fix leaves a slight speed dip at them), frame and safe-area bounds. |
 | Match to a reference frame | ❌ | P3 | a-y-ibrahim `match-reference` |
+| **Point tracking** | ✅ `ae_track_point`: NCC pattern matching with sub-pixel refinement on frames AE renders, adapting the pattern below 80% confidence like AE's tracker; stops when the point is lost; optional null with one key per frame. On a 75-frame eased curve: worst error 0.036 px, about 250 ms a frame (AE 26.2.1). AE's own Track Motion can't be driven from scripts, and no outside tool is used (the user's rule). | (done) | Our own. |
+| **Green screen keying with a check** | ✅ `ae_key_greenscreen`: detects the screen colour, applies Keylight, Key Cleaner and Advanced Spill Suppressor (Ultra: Standard crushed a navy subject's blue, measured), then measures screen left, holes, spill and recoloured subject against frames rendered before the key, with ready `ae_set_effect` fixes. Roto Brush can't be scripted; rough masks for non-screen shots were ruled out by the user. | (done) | Our own. |
 
 ## 7. Audio
 
@@ -133,7 +135,9 @@ Everything else stays in `ae_run_jsx`.
 | VO to markers (VoxMark's engine as a tool) | P2 | Reuse AFX VoxMark's transcript-to-marker logic. It avoids rebuilding what we already ship. |
 | Shot versioning: swap a shot's footage for the latest version and log the change | P2 | Builds on replace/relink, plus the Premiere naming convention. |
 | Premiere round trip: send a comp to Premiere, bring renders back | P3 | `premiere-pro-mcp` already has the AE handoff tools; pair with them. |
-| House style / brand checks (fonts, colours, safe areas) | P3 | Engine-Room `get_house_style` and `set_house_style` is the model. Chroma brand tokens come from the `chroma-brand-guidelines` skill. |
+| House style / brand checks (fonts, colours, safe areas) | P3 | Engine-Room `get_house_style` and `set_house_style` is the model. Chroma brand tokens come from the `chroma-brand-guidelines` skill. `ae_brief` now holds a project's brand colours and fonts, so a check has something to check against. |
+| **Ask the user in the panel** (`ae_ask_user`): buttons, pictures per option, or ease curves with a moving preview and draggable handles | ✅ (done) | Choices are shown rather than described. The answer goes straight into a tool call (a curve into `ae_set_keyframe_ease`). Questions live in the service; the panel polls `/ask`. |
+| **Brief and taste** (`ae_brief`, `ae_taste`) | ✅ (done) | The brief sits next to the .aep (`<name>.brief.json`) and returns questions for what is missing. Taste is per user, across projects; `ae_motion_review` uses the preferred ease's handle lengths in its fixes, can leave deliberate linear fades alone, and can treat overshoot as unwanted. |
 
 ## Proposed P1 slice (v0.2)
 

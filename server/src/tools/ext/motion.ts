@@ -707,6 +707,28 @@ export interface ReviewTarget {
 
 const isMoving = (g: MotionSegment) => g.profile !== "hold" && g.profile !== "static";
 
+/** The parts of the user's taste (ae_taste) the review follows. */
+export interface ReviewTaste {
+  preferred_ease?: number[] | null;
+  allow_linear_non_motion?: boolean;
+  avoid_overshoot?: boolean;
+}
+
+/**
+ * The ease a fix applies at the keys where a move starts or stops: easy
+ * ease, or the handle lengths of the user's preferred curve. Speed stays 0
+ * either way, since those keys begin or end the move.
+ */
+export function fixEase(taste: ReviewTaste | undefined): { ease: unknown; name: string } {
+  const c = taste?.preferred_ease;
+  if (!c || c.length !== 4) return { ease: "easy_ease", name: "Easy ease" };
+  const influence = (v: number) => Math.min(100, Math.max(0.1, Math.round(v * 1000) / 10));
+  return {
+    ease: { in: { speed: 0, influence: influence(1 - c[2]) }, out: { speed: 0, influence: influence(c[0]) } },
+    name: "Your preferred ease",
+  };
+}
+
 /**
  * Finds what an animator would flag in one property, from its samples and
  * their analysis. Thresholds are relative to each segment's own peak speed,
@@ -717,15 +739,19 @@ export function reviewProperty(
   analysis: MotionAnalysis,
   speeds: SpeedSample[],
   path: PropertyPath,
-  target: ReviewTarget
+  target: ReviewTarget,
+  taste?: ReviewTaste
 ): MotionFinding[] {
   const findings: MotionFinding[] = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
+  // The user said linear timing off position, scale and rotation is on purpose.
+  const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
     property: { name: s.property.name, path },
   };
+  const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys: number[]) => ({
     tool: "ae_set_keyframe_ease" as const,
     args: {
@@ -733,7 +759,7 @@ export function reviewProperty(
       layer: { id: s.layer.id },
       path,
       keys,
-      ease: "easy_ease",
+      ease: easeArg,
       expect: { project_path: target.project_path, comp_id: target.comp_id },
     },
   });
@@ -750,7 +776,7 @@ export function reviewProperty(
   // speed are one move, so they become one finding whose fix eases only the
   // ends and keeps the move continuous through the keys in between.
   for (let i = 0; i < segs.length; i++) {
-    if (segs[i].profile !== "constant") continue;
+    if (timingOk || segs[i].profile !== "constant") continue;
     let j = i;
     while (
       j + 1 < segs.length &&
@@ -773,7 +799,7 @@ export function reviewProperty(
       kind: "linear",
       keys: [from, to],
       time: segs[i].start,
-      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. Easy ease on keys ${from} and ${to} softens both ends.${middle}`,
+      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
       fix: fix([from, to]),
     });
     i = j;
@@ -781,7 +807,7 @@ export function reviewProperty(
 
   for (let i = 0; i < segs.length; i++) {
     const g = segs[i];
-    if (!isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
+    if (timingOk || !isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
     const startsHere = i === 0 || !isMoving(segs[i - 1]) || segs[i - 1].to_key !== g.from_key;
     const endsHere = i === segs.length - 1 || !isMoving(segs[i + 1]) || segs[i + 1].from_key !== g.to_key;
     if (startsHere && g.start_speed / g.peak_speed > 0.5) {
@@ -791,7 +817,7 @@ export function reviewProperty(
         kind: "abrupt_start",
         keys: [g.from_key],
         time: g.start,
-        message: `${s.property.name} starts moving at ${Math.round((g.start_speed / g.peak_speed) * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. Easy ease on key ${g.from_key} eases it in.`,
+        message: `${s.property.name} starts moving at ${Math.round((g.start_speed / g.peak_speed) * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. ${easeName} on key ${g.from_key} eases it in.`,
         fix: fix([g.from_key]),
       });
     }
@@ -802,7 +828,7 @@ export function reviewProperty(
         kind: "abrupt_stop",
         keys: [g.to_key],
         time: g.end,
-        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round((g.end_speed / g.peak_speed) * 100)}% of its top speed. Easy ease on key ${g.to_key} lets it settle.`,
+        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round((g.end_speed / g.peak_speed) * 100)}% of its top speed. ${easeName} on key ${g.to_key} lets it settle.`,
         fix: fix([g.to_key]),
       });
     }
@@ -828,7 +854,7 @@ export function reviewProperty(
       message:
         `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` +
         (nearlyStopped
-          ? ` Easy ease on key ${a.to_key} smooths the hand-over.`
+          ? ` ${easeName} on key ${a.to_key} smooths the hand-over.`
           : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
       ...(nearlyStopped ? { fix: fix([a.to_key]) } : {}),
     });
@@ -841,13 +867,16 @@ export function reviewProperty(
     for (let i = 1; i < s.values.length; i++) {
       if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
     }
+    const unwanted = taste?.avoid_overshoot === true;
     findings.push({
       ...base,
-      severity: "info",
+      severity: unwanted ? "low" : "info",
       kind: "overshoot",
       keys: [],
       time: r3(s.times[at]),
-      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. Fine for a bounce or settle; a mistake otherwise.`,
+      message:
+        `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. ` +
+        (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise."),
     });
   }
 
@@ -1111,7 +1140,8 @@ export const motionTools: ToolDefinition<any>[] = [
       "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: " +
       "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. " +
       "Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. " +
-      "Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " +
+      "Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. " +
+      "Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeMotionReviewSchema,
     handler: async (args: AeMotionReviewArgs, ctx: ToolContext) => {
@@ -1147,10 +1177,11 @@ export const motionTools: ToolDefinition<any>[] = [
       });
 
       const target: ReviewTarget = { comp_id: args.comp_id, project_path: scanned.list.project_path };
+      const taste = ctx.settings?.get().taste;
       let findings: MotionFinding[] = [];
       for (const { path: propPath, samples } of scanned.sampled) {
         const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target));
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target, taste));
       }
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);
@@ -1174,6 +1205,16 @@ export const motionTools: ToolDefinition<any>[] = [
         by_kind: byKind,
         findings: findings.slice(0, max),
         findings_truncated: findings.length > max,
+        ...(taste &&
+        (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot)
+          ? {
+              taste: {
+                preferred_ease: taste.preferred_ease,
+                allow_linear_non_motion: taste.allow_linear_non_motion,
+                avoid_overshoot: taste.avoid_overshoot,
+              },
+            }
+          : {}),
       };
     },
   },
