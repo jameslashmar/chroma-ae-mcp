@@ -11,7 +11,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { formatBackupTimestamp, verifyTargetGuard } from "../mutate.js";
+import { checkpointDirFor, formatBackupTimestamp, verifyTargetGuard } from "../mutate.js";
 
 export interface FingerprintKeyframe {
   time: number;
@@ -422,8 +422,14 @@ export function getStoredFingerprintCount(): number {
 export function sanitizeCheckpointLabel(label?: string): string {
   const raw = (label ?? "checkpoint").trim();
   if (!raw) return "checkpoint";
-  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "checkpoint";
+  let cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned) return "checkpoint";
+  // A manual label starting with "auto-" would produce a filename
+  // (`<name>_<stamp>_auto-<label>.aep`) indistinguishable from an automatic
+  // checkpoint's own naming, so ae_checkpoint_list's filename-based `auto`
+  // detection (see AUTO_CHECKPOINT_TOOLS below) would misclassify it.
+  if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
+  return cleaned;
 }
 
 // ---------- Zod Schemas ----------
@@ -641,10 +647,9 @@ export const receiptsTools: ToolDefinition<any>[] = [
             });
           }
 
-          const projDir = path.dirname(actualProjectPath);
           const ext = path.extname(actualProjectPath) || ".aep";
           const baseName = path.basename(actualProjectPath, ext);
-          const checkpointDir = path.join(projDir, "_mcp_checkpoints");
+          const checkpointDir = checkpointDirFor(actualProjectPath);
           fs.mkdirSync(checkpointDir, { recursive: true });
 
           const stamp = formatBackupTimestamp(new Date());
@@ -719,8 +724,7 @@ export const receiptsTools: ToolDefinition<any>[] = [
         });
       }
 
-      const projDir = path.dirname(actualProjectPath);
-      const checkpointDir = path.join(projDir, "_mcp_checkpoints");
+      const checkpointDir = checkpointDirFor(actualProjectPath);
 
       if (!fs.existsSync(checkpointDir)) {
         return {

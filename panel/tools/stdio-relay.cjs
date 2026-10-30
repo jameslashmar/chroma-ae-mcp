@@ -19,12 +19,11 @@ const os = require("os");
 const path = require("path");
 const readline = require("readline");
 
-// Mirrors resolveStateDir() in panel/client/common.js, NOT defaultDataDir()
-// in server/src/quarantine.ts -- those two disagree on the non-Windows/
-// non-macOS fallback, and it's common.js's dir that the panel actually
-// writes the token to (see writeTokenFile there). Mirroring the wrong one
-// leaves this relay looking for the token in a directory the panel never
-// writes to on that platform.
+// Mirrors resolveStateDir() in panel/client/common.js, NOT defaultDataDir() in
+// server/src/quarantine.ts — those two disagree on the non-Windows/non-macOS
+// fallback, and it's common.js's dir that the panel actually writes token to
+// (see writeTokenFile there). Mirroring the wrong one left this relay looking
+// for the token in a directory the panel never writes to on that platform.
 function dataDir() {
   if (process.platform === "win32") {
     const localAppData =

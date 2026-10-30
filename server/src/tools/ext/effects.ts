@@ -255,14 +255,20 @@ export interface PresetEntry {
 
 const MAX_PRESET_FILES = 20000;
 const MAX_PRESET_DEPTH = 8;
+const PRESET_CACHE_TTL_MS = 5000;
 
-export function findPresets(
+interface InternalPresetEntry extends PresetEntry {
+  matchKey: string;
+}
+
+let presetCache: { key: string; at: number; all: InternalPresetEntry[]; scanned: number } | null = null;
+
+/** The disk walk only, unfiltered by text — same (folders, source) skip/cap logic as before. */
+function walkPresetsUnfiltered(
   folders: Array<{ kind: string; path: string }>,
-  filter: string | undefined,
   source: "all" | "user" | "app"
-): { presets: PresetEntry[]; scanned: number } {
-  const needle = filter?.trim().toLowerCase() ?? "";
-  const presets: PresetEntry[] = [];
+): { all: InternalPresetEntry[]; scanned: number } {
+  const all: InternalPresetEntry[] = [];
   let scanned = 0;
   for (const folder of folders) {
     const kind = folder.kind === "user" ? "user" : "app";
@@ -281,18 +287,47 @@ export function findPresets(
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const category = path.relative(folder.path, dir).split(path.sep).join("/");
+          const rawCategory = path.relative(folder.path, dir).split(path.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
-          if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
-            presets.push({ name, path: full, category: category || path.basename(folder.path), source: kind });
-          }
+          all.push({
+            name,
+            path: full,
+            category: rawCategory || path.basename(folder.path),
+            matchKey: `${rawCategory}/${name}`.toLowerCase(),
+            source: kind,
+          });
         }
       }
     };
     walk(folder.path, 0);
   }
-  presets.sort((a, b) => (a.source === b.source ? a.path.localeCompare(b.path) : a.source === "user" ? -1 : 1));
-  return { presets, scanned };
+  return { all, scanned };
+}
+
+export function findPresets(
+  folders: Array<{ kind: string; path: string }>,
+  filter: string | undefined,
+  source: "all" | "user" | "app"
+): { presets: PresetEntry[]; scanned: number } {
+  const key = source + "|" + folders.map((f) => `${f.kind}:${f.path}`).join("|");
+  const now = Date.now();
+  // ae_list_presets is commonly called repeatedly in quick succession (narrowing a
+  // text filter) with the same folders/source; re-walking AE's whole Presets tree
+  // from disk synchronously on every call blocks the single-threaded server for the
+  // full walk each time. Cache the unfiltered walk briefly and just re-filter/re-sort
+  // the cached list by text instead of hitting the disk again.
+  let cached: { all: InternalPresetEntry[]; scanned: number };
+  if (presetCache && presetCache.key === key && now - presetCache.at < PRESET_CACHE_TTL_MS) {
+    cached = presetCache;
+  } else {
+    cached = walkPresetsUnfiltered(folders, source);
+    presetCache = { key, at: now, ...cached };
+  }
+  const needle = filter?.trim().toLowerCase() ?? "";
+  const matched = needle ? cached.all.filter((p) => p.matchKey.includes(needle)) : cached.all.slice();
+  matched.sort((a, b) => (a.source === b.source ? a.path.localeCompare(b.path) : a.source === "user" ? -1 : 1));
+  const presets: PresetEntry[] = matched.map(({ matchKey, ...rest }) => rest);
+  return { presets, scanned: cached.scanned };
 }
 
 // ---------- tools ----------

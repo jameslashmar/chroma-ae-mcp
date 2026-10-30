@@ -300,10 +300,11 @@ export const AeMotionGraphSchema = z
     comp_id: z.number().int().describe("CompItem ID that holds the layer."),
     layer: LayerSelectorSchema,
     path: z
-      .array(z.string().min(1))
+      .array(z.union([z.string().min(1), z.number().int().positive()]))
       .min(1)
       .describe(
-        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour."
+        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. " +
+          "A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
       ),
     start: z
       .number()
@@ -660,6 +661,11 @@ export function renderMotionGraph(s: PropertySamples, speeds: SpeedSample[], wid
 
 // ---------- Motion review ----------
 
+/** A step may be a match/display name, or a 1-based positional index for a
+ * sibling inside an indexed group (effects, masks, shape contents) where
+ * siblings can share a name - see listAnimatedProperties in motion.jsx. */
+export type PropertyPath = Array<string | number>;
+
 export type FindingKind = "linear" | "abrupt_start" | "abrupt_stop" | "speed_jump" | "overshoot" | "subframe_key";
 export type FindingSeverity = "medium" | "low" | "info";
 
@@ -667,7 +673,7 @@ export interface MotionFinding {
   severity: FindingSeverity;
   kind: FindingKind;
   layer: { index: number; id: number; name: string };
-  property: { name: string; path: string[] };
+  property: { name: string; path: PropertyPath };
   keys: number[];
   time: number;
   message: string;
@@ -731,7 +737,8 @@ export function fixEase(taste: ReviewTaste | undefined): { ease: unknown; name: 
 export function reviewProperty(
   s: PropertySamples,
   analysis: MotionAnalysis,
-  path: string[],
+  speeds: SpeedSample[],
+  path: PropertyPath,
   target: ReviewTarget,
   taste?: ReviewTaste
 ): MotionFinding[] {
@@ -760,7 +767,6 @@ export function reviewProperty(
   const propPeak = analysis.speed.peak;
   // Samples past the last key exist only for expression-driven properties
   // (see ae_motion_review); motion there means the key is not a dead stop.
-  const speeds = sampleSpeeds(s);
   const keepsMovingAfter = (time: number, speed: number) => {
     const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
     return next !== undefined && (next.speed as number) > 0.3 * speed;
@@ -935,7 +941,7 @@ interface AnimatedPropertyList {
   layers_scanned: number;
   properties: Array<{
     layer: { index: number; id: number; name: string };
-    path: string[];
+    path: PropertyPath;
     name: string;
     matchName: string;
     num_keys: number;
@@ -1152,7 +1158,7 @@ export const motionTools: ToolDefinition<any>[] = [
         const list = listResp.result;
         const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
         // One evalScript per property, so AE's UI gets a breath between them.
-        const sampled: Array<{ path: string[]; samples: PropertySamples }> = [];
+        const sampled: Array<{ path: PropertyPath; samples: PropertySamples }> = [];
         for (let i = 0; i < list.properties.length; i++) {
           const p = list.properties[i];
           // Keys alone stop at the last key; an expression can keep moving
@@ -1175,7 +1181,7 @@ export const motionTools: ToolDefinition<any>[] = [
       let findings: MotionFinding[] = [];
       for (const { path: propPath, samples } of scanned.sampled) {
         const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), propPath, target, taste));
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target, taste));
       }
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);

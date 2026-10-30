@@ -40,6 +40,17 @@ The token belongs to this machine and survives restarts. **Regenerate token** in
 
 `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
 
+**Claude Desktop (Chat and Cowork)** can only launch a command, so it uses the stdio relay that ships with the panel. Open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
+
+```json
+"chroma-ae": {
+  "command": "node",
+  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"]
+}
+```
+
+`<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
+
 No Node, npm or git is needed. The MCP runs on the Node that is built into AE's CEP.
 
 ## Develop (Chroma)
@@ -167,7 +178,7 @@ node qa/runner.js qa/scenarios/voxmark      # report: qa/out/report.md + junit.x
 
 Priorities and reasons are in `docs/FEATURES.md`. The items marked "Atom" come from the review in `docs/ATOM-REVIEW.md`.
 
-- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size, and `ae_checkpoint_revert` opens a copy without overwriting anything. There is no "after" copy: the file on disk only changes when the user saves.
+- [x] **P1: automatic checkpoints around every write** (Atom). Done: the saved .aep is copied before each write, with `ae_auto_checkpoint` to turn it off or cap the size. There is no "after" copy: the file on disk only changes when the user saves. `ae_checkpoint_revert` opens the checkpoint file itself, not a copy of it — After Effects' open project becomes that file, so saving afterwards overwrites the checkpoint. Make another checkpoint first if you need to keep it.
 - [x] **P2: AE skills bundle** (Atom). Done: `ae_skill_list`, `ae_skill_save` (from code, or from `ae_run_jsx` calls by `op_id`) and `ae_skill_run` (every step in one undo group). Project skills in `ae-skills/` next to the .aep, global ones in the data dir.
 - [x] **P2: one-click registration** (Atom). Done: the panel's Register with buttons for Claude Code (its CLI), Claude Desktop, Cursor and Codex (the stdio relay, so no token in their configs). Claude Code is registered again when the token is regenerated.
 - [x] **P2: asset staging plus auto-import** (Atom). Done: `ae_import_assets` imports `_assets/` next to the .aep into an `_Assets` bin (subfolders mirrored, numbered stills as sequences); `watch: true` imports new files within seconds.

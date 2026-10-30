@@ -99,10 +99,12 @@ export const AeSetKeyframeEaseSchema = z.object({
   comp_id: z.number().int().describe("Target CompItem ID."),
   layer: LayerSelectorSchema,
   path: z
-    .array(z.string().min(1))
+    .array(z.union([z.string().min(1), z.number().int().positive()]))
     .min(1)
     .describe(
-      "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'])."
+      "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). " +
+        "A step may be a 1-based positional index instead of a name for a sibling inside an indexed group " +
+        "(effects, masks, shape layer contents), where siblings can share a display name."
     ),
   keys: z
     .array(z.number().int().positive())
@@ -332,7 +334,11 @@ export function curveToSides(
     const from = asVector(a.value);
     const to = asVector(b.value);
     if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
-    const dims = Math.max(1, a.easeOut?.length ?? 1);
+    // Prefer the vector read off the keyframe's actual value: it reflects the property's
+    // real dimensionality even when one side's ease read failed or came back empty (the
+    // JSX host swallows that read error), whereas trusting a.easeOut alone silently falls
+    // back to 1 and produces an ease array too short for b's "in" side.
+    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
 
     let distances: number[];
     if (snap.isSpatial) {

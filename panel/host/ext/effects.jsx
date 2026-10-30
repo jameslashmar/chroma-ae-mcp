@@ -524,6 +524,12 @@
         if (!effectByMatchName(parade, KEY_CLEANER)) {
           added.push(parade.addProperty(KEY_CLEANER).name);
         }
+        // Re-fetch the Effect Parade group itself: the measured trap in BUILDERS.md
+        // only covers one addProperty invalidating a sibling effect's own reference
+        // (`kl`, handled above via klIndex); it was never measured for a *second*
+        // addProperty on the same undo step, so don't trust the group reference to
+        // have survived the Key Cleaner add before looking up Spill in it.
+        parade = effectParade(l);
         var sp = effectByMatchName(parade, SPILL);
         if (!sp) {
           sp = parade.addProperty(SPILL);

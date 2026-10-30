@@ -459,6 +459,12 @@
   var previewTimer = null;
   var dragHandle = -1;
   var imageCache = {};
+  var imageCacheOrder = [];
+  // Bounds imageCache's growth: entries are base64 data URLs up to MAX_IMAGE_BYTES
+  // each, and a long AE session calling ae_ask_user with distinct preview images
+  // (tracking/keying frames) would otherwise grow this unboundedly for the life of
+  // the panel process.
+  var MAX_IMAGE_CACHE_ENTRIES = 24;
 
   function clamp(v, lo, hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -532,6 +538,10 @@
       }
     } catch (e) {}
     imageCache[p] = url;
+    imageCacheOrder.push(p);
+    while (imageCacheOrder.length > MAX_IMAGE_CACHE_ENTRIES) {
+      delete imageCache[imageCacheOrder.shift()];
+    }
     return url;
   }
 

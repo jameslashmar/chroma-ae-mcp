@@ -142,6 +142,9 @@ async function openProjectPath(ctx: ToolContext): Promise<string> {
 export const AeTasteSchema = z.object({
   set: z
     .object({
+      // Deliberately not EASE_CURVE_ARRAY_SCHEMA/MIN_HANDLE-bounded: [0, 0, 1, 1] (x1=0,
+      // x2=1) is a meaningful "clear to linear" sentinel here, checked by isLinear() below
+      // before it's ever applied as a curve - the tighter apply-time bound would reject it.
       preferred_ease: z
         .array(z.number())
         .length(4)
@@ -195,7 +198,9 @@ export const briefTools: ToolDefinition<any>[] = [
         }
         brief = mergeBrief(brief, args.set, new Date());
         const tmp = `${file}.tmp-${process.pid}`;
-        fs.writeFileSync(tmp, JSON.stringify(brief, null, 2), "utf8");
+        // Match settings.ts/quarantine.ts's tmp+rename stores: restrictive permissions,
+        // not the process umask default.
+        fs.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 0o600 });
         fs.renameSync(tmp, file);
         saved = true;
       }

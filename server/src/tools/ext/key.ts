@@ -219,7 +219,10 @@ export function keyAdvice(
     },
   });
   if (m.screen_left_pct >= 0.5) {
-    const next = Math.min(kl.clip_white - 5, kl.clip_black + (m.screen_left_pct > 5 ? 20 : 10));
+    // Clamp above clip_black so the suggestion always actually raises it (and the
+    // message stays true), and below clip_white so the range doesn't invert when
+    // the two clips already sit close together.
+    const next = Math.max(kl.clip_black + 1, Math.min(kl.clip_white - 1, kl.clip_black + (m.screen_left_pct > 5 ? 20 : 10)));
     findings.push({
       issue: "screen_left",
       message: `${m.screen_left_pct}% of the screen is still visible (mean alpha ${m.screen_residual_alpha}). Raising Clip Black from ${kl.clip_black} to ${next} pushes it out.`,
@@ -227,7 +230,9 @@ export function keyAdvice(
     });
   }
   if (m.holes_pct >= 0.5) {
-    const next = Math.max(kl.clip_black + 5, kl.clip_white - (m.holes_pct > 5 ? 20 : 10));
+    // Clamp below clip_white so the suggestion always actually lowers it, and above
+    // clip_black for the same reason as above.
+    const next = Math.min(kl.clip_white - 1, Math.max(kl.clip_black + 1, kl.clip_white - (m.holes_pct > 5 ? 20 : 10)));
     findings.push({
       issue: "holes",
       message: `${m.holes_pct}% of the subject is see-through. Lowering Clip White from ${kl.clip_white} to ${next} fills it in; if the subject itself is greenish, lower Screen Gain instead.`,

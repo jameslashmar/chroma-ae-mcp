@@ -591,7 +591,10 @@ describe("panel/host/ext/motion.jsx sampleProperty in a simulated AE DOM", () =>
 describe("ext/motion review rules", () => {
   const target = { comp_id: 7, project_path: "C:/jobs/Shot.aep" };
   const POS = ["ADBE Transform Group", "ADBE Position"];
-  const review = (s: PropertySamples, propPath = POS) => reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), propPath, target);
+  const review = (s: PropertySamples, propPath = POS) => {
+    const speeds = sampleSpeeds(s);
+    return reviewProperty(s, analyzeMotion(s, speeds), speeds, propPath, target);
+  };
   const named = (s: PropertySamples, name: string, matchName: string, spatial = false): PropertySamples => ({
     ...s,
     property: { ...s.property, name, matchName, spatial },
@@ -739,9 +742,14 @@ describe("ext/motion review rules", () => {
         ease: { in: { speed: 0, influence: 100 }, out: { speed: 0, influence: 20 } },
         name: "Your preferred ease",
       });
-      const f = reviewProperty(linearMove(), analyzeMotion(linearMove(), sampleSpeeds(linearMove())), POS, target, {
-        preferred_ease: [0.4, 0, 0.3, 1],
-      });
+      const f = reviewProperty(
+        linearMove(),
+        analyzeMotion(linearMove(), sampleSpeeds(linearMove())),
+        sampleSpeeds(linearMove()),
+        POS,
+        target,
+        { preferred_ease: [0.4, 0, 0.3, 1] }
+      );
       expect(f[0].fix!.args.ease).toEqual({ in: { speed: 0, influence: 70 }, out: { speed: 0, influence: 40 } });
       expect(f[0].message).toMatch(/Your preferred ease on keys 1 and 2/);
     });
@@ -749,7 +757,7 @@ describe("ext/motion review rules", () => {
     it("leaves linear opacity alone when the user says it is on purpose, but still flags position", () => {
       const fade = named(samplesOf((t) => [100 - 100 * t], [key(1, 0, [100], "linear"), key(2, 1, [0], "linear")], { spatial: false }), "Opacity", "ADBE Opacity");
       const withTaste = (s: PropertySamples, p: string[]) =>
-        reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), p, target, { allow_linear_non_motion: true });
+        reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), sampleSpeeds(s), p, target, { allow_linear_non_motion: true });
       expect(review(fade, ["ADBE Transform Group", "ADBE Opacity"]).some((x) => x.kind === "linear")).toBe(true);
       expect(withTaste(fade, ["ADBE Transform Group", "ADBE Opacity"])).toEqual([]);
       expect(withTaste(linearMove(), POS).map((x) => x.kind)).toContain("linear");
@@ -765,9 +773,14 @@ describe("ext/motion review rules", () => {
         "Rotation",
         "ADBE Rotate Z"
       );
-      const over = reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), ["ADBE Transform Group", "ADBE Rotate Z"], target, {
-        avoid_overshoot: true,
-      }).find((x) => x.kind === "overshoot")!;
+      const over = reviewProperty(
+        s,
+        analyzeMotion(s, sampleSpeeds(s)),
+        sampleSpeeds(s),
+        ["ADBE Transform Group", "ADBE Rotate Z"],
+        target,
+        { avoid_overshoot: true }
+      ).find((x) => x.kind === "overshoot")!;
       expect(over.severity).toBe("low");
       expect(over.message).toMatch(/prefers no overshoot/);
     });
@@ -872,6 +885,11 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     const blur = group("Blur 2", "ADBE Gaussian Blur 2", PropertyType.NAMED_GROUP, [
       prop("Blurriness", "ADBE Gaussian Blur 2-0001", 3, PropertyValueType.OneD, "value + wiggle(2, 5)"),
     ]);
+    // Same display name as `blur` above (e.g. the user duplicated it without
+    // renaming) - an indexed-group sibling can't be addressed by name here.
+    const blur2 = group("Blur 2", "ADBE Gaussian Blur 3", PropertyType.NAMED_GROUP, [
+      prop("Blurriness", "ADBE Gaussian Blur 3-0001", 2),
+    ]);
     const layer = {
       ...group("Ball", "ADBE Vector Layer", PropertyType.NAMED_GROUP, [
         prop("Marker", "ADBE Marker", 4, PropertyValueType.NO_VALUE),
@@ -880,7 +898,7 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
           prop("Opacity", "ADBE Opacity", 1),
           prop("Rotation", "ADBE Rotate Z", 0),
         ]),
-        group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [blur]),
+        group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [blur, blur2]),
       ]),
       index: 1,
       id: 11,
@@ -910,14 +928,17 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     return G.__chromaAe;
   }
 
-  it("finds keyframed numeric properties, naming effects by display name, and skips markers and single keys", () => {
+  it("finds keyframed numeric properties, addressing same-named effects by position, and skips markers and single keys", () => {
     const res = simulatedComp().listAnimatedProperties({ comp_id: 5 });
     expect(res.project_path).toBe("C:\\jobs\\Shot.aep");
     expect(res.comp).toMatchObject({ id: 5, fps: 25, width: 640 });
     expect(res.truncated).toBe(false);
+    // Both effects display as "Blur 2" (one's a duplicate), so the indexed
+    // step is each sibling's 1-based position, not its (colliding) name.
     expect(res.properties.map((p: any) => p.path)).toEqual([
       ["ADBE Transform Group", "ADBE Position"],
-      ["ADBE Effect Parade", "Blur 2", "ADBE Gaussian Blur 2-0001"],
+      ["ADBE Effect Parade", 1, "ADBE Gaussian Blur 2-0001"],
+      ["ADBE Effect Parade", 2, "ADBE Gaussian Blur 3-0001"],
     ]);
     expect(res.properties[0]).toMatchObject({
       layer: { id: 11, name: "Ball" },
@@ -928,6 +949,7 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
       expression: false,
     });
     expect(res.properties[1].expression).toBe(true);
+    expect(res.properties[2]).toMatchObject({ name: "Blurriness", num_keys: 2, expression: false });
   });
 
   it("limits the scan to the given layers", () => {

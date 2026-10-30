@@ -450,7 +450,13 @@ export const trackTools: ToolDefinition<any>[] = [
       });
 
       const mismatches: ReceiptMismatch[] = [];
-      const keys = write.after?.keyframes ?? [];
+      // AE always stores keyframes in ascending time order regardless of insertion order,
+      // but `times`/`values` run backward for a backward track (end < start). Re-order the
+      // read-back to match `values`' order before zipping index-for-index, or a backward
+      // track compares every key against the wrong frame and reports spurious mismatches.
+      const backward = times.length > 1 && times[0] > times[times.length - 1];
+      const keysRaw = write.after?.keyframes ?? [];
+      const keys = backward ? [...keysRaw].reverse() : keysRaw;
       if (write.made.numKeys !== points.length) {
         mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
       }

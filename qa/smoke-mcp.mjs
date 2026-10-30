@@ -121,7 +121,7 @@ async function main() {
       'g.addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([1, 0.8, 0.1, 1]);',
       'var p = d.property("ADBE Transform Group").property("ADBE Position");',
       // A straight, linear move, so the review has something definite to flag.
-      "p.setValueAtTime(0, [80, 240]); p.setValueAtTime(1.5, [320, 240]); p.setValueAtTime(2.5, [560, 240]);",
+      "p.setValueAtTime(0, [80, 240]); p.setValueAtTime(1.5, [560, 240]); p.setValueAtTime(2.5, [560, 300]);",
       "for (var k = 1; k <= 3; k++) p.setInterpolationTypeAtKey(k, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       // An empty comp for ae_skill_run to write into, so the Smoke comp keeps its three layers.
       'var sk = app.project.items.addComp("Skill target", 320, 180, 1, 1, 25);',

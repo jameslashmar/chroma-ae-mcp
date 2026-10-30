@@ -6383,7 +6383,7 @@ function pickNewAssets(candidates, inProject, now, settleMs, sequenceSettleMs = 
   const settling = [];
   for (const c of candidates) {
     if (have.has(normPath(c.path))) already.push(c);
-    else if (now - c.mtimeMs < (c.sequence ? sequenceSettleMs : settleMs)) settling.push(c);
+    else if (now - c.arrivedMs < (c.sequence ? sequenceSettleMs : settleMs)) settling.push(c);
     else fresh.push(c);
   }
   return { fresh, already, settling };
@@ -6956,7 +6956,7 @@ var path4 = __toESM(require("node:path"), 1);
 var DEFAULT_SETTINGS = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
   taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
-  asset_watch: { enabled: false, since: null }
+  asset_watch: { enabled: false, since: null, recursive: true, sequences: true }
 };
 function defaultSettingsFilePath() {
   return path4.join(defaultDataDir(), "settings.json");
@@ -6971,8 +6971,9 @@ function cloneDefaults() {
     asset_watch: { ...DEFAULT_SETTINGS.asset_watch }
   };
 }
+var MIN_HANDLE = 1e-3;
 function isCurve(v) {
-  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1;
+  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) && v[0] >= MIN_HANDLE && v[0] <= 1 && v[2] >= 0 && v[2] <= 1 - MIN_HANDLE;
 }
 var SettingsStore = class {
   filePath;
@@ -6995,6 +6996,8 @@ var SettingsStore = class {
     const next = { ...this.settings.asset_watch };
     if (patch.enabled !== void 0) next.enabled = patch.enabled;
     if (patch.since !== void 0) next.since = patch.since;
+    if (patch.recursive !== void 0) next.recursive = patch.recursive;
+    if (patch.sequences !== void 0) next.sequences = patch.sequences;
     this.settings = { ...this.settings, asset_watch: next };
     this.saveToDisk();
     return this.get();
@@ -7037,6 +7040,8 @@ var SettingsStore = class {
       if (aw && typeof aw === "object") {
         if (typeof aw.enabled === "boolean") this.settings.asset_watch.enabled = aw.enabled;
         if (typeof aw.since === "string" && !Number.isNaN(Date.parse(aw.since))) this.settings.asset_watch.since = aw.since;
+        if (typeof aw.recursive === "boolean") this.settings.asset_watch.recursive = aw.recursive;
+        if (typeof aw.sequences === "boolean") this.settings.asset_watch.sequences = aw.sequences;
       }
     } catch {
     }
@@ -7293,7 +7298,21 @@ function formatBackupTimestamp(date = /* @__PURE__ */ new Date()) {
   const ss = String(date.getSeconds()).padStart(2, "0");
   return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
 }
+var MAX_TRACKED_PROJECTS = 200;
 var lastAutoCheckpoint = /* @__PURE__ */ new Map();
+function rememberAutoCheckpoint(key, entry) {
+  lastAutoCheckpoint.delete(key);
+  lastAutoCheckpoint.set(key, entry);
+  while (lastAutoCheckpoint.size > MAX_TRACKED_PROJECTS) {
+    const oldestKey = lastAutoCheckpoint.keys().next().value;
+    if (oldestKey === void 0) break;
+    lastAutoCheckpoint.delete(oldestKey);
+  }
+}
+function checkpointDirFor(projectPath) {
+  const dir = path6.dirname(projectPath);
+  return path6.basename(dir) === "_mcp_checkpoints" ? dir : path6.join(dir, "_mcp_checkpoints");
+}
 async function autoCheckpoint(ctx, guard, toolName) {
   const settings = ctx.settings?.get().auto_checkpoint ?? DEFAULT_SETTINGS.auto_checkpoint;
   if (!settings.enabled) {
@@ -7316,21 +7335,22 @@ async function autoCheckpoint(ctx, guard, toolName) {
       reason: `The project file is ${sizeMb.toFixed(0)} MB, over the ${settings.max_mb} MB limit (see ae_auto_checkpoint).`
     };
   }
-  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  const unsaved = guard.dirty === false ? {} : { unsaved_changes_not_included: true };
   const key = normalizeGuardPath(projectPath);
   const last = lastAutoCheckpoint.get(key);
   if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs5.existsSync(last.path)) {
+    rememberAutoCheckpoint(key, last);
     return { status: "reused", path: last.path, ...unsaved };
   }
   const ext2 = path6.extname(projectPath) || ".aep";
-  const dir = path6.join(path6.dirname(projectPath), "_mcp_checkpoints");
+  const dir = checkpointDirFor(projectPath);
   const stem = `${path6.basename(projectPath, ext2)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
   try {
     await fs5.promises.mkdir(dir, { recursive: true });
     let target = path6.join(dir, `${stem}${ext2}`);
     for (let n = 2; fs5.existsSync(target); n++) target = path6.join(dir, `${stem}-${n}${ext2}`);
     await fs5.promises.copyFile(projectPath, target, fs5.constants.COPYFILE_EXCL);
-    lastAutoCheckpoint.set(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
     return { status: "created", path: target, ...unsaved };
   } catch (err) {
     return {
@@ -7757,7 +7777,9 @@ var AssetWatcher = class {
       const seen = this.seen.get(key) ?? /* @__PURE__ */ new Set();
       this.seen.set(key, seen);
       const since = settings.since ? Date.parse(settings.since) : 0;
-      const candidates = scanAssets(folder).filter((c) => !seen.has(normPath(c.path)) && c.arrivedMs >= since);
+      const candidates = scanAssets(folder, { recursive: settings.recursive, sequences: settings.sequences }).filter(
+        (c) => !seen.has(normPath(c.path)) && c.arrivedMs >= since
+      );
       if (candidates.length === 0) return null;
       const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
       const now = (this.opts.now ?? Date.now)();
@@ -7789,7 +7811,12 @@ var assetsTools = [
         const prev = ctx.settings.get().asset_watch;
         let since = null;
         if (args.watch) since = prev.enabled && prev.since ? prev.since : (/* @__PURE__ */ new Date()).toISOString();
-        const s = ctx.settings.updateAssetWatch({ enabled: args.watch, since });
+        const s = ctx.settings.updateAssetWatch({
+          enabled: args.watch,
+          since,
+          recursive: args.recursive ?? true,
+          sequences: args.sequences ?? true
+        });
         watch = { ...s.asset_watch, folder: DEFAULT_ASSET_FOLDER, bin: DEFAULT_ASSET_BIN, note: args.watch ? "Files changed from now on are imported automatically." : "Auto-import is off." };
       }
       if (projectPath === "<unsaved>" && !args.folder) {
@@ -9174,12 +9201,14 @@ var KeyframeEasePresetSchema = external_exports.enum([
   "linear",
   "hold"
 ]);
+var MIN_HANDLE2 = 1e-3;
+var EASE_CURVE_ARRAY_SCHEMA = external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= MIN_HANDLE2 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE2, {
+  message: `curve x1 must be within ${MIN_HANDLE2}..1 and x2 within 0..${1 - MIN_HANDLE2}`
+}).describe(
+  "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
+);
 var KeyframeEaseCurveSchema = external_exports.object({
-  curve: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, {
-    message: "curve x1 and x2 must be within 0..1"
-  }).describe(
-    "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
-  )
+  curve: EASE_CURVE_ARRAY_SCHEMA
 });
 var KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema]).describe(
   'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment\'s first key and the in ease of its last, from that segment\'s duration and distance, and leaves every other side alone.'
@@ -9187,8 +9216,8 @@ var KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, 
 var AeSetKeyframeEaseSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("Target CompItem ID."),
   layer: LayerSelectorSchema,
-  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
-    "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'])."
+  path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+    "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
   ),
   keys: external_exports.array(external_exports.number().int().positive()).optional().describe(
     "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
@@ -9268,7 +9297,6 @@ function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot) {
     }
   };
 }
-var MIN_HANDLE = 1e-3;
 function isCurveEase(ease) {
   return typeof ease === "object" && ease !== null && "curve" in ease;
 }
@@ -9311,8 +9339,8 @@ function curveToSides(snapshot, keys, curve) {
   if (segments.length === 0) {
     throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
   }
-  const x1 = Math.min(1, Math.max(MIN_HANDLE, curve[0]));
-  const x2 = Math.min(1 - MIN_HANDLE, Math.max(0, curve[2]));
+  const x1 = Math.min(1, Math.max(MIN_HANDLE2, curve[0]));
+  const x2 = Math.min(1 - MIN_HANDLE2, Math.max(0, curve[2]));
   const y1 = curve[1];
   const y2 = curve[3];
   const warnings = [];
@@ -9336,7 +9364,7 @@ function curveToSides(snapshot, keys, curve) {
     const from = asVector(a.value);
     const to = asVector(b.value);
     if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
-    const dims = Math.max(1, a.easeOut?.length ?? 1);
+    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
     let distances;
     if (snap.isSpatial) {
       distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
@@ -9839,9 +9867,9 @@ var AskOptionSchema = external_exports.object({
   id: external_exports.string().min(1).max(40).describe("Short id returned when the user picks this option."),
   label: external_exports.string().min(1).max(120),
   description: external_exports.string().max(400).optional(),
-  curve: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, {
-    message: "curve x1 and x2 must be within 0..1"
-  }).optional().describe("cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."),
+  curve: EASE_CURVE_ARRAY_SCHEMA.optional().describe(
+    "cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."
+  ),
   image_path: external_exports.string().min(1).optional().describe(
     "Absolute path of a PNG or JPEG shown with the option, such as an ae_contact_sheet or ae_snapshot_frame of that variant."
   )
@@ -10063,6 +10091,9 @@ async function openProjectPath(ctx) {
 }
 var AeTasteSchema = external_exports.object({
   set: external_exports.object({
+    // Deliberately not EASE_CURVE_ARRAY_SCHEMA/MIN_HANDLE-bounded: [0, 0, 1, 1] (x1=0,
+    // x2=1) is a meaningful "clear to linear" sentinel here, checked by isLinear() below
+    // before it's ever applied as a curve - the tighter apply-time bound would reject it.
     preferred_ease: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, { message: "curve x1 and x2 must be within 0..1" }).optional().describe("The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."),
     allow_linear_non_motion: external_exports.boolean().optional().describe("Linear timing on opacity and effect parameters is on purpose: the review stops flagging it."),
     avoid_overshoot: external_exports.boolean().optional().describe("The user doesn't want overshoot: the review reports it as low instead of info."),
@@ -10099,7 +10130,7 @@ var briefTools = [
         }
         brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
         const tmp = `${file}.tmp-${process.pid}`;
-        fs11.writeFileSync(tmp, JSON.stringify(brief, null, 2), "utf8");
+        fs11.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
         fs11.renameSync(tmp, file);
         saved = true;
       }
@@ -10326,8 +10357,11 @@ function checkBuild(prepared, mapping, read) {
           mismatches.push({ path: where, expected, actual: got.text, message: `Text of ${where} reads back differently` });
         }
       } else if (m.target === "footage") {
-        const a = String(got.footage ?? "").replace(/\\/g, "/").toLowerCase();
-        if (a !== String(expected).toLowerCase()) {
+        const foldCase = process.platform === "win32";
+        const a = String(got.footage ?? "").replace(/\\/g, "/");
+        const b = String(expected).replace(/\\/g, "/");
+        const same = foldCase ? a.toLowerCase() === b.toLowerCase() : a === b;
+        if (!same) {
           mismatches.push({ path: where, expected, actual: got.footage, message: `Footage of ${where} reads back differently` });
         }
       } else {
@@ -10653,9 +10687,10 @@ async function runEffectWrite(args, ctx, spec) {
 }
 var MAX_PRESET_FILES = 2e4;
 var MAX_PRESET_DEPTH = 8;
-function findPresets(folders, filter, source) {
-  const needle = filter?.trim().toLowerCase() ?? "";
-  const presets = [];
+var PRESET_CACHE_TTL_MS = 5e3;
+var presetCache = null;
+function walkPresetsUnfiltered(folders, source) {
+  const all = [];
   let scanned = 0;
   for (const folder of folders) {
     const kind = folder.kind === "user" ? "user" : "app";
@@ -10674,18 +10709,37 @@ function findPresets(folders, filter, source) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const category = path14.relative(folder.path, dir).split(path14.sep).join("/");
+          const rawCategory = path14.relative(folder.path, dir).split(path14.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
-          if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
-            presets.push({ name, path: full, category: category || path14.basename(folder.path), source: kind });
-          }
+          all.push({
+            name,
+            path: full,
+            category: rawCategory || path14.basename(folder.path),
+            matchKey: `${rawCategory}/${name}`.toLowerCase(),
+            source: kind
+          });
         }
       }
     };
     walk(folder.path, 0);
   }
-  presets.sort((a, b) => a.source === b.source ? a.path.localeCompare(b.path) : a.source === "user" ? -1 : 1);
-  return { presets, scanned };
+  return { all, scanned };
+}
+function findPresets(folders, filter, source) {
+  const key = source + "|" + folders.map((f) => `${f.kind}:${f.path}`).join("|");
+  const now = Date.now();
+  let cached;
+  if (presetCache && presetCache.key === key && now - presetCache.at < PRESET_CACHE_TTL_MS) {
+    cached = presetCache;
+  } else {
+    cached = walkPresetsUnfiltered(folders, source);
+    presetCache = { key, at: now, ...cached };
+  }
+  const needle = filter?.trim().toLowerCase() ?? "";
+  const matched = needle ? cached.all.filter((p) => p.matchKey.includes(needle)) : cached.all.slice();
+  matched.sort((a, b) => a.source === b.source ? a.path.localeCompare(b.path) : a.source === "user" ? -1 : 1);
+  const presets = matched.map(({ matchKey, ...rest }) => rest);
+  return { presets, scanned: cached.scanned };
 }
 var PRESET_HINT = `Parameters marked settable: false (custom data such as Colorama's Output Cycle or the Curves curve) can't be read or set by script; AE refuses it. Measured routes, all inside AE: (1) link it by expression to the same parameter of an effect the user set up by hand (ae_set_property on the path ['ADBE Effect Parade', <effect name>, <param matchName>], since a section header can share the param's display name, with an expression such as thisComp.layer("Look").effect("Colorama")("Output Cycle"); \`linkable_by_expression\` says when this works); (2) apply an animation preset saved from AE (Animation > Save Animation Preset) with ae_apply_preset; (3) the effect's own preset menu, if any (Colorama's 'Use Preset Palette' is an ordinary settable popup).`;
 var effectsTools = [
@@ -12015,7 +12069,7 @@ function keyAdvice(m, kl, target) {
     }
   });
   if (m.screen_left_pct >= 0.5) {
-    const next = Math.min(kl.clip_white - 5, kl.clip_black + (m.screen_left_pct > 5 ? 20 : 10));
+    const next = Math.max(kl.clip_black + 1, Math.min(kl.clip_white - 1, kl.clip_black + (m.screen_left_pct > 5 ? 20 : 10)));
     findings.push({
       issue: "screen_left",
       message: `${m.screen_left_pct}% of the screen is still visible (mean alpha ${m.screen_residual_alpha}). Raising Clip Black from ${kl.clip_black} to ${next} pushes it out.`,
@@ -12023,7 +12077,7 @@ function keyAdvice(m, kl, target) {
     });
   }
   if (m.holes_pct >= 0.5) {
-    const next = Math.max(kl.clip_black + 5, kl.clip_white - (m.holes_pct > 5 ? 20 : 10));
+    const next = Math.min(kl.clip_white - 1, Math.max(kl.clip_black + 1, kl.clip_white - (m.holes_pct > 5 ? 20 : 10)));
     findings.push({
       issue: "holes",
       message: `${m.holes_pct}% of the subject is see-through. Lowering Clip White from ${kl.clip_white} to ${next} fills it in; if the subject itself is greenish, lower Screen Gain instead.`,
@@ -12361,8 +12415,8 @@ var AXIS_LABEL = [200, 200, 200, 255];
 var AeMotionGraphSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("CompItem ID that holds the layer."),
   layer: LayerSelectorSchema,
-  path: external_exports.array(external_exports.string().min(1)).min(1).describe(
-    "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour."
+  path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+    "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
   ),
   start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the first keyframe, or the work area start without keyframes."),
   end: external_exports.number().min(0).optional().describe("Range end in comp seconds. Default: the last keyframe, or the work area end without keyframes."),
@@ -12601,7 +12655,7 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, path23, target, taste) {
+function reviewProperty(s, analysis, speeds, path23, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
@@ -12624,7 +12678,6 @@ function reviewProperty(s, analysis, path23, target, taste) {
   });
   const segs = analysis.segments;
   const propPeak = analysis.speed.peak;
-  const speeds = sampleSpeeds(s);
   const keepsMovingAfter = (time, speed) => {
     const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
     return next !== void 0 && next.speed > 0.3 * speed;
@@ -12936,7 +12989,7 @@ var motionTools = [
       let findings = [];
       for (const { path: propPath, samples } of scanned.sampled) {
         const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), propPath, target, taste));
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target, taste));
       }
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);
@@ -13480,8 +13533,10 @@ function getStoredFingerprint(id) {
 function sanitizeCheckpointLabel(label) {
   const raw = (label ?? "checkpoint").trim();
   if (!raw) return "checkpoint";
-  const cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  return cleaned || "checkpoint";
+  let cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned) return "checkpoint";
+  if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
+  return cleaned;
 }
 var AeCompFingerprintSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("The CompItem ID to fingerprint.")
@@ -13637,10 +13692,9 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path20.dirname(actualProjectPath);
           const ext2 = path20.extname(actualProjectPath) || ".aep";
           const baseName = path20.basename(actualProjectPath, ext2);
-          const checkpointDir = path20.join(projDir, "_mcp_checkpoints");
+          const checkpointDir = checkpointDirFor(actualProjectPath);
           fs20.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
@@ -13705,8 +13759,7 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path20.dirname(actualProjectPath);
-      const checkpointDir = path20.join(projDir, "_mcp_checkpoints");
+      const checkpointDir = checkpointDirFor(actualProjectPath);
       if (!fs20.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
@@ -14804,7 +14857,9 @@ var trackTools = [
         return { checkpoint, made: made.result, after: after.result };
       });
       const mismatches = [];
-      const keys = write.after?.keyframes ?? [];
+      const backward = times.length > 1 && times[0] > times[times.length - 1];
+      const keysRaw = write.after?.keyframes ?? [];
+      const keys = backward ? [...keysRaw].reverse() : keysRaw;
       if (write.made.numKeys !== points.length) {
         mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
       }
