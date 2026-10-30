@@ -300,10 +300,11 @@ export const AeMotionGraphSchema = z
     comp_id: z.number().int().describe("CompItem ID that holds the layer."),
     layer: LayerSelectorSchema,
     path: z
-      .array(z.string().min(1))
+      .array(z.union([z.string().min(1), z.number().int().positive()]))
       .min(1)
       .describe(
-        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour."
+        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. " +
+          "A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
       ),
     start: z
       .number()
@@ -500,9 +501,13 @@ export function analyzeMotion(s: PropertySamples, speeds: SpeedSample[]): Motion
   for (let k = 0; k + 1 < s.keys.length; k++) {
     const a = s.keys[k];
     const b = s.keys[k + 1];
+    // Only intervals wholly between the two keys. One that straddles a key
+    // (a key between frames) blends both segments' speeds, so it counts for
+    // neither: measured on AE 26.2.1, a 160 then 240 px/s linear move gave a
+    // 200 px/s straddling interval that made the first segment look uneven.
     const inside: Array<{ speed: number; time: number; dt: number }> = [];
     speeds.forEach((sp, i) => {
-      if (sp.speed === null || sp.time < a.time || sp.time > b.time) return;
+      if (sp.speed === null || s.times[i] < a.time - 1e-6 || s.times[i + 1] > b.time + 1e-6) return;
       inside.push({ speed: sp.speed, time: sp.time, dt: s.times[i + 1] - s.times[i] });
     });
     if (inside.length === 0) continue;
@@ -652,6 +657,270 @@ export function renderMotionGraph(s: PropertySamples, speeds: SpeedSample[], wid
   drawText(img, `${s.start.toFixed(2)}s`, left, height - bottom + 4, scale, AXIS_LABEL);
   rightAlign(`${s.end.toFixed(2)}s`, left + plotW, height - bottom + 4);
   return img;
+}
+
+// ---------- Motion review ----------
+
+/** A step may be a match/display name, or a 1-based positional index for a
+ * sibling inside an indexed group (effects, masks, shape contents) where
+ * siblings can share a name - see listAnimatedProperties in motion.jsx. */
+export type PropertyPath = Array<string | number>;
+
+export type FindingKind = "linear" | "abrupt_start" | "abrupt_stop" | "speed_jump" | "overshoot" | "subframe_key";
+export type FindingSeverity = "medium" | "low" | "info";
+
+export interface MotionFinding {
+  severity: FindingSeverity;
+  kind: FindingKind;
+  layer: { index: number; id: number; name: string };
+  property: { name: string; path: PropertyPath };
+  keys: number[];
+  time: number;
+  message: string;
+  /** A ready-to-run ae_set_keyframe_ease call. Apply it only after the user agrees. */
+  fix?: { tool: "ae_set_keyframe_ease"; args: Record<string, unknown> };
+}
+
+// Properties where constant-speed timing reads as mechanical. Elsewhere
+// (opacity fades, effect parameters) linear keys are often deliberate, so
+// those findings are low severity.
+const MOTION_MATCH_NAMES = new Set([
+  "ADBE Position",
+  "ADBE Position_0",
+  "ADBE Position_1",
+  "ADBE Position_2",
+  "ADBE Anchor Point",
+  "ADBE Scale",
+  "ADBE Rotate Z",
+  "ADBE Rotate X",
+  "ADBE Rotate Y",
+  "ADBE Orientation",
+]);
+
+const SEVERITY_ORDER: Record<FindingSeverity, number> = { medium: 0, low: 1, info: 2 };
+
+/** Where the fix calls point: the comp and the guard they must pass. */
+export interface ReviewTarget {
+  comp_id: number;
+  project_path: string;
+}
+
+const isMoving = (g: MotionSegment) => g.profile !== "hold" && g.profile !== "static";
+
+/**
+ * Finds what an animator would flag in one property, from its samples and
+ * their analysis. Thresholds are relative to each segment's own peak speed,
+ * so they work the same for pixels, degrees and percent.
+ */
+export function reviewProperty(
+  s: PropertySamples,
+  analysis: MotionAnalysis,
+  speeds: SpeedSample[],
+  path: PropertyPath,
+  target: ReviewTarget
+): MotionFinding[] {
+  const findings: MotionFinding[] = [];
+  const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
+  const unit = s.property.spatial ? "px/s" : "/s";
+  const base = {
+    layer: s.layer,
+    property: { name: s.property.name, path },
+  };
+  const fix = (keys: number[]) => ({
+    tool: "ae_set_keyframe_ease" as const,
+    args: {
+      comp_id: target.comp_id,
+      layer: { id: s.layer.id },
+      path,
+      keys,
+      ease: "easy_ease",
+      expect: { project_path: target.project_path, comp_id: target.comp_id },
+    },
+  });
+  const segs = analysis.segments;
+  const propPeak = analysis.speed.peak;
+  // Samples past the last key exist only for expression-driven properties
+  // (see ae_motion_review); motion there means the key is not a dead stop.
+  const keepsMovingAfter = (time: number, speed: number) => {
+    const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
+    return next !== undefined && (next.speed as number) > 0.3 * speed;
+  };
+
+  // Constant-speed runs. Neighbouring linear segments at about the same
+  // speed are one move, so they become one finding whose fix eases only the
+  // ends and keeps the move continuous through the keys in between.
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i].profile !== "constant") continue;
+    let j = i;
+    while (
+      j + 1 < segs.length &&
+      segs[j + 1].profile === "constant" &&
+      Math.min(segs[j].peak_speed, segs[j + 1].peak_speed) / Math.max(segs[j].peak_speed, segs[j + 1].peak_speed) > 0.75
+    ) {
+      j++;
+    }
+    const from = segs[i].from_key;
+    const to = segs[j].to_key;
+    // Measured on AE 26.2.1: the keys in between keep their linear speed, so
+    // the eased move dips there (about 15% for one middle key).
+    const middle =
+      j > i
+        ? ` The key${j - i > 1 ? "s" : ""} in between keep${j - i > 1 ? "" : "s"} its linear speed, which leaves a slight dip there; making ${j - i > 1 ? "them" : "it"} roving in AE (Keyframe > Rove Across Time) gives one smooth curve.`
+        : "";
+    findings.push({
+      ...base,
+      severity: motion ? "medium" : "low",
+      kind: "linear",
+      keys: [from, to],
+      time: segs[i].start,
+      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. Easy ease on keys ${from} and ${to} softens both ends.${middle}`,
+      fix: fix([from, to]),
+    });
+    i = j;
+  }
+
+  for (let i = 0; i < segs.length; i++) {
+    const g = segs[i];
+    if (!isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
+    const startsHere = i === 0 || !isMoving(segs[i - 1]) || segs[i - 1].to_key !== g.from_key;
+    const endsHere = i === segs.length - 1 || !isMoving(segs[i + 1]) || segs[i + 1].from_key !== g.to_key;
+    if (startsHere && g.start_speed / g.peak_speed > 0.5) {
+      findings.push({
+        ...base,
+        severity: motion ? "medium" : "low",
+        kind: "abrupt_start",
+        keys: [g.from_key],
+        time: g.start,
+        message: `${s.property.name} starts moving at ${Math.round((g.start_speed / g.peak_speed) * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. Easy ease on key ${g.from_key} eases it in.`,
+        fix: fix([g.from_key]),
+      });
+    }
+    if (endsHere && g.end_speed / g.peak_speed > 0.5 && !keepsMovingAfter(g.end, g.end_speed)) {
+      findings.push({
+        ...base,
+        severity: motion ? "medium" : "low",
+        kind: "abrupt_stop",
+        keys: [g.to_key],
+        time: g.end,
+        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round((g.end_speed / g.peak_speed) * 100)}% of its top speed. Easy ease on key ${g.to_key} lets it settle.`,
+        fix: fix([g.to_key]),
+      });
+    }
+  }
+
+  // A jolt where one segment hands over to the next at a very different speed.
+  for (let i = 0; i + 1 < segs.length; i++) {
+    const a = segs[i];
+    const b = segs[i + 1];
+    if (!isMoving(a) || !isMoving(b) || a.to_key !== b.from_key) continue;
+    const hi = Math.max(a.end_speed, b.start_speed);
+    const lo = Math.min(a.end_speed, b.start_speed);
+    if (hi < 0.25 * propPeak || lo > 0.3 * hi) continue;
+    // From (nearly) stopped to fast, easing the key smooths it without
+    // changing the move. Between two fast speeds it would add a stop, so no fix.
+    const nearlyStopped = lo < 0.1 * hi;
+    findings.push({
+      ...base,
+      severity: "medium",
+      kind: "speed_jump",
+      keys: [a.to_key],
+      time: a.end,
+      message:
+        `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` +
+        (nearlyStopped
+          ? ` Easy ease on key ${a.to_key} smooths the hand-over.`
+          : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
+      ...(nearlyStopped ? { fix: fix([a.to_key]) } : {}),
+    });
+  }
+
+  for (const o of analysis.overshoot) {
+    const d = o.dimension;
+    const past = o.above_keys_by >= o.below_keys_by;
+    let at = 0;
+    for (let i = 1; i < s.values.length; i++) {
+      if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
+    }
+    findings.push({
+      ...base,
+      severity: "info",
+      kind: "overshoot",
+      keys: [],
+      time: r3(s.times[at]),
+      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. Fine for a bounce or settle; a mistake otherwise.`,
+    });
+  }
+
+  // One finding per property, however many of its keys are off the frame grid.
+  const fps = s.comp.fps > 0 ? s.comp.fps : 25;
+  const offGrid = s.keys
+    .map((k) => ({ index: k.index, time: k.time, frame: k.time * fps }))
+    .filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
+  if (offGrid.length > 0) {
+    const list = (items: string[]) =>
+      items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+    const many = offGrid.length > 1;
+    findings.push({
+      ...base,
+      severity: "low",
+      kind: "subframe_key",
+      keys: offGrid.map((k) => k.index),
+      time: r3(offGrid[0].time),
+      message:
+        `${many ? "Keys" : "Key"} ${list(offGrid.map((k) => String(k.index)))} of ${s.property.name} ${many ? "sit" : "sits"} between frames ` +
+        `(frame ${list(offGrid.map((k) => formatNumber(k.frame)))}), so no rendered frame lands on ${many ? "them" : "it"}. ` +
+        `Move ${many ? "them" : "it"} to frame ${list(offGrid.map((k) => String(Math.round(k.frame))))}.`,
+    });
+  }
+  return findings;
+}
+
+export function sortFindings(findings: MotionFinding[]): MotionFinding[] {
+  return [...findings].sort(
+    (a, b) =>
+      SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
+      a.layer.index - b.layer.index ||
+      a.time - b.time
+  );
+}
+
+export const AeMotionReviewSchema = z.object({
+  comp_id: z.number().int().describe("CompItem ID to review."),
+  layers: z
+    .array(LayerSelectorSchema)
+    .max(50)
+    .optional()
+    .describe("Only review these layers. Default: every layer in the comp."),
+  include_info: z
+    .boolean()
+    .optional()
+    .describe("Include info findings (overshoot past keyframe values). Default true."),
+  max_findings: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Return at most this many findings, most severe first (default 50)."),
+});
+
+export type AeMotionReviewArgs = z.infer<typeof AeMotionReviewSchema>;
+
+interface AnimatedPropertyList {
+  comp: { id: number; name: string; fps: number; width: number; height: number; workAreaStart: number; workAreaDuration: number };
+  project_path: string;
+  layers_scanned: number;
+  properties: Array<{
+    layer: { index: number; id: number; name: string };
+    path: PropertyPath;
+    name: string;
+    matchName: string;
+    num_keys: number;
+    first_key_time: number;
+    last_key_time: number;
+    expression: boolean;
+  }>;
+  truncated: boolean;
 }
 
 async function runQueued<T>(ctx: ToolContext, label: string, opId: string, fn: () => Promise<T>): Promise<T> {
@@ -833,6 +1102,78 @@ export const motionTools: ToolDefinition<any>[] = [
               })),
             }
           : {}),
+      };
+    },
+  },
+  {
+    name: "ae_motion_review",
+    description:
+      "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: " +
+      "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. " +
+      "Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. " +
+      "Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " +
+      AGENT_SAFETY_GUIDANCE,
+    schema: AeMotionReviewSchema,
+    handler: async (args: AeMotionReviewArgs, ctx: ToolContext) => {
+      const opId = ctx.bridge.newOpId();
+      const label = `ae_motion_review(${args.comp_id})`;
+      const scanned = await runQueued(ctx, label, opId, async () => {
+        const listResp = await ctx.bridge.evalRaw<AnimatedPropertyList>({
+          id: `${opId}_list`,
+          script: buildJsxCall("listAnimatedProperties", { comp_id: args.comp_id, layers: args.layers }),
+          label: `${label} list`,
+          mutates: false,
+          toolName: "ae_motion_review",
+        });
+        const list = listResp.result;
+        const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
+        // One evalScript per property, so AE's UI gets a breath between them.
+        const sampled: Array<{ path: PropertyPath; samples: PropertySamples }> = [];
+        for (let i = 0; i < list.properties.length; i++) {
+          const p = list.properties[i];
+          // Keys alone stop at the last key; an expression can keep moving
+          // (a settle or a bounce), so sample those to the work area end.
+          const end = p.expression && workAreaEnd > p.last_key_time + 1e-6 ? workAreaEnd : undefined;
+          const resp = await ctx.bridge.evalRaw<PropertySamples>({
+            id: `${opId}_p${i}`,
+            script: buildJsxCall("sampleProperty", { comp_id: args.comp_id, layer: { id: p.layer.id }, path: p.path, end }),
+            label: `${label} ${p.layer.name} > ${p.name}`,
+            mutates: false,
+            toolName: "ae_motion_review",
+          });
+          sampled.push({ path: p.path, samples: resp.result });
+        }
+        return { list, sampled };
+      });
+
+      const target: ReviewTarget = { comp_id: args.comp_id, project_path: scanned.list.project_path };
+      let findings: MotionFinding[] = [];
+      for (const { path: propPath, samples } of scanned.sampled) {
+        const speeds = sampleSpeeds(samples);
+        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target));
+      }
+      if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
+      findings = sortFindings(findings);
+
+      const counts = { medium: 0, low: 0, info: 0 };
+      const byKind: Record<string, number> = {};
+      for (const f of findings) {
+        counts[f.severity]++;
+        byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
+      }
+      const max = args.max_findings ?? 50;
+      return {
+        ok: true,
+        comp: scanned.list.comp,
+        project_path: scanned.list.project_path,
+        layers_scanned: scanned.list.layers_scanned,
+        properties_scanned: scanned.sampled.length,
+        properties_truncated: scanned.list.truncated,
+        clean: counts.medium === 0 && counts.low === 0,
+        counts,
+        by_kind: byKind,
+        findings: findings.slice(0, max),
+        findings_truncated: findings.length > max,
       };
     },
   },

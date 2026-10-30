@@ -11,6 +11,7 @@ import { zodToJsonSchema } from "../src/schema.js";
 import {
   AeContactSheetSchema,
   AeMotionGraphSchema,
+  AeMotionReviewSchema,
   analyzeMotion,
   buildContactSheet,
   chooseColumns,
@@ -22,8 +23,10 @@ import {
   type PropertyKey,
   type PropertySamples,
   renderMotionGraph,
+  reviewProperty,
   sampleSpeeds,
   segmentProfile,
+  sortFindings,
   sheetLayout,
 } from "../src/tools/ext/motion.js";
 import { fitWithin, resizeArea, textWidth } from "../src/tools/ext/png-utils.js";
@@ -581,5 +584,323 @@ describe("panel/host/ext/motion.jsx sampleProperty in a simulated AE DOM", () =>
     const { A } = simulatedAe({ threeDLayer: false });
     expect(() => A.sampleProperty({ ...args, path: ["ADBE Transform Group", "Nope"] })).toThrow(/not found/);
     expect(() => A.sampleProperty({ ...args, start: 1, end: 1 })).toThrow(/Empty range/);
+  });
+});
+
+describe("ext/motion review rules", () => {
+  const target = { comp_id: 7, project_path: "C:/jobs/Shot.aep" };
+  const POS = ["ADBE Transform Group", "ADBE Position"];
+  const review = (s: PropertySamples, propPath = POS) => {
+    const speeds = sampleSpeeds(s);
+    return reviewProperty(s, analyzeMotion(s, speeds), speeds, propPath, target);
+  };
+  const named = (s: PropertySamples, name: string, matchName: string, spatial = false): PropertySamples => ({
+    ...s,
+    property: { ...s.property, name, matchName, spatial },
+  });
+
+  it("flags a linear move once, easing only its ends, with a ready ae_set_keyframe_ease call", () => {
+    // Two linear segments at the same speed: one continuous move from key 1 to key 3.
+    const s = samplesOf((t) => [100 * t, 0], [key(1, 0, [0, 0], "linear"), key(2, 1, [100, 0], "linear"), key(3, 2, [200, 0], "linear")]);
+    const f = review(s);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ kind: "linear", severity: "medium", keys: [1, 3], time: 0 });
+    expect(f[0].message).toMatch(/constant speed \(100\.0 px\/s\) from key 1 to key 3/);
+    expect(f[0].message).toMatch(/The key in between keeps its linear speed.*roving/);
+    expect(f[0].fix).toEqual({
+      tool: "ae_set_keyframe_ease",
+      args: {
+        comp_id: 7,
+        layer: { id: 11 },
+        path: POS,
+        keys: [1, 3],
+        ease: "easy_ease",
+        expect: { project_path: "C:/jobs/Shot.aep", comp_id: 7 },
+      },
+    });
+  });
+
+  it("keeps a key between frames from blending two linear segments (measured on AE 26.2.1)", () => {
+    // 160 px/s to key 2 at 1.5s (frame 37.5), then 240 px/s. The interval
+    // 1.48-1.52s straddles the key and measures 200 px/s.
+    const s = samplesOf(
+      (t) => (t <= 1.5 ? [80 + 160 * t, 240] : [320 + 240 * (t - 1.5), 240]),
+      [key(1, 0, [80, 240], "linear"), key(2, 1.5, [320, 240], "linear"), key(3, 2.5, [560, 240], "linear")],
+      { end: 2.5 }
+    );
+    const a = analyzeMotion(s, sampleSpeeds(s));
+    expect(a.segments.map((g) => [g.profile, g.start_speed, g.end_speed])).toEqual([
+      ["constant", 160, 160],
+      ["constant", 240, 240],
+    ]);
+    const kinds = review(s).map((x) => x.kind).sort();
+    expect(kinds).toEqual(["linear", "linear", "subframe_key"]);
+  });
+
+  it("leaves an eased move alone", () => {
+    expect(review(samplesOf((t) => [100 * smoothstep(t), 0], [key(1, 0, [0, 0]), key(2, 1, [100, 0])]))).toEqual([]);
+  });
+
+  it("rates a linear opacity fade low, since fades are often linear on purpose", () => {
+    const s = named(samplesOf((t) => [100 * t], [key(1, 0, [0], "linear"), key(2, 1, [100], "linear")], { spatial: false }), "Opacity", "ADBE Opacity");
+    const f = review(s, ["ADBE Transform Group", "ADBE Opacity"]);
+    expect(f.map((x) => [x.kind, x.severity])).toEqual([["linear", "low"]]);
+    expect(f[0].message).toMatch(/100\.0 \/s/);
+  });
+
+  it("flags motion that starts or stops at full speed", () => {
+    // Ease-out shape: fastest at key 1, settles into key 2.
+    const startsFast = review(samplesOf((t) => [100 * (1 - (1 - t) ** 2), 0], [key(1, 0, [0, 0]), key(2, 1, [100, 0])]));
+    expect(startsFast.map((x) => [x.kind, x.keys])).toEqual([["abrupt_start", [1]]]);
+    expect(startsFast[0].fix?.args.keys).toEqual([1]);
+
+    // Ease-in shape: fastest as it hits key 2.
+    const stopsDead = review(samplesOf((t) => [100 * t * t, 0], [key(1, 0, [0, 0]), key(2, 1, [100, 0])]));
+    expect(stopsDead.map((x) => [x.kind, x.keys])).toEqual([["abrupt_stop", [2]]]);
+    expect(stopsDead[0].message).toMatch(/stops dead at key 2/);
+  });
+
+  it("flags a jolt at a key where a stop hands over to a fast move", () => {
+    // Eases to a stop at key 2 (1s), then leaves it at full linear speed.
+    const s = samplesOf(
+      (t) => (t <= 1 ? [50 * (1 - (1 - t) ** 2), 0] : [50 + 100 * (t - 1), 0]),
+      [key(1, 0, [0, 0]), key(2, 1, [50, 0], "linear"), key(3, 2, [150, 0], "linear")]
+    );
+    const f = review(s);
+    const jump = f.find((x) => x.kind === "speed_jump")!;
+    expect(jump).toMatchObject({ severity: "medium", keys: [2], time: 1 });
+    expect(jump.fix?.args.keys).toEqual([2]);
+    expect(f.map((x) => x.kind).sort()).toEqual(["abrupt_start", "linear", "speed_jump"]);
+  });
+
+  it("gives no fix for a jump between two fast speeds, since easing the key would add a stop", () => {
+    const s = samplesOf(
+      (t) => (t <= 1 ? [100 * t, 0] : [100 + 400 * (t - 1), 0]),
+      [key(1, 0, [0, 0], "linear"), key(2, 1, [100, 0], "linear"), key(3, 2, [500, 0], "linear")]
+    );
+    const jump = review(s).find((x) => x.kind === "speed_jump")!;
+    expect(jump.fix).toBeUndefined();
+    expect(jump.message).toMatch(/Match the speeds/);
+  });
+
+  it("notes overshoot as info, at the time it peaks", () => {
+    const s = named(
+      samplesOf(
+        (t) => [t <= 1 ? 90 * smoothstep(t) : 90 + 20 * Math.sin(2 * Math.PI * (t - 1)) * Math.exp(-3 * (t - 1))],
+        [key(1, 0, [0]), key(2, 1, [90])],
+        { end: 1.5, spatial: false }
+      ),
+      "Rotation",
+      "ADBE Rotate Z"
+    );
+    const over = review(s, ["ADBE Transform Group", "ADBE Rotate Z"]).find((x) => x.kind === "overshoot")!;
+    expect(over.severity).toBe("info");
+    expect(over.time).toBeGreaterThan(1);
+    expect(over.time).toBeLessThan(1.3);
+    expect(over.fix).toBeUndefined();
+  });
+
+  it("flags keys between frames, once per property", () => {
+    const s = samplesOf((t) => [100 * smoothstep(Math.min(1, t / 0.5)), 0], [key(1, 0, [0, 0]), key(2, 0.5, [100, 0])], { end: 0.52 });
+    const sub = review(s).filter((x) => x.kind === "subframe_key");
+    expect(sub).toHaveLength(1);
+    expect(sub[0]).toMatchObject({ severity: "low", keys: [2] });
+    expect(sub[0].message).toBe(
+      "Key 2 of Position sits between frames (frame 12.50), so no rendered frame lands on it. Move it to frame 13."
+    );
+
+    const two = samplesOf((t) => [100 * smoothstep(Math.min(1, Math.max(0, t - 0.5)))], [key(1, 0.5, [0]), key(2, 1.5, [100])], { start: 0.5, end: 1.5 });
+    const grouped = review(two).filter((x) => x.kind === "subframe_key");
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].keys).toEqual([1, 2]);
+    expect(grouped[0].message).toMatch(/^Keys 1 and 2 of Position sit between frames \(frame 12\.50 and 37\.50\).*Move them to frame 13 and 38\.$/);
+  });
+
+  it("does not call a key a dead stop when an expression keeps it moving, and reports the overshoot", () => {
+    // Speeds up into key 2, then an expression settle carries the motion on (sampled past the key).
+    const s = named(
+      samplesOf(
+        (t) => [t <= 1 ? 90 * t * t : 90 + 15 * Math.sin(10 * (t - 1)) * Math.exp(-3 * (t - 1))],
+        [key(1, 0, [0]), key(2, 1, [90])],
+        { end: 2, spatial: false }
+      ),
+      "Rotation",
+      "ADBE Rotate Z"
+    );
+    const kinds = review(s, ["ADBE Transform Group", "ADBE Rotate Z"]).map((x) => x.kind);
+    expect(kinds).not.toContain("abrupt_stop");
+    expect(kinds).toContain("overshoot");
+  });
+
+  it("sorts by severity, then layer, then time", () => {
+    const f = (severity: "medium" | "low" | "info", index: number, time: number) =>
+      ({ severity, layer: { index, id: index, name: "" }, time }) as any;
+    const sorted = sortFindings([f("info", 1, 0), f("low", 1, 0), f("medium", 2, 0), f("medium", 1, 2), f("medium", 1, 1)]);
+    expect(sorted.map((x) => `${x.severity}:${x.layer.index}:${x.time}`)).toEqual([
+      "medium:1:1",
+      "medium:1:2",
+      "medium:2:0",
+      "low:1:0",
+      "info:1:0",
+    ]);
+  });
+});
+
+describe("ae_motion_review against a fake AE", () => {
+  it("lists the animated properties, samples each one, and returns sorted findings with fixes", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-review-"));
+    try {
+      const queue = new SingleWriterQueue();
+      const quarantine = new QuarantineStore(path.join(dir, "quarantine.json"));
+      const linear = samplesOf((t) => [100 * t, 0], [key(1, 0, [0, 0], "linear"), key(2, 1, [100, 0], "linear")]);
+      const eased = {
+        ...samplesOf((t) => [100 * smoothstep(t)], [key(1, 0, [0]), key(2, 1, [100])], { spatial: false }),
+        layer: { index: 2, id: 22, name: "Logo" },
+      };
+      eased.property = { ...eased.property, name: "Scale", matchName: "ADBE Scale" };
+      const scripts: string[] = [];
+      const host = new PanelHost({
+        evalScript: async (script) => {
+          scripts.push(script);
+          if (script.includes("__chromaAe.listAnimatedProperties(")) {
+            return {
+              ok: true,
+              durationMs: 1,
+              result: {
+                comp: { id: 7, name: "Shot", fps: 25, width: 1920, height: 1080, workAreaStart: 0, workAreaDuration: 2 },
+                project_path: "C:/jobs/Shot.aep",
+                layers_scanned: 2,
+                truncated: false,
+                properties: [
+                  { layer: linear.layer, path: ["ADBE Transform Group", "ADBE Position"], name: "Position", matchName: "ADBE Position", num_keys: 2, first_key_time: 0, last_key_time: 1, expression: false },
+                  { layer: eased.layer, path: ["ADBE Transform Group", "ADBE Scale"], name: "Scale", matchName: "ADBE Scale", num_keys: 2, first_key_time: 0, last_key_time: 1, expression: true },
+                ],
+              },
+            };
+          }
+          return { ok: true, durationMs: 1, result: script.includes('"id":22') ? eased : linear };
+        },
+        queue,
+        quarantine,
+      });
+      const tool = motionTools.find((t) => t.name === "ae_motion_review")!;
+      const res = (await tool.handler(AeMotionReviewSchema.parse({ comp_id: 7 }), { bridge: host, queue, quarantine })) as Record<string, any>;
+
+      expect(scripts).toHaveLength(3);
+      const sampleCalls = scripts.filter((s) => s.includes("__chromaAe.sampleProperty("));
+      expect(sampleCalls).toHaveLength(2);
+      // Keys only: sampled between the keys. Expression: on to the work area end.
+      expect(sampleCalls.find((s) => s.includes('"id":11'))).not.toContain('"end"');
+      expect(sampleCalls.find((s) => s.includes('"id":22'))).toContain('"end":2');
+      expect(res).toMatchObject({ ok: true, properties_scanned: 2, clean: false, counts: { medium: 1, low: 0, info: 0 }, by_kind: { linear: 1 } });
+      expect(res.findings[0].layer.name).toBe("Ball");
+      expect(res.findings[0].fix.args).toMatchObject({ layer: { id: 11 }, keys: [1, 2], ease: "easy_ease", expect: { project_path: "C:/jobs/Shot.aep" } });
+      expect(AeMotionReviewSchema.safeParse({ comp_id: 7, max_findings: 0 }).success).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../../panel/host/ext/motion.jsx"), "utf8");
+  const PropertyType = { PROPERTY: 6812, INDEXED_GROUP: 6813, NAMED_GROUP: 6814 };
+  const PropertyValueType = { OneD: 1, TwoD: 2, TwoD_SPATIAL: 3, ThreeD: 4, ThreeD_SPATIAL: 5, COLOR: 6, NO_VALUE: 7, TEXT_DOCUMENT: 8 };
+
+  const prop = (name: string, matchName: string, numKeys: number, valueType = PropertyValueType.OneD, expression = "") => ({
+    name,
+    matchName,
+    numKeys,
+    propertyType: PropertyType.PROPERTY,
+    propertyValueType: valueType,
+    keyTime: (k: number) => k * 0.5,
+    canSetExpression: true,
+    expressionEnabled: expression !== "",
+    expression,
+  });
+  const group = (name: string, matchName: string, type: number, children: any[]) => ({
+    name,
+    matchName,
+    propertyType: type,
+    numProperties: children.length,
+    property: (k: number) => children[k - 1],
+  });
+
+  function simulatedComp() {
+    class CompItem {}
+    const blur = group("Blur 2", "ADBE Gaussian Blur 2", PropertyType.NAMED_GROUP, [
+      prop("Blurriness", "ADBE Gaussian Blur 2-0001", 3, PropertyValueType.OneD, "value + wiggle(2, 5)"),
+    ]);
+    // Same display name as `blur` above (e.g. the user duplicated it without
+    // renaming) - an indexed-group sibling can't be addressed by name here.
+    const blur2 = group("Blur 2", "ADBE Gaussian Blur 3", PropertyType.NAMED_GROUP, [
+      prop("Blurriness", "ADBE Gaussian Blur 3-0001", 2),
+    ]);
+    const layer = {
+      ...group("Ball", "ADBE Vector Layer", PropertyType.NAMED_GROUP, [
+        prop("Marker", "ADBE Marker", 4, PropertyValueType.NO_VALUE),
+        group("Transform", "ADBE Transform Group", PropertyType.NAMED_GROUP, [
+          prop("Position", "ADBE Position", 3, PropertyValueType.ThreeD_SPATIAL),
+          prop("Opacity", "ADBE Opacity", 1),
+          prop("Rotation", "ADBE Rotate Z", 0),
+        ]),
+        group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [blur, blur2]),
+      ]),
+      index: 1,
+      id: 11,
+    };
+    const comp = Object.assign(new CompItem(), {
+      id: 5,
+      name: "Shot",
+      frameRate: 25,
+      width: 640,
+      height: 360,
+      workAreaStart: 0,
+      workAreaDuration: 2,
+      numLayers: 1,
+      layer: (sel: number | string) => (sel === 1 || sel === "Ball" ? layer : null),
+    });
+    const G: Record<string, any> = {
+      __chromaAe: {},
+      Array,
+      CompItem,
+      PropertyType,
+      PropertyValueType,
+      KeyframeInterpolationType: { LINEAR: 6612, BEZIER: 6613, HOLD: 6614 },
+      app: { project: { file: { fsName: "C:\\jobs\\Shot.aep" }, itemByID: (id: number) => (id === 5 ? comp : null) } },
+    };
+    G.$ = { global: G };
+    vm.runInNewContext(source, G);
+    return G.__chromaAe;
+  }
+
+  it("finds keyframed numeric properties, addressing same-named effects by position, and skips markers and single keys", () => {
+    const res = simulatedComp().listAnimatedProperties({ comp_id: 5 });
+    expect(res.project_path).toBe("C:\\jobs\\Shot.aep");
+    expect(res.comp).toMatchObject({ id: 5, fps: 25, width: 640 });
+    expect(res.truncated).toBe(false);
+    // Both effects display as "Blur 2" (one's a duplicate), so the indexed
+    // step is each sibling's 1-based position, not its (colliding) name.
+    expect(res.properties.map((p: any) => p.path)).toEqual([
+      ["ADBE Transform Group", "ADBE Position"],
+      ["ADBE Effect Parade", 1, "ADBE Gaussian Blur 2-0001"],
+      ["ADBE Effect Parade", 2, "ADBE Gaussian Blur 3-0001"],
+    ]);
+    expect(res.properties[0]).toMatchObject({
+      layer: { id: 11, name: "Ball" },
+      name: "Position",
+      num_keys: 3,
+      first_key_time: 0.5,
+      last_key_time: 1.5,
+      expression: false,
+    });
+    expect(res.properties[1].expression).toBe(true);
+    expect(res.properties[2]).toMatchObject({ name: "Blurriness", num_keys: 2, expression: false });
+  });
+
+  it("limits the scan to the given layers", () => {
+    const A = simulatedComp();
+    expect(A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ball" }] }).layers_scanned).toBe(1);
+    expect(() => A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ghost" }] })).toThrow(/No layer named/);
   });
 });
