@@ -281,6 +281,11 @@
     if (limit > MAX_LIST) {
       limit = MAX_LIST;
     }
+    // Spatial tangents let the server measure path length for curve easing.
+    var spatial = false;
+    try {
+      spatial = p.isSpatial === true;
+    } catch (eSp) {}
     for (var k = 1; k <= limit; k++) {
       var kv = null;
       try {
@@ -302,7 +307,7 @@
       try {
         easeOut = serialiseEaseList(p.keyOutTemporalEase(k));
       } catch (e5) {}
-      keys.push({
+      var entry = {
         keyIndex: k,
         time: p.keyTime(k),
         value: kv,
@@ -310,11 +315,21 @@
         outInterp: outIt,
         easeIn: easeIn,
         easeOut: easeOut
-      });
+      };
+      if (spatial) {
+        try {
+          entry.inTangent = serialiseValue(p.keyInSpatialTangent(k));
+        } catch (e6) {}
+        try {
+          entry.outTangent = serialiseValue(p.keyOutSpatialTangent(k));
+        } catch (e7) {}
+      }
+      keys.push(entry);
     }
     var out = {
       name: p.name,
       matchName: p.matchName,
+      isSpatial: spatial,
       numKeys: n,
       keyframes: keys
     };
@@ -450,6 +465,99 @@
         numKeys: p.numKeys,
         easeDimensions: usedDims,
         mode: modeName
+      };
+    });
+  };
+
+  function easeListFromArgs(list, dims, what) {
+    if (!(list instanceof Array) || list.length !== dims) {
+      fail("bad_args", what + " must list " + dims + " {speed, influence} entries");
+    }
+    var arr = [];
+    for (var i = 0; i < list.length; i++) {
+      var sp = Number(list[i].speed);
+      if (isNaN(sp) || !isFinite(sp)) {
+        fail("bad_args", what + " speed must be a finite number");
+      }
+      arr.push(new KeyframeEase(sp, clampInfluence(list[i].influence)));
+    }
+    return arr;
+  }
+
+  function copyEaseList(list) {
+    var arr = [];
+    for (var i = 0; i < list.length; i++) {
+      arr.push(new KeyframeEase(list[i].speed, list[i].influence));
+    }
+    return arr;
+  }
+
+  // Sets the in and/or out ease of individual keys, keeping each side that is
+  // not given. The server computes the sides from a curve (curveToSides).
+  A.setKeyframeEaseSides = function (args) {
+    assertGuard(args.expect);
+    var c = requireComp(args.comp_id);
+    var l = findLayer(c, args.layer);
+    var p = resolvePath(l, args.path);
+    if (p.propertyType !== PropertyType.PROPERTY) {
+      fail("bad_args", "Path resolves to a group, not a property");
+    }
+    var sides = args.sides;
+    if (!(sides instanceof Array) || sides.length === 0) {
+      fail("bad_args", "sides must be a non-empty array");
+    }
+
+    var plan = [];
+    for (var i = 0; i < sides.length; i++) {
+      var k = Number(sides[i].key);
+      if (isNaN(k) || Math.floor(k) !== k || k < 1 || k > p.numKeys) {
+        fail("bad_args", "Keyframe index " + sides[i].key + " out of range (1.." + p.numKeys + ")");
+      }
+      var dims = p.keyInTemporalEase(k).length;
+      var step = { key: k, easeIn: null, easeOut: null };
+      if (sides[i]["in"]) {
+        step.easeIn = easeListFromArgs(sides[i]["in"], dims, "in ease of key " + k);
+      }
+      if (sides[i].out) {
+        step.easeOut = easeListFromArgs(sides[i].out, dims, "out ease of key " + k);
+      }
+      plan.push(step);
+    }
+
+    return A.withUndo("Chroma AE MCP: set_keyframe_ease (curve) " + args.path.join(" > "), function () {
+      var updated = [];
+      for (var j = 0; j < plan.length; j++) {
+        var key = plan[j].key;
+        var inType = KeyframeInterpolationType.BEZIER;
+        var inArr = plan[j].easeIn;
+        if (!inArr) {
+          inType = p.keyInInterpolationType(key);
+          inArr = copyEaseList(p.keyInTemporalEase(key));
+        }
+        var outType = KeyframeInterpolationType.BEZIER;
+        var outArr = plan[j].easeOut;
+        if (!outArr) {
+          outType = p.keyOutInterpolationType(key);
+          outArr = copyEaseList(p.keyOutTemporalEase(key));
+        }
+        // Auto and continuous keys would recompute or average the speeds.
+        try {
+          p.setTemporalAutoBezierAtKey(key, false);
+        } catch (eAuto) {}
+        try {
+          p.setTemporalContinuousAtKey(key, false);
+        } catch (eCont) {}
+        p.setInterpolationTypeAtKey(key, inType, outType);
+        p.setTemporalEaseAtKey(key, inArr, outArr);
+        updated.push(key);
+      }
+      return {
+        comp_id: c.id,
+        layer_id: l.id,
+        path: args.path,
+        keysUpdated: updated,
+        numKeys: p.numKeys,
+        mode: "curve"
       };
     });
   };

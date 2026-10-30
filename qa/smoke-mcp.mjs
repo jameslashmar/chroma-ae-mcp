@@ -38,14 +38,14 @@ const BLUE_PNG =
 const token = readToken();
 let seq = 0;
 
-function postMcp(body) {
+function postMcp(body, route = "/mcp") {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         host: DEFAULT_HOST,
         port: Number(process.env.CHROMA_AE_MCP_PORT) || DEFAULT_PORT,
         method: "POST",
-        path: "/mcp",
+        path: route,
         timeout: 600_000,
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       },
@@ -159,6 +159,82 @@ async function main() {
   r = await call("ae_motion_review", { comp_id: COMP });
   check("ae_motion_review (after)", r.ok && r.counts?.medium === 0, `${r.counts?.medium} medium, ${r.counts?.low} low`);
 
+  // Ask for an ease the way an agent would, answer it the way the panel does
+  // (POST /ask/answer), collect the answer, and apply the curve.
+  r = await call("ae_ask_user", {
+    question: "QA smoke: which ease?",
+    kind: "ease",
+    options: [
+      { id: "in_out", label: "Ease in-out", curve: [0.42, 0, 0.58, 1] },
+      { id: "snappy", label: "Snappy", curve: [0.2, 0, 0, 1] },
+    ],
+    wait_seconds: 0,
+  });
+  const askId = r.ask_id;
+  const answered = await postMcp({ id: askId, choice_ids: ["in_out"], curve: [0.42, 0, 0.58, 1] }, "/ask/answer");
+  r = await call("ae_ask_user", { ask_id: askId, wait_seconds: 0 });
+  check(
+    "ae_ask_user",
+    answered?.ok === true && r.status === "answered" && r.chosen?.[0]?.id === "in_out" && r.edited === false,
+    `${r.status}, curve ${JSON.stringify(r.curve)}`
+  );
+
+  r = await call("ae_set_keyframe_ease", { comp_id: COMP, layer: dot, path: ["ADBE Transform Group", "ADBE Position"], ease: { curve: r.curve ?? [0.42, 0, 0.58, 1] }, expect });
+  check(
+    "ae_set_keyframe_ease (curve)",
+    r.applied && r.receipt?.matches === true && r.segments?.length === 2 && r.checkpoint?.status === want("reused"),
+    `segments ${JSON.stringify(r.segments)}; ${cpNote(r)}`
+  );
+
+  // Effects on the BG: add, switch off, apply a preset from AE's own folder, remove.
+  const bg = { name: "BG" };
+  r = await call("ae_add_effect", { comp_id: COMP, layer: bg, effect: "ADBE Gaussian Blur 2", params: [{ param: "Blurriness", value: 4 }], expect });
+  check("ae_add_effect", r.applied && r.receipt?.matches === true && r.checkpoint?.status === want("reused"), `${r.effect?.name}, ${r.effect?.params?.length} params`);
+  r = await call("ae_set_effect", { comp_id: COMP, layer: bg, effect: { index: 1 }, enabled: false, expect });
+  check("ae_set_effect", r.applied && r.receipt?.matches === true && r.effect?.enabled === false, `enabled ${r.effect?.enabled}`);
+  r = await call("ae_list_presets", { filter: "Colorize", source: "app", limit: 1 });
+  const smokePreset = r.presets?.[0]?.path;
+  check("ae_list_presets", r.count > 0 && /\.ffx$/i.test(String(smokePreset)), `${r.count} match, ${r.scanned} scanned`);
+  r = await call("ae_apply_preset", { comp_id: COMP, layer: bg, preset_path: smokePreset, expect });
+  check("ae_apply_preset", r.applied && r.receipt?.matches === true && r.effects_added?.length >= 1, `added ${(r.effects_added ?? []).map((e) => e.name).join(", ")}`);
+  r = await call("ae_remove_effect", { comp_id: COMP, layer: bg, effect: { index: 1 }, expect });
+  check("ae_remove_effect", r.applied && r.receipt?.matches === true && r.removed?.matchName === "ADBE Gaussian Blur 2", `removed ${r.removed?.name}`);
+
+  // Track the Dot's right edge for a few frames (its middle is flat), then
+  // write the track to a null.
+  r = await call("ae_track_point", { comp_id: COMP, point: [110, 240], end: 0.4, apply: { null_name: "Smoke Track", expect } });
+  check(
+    "ae_track_point",
+    r.ok && r.frames_tracked === r.frames_requested && r.applied && r.receipt?.matches === true && fs.existsSync(String(r.preview_path)),
+    `${r.frames_tracked}/${r.frames_requested} frames, min confidence ${r.min_confidence}, null ${r.null?.name}`
+  );
+  await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: remove track null",
+    expect: { ...expect, comp_id: COMP },
+    code: `app.project.itemByID(${COMP}).layer("Smoke Track").remove(); return 0;`,
+  });
+
+  // A green screen plate in its own comp: key it, and the check must measure it.
+  const plate = await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: green plate",
+    expect,
+    code: [
+      'var k = app.project.items.addComp("Smoke Key", 320, 180, 1, 1, 25);',
+      'k.layers.addSolid([0.1, 0.72, 0.22], "Screen", 320, 180, 1);',
+      'k.layers.addSolid([0.85, 0.65, 0.55], "Subject", 120, 100, 1);',
+      'var p = app.project.items.addComp("Smoke Key Test", 320, 180, 1, 1, 25); p.layers.add(k);',
+      "return p.id;",
+    ].join("\n"),
+  });
+  r = await call("ae_key_greenscreen", { comp_id: plate.result, layer: { index: 1 }, clip_black: 20, expect });
+  check(
+    "ae_key_greenscreen",
+    r.ok && r.applied && r.receipt?.matches === true && r.screen_detected?.kind === "green" && r.metrics && r.metrics.screen_left_pct < 1,
+    `verdict ${r.verdict}, screen left ${r.metrics?.screen_left_pct}%, holes ${r.metrics?.holes_pct}%`
+  );
+
   r = await call("ae_set_text", { comp_id: COMP, layer: { name: "Title" }, text: "Smoke test", style: { fontSize: 40, fillColor: [1, 1, 1] }, expect });
   check("ae_set_text", r.applied && r.checkpoint?.status === want("reused"), cpNote(r));
 
@@ -197,6 +273,11 @@ async function main() {
   // ---------- reads ----------
   r = await call("ae_status");
   check("ae_status", /Smoke\.aep$/i.test(String(r.project_path)), `dirty ${r.dirty}`);
+  r = await call("ae_brief", { set: { goal: "QA smoke", feel: ["clean"] }, expect });
+  check("ae_brief", r.saved && fs.existsSync(String(r.brief_path)) && !r.missing?.includes("goal"), `${path.basename(String(r.brief_path))}, ${r.missing?.length} missing`);
+  // Read only: the taste is the user's own, across projects.
+  r = await call("ae_taste");
+  check("ae_taste", r.ok && typeof r.taste?.allow_linear_non_motion === "boolean", JSON.stringify(r.taste));
   r = await call("ae_get_project", { depth: 2 });
   check("ae_get_project", JSON.stringify(r).includes("Smoke"));
   r = await call("ae_get_comp", { comp_id: COMP });

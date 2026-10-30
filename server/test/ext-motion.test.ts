@@ -16,6 +16,7 @@ import {
   buildContactSheet,
   chooseColumns,
   contactSheetTimes,
+  fixEase,
   formatNumber,
   frameLabel,
   MAX_SHEET_EDGE,
@@ -730,6 +731,59 @@ describe("ext/motion review rules", () => {
     const kinds = review(s, ["ADBE Transform Group", "ADBE Rotate Z"]).map((x) => x.kind);
     expect(kinds).not.toContain("abrupt_stop");
     expect(kinds).toContain("overshoot");
+  });
+
+  describe("following the user's taste (ae_taste)", () => {
+    const linearMove = () => samplesOf((t) => [100 * t, 0], [key(1, 0, [0, 0], "linear"), key(2, 1, [100, 0], "linear")]);
+
+    it("fixes with the preferred curve's handle lengths at zero speed", () => {
+      expect(fixEase(undefined)).toEqual({ ease: "easy_ease", name: "Easy ease" });
+      expect(fixEase({ preferred_ease: [0.2, 0, 0, 1] })).toEqual({
+        ease: { in: { speed: 0, influence: 100 }, out: { speed: 0, influence: 20 } },
+        name: "Your preferred ease",
+      });
+      const f = reviewProperty(
+        linearMove(),
+        analyzeMotion(linearMove(), sampleSpeeds(linearMove())),
+        sampleSpeeds(linearMove()),
+        POS,
+        target,
+        { preferred_ease: [0.4, 0, 0.3, 1] }
+      );
+      expect(f[0].fix!.args.ease).toEqual({ in: { speed: 0, influence: 70 }, out: { speed: 0, influence: 40 } });
+      expect(f[0].message).toMatch(/Your preferred ease on keys 1 and 2/);
+    });
+
+    it("leaves linear opacity alone when the user says it is on purpose, but still flags position", () => {
+      const fade = named(samplesOf((t) => [100 - 100 * t], [key(1, 0, [100], "linear"), key(2, 1, [0], "linear")], { spatial: false }), "Opacity", "ADBE Opacity");
+      const withTaste = (s: PropertySamples, p: string[]) =>
+        reviewProperty(s, analyzeMotion(s, sampleSpeeds(s)), sampleSpeeds(s), p, target, { allow_linear_non_motion: true });
+      expect(review(fade, ["ADBE Transform Group", "ADBE Opacity"]).some((x) => x.kind === "linear")).toBe(true);
+      expect(withTaste(fade, ["ADBE Transform Group", "ADBE Opacity"])).toEqual([]);
+      expect(withTaste(linearMove(), POS).map((x) => x.kind)).toContain("linear");
+    });
+
+    it("reports overshoot as low when the user wants none", () => {
+      const s = named(
+        samplesOf(
+          (t) => [t <= 1 ? 90 * smoothstep(t) : 90 + 20 * Math.sin(2 * Math.PI * (t - 1)) * Math.exp(-3 * (t - 1))],
+          [key(1, 0, [0]), key(2, 1, [90])],
+          { end: 1.5, spatial: false }
+        ),
+        "Rotation",
+        "ADBE Rotate Z"
+      );
+      const over = reviewProperty(
+        s,
+        analyzeMotion(s, sampleSpeeds(s)),
+        sampleSpeeds(s),
+        ["ADBE Transform Group", "ADBE Rotate Z"],
+        target,
+        { avoid_overshoot: true }
+      ).find((x) => x.kind === "overshoot")!;
+      expect(over.severity).toBe("low");
+      expect(over.message).toMatch(/prefers no overshoot/);
+    });
   });
 
   it("sorts by severity, then layer, then time", () => {

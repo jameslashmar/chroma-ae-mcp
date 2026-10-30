@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { AskStore } from "./asks.js";
 import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
@@ -79,6 +80,8 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   ) => Promise<void>;
   ctx: ToolContext;
   host: PanelHost;
+  /** Questions for the panel: service.js serves them on GET /ask and POST /ask/answer. */
+  asks: AskStore;
 } {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
@@ -97,6 +100,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     quarantine,
     cep: opts.cep,
     settings: new SettingsStore(path.join(resolvedDataDir, "settings.json")),
+    asks: new AskStore(),
   };
 
   const log = opts.log;
@@ -200,5 +204,6 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     handleHttp,
     ctx,
     host,
+    asks: ctx.asks as AskStore,
   };
 }

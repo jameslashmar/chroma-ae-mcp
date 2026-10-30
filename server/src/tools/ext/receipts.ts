@@ -493,6 +493,12 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_import_footage",
   "ae_replace_footage",
   "ae_render_queue_add",
+  "ae_add_effect",
+  "ae_set_effect",
+  "ae_remove_effect",
+  "ae_apply_preset",
+  "ae_track_point",
+  "ae_key_greenscreen",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

@@ -25,6 +25,17 @@ This is an internal Chroma tool, not a consumer product.
 
 The token belongs to this machine and survives restarts. **Regenerate token** in the panel replaces it; after that, paste the setup command again.
 
+**Claude Desktop (Chat and Cowork)** can only launch a command, so it uses the stdio relay that ships with the panel. Open Settings > Developer > Edit Config, add this under `mcpServers`, then quit Claude Desktop from the tray and reopen it:
+
+```json
+"chroma-ae": {
+  "command": "node",
+  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"]
+}
+```
+
+`<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS. The relay needs Node 16 or later on the machine. It forwards to the same `/mcp` as Claude Code, so both share one write queue. It reads the token itself, so no token goes in the config. While AE is closed the tools stay listed, and calling one says to start AE.
+
 No Node, npm or git is needed. The MCP runs on the Node that is built into AE's CEP.
 
 ## Develop (Chroma)
@@ -52,11 +63,13 @@ node qa/smoke-mcp.mjs                                             # live: every 
 
 ```
 Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hidden CEP extension, starts with AE)
+Claude Desktop ──stdio──► tools/stdio-relay.cjs ──HTTP /mcp──┘
                                       ├─ MCP endpoint (stateless JSON-RPC, no SDK: AE's Node 17 is too old for it)
                                       ├─ single-writer queue · guard · quarantine · receipts
+                                      ├─ questions for the user (ae_ask_user), served to the panel on /ask
                                       ├─ Node side: PNG decode, aerender jobs, UI Automation (popups, screenshots)
                                       └─ evalScript ──► host/core.jsx + host/ext/*.jsx (ExtendScript)
-                                    london.chroma.aemcp.panel     (Window > Extensions: status, log, setup command)
+                                    london.chroma.aemcp.panel     (Window > Extensions: status, log, setup command, questions)
 ```
 
 **Why a thin guarded listener?** AE's ExtendScript DOM is complete, so `ae_run_jsx` can do almost anything. The typed tools exist where they add something `ae_run_jsx` cannot:
@@ -89,17 +102,21 @@ Claude Code ──HTTP /mcp (Bearer)──► london.chroma.aemcp.service   (hid
 
 ---
 
-## Tools (38)
+## Tools (48)
 
 | Group | Tools |
 |---|---|
 | Status & control | `ae_status`, `ae_quarantine_status`, `ae_acknowledge` |
 | Read | `ae_get_project`, `ae_get_comp`, `ae_get_layer_props`, `ae_get_layer_full`, `ae_find_layers`, `ae_list_effects`, `ae_validate_expressions` |
 | Script | `ae_run_jsx` (read, or guarded write with a receipt) |
-| Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease`, `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
+| Write | `ae_set_property` (value / keyframes / expression), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment), `ae_set_text`, `ae_import_footage`, `ae_replace_footage` |
+| Effects | `ae_add_effect`, `ae_set_effect` (on/off, rename, parameter values), `ae_remove_effect`, `ae_apply_preset` (.ffx onto one layer), `ae_list_presets` (the user's User Presets and AE's own). Parameters scripts can't set, such as Colorama's Output Cycle, are listed as `settable: false`; a preset saved from AE carries them. |
+| Tracking & keying | `ae_track_point` (a point tracker inside the MCP: AE renders the frames, the server follows the pattern with sub-pixel accuracy and writes the path to a null; within 0.04 px of the true position on a test shot), `ae_key_greenscreen` (Keylight + Key Cleaner + Advanced Spill Suppressor, then a measured check: screen left, holes, spill, recoloured subject, with ready fixes and a before/after preview). Nothing outside AE is installed. |
+| Ask the user | `ae_ask_user`: a question in the panel with buttons, pictures (e.g. a contact sheet per variant), or ease curves the user can preview and reshape by dragging the handles. Waits for the answer. |
+| Context | `ae_brief` (the project's goal, audience, format, feel, references and no-go areas, kept next to the .aep, with questions for what is missing), `ae_taste` (the user's motion preferences across projects; `ae_motion_review` follows them) |
 | Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint` (settings for the copy taken before every write), `ae_save` (copies the .aep first; never save-as) |
 | Frames | `ae_snapshot_frame` (AE renders at full resolution and the server shrinks the PNG to `scale` or `max_size`; waits for the PNG, which AE writes asynchronously), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
-| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` easy-ease fix) |
+| Motion | `ae_contact_sheet` (up to 24 frames tiled into one labelled PNG), `ae_motion_graph` (value and speed graph of one property, with the easing per keyframe pair and any overshoot), `ae_motion_review` (reviews a comp's animation like an animator would: linear moves, dead starts and stops, speed jolts, overshoot, keys between frames; most findings come with a ready `ae_set_keyframe_ease` fix, easy ease or the user's preferred ease) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |

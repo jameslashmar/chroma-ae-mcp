@@ -38,6 +38,30 @@
     </div>
   </header>
 
+  <section id="ask" class="ask" hidden>
+    <div class="ask-head">
+      <span class="ask-title">Claude asks</span>
+      <span id="ask-more" class="ask-more"></span>
+    </div>
+    <div id="ask-question" class="ask-question"></div>
+    <div id="ask-context" class="ask-context"></div>
+    <div id="ask-options" class="ask-options"></div>
+    <div id="ask-editor" class="ask-editor" hidden>
+      <svg id="ask-editor-svg" class="ask-editor-svg" viewBox="0 0 200 200" aria-label="Curve editor"></svg>
+      <div class="ask-editor-side">
+        <div class="ask-editor-hint">Drag the handles to adjust.</div>
+        <div id="ask-curve-value" class="ask-curve-value"></div>
+        <div class="ask-track"><span id="ask-editor-dot" class="ask-dot"></span></div>
+      </div>
+    </div>
+    <input id="ask-other" class="ask-other" type="text" placeholder="Or type your own answer" />
+    <div class="ask-actions">
+      <button id="ask-send" class="btn btn-primary" type="button" disabled>Send</button>
+      <button id="ask-dismiss" class="btn" type="button">Skip</button>
+      <span id="ask-status" class="ask-status"></span>
+    </div>
+  </section>
+
   <main class="log-container">
     <div id="log" class="log" role="log" aria-live="polite"></div>
   </main>
