@@ -2705,8 +2705,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path19, errorMaps, issueData } = params;
-  const fullPath = [...path19, ...issueData.path || []];
+  const { data, path: path20, errorMaps, issueData } = params;
+  const fullPath = [...path20, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2822,11 +2822,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path19, key) {
+  constructor(parent, value, path20, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path19;
+    this._path = path20;
     this._key = key;
   }
   get path() {
@@ -7190,7 +7190,7 @@ var dialogsTools = [
 ];
 
 // src/panel-entry.ts
-var path18 = __toESM(require("node:path"), 1);
+var path19 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -8850,14 +8850,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path19 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path20 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path19,
+          path: path20,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path19} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path20} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -9608,9 +9608,389 @@ var briefTools = [
   }
 ];
 
-// src/tools/ext/effects.ts
+// src/tools/ext/data.ts
 var fs9 = __toESM(require("node:fs"), 1);
 var path10 = __toESM(require("node:path"), 1);
+function parseCsv(text) {
+  const src = text.replace(/^﻿/, "");
+  const records = [];
+  let field = "";
+  let record = [];
+  let quoted = false;
+  let quotedInRecord = false;
+  let i = 0;
+  const endField = () => {
+    record.push(field);
+    field = "";
+  };
+  const endRecord = () => {
+    endField();
+    if (!(record.length === 1 && record[0] === "" && !quotedInRecord)) records.push(record);
+    record = [];
+    quotedInRecord = false;
+  };
+  while (i < src.length) {
+    const c = src[i];
+    if (quoted) {
+      if (c === '"') {
+        if (src[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        quoted = false;
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+      continue;
+    }
+    if (c === '"' && field === "") {
+      quoted = true;
+      quotedInRecord = true;
+    } else if (c === ",") {
+      endField();
+    } else if (c === "\n" || c === "\r") {
+      endRecord();
+      if (c === "\r" && src[i + 1] === "\n") i++;
+    } else {
+      field += c;
+    }
+    i++;
+  }
+  if (quoted) throw new Error("CSV ends inside a quoted field");
+  if (field !== "" || record.length > 0) endRecord();
+  if (records.length === 0) return [];
+  const header = records[0].map((h) => h.trim());
+  return records.slice(1).map((r) => {
+    const row = {};
+    header.forEach((h, idx) => {
+      row[h] = r[idx] ?? "";
+    });
+    return row;
+  });
+}
+function parseDataFile(filePath) {
+  const text = fs9.readFileSync(filePath, "utf8");
+  if (/\.csv$/i.test(filePath)) return parseCsv(text);
+  const parsed = JSON.parse(text.replace(/^﻿/, ""));
+  const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
+  if (!Array.isArray(rows) || !rows.every((r) => r && typeof r === "object" && !Array.isArray(r))) {
+    throw new Error("JSON data must be an array of objects, or { rows: [...] }");
+  }
+  return rows;
+}
+function isBlank(v) {
+  return v === null || v === void 0 || typeof v === "string" && v.trim() === "";
+}
+function toNumber(s) {
+  const t = s.trim();
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?%?$/i.test(t)) return void 0;
+  return Number(t.replace(/%$/, ""));
+}
+function cellValue(target, cell) {
+  if (target === "text") return { value: String(cell) };
+  if (target === "footage") {
+    const p = String(cell).trim();
+    if (!path10.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs9.existsSync(p)) return { error: `file not found: ${p}` };
+    return { value: p.replace(/\\/g, "/") };
+  }
+  if (target === "color") {
+    if (Array.isArray(cell) && cell.length >= 3 && cell.every((n2) => typeof n2 === "number")) {
+      return { value: cell.length === 3 ? [...cell, 1] : cell.slice(0, 4) };
+    }
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(cell).trim());
+    if (!m) return { error: `"${String(cell)}" is not a #rrggbb colour` };
+    const n = parseInt(m[1], 16);
+    return { value: [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255, 1] };
+  }
+  if (typeof cell === "number") return { value: cell };
+  if (typeof cell === "boolean") return { value: cell ? 1 : 0 };
+  if (Array.isArray(cell) && cell.every((n) => typeof n === "number")) return { value: cell };
+  const s = String(cell).trim().replace(/^\[|\]$/g, "");
+  if (/^(true|false)$/i.test(s)) return { value: /^true$/i.test(s) ? 1 : 0 };
+  const parts = s.split(/[,;]\s*|\s+/).filter((x) => x !== "");
+  const nums = parts.map(toNumber);
+  if (nums.length === 0 || nums.some((n) => n === void 0)) return { error: `"${String(cell)}" is not a number or a list of numbers` };
+  return { value: nums.length === 1 ? nums[0] : nums };
+}
+function fillName(pattern, row, rowNumber, templateName) {
+  const name = pattern.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_m, key) => {
+    if (key === "#") return String(rowNumber);
+    if (key === "template") return templateName;
+    const v = row[key];
+    return v === void 0 || v === null ? "" : String(v);
+  }).trim();
+  return name === "" ? `${templateName} - ${rowNumber}` : name;
+}
+var DataMappingSchema = external_exports.object({
+  column: external_exports.string().min(1).describe("Column (CSV header or JSON key) the value comes from."),
+  layer: LayerSelectorSchema.describe("Layer in the template comp (by name is usual; names must be unique)."),
+  target: external_exports.enum(["text", "value", "color", "footage"]).describe(
+    'text: the layer\'s Source Text (style kept; every text key if keyed). value: a number or list ("100, 50") on `path`. color: #rrggbb on `path`. footage: an absolute file path, imported once and swapped in with replaceSource.'
+  ),
+  path: external_exports.array(external_exports.string().min(1)).optional().describe("For value and color: property path by match name or name, e.g. ['ADBE Effect Parade', 'Bar Height', 'ADBE Slider Control-0001'] or ['ADBE Transform Group', 'ADBE Scale']."),
+  keyframe: external_exports.union([external_exports.enum(["last", "first", "all"]), external_exports.number().int().positive()]).optional().describe("For animated properties: which key takes the value. Default 'last' (a bar that grows to the data value).")
+}).refine((m) => m.target === "text" || m.target === "footage" || m.path !== void 0 && m.path.length > 0, {
+  message: "value and color mappings need a path"
+});
+var AeBuildFromDataSchema = external_exports.object({
+  template_comp_id: external_exports.number().int().describe("The comp to copy for each row."),
+  rows: external_exports.array(external_exports.record(external_exports.union([external_exports.string(), external_exports.number(), external_exports.boolean(), external_exports.null()]))).max(200).optional().describe("The data, one object per row."),
+  data_path: external_exports.string().min(1).optional().describe("Or an absolute path to a .csv (header row first) or .json (array of objects) file."),
+  mapping: external_exports.array(DataMappingSchema).min(1).max(50),
+  name: external_exports.string().min(1).max(200).optional().describe("Name pattern for each copy: {{column}}, {{#}} (row number), {{template}}. Default '{{template}} - {{#}}'."),
+  folder: external_exports.string().min(1).max(200).optional().describe("Project folder for the copies (and imported footage). Default '<template> (data)'."),
+  in_place: external_exports.boolean().optional().describe("Set the template comp itself from a single row instead of copying it, e.g. to update a chart."),
+  dry_run: external_exports.boolean().optional().describe("Check the data and mapping against the template and report what would be built, without writing."),
+  expect: ExpectSchema
+}).refine((v) => v.rows === void 0 !== (v.data_path === void 0), { message: "Give either rows or data_path." });
+function prepareRows(rows, mapping, namePattern, templateName) {
+  const problems = [];
+  const skipped = [];
+  const columns = new Set(rows.flatMap((r) => Object.keys(r)));
+  for (const m of mapping) {
+    if (rows.length > 0 && !columns.has(m.column)) problems.push(`column "${m.column}" is not in the data (columns: ${[...columns].join(", ")})`);
+  }
+  const prepared = rows.map((r, i) => {
+    const values = mapping.map((m) => {
+      const cell = r[m.column];
+      if (isBlank(cell)) {
+        if (columns.has(m.column)) skipped.push(`row ${i + 1}: "${m.column}" is empty, so the template's value stays`);
+        return null;
+      }
+      const v = cellValue(m.target, cell);
+      if ("error" in v) {
+        problems.push(`row ${i + 1}, "${m.column}": ${v.error}`);
+        return null;
+      }
+      return v.value;
+    });
+    return { row: i + 1, name: fillName(namePattern, r, i + 1, templateName), values };
+  });
+  return { prepared, problems, skipped };
+}
+function normText(s) {
+  return s.replace(/\r\n?/g, "\n");
+}
+function checkBuild(prepared, mapping, read) {
+  const mismatches = [];
+  const offFrame = [];
+  read.forEach((c, ci) => {
+    const row = prepared[ci];
+    mapping.forEach((m, mi) => {
+      const expected = row?.values[mi];
+      const got = c.values[mi] ?? {};
+      const where = `${c.name}.${m.column}`;
+      if (expected === null || expected === void 0) return;
+      if (m.target === "text") {
+        if (got.bounds) {
+          const b = got.bounds;
+          if (b.left < -0.5 || b.top < -0.5 || b.right > c.width + 0.5 || b.bottom > c.height + 0.5) {
+            offFrame.push({ comp: c.name, layer: m.column, bounds: b });
+          }
+        }
+        if (normText(String(got.text ?? "")) !== normText(String(expected))) {
+          mismatches.push({ path: where, expected, actual: got.text, message: `Text of ${where} reads back differently` });
+        }
+      } else if (m.target === "footage") {
+        const a = String(got.footage ?? "").replace(/\\/g, "/").toLowerCase();
+        if (a !== String(expected).toLowerCase()) {
+          mismatches.push({ path: where, expected, actual: got.footage, message: `Footage of ${where} reads back differently` });
+        }
+      } else {
+        const values = got.key_values && got.key_values.length > 0 ? got.key_values : [got.value];
+        values.forEach((gv, ki) => {
+          const actual = Array.isArray(expected) && Array.isArray(gv) && gv.length > expected.length ? gv.slice(0, expected.length) : gv;
+          const label = values.length > 1 ? `${where}[key ${got.keys?.[ki] ?? ki + 1}]` : where;
+          compareValues(expected, actual, label, mismatches);
+        });
+      }
+    });
+  });
+  return { mismatches, off_frame: offFrame };
+}
+function validateAgainstTemplate(rows, prepared, mapping, inspected) {
+  const problems = [];
+  mapping.forEach((m, mi) => {
+    const insp = inspected[mi];
+    if (!insp) return;
+    const label = `mapping ${mi + 1} ("${m.column}")`;
+    if (insp.error) {
+      problems.push(`${label}: ${insp.error}`);
+      return;
+    }
+    if (!prepared.some((p) => p.values[mi] !== null && p.values[mi] !== void 0)) return;
+    if (m.target === "footage") {
+      if (!insp.can_take_footage) problems.push(`${label}: layer "${m.layer.name ?? m.layer.index ?? m.layer.id}" can't take footage (it needs a footage, solid or precomp layer)`);
+      return;
+    }
+    if (m.target === "text") return;
+    const where = (m.path ?? []).join(" > ");
+    const dims = insp.dims ?? 0;
+    if (m.target === "color" && !insp.is_color) {
+      problems.push(`${label}: ${where} is not a colour property`);
+      return;
+    }
+    if (dims === 0) {
+      problems.push(`${label}: ${where} doesn't take numbers`);
+      return;
+    }
+    if (typeof m.keyframe === "number" && (insp.num_keys ?? 0) > 0 && m.keyframe > (insp.num_keys ?? 0)) {
+      problems.push(`${label}: keyframe ${m.keyframe} is past the last of ${insp.num_keys} keys on ${where}`);
+    }
+    if (m.target === "color") return;
+    prepared.forEach((p) => {
+      const v = p.values[mi];
+      if (v === null || v === void 0) return;
+      const raw = String(rows[p.row - 1]?.[m.column]);
+      const at = `row ${p.row}, "${m.column}"`;
+      if (Array.isArray(v)) {
+        if (dims === 1) {
+          problems.push(`${at}: "${raw}" reads as a list of ${v.length} numbers; for a decimal use a point, 1.5`);
+        } else if (v.length !== dims && !(dims === 3 && v.length === 2)) {
+          problems.push(`${at}: "${raw}" has ${v.length} numbers, but ${where} takes ${dims}`);
+        }
+      } else if (dims > 1) {
+        problems.push(`${at}: "${raw}" is a single number, but ${where} takes ${dims} (e.g. "100, 75")`);
+      }
+    });
+  });
+  return problems;
+}
+async function inspectMapping(ctx, compId, mapping) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${ctx.bridge.newOpId()}_data_inspect`,
+    script: buildJsxCall("inspectDataMapping", { template_comp_id: compId, mapping }),
+    label: "ae_build_from_data (inspect mapping)",
+    mutates: false,
+    toolName: "ae_build_from_data"
+  });
+  return res.result?.mappings ?? [];
+}
+async function templateInfo(ctx, compId) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${ctx.bridge.newOpId()}_data_template`,
+    script: buildJsxCall("getComp", { comp_id: compId }),
+    label: "ae_build_from_data (template)",
+    mutates: false,
+    toolName: "ae_build_from_data"
+  });
+  return res.result;
+}
+var dataTools = [
+  {
+    name: "ae_build_from_data",
+    description: "Build comps from data (CSV or JSON): one copy of a template comp per row, named from the row, with text, numbers, colours and footage set from its columns. For localisation (a row per language), versions of a lower third or end card, and charts whose bars, sliders or labels are driven by numbers. `in_place` sets the template itself from one row (to update a chart). Animated properties get the value on their last key by default (a bar that grows to the number); `keyframe` picks another. Empty cells keep the template's value. Every cell is checked before AE is touched (bad numbers, colours, missing files are refused with the row); `dry_run` reports the plan without writing. The build is one undo group guarded by `expect`, with an auto checkpoint; the values are read back in a separate evalScript, and text that now runs off the frame is listed in `off_frame`. Up to 200 rows a call. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeBuildFromDataSchema,
+    handler: async (args, ctx) => {
+      let rows;
+      if (args.data_path) {
+        if (!path10.isAbsolute(args.data_path) || !fs9.existsSync(args.data_path)) {
+          return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
+        }
+        try {
+          rows = parseDataFile(args.data_path);
+        } catch (err) {
+          return { ok: false, error: "bad_data", message: err instanceof Error ? err.message : String(err) };
+        }
+        if (rows.length > 200) {
+          return { ok: false, error: "too_many_rows", message: `${rows.length} rows; build up to 200 a call (split the file).` };
+        }
+      } else {
+        rows = args.rows;
+      }
+      if (rows.length === 0) return { ok: false, error: "bad_data", message: "The data has no rows." };
+      if (args.in_place && rows.length !== 1) {
+        return { ok: false, error: "bad_args", message: "in_place sets the template from exactly one row." };
+      }
+      const template = await templateInfo(ctx, args.template_comp_id);
+      const templateName = template?.name ?? `comp ${args.template_comp_id}`;
+      const { prepared, problems, skipped } = prepareRows(rows, args.mapping, args.name ?? "{{template}} - {{#}}", templateName);
+      const mapping = args.mapping.map((m) => ({ layer: m.layer, target: m.target, path: m.path, keyframe: m.keyframe }));
+      const inspected = await inspectMapping(ctx, args.template_comp_id, mapping);
+      problems.push(...validateAgainstTemplate(rows, prepared, args.mapping, inspected));
+      if (problems.length > 0) {
+        return { ok: false, error: "bad_data", message: "Some cells can't be used; nothing was built.", problems };
+      }
+      const folder = args.in_place ? void 0 : args.folder ?? `${templateName} (data)`;
+      if (args.dry_run) {
+        return {
+          ok: true,
+          dry_run: true,
+          template: templateName,
+          folder,
+          comps: prepared.map((p) => ({ row: p.row, name: args.in_place ? templateName : p.name, values: p.values })),
+          skipped
+        };
+      }
+      ctx.quarantine.assertClear();
+      const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.template_comp_id };
+      const opId = ctx.bridge.newOpId();
+      const projectSnapshot = (suffix) => ctx.bridge.evalRaw({
+        id: `${opId}_${suffix}`,
+        script: buildJsxCall("snapshotForReceipt", {}),
+        label: `ae_build_from_data (${suffix} snapshot)`,
+        mutates: false,
+        toolName: "ae_build_from_data"
+      });
+      try {
+        return await ctx.queue.run("ae_build_from_data", async () => {
+          ctx.quarantine.assertClear();
+          const guard = await verifyTargetGuard(ctx, expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_build_from_data");
+          const before = await projectSnapshot("before");
+          const write = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("buildFromData", {
+              expect,
+              template_comp_id: args.template_comp_id,
+              mapping,
+              rows: prepared.map((p) => ({ row: p.row, name: p.name, values: p.values })),
+              folder_name: folder,
+              in_place: args.in_place === true
+            }),
+            label: `ae_build_from_data(${prepared.length})`,
+            mutates: true,
+            toolName: "ae_build_from_data"
+          });
+          const built = write.result;
+          const after = await projectSnapshot("after");
+          const read = await ctx.bridge.evalRaw({
+            id: `${opId}_read`,
+            script: buildJsxCall("readDataBuild", { comp_ids: built.comps.map((c) => c.comp_id), mapping: built.mapping }),
+            label: "ae_build_from_data (read back)",
+            mutates: false,
+            toolName: "ae_build_from_data"
+          });
+          const { mismatches, off_frame } = checkBuild(prepared, args.mapping, read.result.comps);
+          return {
+            ok: true,
+            op_id: opId,
+            applied: true,
+            folder_id: built.folder_id,
+            comps: built.comps,
+            skipped,
+            off_frame,
+            checkpoint,
+            receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches })
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+        }
+        throw err;
+      }
+    }
+  }
+];
+
+// src/tools/ext/effects.ts
+var fs10 = __toESM(require("node:fs"), 1);
+var path11 = __toESM(require("node:path"), 1);
 var EffectSelectorSchema = external_exports.object({
   index: external_exports.number().int().positive().optional().describe("1-based position in the layer's Effects."),
   name: external_exports.string().min(1).optional().describe("Effect name as shown on the layer (refused if several share it).")
@@ -9754,20 +10134,20 @@ function findPresets(folders, filter, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs9.readdirSync(dir, { withFileTypes: true });
+        entries = fs10.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path10.join(dir, e.name);
+        const full = path11.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const category = path10.relative(folder.path, dir).split(path10.sep).join("/");
+          const category = path11.relative(folder.path, dir).split(path11.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           if (!needle || `${category}/${name}`.toLowerCase().includes(needle)) {
-            presets.push({ name, path: full, category: category || path10.basename(folder.path), source: kind });
+            presets.push({ name, path: full, category: category || path11.basename(folder.path), source: kind });
           }
         }
       }
@@ -9841,12 +10221,12 @@ var effectsTools = [
     description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
     schema: AeApplyPresetSchema,
     handler: async (args, ctx) => {
-      if (!path10.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs9.existsSync(args.preset_path)) {
+      if (!path11.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs10.existsSync(args.preset_path)) {
         return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
       }
       return runEffectWrite(args, ctx, {
         toolName: "ae_apply_preset",
-        label: `ae_apply_preset(${path10.basename(args.preset_path)})`,
+        label: `ae_apply_preset(${path11.basename(args.preset_path)})`,
         host: "applyPreset",
         hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
         check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -10036,17 +10416,17 @@ var exploreTools = [
 
 // src/tools/ext/frames.ts
 var crypto3 = __toESM(require("node:crypto"), 1);
-var fs12 = __toESM(require("node:fs"), 1);
-var path12 = __toESM(require("node:path"), 1);
+var fs13 = __toESM(require("node:fs"), 1);
+var path13 = __toESM(require("node:path"), 1);
 var import_pngjs2 = __toESM(require_png(), 1);
 
 // src/tools/render.ts
 var crypto2 = __toESM(require("node:crypto"), 1);
-var fs11 = __toESM(require("node:fs"), 1);
-var path11 = __toESM(require("node:path"), 1);
+var fs12 = __toESM(require("node:fs"), 1);
+var path12 = __toESM(require("node:path"), 1);
 
 // src/tools/ext/png-utils.ts
-var fs10 = __toESM(require("node:fs"), 1);
+var fs11 = __toESM(require("node:fs"), 1);
 var import_pngjs = __toESM(require_png(), 1);
 function fitWithin(width, height, maxSize) {
   const longEdge = Math.max(width, height);
@@ -10259,7 +10639,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs10.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs11.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -10273,7 +10653,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs10.writeFileSync(dstPath, encodePng(out));
+  fs11.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 
@@ -10297,14 +10677,14 @@ var AeRenderQueueAddSchema = external_exports.object({
 });
 var AeRenderQueueStatusSchema = external_exports.object({});
 function defaultFramesDir() {
-  return path11.join(defaultDataDir(), "frames");
+  return path12.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs11.existsSync(filePath)) {
+    if (!fs12.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs11.statSync(filePath);
+    const stat = fs12.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -10330,7 +10710,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs11.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs12.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -10344,14 +10724,14 @@ var renderTools = [
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs11.mkdirSync(framesDir, { recursive: true });
+      fs12.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       try {
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath1 = path11.join(
+            const pngPath1 = path12.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix1}.png`
             );
@@ -10387,7 +10767,7 @@ var renderTools = [
             }
             const nudgedTime = Math.max(0, args.time + 1e-3);
             const uniqueSuffix2 = `${Date.now()}_${crypto2.randomBytes(4).toString("hex")}`;
-            const pngPath2 = path11.join(
+            const pngPath2 = path12.join(
               framesDir,
               `frame_c${args.comp_id}_${uniqueSuffix2}.png`
             );
@@ -10607,10 +10987,10 @@ var AeCompareFramesSchema = external_exports.object({
   }
 });
 function decodePngFile(filePath) {
-  if (!fs12.existsSync(filePath)) {
+  if (!fs13.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs12.readFileSync(filePath);
+  const buf = fs13.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -10666,9 +11046,9 @@ function analyzeDecodedFrame(png, meta) {
   }
   const isTransparent = allTransparent;
   const isBlack = !allTransparent && allBlack;
-  const isBlank = isTransparent || isBlack || isUniform;
+  const isBlank2 = isTransparent || isBlack || isUniform;
   const flags = [];
-  if (isBlank) flags.push("blank");
+  if (isBlank2) flags.push("blank");
   if (isBlack) flags.push("black");
   if (isTransparent) flags.push("transparent");
   const round4 = (n) => Math.round(n * 1e4) / 1e4;
@@ -10678,7 +11058,7 @@ function analyzeDecodedFrame(png, meta) {
     ...meta.time !== void 0 ? { time: meta.time } : {},
     width,
     height,
-    is_blank: isBlank,
+    is_blank: isBlank2,
     is_black: isBlack,
     is_transparent: isTransparent,
     is_uniform: isUniform,
@@ -10781,7 +11161,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path12.join(
+  const pngPath1 = path13.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -10805,7 +11185,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path12.join(
+  const pngPath2 = path13.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -10842,7 +11222,7 @@ var framesTools = [
       const framesDir = defaultFramesDir();
       const capturedItems = [];
       if (args.comp_id !== void 0 && args.times !== void 0) {
-        fs12.mkdirSync(framesDir, { recursive: true });
+        fs13.mkdirSync(framesDir, { recursive: true });
         const opId = ctx.bridge.newOpId();
         const compId = args.comp_id;
         const times = args.times;
@@ -10881,7 +11261,7 @@ var framesTools = [
         );
       }
       if (shouldWriteDiff) {
-        fs12.mkdirSync(framesDir, { recursive: true });
+        fs13.mkdirSync(framesDir, { recursive: true });
       }
       const decodedPngs = [];
       const frameAnalyses = [];
@@ -10909,9 +11289,9 @@ var framesTools = [
         let diffPngPath;
         if (shouldWriteDiff && cmp.diffPng) {
           const suffix = `${Date.now()}_${crypto3.randomBytes(4).toString("hex")}`;
-          diffPngPath = path12.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+          diffPngPath = path13.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
           const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-          fs12.writeFileSync(diffPngPath, outBuf);
+          fs13.writeFileSync(diffPngPath, outBuf);
           diffPngPaths.push(diffPngPath);
         }
         pairs.push({
@@ -10965,8 +11345,8 @@ var framesTools = [
 ];
 
 // src/tools/ext/key.ts
-var fs13 = __toESM(require("node:fs"), 1);
-var path13 = __toESM(require("node:path"), 1);
+var fs14 = __toESM(require("node:fs"), 1);
+var path14 = __toESM(require("node:path"), 1);
 function screenLean(r, g, b, dominant, screenLeanValue) {
   const lean = dominant === 1 ? g - Math.max(r, b) : b - Math.max(r, g);
   return screenLeanValue > 0 ? lean / screenLeanValue : 0;
@@ -11187,7 +11567,7 @@ var keyTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs13.mkdirSync(framesDir, { recursive: true });
+      fs14.mkdirSync(framesDir, { recursive: true });
       const label = `ae_key_greenscreen(${args.comp_id})`;
       const readInfo = async (times, suffix) => (await ctx.bridge.evalRaw({
         id: `${opId}_${suffix}`,
@@ -11261,8 +11641,8 @@ var keyTools = [
       }
       const kl = run.info.keylight;
       const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-      const previewPath = path13.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-      fs13.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+      const previewPath = path14.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+      fs14.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
       const below = run.info.layers_below_visible;
       const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
       const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -11312,8 +11692,8 @@ var keyTools = [
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs14 = __toESM(require("node:fs"), 1);
-var path14 = __toESM(require("node:path"), 1);
+var fs15 = __toESM(require("node:fs"), 1);
+var path15 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -11691,14 +12071,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, path19, target, taste) {
+function reviewProperty(s, analysis, path20, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path19 }
+    property: { name: s.property.name, path: path20 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys) => ({
@@ -11706,7 +12086,7 @@ function reviewProperty(s, analysis, path19, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path19,
+      path: path20,
       keys,
       ease: easeArg,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
@@ -11846,7 +12226,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs14.mkdirSync(framesDir, { recursive: true });
+      fs15.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -11904,11 +12284,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path14.join(
+      const sheetPath = path15.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs14.writeFileSync(sheetPath, encodePng(sheet));
+      fs15.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -11954,12 +12334,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs14.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path14.join(
+      fs15.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path15.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs14.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs15.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -12063,8 +12443,8 @@ var motionTools = [
 
 // src/tools/ext/panels.ts
 var import_node_child_process2 = require("node:child_process");
-var fs15 = __toESM(require("node:fs"), 1);
-var path15 = __toESM(require("node:path"), 1);
+var fs16 = __toESM(require("node:fs"), 1);
+var path16 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -12098,7 +12478,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path15.join(defaultDataDir(), "ui");
+  return path16.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -12293,7 +12673,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs15.mkdirSync(outDir, { recursive: true });
+        fs16.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -12327,8 +12707,8 @@ var panelsTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs16 = __toESM(require("node:fs"), 1);
-var path16 = __toESM(require("node:path"), 1);
+var fs17 = __toESM(require("node:fs"), 1);
+var path17 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -12609,7 +12989,9 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_apply_preset",
   "ae_track_point",
   "ae_key_greenscreen",
-  "ae_skill_run"
+  "ae_skill_run",
+  "ae_build_from_data",
+  "ae_reframe"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -12715,7 +13097,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs16.existsSync(actualProjectPath)) {
+          if (!fs17.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -12724,17 +13106,17 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const projDir = path16.dirname(actualProjectPath);
-          const ext = path16.extname(actualProjectPath) || ".aep";
-          const baseName = path16.basename(actualProjectPath, ext);
-          const checkpointDir = path16.join(projDir, "_mcp_checkpoints");
-          fs16.mkdirSync(checkpointDir, { recursive: true });
+          const projDir = path17.dirname(actualProjectPath);
+          const ext = path17.extname(actualProjectPath) || ".aep";
+          const baseName = path17.basename(actualProjectPath, ext);
+          const checkpointDir = path17.join(projDir, "_mcp_checkpoints");
+          fs17.mkdirSync(checkpointDir, { recursive: true });
           const stamp = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp}_${safeLabel}${ext}`;
-          const checkpointPath = path16.join(checkpointDir, checkpointFileName);
-          fs16.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs16.statSync(checkpointPath);
+          const checkpointPath = path17.join(checkpointDir, checkpointFileName);
+          fs17.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs17.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -12750,7 +13132,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs16.existsSync(checkpointPath)
+              checkpoint_exists: fs17.existsSync(checkpointPath)
             }
           });
           return {
@@ -12792,9 +13174,9 @@ var receiptsTools = [
           actual: { project_path: "<unsaved>" }
         });
       }
-      const projDir = path16.dirname(actualProjectPath);
-      const checkpointDir = path16.join(projDir, "_mcp_checkpoints");
-      if (!fs16.existsSync(checkpointDir)) {
+      const projDir = path17.dirname(actualProjectPath);
+      const checkpointDir = path17.join(projDir, "_mcp_checkpoints");
+      if (!fs17.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -12802,10 +13184,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs16.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs17.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path16.join(checkpointDir, e.name);
-        const stat = fs16.statSync(fullPath);
+        const fullPath = path17.join(checkpointDir, e.name);
+        const stat = fs17.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -12858,7 +13240,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs16.existsSync(args.checkpoint_path)) {
+          if (!fs17.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -12942,6 +13324,179 @@ var receiptsTools = [
             op_id: opId,
             message: err.message
           });
+        }
+        throw err;
+      }
+    }
+  }
+];
+
+// src/tools/ext/reframe.ts
+var DEFAULT_MARGINS = {
+  "16:9": { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 },
+  "1:1": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
+  "4:5": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
+  "9:16": { top: 0.12, bottom: 0.2, left: 0.06, right: 0.06 }
+};
+var FALLBACK_MARGINS = { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 };
+function parseAspect(aspect) {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)\s*$/i.exec(aspect);
+  if (!m) return void 0;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  return w > 0 && h > 0 ? w / h : void 0;
+}
+var MIN_SIZE = 4;
+var MAX_SIZE = 3e4;
+function even(n) {
+  return Math.max(4, Math.round(n / 2) * 2);
+}
+function sizeForAspect(srcW, srcH, ratio) {
+  const short = Math.min(srcW, srcH);
+  if (ratio >= 1) return { width: even(short * ratio), height: even(short) };
+  return { width: even(short), height: even(short / ratio) };
+}
+function aspectName(w, h) {
+  const r = w / h;
+  return Object.keys(DEFAULT_MARGINS).find((k) => Math.abs(parseAspect(k) - r) / r < 0.01);
+}
+function marginsFor(w, h, override) {
+  const base = DEFAULT_MARGINS[aspectName(w, h) ?? ""] ?? FALLBACK_MARGINS;
+  return { ...base, ...override ?? {} };
+}
+var MarginsSchema = external_exports.object({
+  top: external_exports.number().min(0).max(0.45).optional(),
+  bottom: external_exports.number().min(0).max(0.45).optional(),
+  left: external_exports.number().min(0).max(0.45).optional(),
+  right: external_exports.number().min(0).max(0.45).optional()
+}).describe("Safe margins as fractions of the frame, e.g. { bottom: 0.25 } for a platform with a tall caption area.");
+var AeReframeSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("The approved comp to reframe."),
+  targets: external_exports.array(
+    external_exports.object({
+      aspect: external_exports.string().min(3).describe("'16:9', '1:1', '4:5', '9:16', or any 'w:h'."),
+      width: external_exports.number().int().min(4).max(3e4).optional().describe("Exact size instead of keeping the source's short side."),
+      height: external_exports.number().int().min(4).max(3e4).optional(),
+      name: external_exports.string().min(1).max(200).optional().describe("Default '<comp> <w>x<h>'."),
+      margins: MarginsSchema.optional()
+    })
+  ).min(1).max(6),
+  source_margins: MarginsSchema.optional().describe("The source comp's safe margins, if not the defaults for its aspect."),
+  shrink: external_exports.boolean().optional().describe("Shrink a pinned layer that no longer fits the safe area. Default true."),
+  guide: external_exports.boolean().optional().describe("Add a guide layer (not rendered) outlining the safe area. Default true."),
+  expect: ExpectSchema
+});
+function planTargets(args, srcW, srcH, srcName) {
+  const problems = [];
+  const targets = args.targets.map((t) => {
+    const ratio = parseAspect(t.aspect);
+    let size;
+    if (t.width && t.height) {
+      size = { width: t.width, height: t.height };
+    } else if (ratio === void 0) {
+      problems.push(`"${t.aspect}" is not an aspect like 9:16`);
+      size = { width: srcW, height: srcH };
+    } else if (t.width) {
+      size = { width: t.width, height: even(t.width / ratio) };
+    } else if (t.height) {
+      size = { width: even(t.height * ratio), height: t.height };
+    } else {
+      size = sizeForAspect(srcW, srcH, ratio);
+    }
+    if (size.width < MIN_SIZE || size.height < MIN_SIZE || size.width > MAX_SIZE || size.height > MAX_SIZE) {
+      problems.push(`"${t.aspect}" gives ${size.width}x${size.height}; a comp must be ${MIN_SIZE} to ${MAX_SIZE} pixels on each side (give width and height)`);
+    }
+    return {
+      aspect: t.aspect,
+      name: t.name ?? `${srcName} ${size.width}x${size.height}`,
+      width: size.width,
+      height: size.height,
+      margins: marginsFor(size.width, size.height, t.margins)
+    };
+  });
+  return { targets, problems };
+}
+var reframeTools = [
+  {
+    name: "ae_reframe",
+    description: "Social cut-downs: copy a comp to other aspects (16:9, 1:1, 4:5, 9:16, or any w:h; the source's short side is kept, so 1920x1080 gives 1080x1920) and re-lay out its top-level layers. Backgrounds (footage, solids, adjustment and shape layers covering the frame) are scaled to cover the new frame. Everything else, controller nulls included, is pinned to the nearest edge or centre of the safe area, keeping its margin, and shrunk if it no longer fits; keys move with it; children follow their parent. 3D layers, cameras and lights move with the frame's centre. Precomps are treated like any other layer (shrunk to fit), so reframe inside them if they need their own layout. Default safe margins: 5% on 16:9, 6% on 1:1 and 4:5, and on 9:16 12% top, 20% bottom, 6% sides for platform UI; override with `margins` (a brief's platform numbers win). A guide layer outlines the safe area. One undo group for every size, guarded by `expect`, with an auto checkpoint. The layout is read back in a separate evalScript: `outside_safe` lists layers still past the safe area. Look at each new comp (ae_contact_sheet) before calling it done. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeReframeSchema,
+    handler: async (args, ctx) => {
+      const src = await ctx.bridge.evalRaw({
+        id: `${ctx.bridge.newOpId()}_reframe_src`,
+        script: buildJsxCall("getComp", { comp_id: args.comp_id }),
+        label: "ae_reframe (source)",
+        mutates: false,
+        toolName: "ae_reframe"
+      });
+      const { width: srcW, height: srcH, name: srcName } = src.result;
+      const { targets, problems } = planTargets(args, srcW, srcH, srcName);
+      if (problems.length > 0) return { ok: false, error: "bad_args", problems };
+      ctx.quarantine.assertClear();
+      const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+      const opId = ctx.bridge.newOpId();
+      const projectSnapshot = (suffix) => ctx.bridge.evalRaw({
+        id: `${opId}_${suffix}`,
+        script: buildJsxCall("snapshotForReceipt", {}),
+        label: `ae_reframe (${suffix} snapshot)`,
+        mutates: false,
+        toolName: "ae_reframe"
+      });
+      try {
+        return await ctx.queue.run("ae_reframe", async () => {
+          ctx.quarantine.assertClear();
+          const guard = await verifyTargetGuard(ctx, expect, opId);
+          const checkpoint = await autoCheckpoint(ctx, guard, "ae_reframe");
+          const before = await projectSnapshot("before");
+          const write = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("reframeComp", {
+              expect,
+              comp_id: args.comp_id,
+              targets,
+              source_margins: marginsFor(srcW, srcH, args.source_margins),
+              shrink: args.shrink !== false,
+              guide: args.guide !== false
+            }),
+            label: `ae_reframe(${targets.map((t) => t.aspect).join(", ")})`,
+            mutates: true,
+            toolName: "ae_reframe"
+          });
+          const made = write.result.comps;
+          const after = await projectSnapshot("after");
+          const report = await ctx.bridge.evalRaw({
+            id: `${opId}_report`,
+            script: buildJsxCall("reframeReport", { comps: made.map((m) => ({ comp_id: m.comp_id, safe: m.safe })) }),
+            label: "ae_reframe (read back)",
+            mutates: false,
+            toolName: "ae_reframe"
+          });
+          const mismatches = [];
+          report.result.comps.forEach((r, i) => {
+            const t = targets[i];
+            if (r.width !== t.width || r.height !== t.height) {
+              mismatches.push({ path: `${t.name}.size`, expected: [t.width, t.height], actual: [r.width, r.height], message: `${t.name} is not ${t.width}x${t.height}` });
+            }
+          });
+          return {
+            ok: true,
+            op_id: opId,
+            applied: true,
+            source: write.result.source,
+            comps: made.map((m, i) => ({
+              ...m,
+              aspect: targets[i].aspect,
+              margins: targets[i].margins,
+              outside_safe: report.result.comps[i]?.outside_safe ?? []
+            })),
+            next: "Check each new comp with ae_contact_sheet; nudge anything in outside_safe with ae_set_property.",
+            checkpoint,
+            receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches })
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) {
+          throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
         }
         throw err;
       }
@@ -13398,8 +13953,8 @@ ${args.description}`,
 ];
 
 // src/tools/ext/track.ts
-var fs17 = __toESM(require("node:fs"), 1);
-var path17 = __toESM(require("node:path"), 1);
+var fs18 = __toESM(require("node:fs"), 1);
+var path18 = __toESM(require("node:path"), 1);
 function toGray(img) {
   const n = img.width * img.height;
   const data = new Float32Array(n);
@@ -13603,7 +14158,7 @@ var trackTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs17.mkdirSync(framesDir, { recursive: true });
+      fs18.mkdirSync(framesDir, { recursive: true });
       const patchSize = (args.pattern_size ?? 31) | 1;
       const opts = {
         patchSize,
@@ -13651,14 +14206,14 @@ var trackTools = [
               points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
             }
           }
-          fs17.rmSync(snap.path, { force: true });
+          fs18.rmSync(snap.path, { force: true });
           if (lostAt2) break;
         }
         return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker.contrast };
       });
       const { points, lostAt } = tracked;
-      const previewPath = path17.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-      fs17.writeFileSync(
+      const previewPath = path18.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+      fs18.writeFileSync(
         previewPath,
         encodePng(
           drawTrackPreview(
@@ -13741,6 +14296,8 @@ var extTools = [
   ...receiptsTools,
   ...animateTools,
   ...effectsTools,
+  ...dataTools,
+  ...reframeTools,
   ...framesTools,
   ...motionTools,
   ...askTools,
@@ -14303,7 +14860,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path18.join(resolvedDataDir, "quarantine.json")
+    path19.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -14316,7 +14873,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path18.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path19.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir
   };

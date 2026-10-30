@@ -3,6 +3,7 @@ import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { askTools } from "./ask.js";
 import { briefTools } from "./brief.js";
+import { dataTools } from "./data.js";
 import { dialogsTools } from "./dialogs.js";
 import { effectsTools } from "./effects.js";
 import { exploreTools } from "./explore.js";
@@ -11,6 +12,7 @@ import { keyTools } from "./key.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
+import { reframeTools } from "./reframe.js";
 import { skillsTools } from "./skills.js";
 import { trackTools } from "./track.js";
 
@@ -20,6 +22,8 @@ export const extTools: ToolDefinition<any>[] = [
   ...receiptsTools,
   ...animateTools,
   ...effectsTools,
+  ...dataTools,
+  ...reframeTools,
   ...framesTools,
   ...motionTools,
   ...askTools,
