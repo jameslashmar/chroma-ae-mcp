@@ -397,9 +397,95 @@ describe("ext/dialogs tools (Task G5)", () => {
     });
   });
 
-  it("returns not_implemented_on_this_os on non-Windows platforms", async () => {
+  it("reads and answers dialogs on macOS through ae-dialogs-mac.js", async () => {
+    const macCalls: string[][] = [];
+    const sheet = {
+      handle: 101,
+      title: "",
+      class: "AXSheet",
+      isModal: true,
+      text: "Save changes to Show.aep?",
+      buttons: [
+        { name: "Cancel", automationId: "", enabled: true },
+        { name: "Don't Save", automationId: "", enabled: true },
+      ],
+      checkboxes: [],
+      boundingRect: { x: 10, y: 20, width: 300, height: 120 },
+      screenshot: null,
+    };
     setDialogsTestOverrides({
       platform: "darwin",
+      dialogsDir: tempDialogsDir,
+      ps1Runner: async () => {
+        throw new Error("PowerShell must not run on macOS");
+      },
+      macRunner: async (args) => {
+        macCalls.push(args);
+        if (args[0] === "list") return JSON.stringify({ ok: true, ae_pid: 501, dialogs: [sheet] });
+        return JSON.stringify({ ok: true, handle: 101, pressed: args[2], checked: null, closed: true });
+      },
+    });
+
+    noteOpStarted("op_close_1");
+    const listRes = (await getTool("ae_dialogs").handler({ screenshots: true }, fakeCtx)) as {
+      ok: boolean;
+      ae_pid: number;
+      dialogs: Array<{ handle: number; text: string; caused_by_op: string | null; screenshot: string | null }>;
+    };
+    noteOpFinished("op_close_1");
+    expect(listRes.ok).toBe(true);
+    expect(listRes.ae_pid).toBe(501);
+    expect(listRes.dialogs[0]).toMatchObject({ handle: 101, text: "Save changes to Show.aep?", caused_by_op: "op_close_1", screenshot: null });
+
+    const res = await getTool("ae_dialog_respond").handler({ handle: 101, button: "Cancel", reason: "Our close caused it" }, fakeCtx);
+    expect(res).toMatchObject({ ok: true, pressed: "Cancel", closed: true });
+    expect(macCalls).toEqual([["list"], ["respond", "101", "Cancel", "", "", "Save changes to Show.aep?"]]);
+  });
+
+  it("passes the title and text guards to the macOS script and relays dialog_changed", async () => {
+    const macCalls: string[][] = [];
+    const win = {
+      handle: 200,
+      title: "Render Settings",
+      class: "AXDialog",
+      isModal: true,
+      text: "x".repeat(300),
+      buttons: [{ name: "Cancel", automationId: "", enabled: true }],
+      checkboxes: [],
+      boundingRect: { x: 0, y: 0, width: 10, height: 10 },
+      screenshot: null,
+    };
+    setDialogsTestOverrides({
+      platform: "darwin",
+      dialogsDir: tempDialogsDir,
+      macRunner: async (args) => {
+        macCalls.push(args);
+        if (args[0] === "list") return JSON.stringify({ ok: true, ae_pid: 1, dialogs: [win] });
+        return JSON.stringify({ ok: false, error: "dialog_changed: the text of the window at this handle is different now; list the dialogs again" });
+      },
+    });
+    noteOpStarted("op_mac_2");
+    await getTool("ae_dialogs").handler({ screenshots: false }, fakeCtx);
+    noteOpFinished("op_mac_2");
+    const res = (await getTool("ae_dialog_respond").handler({ handle: 200, button: "Cancel", reason: "Our op caused it" }, fakeCtx)) as { ok: boolean; error: string };
+    expect(macCalls[1]).toEqual(["respond", "200", "Cancel", "", "Render Settings", "x".repeat(200)]);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/^dialog_changed/);
+  });
+
+  it("passes a macOS permission error through", async () => {
+    setDialogsTestOverrides({
+      platform: "darwin",
+      dialogsDir: tempDialogsDir,
+      macRunner: async () => JSON.stringify({ ok: false, error: "accessibility_permission_needed: allow After Effects" }),
+    });
+    const listRes = await getTool("ae_dialogs").handler({ screenshots: false }, fakeCtx);
+    expect(listRes).toEqual({ ok: false, error: "accessibility_permission_needed: allow After Effects" });
+  });
+
+  it("returns not_implemented_on_this_os on other platforms", async () => {
+    setDialogsTestOverrides({
+      platform: "linux",
       dialogsDir: tempDialogsDir,
     });
 
