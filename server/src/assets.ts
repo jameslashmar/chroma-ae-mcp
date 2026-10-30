@@ -138,7 +138,12 @@ export function pickNewAssets(
   const settling: AssetCandidate[] = [];
   for (const c of candidates) {
     if (have.has(normPath(c.path))) already.push(c);
-    else if (now - c.mtimeMs < (c.sequence ? sequenceSettleMs : settleMs)) settling.push(c);
+    // arrivedMs (latest of mtime/ctime/birthtime), not raw mtimeMs: a copy
+    // or sync delivery that preserves an old source mtime still gets a
+    // fresh ctime/birthtime, and settling on mtimeMs alone would judge it
+    // "already settled" and import it while the delivery is still in
+    // progress -- the exact half-done-import bug arrivedMs exists to catch.
+    else if (now - c.arrivedMs < (c.sequence ? sequenceSettleMs : settleMs)) settling.push(c);
     else fresh.push(c);
   }
   return { fresh, already, settling };

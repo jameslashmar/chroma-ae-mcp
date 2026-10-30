@@ -26,6 +26,10 @@ export interface AssetWatchSettings {
   enabled: boolean;
   /** When watching was turned on (ISO); only files changed after it are imported automatically. */
   since: string | null;
+  /** Mirrors the `recursive` arg the watch was turned on with; scanAssets() default (true) otherwise. */
+  recursive: boolean;
+  /** Mirrors the `sequences` arg the watch was turned on with; scanAssets() default (true) otherwise. */
+  sequences: boolean;
 }
 
 export interface Settings {
@@ -37,7 +41,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
   taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
-  asset_watch: { enabled: false, since: null },
+  asset_watch: { enabled: false, since: null, recursive: true, sequences: true },
 };
 
 export function defaultSettingsFilePath(): string {
@@ -56,12 +60,20 @@ function cloneDefaults(): Settings {
   };
 }
 
+// Same MIN_HANDLE bound ext/animate.ts's curveToSides() clamps to at apply
+// time (duplicated here rather than imported, to avoid this settings module
+// depending on a tools/ext/* module): x1 can't be 0 (AE's influence floor
+// is 0.1%) and x2 can't be 1, or the stored curve would silently come out
+// different from what was stored the moment it's actually applied. x1 = 1
+// and x2 = 0 are both fine -- curveToSides() doesn't clamp those ends.
+const MIN_HANDLE = 0.001;
+
 function isCurve(v: unknown): v is number[] {
   return (
     Array.isArray(v) &&
     v.length === 4 &&
     v.every((n) => typeof n === "number" && Number.isFinite(n)) &&
-    v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1
+    v[0] >= MIN_HANDLE && v[0] <= 1 && v[2] >= 0 && v[2] <= 1 - MIN_HANDLE
   );
 }
 
@@ -95,6 +107,8 @@ export class SettingsStore {
     const next = { ...this.settings.asset_watch };
     if (patch.enabled !== undefined) next.enabled = patch.enabled;
     if (patch.since !== undefined) next.since = patch.since;
+    if (patch.recursive !== undefined) next.recursive = patch.recursive;
+    if (patch.sequences !== undefined) next.sequences = patch.sequences;
     this.settings = { ...this.settings, asset_watch: next };
     this.saveToDisk();
     return this.get();
@@ -144,6 +158,8 @@ export class SettingsStore {
       if (aw && typeof aw === "object") {
         if (typeof aw.enabled === "boolean") this.settings.asset_watch.enabled = aw.enabled;
         if (typeof aw.since === "string" && !Number.isNaN(Date.parse(aw.since))) this.settings.asset_watch.since = aw.since;
+        if (typeof aw.recursive === "boolean") this.settings.asset_watch.recursive = aw.recursive;
+        if (typeof aw.sequences === "boolean") this.settings.asset_watch.sequences = aw.sequences;
       }
     } catch {
       // Ignore a corrupt or unreadable file on startup; keep the defaults

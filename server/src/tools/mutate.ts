@@ -230,7 +230,11 @@ export async function autoCheckpoint(
     };
   }
 
-  const unsaved = guard.dirty === true ? { unsaved_changes_not_included: true } : {};
+  // guard.dirty is boolean | null -- null means AE couldn't say (reading
+  // app.project.dirty threw). Treating null the same as false would tell
+  // the caller the checkpoint is known-complete when it's actually unknown;
+  // the honest, conservative answer is to warn for both true and null.
+  const unsaved = guard.dirty !== false ? { unsaved_changes_not_included: true } : {};
   const key = normalizeGuardPath(projectPath);
   const last = lastAutoCheckpoint.get(key);
   if (last && last.size === stat.size && last.mtimeMs === stat.mtimeMs && fs.existsSync(last.path)) {

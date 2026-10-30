@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import type { AskAnswer, AskQuestion } from "../../asks.js";
 import type { ToolDefinition } from "../common.js";
+import { EASE_CURVE_ARRAY_SCHEMA } from "./animate.js";
 
 export const PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
 export const DEFAULT_WAIT_SECONDS = 120;
@@ -20,14 +21,9 @@ const AskOptionSchema = z.object({
   id: z.string().min(1).max(40).describe("Short id returned when the user picks this option."),
   label: z.string().min(1).max(120),
   description: z.string().max(400).optional(),
-  curve: z
-    .array(z.number())
-    .length(4)
-    .refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, {
-      message: "curve x1 and x2 must be within 0..1",
-    })
-    .optional()
-    .describe("cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."),
+  curve: EASE_CURVE_ARRAY_SCHEMA.optional().describe(
+    "cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."
+  ),
   image_path: z
     .string()
     .min(1)

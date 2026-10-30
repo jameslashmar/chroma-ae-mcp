@@ -324,20 +324,39 @@
     return cur;
   }
 
-  function descendantsOf(comp, rootIdx, parentIdx) {
+  // Parent-index -> children-indexes, built once per comp in O(n). Lets
+  // descendantsOf() below walk each root's subtree directly instead of
+  // re-scanning every layer and re-walking its whole parent chain for every
+  // root, which was O(n^2 * depth) total (and was then redone from scratch
+  // again for the read-back pass) -- synchronous, so it blocked the AE UI
+  // for the whole operation on a comp with many layers.
+  function childrenIndexes(comp, parentIdx) {
     var out = [];
-    for (var j = 1; j <= comp.numLayers; j++) {
-      if (j === rootIdx) continue;
-      var cur = parentIdx[j];
-      var guard = 0;
-      while (cur && guard < 64) {
-        if (cur === rootIdx) {
-          out.push(comp.layer(j));
-          break;
-        }
-        cur = parentIdx[cur];
-        guard++;
+    var i;
+    for (i = 0; i <= comp.numLayers; i++) out.push([]);
+    for (i = 1; i <= comp.numLayers; i++) {
+      var p = parentIdx[i];
+      if (p) out[p].push(i);
+    }
+    return out;
+  }
+
+  function descendantsOf(comp, rootIdx, childrenOf) {
+    var out = [];
+    var stack = childrenOf[rootIdx] ? childrenOf[rootIdx].slice(0) : [];
+    // AE parenting gives each layer exactly one parent, so childrenOf forms
+    // a tree below any true root and this walk visits each node once; the
+    // guard is defensive only, bounding total work if that ever isn't true.
+    var guard = 0;
+    var maxSteps = comp.numLayers + 1;
+    while (stack.length && guard < maxSteps) {
+      var idx = stack.pop();
+      out.push(comp.layer(idx));
+      var kids = childrenOf[idx];
+      if (kids) {
+        for (var k = 0; k < kids.length; k++) stack.push(kids[k]);
       }
+      guard++;
     }
     return out;
   }
@@ -473,6 +492,7 @@
     var dcx = (dst.w - src.w) / 2;
     var dcy = (dst.h - src.h) / 2;
     var parentIdx = parentIndexes(comp);
+    var childrenOf = childrenIndexes(comp, parentIdx);
     var matteOf = matteMap(comp, parentIdx);
     var done = [];
     var entries = [];
@@ -513,7 +533,7 @@
       if (hasExpression(tr.property("ADBE Position"))) {
         entry.note = "Position has an expression, which may override the move";
       }
-      var desc = descendantsOf(comp, i, parentIdx);
+      var desc = descendantsOf(comp, i, childrenOf);
       var t = restTime(comp, layer, desc, src.w, src.h);
       var own = layerBox(layer, t);
       if (!own) {
@@ -663,12 +683,13 @@
       var safe = spec.safe;
       var outside = [];
       var parentIdx = parentIndexes(comp);
+      var childrenOf = childrenIndexes(comp, parentIdx);
       for (var i = 1; i <= comp.numLayers; i++) {
         if (parentIdx[i]) continue;
         var root = comp.layer(i);
         if (root.name === GUIDE_NAME) continue;
         if (isCameraOrLight(root) || is3d(root) || !transformOf(root) || noPicture(root)) continue;
-        var desc = descendantsOf(comp, i, parentIdx);
+        var desc = descendantsOf(comp, i, childrenOf);
         var t = restTime(comp, root, desc, comp.width, comp.height);
         var members = [root];
         for (var d = 0; d < desc.length; d++) members.push(desc[d]);

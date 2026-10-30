@@ -17,6 +17,13 @@
     return;
   }
 
+  // Matches core.jsx's own normPath() convention: fold case on Windows
+  // only. Motion/VFX pipelines routinely format macOS volumes
+  // case-sensitive on purpose (for Linux render-farm parity), so folding
+  // case there would let sameFile() silently treat two different files as
+  // the same one and attach the wrong footage.
+  var IS_WIN = String($.os).indexOf("Windows") !== -1;
+
   function fail(kind, message, extra) {
     var e = new Error(message);
     e.__kind = kind;
@@ -125,7 +132,13 @@
   function sameFile(item, fsName) {
     try {
       if (!(item instanceof FootageItem) || !item.mainSource || !item.mainSource.file) return false;
-      return String(item.mainSource.file.fsName).toLowerCase() === String(fsName).toLowerCase();
+      var a = String(item.mainSource.file.fsName);
+      var b = String(fsName);
+      if (IS_WIN) {
+        a = a.toLowerCase();
+        b = b.toLowerCase();
+      }
+      return a === b;
     } catch (e) {
       return false;
     }

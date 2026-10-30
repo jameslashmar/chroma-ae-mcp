@@ -8,7 +8,7 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import { SettingsStore } from "../src/settings.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AeImportAssetsSchema, AssetWatcher, assetsTools } from "../src/tools/ext/assets.js";
+import { AeImportAssetsSchema, AssetWatcher, SETTLE_MS, assetsTools } from "../src/tools/ext/assets.js";
 import { redact, tailLines, writeDiagnostics } from "../src/tools/ext/diagnostics.js";
 import { AUTO_CHECKPOINT_TOOLS } from "../src/tools/ext/receipts.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
@@ -123,6 +123,11 @@ describe("ae_import_assets", () => {
     touch(path.join(dir, "_assets", "flora", "b.jpg"));
     const state = { project, footage: [path.join(dir, "_assets", "a.png")] };
     const { ctx, calls } = fakeAe(state);
+    // The settle check now keys off arrivedMs (real ctime/birthtime), not
+    // the backdated mtime touch() sets -- Node has no portable way to
+    // backdate ctime/birthtime, so a real wait past SETTLE_MS is needed to
+    // simulate "this file finished arriving a while ago".
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
     const out: any = await assetsTools[0].handler(AeImportAssetsSchema.parse({ expect: { project_path: project } }), ctx);
     expect(out.ok).toBe(true);
     expect(out.already_in_project).toBe(1);
@@ -155,7 +160,7 @@ describe("ae_import_assets", () => {
     expect(settings.get().asset_watch.since).toBe(since);
     expect(fs.existsSync(path.join(dir, "_assets"))).toBe(true);
     await assetsTools[0].handler(AeImportAssetsSchema.parse({ watch: false, dry_run: true, expect: { project_path: project } }), ctx);
-    expect(settings.get().asset_watch).toEqual({ enabled: false, since: null });
+    expect(settings.get().asset_watch).toEqual({ enabled: false, since: null, recursive: true, sequences: true });
   });
 
   it("the watcher does nothing while off, then imports files that arrive after it was turned on", async () => {
@@ -172,8 +177,15 @@ describe("ae_import_assets", () => {
     await new Promise((r) => setTimeout(r, 60));
     settings.updateAssetWatch({ enabled: true, since: new Date().toISOString() });
     await new Promise((r) => setTimeout(r, 60));
-    // Old mtime, but it arrived after watching began (copied in): still imported.
+    // Old (backdated) mtime, but it arrives (real ctime/birthtime) after
+    // watching began, same as a copy that preserves an old source mtime.
+    // The settle check keys off that real arrival time, so -- unlike the
+    // raw-mtime check this replaced -- it is NOT treated as already settled
+    // just because its mtime looks old; it needs real time to pass too,
+    // same as writing.png below. Wait past SETTLE_MS so it genuinely has.
     touch(path.join(dir, "_assets", "new.png"), 10_000);
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+    // Arrives right before the tick: still (correctly) judged as settling.
     touch(path.join(dir, "_assets", "writing.png"), 0);
     const res = await watcher.tick();
     expect(res).toEqual({ imported: 1, failed: 0 });
@@ -181,9 +193,11 @@ describe("ae_import_assets", () => {
     expect(logs[0]).toMatch(/imported 1 file/);
     expect(calls.find((c) => c.fn === "status")).toBeDefined();
 
-    // Nothing new: no question to AE beyond the status poll (the one footage read is the import's own check).
+    // writing.png has now genuinely settled (real time has passed), so this
+    // tick imports it; the one after has nothing left to do.
     const before = calls.length;
     touch(path.join(dir, "_assets", "writing.png"), 10_000);
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
     expect(await watcher.tick()).toEqual({ imported: 1, failed: 0 });
     expect(await watcher.tick()).toBeNull();
     expect(calls.slice(before).filter((c) => c.fn === "footagePaths")).toHaveLength(2);

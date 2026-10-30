@@ -288,20 +288,24 @@ const CLIENTS = {
         const secrets = [opts.token];
         let note = "";
         if (old) {
+          // Write the exact old entry straight back into ~/.claude.json,
+          // through the same backup-first, atomic-rename path the other
+          // three hosts use (backupAndWrite), instead of reconstructing a
+          // `claude mcp add` command. That reconstruction only ever covered
+          // the http-transport shape; any other shape (stdio, sse, or
+          // anything a future Claude Code CLI adds) silently skipped the
+          // restore entirely and still claimed "could not be restored"
+          // without having tried. Restoring the raw JSON is shape-agnostic.
           let restored = false;
-          if (old.type === "http" && typeof old.url === "string") {
-            const args = ["mcp", "add", "--scope", "user", "--transport", "http", NAME, old.url];
-            const headers = old.headers && typeof old.headers === "object" ? old.headers : {};
-            for (const k of Object.keys(headers)) {
-              args.push("--header", k + ": " + headers[k]);
-              secrets.push(String(headers[k]).replace(/^Bearer\s+/i, ""));
-            }
-            try {
-              const back = await runClaude(env, args);
-              restored = !back.error && back.status === 0;
-            } catch (e) {
-              restored = false;
-            }
+          try {
+            const file = path.join(env.home, ".claude.json");
+            const cfg = readJson(file);
+            if (!cfg.mcpServers || typeof cfg.mcpServers !== "object") cfg.mcpServers = {};
+            cfg.mcpServers[NAME] = old;
+            backupAndWrite(file, JSON.stringify(cfg, null, 2) + "\n");
+            restored = true;
+          } catch (e) {
+            restored = false;
           }
           note = restored ? " The old registration was restored." : " The old registration could not be restored.";
         }

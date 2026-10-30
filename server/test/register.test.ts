@@ -121,25 +121,46 @@ describe("register.cjs config editing", () => {
     const { env } = fakeEnv();
     fs.writeFileSync(path.join(env.pathEnv, process.platform === "win32" ? "claude.exe" : "claude"), "");
     const oldToken = "a".repeat(64);
-    fs.writeFileSync(
-      path.join(env.home, ".claude.json"),
-      JSON.stringify({ mcpServers: { "chroma-ae": { type: "http", url: "http://127.0.0.1:7790/mcp", headers: { Authorization: `Bearer ${oldToken}` } } } })
-    );
+    const claudeJsonPath = path.join(env.home, ".claude.json");
+    const oldEntry = { type: "http", url: "http://127.0.0.1:7790/mcp", headers: { Authorization: `Bearer ${oldToken}` } };
+    fs.writeFileSync(claudeJsonPath, JSON.stringify({ mcpServers: { "chroma-ae": oldEntry } }));
     const calls: string[][] = [];
-    let adds = 0;
     const flaky = {
       ...env,
       exec: async (_f: string, args: string[]) => {
         calls.push(args);
-        if (args[1] === "add") {
-          adds++;
-          return adds === 1 ? { status: 1, stdout: "", stderr: "boom" } : { status: 0, stdout: "", stderr: "" };
-        }
+        if (args[1] === "add") return { status: 1, stdout: "", stderr: "boom" };
         return { status: 0, stdout: "", stderr: "" };
       },
     };
     await expect(register.setRegistered("claude-code", true, { port: 7790, token: "b".repeat(64) }, flaky)).rejects.toThrow(/old registration was restored/);
-    expect(calls[2]).toEqual(["mcp", "add", "--scope", "user", "--transport", "http", "chroma-ae", "http://127.0.0.1:7790/mcp", "--header", `Authorization: Bearer ${oldToken}`]);
+    // Restore now writes the raw old entry straight back into ~/.claude.json
+    // (through the same backup-first, atomic-rename path the other three
+    // hosts use) instead of reconstructing a second `claude mcp add` call,
+    // so there is no third exec call to check -- only "mcp remove" then the
+    // failing "mcp add".
+    expect(calls.map((c) => c.slice(0, 2).join(" "))).toEqual(["mcp remove", "mcp add"]);
+    const restored = JSON.parse(fs.readFileSync(claudeJsonPath, "utf8"));
+    expect(restored.mcpServers["chroma-ae"]).toEqual(oldEntry);
+    expect(fs.existsSync(claudeJsonPath + ".chroma-bak")).toBe(true);
+  });
+
+  it("restores a non-http old Claude Code entry too (register.cjs's own stdio pattern, applied by hand)", async () => {
+    const { env, relayPath, node } = fakeEnv();
+    fs.writeFileSync(path.join(env.pathEnv, process.platform === "win32" ? "claude.exe" : "claude"), "");
+    const claudeJsonPath = path.join(env.home, ".claude.json");
+    // The shape the restore logic used to only handle for `http`: a `stdio`
+    // entry, e.g. one a user set up by hand with `claude mcp add -- node
+    // stdio-relay.cjs` before the http-based flow existed.
+    const oldEntry = { type: "stdio", command: node, args: [relayPath] };
+    fs.writeFileSync(claudeJsonPath, JSON.stringify({ mcpServers: { "chroma-ae": oldEntry } }));
+    const flaky = {
+      ...env,
+      exec: async (_f: string, args: string[]) => (args[1] === "add" ? { status: 1, stdout: "", stderr: "boom" } : { status: 0, stdout: "", stderr: "" }),
+    };
+    await expect(register.setRegistered("claude-code", true, { port: 7790, token: "b".repeat(64) }, flaky)).rejects.toThrow(/old registration was restored/);
+    const restored = JSON.parse(fs.readFileSync(claudeJsonPath, "utf8"));
+    expect(restored.mcpServers["chroma-ae"]).toEqual(oldEntry);
   });
 
   it("refuses to edit TOML where chroma-ae is defined in another form, and accepts a header comment", () => {

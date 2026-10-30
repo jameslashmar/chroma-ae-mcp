@@ -75,9 +75,22 @@
       return comp.layer(sel.index);
     }
     if (sel.name !== undefined && sel.name !== null) {
-      var byName = comp.layer(sel.name);
-      if (!byName) fail("not_found", "No layer named \"" + sel.name + "\"");
-      return byName;
+      // Count matches instead of trusting comp.layer(name), which silently
+      // returns just the first match -- the same selector would then
+      // resolve to an arbitrary layer here but be correctly refused as
+      // ambiguous by data.jsx's layerIndex(), a real cross-tool
+      // inconsistency for duplicate layer names (common in AE comps).
+      var count = 0;
+      var found = null;
+      for (i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).name === sel.name) {
+          count++;
+          if (!found) found = comp.layer(i);
+        }
+      }
+      if (count === 0) fail("not_found", "No layer named \"" + sel.name + "\"");
+      if (count > 1) fail("bad_args", count + " layers are named \"" + sel.name + "\"; select by id or index");
+      return found;
     }
     fail("bad_args", "layer selector needs id, index or name");
     return null;

@@ -29,7 +29,7 @@ import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
 
-const SETTLE_MS = 2000;
+export const SETTLE_MS = 2000;
 /** Sequences are renders in progress: wait longer after the newest frame. */
 const SEQUENCE_SETTLE_MS = 10_000;
 const BACKOFF_BASE_MS = 5000;
@@ -200,7 +200,7 @@ export class AssetWatcher {
     }
   }
 
-  private async look(settings: { enabled: boolean; since: string | null }): Promise<{ imported: number; failed: number } | null> {
+  private async look(settings: { enabled: boolean; since: string | null; recursive?: boolean; sequences?: boolean }): Promise<{ imported: number; failed: number } | null> {
     {
       const status = await this.ctx.bridge.evalRaw<{ project_path: string }>({
         id: `${this.ctx.bridge.newOpId()}_watch`,
@@ -217,7 +217,13 @@ export class AssetWatcher {
       const seen = this.seen.get(key) ?? new Set<string>();
       this.seen.set(key, seen);
       const since = settings.since ? Date.parse(settings.since) : 0;
-      const candidates = scanAssets(folder).filter((c) => !seen.has(normPath(c.path)) && c.arrivedMs >= since);
+      // Reuse the recursive/sequences choice ae_import_assets was called
+      // with when watch was turned on, instead of always defaulting both
+      // to true -- otherwise watch:true silently ignores a non-default
+      // recursive:false/sequences:false the user explicitly asked for.
+      const candidates = scanAssets(folder, { recursive: settings.recursive, sequences: settings.sequences }).filter(
+        (c) => !seen.has(normPath(c.path)) && c.arrivedMs >= since
+      );
       if (candidates.length === 0) return null;
       const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
       const now = (this.opts.now ?? Date.now)();
@@ -255,7 +261,12 @@ export const assetsTools: ToolDefinition<any>[] = [
         const prev = ctx.settings.get().asset_watch;
         let since: string | null = null;
         if (args.watch) since = prev.enabled && prev.since ? prev.since : new Date().toISOString();
-        const s = ctx.settings.updateAssetWatch({ enabled: args.watch, since });
+        const s = ctx.settings.updateAssetWatch({
+          enabled: args.watch,
+          since,
+          recursive: args.recursive ?? true,
+          sequences: args.sequences ?? true,
+        });
         watch = { ...s.asset_watch, folder: DEFAULT_ASSET_FOLDER, bin: DEFAULT_ASSET_BIN, note: args.watch ? "Files changed from now on are imported automatically." : "Auto-import is off." };
       }
       if (projectPath === "<unsaved>" && !args.folder) {

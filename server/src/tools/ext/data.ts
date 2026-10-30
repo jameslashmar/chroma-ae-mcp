@@ -294,8 +294,18 @@ export function checkBuild(
           mismatches.push({ path: where, expected, actual: got.text, message: `Text of ${where} reads back differently` });
         }
       } else if (m.target === "footage") {
-        const a = String(got.footage ?? "").replace(/\\/g, "/").toLowerCase();
-        if (a !== String(expected).toLowerCase()) {
+        // Fold case only on win32, matching panel/host/core.jsx's own
+        // normPath() convention elsewhere in this codebase. macOS volumes
+        // used by motion/VFX pipelines are routinely formatted
+        // case-sensitive on purpose (for parity with Linux render farms),
+        // so comparing footage paths case-insensitively there would mask a
+        // genuine "the wrong (differently-cased) file got attached" bug
+        // instead of reporting it.
+        const foldCase = process.platform === "win32";
+        const a = String(got.footage ?? "").replace(/\\/g, "/");
+        const b = String(expected).replace(/\\/g, "/");
+        const same = foldCase ? a.toLowerCase() === b.toLowerCase() : a === b;
+        if (!same) {
           mismatches.push({ path: where, expected, actual: got.footage, message: `Footage of ${where} reads back differently` });
         }
       } else {
