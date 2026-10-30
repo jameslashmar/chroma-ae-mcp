@@ -6,13 +6,13 @@ This picks up where the work stands after two sessions with Emre on the Windows 
 - what the code review found and what changed because of it;
 - what is still open.
 
-Everything here is on GitHub as stacked pull requests; nothing is merged yet.
+Everything here is on GitHub as stacked pull requests. Jay merged #1 into `main` on 2026-10-30, with a fix commit on top (`c8bd645`), and rebased #3 and #4 onto it; #6 was rebased onto that #4 (`feat/ae-control` at `5013831`) the same day.
 
 ## Where it is
 
 | PR | Branch | Base | What |
 |---|---|---|---|
-| #1 | `feat/motion-preview` | `main` | `ae_contact_sheet`, `ae_motion_graph`, scaled snapshots |
+| #1 (merged) | `feat/motion-preview` | `main` | `ae_contact_sheet`, `ae_motion_graph`, scaled snapshots |
 | #2 | `feat/auto-checkpoints` | #1 | automatic checkpoints before every write, minimized-AE screenshots, the live smoke test |
 | #3 | `feat/motion-review` | #2 | `ae_motion_review` with easy-ease fixes |
 | #4 | `feat/ae-control` | #3 | Claude Desktop relay, `ae_ask_user` and curve easing, effect tools, `ae_brief` and `ae_taste`, `ae_track_point`, `ae_key_greenscreen` |
@@ -20,7 +20,7 @@ Everything here is on GitHub as stacked pull requests; nothing is merged yet.
 
 **Merging:**
 - Merge in order: #1, #2, #3, #4, then #6. Number 5 was never used: GitHub skipped it.
-- After #1 lands, rebase the rest onto `main` and retarget each PR.
+- #1 is in `main`. When #2 merges, retarget #3 to `main`, and so on down the stack, rebasing each onto the new base. `mcp-bundle.cjs` conflicts in a rebase are resolved by running `npm run bundle` in `server/` at that commit, never by merging the text.
 - The earlier PRs were merged by rebase, which keeps the topic commits.
 
 **The user's ground rules** (they apply to anything built on this):
@@ -34,12 +34,12 @@ Each commit builds, passes its tests and has an up-to-date bundle on its own.
 
 | Commit | Topic |
 |---|---|
-| `7d49ead` | AE skills |
-| `26e3a5f` | `ae_build_from_data` and `ae_reframe` |
-| `2a48631` | `ae_import_assets` with a watcher, and `ae_diagnostics` |
-| `19634b4` | panel registration and Save diagnostics |
-| `f2d2086` | macOS popups |
-| last | runner prep, smoke checks, docs and this file |
+| `f8de083` | AE skills |
+| `87400b7` | `ae_build_from_data` and `ae_reframe` |
+| `21f3dde` | `ae_import_assets` with a watcher, and `ae_diagnostics` |
+| `d7c7563` | panel registration and Save diagnostics |
+| `b98f7d9` | macOS popups |
+| `a237d78` | runner prep, smoke checks, docs and this file |
 
 ## What #6 adds (tools 48 → 55)
 
