@@ -11,6 +11,15 @@ import { scrubTools } from "./scrub.js";
 import { interpretTools } from "./interpret.js";
 import { pathsTools } from "./paths.js";
 import { memoryTools } from "./memory.js";
+import { rqeditTools } from "./rqedit.js";
+import { renderbatchTools } from "./renderbatch.js";
+import { collectTools } from "./collect.js";
+import { deliverTools } from "./deliver.js";
+import { loudnessTools } from "./loudness.js";
+import { legibilityTools } from "./legibility.js";
+import { variantsTools } from "./variants.js";
+import { learntasteTools } from "./learntaste.js";
+import { projectsessionTools } from "./projectsession.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { annotateTools } from "./annotate.js";
@@ -94,4 +103,13 @@ export const extTools: ToolDefinition<any>[] = [
   ...interpretTools,
   ...pathsTools,
   ...memoryTools,
+  ...rqeditTools,
+  ...renderbatchTools,
+  ...collectTools,
+  ...deliverTools,
+  ...loudnessTools,
+  ...legibilityTools,
+  ...variantsTools,
+  ...learntasteTools,
+  ...projectsessionTools,
 ];

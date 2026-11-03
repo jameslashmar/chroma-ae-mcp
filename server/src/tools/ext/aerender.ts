@@ -181,6 +181,8 @@ export function buildAerenderArgs(params: {
   render_settings_template?: string;
   start_frame?: number;
   end_frame?: number;
+  /** Adds -mfr ON <percent>: Multi-Frame Rendering capped at this share of the CPU (AE 22+). */
+  max_cpu_percent?: number;
 }): string[] {
   const cliArgs: string[] = [
     "-project",
@@ -201,6 +203,9 @@ export function buildAerenderArgs(params: {
   }
   if (params.end_frame !== undefined) {
     cliArgs.push("-e", String(params.end_frame));
+  }
+  if (params.max_cpu_percent !== undefined) {
+    cliArgs.push("-mfr", "ON", String(params.max_cpu_percent));
   }
   return cliArgs;
 }
@@ -490,6 +495,326 @@ export function getDefaultAerenderRegistry(): AerenderJobRegistry {
   return defaultRegistry;
 }
 
+export interface LaunchAerenderParams {
+  registry: AerenderJobRegistry;
+  spawn: SpawnLike;
+  aerender_path: string;
+  project_path: string;
+  comp_name: string;
+  output_path: string;
+  output_module_template?: string;
+  render_settings_template?: string;
+  start_frame?: number;
+  end_frame?: number;
+  /** aerender -mfr ON <percent> (AE 22+): Multi-Frame Rendering capped at this share of the CPU. */
+  max_cpu_percent?: number;
+}
+
+/**
+ * Spawns one background aerender, logs it to <job>.log and tracks it in the
+ * registry until it exits. ae_aerender_start and the render-batch runner both
+ * go through here, so a job behaves the same whichever started it.
+ */
+export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
+  const registry = p.registry;
+  const spawnFn = p.spawn;
+  const jobId = registry.newJobId();
+  const rendersDir = registry.rendersDir;
+  fs.mkdirSync(rendersDir, { recursive: true });
+  const outDir = path.dirname(p.output_path);
+  if (outDir && outDir !== ".") {
+    try {
+      fs.mkdirSync(outDir, { recursive: true });
+    } catch {
+      // Output dir may be on a virtual path in tests
+    }
+  }
+
+  const logPath = path.join(rendersDir, `${jobId}.log`);
+  fs.writeFileSync(logPath, "", { encoding: "utf8" });
+
+  const cliArgs = buildAerenderArgs({
+    project_path: p.project_path,
+    comp_name: p.comp_name,
+    output_path: p.output_path,
+    output_module_template: p.output_module_template,
+    render_settings_template: p.render_settings_template,
+    start_frame: p.start_frame,
+    end_frame: p.end_frame,
+    max_cpu_percent: p.max_cpu_percent,
+  });
+
+  let logFd: number | null = null;
+  try {
+    logFd = fs.openSync(logPath, "a");
+  } catch {
+    logFd = null;
+  }
+
+  const stdioConfig: childProcess.StdioOptions =
+    logFd !== null ? ["ignore", logFd, logFd] : "pipe";
+
+  const child = spawnFn(p.aerender_path, cliArgs, {
+    windowsHide: true,
+    detached: true,
+    stdio: stdioConfig,
+  });
+
+  if (logFd !== null) {
+    try {
+      fs.closeSync(logFd);
+    } catch {
+      // ignore
+    }
+  }
+
+  // If a test spawn mock returns readable stdout/stderr streams, append to logPath
+  if (child.stdout) {
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      try {
+        fs.appendFileSync(logPath, chunk);
+      } catch {
+        // ignore
+      }
+    });
+  }
+  if (child.stderr) {
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      try {
+        fs.appendFileSync(logPath, chunk);
+      } catch {
+        // ignore
+      }
+    });
+  }
+
+  const initialRecord: AerenderJobRecord = {
+    job_id: jobId,
+    pid: typeof child.pid === "number" ? child.pid : null,
+    state: "running",
+    exit_code: null,
+    signal: null,
+    cancelled: false,
+    project_path: p.project_path,
+    comp_name: p.comp_name,
+    output_path: p.output_path,
+    ...(p.output_module_template
+      ? { output_module_template: p.output_module_template }
+      : {}),
+    ...(p.render_settings_template
+      ? { render_settings_template: p.render_settings_template }
+      : {}),
+    ...(p.start_frame !== undefined
+      ? { start_frame: p.start_frame }
+      : {}),
+    ...(p.end_frame !== undefined
+      ? { end_frame: p.end_frame }
+      : {}),
+    aerender_path: p.aerender_path,
+    args: cliArgs,
+    log_path: logPath,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+  };
+
+  registry.register(initialRecord, child);
+
+  child.on("error", (err: Error) => {
+    try {
+      fs.appendFileSync(
+        logPath,
+        `\nAERENDER SPAWN ERROR: ${err.message}\n`
+      );
+    } catch {
+      // ignore
+    }
+    const current = registry.get(jobId);
+    registry.update(jobId, {
+      state: "failed",
+      exit_code: current?.exit_code ?? -1,
+      error: err.message,
+      finished_at: new Date().toISOString(),
+    });
+  });
+
+  child.on(
+    "exit",
+    (code: number | null, signal: NodeJS.Signals | null) => {
+      const current = registry.get(jobId);
+      if (current?.cancelled) {
+        registry.update(jobId, {
+          state: "failed",
+          exit_code: code ?? current.exit_code,
+          signal: signal ?? current.signal,
+          finished_at:
+            current.finished_at ?? new Date().toISOString(),
+        });
+        return;
+      }
+      // aerender can exit 0 after a fatal error (measured: a missing
+      // output-module template logs "aerender ERROR:" and exits 0), so
+      // the log decides as well as the exit code.
+      let logError: string | null = null;
+      try {
+        const m = /^aerender ERROR:?\s*(.*)$/im.exec(
+          fs.readFileSync(logPath, "utf8")
+        );
+        if (m) logError = m[1].trim() || "aerender ERROR";
+      } catch {
+        logError = null;
+      }
+      const succeeded = code === 0 && logError === null;
+      registry.update(jobId, {
+        state: succeeded ? "succeeded" : "failed",
+        ...(logError ? { error: logError } : {}),
+        exit_code: code,
+        signal: signal ?? null,
+        finished_at: new Date().toISOString(),
+      });
+    }
+  );
+
+  if (typeof child.unref === "function") {
+    child.unref();
+  }
+  return initialRecord;
+}
+
+/**
+ * Whether `pid` is a running process whose image is aerender. A pid from the
+ * registry after a restart or reboot may belong to anything else by now (pids
+ * are reused quickly on Windows), so a kill or a liveness test by pid alone is
+ * not safe. Three answers: true (it is an aerender), false (positively another
+ * image, or no such process), null (could not tell: the lookup threw, timed
+ * out or printed something unexpected). Windows asks tasklist, macOS ps (where
+ * aerender may hand off to aerendercore, so both names count). A kill acts on
+ * true only; a liveness test treats null as alive. The start time is not
+ * compared (neither tool gives it cheaply).
+ */
+export function isAerenderProcess(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  run: (file: string, args: string[]) => string = (file, args) =>
+    String(childProcess.execFileSync(file, args, { windowsHide: true, timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }))
+): boolean | null {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    if (platform === "win32") {
+      const out = run("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+      const lines = out.split(String.fromCharCode(10)).map((l) => l.trim()).filter((l) => l.length > 0);
+      let sawRow = false;
+      for (const l of lines) {
+        const m = /^"([^"]*)","(\d+)"/.exec(l);
+        if (m === null) continue;
+        sawRow = true;
+        if (m[2] === String(pid)) return /^aerender(?:\.exe)?$/i.test(m[1]);
+      }
+      if (sawRow) return false;
+      if (/^INFO:/i.test(lines[0] ?? "")) return false;
+      return null;
+    }
+    const out = run("ps", ["-p", String(pid), "-o", "comm="]).trim();
+    if (out === "") return null;
+    return /(^|\/)aerender(core)?$/i.test(out);
+  } catch {
+    return null;
+  }
+}
+
+/** True when another registry job with a live process handle in this server owns `pid` (a reused pid must not be mistaken for an old job's). */
+export function pidHeldByLiveJob(registry: AerenderJobRegistry, pid: number, exceptJobId?: string): boolean {
+  return registry.list().some((j) => j.job_id !== exceptJobId && j.pid === pid && registry.getProcess(j.job_id) !== undefined);
+}
+
+/** What the pid-based kill did: killed (signal sent to a positive aerender), other (the pid is held by another live job or positively not an aerender, so ours is gone), unknown (identity could not be told, nothing was signalled). */
+export type PidKillOutcome = "killed" | "other" | "unknown";
+
+/** Test seams for the default pid kill. */
+export interface CancelHooks {
+  identify?: (pid: number) => boolean | null;
+  signal?: (pid: number, sig: NodeJS.Signals) => void;
+}
+
+/**
+ * Stops a running job: terminates its process (or, after a restart, the pid
+ * from the registry, but only when the pid is positively an aerender and no
+ * other job with a live handle in this server holds it), notes the cancel in
+ * the log and marks the job failed with cancelled: true. When the pid's
+ * identity could not be told (the lookup failed), nothing is killed and the job
+ * stays 'running' with kill_unconfirmed: true, so a later resume still refuses
+ * instead of starting a second aerender on the same output. ae_aerender_cancel
+ * and the render-batch cancel share it.
+ */
+export function cancelAerenderJob(
+  registry: AerenderJobRegistry,
+  job: AerenderJobRecord,
+  killProcess?: (pid: number, signal?: string | number) => void,
+  by = "ae_aerender_cancel",
+  hooks: CancelHooks = {}
+): AerenderJobRecord & { kill_unconfirmed?: boolean } {
+  const proc = registry.getProcess(job.job_id);
+  if (proc) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      // ignore if already dead
+    }
+  } else if (typeof job.pid === "number" && job.pid > 0) {
+    let outcome: PidKillOutcome = "killed";
+    if (killProcess) {
+      try {
+        killProcess(job.pid, "SIGTERM");
+      } catch {
+        // ignore ESRCH if process already exited
+      }
+    } else {
+      // Without a live handle the pid is only trusted when it still is an aerender.
+      if (pidHeldByLiveJob(registry, job.pid, job.job_id)) outcome = "other";
+      else {
+        const identity = (hooks.identify ?? ((p: number) => isAerenderProcess(p)))(job.pid);
+        if (identity === true) {
+          try {
+            (hooks.signal ?? ((p: number, sig: NodeJS.Signals) => { process.kill(p, sig); }))(job.pid, "SIGTERM");
+          } catch {
+            // ignore ESRCH if process already exited
+          }
+        } else if (identity === false) outcome = "other";
+        else outcome = "unknown";
+      }
+    }
+    if (outcome === "unknown") {
+      try {
+        fs.appendFileSync(
+          job.log_path,
+          `
+AERENDER CANCEL by ${by} at ${new Date().toISOString()} could not confirm that pid ${job.pid} is this job's aerender; nothing was killed and the job stays running.
+`
+        );
+      } catch {
+        // ignore
+      }
+      return { ...(registry.get(job.job_id) ?? job), kill_unconfirmed: true };
+    }
+  }
+
+  try {
+    fs.appendFileSync(
+      job.log_path,
+      `
+AERENDER CANCELLED by ${by} at ${new Date().toISOString()}
+`
+    );
+  } catch {
+    // ignore
+  }
+
+  return registry.update(job.job_id, {
+    state: "failed",
+    cancelled: true,
+    finished_at: new Date().toISOString(),
+  })!;
+}
+
 export const AeAerenderStartSchema = z
   .object({
     expect: ExpectSchema,
@@ -565,6 +890,8 @@ export interface AerenderToolsOptions {
   afterFxPath?: string;
   existsSync?: (p: string) => boolean;
   killProcess?: (pid: number, signal?: string | number) => void;
+  /** Test seams for the pid identity check and signal used by the default kill. */
+  cancelHooks?: CancelHooks;
 }
 
 /**
@@ -699,22 +1026,10 @@ export function createAerenderTools(
                 existsSync: options.existsSync,
               });
 
-              const jobId = registry.newJobId();
-              const rendersDir = registry.rendersDir;
-              fs.mkdirSync(rendersDir, { recursive: true });
-              const outDir = path.dirname(args.output_path);
-              if (outDir && outDir !== ".") {
-                try {
-                  fs.mkdirSync(outDir, { recursive: true });
-                } catch {
-                  // Output dir may be on a virtual path in tests
-                }
-              }
-
-              const logPath = path.join(rendersDir, `${jobId}.log`);
-              fs.writeFileSync(logPath, "", { encoding: "utf8" });
-
-              const cliArgs = buildAerenderArgs({
+              const initialRecord = launchAerenderJob({
+                registry,
+                spawn: spawnFn,
+                aerender_path: aerenderBin,
                 project_path: actualProjectPath,
                 comp_name: args.comp_name,
                 output_path: args.output_path,
@@ -724,144 +1039,10 @@ export function createAerenderTools(
                 end_frame: args.end_frame,
               });
 
-              let logFd: number | null = null;
-              try {
-                logFd = fs.openSync(logPath, "a");
-              } catch {
-                logFd = null;
-              }
-
-              const stdioConfig: childProcess.StdioOptions =
-                logFd !== null ? ["ignore", logFd, logFd] : "pipe";
-
-              const child = spawnFn(aerenderBin, cliArgs, {
-                windowsHide: true,
-                detached: true,
-                stdio: stdioConfig,
-              });
-
-              if (logFd !== null) {
-                try {
-                  fs.closeSync(logFd);
-                } catch {
-                  // ignore
-                }
-              }
-
-              // If a test spawn mock returns readable stdout/stderr streams, append to logPath
-              if (child.stdout) {
-                child.stdout.on("data", (chunk: Buffer | string) => {
-                  try {
-                    fs.appendFileSync(logPath, chunk);
-                  } catch {
-                    // ignore
-                  }
-                });
-              }
-              if (child.stderr) {
-                child.stderr.on("data", (chunk: Buffer | string) => {
-                  try {
-                    fs.appendFileSync(logPath, chunk);
-                  } catch {
-                    // ignore
-                  }
-                });
-              }
-
-              const initialRecord: AerenderJobRecord = {
-                job_id: jobId,
-                pid: typeof child.pid === "number" ? child.pid : null,
-                state: "running",
-                exit_code: null,
-                signal: null,
-                cancelled: false,
-                project_path: actualProjectPath,
-                comp_name: args.comp_name,
-                output_path: args.output_path,
-                ...(args.output_module_template
-                  ? { output_module_template: args.output_module_template }
-                  : {}),
-                ...(args.render_settings_template
-                  ? { render_settings_template: args.render_settings_template }
-                  : {}),
-                ...(args.start_frame !== undefined
-                  ? { start_frame: args.start_frame }
-                  : {}),
-                ...(args.end_frame !== undefined
-                  ? { end_frame: args.end_frame }
-                  : {}),
-                aerender_path: aerenderBin,
-                args: cliArgs,
-                log_path: logPath,
-                started_at: new Date().toISOString(),
-                finished_at: null,
-              };
-
-              registry.register(initialRecord, child);
-
-              child.on("error", (err: Error) => {
-                try {
-                  fs.appendFileSync(
-                    logPath,
-                    `\nAERENDER SPAWN ERROR: ${err.message}\n`
-                  );
-                } catch {
-                  // ignore
-                }
-                const current = registry.get(jobId);
-                registry.update(jobId, {
-                  state: "failed",
-                  exit_code: current?.exit_code ?? -1,
-                  error: err.message,
-                  finished_at: new Date().toISOString(),
-                });
-              });
-
-              child.on(
-                "exit",
-                (code: number | null, signal: NodeJS.Signals | null) => {
-                  const current = registry.get(jobId);
-                  if (current?.cancelled) {
-                    registry.update(jobId, {
-                      state: "failed",
-                      exit_code: code ?? current.exit_code,
-                      signal: signal ?? current.signal,
-                      finished_at:
-                        current.finished_at ?? new Date().toISOString(),
-                    });
-                    return;
-                  }
-                  // aerender can exit 0 after a fatal error (measured: a missing
-                  // output-module template logs "aerender ERROR:" and exits 0), so
-                  // the log decides as well as the exit code.
-                  let logError: string | null = null;
-                  try {
-                    const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-                      fs.readFileSync(logPath, "utf8")
-                    );
-                    if (m) logError = m[1].trim() || "aerender ERROR";
-                  } catch {
-                    logError = null;
-                  }
-                  const succeeded = code === 0 && logError === null;
-                  registry.update(jobId, {
-                    state: succeeded ? "succeeded" : "failed",
-                    ...(logError ? { error: logError } : {}),
-                    exit_code: code,
-                    signal: signal ?? null,
-                    finished_at: new Date().toISOString(),
-                  });
-                }
-              );
-
-              if (typeof child.unref === "function") {
-                child.unref();
-              }
-
               return {
                 ok: true,
                 op_id: opId,
-                job_id: jobId,
+                job_id: initialRecord.job_id,
                 pid: initialRecord.pid,
                 state: initialRecord.state,
                 project_path: initialRecord.project_path,
@@ -935,7 +1116,7 @@ export function createAerenderTools(
     {
       name: "ae_aerender_cancel",
       description:
-        "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). " +
+        "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). After a restart only a pid that is positively an aerender is killed; when the process lookup cannot tell, nothing is killed, the job stays running and the result says `kill_unconfirmed: true`. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderCancelSchema,
       handler: async (args: AeAerenderCancelArgs) => {
@@ -956,39 +1137,20 @@ export function createAerenderTools(
           };
         }
 
-        const proc = registry.getProcess(args.job_id);
-        if (proc) {
-          try {
-            proc.kill("SIGTERM");
-          } catch {
-            // ignore if already dead
-          }
-        } else if (typeof job.pid === "number" && job.pid > 0) {
-          const killFn =
-            options.killProcess ??
-            ((pid: number, sig?: string | number) =>
-              process.kill(pid, sig as NodeJS.Signals | undefined));
-          try {
-            killFn(job.pid, "SIGTERM");
-          } catch {
-            // ignore ESRCH if process already exited
-          }
-        }
+        const updated = cancelAerenderJob(registry, job, options.killProcess, "ae_aerender_cancel", options.cancelHooks);
 
-        try {
-          fs.appendFileSync(
-            job.log_path,
-            `\nAERENDER CANCELLED by ae_aerender_cancel at ${new Date().toISOString()}\n`
-          );
-        } catch {
-          // ignore
+        if (updated.kill_unconfirmed) {
+          return {
+            ok: true,
+            job_id: updated.job_id,
+            pid: updated.pid,
+            state: updated.state,
+            exit_code: updated.exit_code,
+            cancelled: false,
+            kill_unconfirmed: true,
+            advice: `Could not confirm that pid ${updated.pid} is this job's aerender (the process lookup failed), so nothing was killed and the job stays running. Check the process yourself (Task Manager / Activity Monitor), then try again.`,
+          };
         }
-
-        const updated = registry.update(args.job_id, {
-          state: "failed",
-          cancelled: true,
-          finished_at: new Date().toISOString(),
-        })!;
 
         return {
           ok: true,

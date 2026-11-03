@@ -10,6 +10,21 @@ const READS = [
   "ae_captions_plan", "ae_captions_read", "ae_rig_list", "ae_expr_recipes", "ae_measure_text", "ae_get_time_remap",
   "ae_scene_3d_report", "ae_explain_layer", "ae_describe_comp", "ae_get_footage_interpretation", "ae_path_read",
   "ae_memory_status",
+  "ae_render_queue_inspect",
+  "ae_delivery_specs",
+  "ae_check_delivery_file",
+  "ae_render_batch_plan",
+  "ae_render_batch_status",
+  "ae_collect_files",
+  "ae_collect_report",
+  "ae_deliver_recipe",
+  "ae_deliver_status",
+  "ae_loudness_check",
+  "ae_check_text_overlap",
+  "ae_estimate_legibility",
+  "ae_taste_baseline",
+  "ae_learn_taste",
+  "ae_taste_rules",
 ];
 const WRITES_WITH_CHECKPOINT = [
   "ae_layer_ops", "ae_comp_settings",
@@ -33,11 +48,25 @@ const WRITES_WITH_CHECKPOINT = [
   "ae_path_operator",
   "ae_path_link",
   "ae_path_connector",
+  "ae_render_queue_edit",
+  "ae_render_queue_duplicate",
+  "ae_render_queue_apply_spec",
+  "ae_loudness_apply",
+  "ae_check_legibility",
+  "ae_variants",
+  "ae_variants_pick",
+  "ae_variants_discard",
+  "ae_project_session",
 ];
-// Changes AE's caches, not the project: nothing to checkpoint.
-const WRITES_WITHOUT_CHECKPOINT = ["ae_memory_purge"];
+// No checkpoint of the open project: purge changes AE's caches, a batch renders
+// a frozen copy, and relink works on a collected copy of the project.
+const WRITES_WITHOUT_CHECKPOINT = [
+  "ae_memory_purge",
+  "ae_render_batch", "ae_render_batch_resume", "ae_render_batch_cancel",
+  "ae_collect_relink",
+];
 // Runs other write tools, which take their own checkpoints.
-const ORCHESTRATORS = ["ae_multi_comp_apply"];
+const ORCHESTRATORS = ["ae_multi_comp_apply", "ae_deliver_step"];
 
 describe("tool registration", () => {
   it("lists every tool once", () => {

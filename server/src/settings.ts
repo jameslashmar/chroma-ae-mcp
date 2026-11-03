@@ -9,6 +9,42 @@ export interface AutoCheckpointSettings {
   max_mb: number;
 }
 
+/** What kind of edit a learned taste rule comes from (ae_learn_taste). */
+export const TASTE_RULE_KINDS = [
+  "ease_influence",
+  "overshoot",
+  "layer_duration",
+  "animation_timing",
+  "edge_margin",
+  "font_size",
+  "fill_color",
+] as const;
+export type TasteRuleKind = (typeof TASTE_RULE_KINDS)[number];
+export const TASTE_CONFIDENCE = ["low", "medium", "high"] as const;
+export type TasteConfidence = (typeof TASTE_CONFIDENCE)[number];
+
+/**
+ * A preference the user confirmed after ae_learn_taste noticed it in their
+ * edits. `value` is the number the rule is about (a ratio, a margin as a share
+ * of the comp's short side, a font size ratio), a cubic-bezier for ease rules,
+ * or an [r, g, b] colour; null when the rule is only words.
+ */
+export interface TasteRule {
+  id: string;
+  kind: TasteRuleKind;
+  /** The rule in plain words, for the agent to read. */
+  text: string;
+  value: number | number[] | null;
+  confidence: TasteConfidence;
+  /** How many separate edits it rests on. */
+  samples: number;
+  /** In how many reviews (sessions) it showed up. */
+  reviews: number;
+  saved_at: string;
+}
+
+export const MAX_TASTE_RULES = 50;
+
 /** The user's motion taste, kept across projects (ae_taste); ae_motion_review follows it. */
 export interface TasteSettings {
   /** cubic-bezier [x1, y1, x2, y2] whose handle lengths review fixes use instead of easy ease. */
@@ -19,6 +55,44 @@ export interface TasteSettings {
   avoid_overshoot: boolean;
   /** What the user has said about their taste, for the agent to read. */
   notes: string;
+  /** Rules the user confirmed from ae_learn_taste. Absent until the first one is saved. */
+  rules?: TasteRule[];
+}
+
+function finiteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+/** Keeps the well-formed rules (at most MAX_TASTE_RULES, one per id, the last wins) and drops the rest. */
+export function sanitizeTasteRules(raw: unknown): TasteRule[] {
+  if (!Array.isArray(raw)) return [];
+  const byId = new Map<string, TasteRule>();
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const x = r as Record<string, unknown>;
+    if (typeof x.id !== "string" || x.id.length === 0 || x.id.length > 80) continue;
+    if (!(TASTE_RULE_KINDS as readonly string[]).includes(x.kind as string)) continue;
+    if (typeof x.text !== "string" || x.text.length === 0) continue;
+    if (!(TASTE_CONFIDENCE as readonly string[]).includes(x.confidence as string)) continue;
+    let value: number | number[] | null = null;
+    if (finiteNumber(x.value)) value = x.value;
+    else if (Array.isArray(x.value) && x.value.length > 0 && x.value.length <= 4 && x.value.every(finiteNumber)) value = [...(x.value as number[])];
+    else if (x.value !== null && x.value !== undefined) continue;
+    const samples = finiteNumber(x.samples) && x.samples >= 0 ? Math.floor(x.samples) : 0;
+    const reviews = finiteNumber(x.reviews) && x.reviews >= 0 ? Math.floor(x.reviews) : 0;
+    const savedAt = typeof x.saved_at === "string" && !Number.isNaN(Date.parse(x.saved_at)) ? x.saved_at : new Date(0).toISOString();
+    byId.set(x.id, {
+      id: x.id,
+      kind: x.kind as TasteRuleKind,
+      text: x.text.slice(0, 400),
+      value,
+      confidence: x.confidence as TasteConfidence,
+      samples,
+      reviews,
+      saved_at: savedAt,
+    });
+  }
+  return [...byId.values()].slice(-MAX_TASTE_RULES);
 }
 
 /** Auto-import of new files in `<project dir>/_assets/` into the `_Assets` bin (ae_import_assets watch). */
@@ -49,7 +123,9 @@ export function defaultSettingsFilePath(): string {
 }
 
 function cloneTaste(t: TasteSettings): TasteSettings {
-  return { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+  const copy: TasteSettings = { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+  if (t.rules) copy.rules = t.rules.map((r) => ({ ...r, value: Array.isArray(r.value) ? [...r.value] : r.value }));
+  return copy;
 }
 
 function cloneDefaults(): Settings {
@@ -120,6 +196,7 @@ export class SettingsStore {
     if (patch.allow_linear_non_motion !== undefined) next.allow_linear_non_motion = patch.allow_linear_non_motion;
     if (patch.avoid_overshoot !== undefined) next.avoid_overshoot = patch.avoid_overshoot;
     if (patch.notes !== undefined) next.notes = patch.notes;
+    if (patch.rules !== undefined) next.rules = sanitizeTasteRules(patch.rules);
     this.settings = { ...this.settings, taste: next };
     this.saveToDisk();
     return this.get();
@@ -153,6 +230,10 @@ export class SettingsStore {
         if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
         if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
         if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
+        if (Array.isArray(t.rules)) {
+          const rules = sanitizeTasteRules(t.rules);
+          if (rules.length > 0) this.settings.taste.rules = rules;
+        }
       }
       const aw = parsed?.asset_watch;
       if (aw && typeof aw === "object") {

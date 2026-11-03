@@ -575,6 +575,15 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_path_operator",
   "ae_path_link",
   "ae_path_connector",
+  "ae_render_queue_edit",
+  "ae_render_queue_duplicate",
+  "ae_render_queue_apply_spec",
+  "ae_loudness_apply",
+  "ae_check_legibility",
+  "ae_variants",
+  "ae_variants_pick",
+  "ae_variants_discard",
+  "ae_project_session",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

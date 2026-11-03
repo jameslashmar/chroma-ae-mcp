@@ -5,6 +5,9 @@
  * panel's Node 17, so no native modules):
  * - decodeAudio: WAV (PCM 8/16/24/32-bit, float, extensible) and AIFF/AIFC
  *   (big-endian PCM, 'sowt', 'fl32', 'fl64') to a mono mix
+ * - decodeAudioChannels: the same files, one Float32Array per channel (the
+ *   loudness measurement K-weights each channel and sums their energy, which a
+ *   channel average would misread)
  * - analyzeAudio: overall level, onsets (spectral flux), tempo
  *   (autocorrelation of the onset envelope with a prior around 120 BPM),
  *   beats (Ellis' dynamic-programming tracker), the strongest hits, and
@@ -15,8 +18,19 @@ export interface DecodedAudio {
   sampleRate: number;
   channels: number;
   frames: number;
-  /** Channels averaged into one, in -1..1. */
+  /** Channels averaged into one, in -1..1. Empty when the file was decoded per channel. */
   mono: Float32Array;
+  /** One array per channel, in -1..1. Only from decodeAudioChannels. */
+  channelData?: Float32Array[];
+  format: string;
+}
+
+/** What decodeAudioChannels returns: the same header facts, the samples kept per channel. */
+export interface DecodedChannels {
+  sampleRate: number;
+  channels: number;
+  frames: number;
+  channelData: Float32Array[];
   format: string;
 }
 
@@ -59,12 +73,19 @@ function floatReader(bits: number, littleEndian: boolean): SampleReader {
 export interface DecodeOptions {
   /** Refuse audio longer than this before the samples are decoded (header check). */
   maxSeconds?: number;
+  /** Keep the channels apart (channelData) instead of averaging them into mono. */
+  perChannel?: boolean;
+  /** Refuse audio whose decoded Float32 samples (frames x channels x 4 bytes) would be bigger than this, checked from the header. */
+  maxDecodedBytes?: number;
 }
 
-function checkLength(frames: number, sampleRate: number, maxSeconds?: number): void {
+function checkLength(frames: number, sampleRate: number, maxSeconds?: number, channels = 1, maxDecodedBytes?: number): void {
   if (!(sampleRate > 0)) throw new AudioDecodeError("Invalid sample rate in the audio header");
   if (maxSeconds !== undefined && frames / sampleRate > maxSeconds) {
     throw new AudioDecodeError(`${Math.round(frames / sampleRate)} s of audio; analyse at most ${maxSeconds / 60} minutes at a time (use start/end)`);
+  }
+  if (maxDecodedBytes !== undefined && frames * channels * 4 > maxDecodedBytes) {
+    throw new AudioDecodeError(`${channels} channels of ${Math.round(frames / sampleRate)} s would need ${Math.round((frames * channels * 4) / 1048576)} MB decoded; the limit is ${Math.round(maxDecodedBytes / 1048576)} MB. Measure a shorter range (use start/end)`);
   }
 }
 
@@ -78,6 +99,23 @@ function mixDown(buf: Buffer, start: number, frames: number, channels: number, b
     mono[f] = sum / channels;
   }
   return mono;
+}
+
+function splitChannels(buf: Buffer, start: number, frames: number, channels: number, bytesPerSample: number, read: SampleReader): Float32Array[] {
+  const out: Float32Array[] = [];
+  for (let c = 0; c < channels; c++) out.push(new Float32Array(frames));
+  const block = channels * bytesPerSample;
+  for (let f = 0; f < frames; f++) {
+    const at = start + f * block;
+    for (let c = 0; c < channels; c++) out[c][f] = read(buf, at + c * bytesPerSample);
+  }
+  return out;
+}
+
+/** The samples as the caller asked: averaged into mono, or kept per channel. */
+function samplesOf(opts: DecodeOptions, buf: Buffer, start: number, frames: number, channels: number, bytesPerSample: number, read: SampleReader) {
+  if (opts.perChannel) return { mono: new Float32Array(0), channelData: splitChannels(buf, start, frames, channels, bytesPerSample, read) };
+  return { mono: mixDown(buf, start, frames, channels, bytesPerSample, read) };
 }
 
 function decodeWav(buf: Buffer, opts: DecodeOptions): DecodedAudio {
@@ -107,7 +145,7 @@ function decodeWav(buf: Buffer, opts: DecodeOptions): DecodedAudio {
       const bytes = fmt.bits / 8;
       if (fmt.channels < 1 || !(fmt.sampleRate > 0) || !Number.isInteger(bytes) || bytes < 1) throw new AudioDecodeError("Malformed WAV fmt chunk");
       const frames = Math.floor(size / (bytes * fmt.channels));
-      checkLength(frames, fmt.sampleRate, opts.maxSeconds);
+      checkLength(frames, fmt.sampleRate, opts.maxSeconds, fmt.channels, opts.maxDecodedBytes);
       let read: SampleReader;
       if (fmt.format === 1) read = intReader(fmt.bits, true);
       else if (fmt.format === 3) read = floatReader(fmt.bits, true);
@@ -116,7 +154,7 @@ function decodeWav(buf: Buffer, opts: DecodeOptions): DecodedAudio {
         sampleRate: fmt.sampleRate,
         channels: fmt.channels,
         frames,
-        mono: mixDown(buf, body, frames, fmt.channels, bytes, read),
+        ...samplesOf(opts, buf, body, frames, fmt.channels, bytes, read),
         format: `wav ${fmt.format === 3 ? "float" : "pcm"} ${fmt.bits}-bit`,
       };
     }
@@ -164,12 +202,12 @@ function decodeAiff(buf: Buffer, opts: DecodeOptions): DecodedAudio {
       const bytes = Math.ceil(bits / 8);
       const available = Math.floor((body + size - start) / (bytes * comm.channels));
       const frames = Math.max(0, Math.min(comm.frames, available));
-      checkLength(frames, comm.sampleRate, opts.maxSeconds);
+      checkLength(frames, comm.sampleRate, opts.maxSeconds, comm.channels, opts.maxDecodedBytes);
       return {
         sampleRate: comm.sampleRate,
         channels: comm.channels,
         frames,
-        mono: mixDown(buf, start, frames, comm.channels, bytes, read),
+        ...samplesOf(opts, buf, start, frames, comm.channels, bytes, read),
         format: `${isAifc ? "aifc" : "aiff"} ${c} ${bits}-bit`,
       };
     }
@@ -191,6 +229,12 @@ export function decodeAudio(buf: Buffer, opts: DecodeOptions = {}): DecodedAudio
     throw err;
   }
   throw new AudioDecodeError("Not a WAV or AIFF file");
+}
+
+/** Decodes a WAV or AIFF into one Float32Array per channel. Same files, limits and errors as decodeAudio. */
+export function decodeAudioChannels(buf: Buffer, opts: Omit<DecodeOptions, "perChannel"> = {}): DecodedChannels {
+  const d = decodeAudio(buf, { ...opts, perChannel: true });
+  return { sampleRate: d.sampleRate, channels: d.channels, frames: d.frames, channelData: d.channelData ?? [], format: d.format };
 }
 
 // ---------- analysis ----------

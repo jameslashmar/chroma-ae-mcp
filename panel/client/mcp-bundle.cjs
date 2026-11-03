@@ -33,10 +33,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util, objectUtil, ZodParsedType, getParsedType;
 var init_util = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/util.js"() {
+  "node_modules/zod/v3/helpers/util.js"() {
     (function(util2) {
       util2.assertEqual = (_) => {
       };
@@ -170,10 +170,10 @@ var init_util = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode, quotelessJson, ZodError;
 var init_ZodError = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/ZodError.js"() {
+  "node_modules/zod/v3/ZodError.js"() {
     init_util();
     ZodIssueCode = util.arrayToEnum([
       "invalid_type",
@@ -294,10 +294,10 @@ var init_ZodError = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap, en_default;
 var init_en = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/locales/en.js"() {
+  "node_modules/zod/v3/locales/en.js"() {
     init_ZodError();
     init_util();
     errorMap = (issue, _ctx) => {
@@ -404,7 +404,7 @@ var init_en = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 function setErrorMap(map) {
   overrideErrorMap = map;
 }
@@ -413,13 +413,13 @@ function getErrorMap() {
 }
 var overrideErrorMap;
 var init_errors = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/errors.js"() {
+  "node_modules/zod/v3/errors.js"() {
     init_en();
     overrideErrorMap = en_default;
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
@@ -441,12 +441,12 @@ function addIssueToContext(ctx, issueData) {
 }
 var makeIssue, EMPTY_PATH, ParseStatus, INVALID, DIRTY, OK, isAborted, isDirty, isValid, isAsync;
 var init_parseUtil = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/parseUtil.js"() {
+  "node_modules/zod/v3/helpers/parseUtil.js"() {
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path35, errorMaps, issueData } = params;
-      const fullPath = [...path35, ...issueData.path || []];
+      const { data, path: path44, errorMaps, issueData } = params;
+      const fullPath = [...path44, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -493,9 +493,9 @@ var init_parseUtil = __esm({
         }
         return { status: status.value, value: arrayValue };
       }
-      static async mergeObjectAsync(status, pairs) {
+      static async mergeObjectAsync(status, pairs2) {
         const syncPairs = [];
-        for (const pair of pairs) {
+        for (const pair of pairs2) {
           const key = await pair.key;
           const value = await pair.value;
           syncPairs.push({
@@ -505,9 +505,9 @@ var init_parseUtil = __esm({
         }
         return _ParseStatus.mergeObjectSync(status, syncPairs);
       }
-      static mergeObjectSync(status, pairs) {
+      static mergeObjectSync(status, pairs2) {
         const finalObject = {};
-        for (const pair of pairs) {
+        for (const pair of pairs2) {
           const { key, value } = pair;
           if (key.status === "aborted")
             return INVALID;
@@ -536,16 +536,16 @@ var init_parseUtil = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/typeAliases.js
+// node_modules/zod/v3/helpers/typeAliases.js
 var init_typeAliases = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/typeAliases.js"() {
+  "node_modules/zod/v3/helpers/typeAliases.js"() {
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 var init_errorUtil = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/errorUtil.js"() {
+  "node_modules/zod/v3/helpers/errorUtil.js"() {
     (function(errorUtil2) {
       errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
       errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
@@ -553,7 +553,7 @@ var init_errorUtil = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 function processCreateParams(params) {
   if (!params)
     return {};
@@ -747,18 +747,18 @@ function custom(check, _params = {}, fatal) {
 }
 var ParseInputLazyPath, handleResult, ZodType, cuidRegex, cuid2Regex, ulidRegex, uuidRegex, nanoidRegex, jwtRegex, durationRegex, emailRegex, _emojiRegex, emojiRegex, ipv4Regex, ipv4CidrRegex, ipv6Regex, ipv6CidrRegex, base64Regex, base64urlRegex, dateRegexSource, dateRegex, ZodString, ZodNumber, ZodBigInt, ZodBoolean, ZodDate, ZodSymbol, ZodUndefined, ZodNull, ZodAny, ZodUnknown, ZodNever, ZodVoid, ZodArray, ZodObject, ZodUnion, getDiscriminator, ZodDiscriminatedUnion, ZodIntersection, ZodTuple, ZodRecord, ZodMap, ZodSet, ZodFunction, ZodLazy, ZodLiteral, ZodEnum, ZodNativeEnum, ZodPromise, ZodEffects, ZodOptional, ZodNullable, ZodDefault, ZodCatch, ZodNaN, BRAND, ZodBranded, ZodPipeline, ZodReadonly, late, ZodFirstPartyTypeKind, instanceOfType, stringType, numberType, nanType, bigIntType, booleanType, dateType, symbolType, undefinedType, nullType, anyType, unknownType, neverType, voidType, arrayType, objectType, strictObjectType, unionType, discriminatedUnionType, intersectionType, tupleType, recordType, mapType, setType, functionType, lazyType, literalType, enumType, nativeEnumType, promiseType, effectsType, optionalType, nullableType, preprocessType, pipelineType, ostring, onumber, oboolean, coerce, NEVER;
 var init_types = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/types.js"() {
+  "node_modules/zod/v3/types.js"() {
     init_ZodError();
     init_errors();
     init_errorUtil();
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path35, key) {
+      constructor(parent, value, path44, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path35;
+        this._path = path44;
         this._key = key;
       }
       get path() {
@@ -925,14 +925,14 @@ var init_types = __esm({
         };
         return this._refinement((val, ctx) => {
           const result = check(val);
-          const setError = () => ctx.addIssue({
+          const setError2 = () => ctx.addIssue({
             code: ZodIssueCode.custom,
             ...getIssueProperties(val)
           });
           if (typeof Promise !== "undefined" && result instanceof Promise) {
             return result.then((data) => {
               if (!data) {
-                setError();
+                setError2();
                 return false;
               } else {
                 return true;
@@ -940,7 +940,7 @@ var init_types = __esm({
             });
           }
           if (!result) {
-            setError();
+            setError2();
             return false;
           } else {
             return true;
@@ -2443,11 +2443,11 @@ var init_types = __esm({
             }
           }
         }
-        const pairs = [];
+        const pairs2 = [];
         for (const key of shapeKeys) {
           const keyValidator = shape[key];
           const value = ctx.data[key];
-          pairs.push({
+          pairs2.push({
             key: { status: "valid", value: key },
             value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
             alwaysSet: key in ctx.data
@@ -2457,7 +2457,7 @@ var init_types = __esm({
           const unknownKeys = this._def.unknownKeys;
           if (unknownKeys === "passthrough") {
             for (const key of extraKeys) {
-              pairs.push({
+              pairs2.push({
                 key: { status: "valid", value: key },
                 value: { status: "valid", value: ctx.data[key] }
               });
@@ -2478,7 +2478,7 @@ var init_types = __esm({
           const catchall = this._def.catchall;
           for (const key of extraKeys) {
             const value = ctx.data[key];
-            pairs.push({
+            pairs2.push({
               key: { status: "valid", value: key },
               value: catchall._parse(
                 new ParseInputLazyPath(ctx, value, ctx.path, key)
@@ -2491,7 +2491,7 @@ var init_types = __esm({
         if (ctx.common.async) {
           return Promise.resolve().then(async () => {
             const syncPairs = [];
-            for (const pair of pairs) {
+            for (const pair of pairs2) {
               const key = await pair.key;
               const value = await pair.value;
               syncPairs.push({
@@ -2505,7 +2505,7 @@ var init_types = __esm({
             return ParseStatus.mergeObjectSync(status, syncPairs);
           });
         } else {
-          return ParseStatus.mergeObjectSync(status, pairs);
+          return ParseStatus.mergeObjectSync(status, pairs2);
         }
       }
       get shape() {
@@ -3080,20 +3080,20 @@ var init_types = __esm({
           });
           return INVALID;
         }
-        const pairs = [];
+        const pairs2 = [];
         const keyType = this._def.keyType;
         const valueType = this._def.valueType;
         for (const key in ctx.data) {
-          pairs.push({
+          pairs2.push({
             key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, key)),
             value: valueType._parse(new ParseInputLazyPath(ctx, ctx.data[key], ctx.path, key)),
             alwaysSet: key in ctx.data
           });
         }
         if (ctx.common.async) {
-          return ParseStatus.mergeObjectAsync(status, pairs);
+          return ParseStatus.mergeObjectAsync(status, pairs2);
         } else {
-          return ParseStatus.mergeObjectSync(status, pairs);
+          return ParseStatus.mergeObjectSync(status, pairs2);
         }
       }
       get element() {
@@ -3135,7 +3135,7 @@ var init_types = __esm({
         }
         const keyType = this._def.keyType;
         const valueType = this._def.valueType;
-        const pairs = [...ctx.data.entries()].map(([key, value], index) => {
+        const pairs2 = [...ctx.data.entries()].map(([key, value], index) => {
           return {
             key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
             value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
@@ -3144,7 +3144,7 @@ var init_types = __esm({
         if (ctx.common.async) {
           const finalMap = /* @__PURE__ */ new Map();
           return Promise.resolve().then(async () => {
-            for (const pair of pairs) {
+            for (const pair of pairs2) {
               const key = await pair.key;
               const value = await pair.value;
               if (key.status === "aborted" || value.status === "aborted") {
@@ -3159,7 +3159,7 @@ var init_types = __esm({
           });
         } else {
           const finalMap = /* @__PURE__ */ new Map();
-          for (const pair of pairs) {
+          for (const pair of pairs2) {
             const key = pair.key;
             const value = pair.value;
             if (key.status === "aborted" || value.status === "aborted") {
@@ -4009,7 +4009,7 @@ var init_types = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/external.js
+// node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -4121,7 +4121,7 @@ __export(external_exports, {
   void: () => voidType
 });
 var init_external = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/external.js"() {
+  "node_modules/zod/v3/external.js"() {
     init_errors();
     init_parseUtil();
     init_typeAliases();
@@ -4131,9 +4131,9 @@ var init_external = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/index.js
+// node_modules/zod/index.js
 var init_zod = __esm({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/index.js"() {
+  "node_modules/zod/index.js"() {
     init_external();
     init_external();
   }
@@ -4404,13 +4404,13 @@ var init_queue = __esm({
           return Promise.resolve(this.createLease(op, 0, null));
         }
         const behind = this.holder ?? this.waiting.find((w) => !w.done)?.op ?? "unknown";
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           const waiter = {
             op,
             enqueuedAt: Date.now(),
             behind,
             done: false,
-            resolve: resolve3,
+            resolve: resolve4,
             reject,
             cleanup: () => {
             }
@@ -4864,11 +4864,46 @@ var init_common = __esm({
 });
 
 // src/settings.ts
+function finiteNumber(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function sanitizeTasteRules(raw) {
+  if (!Array.isArray(raw)) return [];
+  const byId3 = /* @__PURE__ */ new Map();
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const x = r;
+    if (typeof x.id !== "string" || x.id.length === 0 || x.id.length > 80) continue;
+    if (!TASTE_RULE_KINDS.includes(x.kind)) continue;
+    if (typeof x.text !== "string" || x.text.length === 0) continue;
+    if (!TASTE_CONFIDENCE.includes(x.confidence)) continue;
+    let value = null;
+    if (finiteNumber(x.value)) value = x.value;
+    else if (Array.isArray(x.value) && x.value.length > 0 && x.value.length <= 4 && x.value.every(finiteNumber)) value = [...x.value];
+    else if (x.value !== null && x.value !== void 0) continue;
+    const samples = finiteNumber(x.samples) && x.samples >= 0 ? Math.floor(x.samples) : 0;
+    const reviews = finiteNumber(x.reviews) && x.reviews >= 0 ? Math.floor(x.reviews) : 0;
+    const savedAt = typeof x.saved_at === "string" && !Number.isNaN(Date.parse(x.saved_at)) ? x.saved_at : (/* @__PURE__ */ new Date(0)).toISOString();
+    byId3.set(x.id, {
+      id: x.id,
+      kind: x.kind,
+      text: x.text.slice(0, 400),
+      value,
+      confidence: x.confidence,
+      samples,
+      reviews,
+      saved_at: savedAt
+    });
+  }
+  return [...byId3.values()].slice(-MAX_TASTE_RULES);
+}
 function defaultSettingsFilePath() {
   return path4.join(defaultDataDir(), "settings.json");
 }
 function cloneTaste(t) {
-  return { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+  const copy = { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
+  if (t.rules) copy.rules = t.rules.map((r) => ({ ...r, value: Array.isArray(r.value) ? [...r.value] : r.value }));
+  return copy;
 }
 function cloneDefaults() {
   return {
@@ -4880,13 +4915,24 @@ function cloneDefaults() {
 function isCurve(v) {
   return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) && v[0] >= MIN_HANDLE && v[0] <= 1 && v[2] >= 0 && v[2] <= 1 - MIN_HANDLE;
 }
-var fs3, path4, DEFAULT_SETTINGS, MIN_HANDLE, SettingsStore;
+var fs3, path4, TASTE_RULE_KINDS, TASTE_CONFIDENCE, MAX_TASTE_RULES, DEFAULT_SETTINGS, MIN_HANDLE, SettingsStore;
 var init_settings = __esm({
   "src/settings.ts"() {
     "use strict";
     fs3 = __toESM(require("node:fs"), 1);
     path4 = __toESM(require("node:path"), 1);
     init_quarantine();
+    TASTE_RULE_KINDS = [
+      "ease_influence",
+      "overshoot",
+      "layer_duration",
+      "animation_timing",
+      "edge_margin",
+      "font_size",
+      "fill_color"
+    ];
+    TASTE_CONFIDENCE = ["low", "medium", "high"];
+    MAX_TASTE_RULES = 50;
     DEFAULT_SETTINGS = {
       auto_checkpoint: { enabled: true, max_mb: 250 },
       taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
@@ -4926,6 +4972,7 @@ var init_settings = __esm({
         if (patch.allow_linear_non_motion !== void 0) next.allow_linear_non_motion = patch.allow_linear_non_motion;
         if (patch.avoid_overshoot !== void 0) next.avoid_overshoot = patch.avoid_overshoot;
         if (patch.notes !== void 0) next.notes = patch.notes;
+        if (patch.rules !== void 0) next.rules = sanitizeTasteRules(patch.rules);
         this.settings = { ...this.settings, taste: next };
         this.saveToDisk();
         return this.get();
@@ -4953,6 +5000,10 @@ var init_settings = __esm({
             if (typeof t.allow_linear_non_motion === "boolean") this.settings.taste.allow_linear_non_motion = t.allow_linear_non_motion;
             if (typeof t.avoid_overshoot === "boolean") this.settings.taste.avoid_overshoot = t.avoid_overshoot;
             if (typeof t.notes === "string") this.settings.taste.notes = t.notes;
+            if (Array.isArray(t.rules)) {
+              const rules = sanitizeTasteRules(t.rules);
+              if (rules.length > 0) this.settings.taste.rules = rules;
+            }
           }
           const aw = parsed?.asset_watch;
           if (aw && typeof aw === "object") {
@@ -5140,9 +5191,9 @@ function readBackMismatch(opId, what, err) {
     message: `The write was applied (op ${opId}) but ${what}: ${err instanceof Error ? err.message : String(err)}. Do not resend; inspect the state with a read tool.`
   };
 }
-async function readAfterWrite(opId, read, what = "the read-back failed") {
+async function readAfterWrite(opId, read2, what = "the read-back failed") {
   try {
-    return { value: await read(), failure: null };
+    return { value: await read2(), failure: null };
   } catch (err) {
     return { value: null, failure: readBackMismatch(opId, what, err) };
   }
@@ -5363,31 +5414,31 @@ async function step(s, call2) {
     return;
   }
   if (s.phase === "layers") {
-    const head = s.queue[0];
+    const head2 = s.queue[0];
     let page;
     try {
       page = await call2(
         "preflightLayers",
         {
-          comp_id: head.comp_id,
-          from: head.from,
+          comp_id: head2.comp_id,
+          from: head2.from,
           limit: BATCH_LAYERS,
-          force_eval: head.force,
-          text_candidates: o.check_title_safe && s.finals.has(head.comp_id)
+          force_eval: head2.force,
+          text_candidates: o.check_title_safe && s.finals.has(head2.comp_id)
         },
-        `layers of comp ${head.comp_id} from ${head.from}`
+        `layers of comp ${head2.comp_id} from ${head2.from}`
       );
     } catch (err) {
       if (err instanceof BridgeError && err.kind === "evalscript_error" && /No CompItem/.test(err.message)) {
-        s.skipped_comps.push(s.comps.get(head.comp_id)?.name ?? String(head.comp_id));
+        s.skipped_comps.push(s.comps.get(head2.comp_id)?.name ?? String(head2.comp_id));
         s.queue.shift();
         if (s.queue.length === 0) s.phase = "safe";
         return;
       }
       throw err;
     }
-    absorbLayers(s, head, page);
-    if (page.next_from !== null) head.from = page.next_from;
+    absorbLayers(s, head2, page);
+    if (page.next_from !== null) head2.from = page.next_from;
     else s.queue.shift();
     if (s.queue.length === 0) s.phase = "safe";
     return;
@@ -5411,7 +5462,7 @@ async function step(s, call2) {
     return;
   }
 }
-function absorbLayers(s, head, page) {
+function absorbLayers(s, head2, page) {
   const st = s.stats.get(page.comp_id) ?? { counts: { layers: 0, effects: 0, expressions: 0, keys: 0, three_d: 0, text: 0, precomp: 0 }, scanned_layers: 0, num_layers: page.num_layers };
   for (const k of Object.keys(st.counts)) st.counts[k] += page.counts[k] ?? 0;
   st.scanned_layers += page.layers.length;
@@ -5440,7 +5491,7 @@ function absorbLayers(s, head, page) {
     if (!edges.includes(id)) edges.push(id);
     if (!s.seen.has(id) && s.comps.has(id)) {
       s.seen.add(id);
-      s.queue.push({ comp_id: id, from: 1, force: head.force });
+      s.queue.push({ comp_id: id, from: 1, force: head2.force });
     }
   }
   s.edges.set(page.comp_id, edges);
@@ -6048,7 +6099,7 @@ async function runPreflightGate(ctx, o) {
   const { complete } = await runScan(state, call2, { maxSlices: 300, deadline: Date.now() + 6e4 });
   const findings = buildFindings(state);
   const counts = countSeverities(findings);
-  const summary2 = {
+  const summary3 = {
     verdict: counts.blocker > 0 ? "blocked" : !complete ? "incomplete" : counts.warning > 0 ? "warnings" : "clear",
     complete,
     counts,
@@ -6058,16 +6109,16 @@ async function runPreflightGate(ctx, o) {
     expressions: `forced evaluation of the root comps' expressions, then expressionError (${state.forced_evals} forced${state.force_capped > 0 ? `, ${state.force_capped} only read the cheap way (cap)` : ""})`,
     ...complete ? {} : { note: "The preflight did not finish within its limits; run ae_preflight to read the rest." }
   };
-  return { blocked: counts.blocker > 0, summary: summary2 };
+  return { blocked: counts.blocker > 0, summary: summary3 };
 }
-function preflightRefusal(toolName, summary2) {
+function preflightRefusal(toolName, summary3) {
   return {
     ok: false,
     error: "preflight_blocked",
     kind: "preflight",
     applied: false,
-    message: `${toolName} refused: preflight found ${summary2.counts.blocker} blocker${summary2.counts.blocker === 1 ? "" : "s"}. Nothing was changed. Fix them (each names its tool) or call again without preflight.`,
-    preflight: summary2
+    message: `${toolName} refused: preflight found ${summary3.counts.blocker} blocker${summary3.counts.blocker === 1 ? "" : "s"}. Nothing was changed. Fix them (each names its tool) or call again without preflight.`,
+    preflight: summary3
   };
 }
 var crypto, fs5, path6, SEVERITY_RANK, DEFAULT_NAME, TEMPLATE_TOKENS, escapeRegex, r1, BATCH_ITEMS, BATCH_LAYERS, SAFE_AREA_MAX, MAX_FINDINGS, MAX_STORED_ISSUES, MAX_STORED_FOOTAGE, SESSION_TTL_MS, MAX_SESSIONS, appliesTo, inScope, fileOf, sessions, NamingSchema, ProjectSpecSchema, AePreflightSchema, preflightTools;
@@ -6207,11 +6258,15 @@ __export(aerender_exports, {
   WINDOWS_FALLBACK_AERENDER: () => WINDOWS_FALLBACK_AERENDER,
   aerenderTools: () => aerenderTools,
   buildAerenderArgs: () => buildAerenderArgs,
+  cancelAerenderJob: () => cancelAerenderJob,
   createAerenderTools: () => createAerenderTools,
   defaultAerenderJobsFilePath: () => defaultAerenderJobsFilePath,
   defaultRendersDir: () => defaultRendersDir,
   getDefaultAerenderRegistry: () => getDefaultAerenderRegistry,
+  isAerenderProcess: () => isAerenderProcess,
+  launchAerenderJob: () => launchAerenderJob,
   parseAerenderProgress: () => parseAerenderProgress,
+  pidHeldByLiveJob: () => pidHeldByLiveJob,
   readLogTail: () => readLogTail,
   resolveAerenderPath: () => resolveAerenderPath
 });
@@ -6309,6 +6364,9 @@ function buildAerenderArgs(params) {
   }
   if (params.end_frame !== void 0) {
     cliArgs.push("-e", String(params.end_frame));
+  }
+  if (params.max_cpu_percent !== void 0) {
+    cliArgs.push("-mfr", "ON", String(params.max_cpu_percent));
   }
   return cliArgs;
 }
@@ -6415,6 +6473,225 @@ function getDefaultAerenderRegistry() {
   }
   return defaultRegistry;
 }
+function launchAerenderJob(p) {
+  const registry = p.registry;
+  const spawnFn = p.spawn;
+  const jobId = registry.newJobId();
+  const rendersDir = registry.rendersDir;
+  fs6.mkdirSync(rendersDir, { recursive: true });
+  const outDir = path7.dirname(p.output_path);
+  if (outDir && outDir !== ".") {
+    try {
+      fs6.mkdirSync(outDir, { recursive: true });
+    } catch {
+    }
+  }
+  const logPath = path7.join(rendersDir, `${jobId}.log`);
+  fs6.writeFileSync(logPath, "", { encoding: "utf8" });
+  const cliArgs = buildAerenderArgs({
+    project_path: p.project_path,
+    comp_name: p.comp_name,
+    output_path: p.output_path,
+    output_module_template: p.output_module_template,
+    render_settings_template: p.render_settings_template,
+    start_frame: p.start_frame,
+    end_frame: p.end_frame,
+    max_cpu_percent: p.max_cpu_percent
+  });
+  let logFd = null;
+  try {
+    logFd = fs6.openSync(logPath, "a");
+  } catch {
+    logFd = null;
+  }
+  const stdioConfig = logFd !== null ? ["ignore", logFd, logFd] : "pipe";
+  const child = spawnFn(p.aerender_path, cliArgs, {
+    windowsHide: true,
+    detached: true,
+    stdio: stdioConfig
+  });
+  if (logFd !== null) {
+    try {
+      fs6.closeSync(logFd);
+    } catch {
+    }
+  }
+  if (child.stdout) {
+    child.stdout.on("data", (chunk) => {
+      try {
+        fs6.appendFileSync(logPath, chunk);
+      } catch {
+      }
+    });
+  }
+  if (child.stderr) {
+    child.stderr.on("data", (chunk) => {
+      try {
+        fs6.appendFileSync(logPath, chunk);
+      } catch {
+      }
+    });
+  }
+  const initialRecord = {
+    job_id: jobId,
+    pid: typeof child.pid === "number" ? child.pid : null,
+    state: "running",
+    exit_code: null,
+    signal: null,
+    cancelled: false,
+    project_path: p.project_path,
+    comp_name: p.comp_name,
+    output_path: p.output_path,
+    ...p.output_module_template ? { output_module_template: p.output_module_template } : {},
+    ...p.render_settings_template ? { render_settings_template: p.render_settings_template } : {},
+    ...p.start_frame !== void 0 ? { start_frame: p.start_frame } : {},
+    ...p.end_frame !== void 0 ? { end_frame: p.end_frame } : {},
+    aerender_path: p.aerender_path,
+    args: cliArgs,
+    log_path: logPath,
+    started_at: (/* @__PURE__ */ new Date()).toISOString(),
+    finished_at: null
+  };
+  registry.register(initialRecord, child);
+  child.on("error", (err) => {
+    try {
+      fs6.appendFileSync(
+        logPath,
+        `
+AERENDER SPAWN ERROR: ${err.message}
+`
+      );
+    } catch {
+    }
+    const current = registry.get(jobId);
+    registry.update(jobId, {
+      state: "failed",
+      exit_code: current?.exit_code ?? -1,
+      error: err.message,
+      finished_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+  child.on(
+    "exit",
+    (code, signal) => {
+      const current = registry.get(jobId);
+      if (current?.cancelled) {
+        registry.update(jobId, {
+          state: "failed",
+          exit_code: code ?? current.exit_code,
+          signal: signal ?? current.signal,
+          finished_at: current.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
+        });
+        return;
+      }
+      let logError = null;
+      try {
+        const m = /^aerender ERROR:?\s*(.*)$/im.exec(
+          fs6.readFileSync(logPath, "utf8")
+        );
+        if (m) logError = m[1].trim() || "aerender ERROR";
+      } catch {
+        logError = null;
+      }
+      const succeeded = code === 0 && logError === null;
+      registry.update(jobId, {
+        state: succeeded ? "succeeded" : "failed",
+        ...logError ? { error: logError } : {},
+        exit_code: code,
+        signal: signal ?? null,
+        finished_at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+  );
+  if (typeof child.unref === "function") {
+    child.unref();
+  }
+  return initialRecord;
+}
+function isAerenderProcess(pid, platform = process.platform, run = (file, args) => String(childProcess.execFileSync(file, args, { windowsHide: true, timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }))) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    if (platform === "win32") {
+      const out2 = run("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+      const lines = out2.split(String.fromCharCode(10)).map((l) => l.trim()).filter((l) => l.length > 0);
+      let sawRow = false;
+      for (const l of lines) {
+        const m = /^"([^"]*)","(\d+)"/.exec(l);
+        if (m === null) continue;
+        sawRow = true;
+        if (m[2] === String(pid)) return /^aerender(?:\.exe)?$/i.test(m[1]);
+      }
+      if (sawRow) return false;
+      if (/^INFO:/i.test(lines[0] ?? "")) return false;
+      return null;
+    }
+    const out = run("ps", ["-p", String(pid), "-o", "comm="]).trim();
+    if (out === "") return null;
+    return /(^|\/)aerender(core)?$/i.test(out);
+  } catch {
+    return null;
+  }
+}
+function pidHeldByLiveJob(registry, pid, exceptJobId) {
+  return registry.list().some((j) => j.job_id !== exceptJobId && j.pid === pid && registry.getProcess(j.job_id) !== void 0);
+}
+function cancelAerenderJob(registry, job, killProcess, by = "ae_aerender_cancel", hooks = {}) {
+  const proc = registry.getProcess(job.job_id);
+  if (proc) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+    }
+  } else if (typeof job.pid === "number" && job.pid > 0) {
+    let outcome = "killed";
+    if (killProcess) {
+      try {
+        killProcess(job.pid, "SIGTERM");
+      } catch {
+      }
+    } else {
+      if (pidHeldByLiveJob(registry, job.pid, job.job_id)) outcome = "other";
+      else {
+        const identity = (hooks.identify ?? ((p) => isAerenderProcess(p)))(job.pid);
+        if (identity === true) {
+          try {
+            (hooks.signal ?? ((p, sig) => {
+              process.kill(p, sig);
+            }))(job.pid, "SIGTERM");
+          } catch {
+          }
+        } else if (identity === false) outcome = "other";
+        else outcome = "unknown";
+      }
+    }
+    if (outcome === "unknown") {
+      try {
+        fs6.appendFileSync(
+          job.log_path,
+          `
+AERENDER CANCEL by ${by} at ${(/* @__PURE__ */ new Date()).toISOString()} could not confirm that pid ${job.pid} is this job's aerender; nothing was killed and the job stays running.
+`
+        );
+      } catch {
+      }
+      return { ...registry.get(job.job_id) ?? job, kill_unconfirmed: true };
+    }
+  }
+  try {
+    fs6.appendFileSync(
+      job.log_path,
+      `
+AERENDER CANCELLED by ${by} at ${(/* @__PURE__ */ new Date()).toISOString()}
+`
+    );
+  } catch {
+  }
+  return registry.update(job.job_id, {
+    state: "failed",
+    cancelled: true,
+    finished_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+}
 function createAerenderTools(options = {}) {
   const getRegistry = () => options.registry ?? getDefaultAerenderRegistry();
   const spawnFn = options.spawn ?? childProcess.spawn;
@@ -6505,19 +6782,10 @@ function createAerenderTools(options = {}) {
                 aeVersion: statusInfo.aeVersion,
                 existsSync: options.existsSync
               });
-              const jobId = registry.newJobId();
-              const rendersDir = registry.rendersDir;
-              fs6.mkdirSync(rendersDir, { recursive: true });
-              const outDir = path7.dirname(args.output_path);
-              if (outDir && outDir !== ".") {
-                try {
-                  fs6.mkdirSync(outDir, { recursive: true });
-                } catch {
-                }
-              }
-              const logPath = path7.join(rendersDir, `${jobId}.log`);
-              fs6.writeFileSync(logPath, "", { encoding: "utf8" });
-              const cliArgs = buildAerenderArgs({
+              const initialRecord = launchAerenderJob({
+                registry,
+                spawn: spawnFn,
+                aerender_path: aerenderBin,
                 project_path: actualProjectPath,
                 comp_name: args.comp_name,
                 output_path: args.output_path,
@@ -6526,118 +6794,10 @@ function createAerenderTools(options = {}) {
                 start_frame: args.start_frame,
                 end_frame: args.end_frame
               });
-              let logFd = null;
-              try {
-                logFd = fs6.openSync(logPath, "a");
-              } catch {
-                logFd = null;
-              }
-              const stdioConfig = logFd !== null ? ["ignore", logFd, logFd] : "pipe";
-              const child = spawnFn(aerenderBin, cliArgs, {
-                windowsHide: true,
-                detached: true,
-                stdio: stdioConfig
-              });
-              if (logFd !== null) {
-                try {
-                  fs6.closeSync(logFd);
-                } catch {
-                }
-              }
-              if (child.stdout) {
-                child.stdout.on("data", (chunk) => {
-                  try {
-                    fs6.appendFileSync(logPath, chunk);
-                  } catch {
-                  }
-                });
-              }
-              if (child.stderr) {
-                child.stderr.on("data", (chunk) => {
-                  try {
-                    fs6.appendFileSync(logPath, chunk);
-                  } catch {
-                  }
-                });
-              }
-              const initialRecord = {
-                job_id: jobId,
-                pid: typeof child.pid === "number" ? child.pid : null,
-                state: "running",
-                exit_code: null,
-                signal: null,
-                cancelled: false,
-                project_path: actualProjectPath,
-                comp_name: args.comp_name,
-                output_path: args.output_path,
-                ...args.output_module_template ? { output_module_template: args.output_module_template } : {},
-                ...args.render_settings_template ? { render_settings_template: args.render_settings_template } : {},
-                ...args.start_frame !== void 0 ? { start_frame: args.start_frame } : {},
-                ...args.end_frame !== void 0 ? { end_frame: args.end_frame } : {},
-                aerender_path: aerenderBin,
-                args: cliArgs,
-                log_path: logPath,
-                started_at: (/* @__PURE__ */ new Date()).toISOString(),
-                finished_at: null
-              };
-              registry.register(initialRecord, child);
-              child.on("error", (err) => {
-                try {
-                  fs6.appendFileSync(
-                    logPath,
-                    `
-AERENDER SPAWN ERROR: ${err.message}
-`
-                  );
-                } catch {
-                }
-                const current = registry.get(jobId);
-                registry.update(jobId, {
-                  state: "failed",
-                  exit_code: current?.exit_code ?? -1,
-                  error: err.message,
-                  finished_at: (/* @__PURE__ */ new Date()).toISOString()
-                });
-              });
-              child.on(
-                "exit",
-                (code, signal) => {
-                  const current = registry.get(jobId);
-                  if (current?.cancelled) {
-                    registry.update(jobId, {
-                      state: "failed",
-                      exit_code: code ?? current.exit_code,
-                      signal: signal ?? current.signal,
-                      finished_at: current.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
-                    });
-                    return;
-                  }
-                  let logError = null;
-                  try {
-                    const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-                      fs6.readFileSync(logPath, "utf8")
-                    );
-                    if (m) logError = m[1].trim() || "aerender ERROR";
-                  } catch {
-                    logError = null;
-                  }
-                  const succeeded = code === 0 && logError === null;
-                  registry.update(jobId, {
-                    state: succeeded ? "succeeded" : "failed",
-                    ...logError ? { error: logError } : {},
-                    exit_code: code,
-                    signal: signal ?? null,
-                    finished_at: (/* @__PURE__ */ new Date()).toISOString()
-                  });
-                }
-              );
-              if (typeof child.unref === "function") {
-                child.unref();
-              }
               return {
                 ok: true,
                 op_id: opId,
-                job_id: jobId,
+                job_id: initialRecord.job_id,
                 pid: initialRecord.pid,
                 state: initialRecord.state,
                 project_path: initialRecord.project_path,
@@ -6706,7 +6866,7 @@ AERENDER SPAWN ERROR: ${err.message}
     },
     {
       name: "ae_aerender_cancel",
-      description: "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). " + AGENT_SAFETY_GUIDANCE,
+      description: "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). After a restart only a pid that is positively an aerender is killed; when the process lookup cannot tell, nothing is killed, the job stays running and the result says `kill_unconfirmed: true`. " + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderCancelSchema,
       handler: async (args) => {
         const registry = getRegistry();
@@ -6724,33 +6884,19 @@ AERENDER SPAWN ERROR: ${err.message}
             already_finished: true
           };
         }
-        const proc = registry.getProcess(args.job_id);
-        if (proc) {
-          try {
-            proc.kill("SIGTERM");
-          } catch {
-          }
-        } else if (typeof job.pid === "number" && job.pid > 0) {
-          const killFn = options.killProcess ?? ((pid, sig) => process.kill(pid, sig));
-          try {
-            killFn(job.pid, "SIGTERM");
-          } catch {
-          }
+        const updated = cancelAerenderJob(registry, job, options.killProcess, "ae_aerender_cancel", options.cancelHooks);
+        if (updated.kill_unconfirmed) {
+          return {
+            ok: true,
+            job_id: updated.job_id,
+            pid: updated.pid,
+            state: updated.state,
+            exit_code: updated.exit_code,
+            cancelled: false,
+            kill_unconfirmed: true,
+            advice: `Could not confirm that pid ${updated.pid} is this job's aerender (the process lookup failed), so nothing was killed and the job stays running. Check the process yourself (Task Manager / Activity Monitor), then try again.`
+          };
         }
-        try {
-          fs6.appendFileSync(
-            job.log_path,
-            `
-AERENDER CANCELLED by ae_aerender_cancel at ${(/* @__PURE__ */ new Date()).toISOString()}
-`
-          );
-        } catch {
-        }
-        const updated = registry.update(args.job_id, {
-          state: "failed",
-          cancelled: true,
-          finished_at: (/* @__PURE__ */ new Date()).toISOString()
-        });
         return {
           ok: true,
           job_id: updated.job_id,
@@ -7241,13 +7387,13 @@ async function noteAfterWrite(ctx, info, opts = {}) {
   } catch {
   }
 }
-async function readOpenProject(t, read, extra) {
+async function readOpenProject(t, read2, extra) {
   const first = t.compsToReadDetailed(null, extra);
-  const snap2 = await read(first.ids);
+  const snap2 = await read2(first.ids);
   if (!snap2) return null;
   if (!t.isLastProject(snap2.project_path) && t.touchedComps(snap2.project_path).length > 0) {
     const second = t.compsToReadDetailed(snap2.project_path, extra);
-    const again = await read(second.ids);
+    const again = await read2(second.ids);
     if (again) return { snap: again, dropped: second.dropped };
   }
   return { snap: snap2, dropped: first.dropped };
@@ -7276,7 +7422,7 @@ function installSessionBridgeHook(bridge) {
     }
     const toolName = p.toolName ?? "unknown";
     const raw = { bridge: { evalRaw: original } };
-    const read = (phase) => (ids) => readSnapshot(raw, p.id, phase, toolName, ids);
+    const read2 = (phase) => (ids) => readSnapshot(raw, p.id, phase, toolName, ids);
     let projectPath = UNKNOWN_PROJECT;
     let skipAfter = false;
     try {
@@ -7284,7 +7430,7 @@ function installSessionBridgeHook(bridge) {
       if (prev) {
         projectPath = prev.project_path;
         try {
-          const live = await readOpenProject(t, read("before"), []);
+          const live = await readOpenProject(t, read2("before"), []);
           if (live) {
             projectPath = live.snap.project_path;
             const base = t.baselineFor(live.snap.project_path) ?? prev;
@@ -7313,7 +7459,7 @@ function installSessionBridgeHook(bridge) {
     let writtenTo = projectPath;
     if (!skipAfter) {
       try {
-        const after = await readOpenProject(t, read("after"), []);
+        const after = await readOpenProject(t, read2("after"), []);
         if (after) {
           t.record(after.snap, { op_id: p.id, tool: toolName });
           writtenTo = after.snap.project_path;
@@ -7354,9 +7500,9 @@ function readRenderJobs(jobsFile, alive) {
   }
   return out.slice(0, 500);
 }
-async function readSnapshotOrNull(read, ids) {
+async function readSnapshotOrNull(read2, ids) {
   try {
-    return await read(ids);
+    return await read2(ids);
   } catch {
     return null;
   }
@@ -8233,8 +8379,8 @@ var init_mutate = __esm({
                   const baseName = path9.basename(actualProjectPath, ext2);
                   const backupDir = path9.join(projDir, "_mcp_backups");
                   fs8.mkdirSync(backupDir, { recursive: true });
-                  const stamp2 = formatBackupTimestamp(/* @__PURE__ */ new Date());
-                  backupPath = path9.join(backupDir, `${baseName}_${stamp2}${ext2}`);
+                  const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
+                  backupPath = path9.join(backupDir, `${baseName}_${stamp3}${ext2}`);
                   fs8.copyFileSync(actualProjectPath, backupPath);
                   backupSize = fs8.statSync(backupPath).size;
                 }
@@ -8760,7 +8906,7 @@ function runPowerShellScript(ps1Args) {
     scriptPath,
     ...ps1Args
   ];
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     (0, import_node_child_process.execFile)(
       "powershell.exe",
       fullArgs,
@@ -8772,11 +8918,11 @@ function runPowerShellScript(ps1Args) {
       (err, stdout, stderr) => {
         const outStr = typeof stdout === "string" ? stdout.trim() : "";
         if (outStr.length > 0) {
-          resolve3(outStr);
+          resolve4(outStr);
           return;
         }
         const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
-        resolve3(
+        resolve4(
           JSON.stringify({
             ok: false,
             error: errMsg
@@ -8794,7 +8940,7 @@ function runMacScript(args) {
   if (!scriptPath) {
     return Promise.resolve(JSON.stringify({ ok: false, error: "ae_dialogs_mac_script_not_found" }));
   }
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     (0, import_node_child_process.execFile)(
       "osascript",
       ["-l", "JavaScript", scriptPath, ...args],
@@ -8802,11 +8948,11 @@ function runMacScript(args) {
       (err, stdout, stderr) => {
         const outStr = typeof stdout === "string" ? stdout.trim() : "";
         if (outStr.length > 0) {
-          resolve3(outStr);
+          resolve4(outStr);
           return;
         }
         const errMsg = typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : err instanceof Error ? err.message : "osascript_exec_failed";
-        resolve3(JSON.stringify({ ok: false, error: errMsg }));
+        resolve4(JSON.stringify({ ok: false, error: errMsg }));
       }
     );
   });
@@ -8882,6 +9028,14 @@ async function listDialogsInternal(opts) {
     ae_pid: parsed.ae_pid ?? null,
     dialogs: enriched
   };
+}
+async function listBlockingDialogs(opts) {
+  try {
+    const res = await listDialogsInternal(opts);
+    return res.ok ? { ok: true, dialogs: res.dialogs } : { ok: false, error: res.error };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 async function describeBlockingDialogs() {
   try {
@@ -9066,9 +9220,9 @@ async function aeStatusWithin(ctx, ms) {
     });
   }
   let timer;
-  const late2 = new Promise((resolve3) => {
+  const late2 = new Promise((resolve4) => {
     timer = setTimeout(
-      () => resolve3({ answered: false, error: `AE did not answer within ${ms / 1e3} s (busy with a script or render, or a popup is open).` }),
+      () => resolve4({ answered: false, error: `AE did not answer within ${ms / 1e3} s (busy with a script or render, or a popup is open).` }),
       ms
     );
   });
@@ -9087,7 +9241,7 @@ async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
   const logText = readIfExists(serviceInfo?.rotatedLogPath) + readIfExists(serviceInfo?.logPath);
   const log = redact(tailLines(logText, opts.logLines ?? DEFAULT_LOG_LINES), token);
   const { tokenPath: _omit, ...service } = serviceInfo ?? {};
-  const summary2 = {
+  const summary3 = {
     created_at: now.toISOString(),
     ae_answered: ae.answered,
     service_in_flight: service.inFlight ?? null,
@@ -9096,7 +9250,7 @@ async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
     open_dialogs: dialogs.length
   };
   const sections = [
-    ["Summary", summary2],
+    ["Summary", summary3],
     ["Service", service],
     ["After Effects", ae],
     ["Quarantine", quarantine],
@@ -9130,7 +9284,7 @@ async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
       file = path12.join(dir, `${stem}-${n}.md`);
     }
   }
-  return { path: file, summary: summary2 };
+  return { path: file, summary: summary3 };
 }
 var fs11, os2, path12, AE_STATUS_WAIT_MS, DEFAULT_LOG_LINES, AeDiagnosticsSchema, pendingStatus, diagnosticsTools;
 var init_diagnostics = __esm({
@@ -9769,7 +9923,7 @@ async function runGuardedWrite(ctx, spec) {
     project_path: spec.expect.project_path,
     comp_id: spec.expect.comp_id ?? spec.compId
   };
-  const read = async (phase, written, before) => {
+  const read2 = async (phase, written, before) => {
     const call2 = spec.read?.(phase, written, before);
     if (!call2) return null;
     const res = await ctx.bridge.evalRaw({
@@ -9789,7 +9943,7 @@ async function runGuardedWrite(ctx, spec) {
       const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
       const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
       const sessionFields = await noteBeforeWrite(ctx, note);
-      const before = await read("before");
+      const before = await read2("before");
       beginInflight(note);
       let write;
       try {
@@ -9808,7 +9962,7 @@ async function runGuardedWrite(ctx, spec) {
       let after = null;
       let readBackFailure = null;
       try {
-        after = await read("after", written, before);
+        after = await read2("after", written, before);
       } catch (err) {
         readBackFailure = readBackMismatch(opId, "the read-back failed", err);
       }
@@ -9843,8 +9997,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path35, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path35, expected, actual, message });
+function expectThat(mismatches, ok, path44, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path44, expected, actual, message });
 }
 var init_write_runner = __esm({
   "src/tools/ext/write-runner.ts"() {
@@ -10189,9 +10343,9 @@ var init_captions = __esm({
             },
             check: (_before, after, w) => captionsMismatches(args, removeStale, captions, after, w),
             present: (_before, after, w) => {
-              const read = readOf(after);
-              const outside = (read?.captions ?? []).filter((e) => e.outside_safe === true || e.first_outside_safe !== void 0).map((e) => ({ name: e.name, ...e.rect ? { width: e.rect.width } : {}, ...e.first_outside_safe !== void 0 ? { first_at: e.first_outside_safe } : {} }));
-              const substituted = (read?.captions ?? []).filter((e) => e.font_substituted).map((e) => e.name);
+              const read2 = readOf(after);
+              const outside = (read2?.captions ?? []).filter((e) => e.outside_safe === true || e.first_outside_safe !== void 0).map((e) => ({ name: e.name, ...e.rect ? { width: e.rect.width } : {}, ...e.first_outside_safe !== void 0 ? { first_at: e.first_outside_safe } : {} }));
+              const substituted = (read2?.captions ?? []).filter((e) => e.font_substituted).map((e) => e.name);
               const warnings = [...plan2.warnings, ...w.warnings ?? []];
               if (outside.length) warnings.push(`${outside.length} caption${outside.length === 1 ? " runs" : "s run"} outside the safe area; re-run with a smaller max_chars_per_line or font_size.`);
               if (substituted.length) warnings.push("The font is substituted (not installed under that name); check ae_fonts.");
@@ -11171,7 +11325,7 @@ var init_fittext = __esm({
               skipped: first.skipped
             };
           }
-          const passes = [];
+          const passes2 = [];
           let passError;
           for (let pass = 1; pass <= maxPasses; pass++) {
             const items = [];
@@ -11210,7 +11364,7 @@ var init_fittext = __esm({
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 passError = { pass, message };
-                passes.push({
+                passes2.push({
                   pass,
                   error: message,
                   note: `Pass ${pass} did not complete. The earlier passes are applied and kept; measure again before trying more.`
@@ -11223,7 +11377,7 @@ var init_fittext = __esm({
             for (const sk of wroteSkipped) hostSkip.set(sk.id, sk.reason ?? "the host would not write it");
             for (const it of items) if (!hostSkip.has(it.id)) used.set(it.id, (used.get(it.id) ?? 0) + 1);
             const wroteNothing = out.no_op === true;
-            passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: out.changes, receipt: out.receipt, ...wroteNothing ? { wrote_nothing: true } : {} });
+            passes2.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: out.changes, receipt: out.receipt, ...wroteNothing ? { wrote_nothing: true } : {} });
             const measured = out.measured;
             if (!measured) break;
             current = current.map((l) => measured.layers.find((n) => n.id === l.id) ?? l);
@@ -11256,12 +11410,12 @@ var init_fittext = __esm({
             }
             return { id: l.id, name: l.name, status, reason, from_size: startSize.get(l.id), to_size: l.fontSize, passes: n, bounds: l.bounds, overflow: l.boxOverflow };
           });
-          const lastWithReceipt = [...passes].reverse().find((p) => p.receipt !== void 0);
+          const lastWithReceipt = [...passes2].reverse().find((p) => p.receipt !== void 0);
           return {
             ok: true,
-            applied: passes.some((p) => p.op_id !== void 0 && p.wrote_nothing !== true),
+            applied: passes2.some((p) => p.op_id !== void 0 && p.wrote_nothing !== true),
             region,
-            passes,
+            passes: passes2,
             layers: final,
             receipt: lastWithReceipt?.receipt,
             all_fit: !passError && final.every((f) => f.status === "fits"),
@@ -11370,49 +11524,49 @@ function radialPositions(n, centre2, radius, startAngle, sweep) {
     return [centre2[0] + radius * Math.sin(a), centre2[1] - radius * Math.cos(a)];
   });
 }
-function planStagger(args, read) {
-  const bad3 = (message) => ({ ok: false, error: "bad_args", message });
-  if (read.truncated) return bad3("More than 500 layers were given or selected; split them into batches.");
+function planStagger(args, read2) {
+  const bad4 = (message) => ({ ok: false, error: "bad_args", message });
+  if (read2.truncated) return bad4("More than 500 layers were given or selected; split them into batches.");
   const skipped = [];
-  let layers = read.layers;
+  let layers = read2.layers;
   const lockedOnes = layers.filter((l) => l.locked === true);
-  if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
+  if (lockedOnes.length) return bad4(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
   if (args.mode !== "layers") {
     const prop = (l) => l.property;
     const missing = layers.filter((l) => !prop(l)?.found);
     if (missing.length) {
-      return bad3(`${missing.length} layer(s) have no property ${args.property_path?.join(" > ")}: ${missing.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${missing.length > 5 ? ", ..." : ""}.`);
+      return bad4(`${missing.length} layer(s) have no property ${args.property_path?.join(" > ")}: ${missing.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${missing.length > 5 ? ", ..." : ""}.`);
     }
     const sepLeaders = layers.filter((l) => prop(l)?.separationLeader);
-    if (sepLeaders.length) return bad3(`"${sepLeaders[0].name}": that Position has separated dimensions; its keys are on X Position / Y Position (ADBE Position_0, ADBE Position_1).`);
+    if (sepLeaders.length) return bad4(`"${sepLeaders[0].name}": that Position has separated dimensions; its keys are on X Position / Y Position (ADBE Position_0, ADBE Position_1).`);
     if (args.mode === "keys") {
       const keyless = layers.filter((l) => !(prop(l)?.numKeys && prop(l).numKeys > 0));
       if (keyless.length && !args.skip_missing) {
-        return bad3(
+        return bad4(
           `${keyless.length} layer(s) have no keys on that property: ${keyless.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${keyless.length > 5 ? ", ..." : ""}. Pass skip_missing to leave them out, or use mode copy_keys.`
         );
       }
       for (const l of keyless) skipped.push({ id: l.id, name: l.name, reason: "no keys on the property" });
       layers = layers.filter((l) => (prop(l)?.numKeys ?? 0) > 0);
       const total = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
-      if (total > MAX_KEYS_TOTAL) return bad3(`${total} keys would be rebuilt; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+      if (total > MAX_KEYS_TOTAL) return bad4(`${total} keys would be rebuilt; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
     }
     if (args.mode === "copy_keys") {
-      const src = read.source;
-      if (!src?.property?.found || !(src.property.numKeys && src.property.numKeys > 0)) return bad3("The source layer has no keys on that property.");
-      if (layers.some((l) => l.id === src.id)) return bad3("The source layer can't also be a target.");
-      if (src.property.separationLeader) return bad3("That Position has separated dimensions; copy X Position / Y Position instead.");
+      const src = read2.source;
+      if (!src?.property?.found || !(src.property.numKeys && src.property.numKeys > 0)) return bad4("The source layer has no keys on that property.");
+      if (layers.some((l) => l.id === src.id)) return bad4("The source layer can't also be a target.");
+      if (src.property.separationLeader) return bad4("That Position has separated dimensions; copy X Position / Y Position instead.");
       if (!args.replace_existing) {
         const has = layers.filter((l) => (prop(l)?.numKeys ?? 0) > 0);
-        if (has.length) return bad3(`${has.length} target layer(s) already have keys on that property (${has.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}); pass replace_existing to overwrite them.`);
+        if (has.length) return bad4(`${has.length} target layer(s) already have keys on that property (${has.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}); pass replace_existing to overwrite them.`);
       }
       const existing = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
       const total = (src.property.numKeys ?? 0) * layers.length + existing;
-      if (total > MAX_KEYS_TOTAL) return bad3(`${total} keys would be written; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+      if (total > MAX_KEYS_TOTAL) return bad4(`${total} keys would be written; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
     }
   }
-  if (layers.length === 0) return bad3("No layers left to stagger.");
-  const frameDuration = read.frameDuration;
+  if (layers.length === 0) return bad4("No layers left to stagger.");
+  const frameDuration = read2.frameDuration;
   const offsets = computeOffsets(layers.length, {
     order: args.order,
     seed: args.seed,
@@ -11428,7 +11582,7 @@ function planStagger(args, read) {
       e.from = l.startTime;
       e.to = Number((l.startTime + offsets[i]).toFixed(9));
     } else {
-      const p = args.mode === "copy_keys" ? read.source?.property : l.property;
+      const p = args.mode === "copy_keys" ? read2.source?.property : l.property;
       e.num_keys = p?.numKeys;
       e.first_time = p?.times?.[0];
     }
@@ -11436,18 +11590,18 @@ function planStagger(args, read) {
   });
   return { ok: true, plan: { entries, skipped, frameDuration } };
 }
-function planLayout(args, read) {
-  const bad3 = (message) => ({ ok: false, error: "bad_args", message });
-  if (read.truncated) return bad3("More than 500 layers were given or selected; split them into batches.");
-  const layers = read.layers;
+function planLayout(args, read2) {
+  const bad4 = (message) => ({ ok: false, error: "bad_args", message });
+  if (read2.truncated) return bad4("More than 500 layers were given or selected; split them into batches.");
+  const layers = read2.layers;
   const lockedOnes = layers.filter((l) => l.locked === true);
-  if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
+  if (lockedOnes.length) return bad4(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
   const stuck = layers.filter((l) => l.state !== "static");
   if (stuck.length) {
     const why = (l) => l.state === "keyed" ? "has Position keyframes" : l.state === "expression" ? "has a Position expression" : "has no Position";
-    return bad3(`${stuck.length} layer(s) can't be placed: ${stuck.slice(0, 5).map((l) => `"${l.name}" ${why(l)}`).join("; ")}.`);
+    return bad4(`${stuck.length} layer(s) can't be placed: ${stuck.slice(0, 5).map((l) => `"${l.name}" ${why(l)}`).join("; ")}.`);
   }
-  const origin = args.origin ?? [read.width / 2, read.height / 2];
+  const origin = args.origin ?? [read2.width / 2, read2.height / 2];
   const cells = args.pattern === "grid" ? gridPositions(layers.length, args.columns ?? 1, args.spacing ?? [0, 0], origin) : radialPositions(layers.length, origin, args.radius ?? 0, args.start_angle, args.sweep);
   const ranks = orderRanks(layers.length, args.order, args.seed);
   const entries = layers.map((l, i) => {
@@ -11643,7 +11797,7 @@ var init_stagger = __esm({
     MAX_MISMATCHES = 40;
     numClose = (a, b, abs, rel = 1e-5) => Math.abs(a - b) <= abs + rel * Math.max(Math.abs(a), Math.abs(b));
     easeClose = (a, b) => !!a && !!b && a.length === b.length && a.every((e, i) => numClose(e.speed, b[i].speed, 1e-3, 1e-3) && numClose(e.influence, b[i].influence, 0.01, 1e-3));
-    layerOf = (read, id) => read?.layers.find((l) => l.id === id);
+    layerOf = (read2, id) => read2?.layers.find((l) => l.id === id);
     selection = (layers) => layers ? { layers } : {};
     idSelectors = (entries) => entries.map((e) => ({ id: e.id }));
     staggerTools = [
@@ -11662,8 +11816,8 @@ var init_stagger = __esm({
             ctx.quarantine.assertClear();
             await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
           }
-          const read = await planRead(ctx, "staggerRead", selectionArgs, "ae_stagger", `ae_stagger (${args.dry_run ? "dry run" : "plan"})`);
-          const planned = planStagger(args, read);
+          const read2 = await planRead(ctx, "staggerRead", selectionArgs, "ae_stagger", `ae_stagger (${args.dry_run ? "dry run" : "plan"})`);
+          const planned = planStagger(args, read2);
           if (!planned.ok) return { ok: false, error: planned.error, message: planned.message };
           const plan2 = planned.plan;
           if (args.dry_run) {
@@ -11713,8 +11867,8 @@ var init_stagger = __esm({
             ctx.quarantine.assertClear();
             await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
           }
-          const read = await planRead(ctx, "staggerLayoutRead", { comp_id: args.comp_id, ...selection(args.layers) }, "ae_stagger_layout", `ae_stagger_layout (${args.dry_run ? "dry run" : "plan"})`);
-          const planned = planLayout(args, read);
+          const read2 = await planRead(ctx, "staggerLayoutRead", { comp_id: args.comp_id, ...selection(args.layers) }, "ae_stagger_layout", `ae_stagger_layout (${args.dry_run ? "dry run" : "plan"})`);
+          const planned = planLayout(args, read2);
           if (!planned.ok) return { ok: false, error: planned.error, message: planned.message };
           const view = planned.entries.map((e) => ({ id: e.id, index: e.index, name: e.name, from: e.from?.slice(0, 2), to: e.position }));
           if (args.dry_run) return { ok: true, dry_run: true, pattern: args.pattern, layers: view, warnings: planned.warnings };
@@ -11960,13 +12114,13 @@ function planTimeRemap(args, info) {
     }
     case "speed": {
       if (info.remap_enabled) return bad("Time remapping is on, so layer.stretch can't change speed. Use operation ramp, or disable remapping first.");
-      const pct = args.speed_percent;
-      if (pct === 0) return bad("speed_percent can't be 0; use freeze.");
-      const stretch = 1e4 / pct;
+      const pct2 = args.speed_percent;
+      if (pct2 === 0) return bad("speed_percent can't be 0; use freeze.");
+      const stretch = 1e4 / pct2;
       if (Math.abs(stretch) < 1 || Math.abs(stretch) > 9900) {
-        return bad(`speed_percent ${pct} gives a stretch of ${fix(stretch)}%; After Effects allows 1 to 9900 percent (speed ${fix(1e4 / 9900)}% to 10000%).`);
+        return bad(`speed_percent ${pct2} gives a stretch of ${fix(stretch)}%; After Effects allows 1 to 9900 percent (speed ${fix(1e4 / 9900)}% to 10000%).`);
       }
-      if (Math.abs(stretch - info.stretch) < 1e-9) return bad(`The layer is already at ${pct}% speed.`);
+      if (Math.abs(stretch - info.stretch) < 1e-9) return bad(`The layer is already at ${pct2}% speed.`);
       return {
         ok: true,
         plan: {
@@ -12202,8 +12356,8 @@ function remapMismatches(plan2, beforeRaw, afterRaw) {
         ];
         for (const [nm, speed, infl, got] of sides) {
           if (speed === void 0 && infl === void 0) continue;
-          const bad3 = !got || speed !== void 0 && !(Math.abs(got.speed - speed) <= 1e-3) || infl !== void 0 && !(Math.abs(got.influence - infl) <= 0.01);
-          if (bad3 && shown < 5) {
+          const bad4 = !got || speed !== void 0 && !(Math.abs(got.speed - speed) <= 1e-3) || infl !== void 0 && !(Math.abs(got.influence - infl) <= 0.01);
+          if (bad4 && shown < 5) {
             shown++;
             m.push({
               path: `keys[${i + 1}].ease`,
@@ -12419,9 +12573,9 @@ var init_timeremap = __esm({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/chunkstream.js
+// node_modules/pngjs/lib/chunkstream.js
 var require_chunkstream = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/chunkstream.js"(exports2, module2) {
+  "node_modules/pngjs/lib/chunkstream.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -12502,27 +12656,27 @@ var require_chunkstream = __commonJS({
       this._buffers = null;
       this.emit("close");
     };
-    ChunkStream.prototype._processReadAllowingLess = function(read) {
+    ChunkStream.prototype._processReadAllowingLess = function(read2) {
       this._reads.shift();
       let smallerBuf = this._buffers[0];
-      if (smallerBuf.length > read.length) {
-        this._buffered -= read.length;
-        this._buffers[0] = smallerBuf.slice(read.length);
-        read.func.call(this, smallerBuf.slice(0, read.length));
+      if (smallerBuf.length > read2.length) {
+        this._buffered -= read2.length;
+        this._buffers[0] = smallerBuf.slice(read2.length);
+        read2.func.call(this, smallerBuf.slice(0, read2.length));
       } else {
         this._buffered -= smallerBuf.length;
         this._buffers.shift();
-        read.func.call(this, smallerBuf);
+        read2.func.call(this, smallerBuf);
       }
     };
-    ChunkStream.prototype._processRead = function(read) {
+    ChunkStream.prototype._processRead = function(read2) {
       this._reads.shift();
       let pos = 0;
       let count = 0;
-      let data = Buffer.alloc(read.length);
-      while (pos < read.length) {
+      let data = Buffer.alloc(read2.length);
+      while (pos < read2.length) {
         let buf = this._buffers[count++];
-        let len = Math.min(buf.length, read.length - pos);
+        let len = Math.min(buf.length, read2.length - pos);
         buf.copy(data, pos, 0, len);
         pos += len;
         if (len !== buf.length) {
@@ -12532,17 +12686,17 @@ var require_chunkstream = __commonJS({
       if (count > 0) {
         this._buffers.splice(0, count);
       }
-      this._buffered -= read.length;
-      read.func.call(this, data);
+      this._buffered -= read2.length;
+      read2.func.call(this, data);
     };
     ChunkStream.prototype._process = function() {
       try {
         while (this._buffered > 0 && this._reads && this._reads.length > 0) {
-          let read = this._reads[0];
-          if (read.allowLess) {
-            this._processReadAllowingLess(read);
-          } else if (this._buffered >= read.length) {
-            this._processRead(read);
+          let read2 = this._reads[0];
+          if (read2.allowLess) {
+            this._processReadAllowingLess(read2);
+          } else if (this._buffered >= read2.length) {
+            this._processRead(read2);
           } else {
             break;
           }
@@ -12557,9 +12711,9 @@ var require_chunkstream = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/interlace.js
+// node_modules/pngjs/lib/interlace.js
 var require_interlace = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/interlace.js"(exports2) {
+  "node_modules/pngjs/lib/interlace.js"(exports2) {
     "use strict";
     var imagePasses = [
       {
@@ -12640,9 +12794,9 @@ var require_interlace = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/paeth-predictor.js
+// node_modules/pngjs/lib/paeth-predictor.js
 var require_paeth_predictor = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/paeth-predictor.js"(exports2, module2) {
+  "node_modules/pngjs/lib/paeth-predictor.js"(exports2, module2) {
     "use strict";
     module2.exports = function paethPredictor(left, above, upLeft) {
       let paeth = left + above - upLeft;
@@ -12660,9 +12814,9 @@ var require_paeth_predictor = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse.js
+// node_modules/pngjs/lib/filter-parse.js
 var require_filter_parse = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse.js"(exports2, module2) {
+  "node_modules/pngjs/lib/filter-parse.js"(exports2, module2) {
     "use strict";
     var interlaceUtils = require_interlace();
     var paethPredictor = require_paeth_predictor();
@@ -12685,11 +12839,11 @@ var require_filter_parse = __commonJS({
       this._imageIndex = 0;
       this._images = [];
       if (interlace) {
-        let passes = interlaceUtils.getImagePasses(width, height);
-        for (let i = 0; i < passes.length; i++) {
+        let passes2 = interlaceUtils.getImagePasses(width, height);
+        for (let i = 0; i < passes2.length; i++) {
           this._images.push({
-            byteWidth: getByteWidth(passes[i].width, bpp, depth),
-            height: passes[i].height,
+            byteWidth: getByteWidth(passes2[i].width, bpp, depth),
+            height: passes2[i].height,
             lineIndex: 0
           });
         }
@@ -12801,9 +12955,9 @@ var require_filter_parse = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-async.js
+// node_modules/pngjs/lib/filter-parse-async.js
 var require_filter_parse_async = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-async.js"(exports2, module2) {
+  "node_modules/pngjs/lib/filter-parse-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var ChunkStream = require_chunkstream();
@@ -12827,9 +12981,9 @@ var require_filter_parse_async = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/constants.js
+// node_modules/pngjs/lib/constants.js
 var require_constants = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/constants.js"(exports2, module2) {
+  "node_modules/pngjs/lib/constants.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       PNG_SIGNATURE: [137, 80, 78, 71, 13, 10, 26, 10],
@@ -12862,9 +13016,9 @@ var require_constants = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/crc.js
+// node_modules/pngjs/lib/crc.js
 var require_crc = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/crc.js"(exports2, module2) {
+  "node_modules/pngjs/lib/crc.js"(exports2, module2) {
     "use strict";
     var crcTable = [];
     (function() {
@@ -12902,9 +13056,9 @@ var require_crc = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser.js
+// node_modules/pngjs/lib/parser.js
 var require_parser = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser.js"(exports2, module2) {
+  "node_modules/pngjs/lib/parser.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     var CrcCalculator = require_crc();
@@ -13123,9 +13277,9 @@ var require_parser = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitmapper.js
+// node_modules/pngjs/lib/bitmapper.js
 var require_bitmapper = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitmapper.js"(exports2) {
+  "node_modules/pngjs/lib/bitmapper.js"(exports2) {
     "use strict";
     var interlaceUtils = require_interlace();
     var pixelBppMapper = [
@@ -13371,9 +13525,9 @@ var require_bitmapper = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/format-normaliser.js
+// node_modules/pngjs/lib/format-normaliser.js
 var require_format_normaliser = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/format-normaliser.js"(exports2, module2) {
+  "node_modules/pngjs/lib/format-normaliser.js"(exports2, module2) {
     "use strict";
     function dePalette(indata, outdata, width, height, palette) {
       let pxPos = 0;
@@ -13452,12 +13606,12 @@ var require_format_normaliser = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-async.js
+// node_modules/pngjs/lib/parser-async.js
 var require_parser_async = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-async.js"(exports2, module2) {
+  "node_modules/pngjs/lib/parser-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
-    var zlib = require("zlib");
+    var zlib2 = require("zlib");
     var ChunkStream = require_chunkstream();
     var FilterAsync = require_filter_parse_async();
     var Parser = require_parser();
@@ -13499,15 +13653,15 @@ var require_parser_async = __commonJS({
     ParserAsync.prototype._inflateData = function(data) {
       if (!this._inflate) {
         if (this._bitmapInfo.interlace) {
-          this._inflate = zlib.createInflate();
+          this._inflate = zlib2.createInflate();
           this._inflate.on("error", this.emit.bind(this, "error"));
           this._filter.on("complete", this._complete.bind(this));
           this._inflate.pipe(this._filter);
         } else {
           let rowSize = (this._bitmapInfo.width * this._bitmapInfo.bpp * this._bitmapInfo.depth + 7 >> 3) + 1;
           let imageSize = rowSize * this._bitmapInfo.height;
-          let chunkSize = Math.max(imageSize, zlib.Z_MIN_CHUNK);
-          this._inflate = zlib.createInflate({ chunkSize });
+          let chunkSize = Math.max(imageSize, zlib2.Z_MIN_CHUNK);
+          this._inflate = zlib2.createInflate({ chunkSize });
           let leftToInflate = imageSize;
           let emitError = this.emit.bind(this, "error");
           this._inflate.on("error", function(err) {
@@ -13582,9 +13736,9 @@ var require_parser_async = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitpacker.js
+// node_modules/pngjs/lib/bitpacker.js
 var require_bitpacker = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
+  "node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     module2.exports = function(dataIn, width, height, options) {
@@ -13732,9 +13886,9 @@ var require_bitpacker = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-pack.js
+// node_modules/pngjs/lib/filter-pack.js
 var require_filter_pack = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-pack.js"(exports2, module2) {
+  "node_modules/pngjs/lib/filter-pack.js"(exports2, module2) {
     "use strict";
     var paethPredictor = require_paeth_predictor();
     function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
@@ -13874,22 +14028,22 @@ var require_filter_pack = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer.js
+// node_modules/pngjs/lib/packer.js
 var require_packer = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer.js"(exports2, module2) {
+  "node_modules/pngjs/lib/packer.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     var CrcStream = require_crc();
     var bitPacker = require_bitpacker();
     var filter = require_filter_pack();
-    var zlib = require("zlib");
+    var zlib2 = require("zlib");
     var Packer = module2.exports = function(options) {
       this._options = options;
       options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
       options.deflateLevel = options.deflateLevel != null ? options.deflateLevel : 9;
       options.deflateStrategy = options.deflateStrategy != null ? options.deflateStrategy : 3;
       options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
-      options.deflateFactory = options.deflateFactory || zlib.createDeflate;
+      options.deflateFactory = options.deflateFactory || zlib2.createDeflate;
       options.bitDepth = options.bitDepth || 8;
       options.colorType = typeof options.colorType === "number" ? options.colorType : constants3.COLORTYPE_COLOR_ALPHA;
       options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants3.COLORTYPE_COLOR_ALPHA;
@@ -13974,9 +14128,9 @@ var require_packer = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-async.js
+// node_modules/pngjs/lib/packer-async.js
 var require_packer_async = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-async.js"(exports2, module2) {
+  "node_modules/pngjs/lib/packer-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -14016,22 +14170,22 @@ var require_packer_async = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-inflate.js
+// node_modules/pngjs/lib/sync-inflate.js
 var require_sync_inflate = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-inflate.js"(exports2, module2) {
+  "node_modules/pngjs/lib/sync-inflate.js"(exports2, module2) {
     "use strict";
     var assert = require("assert").ok;
-    var zlib = require("zlib");
+    var zlib2 = require("zlib");
     var util2 = require("util");
     var kMaxLength = require("buffer").kMaxLength;
     function Inflate(opts) {
       if (!(this instanceof Inflate)) {
         return new Inflate(opts);
       }
-      if (opts && opts.chunkSize < zlib.Z_MIN_CHUNK) {
-        opts.chunkSize = zlib.Z_MIN_CHUNK;
+      if (opts && opts.chunkSize < zlib2.Z_MIN_CHUNK) {
+        opts.chunkSize = zlib2.Z_MIN_CHUNK;
       }
-      zlib.Inflate.call(this, opts);
+      zlib2.Inflate.call(this, opts);
       this._offset = this._offset === void 0 ? this._outOffset : this._offset;
       this._buffer = this._buffer || this._outBuffer;
       if (opts && opts.maxLength != null) {
@@ -14053,7 +14207,7 @@ var require_sync_inflate = __commonJS({
     }
     Inflate.prototype._processChunk = function(chunk, flushFlag, asyncCb) {
       if (typeof asyncCb === "function") {
-        return zlib.Inflate._processChunk.call(this, chunk, flushFlag, asyncCb);
+        return zlib2.Inflate._processChunk.call(this, chunk, flushFlag, asyncCb);
       }
       let self = this;
       let availInBefore = chunk && chunk.length;
@@ -14129,7 +14283,7 @@ var require_sync_inflate = __commonJS({
       _close(this);
       return buf;
     };
-    util2.inherits(Inflate, zlib.Inflate);
+    util2.inherits(Inflate, zlib2.Inflate);
     function zlibBufferSync(engine, buffer) {
       if (typeof buffer === "string") {
         buffer = Buffer.from(buffer);
@@ -14139,7 +14293,7 @@ var require_sync_inflate = __commonJS({
       }
       let flushFlag = engine._finishFlushFlag;
       if (flushFlag == null) {
-        flushFlag = zlib.Z_FINISH;
+        flushFlag = zlib2.Z_FINISH;
       }
       return engine._processChunk(buffer, flushFlag);
     }
@@ -14153,9 +14307,9 @@ var require_sync_inflate = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-reader.js
+// node_modules/pngjs/lib/sync-reader.js
 var require_sync_reader = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-reader.js"(exports2, module2) {
+  "node_modules/pngjs/lib/sync-reader.js"(exports2, module2) {
     "use strict";
     var SyncReader = module2.exports = function(buffer) {
       this._buffer = buffer;
@@ -14171,12 +14325,12 @@ var require_sync_reader = __commonJS({
     };
     SyncReader.prototype.process = function() {
       while (this._reads.length > 0 && this._buffer.length) {
-        let read = this._reads[0];
-        if (this._buffer.length && (this._buffer.length >= read.length || read.allowLess)) {
+        let read2 = this._reads[0];
+        if (this._buffer.length && (this._buffer.length >= read2.length || read2.allowLess)) {
           this._reads.shift();
           let buf = this._buffer;
-          this._buffer = buf.slice(read.length);
-          read.func.call(this, buf.slice(0, read.length));
+          this._buffer = buf.slice(read2.length);
+          read2.func.call(this, buf.slice(0, read2.length));
         } else {
           break;
         }
@@ -14191,9 +14345,9 @@ var require_sync_reader = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-sync.js
+// node_modules/pngjs/lib/filter-parse-sync.js
 var require_filter_parse_sync = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-sync.js"(exports2) {
+  "node_modules/pngjs/lib/filter-parse-sync.js"(exports2) {
     "use strict";
     var SyncReader = require_sync_reader();
     var Filter = require_filter_parse();
@@ -14215,14 +14369,14 @@ var require_filter_parse_sync = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-sync.js
+// node_modules/pngjs/lib/parser-sync.js
 var require_parser_sync = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-sync.js"(exports2, module2) {
+  "node_modules/pngjs/lib/parser-sync.js"(exports2, module2) {
     "use strict";
     var hasSyncZlib = true;
-    var zlib = require("zlib");
+    var zlib2 = require("zlib");
     var inflateSync = require_sync_inflate();
-    if (!zlib.deflateSync) {
+    if (!zlib2.deflateSync) {
       hasSyncZlib = false;
     }
     var SyncReader = require_sync_reader();
@@ -14281,7 +14435,7 @@ var require_parser_sync = __commonJS({
       inflateDataList.length = 0;
       let inflatedData;
       if (metaData.interlace) {
-        inflatedData = zlib.inflateSync(inflateData);
+        inflatedData = zlib2.inflateSync(inflateData);
       } else {
         let rowSize = (metaData.width * metaData.bpp * metaData.depth + 7 >> 3) + 1;
         let imageSize = rowSize * metaData.height;
@@ -14310,13 +14464,13 @@ var require_parser_sync = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-sync.js
+// node_modules/pngjs/lib/packer-sync.js
 var require_packer_sync = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-sync.js"(exports2, module2) {
+  "node_modules/pngjs/lib/packer-sync.js"(exports2, module2) {
     "use strict";
     var hasSyncZlib = true;
-    var zlib = require("zlib");
-    if (!zlib.deflateSync) {
+    var zlib2 = require("zlib");
+    if (!zlib2.deflateSync) {
       hasSyncZlib = false;
     }
     var constants3 = require_constants();
@@ -14340,7 +14494,7 @@ var require_packer_sync = __commonJS({
         metaData.width,
         metaData.height
       );
-      let compressedData = zlib.deflateSync(
+      let compressedData = zlib2.deflateSync(
         filteredData,
         packer.getDeflateOptions()
       );
@@ -14355,9 +14509,9 @@ var require_packer_sync = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png-sync.js
+// node_modules/pngjs/lib/png-sync.js
 var require_png_sync = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png-sync.js"(exports2) {
+  "node_modules/pngjs/lib/png-sync.js"(exports2) {
     "use strict";
     var parse = require_parser_sync();
     var pack = require_packer_sync();
@@ -14370,9 +14524,9 @@ var require_png_sync = __commonJS({
   }
 });
 
-// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png.js
+// node_modules/pngjs/lib/png.js
 var require_png = __commonJS({
-  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png.js"(exports2) {
+  "node_modules/pngjs/lib/png.js"(exports2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -14772,11 +14926,11 @@ function regionStats(src, x0, y0, x1, y1) {
   }
   const pixels = (bx - ax) * (by - ay);
   const mean = a > 0 ? [clamp255(r / a), clamp255(g / a), clamp255(b / a)] : [0, 0, 0];
-  const hex2 = "#" + mean.map((v) => v.toString(16).padStart(2, "0")).join("");
+  const hex4 = "#" + mean.map((v) => v.toString(16).padStart(2, "0")).join("");
   const luma = (0.2126 * mean[0] + 0.7152 * mean[1] + 0.0722 * mean[2]) / 255;
   return {
     mean_rgb: mean,
-    hex: hex2,
+    hex: hex4,
     luma: Math.round(luma * 1e3) / 1e3,
     alpha_mean: pixels > 0 ? Math.round(a / pixels * 1e3) / 1e3 : 0,
     pixels
@@ -15530,7 +15684,7 @@ var init_frames = __esm({
               })
             );
           }
-          const pairs = [];
+          const pairs2 = [];
           const diffPngPaths = [];
           for (let i = 0; i < decodedPngs.length - 1; i++) {
             const itemA = capturedItems[i];
@@ -15547,7 +15701,7 @@ var init_frames = __esm({
               fs15.writeFileSync(diffPngPath, outBuf);
               diffPngPaths.push(diffPngPath);
             }
-            pairs.push({
+            pairs2.push({
               pair_index: i,
               a_index: i,
               b_index: i + 1,
@@ -15574,7 +15728,7 @@ var init_frames = __esm({
             ...f.time !== void 0 ? { time: f.time } : {},
             flags: f.flags
           }));
-          const firstPair = pairs[0];
+          const firstPair = pairs2[0];
           return {
             ok: true,
             mode: args.comp_id !== void 0 ? "comp_times" : "file_pair",
@@ -15582,7 +15736,7 @@ var init_frames = __esm({
             threshold,
             frames: frameAnalyses,
             flagged_frames: flaggedFrames,
-            pairs,
+            pairs: pairs2,
             // Convenience top-level summary fields when comparing a single pair
             ...firstPair ? {
               mean_abs_diff: firstPair.mean_abs_diff,
@@ -15740,12 +15894,12 @@ function lookAtRotation(from, to) {
   const y = [f[1] * x[2] - f[2] * x[1], f[2] * x[0] - f[0] * x[2], f[0] * x[1] - f[1] * x[0]];
   return [x[0], y[0], f[0], 0, x[1], y[1], f[1], 0, x[2], y[2], f[2], 0, 0, 0, 0, 1];
 }
-function cameraModel(read, byId3) {
-  const { width, height } = read.comp;
-  const cam = read.active_camera_id === null ? void 0 : byId3.get(read.active_camera_id);
+function cameraModel(read2, byId3) {
+  const { width, height } = read2.comp;
+  const cam = read2.active_camera_id === null ? void 0 : byId3.get(read2.active_camera_id);
   if (!cam) {
-    if (read.active_camera_id !== null) {
-      return defaultCamera(width, height, `the active camera (id ${read.active_camera_id}) is past the 500 layers read; the default camera was used`);
+    if (read2.active_camera_id !== null) {
+      return defaultCamera(width, height, `the active camera (id ${read2.active_camera_id}) is past the 500 layers read; the default camera was used`);
     }
     return defaultCamera(width, height);
   }
@@ -15831,23 +15985,23 @@ function chooseLayers(layers, mode, ids) {
   }
   return out;
 }
-function missingLayerIds(read, picked, mode, ids) {
+function missingLayerIds(read2, picked, mode, ids) {
   if (!ids || ids.length === 0) return [];
   const got = new Set(picked.map((l) => l.id));
-  const known = new Set(read.layers.map((l) => l.id));
+  const known = new Set(read2.layers.map((l) => l.id));
   const out = [];
   for (const id of new Set(ids)) {
     if (got.has(id)) continue;
     if (known.has(id)) out.push({ id, reason: "filtered_out_by_layers" });
-    else if (read.truncated) out.push({ id, reason: "not_read_layer_cap_or_not_in_comp" });
+    else if (read2.truncated) out.push({ id, reason: "not_read_layer_cap_or_not_in_comp" });
     else out.push({ id, reason: "not_in_comp" });
   }
   return out;
 }
-function buildIndex(read, picked, include3d = false) {
-  const byId3 = layerMap(read.layers);
-  const cam = cameraModel(read, byId3);
-  const comp = read.comp;
+function buildIndex(read2, picked, include3d = false) {
+  const byId3 = layerMap(read2.layers);
+  const cam = cameraModel(read2, byId3);
+  const comp = read2.comp;
   return picked.map((l) => {
     const { box, reason } = layerBox(l, byId3, cam, comp, include3d);
     const parent = l.parent_id === null ? null : byId3.get(l.parent_id)?.index ?? null;
@@ -16180,18 +16334,18 @@ var init_annotate = __esm({
                 mutates: false,
                 toolName: TOOL
               });
-              const read = res.result;
-              if (args.zoom) checkZoom(read.comp, args.zoom);
+              const read2 = res.result;
+              if (args.zoom) checkZoom(read2.comp, args.zoom);
               const snap2 = await captureCompFrame({
                 ctx,
                 opId,
                 compId: args.comp_id,
-                time: read.time,
+                time: read2.time,
                 frameIndex: i,
                 framesDir,
                 toolName: TOOL
               });
-              got.push({ read, path: snap2.path });
+              got.push({ read: read2, path: snap2.path });
             }
             return got;
           });
@@ -16303,10 +16457,10 @@ function zoomFromLens(compWidth, lens) {
 function angleOfViewFromZoom(compWidth, zoom) {
   return 2 * Math.atan(compWidth / 2 / zoom) * 180 / Math.PI;
 }
-function expectSpan(m, path35, l, duration) {
-  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path35}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
+function expectSpan(m, path44, l, duration) {
+  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path44}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
   if (typeof l.out_point === "number" && typeof duration === "number") {
-    expectThat(m, l.out_point >= duration - 0.05, `${path35}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
+    expectThat(m, l.out_point >= duration - 0.05, `${path44}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
   }
 }
 function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
@@ -16366,20 +16520,20 @@ function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
   }
   return m;
 }
-function analyseScene(read, cameraId) {
+function analyseScene(read2, cameraId) {
   const warnings = [];
   const notes = [];
-  const byId3 = layerMap(read.layers);
-  const wantId = cameraId ?? read.active_camera_id;
-  const model = cameraModel({ ...read, active_camera_id: wantId }, byId3);
+  const byId3 = layerMap(read2.layers);
+  const wantId = cameraId ?? read2.active_camera_id;
+  const model = cameraModel({ ...read2, active_camera_id: wantId }, byId3);
   if (model.note) warnings.push(model.note);
   const camLayer = model.source === "layer" && wantId !== null ? byId3.get(wantId) : void 0;
   if (model.source === "default") notes.push("No camera layer: depths are measured from AE's default comp camera.");
-  const { width, height } = read.comp;
+  const { width, height } = read2.comp;
   const entries = [];
   let twoD = 0;
   const unresolved = [];
-  for (const l of read.layers) {
+  for (const l of read2.layers) {
     if (l.kind === "camera" || l.kind === "light") continue;
     if (!l.three_d) {
       twoD++;
@@ -16408,14 +16562,14 @@ function analyseScene(read, cameraId) {
       size_ratio: behind2 ? null : r3(model.zoom / depth),
       behind_camera: behind2,
       center_in_frame: sx !== null && sy !== null && sx >= 0 && sx <= width && sy >= 0 && sy <= height,
-      rendered: l.visible && l.kind !== "null" && l.guide !== true && (!read.solo_active || l.solo === true)
+      rendered: l.visible && l.kind !== "null" && l.guide !== true && (!read2.solo_active || l.solo === true)
     });
   }
   entries.sort((x, y) => x.depth - y.depth || x.index - y.index);
   const behind = entries.filter((e) => e.rendered && e.behind_camera).map((e) => ({ id: e.id, name: e.name, depth: e.depth }));
   const outside = entries.filter((e) => e.rendered && !e.behind_camera && !e.center_in_frame).map((e) => ({ id: e.id, name: e.name, screen: e.screen }));
-  const cameras = read.layers.filter((l) => l.kind === "camera");
-  const idle = cameras.filter((c) => c.enabled && c.id !== wantId && read.time >= c.in_point && read.time < c.out_point);
+  const cameras = read2.layers.filter((l) => l.kind === "camera");
+  const idle = cameras.filter((c) => c.enabled && c.id !== wantId && read2.time >= c.in_point && read2.time < c.out_point);
   if (idle.length) warnings.push(`${idle.length} other enabled camera(s) at this time are not used: ${idle.map((c) => `"${c.name}"`).join(", ")}`);
   const state = camLayer?.camera;
   if (state?.dof && !state.focus_expression) {
@@ -16425,12 +16579,12 @@ function analyseScene(read, cameraId) {
   }
   if (camLayer && camLayer.parent_id !== null) notes.push("The camera is parented: its point of interest and rotation signs are unmeasured through a parent, so treat the depths as approximate.");
   if (camLayer?.camera?.two_node) notes.push("X and Y rotation signs are unmeasured; a two-node camera that also has rotation values may be off.");
-  if (read.active_camera_beyond_list) warnings.push("The active camera is past the layers that were read, so depths are measured from AE's default camera instead.");
-  if (read.truncated) warnings.push(`The comp has ${read.total_layers} layers; only the first ${read.layers.length} were read.`);
+  if (read2.active_camera_beyond_list) warnings.push("The active camera is past the layers that were read, so depths are measured from AE's default camera instead.");
+  if (read2.truncated) warnings.push(`The comp has ${read2.total_layers} layers; only the first ${read2.layers.length} were read.`);
   for (const u of unresolved) warnings.push(`"${u.name}" skipped: ${u.reason}`);
   return {
-    time: read.time,
-    comp: { id: read.comp.id, name: read.comp.name, width, height, renderer: read.comp.renderer ?? null },
+    time: read2.time,
+    comp: { id: read2.comp.id, name: read2.comp.name, width, height, renderer: read2.comp.renderer ?? null },
     camera: {
       source: model.source,
       id: camLayer?.id ?? null,
@@ -16448,7 +16602,7 @@ function analyseScene(read, cameraId) {
     outside_frame: outside,
     warnings,
     notes,
-    truncated: read.truncated
+    truncated: read2.truncated
   };
 }
 var DEFAULT_FOCAL_LENGTH, DEFAULT_FILM_SIZE, PRESETS, LensSchema, MotionSchema, FocusSchema, SpreadSchema, AeCameraRigSchema, AeScene3dReportSchema, asRead, near2, r3, MIN_DEPTH, rigIds, cameraTools;
@@ -16550,12 +16704,12 @@ var init_camera = __esm({
           },
           check: (before, after, w) => cameraRigMismatches(args, before, after, w),
           present: (_before, after, w) => {
-            const read = asRead(after);
+            const read2 = asRead(after);
             return {
               ...w,
-              camera: read?.cameras.find((c) => c.id === w.camera.id) ?? w.camera,
-              is_active_camera: read ? read.active_camera_id === w.camera.id : null,
-              controller_layer: read?.layers.find((l) => l.id === w.controller?.id) ?? w.controller
+              camera: read2?.cameras.find((c) => c.id === w.camera.id) ?? w.camera,
+              is_active_camera: read2 ? read2.active_camera_id === w.camera.id : null,
+              controller_layer: read2?.layers.find((l) => l.id === w.controller?.id) ?? w.controller
             };
           }
         })
@@ -16570,18 +16724,18 @@ var init_camera = __esm({
             { comp_id: args.comp_id, time: args.time },
             { label: "ae_scene_3d_report", mutates: false, toolName: "ae_scene_3d_report" }
           );
-          const read = res.result;
+          const read2 = res.result;
           let cameraId;
           if (args.camera) {
             const sel2 = args.camera;
-            const cams = read.layers.filter((l) => l.kind === "camera");
+            const cams = read2.layers.filter((l) => l.kind === "camera");
             const hit = sel2.id !== void 0 ? cams.find((l) => l.id === sel2.id) : sel2.index !== void 0 ? cams.find((l) => l.index === sel2.index) : cams.filter((l) => l.name === sel2.name).length === 1 ? cams.find((l) => l.name === sel2.name) : void 0;
             if (!hit) {
               return { ok: false, error: "not_found", message: "No single camera layer matches that selector in the first 500 layers." };
             }
             cameraId = hit.id;
           }
-          return analyseScene(read, cameraId);
+          return analyseScene(read2, cameraId);
         }
       }
     ];
@@ -16774,7 +16928,7 @@ var init_explain = __esm({
           const toolName = "ae_explain_layer_proof";
           const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
           const framesDir = defaultFramesDir();
-          const read = async (phase) => {
+          const read2 = async (phase) => {
             const res = await ctx.bridge.evalRaw({
               id: `${opId}_${phase}`,
               script: buildJsxCall("explainProofState", {}),
@@ -16798,7 +16952,7 @@ var init_explain = __esm({
               const checkpoint = await autoCheckpoint(ctx, guard, toolName);
               const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
               const sessionFields = await noteBeforeWrite(ctx, note);
-              const before = await read("before");
+              const before = await read2("before");
               fs17.mkdirSync(framesDir, { recursive: true });
               beginInflight(note);
               let begun;
@@ -16880,7 +17034,7 @@ var init_explain = __esm({
               } finally {
                 endInflight(opId);
               }
-              const { value: after, failure } = await readAfterWrite(opId, () => read("after"));
+              const { value: after, failure } = await readAfterWrite(opId, () => read2("after"));
               const custom2 = [...failure ? [failure] : [], ...proofMismatches(before, failure ? null : after, cleanupError, copyId)];
               const receipt = buildReceipt({ before, after, customMismatches: custom2 });
               await noteAfterWrite(ctx, note, { skipRead: !!failure });
@@ -17213,14 +17367,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path35, target, taste) {
+function reviewProperty(s, analysis, speeds, path44, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path35 }
+    property: { name: s.property.name, path: path44 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix2 = (keys, extra = {}) => ({
@@ -17228,7 +17382,7 @@ function reviewProperty(s, analysis, speeds, path35, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path35,
+      path: path44,
       keys,
       ease: easeArg,
       ...extra,
@@ -17985,11 +18139,11 @@ function buildActions(raw) {
   const dur = raw.comp.duration;
   for (const l of raw.layers) {
     if (!l.enabled || !VISIBLE_ROLES.has(l.role)) continue;
-    const near5 = (t) => actions.some((a) => a.layer === l.index && (Math.abs(a.start - t) <= 0.1 || Math.abs(a.end - t) <= 0.1));
-    if (l.in_point > 0.05 && l.in_point < dur && !near5(l.in_point)) {
+    const near6 = (t) => actions.some((a) => a.layer === l.index && (Math.abs(a.start - t) <= 0.1 || Math.abs(a.end - t) <= 0.1));
+    if (l.in_point > 0.05 && l.in_point < dur && !near6(l.in_point)) {
       actions.push({ layer: l.index, name: l.name, verb: "enters", start: l.in_point, end: l.in_point });
     }
-    if (l.out_point < dur - 0.05 && l.out_point > 0 && !near5(l.out_point)) {
+    if (l.out_point < dur - 0.05 && l.out_point > 0 && !near6(l.out_point)) {
       actions.push({ layer: l.index, name: l.name, verb: "leaves", start: l.out_point, end: l.out_point });
     }
   }
@@ -18212,9 +18366,9 @@ function drawGantt(raw) {
   const xOf = (t) => labelW + Math.round(Math.min(Math.max(t, 0), dur) / dur * chartW);
   const png = createCanvas(width, height, [24, 24, 28, 255]);
   const ink = [225, 225, 225, 255];
-  const dim = [110, 110, 120, 255];
+  const dim2 = [110, 110, 120, 255];
   const step2 = TICK_STEPS.find((s) => s >= dur / 10) ?? TICK_STEPS[TICK_STEPS.length - 1];
-  drawText(png, "SECONDS", 6, 4, 1, dim);
+  drawText(png, "SECONDS", 6, 4, 1, dim2);
   for (let t = 0; t <= dur + 1e-6; t += step2) {
     const x = xOf(t);
     fillRect(png, x, headerH - 8, 1, 8 + layers.length * rowH + 4, [60, 60, 68, 255]);
@@ -18230,7 +18384,7 @@ function drawGantt(raw) {
   layers.forEach((l, i) => {
     const y = headerH + i * rowH;
     if (i % 2 === 1) fillRect(png, 0, y, width, rowH, [255, 255, 255, 10]);
-    drawText(png, glyphSafe(`${l.index} ${l.name}`).slice(0, labelChars), 6, y + Math.floor((rowH - 7 * scale) / 2), scale, l.enabled ? ink : dim);
+    drawText(png, glyphSafe(`${l.index} ${l.name}`).slice(0, labelChars), 6, y + Math.floor((rowH - 7 * scale) / 2), scale, l.enabled ? ink : dim2);
     const color = ROLE_COLORS[l.role] ?? [150, 150, 150, 255];
     const x0 = xOf(l.in_point);
     const x1 = Math.max(x0 + 2, xOf(l.out_point));
@@ -18593,9 +18747,9 @@ function planSamples(frames, count) {
   const n = Math.max(2, Math.floor(count));
   if (frames - 1 <= n) {
     const indexes2 = Array.from({ length: frames }, (_, i) => i);
-    const pairs2 = [];
-    for (let i = 0; i < frames - 1; i++) pairs2.push([i, i + 1]);
-    return { indexes: indexes2, pairs: pairs2, dense: true };
+    const pairs3 = [];
+    for (let i = 0; i < frames - 1; i++) pairs3.push([i, i + 1]);
+    return { indexes: indexes2, pairs: pairs3, dense: true };
   }
   const lastPair = frames - 2;
   const starts = /* @__PURE__ */ new Set();
@@ -18608,8 +18762,8 @@ function planSamples(frames, count) {
   }
   const indexes = [...frameSet].sort((a, b) => a - b);
   const pos = new Map(indexes.map((k, i) => [k, i]));
-  const pairs = sortedStarts.map((k) => [pos.get(k), pos.get(k + 1)]);
-  return { indexes, pairs, dense: false };
+  const pairs2 = sortedStarts.map((k) => [pos.get(k), pos.get(k + 1)]);
+  return { indexes, pairs: pairs2, dense: false };
 }
 function sequenceGaps(names, firstName) {
   const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(firstName);
@@ -18658,7 +18812,7 @@ function measureFrame(png, index = 0) {
   const bx = Math.max(2, Math.round(w * EDGE_BAND));
   const by = Math.max(2, Math.round(h * EDGE_BAND));
   let lumaSum = 0;
-  let clip = 0;
+  let clip3 = 0;
   let top = 0;
   let bottom = 0;
   let left = 0;
@@ -18674,7 +18828,7 @@ function measureFrame(png, index = 0) {
       const a = data[i + 3];
       const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       lumaSum += luma * a / 255;
-      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip++;
+      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip3++;
       const inLeft = x < bx;
       const inRight = x >= w - bx;
       if (inTop || inBottom || inLeft || inRight) {
@@ -18695,7 +18849,7 @@ function measureFrame(png, index = 0) {
     kind,
     flags: analysis.flags,
     mean_luma: round42(lumaSum / (255 * total)),
-    clip_frac: round42(clip / total),
+    clip_frac: round42(clip3 / total),
     edges: {
       top: round42(top / Math.max(1, by * w)),
       bottom: round42(bottom / Math.max(1, by * w)),
@@ -18706,9 +18860,9 @@ function measureFrame(png, index = 0) {
     height: h
   };
 }
-function measurePairs(captured, pairs, pixelThreshold = 0.02) {
+function measurePairs(captured, pairs2, pixelThreshold = 0.02) {
   const lastUse = /* @__PURE__ */ new Map();
-  pairs.forEach(([a, b], i) => {
+  pairs2.forEach(([a, b], i) => {
     lastUse.set(a, i);
     lastUse.set(b, i);
   });
@@ -18725,7 +18879,7 @@ function measurePairs(captured, pairs, pixelThreshold = 0.02) {
     if (!measures.has(pos)) measures.set(pos, measureFrame(png, pos));
     return { png, measure: measures.get(pos) };
   };
-  pairs.forEach(([pa, pb], i) => {
+  pairs2.forEach(([pa, pb], i) => {
     const ca = captured[pa];
     const cb = captured[pb];
     if (ca && cb) {
@@ -18761,32 +18915,32 @@ function nearCut(pair, cuts, frameDuration) {
   const eps = 1e-6;
   return cuts.some((c) => c >= pair.a_time - frameDuration - eps && c <= pair.b_time + frameDuration + eps);
 }
-function runsOf(pairs, key) {
+function runsOf(pairs2, key) {
   const runs = [];
   let i = 0;
-  while (i < pairs.length) {
-    const k = key(pairs[i]);
+  while (i < pairs2.length) {
+    const k = key(pairs2[i]);
     if (k === null) {
       i++;
       continue;
     }
     let j = i;
-    while (j + 1 < pairs.length && key(pairs[j + 1]) === k) j++;
+    while (j + 1 < pairs2.length && key(pairs2[j + 1]) === k) j++;
     runs.push({ key: k, from: i, to: j });
     i = j + 1;
   }
   return runs;
 }
-function analyzePairs(pairs, ctx) {
+function analyzePairs(pairs2, ctx) {
   const out = [];
   const th = ctx.thresholds;
   const fd = ctx.frameDuration;
-  const n = pairs.length;
+  const n = pairs2.length;
   if (n === 0) return out;
   const rangeLen = Math.max(fd, ctx.rangeEnd - ctx.rangeStart);
-  for (const run of runsOf(pairs, pairKind)) {
-    const first = pairs[run.from];
-    const last = pairs[run.to];
+  for (const run of runsOf(pairs2, pairKind)) {
+    const first = pairs2[run.from];
+    const last = pairs2[run.to];
     const atEnd = run.from === 0 || run.to === n - 1;
     const count = run.to - run.from + 1;
     let severity;
@@ -18811,10 +18965,10 @@ function analyzePairs(pairs, ctx) {
     });
   }
   const frozenHash = (p) => pairKind(p) === null && p.a.hash === p.b.hash ? p.a.hash : null;
-  for (const run of runsOf(pairs, frozenHash)) {
+  for (const run of runsOf(pairs2, frozenHash)) {
     if (run.to === run.from) continue;
-    const first = pairs[run.from];
-    const last = pairs[run.to];
+    const first = pairs2[run.from];
+    const last = pairs2[run.to];
     const span = last.b_time + fd - first.a_time;
     if (span < th.frozen_min_seconds) continue;
     const toEnd = run.to === n - 1;
@@ -18834,7 +18988,7 @@ function analyzePairs(pairs, ctx) {
       tiles: [first.a_pos, last.b_pos]
     });
   }
-  const eligible = pairs.filter((p) => !nearCut(p, ctx.cuts, fd));
+  const eligible = pairs2.filter((p) => !nearCut(p, ctx.cuts, fd));
   const typical = median(eligible.map((p) => p.mean_abs_diff));
   const limit = Math.max(th.pop_min_diff, th.pop_factor * Math.max(typical, 2e-3));
   const pops = eligible.filter((p) => p.mean_abs_diff > limit);
@@ -18869,8 +19023,8 @@ function analyzePairs(pairs, ctx) {
       });
     }
   }
-  const frames = pairs.map((p) => ({ time: p.a_time, m: p.a }));
-  frames.push({ time: pairs[n - 1].b_time, m: pairs[n - 1].b });
+  const frames = pairs2.map((p) => ({ time: p.a_time, m: p.a }));
+  frames.push({ time: pairs2[n - 1].b_time, m: pairs2[n - 1].b });
   const need = th.edge_min_pct / 100;
   for (const edge of ["top", "bottom", "left", "right"]) {
     const hit = frames.filter((f) => f.m.edges[edge] >= need);
@@ -19062,9 +19216,9 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   findings.sort((a, b) => SEVERITY_ORDER2[a.severity] - SEVERITY_ORDER2[b.severity] || (a.time ?? 0) - (b.time ?? 0));
   const verdict = verdictOf(findings);
   const curve = measured.pairs.map((p) => ({ time: p.a_time, diff: p.mean_abs_diff, luma: p.a.mean_luma }));
-  const bad3 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
+  const bad4 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
   fs21.mkdirSync(framesDir, { recursive: true });
-  const stamp2 = `${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
+  const stamp3 = `${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
   const frameSize = measured.pairs[0] ? { width: measured.pairs[0].a.width, height: measured.pairs[0].a.height } : { width: prep.size.width, height: prep.size.height };
   let chart = null;
   let sheet = null;
@@ -19073,8 +19227,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   const notes = [];
   try {
     if (curve.length > 0) {
-      const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST), bad3);
-      const chartPath = path20.join(framesDir, `scrub_chart_${stamp2}.png`);
+      const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST), bad4);
+      const chartPath = path20.join(framesDir, `scrub_chart_${stamp3}.png`);
       fs21.writeFileSync(chartPath, encodePng(png));
       chart = { path: chartPath, width: png.width, height: png.height };
     }
@@ -19084,7 +19238,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     const built = buildSuspectSheet(cap2.captured, findings, args.max_suspects ?? 6, frameSize);
     if (built) {
-      const sheetPath = path20.join(framesDir, `scrub_suspects_${stamp2}.png`);
+      const sheetPath = path20.join(framesDir, `scrub_suspects_${stamp3}.png`);
       fs21.writeFileSync(sheetPath, encodePng(built.png));
       sheet = { path: sheetPath, width: built.png.width, height: built.png.height, suspects: built.shown.length };
       shown = built.shown;
@@ -19496,12 +19650,12 @@ function interpretationFindings(it) {
   }
   return out;
 }
-function renderQueueFindings2(read) {
-  const rq = read.render_queue;
+function renderQueueFindings2(read2) {
+  const rq = read2.render_queue;
   if (!rq) return [];
   const out = [];
-  const anyOn = read.items.some((i) => i.use_proxy === true && i.proxy);
-  const anyCompOn = read.items.some((i) => i.kind === "comp" && i.use_proxy === true && i.proxy);
+  const anyOn = read2.items.some((i) => i.use_proxy === true && i.proxy);
+  const anyCompOn = read2.items.some((i) => i.kind === "comp" && i.use_proxy === true && i.proxy);
   if (rq.items.length > 0 && !rq.key_found) {
     out.push({ code: "proxy_use_unreadable", severity: "info", message: "This AE did not answer to the 'Proxy Use' render setting, so queued renders could not be checked for proxies." });
     return out;
@@ -19511,7 +19665,7 @@ function renderQueueFindings2(read) {
     if (!rendersWithProxies(q.proxy_use) || q.status !== void 0 && !WILL_RENDER.has(q.status.toLowerCase())) continue;
     const label = `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}"`;
     const used = new Set(q.reach ?? []);
-    const hit = read.items.some((i) => i.use_proxy === true && i.proxy && used.has(i.id) && (!compsOnly(q.proxy_use) || i.kind === "comp"));
+    const hit = read2.items.some((i) => i.use_proxy === true && i.proxy && used.has(i.id) && (!compsOnly(q.proxy_use) || i.kind === "comp"));
     if (hit) {
       out.push({ code: "queue_uses_proxies", severity: "warn", message: `${label} and its comp uses an item with its proxy on: it would render from proxies.` });
     } else if ((!q.reach || q.reach_complete !== true) && (!compsOnly(q.proxy_use) || anyCompOn)) {
@@ -19614,7 +19768,7 @@ var init_interpret = __esm({
     init_common();
     init_write_runner();
     readOf3 = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
-    itemOf = (read, id) => read?.items.find((i) => i.id === id);
+    itemOf = (read2, id) => read2?.items.find((i) => i.id === id);
     ROUNDED_RATES = [
       [23.976, 24],
       [29.97, 30],
@@ -19704,18 +19858,18 @@ var init_interpret = __esm({
             { item_ids: args.item_ids, include_render_queue: args.include_render_queue, probe_colour: args.probe_colour },
             { label: "ae_get_footage_interpretation", mutates: false, toolName: "ae_get_footage_interpretation" }
           );
-          const read = res.result;
-          const rows = (read.items ?? []).map((item) => ({ ...item, findings: interpretationFindings(item) }));
+          const read2 = res.result;
+          const rows = (read2.items ?? []).map((item) => ({ ...item, findings: interpretationFindings(item) }));
           const shown = args.only_findings ? rows.filter((r) => r.findings.length > 0) : rows;
-          const queueFindings = renderQueueFindings2(read);
+          const queueFindings = renderQueueFindings2(read2);
           const all = rows.flatMap((r) => r.findings).concat(queueFindings);
-          const rq = read.render_queue;
+          const rq = read2.render_queue;
           const render_queue = rq ? {
             ...rq,
             items: (rq.items ?? []).map(({ reach, ...q }) => ({ ...q, reach_count: reach ? reach.length : void 0 }))
           } : rq;
           return {
-            ...read,
+            ...read2,
             render_queue,
             items: shown,
             findings_total: all.length,
@@ -19777,13 +19931,13 @@ var init_interpret = __esm({
           },
           check: (before, after) => proxyMismatches(args, before, after),
           present: (_before, after, w) => {
-            const read = readOf3(after);
+            const read2 = readOf3(after);
             return {
               action: args.action,
               changed_ids: w.item_ids,
               skipped_ids: w.skipped_ids,
               no_change: w.no_change,
-              items: read?.items.map((i) => ({ id: i.id, name: i.name, use_proxy: i.use_proxy, proxy: i.proxy ?? null }))
+              items: read2?.items.map((i) => ({ id: i.id, name: i.name, use_proxy: i.use_proxy, proxy: i.proxy ?? null }))
             };
           }
         })
@@ -19956,12 +20110,12 @@ function pathChecksum(p) {
   }
   return Math.round(sum * 1e3) / 1e3;
 }
-function comparePoints(expected, actual, path35, m) {
+function comparePoints(expected, actual, path44, m) {
   for (let i = 0; i < expected.length; i++) {
     const a = actual[i];
     const e = expected[i];
     if (!a || Math.abs(a[0] - e[0]) > PATH_TOLERANCE || Math.abs(a[1] - e[1]) > PATH_TOLERANCE) {
-      m.push({ path: `${path35}[${i}]`, expected: e, actual: a, message: `${path35} differs from what was written at vertex ${i + 1}` });
+      m.push({ path: `${path44}[${i}]`, expected: e, actual: a, message: `${path44} differs from what was written at vertex ${i + 1}` });
       return;
     }
   }
@@ -20345,14 +20499,14 @@ var init_paths = __esm({
         description: "Read one path as JSON: a mask path or a free path ('ADBE Vector Shape - Group') in a shape layer's top-level group, with vertices, inTangents, outTangents and closed (up to 500 vertices, `truncated` says if more), its keyframe times, expression state, feather-point count (masks) and path direction (shapes). include_operators also lists the group's Trim Paths, Offset Paths and Repeater values and keys. Rectangles, ellipses and stars have no vertices and are refused. Read-only: never changes the time, selection or anything else in the project. " + AGENT_SAFETY_GUIDANCE,
         schema: AePathReadSchema,
         handler: async (args, ctx) => {
-          const path35 = await readPath(ctx, "ae_path_read", args);
-          if (!args.include_operators || !args.target.shape || !path35) return path35;
+          const path44 = await readPath(ctx, "ae_path_read", args);
+          if (!args.include_operators || !args.target.shape || !path44) return path44;
           const ops = await ctx.bridge.callHost(
             "pathsOperators",
-            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path35.group?.index } },
+            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path44.group?.index } },
             readOpts("ae_path_read", `ae_path_read(${args.comp_id}) operators`)
           );
-          return { ...path35, operators: ops.result };
+          return { ...path44, operators: ops.result };
         }
       },
       {
@@ -20361,24 +20515,24 @@ var init_paths = __esm({
         schema: AePathWriteSchema,
         handler: async (args, ctx) => {
           let current = null;
-          let path35;
+          let path44;
           try {
             if (args.operation === "set") {
-              path35 = toPathData(args.path);
+              path44 = toPathData(args.path);
             } else {
               current = await readPath(ctx, "ae_path_write", args);
               if (!current) return badArgs("The path could not be read.");
               if (current.path.truncated) return badArgs(`The path has ${current.path.vertexCount} vertices; only paths of up to ${MAX_PATH_VERTICES} can be changed here.`);
               if (current.numKeys > 0 && args.time === void 0) return badArgs(`The path is keyframed (${current.numKeys} keys); give \`time\` to write a key at that time.`);
               if (current.expression.enabled) return badArgs("The path has an expression, which overrides any value written here; remove it first (ae_path_link with unlink).");
-              path35 = applyPathOperation(args, toData(current));
+              path44 = applyPathOperation(args, toData(current));
             }
           } catch (err) {
             if (err instanceof PathMathError) return badArgs(err.message);
             throw err;
           }
           if (args.dry_run) {
-            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path35.vertices.length, path: path35, source: current?.path };
+            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path44.vertices.length, path: path44, source: current?.path };
           }
           const base = current && { count: current.path.vertexCount, checksum: pathChecksum(current.path) };
           return runGuardedWrite(ctx, {
@@ -20392,7 +20546,7 @@ var init_paths = __esm({
               args: {
                 comp_id: args.comp_id,
                 target: args.target,
-                path: path35,
+                path: path44,
                 time: args.time,
                 base,
                 allow_vertex_count_change: args.allow_vertex_count_change,
@@ -20402,7 +20556,7 @@ var init_paths = __esm({
                 label: `Path ${args.operation}`
               }
             },
-            check: (_before, after, w) => pathWriteMismatches(path35, after, args, w),
+            check: (_before, after, w) => pathWriteMismatches(path44, after, args, w),
             present: (_before, after, w) => ({ ...w, path: asReadout(after)?.path, numKeys: asReadout(after)?.numKeys })
           });
         }
@@ -20733,6 +20887,7762 @@ var init_memory = __esm({
   }
 });
 
+// src/tools/ext/rqedit.ts
+function unknownNameTokens(tpl) {
+  const bad4 = [];
+  for (const m of tpl.matchAll(/\[([^\]]*)\]/g)) {
+    const t = m[1];
+    if (/^#+$/.test(t)) continue;
+    if (NAME_TOKENS.includes(t)) continue;
+    bad4.push(t);
+  }
+  return bad4;
+}
+function sizeNumbers(got) {
+  if (typeof got === "string") return numbersIn(got);
+  if (got && typeof got === "object" && !Array.isArray(got)) {
+    const o = got;
+    if ("x" in o && "y" in o) return [toNum(o.x), toNum(o.y)];
+    if ("width" in o && "height" in o) return [toNum(o.width), toNum(o.height)];
+    return Object.values(o).map(toNum);
+  }
+  return [];
+}
+function sameSetting(want, got) {
+  if (got === void 0 || got === null) return false;
+  if (typeof want === "boolean") return toBool(got) === want;
+  if (typeof want === "number") {
+    const n = toNum(got);
+    return n !== void 0 && Math.abs(n - want) <= 1e-4 * Math.max(1, Math.abs(want));
+  }
+  if (Array.isArray(want)) {
+    if (Array.isArray(got)) return got.length === want.length && want.every((w, i) => sameSetting(w, got[i]));
+    return sizeNumbers(got).length >= want.length && want.every((w, i) => typeof w === "number" && sizeNumbers(got)[i] !== void 0 && Math.abs(sizeNumbers(got)[i] - w) <= 1e-4);
+  }
+  if (want && typeof want === "object") {
+    if (!got || typeof got !== "object") return false;
+    return Object.entries(want).every(([k, v]) => sameSetting(v, got[k]));
+  }
+  if (typeof want === "string") {
+    if (typeof got === "string") return got.trim().toLowerCase() === want.trim().toLowerCase();
+    if (typeof got === "number") return String(got) === want.trim();
+    if (typeof got === "boolean") return toBool(want) === got;
+  }
+  return false;
+}
+function settingsMismatches(where, want, got, skip) {
+  const m = [];
+  if (!want) return m;
+  for (const [key, value] of Object.entries(want)) {
+    if (skip.has(key)) continue;
+    if (!got) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: "The settings could not be read back" });
+      continue;
+    }
+    if (!(key in got)) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: `AE does not list "${key}" in the read-back` });
+    } else if (!sameSetting(value, got[key])) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: got[key], message: `"${key}" reads back differently (a format can adjust a size or rate it can't take)` });
+    }
+  }
+  return m;
+}
+function stepMismatches(where, errors, skipped) {
+  const m = [];
+  (errors ?? []).forEach(
+    (e, i) => m.push({ path: `${where}.errors[${i}]`, expected: "the step to succeed", actual: e.message, message: `${e.step} failed: ${e.message}` })
+  );
+  (skipped ?? []).forEach(
+    (s, i) => m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: void 0, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` })
+  );
+  return m;
+}
+function itemMismatches(where, echo, item, skipped) {
+  const m = [];
+  if (!echo) return m;
+  if (!item) {
+    m.push({ path: where, expected: "the item in the read-back", actual: void 0, message: "The render queue item could not be read back" });
+    return m;
+  }
+  const skipAt = (suffix) => new Set((skipped ?? []).filter((s) => !s.where || s.where.endsWith(suffix)).map((s) => s.key));
+  const ne = (ok, p, expected, actual, message) => {
+    if (!ok) m.push({ path: `${where}.${p}`, expected, actual, message });
+  };
+  if (echo.time_span) {
+    ne(item.time_span_start !== void 0 && Math.abs(item.time_span_start - echo.time_span.start) <= TIME_TOL2, "time_span.start", echo.time_span.start, item.time_span_start, "Time span start differs");
+    ne(
+      item.time_span_duration !== void 0 && Math.abs(item.time_span_duration - echo.time_span.duration) <= TIME_TOL2,
+      "time_span.duration",
+      echo.time_span.duration,
+      item.time_span_duration,
+      "Time span length differs"
+    );
+  }
+  if (echo.skip_frames !== void 0) ne(item.skip_frames === echo.skip_frames, "skip_frames", echo.skip_frames, item.skip_frames, "Skip frames differs");
+  if (echo.log_type !== void 0) ne(item.log_type === echo.log_type, "log_type", echo.log_type, item.log_type, "Log type differs");
+  m.push(...settingsMismatches(`${where}.render_settings`, echo.render_settings, item.render_settings, skipAt(" render settings")));
+  ne(item.num_output_modules === echo.num_output_modules, "num_output_modules", echo.num_output_modules, item.num_output_modules, "Output module count differs");
+  for (const e of echo.modules) {
+    const mod = item.output_modules?.find((o) => o.index === e.index);
+    const p = `${where}.output_modules[${e.index}]`;
+    if (!mod) {
+      m.push({ path: p, expected: "the output module in the read-back", actual: void 0, message: `Output module ${e.index} could not be read back` });
+      continue;
+    }
+    if (e.file !== void 0) ne(!!mod.file && pathKey(mod.file) === pathKey(e.file), `output_modules[${e.index}].file`, e.file, mod.file, "Output file differs");
+    if (e.post_render_action !== void 0) {
+      ne(mod.post_render_action === e.post_render_action, `output_modules[${e.index}].post_render_action`, e.post_render_action, mod.post_render_action, "Post-render action differs");
+    }
+    if (e.include_source_xmp !== void 0) {
+      ne(mod.include_source_xmp === e.include_source_xmp, `output_modules[${e.index}].include_source_xmp`, e.include_source_xmp, mod.include_source_xmp, "Include source XMP differs");
+    }
+    m.push(...settingsMismatches(p, e.settings, mod.settings, skipAt(` output module ${e.plan_index ?? e.index}`)));
+  }
+  return m;
+}
+function editMismatches(args, _before, afterRaw, written) {
+  const after = queueOf(afterRaw);
+  const where = `item[${args.item_index}]`;
+  const m = stepMismatches(where, asArray(written.errors), asArray(written.skipped));
+  if (!after) return m;
+  m.push(...itemMismatches(where, written.expect, itemOf2(after, args.item_index), asArray(written.skipped)));
+  if (args.comp_id !== void 0) {
+    const it = itemOf2(after, args.item_index);
+    if (it && it.comp_id !== args.comp_id) m.push({ path: `${where}.comp_id`, expected: args.comp_id, actual: it.comp_id, message: "The item at this index is another comp now" });
+  }
+  return m;
+}
+function copiesMismatches(kind, beforeRaw, afterRaw, entries, compId) {
+  const m = [];
+  const before = queueOf(beforeRaw);
+  const after = queueOf(afterRaw);
+  const made = entries.filter((e) => typeof e.item_index === "number" && e.in_place !== true).length;
+  entries.forEach((e, i) => {
+    const where = `${kind}[${i + 1}]`;
+    m.push(...stepMismatches(where, asArray(e.errors), asArray(e.skipped)));
+    if (typeof e.item_index !== "number") {
+      m.push({ path: where, expected: "a duplicate", actual: void 0, message: "The item could not be duplicated, or its place in the queue could not be found" });
+    }
+  });
+  if (!after) return m;
+  if (before) {
+    const grown = after.numItems - before.numItems;
+    if (grown !== made) m.push({ path: "numItems", expected: before.numItems + made, actual: after.numItems, message: "The queue did not grow by the number of copies" });
+  }
+  entries.forEach((e, i) => {
+    if (typeof e.item_index !== "number") return;
+    const where = `${kind}[${i + 1}]`;
+    const it = itemOf2(after, e.item_index);
+    m.push(...itemMismatches(where, e.expect, it, asArray(e.skipped)));
+    if (it && typeof compId === "number" && it.comp_id !== compId) {
+      m.push({ path: `${where}.comp_id`, expected: compId, actual: it.comp_id, message: "The copy is another comp than the source" });
+    }
+  });
+  const touched = new Set(entries.map((e) => e.item_index).filter((n) => typeof n === "number"));
+  const seen = /* @__PURE__ */ new Map();
+  for (const it of after.items) {
+    if (it.status === "done") continue;
+    for (const o of it.output_modules ?? []) {
+      if (!o.file || /\[#+\]/.test(o.file)) continue;
+      const key = pathKey(o.file);
+      const other = seen.get(key);
+      const here = `item ${it.index} output ${o.index}`;
+      if (other && (touched.has(it.index) || touched.has(other.index))) {
+        m.push({ path: `items[${it.index}]`, expected: "distinct output files", actual: o.file, message: `${here} and ${other.label} write the same file` });
+      }
+      if (!other) seen.set(key, { label: here, index: it.index });
+    }
+  }
+  return m;
+}
+function checkDeliveryFile(spec, filePath) {
+  const issues = [];
+  let size = 0;
+  let exists = false;
+  try {
+    const st = fs22.statSync(filePath);
+    exists = st.isFile();
+    size = st.size;
+  } catch {
+    exists = false;
+  }
+  if (!exists) {
+    issues.push("The file does not exist.");
+  } else {
+    if (size === 0) issues.push("The file is empty.");
+    const ext2 = path21.extname(filePath).replace(/^\./, "").toLowerCase();
+    if (ext2 !== spec.ext) issues.push(`The extension is .${ext2}, the spec's is .${spec.ext}.`);
+    if (spec.max_size_mb !== void 0 && size > spec.max_size_mb * 1024 * 1024) {
+      issues.push(`The file is ${(size / 1048576).toFixed(1)} MB, over the spec's approximate ${spec.max_size_mb} MB limit.`);
+    }
+  }
+  return { ok: issues.length === 0, exists, size_bytes: size, size_mb: Math.round(size / 1048576 * 100) / 100, issues };
+}
+var fs22, path21, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
+var init_rqedit = __esm({
+  "src/tools/ext/rqedit.ts"() {
+    "use strict";
+    fs22 = __toESM(require("node:fs"), 1);
+    path21 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_common();
+    init_write_runner();
+    queueOf = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
+    itemOf2 = (q, index) => q?.items.find((i) => i.index === index);
+    H264 = (mbps) => [
+      { pattern: `^H\\.264.*Match Render Settings.*\\b${mbps} ?Mbps`, flags: "i" },
+      { pattern: "^H\\.264.*Match Render Settings", flags: "i" },
+      { pattern: "^H\\.264", flags: "i" }
+    ];
+    SOCIAL_NOTE = "The bitrate comes from the template (AE ships H.264 15 and 40 Mbps ones); scripts can't set it. The size limit is approximate.";
+    SPEC_LIBRARY = [
+      {
+        id: "youtube_1080p",
+        label: "YouTube 1080p",
+        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        note: "YouTube re-encodes; this is the upload master. " + SOCIAL_NOTE
+      },
+      {
+        id: "youtube_4k",
+        label: "YouTube 4K",
+        description: "H.264 MP4, 3840x2160, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(40),
+        resize: { width: 3840, height: 2160 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "instagram_feed",
+        label: "Instagram feed (4:5)",
+        description: "H.264 MP4, 1080x1350, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1350 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 4096,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "instagram_reels_story",
+        label: "Instagram Reels / Story (9:16)",
+        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1920 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 4096,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "tiktok",
+        label: "TikTok (9:16)",
+        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1920 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 500,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "linkedin_1080p",
+        label: "LinkedIn 1080p",
+        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 5120,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "broadcast_hd",
+        label: "Broadcast HD (ProRes 422 HQ)",
+        description: "Apple ProRes 422 HQ MOV, 1920x1080.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        name_template: "[compName]_[spec].mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine (made in the Output Module dialog); refused without one. Frame rate follows the comp."
+      },
+      {
+        id: "broadcast_uhd",
+        label: "Broadcast UHD (ProRes 422 HQ)",
+        description: "Apple ProRes 422 HQ MOV, 3840x2160.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        resize: { width: 3840, height: 2160 },
+        channels: "RGB",
+        name_template: "[compName]_[spec].mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
+      },
+      {
+        id: "prores_422_hq_master",
+        label: "ProRes 422 HQ master",
+        description: "Apple ProRes 422 HQ MOV at the comp's size.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        name_template: "[compName]_master.mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
+      },
+      {
+        id: "png_sequence",
+        label: "PNG sequence",
+        description: "Numbered PNG frames at the comp's size, with alpha.",
+        container: "png_sequence",
+        ext: "png",
+        sequence: true,
+        template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG", flags: "i" }],
+        channels: "RGB + Alpha",
+        video_output: true,
+        name_template: "[compName]_[spec]_[#####].png",
+        note: "Needs a PNG output module template on this machine. The folder should be empty: every frame is a file."
+      },
+      {
+        id: "wav_audio",
+        label: "WAV audio only",
+        description: "48 kHz WAV, no picture.",
+        container: "wav",
+        ext: "wav",
+        template_candidates: [{ pattern: "\\bWAV\\b", flags: "i" }],
+        video_output: false,
+        audio_sample_rate: 48e3,
+        output_audio: "On",
+        name_template: "[compName]_[spec].wav",
+        note: "Needs a WAV output module template on this machine; refused without one."
+      },
+      {
+        id: "gif",
+        label: "Animated GIF",
+        description: "Not available: After Effects has no animated GIF output module.",
+        container: "gif",
+        ext: "gif",
+        template_candidates: [],
+        name_template: "[compName].gif",
+        refuse: "After Effects has no animated GIF output module (Adobe moved GIF to Media Encoder and Photoshop). Use the png_sequence spec and convert the frames outside AE."
+      }
+    ];
+    SPEC_IDS = SPEC_LIBRARY.map((s) => s.id);
+    specById = (id) => SPEC_LIBRARY.find((s) => s.id === id);
+    NAME_TOKENS = ["compName", "spec", "width", "height", "date", "copy"];
+    isAbsolutePath = (p) => /^([A-Za-z]:[\\/]|\/|\\\\)/.test(p);
+    pathKey = (p) => p.replace(/\\/g, "/").toLowerCase();
+    toBool = (v) => {
+      if (typeof v === "boolean") return v;
+      if (typeof v === "number") return v !== 0;
+      if (typeof v === "string") {
+        if (/^(on|true|yes|1)$/i.test(v.trim())) return true;
+        if (/^(off|false|no|0)$/i.test(v.trim())) return false;
+      }
+      return void 0;
+    };
+    numbersIn = (s) => (s.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    toNum = (v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = numbersIn(v)[0];
+        if (n === void 0) return void 0;
+        return /khz/i.test(v) ? n * 1e3 : n;
+      }
+      return void 0;
+    };
+    TIME_TOL2 = 0.05;
+    ItemIndexSchema = external_exports.number().int().min(1).max(500).describe("1-based position in the Render Queue (see ae_render_queue_inspect). The queue shifts when items are added or removed, so re-read it first.");
+    ItemCompSchema = external_exports.number().int().optional().describe("Expected CompItem id of the queue item at item_index. The tool refuses when it is another comp (the queue changed under you).");
+    SettingValueSchema = external_exports.union([
+      external_exports.string().max(2e3),
+      external_exports.number().finite(),
+      external_exports.boolean(),
+      external_exports.array(external_exports.union([external_exports.string().max(200), external_exports.number().finite()])).max(8),
+      external_exports.record(external_exports.string(), external_exports.union([external_exports.string().max(2e3), external_exports.number().finite(), external_exports.boolean()]))
+    ]);
+    SettingsMapSchema = external_exports.record(external_exports.string().min(1).max(100), SettingValueSchema).refine((r) => Object.keys(r).length <= 40, { message: "At most 40 settings at once." }).refine((r) => !Object.keys(r).some((k) => k.trim().toLowerCase() === "format"), {
+      message: '"Format" is read-only in After Effects. Change the format with an output module template.'
+    });
+    FileSchema = external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Absolute output file path. AE's [#####] frame token is kept for image sequences. The tool refuses a path another queued item uses, or one already on disk unless allow_overwrite is true.");
+    POST_ACTIONS = ["none", "import", "import_and_replace_usage", "set_proxy"];
+    LOG_TYPES = ["errors_only", "errors_and_settings", "errors_and_per_frame_info"];
+    PostActionSchema = external_exports.enum(POST_ACTIONS).describe("What AE does with the rendered file: nothing, import it, import it and replace the comp's usage, or set it as the comp's proxy.");
+    TimeSpanSchema = external_exports.union([
+      external_exports.enum(["comp", "work_area"]),
+      external_exports.object({
+        start: external_exports.number().min(0).describe("Seconds from the comp's start."),
+        duration: external_exports.number().positive().describe("Seconds.")
+      })
+    ]).describe("The time span to render: 'comp' (whole comp), 'work_area', or { start, duration } in seconds. Must end inside the comp.");
+    ModuleBase = {
+      template: external_exports.string().min(1).max(200).optional().describe("Output module template to apply first (this is the only way to change the format, codec or bitrate). Must be installed on this machine; the tool lists the installed ones when it isn't."),
+      settings: SettingsMapSchema.optional().describe(
+        "Output module settings by their STRING_SETTABLE key, e.g. 'Channels', 'Resize', 'Resize to' ([width, height]), 'Audio Sample Rate', 'Output File Info' ({ 'File Name': ... }). Keys are checked against ae_render_queue_inspect's dump before anything changes; values take the dump's type. Applied after the template."
+      ),
+      file: FileSchema.optional(),
+      post_render_action: PostActionSchema.optional(),
+      include_source_xmp: external_exports.boolean().optional().describe("Include the source XMP metadata in the output file.")
+    };
+    hasModuleChange = (m) => [m.template, m.settings, m.file, m.post_render_action, m.include_source_xmp].some((v) => v !== void 0);
+    ModuleEditSchema = external_exports.object({ index: external_exports.number().int().min(1).max(20).describe("1-based output module index."), ...ModuleBase }).refine(hasModuleChange, { message: "Each output module edit changes something." });
+    ModuleAddSchema = external_exports.object(ModuleBase).describe("A new output module (AE starts it from the default template).");
+    AeRenderQueueInspectSchema = external_exports.object({
+      item_index: ItemIndexSchema.optional().describe("One item, with its render settings and output module settings. Without it: every item, briefly."),
+      settings: external_exports.boolean().optional().describe("Dump the render settings and each output module's settings (the keys ae_render_queue_edit accepts). Default true with item_index, false without."),
+      include_templates: external_exports.boolean().optional().describe("List the installed render settings and output module templates for the item(s).")
+    });
+    AeRenderQueueEditSchema = external_exports.object({
+      item_index: ItemIndexSchema,
+      comp_id: ItemCompSchema,
+      render_settings_template: external_exports.string().min(1).max(200).optional().describe("Render settings template to apply first."),
+      time_span: TimeSpanSchema.optional(),
+      skip_frames: external_exports.number().int().min(0).max(99).optional().describe("Frames to skip between rendered frames (0 renders every frame)."),
+      log_type: external_exports.enum(LOG_TYPES).optional(),
+      render_settings: SettingsMapSchema.optional().describe(
+        "Render settings by STRING_SETTABLE key (e.g. 'Quality', 'Resolution', 'Frame Rate'). Keys are checked before anything changes. Applied after render_settings_template."
+      ),
+      output_modules: external_exports.array(ModuleEditSchema).max(20).optional().describe("Edits to existing output modules, by index."),
+      add_output_modules: external_exports.array(ModuleAddSchema).max(10).optional().describe("Output modules to add (one more deliverable from the same render)."),
+      remove_output_modules: external_exports.array(external_exports.number().int().min(1).max(20)).max(20).optional().describe("Output modules to remove, by their index before this call. At least one must remain."),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow an output file that already exists on disk."),
+      expect: ExpectSchema
+    }).refine(
+      (v) => [v.render_settings_template, v.time_span, v.skip_frames, v.log_type, v.render_settings, v.output_modules, v.add_output_modules, v.remove_output_modules].some(
+        (x) => x !== void 0
+      ),
+      { message: "Nothing to change: give at least one of the settings." }
+    );
+    CopySchema = external_exports.object({
+      output_module_template: external_exports.string().min(1).max(200).optional().describe("Output module template for this copy's first output module."),
+      render_settings_template: external_exports.string().min(1).max(200).optional(),
+      file: FileSchema.optional().describe("Output file of this copy's first output module. Required with output_module_template (the format decides the extension, and a PNG sequence needs [#####]). Default: the source's path with the next free _copyN before the extension (a duplicate may keep the source's path, which would render over it)."),
+      settings: SettingsMapSchema.optional().describe("Settings for this copy's first output module (see ae_render_queue_edit)."),
+      render_settings: SettingsMapSchema.optional(),
+      time_span: TimeSpanSchema.optional(),
+      skip_frames: external_exports.number().int().min(0).max(99).optional(),
+      log_type: external_exports.enum(LOG_TYPES).optional(),
+      post_render_action: PostActionSchema.optional()
+    }).refine((c) => c.output_module_template === void 0 || c.file !== void 0, {
+      message: "Give file together with output_module_template: the template can change the container, so the source's path (and its extension) cannot be reused."
+    }).describe("What differs in this copy.");
+    AeRenderQueueDuplicateSchema = external_exports.object({
+      item_index: ItemIndexSchema,
+      comp_id: ItemCompSchema,
+      count: external_exports.number().int().min(1).max(20).optional().describe("Plain copies (each with the next free _copyN path, so a later call continues the numbering). Use copies for per-copy changes."),
+      copies: external_exports.array(CopySchema).min(1).max(20).optional(),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
+      expect: ExpectSchema
+    }).refine((v) => v.count === void 0 !== (v.copies === void 0), { message: "Give either count or copies." });
+    AeDeliverySpecsSchema = external_exports.object({
+      ids: external_exports.array(external_exports.enum(SPEC_IDS)).max(20).optional().describe("Only these specs. Default: all."),
+      item_index: ItemIndexSchema.optional().describe("Judge the specs against this queue item (its installed templates and its comp's size). Default: queue item 1, templates and comp."),
+      comp_id: external_exports.number().int().optional().describe("Judge the aspect ratio against this comp.")
+    });
+    AeApplySpecSchema = external_exports.object({
+      item_index: ItemIndexSchema,
+      comp_id: ItemCompSchema,
+      specs: external_exports.array(external_exports.enum(SPEC_IDS)).min(1).max(12).describe("Spec ids from ae_delivery_specs. One output per spec."),
+      output_folder: external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Folder the files go in. It should exist; the tool warns when it doesn't."),
+      file_name: external_exports.string().min(1).max(300).refine((t) => unknownNameTokens(t).length === 0, { message: `Unknown token. Use ${NAME_TOKENS.map((t) => `[${t}]`).join(", ")} (and AE's [#####] for sequences).` }).optional().describe("File name template; default each spec's own, like '[compName]_[spec].mp4'. A name without an extension gets the spec's; another media extension (like .mp4 on a ProRes spec) is replaced by the spec's."),
+      in_place: external_exports.boolean().optional().describe("Default true: the first spec is applied to the item itself and the rest to duplicates of it. False: every spec gets a duplicate and the item is left as it is. A DONE item is locked by AE, so it defaults to false and in_place: true is refused."),
+      allow_stretch: external_exports.boolean().optional().describe("Apply a spec whose aspect ratio differs from the comp's (the picture stretches). Default false: refused."),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
+      settings: SettingsMapSchema.optional().describe("Extra output module settings for every spec."),
+      post_render_action: PostActionSchema.optional(),
+      expect: ExpectSchema
+    }).refine((v) => new Set(v.specs).size === v.specs.length, { message: "A spec is listed twice." }).refine((v) => v.specs.length < 2 || v.file_name === void 0 || /\[(spec|copy|width|height)\]/.test(v.file_name), {
+      message: "With several specs the file name template needs [spec], [copy], [width] or [height] so the files differ."
+    });
+    AeCheckDeliveryFileSchema = external_exports.object({
+      spec_id: external_exports.enum(SPEC_IDS),
+      file_path: external_exports.string().min(1).max(1e3).describe("The finished file (for a PNG sequence, any one frame).")
+    });
+    readCall2 = (indexes, settings) => ({
+      host: "rqeditRead",
+      args: { item_indexes: indexes, settings }
+    });
+    asArray = (v) => Array.isArray(v) ? v : [];
+    afterCopiesRead = (entries) => {
+      const idx = asArray(entries).map((e) => e.item_index).filter((n) => typeof n === "number");
+      if (!idx.length) return readCall2(void 0, false);
+      return { host: "rqeditRead", args: { item_indexes: void 0, settings: false, settings_indexes: [...new Set(idx)] } };
+    };
+    editHostArgs = (a) => ({
+      item_index: a.item_index,
+      item_comp_id: a.comp_id,
+      item_template: a.render_settings_template,
+      time_span: a.time_span,
+      skip_frames: a.skip_frames,
+      log_type: a.log_type,
+      render_settings: a.render_settings,
+      modules: a.output_modules,
+      add_modules: a.add_output_modules,
+      remove_modules: a.remove_output_modules,
+      allow_overwrite: a.allow_overwrite,
+      label: `Edit render queue item ${a.item_index}`
+    });
+    rqeditTools = [
+      {
+        name: "ae_render_queue_inspect",
+        description: "Read Render Queue items: comp, status, time span, skip frames, log type, output modules (file, post-render action) and, with settings, the render settings and each output module's settings by their STRING_SETTABLE key (the keys ae_render_queue_edit takes), with include_templates the installed templates. Changes nothing. The output module Format is shown but cannot be set by script; only a template changes it.",
+        schema: AeRenderQueueInspectSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "rqeditRead",
+            {
+              item_indexes: args.item_index !== void 0 ? [args.item_index] : void 0,
+              settings: args.settings ?? args.item_index !== void 0,
+              include_templates: args.include_templates === true
+            },
+            { label: "ae_render_queue_inspect", mutates: false, toolName: "ae_render_queue_inspect" }
+          );
+          return res.result;
+        }
+      },
+      {
+        name: "ae_render_queue_edit",
+        description: "Edit an item already in the Render Queue, in one undo group guarded by `expect`: render settings template, time span (comp, work area or start/duration), skip frames, log type, render settings, and per output module the template, settings, output file, post-render action and XMP; add or remove output modules. A DONE item is refused (AE locks its settings; duplicate it instead). Everything is checked before AE changes: templates must be installed, setting keys must be ones the item offers (ae_render_queue_inspect lists them), \"Format\" is read-only (use a template), the time span must fit the comp, and an output file must not be another queued item's or already on disk (allow_overwrite). A step that fails inside AE is reported in `errors`, not thrown. The read-back (a separate evalScript) compares every change; a format can adjust a size or rate it can't take, and that shows as a mismatch. A template itself can't be read back. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueEditSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_edit",
+          label: `ae_render_queue_edit(item ${args.item_index})`,
+          expect: args.expect,
+          read: () => readCall2([args.item_index], true),
+          write: { host: "rqeditEdit", args: editHostArgs(args) },
+          check: (before, after, w) => editMismatches(args, before, after, w),
+          present: (_b, after, w) => ({
+            item_index: args.item_index,
+            item: itemOf2(queueOf(after), args.item_index),
+            steps_done: w.steps_done,
+            skipped: w.skipped,
+            errors: w.errors,
+            warnings: w.warnings,
+            added_modules: w.added_modules,
+            removed_modules: w.removed_modules
+          })
+        })
+      },
+      {
+        name: "ae_render_queue_duplicate",
+        description: "Duplicate a Render Queue item N times (RenderQueueItem.duplicate), each copy with its own output module template, output file and settings, in one undo group guarded by `expect`: H.264 plus ProRes plus a PNG sequence from one comp. A duplicate may keep the source's output path and render over it, so every copy gets its own file (yours, or the source's with the next free _copyN) and the tool refuses a path already queued or on disk. A copy with an output_module_template needs its own file. A finished item's copy is queued again. The read-back (a separate evalScript) checks the queue grew by the copies, each copy's settings and that no copy writes the same file as another unfinished item in the queue. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueDuplicateSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_duplicate",
+          label: `ae_render_queue_duplicate(item ${args.item_index} x${args.count ?? args.copies?.length ?? 0})`,
+          expect: args.expect,
+          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.copies),
+          write: {
+            host: "rqeditDuplicate",
+            args: {
+              item_index: args.item_index,
+              item_comp_id: args.comp_id,
+              copies: args.copies ?? Array.from({ length: args.count ?? 0 }, () => ({})),
+              allow_overwrite: args.allow_overwrite,
+              label: `Duplicate render queue item ${args.item_index}`
+            }
+          },
+          check: (before, after, w) => copiesMismatches("copy", before, after, asArray(w.copies), w.comp_id).concat(stepMismatches("duplicate", asArray(w.errors), [])),
+          present: (_b, after, w) => {
+            const q = queueOf(after);
+            const copies = asArray(w.copies);
+            return {
+              source_index: w.source_index,
+              copies: copies.map((c) => ({ ...c, expect: void 0, item: itemOf2(q, c.item_index) })),
+              errors: w.errors
+            };
+          }
+        })
+      },
+      {
+        name: "ae_delivery_specs",
+        description: "The delivery spec library (YouTube 1080p/4K, Instagram feed and Reels/Story, TikTok, LinkedIn, broadcast HD/UHD and ProRes 422 HQ master, PNG sequence, WAV, GIF) and which of them this After Effects can meet for a queue item: the installed output module template each would use, and why a spec is refused (no matching template, the comp's aspect ratio, GIF). Changes nothing. Specs pick an installed template (AE can't set format, codec or bitrate by script) and set size, channels and audio around it; the bitrate is whatever the template carries. Apply with ae_render_queue_apply_spec.",
+        schema: AeDeliverySpecsSchema,
+        handler: async (args, ctx) => {
+          const specs = args.ids ? SPEC_LIBRARY.filter((s) => args.ids.includes(s.id)) : SPEC_LIBRARY;
+          const res = await ctx.bridge.callHost(
+            "rqeditSpecs",
+            { specs, item_index: args.item_index, comp_id: args.comp_id },
+            { label: "ae_delivery_specs", mutates: false, toolName: "ae_delivery_specs" }
+          );
+          const host = res.result ?? {};
+          const verdicts = asArray(host.specs);
+          return {
+            templates_known: host.templates_known,
+            templates_from: host.templates_from,
+            comp: host.comp,
+            output_module_templates: host.output_module_templates,
+            specs: specs.map((s) => ({ ...s, template_candidates: void 0, ...verdicts.find((v) => v.id === s.id) ?? {}, id: s.id }))
+          };
+        }
+      },
+      {
+        name: "ae_render_queue_apply_spec",
+        description: "Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by `expect`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeApplySpecSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_apply_spec",
+          label: `ae_render_queue_apply_spec(item ${args.item_index}: ${args.specs.join(", ")})`,
+          expect: args.expect,
+          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.results),
+          write: {
+            host: "rqeditApplySpec",
+            args: {
+              item_index: args.item_index,
+              item_comp_id: args.comp_id,
+              specs: args.specs.map((id) => specById(id)),
+              output_folder: args.output_folder,
+              file_name: args.file_name,
+              in_place: args.in_place,
+              allow_stretch: args.allow_stretch,
+              allow_overwrite: args.allow_overwrite,
+              settings: args.settings,
+              post_render_action: args.post_render_action,
+              label: `Apply delivery specs to render queue item ${args.item_index}`
+            }
+          },
+          check: (before, after, w) => {
+            const results = asArray(w.results);
+            return copiesMismatches("spec", before, after, results, w.comp_id);
+          },
+          present: (_b, after, w) => {
+            const q = queueOf(after);
+            return {
+              source_index: w.source_index,
+              in_place: w.in_place,
+              results: asArray(w.results).map((r) => ({ ...r, expect: void 0, item: itemOf2(q, r.item_index) }))
+            };
+          }
+        })
+      },
+      {
+        name: "ae_check_delivery_file",
+        description: "Check a finished render against its delivery spec: the file exists and isn't empty, has the spec's extension and is under the spec's approximate size limit (Node fs.stat). Codec, bitrate and dimensions aren't checked here; ae_verify_render imports the file and checks size, frame rate and audio. Changes nothing.",
+        schema: AeCheckDeliveryFileSchema,
+        handler: async (args) => {
+          const spec = specById(args.spec_id);
+          return { spec_id: spec.id, file_path: args.file_path, ...checkDeliveryFile(spec, args.file_path), max_size_mb: spec.max_size_mb ?? null };
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/renderbatch.ts
+function refineJob(val, ctx) {
+  if (new Set(val.comps).size !== val.comps.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["comps"], message: "Comp names must be unique in the list." });
+  }
+  const specNames = (val.specs ?? []).map((s) => s.name.toLowerCase());
+  if (new Set(specNames).size !== specNames.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["specs"], message: "Spec names must be unique." });
+  }
+  if (!WIN_OR_POSIX_ABSOLUTE.test(val.output_dir)) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["output_dir"], message: "`output_dir` must be an absolute path." });
+  }
+  for (const m of (val.name_template ?? "").matchAll(/\{([^{}]*)\}/g)) {
+    if (!TOKENS.includes(m[1])) {
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["name_template"], message: `Unknown token {${m[1]}}. Use ${TOKENS.map((t) => `{${t}}`).join(", ")}.` });
+    }
+  }
+}
+function sanitizeFileToken(s) {
+  const cleaned = s.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
+  return cleaned.length > 0 ? cleaned : "_";
+}
+function isSequencePath(p) {
+  return /\[#+\]/.test(path22.basename(p.replace(/\\/g, "/")));
+}
+function joinOutput(dir, name) {
+  const sep3 = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return dir.replace(/[\\/]+$/, "") + sep3 + name;
+}
+function dateStamp(now) {
+  const d = new Date(now);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+function outputNameFor(job, compName, spec, n, now) {
+  const base = job.name_template.replace(/\{(comp|spec|date|n)\}/g, (_m, token) => {
+    if (token === "comp") return sanitizeFileToken(compName);
+    if (token === "spec") return sanitizeFileToken(spec.name);
+    if (token === "date") return dateStamp(now);
+    return String(n).padStart(2, "0");
+  });
+  const stem = sanitizeFileToken(base);
+  const ext2 = spec.extension ?? job.extension;
+  return spec.sequence ? `${stem}.[#####].${ext2}` : `${stem}.${ext2}`;
+}
+function normaliseJob(args) {
+  return {
+    comps: args.comps,
+    specs: args.specs && args.specs.length > 0 ? args.specs : [{ name: "default" }],
+    output_dir: args.output_dir,
+    name_template: args.name_template ?? "{comp}_{spec}",
+    extension: args.extension ?? "mov",
+    extension_given: args.extension !== void 0,
+    time_span: args.time_span ?? "comp"
+  };
+}
+function framesFor(info, span) {
+  const fps = info?.frame_rate;
+  const dur = info?.duration;
+  if (!info || !fps || !dur || !(fps > 0) || !(dur > 0)) return { frames: null };
+  const whole = Math.max(1, Math.round(dur * fps));
+  if (span === "template") return { frames: whole };
+  if (span === "work_area") {
+    const ws = info.work_area_start;
+    const wd = info.work_area_duration;
+    if (typeof ws === "number" && typeof wd === "number" && wd > 0) {
+      const start = Math.max(0, Math.round(ws * fps));
+      const frames = Math.max(1, Math.round(wd * fps));
+      return { start, end: start + frames - 1, frames };
+    }
+  }
+  return { start: 0, end: whole - 1, frames: whole };
+}
+function expandItems(job, reads, now) {
+  const byName = new Map(reads.map((c) => [c.name, c]));
+  const items = [];
+  for (const comp of job.comps) {
+    const info = byName.get(comp);
+    const f = framesFor(info && info.count === 1 ? info : void 0, job.time_span);
+    for (const spec of job.specs) {
+      const index = items.length + 1;
+      items.push({
+        index,
+        comp_name: comp,
+        spec_name: spec.name,
+        ...spec.render_settings_template ? { render_settings_template: spec.render_settings_template } : {},
+        ...spec.output_module_template ? { output_module_template: spec.output_module_template } : {},
+        output_path: joinOutput(job.output_dir, outputNameFor(job, comp, spec, index, now)),
+        ...f.start !== void 0 ? { start_frame: f.start } : {},
+        ...f.end !== void 0 ? { end_frame: f.end } : {},
+        frames: f.frames
+      });
+    }
+  }
+  return items;
+}
+function protectedReason(outputPath, projectPaths = []) {
+  const norm2 = outputPath.replace(/\\/g, "/").toLowerCase();
+  for (const seg of norm2.split("/")) {
+    if (seg === "_mcp_backups" || seg === "_mcp_checkpoints") return `it is inside ${seg}, which holds the MCP's own backups`;
+  }
+  for (const p of projectPaths) {
+    if (p && p !== "<unsaved>" && p.replace(/\\/g, "/").toLowerCase() === norm2) return "it is the project file itself";
+  }
+  return null;
+}
+function validatePlan(job, read2, items, projectPaths = []) {
+  const errors = [];
+  const warnings = [];
+  if (read2) {
+    for (const name of job.comps) {
+      const c = read2.comps.find((x) => x.name === name);
+      if (!c || c.count === 0) errors.push({ code: "comp_not_found", comp: name, message: `No comp named "${name}" in the project.` });
+      else if (c.count > 1) {
+        errors.push({ code: "comp_name_ambiguous", comp: name, message: `${c.count} comps are named "${name}"; aerender selects by name. Rename them so the name is unique.` });
+      } else if (!c.frame_rate || !c.duration) {
+        warnings.push(`Comp "${name}": frame rate or duration unreadable; its ETA and frame range are unknown.`);
+      }
+      if (c && c.count === 1 && c.queued_item) {
+        const q = c.queued_item;
+        const files = q.output_files.filter((f) => typeof f === "string");
+        if (q.num_output_modules > 1) {
+          errors.push({
+            code: "queued_item_extra_output_modules",
+            comp: name,
+            message: `Comp "${name}" already has a queued item in the render queue with ${q.num_output_modules} output modules (${files.slice(0, 5).join(", ")}). aerender renders that item, so every module writes to the path stored in the project, outside output_dir, where nothing here checks for overwrites. Take the item out of the render queue (or remove its extra output modules), save, and plan again.`
+          });
+          for (const f of files.slice(1)) {
+            const why = protectedReason(f, projectPaths);
+            if (why) errors.push({ code: "output_protected", comp: name, message: `A queued output module of "${name}" would write ${f}, but ${why}.` });
+          }
+        }
+        const missing = job.specs.filter((sp) => !sp.render_settings_template || !sp.output_module_template).map((sp) => sp.name);
+        if (missing.length > 0) {
+          warnings.push(`Comp "${name}" has a queued render-queue item. aerender renders that item, so spec(s) ${missing.join(", ")} (which leave out a template) use its render settings and output module, which may differ from the defaults (resolution, frame rate, codec).`);
+        }
+      }
+      if (c && c.count === 1 && typeof c.display_start_time === "number" && c.display_start_time !== 0 && (job.time_span === "comp" || job.time_span === "work_area")) {
+        warnings.push(`Comp "${name}" has a non-zero display start time (${c.display_start_time}s): whether aerender's -s/-e frames count from 0 or from that start is unconfirmed, so the rendered range may be shifted. Consider time_span 'template' for this comp.`);
+      }
+    }
+    const rsKnown = read2.templates.source !== "none" && read2.templates.render_settings.length > 0;
+    const omKnown = read2.templates.source !== "none" && read2.templates.output_modules.length > 0;
+    if (read2.templates.source === "none") {
+      warnings.push("Template names were not checked: the render queue is empty, and reading them would need a temporary item (which marks the project changed). An unknown template fails that item with 'aerender ERROR' in its log.");
+    } else {
+      if (!rsKnown && job.specs.some((sp) => sp.render_settings_template)) warnings.push("Render-settings template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
+      if (!omKnown && job.specs.some((sp) => sp.output_module_template)) warnings.push("Output-module template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
+      for (const spec of job.specs) {
+        if (rsKnown && spec.render_settings_template && !read2.templates.render_settings.includes(spec.render_settings_template)) {
+          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no render-settings template "${spec.render_settings_template}". Known: ${read2.templates.render_settings.slice(0, 20).join(", ")}.` });
+        }
+        if (omKnown && spec.output_module_template && !read2.templates.output_modules.includes(spec.output_module_template)) {
+          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no output-module template "${spec.output_module_template}". Known: ${read2.templates.output_modules.slice(0, 20).join(", ")}.` });
+        }
+      }
+    }
+    if (read2.truncated) warnings.push("The comp list was capped; some names were not checked.");
+  }
+  for (const spec of job.specs) {
+    if (spec.extension !== void 0 || job.extension_given) continue;
+    if (!spec.output_module_template) {
+      errors.push({
+        code: "extension_required",
+        message: `Spec "${spec.name}" has no output_module_template and no extension (nor does the job), so the file name would be a guess ('.${job.extension}'; recent After Effects versions default to H.264, .mp4). Give the spec or the job an extension that matches what is rendered.`
+      });
+    } else {
+      warnings.push(`Spec "${spec.name}" has no extension, so the file name ends in '.${job.extension}' (a default, not read from the template). Give it the extension the output-module template writes, or the batch fails verifying a file that rendered under another name.`);
+    }
+  }
+  const seen = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    const key = it.output_path.replace(/\\/g, "/").toLowerCase();
+    const prev = seen.get(key);
+    if (prev !== void 0) {
+      errors.push({ code: "output_collision", item: it.index, message: `Items ${prev} and ${it.index} write the same file (${it.output_path}). Add {comp}, {spec} or {n} to name_template.` });
+    } else seen.set(key, it.index);
+    const why = protectedReason(it.output_path, projectPaths);
+    if (why) errors.push({ code: "output_protected", item: it.index, message: `Item ${it.index} would write ${it.output_path}, but ${why}.` });
+  }
+  if (job.time_span === "template") warnings.push("time_span 'template': no -s/-e is passed, so progress and ETA are estimated from the comp length.");
+  return { errors, warnings };
+}
+function sequenceRegex(base) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${base.split(/\[#+\]/).map(esc).join("\\d+")}$`, "i");
+}
+function outputFiles(outputPath) {
+  try {
+    if (isSequencePath(outputPath)) {
+      const norm2 = path22.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
+      const dir = path22.dirname(norm2);
+      const re = sequenceRegex(path22.basename(norm2));
+      return fs23.readdirSync(dir).filter((n) => re.test(n)).map((n) => path22.join(dir, n));
+    }
+    return fs23.existsSync(outputPath) ? [outputPath] : [];
+  } catch {
+    return [];
+  }
+}
+function inspectOutput(outputPath) {
+  let bytes = 0;
+  let newest = null;
+  let count = 0;
+  const files = [];
+  for (const f of outputFiles(outputPath)) {
+    try {
+      const st = fs23.statSync(f);
+      if (!st.isFile()) continue;
+      count++;
+      files.push({ mtime_ms: st.mtimeMs, size: st.size });
+      bytes += st.size;
+      if (newest === null || st.mtimeMs > newest) newest = st.mtimeMs;
+    } catch {
+    }
+  }
+  return { exists: count > 0, bytes, newest_mtime_ms: newest, files };
+}
+function verifyOutput(outputPath, sinceMs, expectFrames = null) {
+  const o = inspectOutput(outputPath);
+  if (!o.exists) return { ok: false, bytes: 0, reason: "the output file does not exist" };
+  if (o.bytes <= 0) return { ok: false, bytes: 0, reason: "the output file is empty" };
+  const floor = sinceMs === null ? null : sinceMs - MTIME_SLOP_MS;
+  if (isSequencePath(outputPath)) {
+    const fresh = floor === null ? o.files : o.files.filter((f) => f.mtime_ms >= floor);
+    const bytes = fresh.reduce((sum, f) => sum + f.size, 0);
+    if (fresh.length === 0) return { ok: false, bytes: o.bytes, files: 0, reason: "no frame of the sequence is newer than the item's start (aerender did not write it)" };
+    if (expectFrames !== null && expectFrames > 0 && fresh.length !== expectFrames) {
+      return { ok: false, bytes, files: fresh.length, reason: `${fresh.length} of ${expectFrames} frames of the sequence were written` };
+    }
+    if (bytes <= 0) return { ok: false, bytes: 0, files: fresh.length, reason: "the written frames are empty" };
+    return { ok: true, bytes, files: fresh.length };
+  }
+  if (floor !== null && (o.newest_mtime_ms ?? 0) < floor) {
+    return { ok: false, bytes: o.bytes, reason: "the output file is older than the item's start (aerender did not write it)" };
+  }
+  return { ok: true, bytes: o.bytes };
+}
+function spaceStatus(freeBytes, neededBytes, minFreeGb) {
+  if (freeBytes === null) return "unknown";
+  return freeBytes - (neededBytes ?? 0) >= minFreeGb * GIB ? "ok" : "low";
+}
+function estimateBytes(items, item) {
+  if (!item.frames) return null;
+  let bytes = 0;
+  let frames = 0;
+  for (const i of items) {
+    if (i.state === "succeeded" && i.spec_name === item.spec_name && i.frames && i.output_bytes) {
+      bytes += i.output_bytes;
+      frames += i.frames;
+    }
+  }
+  if (frames === 0) return null;
+  return Math.round(bytes / frames * item.frames * 1.1);
+}
+function parseDfAvailableBytes(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /\s(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(lines[i]);
+    if (m) return parseInt(m[3], 10) * 1024;
+  }
+  return null;
+}
+function driveLetterOf(p) {
+  const m = /^([A-Za-z]):[\\/]/.exec(p);
+  return m ? m[1].toUpperCase() : null;
+}
+async function getFreeBytes(dir, platform = process.platform, run = defaultRunFile) {
+  try {
+    if (platform === "win32") {
+      const letter = driveLetterOf(dir);
+      if (!letter) return null;
+      const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-PSDrive -Name ${letter}).Free`]);
+      const text = out.trim();
+      if (!/^\d+$/.test(text)) return null;
+      const n = Number(text);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+    let probe = dir;
+    while (probe && !fs23.existsSync(probe) && path22.dirname(probe) !== probe) probe = path22.dirname(probe);
+    return parseDfAvailableBytes(await run("df", ["-Pk", probe]));
+  } catch {
+    return null;
+  }
+}
+function computeEta(b, nowMs) {
+  let secs2 = 0;
+  let frames = 0;
+  for (const i of b.items) {
+    if (i.state === "succeeded" && i.frames && i.started_at && i.finished_at) {
+      const d = (Date.parse(i.finished_at) - Date.parse(i.started_at)) / 1e3;
+      if (d > 0) {
+        secs2 += d;
+        frames += i.frames;
+      }
+    }
+  }
+  const spf = frames > 0 ? secs2 / frames : null;
+  const running = b.items.filter((i) => i.state === "running");
+  const pending = b.items.filter((i) => i.state === "pending");
+  if (running.length === 0 && pending.length === 0) return { eta_seconds: 0, eta_at: null, basis: "nothing left to render" };
+  let unknown = false;
+  let longestRunning = 0;
+  for (const i of running) {
+    const started = i.started_at ? Date.parse(i.started_at) : NaN;
+    if (typeof i.percent === "number" && i.percent > 0 && !Number.isNaN(started)) {
+      longestRunning = Math.max(longestRunning, (nowMs - started) / 1e3 * ((100 - i.percent) / i.percent));
+    } else if (spf !== null && i.frames) {
+      longestRunning = Math.max(longestRunning, spf * i.frames);
+    } else unknown = true;
+  }
+  let pendingSecs = 0;
+  for (const i of pending) {
+    if (spf !== null && i.frames) pendingSecs += spf * i.frames;
+    else unknown = true;
+  }
+  if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
+  const total = Math.round(longestRunning + pendingSecs / Math.max(1, b.options.concurrency));
+  return { eta_seconds: total, eta_at: new Date(nowMs + total * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
+}
+function countStates(items) {
+  const c = { pending: 0, running: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
+  for (const i of items) c[i.state]++;
+  return c;
+}
+function logFinished(logPath) {
+  const { fullText } = readLogTail(logPath);
+  return /Finished composition/i.test(fullText) && !/^aerender ERROR/im.test(fullText);
+}
+function refreshRunning(item, job, now, stallMs) {
+  const { fullText } = readLogTail(job.log_path);
+  const p = parseAerenderProgress(fullText, { start_frame: job.start_frame, end_frame: job.end_frame, state: job.state });
+  let percent = p.percent;
+  if (percent === null && item.frames && p.frames_completed > 0) percent = Math.min(100, Math.round(p.frames_completed / item.frames * 1e4) / 100);
+  item.percent = percent;
+  item.frames_completed = p.frames_completed;
+  let outBytes = 0;
+  try {
+    outBytes = fs23.existsSync(item.output_path) && !isSequencePath(item.output_path) ? fs23.statSync(item.output_path).size : 0;
+  } catch {
+    outBytes = 0;
+  }
+  const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
+  if (!item.activity || item.activity.sig !== sig) item.activity = { sig, changed_ms: now };
+  item.stalled = job.state === "running" && now - item.activity.changed_ms >= stallMs;
+  if (!item.stalled) item.stall_noted = false;
+}
+function expectedFrames(item) {
+  return item.start_frame !== void 0 && isSequencePath(item.output_path) ? item.frames : null;
+}
+function itemView(i) {
+  return {
+    index: i.index,
+    comp: i.comp_name,
+    spec: i.spec_name,
+    state: i.state,
+    output_path: i.output_path,
+    frames: i.frames,
+    ...i.percent !== void 0 ? { percent: i.percent } : {},
+    ...i.job_id ? { job_id: i.job_id } : {},
+    ...i.error ? { error: i.error } : {},
+    ...i.note ? { note: i.note } : {},
+    ...i.output_bytes !== void 0 ? { output_bytes: i.output_bytes } : {},
+    ...i.output_files !== void 0 ? { output_files: i.output_files } : {},
+    ...i.stalled ? { stalled: true } : {},
+    ...i.overwrote ? { overwrote_existing: true } : {}
+  };
+}
+function batchSummary(b) {
+  return {
+    batch_id: b.batch_id,
+    state: b.state,
+    created_at: b.created_at,
+    finished_at: b.finished_at,
+    output_dir: b.output_dir,
+    counts: countStates(b.items),
+    total: b.items.length
+  };
+}
+function resolveOptions(a, aerenderPath, base) {
+  const pick = (v, fallback) => v === void 0 ? fallback : v;
+  return {
+    concurrency: pick(a.concurrency, base?.concurrency ?? 1),
+    max_cpu_percent: pick(a.max_cpu_percent, base?.max_cpu_percent ?? 50),
+    on_error: pick(a.on_error, base?.on_error ?? "stop"),
+    stall_minutes: pick(a.stall_minutes, base?.stall_minutes ?? 15),
+    if_output_exists: pick(a.if_output_exists, base?.if_output_exists ?? "protect_recent"),
+    protect_recent_minutes: pick(a.protect_recent_minutes, base?.protect_recent_minutes ?? 60),
+    min_free_gb: pick(a.min_free_gb, base?.min_free_gb ?? 2),
+    on_unknown_space: pick(a.on_unknown_space, base?.on_unknown_space ?? "continue"),
+    aerender_path: aerenderPath
+  };
+}
+function createRenderbatch(options = {}) {
+  const getRegistry = () => options.registry ?? getDefaultAerenderRegistry();
+  const now = options.now ?? (() => Date.now());
+  const freeBytes = options.getFreeBytes ?? ((dir) => getFreeBytes(dir, options.platform));
+  let storeInstance = options.store ?? null;
+  let runnerInstance = null;
+  const getStore = () => {
+    if (!storeInstance) storeInstance = new BatchStore(path22.join(getRegistry().rendersDir, "batches"));
+    return storeInstance;
+  };
+  const pidAlive2 = options.isPidAlive ?? ((pid, jobId) => defaultIsPidAlive(pid, getRegistry(), jobId));
+  const getRunner = () => {
+    if (!runnerInstance) {
+      runnerInstance = new BatchRunner(
+        getStore(),
+        {
+          registry: getRegistry(),
+          spawn: options.spawn ?? childProcess2.spawn,
+          now,
+          getFreeBytes: freeBytes,
+          isPidAlive: pidAlive2,
+          killProcess: options.killProcess,
+          cancelHooks: options.cancelHooks
+        },
+        { tickMs: options.tickMs ?? 5e3, autoTick: options.autoTick ?? true }
+      );
+    }
+    return runnerInstance;
+  };
+  const queued3 = (err, opId) => {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  };
+  const planSpace = async (dir, minFreeGb) => {
+    const free = await freeBytes(dir);
+    return { dir, status: spaceStatus(free, null, minFreeGb), free_bytes: free, needed_bytes: null, checked_at: new Date(now()).toISOString() };
+  };
+  const describeExisting = (items, policy) => items.map((it) => {
+    const ex = inspectOutput(it.output_path);
+    const age = ex.newest_mtime_ms === null ? null : Math.max(0, Math.round((now() - ex.newest_mtime_ms) / 6e4));
+    const blocks = ex.exists && policy.if_output_exists === "protect_recent" && age !== null && age < policy.protect_recent_minutes;
+    return { index: it.index, exists: ex.exists, bytes: ex.bytes, age_minutes: age, ...blocks ? { would_block: true } : {} };
+  });
+  const tools = [
+    {
+      name: "ae_render_batch_plan",
+      description: "Dry run for a render batch. Expands comps x specs into items (comps outer, specs inner), names each output from name_template, and checks: every comp name exists exactly once (aerender selects by name), the template names exist (when the render queue has an item to read them from), no two items write the same file, no output sits in _mcp_backups / _mcp_checkpoints, which outputs already exist and would be protected, and the output volume's free space ('unknown' for a UNC path, never 'ok'). Changes nothing in After Effects or on disk. Run it before ae_render_batch; valid:false lists what to fix.",
+      schema: AeRenderBatchPlanSchema,
+      handler: async (args, ctx) => {
+        const job = normaliseJob(args);
+        const read2 = (await ctx.bridge.callHost("renderbatchRead", { comp_names: job.comps }, { label: "ae_render_batch_plan", mutates: false, toolName: "ae_render_batch_plan" })).result;
+        const items = expandItems(job, read2.comps, now());
+        const { errors, warnings } = validatePlan(job, read2, items, [read2.project_path]);
+        const policy = resolveOptions(args, "");
+        const space = await planSpace(job.output_dir, policy.min_free_gb);
+        if (space.status === "unknown") warnings.push("Free space on the output volume could not be measured; it is reported as unknown, not ok.");
+        if (read2.dirty) warnings.push("The open project has unsaved changes. ae_render_batch renders the saved file and asks for ae_save first.");
+        if (read2.project_path === "<unsaved>") errors.push({ code: "project_unsaved", message: "The project has never been saved; save it so there is a file to render." });
+        const existing = describeExisting(items, policy);
+        return {
+          ok: true,
+          valid: errors.length === 0,
+          project_path: read2.project_path,
+          dirty: read2.dirty,
+          item_count: items.length,
+          items: items.slice(0, MAX_ITEMS).map((it) => ({ ...it, existing: existing.find((e) => e.index === it.index) })),
+          errors,
+          warnings,
+          free_space: space,
+          templates_checked: read2.templates.source !== "none"
+        };
+      }
+    },
+    {
+      name: "ae_render_batch",
+      description: "Start a render batch: comps x specs rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the concurrent processes) and one process at a time by default (the limit counts every aerender job this server runs). Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. Not measured yet: whether footage paths resolve from the frozen copy, how far the -mfr cap limits the CPU, and whether aerender overwrites an existing file silently. A comp with a queued render-queue item renders with that item's settings when a spec leaves out its templates, and extra output modules on it are refused. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchStartSchema,
+      handler: async (args, ctx) => {
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const job = normaliseJob(args);
+        let ready;
+        try {
+          ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps)`, async () => {
+            ctx.quarantine.assertClear();
+            const statusResp = await ctx.bridge.evalRaw({
+              id: `${opId}_status`,
+              script: buildJsxCall("status", {}),
+              label: "ae_render_batch (status)",
+              mutates: false,
+              toolName: "ae_render_batch"
+            });
+            const st = statusResp.result ?? {};
+            const projectPath = st.project_path ?? "<unsaved>";
+            if (projectPath === "<unsaved>" || args.expect.project_path === "<unsaved>") {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: "Cannot start a render batch on an unsaved project (<unsaved>). Save the project to disk first.",
+                expected: { project_path: args.expect.project_path, dirty: false },
+                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
+              });
+            }
+            if (!pathsMatchForGuard(args.expect.project_path, projectPath)) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: `Target guard refused ae_render_batch: expected project_path "${args.expect.project_path}", but After Effects has "${projectPath}" open.`,
+                expected: args.expect,
+                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
+              });
+            }
+            if (st.dirty === true && !args.allow_dirty) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: "Cannot start a render batch because the open project has unsaved changes (dirty: true). Call ae_save first so the batch renders what you see, or pass allow_dirty to render the last saved file.",
+                expected: { project_path: args.expect.project_path, dirty: false },
+                actual: { project_path: projectPath, dirty: true }
+              });
+            }
+            if (args.expect.comp_id !== void 0) await verifyTargetGuard(ctx, args.expect, opId);
+            const read2 = (await ctx.bridge.evalRaw({
+              id: `${opId}_read`,
+              script: buildJsxCall("renderbatchRead", { comp_names: job.comps }),
+              label: "ae_render_batch (comps)",
+              mutates: false,
+              toolName: "ae_render_batch"
+            })).result;
+            const items = expandItems(job, read2.comps, now());
+            const { errors, warnings } = validatePlan(job, read2, items, [projectPath]);
+            if (errors.length > 0) {
+              return {
+                ok: false,
+                error: "plan_invalid",
+                applied: false,
+                message: `The plan has ${errors.length} problem${errors.length === 1 ? "" : "s"}; nothing was started. Fix them (ae_render_batch_plan shows the full plan).`,
+                errors,
+                warnings
+              };
+            }
+            let preflight;
+            if (args.preflight !== false) {
+              const gate = await runPreflightGate(ctx, { toolName: "ae_render_batch", opId, comp_names: job.comps });
+              if (gate.blocked) return preflightRefusal("ae_render_batch", gate.summary);
+              preflight = gate.summary;
+            }
+            const aerenderBin = resolveAerenderPath({
+              platform: options.platform,
+              afterFxPath: options.afterFxPath ?? st.afterfx_path ?? st.app_path,
+              aeVersion: st.aeVersion,
+              existsSync: options.existsSync
+            });
+            if (st.dirty === true) warnings.push("The project had unsaved changes; the batch renders the last saved file on disk.");
+            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight };
+          });
+        } catch (err) {
+          return queued3(err, opId);
+        }
+        if (!ready.ok) return ready;
+        const store = getStore();
+        const batchId = store.newId();
+        const batchDir = store.batchDir(batchId);
+        const ext2 = path22.extname(ready.project_path) || ".aep";
+        const beside = args.freeze_location === "project_folder";
+        const frozenDir = beside ? path22.dirname(ready.project_path) : batchDir;
+        const frozen = path22.join(frozenDir, beside ? `${path22.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path22.basename(ready.project_path, ext2)}${ext2}`);
+        try {
+          fs23.mkdirSync(frozenDir, { recursive: true });
+          fs23.copyFileSync(ready.project_path, frozen);
+        } catch (err) {
+          return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
+        }
+        const batch = {
+          batch_id: batchId,
+          state: "running",
+          created_at: new Date(now()).toISOString(),
+          finished_at: null,
+          cancel_requested: false,
+          project_path: ready.project_path,
+          frozen_project: frozen,
+          ...beside ? { frozen_temporary: true } : {},
+          batch_dir: batchDir,
+          output_dir: job.output_dir,
+          options: resolveOptions(args, ready.aerenderBin),
+          items: ready.items.map((it) => ({ ...it, state: "pending", attempts: 0 })),
+          warnings: ready.warnings,
+          notices: [],
+          ...ready.preflight ? { preflight: ready.preflight } : {}
+        };
+        try {
+          store.save(batch);
+        } catch (err) {
+          try {
+            if (beside) fs23.rmSync(frozen, { force: true });
+          } catch {
+          }
+          store.forget(batchId);
+          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); the frozen copy was removed and nothing was started.` };
+        }
+        let after = batch;
+        let saveNotice;
+        try {
+          after = await getRunner().begin(batchId) ?? batch;
+        } catch (err) {
+          saveNotice = `The batch started, but its state could not be saved: ${errText(err)}`;
+        }
+        return {
+          ok: true,
+          applied: true,
+          op_id: opId,
+          batch_id: batchId,
+          state: after.state,
+          batch_json: store.jsonPath(batchId),
+          frozen_project: frozen,
+          ...beside ? { frozen_temporary: true } : {},
+          options: after.options,
+          counts: countStates(after.items),
+          items: after.items.slice(0, MAX_ITEMS).map(itemView),
+          warnings: after.warnings,
+          notices: saveNotice ? [...after.notices, saveNotice] : after.notices,
+          ...ready.preflight ? { preflight: ready.preflight } : {},
+          next: "Poll ae_render_batch_status with this batch_id. The renders run in the background; the After Effects project is untouched."
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_status",
+      description: "State of a render batch: per-item state, percent, output size and error, counts, an ETA (running items' progress plus seconds-per-frame of the finished ones), stall warnings, notices, and whether this server is still driving the batch (runner_active; false after a panel restart: call ae_render_batch_resume). Without batch_id it lists recent batches. Read-only: nothing is started, cancelled or changed.",
+      schema: AeRenderBatchStatusSchema,
+      handler: async (args) => {
+        const store = getStore();
+        if (!args.batch_id) {
+          return { ok: true, batches: store.list(20).map(batchSummary) };
+        }
+        const stored = store.get(args.batch_id);
+        if (!stored) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
+        const t = now();
+        const b = JSON.parse(JSON.stringify(stored));
+        const registry = getRegistry();
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? registry.get(item.job_id) : void 0;
+          if (job) refreshRunning(item, job, t, b.options.stall_minutes * 6e4);
+        }
+        const runnerActive = getRunner().isActive(b.batch_id);
+        const space = args.include_free_space ? await planSpace(b.output_dir, b.options.min_free_gb) : b.free_space;
+        const orphaned = b.items.filter((i) => {
+          if (i.state !== "running" || !i.job_id) return false;
+          const job = registry.get(i.job_id);
+          return job !== void 0 && job.state === "running" && registry.getProcess(job.job_id) === void 0 && !(typeof job.pid === "number" && pidAlive2(job.pid, job.job_id));
+        });
+        const orphanIdx = new Set(orphaned.map((i) => i.index));
+        const stalled = b.items.filter((i) => i.state === "running" && i.stalled && !orphanIdx.has(i.index)).map((i) => ({ index: i.index, job_id: i.job_id, advice: "No progress for a while: check ae_aerender_status, then ae_aerender_cancel if it is stuck." }));
+        return {
+          ok: true,
+          batch_id: b.batch_id,
+          state: b.state,
+          runner_active: runnerActive,
+          ...b.state === "running" && !runnerActive ? { advice: "This server is not driving the batch (it restarted since). Call ae_render_batch_resume to continue; finished renders are kept." } : {},
+          created_at: b.created_at,
+          finished_at: b.finished_at,
+          project_path: b.project_path,
+          frozen_project: b.frozen_project,
+          output_dir: b.output_dir,
+          options: b.options,
+          counts: countStates(b.items),
+          eta: computeEta(b, t),
+          items: b.items.slice(0, MAX_ITEMS).map(itemView),
+          stalled,
+          ...orphaned.length > 0 ? { orphaned: orphaned.map((i) => ({ index: i.index, job_id: i.job_id, advice: "Its aerender process is gone (the server or the machine restarted). Call ae_render_batch_resume; do not cancel it by pid." })) } : {},
+          warnings: b.warnings,
+          notices: b.notices.slice(-50),
+          ...space ? { free_space: space } : {},
+          batch_json: store.jsonPath(b.batch_id)
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_resume",
+      description: "Continue a stopped, failed or interrupted render batch from its frozen project copy. Items that finished and whose output still verifies (exists, not empty, written after the item started; an image sequence must have all its frames) are kept, and so are items skipped on purpose (if_output_exists 'skip': their files are never overwritten by a resume, whatever policy it passes); an item whose runner died is adopted when its aerender ended cleanly or its log says it finished; failed, cancelled and unstarted items run again, a failed item's partial file included. Takes expect so the right project is open, refuses while an aerender of the batch is still alive, and can change concurrency, max_cpu_percent, on_error, stall_minutes and if_output_exists for the rest of the run. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchResumeSchema,
+      handler: async (args, ctx) => {
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const store = getStore();
+        const batch = store.get(args.batch_id);
+        if (!batch) return { ok: false, error: "not_found", applied: false, message: `No render batch "${args.batch_id}".` };
+        try {
+          await ctx.queue.run("ae_render_batch_resume", async () => {
+            ctx.quarantine.assertClear();
+            await verifyTargetGuard(ctx, args.expect, opId);
+            if (!pathsMatchForGuard(args.expect.project_path, batch.project_path)) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: `Target guard refused ae_render_batch_resume: batch ${batch.batch_id} belongs to "${batch.project_path}", but expect.project_path is "${args.expect.project_path}".`,
+                expected: args.expect,
+                actual: { project_path: batch.project_path }
+              });
+            }
+          });
+        } catch (err) {
+          return queued3(err, opId);
+        }
+        if (!fs23.existsSync(batch.frozen_project)) {
+          return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
+        }
+        const runner = getRunner();
+        if (batch.state === "running" && runner.isActive(batch.batch_id)) {
+          return { ok: false, error: "already_running", applied: false, message: "This batch is already running under this server." };
+        }
+        const rec = runner.reconcile(batch);
+        if (!rec.ok) return { ok: false, error: "still_running", applied: false, message: rec.message };
+        batch.options = resolveOptions(args, batch.options.aerender_path, batch.options);
+        batch.notices.push(`Resumed at ${new Date(now()).toISOString()}: ${rec.kept} kept (${rec.skipped_kept} of them skipped on purpose), ${rec.recovered} adopted, ${rec.reset} to render again.`);
+        try {
+          store.save(batch);
+        } catch (err) {
+          batch.state = "stopped";
+          batch.notices.push(`The resume could not be saved to disk (${errText(err)}); nothing was started.`);
+          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); nothing was started. Resume again once the disk problem is fixed.` };
+        }
+        let after = batch;
+        let saveNotice;
+        try {
+          after = await runner.begin(batch.batch_id) ?? batch;
+        } catch (err) {
+          saveNotice = `The batch resumed, but its state could not be saved: ${errText(err)}`;
+        }
+        return {
+          ok: true,
+          applied: true,
+          op_id: opId,
+          batch_id: after.batch_id,
+          state: after.state,
+          kept: rec.kept,
+          skipped_kept: rec.skipped_kept,
+          recovered: rec.recovered,
+          reset: rec.reset,
+          counts: countStates(after.items),
+          items: after.items.slice(0, MAX_ITEMS).map(itemView),
+          notices: (saveNotice ? [...after.notices, saveNotice] : after.notices).slice(-50)
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_cancel",
+      description: "Cancel a render batch: terminates its running aerender processes (those items become cancelled) and ends the batch; an item whose process cannot be identified is not killed and stays running (see notices; resume refuses until it is gone); renders already finished are kept and ae_render_batch_resume can pick the rest up later. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchCancelSchema,
+      handler: async (args) => {
+        const store = getStore();
+        const b = store.get(args.batch_id);
+        if (!b) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
+        if (b.state !== "running") return { ok: true, batch_id: b.batch_id, state: b.state, already_finished: true, counts: countStates(b.items) };
+        getRunner().cancel(b);
+        const unconfirmed = b.items.filter((i) => i.state === "running").map((i) => ({ index: i.index, job_id: i.job_id }));
+        return { ok: true, batch_id: b.batch_id, state: b.state, cancelled: true, ...unconfirmed.length > 0 ? { kill_unconfirmed: unconfirmed, notices: b.notices.slice(-10) } : {}, counts: countStates(b.items), items: b.items.slice(0, MAX_ITEMS).map(itemView) };
+      }
+    }
+  ];
+  return { tools, getRunner, getStore };
+}
+function createRenderbatchTools(options = {}) {
+  return createRenderbatch(options).tools;
+}
+var childProcess2, crypto10, fs23, path22, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
+var init_renderbatch = __esm({
+  "src/tools/ext/renderbatch.ts"() {
+    "use strict";
+    childProcess2 = __toESM(require("node:child_process"), 1);
+    crypto10 = __toESM(require("node:crypto"), 1);
+    fs23 = __toESM(require("node:fs"), 1);
+    path22 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_mutate();
+    init_aerender();
+    init_preflight();
+    MAX_ITEMS = 500;
+    MAX_STRING = 2e4;
+    GIB = 1024 * 1024 * 1024;
+    MTIME_SLOP_MS = 2e3;
+    TOKENS = ["comp", "spec", "date", "n"];
+    WIN_OR_POSIX_ABSOLUTE = /^([A-Za-z]:[\\/]|\\\\|\/)/;
+    BatchSpecSchema = external_exports.object({
+      name: external_exports.string().min(1).max(60).regex(/^[A-Za-z0-9._-]+$/, "Spec names use letters, digits, '.', '_' and '-' only (they go into file names).").describe(
+        "Short name of this render spec, e.g. 'h264' or 'prores'. It fills the {spec} token in the file name. This is a free-form label, not an ae_delivery_specs id: a name like 'youtube_1080p' here does not apply that spec's resize, channels or audio."
+      ),
+      render_settings_template: external_exports.string().min(1).optional().describe("Render Settings template name (aerender -RStemplate). Omit to use the settings of the comp's queued render-queue item when it has one (the plan reports it), otherwise After Effects' defaults."),
+      output_module_template: external_exports.string().min(1).optional().describe(
+        "Output Module template name (aerender -OMtemplate), e.g. the installed template an ae_delivery_specs entry names. Omit to use the output module of the comp's queued render-queue item when it has one, otherwise After Effects' default (H.264 in recent versions). A size change needs a reframed comp or a template that resizes."
+      ),
+      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mp4'.").optional().describe("File extension for this spec, without the dot. It must match what the Output Module template writes. Falls back to the job's extension. A spec with no output_module_template and no extension (here or on the job) is refused: the plan would have to guess the file name."),
+      sequence: external_exports.boolean().optional().describe("The spec writes an image sequence: the file name gets a [#####] frame token (name.[#####].png) and the result is verified as a set of numbered files.")
+    });
+    jobFields = {
+      comps: external_exports.array(external_exports.string().min(1).max(255)).min(1).max(50).describe(
+        "Names of the comps to render. aerender selects a comp by name, so each name must belong to exactly one comp in the project. For other sizes, make the copies first with ae_reframe and list their names here: a size is just another comp."
+      ),
+      specs: external_exports.array(BatchSpecSchema).min(1).max(10).optional().describe(
+        "Render specs: free-form {name, render_settings_template, output_module_template, extension, sequence} objects, not ae_delivery_specs ids (those carry a resize, channels and audio that aerender cannot apply here; pass the installed template an entry names as output_module_template). Every comp is rendered once per spec. Omit for one render per comp with After Effects' default templates (or the comp's queued item); an extension is then required."
+      ),
+      output_dir: external_exports.string().min(1).describe("Absolute folder the renders go into (created when missing). Never a folder named _mcp_backups or _mcp_checkpoints."),
+      name_template: external_exports.string().min(1).max(200).optional().describe("File name without extension, with tokens {comp}, {spec}, {date} (YYYYMMDD) and {n} (item number, two digits). Default '{comp}_{spec}'. Characters Windows forbids in file names become '_'."),
+      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mov'.").optional().describe("Default file extension, without the dot, for specs that give none ('mov' is the name guessed when this is left out, and the plan refuses that for a spec without an output_module_template). A spec's own extension wins."),
+      time_span: external_exports.enum(["comp", "work_area", "template"]).optional().describe(
+        "Which frames each item renders. 'comp' (default) passes -s/-e for the whole comp; 'work_area' for the comp's work area; 'template' passes neither and lets the render-settings template decide (the ETA then uses the comp length as a guess)."
+      )
+    };
+    policyFields = {
+      if_output_exists: external_exports.enum(["protect_recent", "skip", "overwrite"]).optional().describe(
+        "What to do when an output file already exists. 'protect_recent' (default) refuses an item whose file was written in the last protect_recent_minutes and overwrites older ones; 'skip' leaves any existing non-empty file alone and marks the item skipped (a partial file left by this batch's own earlier attempt is not left alone: that item renders again); 'overwrite' always renders. A file in _mcp_backups / _mcp_checkpoints is never written."
+      ),
+      protect_recent_minutes: external_exports.number().int().min(1).max(1e5).optional().describe("How recent counts as 'recent' for protect_recent. Default 60."),
+      min_free_gb: external_exports.number().min(0).max(1e5).optional().describe("Free space (GB) that must remain on the output volume after an item's estimated size. Default 2."),
+      on_unknown_space: external_exports.enum(["continue", "stop"]).optional().describe("When free space can't be measured (a UNC path or a failed lookup): 'continue' (default) renders and flags it, 'stop' blocks the item. Unknown is never reported as ok.")
+    };
+    runFields = {
+      concurrency: external_exports.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
+      max_cpu_percent: external_exports.number().int().min(1).max(100).optional().describe(
+        "Share of the CPU for the whole batch, split evenly over the concurrent aerender processes (each gets floor(max_cpu_percent / concurrency), at least 1, as aerender -mfr ON <percent>, After Effects 22+). Default 50. How far -mfr limits the CPU is not measured."
+      ),
+      on_error: external_exports.enum(["stop", "continue"]).optional().describe("A failed item stops the batch ('stop', default; resume retries it) or the batch goes on with the next item ('continue')."),
+      stall_minutes: external_exports.number().int().min(1).max(1e4).optional().describe("Minutes without log or output growth before a running item is flagged as stalled (advice only, nothing is cancelled). Default 15.")
+    };
+    AeRenderBatchPlanSchema = external_exports.object({ ...jobFields, ...policyFields }).superRefine(refineJob);
+    AeRenderBatchStartSchema = external_exports.object({
+      expect: ExpectSchema,
+      ...jobFields,
+      ...policyFields,
+      ...runFields,
+      preflight: external_exports.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
+      allow_dirty: external_exports.boolean().optional().describe("Render the last saved state although the open project has unsaved changes. Default false: the tool refuses and asks for ae_save first, so the frozen copy holds what you see."),
+      freeze_location: external_exports.enum(["batch_folder", "project_folder"]).optional().describe(
+        "Where the frozen copy of the .aep goes. 'batch_folder' (default) keeps it with batch.json; 'project_folder' puts it beside the original .aep as <name>.mcp_<batch id>.aep (so a relative footage path resolves from the same folder; whether it does is not measured) and deletes it when the batch ends succeeded. In a synced folder it is synced while it exists."
+      )
+    }).superRefine(refineJob);
+    BATCH_ID_RE = /^batch_\d+_[0-9a-f]{6}$/;
+    BatchIdSchema = external_exports.string().regex(BATCH_ID_RE, "batch_id must look like batch_<digits>_<6 hex>, as returned by ae_render_batch.");
+    AeRenderBatchStatusSchema = external_exports.object({
+      batch_id: BatchIdSchema.optional().describe("Batch to report. Omit to list the most recent batches."),
+      include_free_space: external_exports.boolean().optional().describe("Also measure the output volume's free space now (runs a PowerShell or df lookup). Default false.")
+    });
+    AeRenderBatchResumeSchema = external_exports.object({
+      expect: ExpectSchema,
+      batch_id: BatchIdSchema.describe("Batch to continue."),
+      concurrency: runFields.concurrency,
+      max_cpu_percent: runFields.max_cpu_percent,
+      on_error: runFields.on_error,
+      stall_minutes: runFields.stall_minutes,
+      if_output_exists: policyFields.if_output_exists
+    });
+    AeRenderBatchCancelSchema = external_exports.object({
+      batch_id: BatchIdSchema.describe("Batch to cancel. Running aerender processes are terminated; finished renders are kept.")
+    });
+    clip = (s) => s.length > MAX_STRING ? s.slice(0, MAX_STRING) : s;
+    errText = (e) => clip(e instanceof Error ? e.message : String(e));
+    defaultRunFile = (file, args) => new Promise((resolve4, reject) => {
+      childProcess2.execFile(file, args, { windowsHide: true, timeout: 15e3 }, (err, stdout) => err ? reject(err) : resolve4(String(stdout)));
+    });
+    BatchStore = class {
+      constructor(dir) {
+        this.dir = dir;
+      }
+      cache = /* @__PURE__ */ new Map();
+      newId() {
+        return `batch_${Date.now()}_${crypto10.randomBytes(3).toString("hex")}`;
+      }
+      batchDir(id) {
+        return path22.join(this.dir, id);
+      }
+      jsonPath(id) {
+        return path22.join(this.batchDir(id), "batch.json");
+      }
+      save(b) {
+        this.cache.set(b.batch_id, b);
+        const file = this.jsonPath(b.batch_id);
+        fs23.mkdirSync(path22.dirname(file), { recursive: true });
+        const tmp = `${file}.tmp-${process.pid}-${crypto10.randomBytes(3).toString("hex")}`;
+        const payload = JSON.stringify(b, null, 2);
+        try {
+          fs23.writeFileSync(tmp, payload, "utf8");
+          fs23.renameSync(tmp, file);
+        } catch {
+          fs23.writeFileSync(file, payload, "utf8");
+          try {
+            fs23.unlinkSync(tmp);
+          } catch {
+          }
+        }
+      }
+      /** Drops a batch that never started: the cached record and its folder. */
+      forget(id) {
+        this.cache.delete(id);
+        if (!BATCH_ID_RE.test(id)) return;
+        try {
+          fs23.rmSync(this.batchDir(id), { recursive: true, force: true });
+        } catch {
+        }
+      }
+      get(id) {
+        if (!BATCH_ID_RE.test(id)) return void 0;
+        const cached = this.cache.get(id);
+        if (cached) return cached;
+        try {
+          const b = JSON.parse(fs23.readFileSync(this.jsonPath(id), "utf8"));
+          if (b && typeof b.batch_id === "string") {
+            this.cache.set(id, b);
+            return b;
+          }
+        } catch {
+        }
+        return void 0;
+      }
+      /** Newest first. */
+      list(limit = 20) {
+        let ids = [];
+        try {
+          ids = fs23.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
+        } catch {
+          ids = [];
+        }
+        ids.sort().reverse();
+        const out = [];
+        for (const id of ids) {
+          const b = this.get(id);
+          if (b) out.push(b);
+          if (out.length >= limit) break;
+        }
+        return out;
+      }
+    };
+    BatchRunner = class {
+      constructor(store, deps, opts = { tickMs: 5e3, autoTick: true }) {
+        this.store = store;
+        this.deps = deps;
+        this.opts = opts;
+      }
+      timers = /* @__PURE__ */ new Map();
+      busy = /* @__PURE__ */ new Set();
+      isActive(id) {
+        return this.timers.has(id) || this.busy.has(id);
+      }
+      /** Marks the batch as driven by this process, ticks once now, and keeps ticking. */
+      async begin(id) {
+        if (this.opts.autoTick && !this.timers.has(id)) {
+          const t = setInterval(() => {
+            this.tick(id).catch(() => {
+            });
+          }, this.opts.tickMs);
+          if (typeof t.unref === "function") t.unref();
+          this.timers.set(id, t);
+        }
+        return this.tick(id);
+      }
+      stopTimer(id) {
+        const t = this.timers.get(id);
+        if (t) clearInterval(t);
+        this.timers.delete(id);
+      }
+      async tick(id) {
+        const b = this.store.get(id);
+        if (!b) {
+          this.stopTimer(id);
+          return void 0;
+        }
+        if (b.state !== "running") {
+          this.stopTimer(id);
+          return b;
+        }
+        if (this.busy.has(id)) return b;
+        this.busy.add(id);
+        try {
+          await this.step(b);
+        } catch (err) {
+          b.notices.push(`The runner stopped on an error: ${errText(err)}`);
+          b.state = "stopped";
+          b.finished_at = new Date(this.deps.now()).toISOString();
+        } finally {
+          this.busy.delete(id);
+          if (b.state === "succeeded" && b.frozen_temporary) {
+            b.frozen_temporary = false;
+            try {
+              fs23.rmSync(b.frozen_project, { force: true });
+              b.notices.push(`Every item finished; the frozen project copy ${b.frozen_project} was deleted.`);
+            } catch (err) {
+              b.notices.push(`Every item finished, but the frozen project copy ${b.frozen_project} could not be deleted (${errText(err)}).`);
+            }
+          }
+          try {
+            this.store.save(b);
+          } catch (err) {
+            const note = `The batch state could not be saved to disk (${errText(err)}); it is kept in memory only.`;
+            if (!b.notices.includes(note)) b.notices.push(note);
+          }
+          if (b.state !== "running") this.stopTimer(id);
+        }
+        return b;
+      }
+      stopping(b) {
+        return b.cancel_requested || b.options.on_error === "stop" && b.items.some((i) => i.state === "failed" || i.state === "cancelled");
+      }
+      async step(b) {
+        const now = this.deps.now();
+        const stallMs = b.options.stall_minutes * 6e4;
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+          if (!job) {
+            this.fail(item, "the aerender job record is gone", now);
+            continue;
+          }
+          refreshRunning(item, job, now, stallMs);
+          if (item.stalled && !item.stall_noted) {
+            item.stall_noted = true;
+            b.notices.push(
+              `Item ${item.index} (${item.comp_name}, ${item.spec_name}) shows no log or output growth for ${b.options.stall_minutes} minutes (job ${job.job_id}). It may be stuck on a slow frame; check ae_aerender_status and call ae_aerender_cancel if it is. The batch does not cancel it for you.`
+            );
+          }
+          if (job.state === "running") continue;
+          item.finished_at = job.finished_at ?? new Date(now).toISOString();
+          if (job.cancelled) {
+            item.state = "cancelled";
+            item.error = "cancelled";
+          } else if (job.state === "succeeded") {
+            const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (v.ok) {
+              item.state = "succeeded";
+              item.output_bytes = v.bytes;
+              if (v.files !== void 0) item.output_files = v.files;
+              item.percent = 100;
+              item.stalled = false;
+            } else this.fail(item, `aerender exited cleanly but ${v.reason}`, now);
+          } else {
+            this.fail(item, job.error ? clip(job.error) : `aerender exited with code ${job.exit_code ?? "unknown"}${job.signal ? ` (${job.signal})` : ""}; see ${job.log_path}`, now);
+          }
+        }
+        let waitingForOthers = false;
+        while (!this.stopping(b)) {
+          const own = b.items.filter((i) => i.state === "running").length;
+          const others = this.othersRunning(b);
+          if (own + others >= b.options.concurrency) {
+            waitingForOthers = own === 0 && others > 0 && b.items.some((i) => i.state === "pending");
+            break;
+          }
+          const next = b.items.find((i) => i.state === "pending");
+          if (!next) break;
+          await this.startItem(b, next, now);
+        }
+        if (b.items.some((i) => i.state === "running")) return;
+        if (waitingForOthers && b.state === "running" && !b.cancel_requested) {
+          const note = "Waiting: the concurrency limit is used up by aerender jobs that are not part of this batch (another batch or ae_aerender_start). The next item starts when one of them ends.";
+          if (!b.notices.includes(note)) b.notices.push(note);
+          return;
+        }
+        const counts = countStates(b.items);
+        if (b.cancel_requested) b.state = "cancelled";
+        else if (counts.pending > 0) b.state = "stopped";
+        else b.state = counts.failed > 0 || counts.cancelled > 0 ? "failed" : "succeeded";
+        b.finished_at = new Date(now).toISOString();
+      }
+      /** Running aerender jobs of this process that no item of this batch owns (other batches, ae_aerender_start). */
+      othersRunning(b) {
+        const own = new Set(b.items.map((i) => i.job_id).filter((j) => typeof j === "string"));
+        return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && this.deps.registry.getProcess(j.job_id) !== void 0).length;
+      }
+      fail(item, why, now) {
+        item.state = "failed";
+        item.error = why;
+        item.finished_at = new Date(now).toISOString();
+      }
+      /** The governor, then the launch. Any refusal fails the item with the reason; nothing is thrown. */
+      async startItem(b, item, now) {
+        const o = b.options;
+        const why = protectedReason(item.output_path, [b.project_path, b.frozen_project]);
+        if (why) return this.fail(item, `blocked: ${why}`, now);
+        const existing = inspectOutput(item.output_path);
+        if (existing.exists) {
+          const ours = item.attempts > 0;
+          if (o.if_output_exists === "skip" && existing.bytes > 0 && !ours) {
+            item.state = "skipped";
+            item.note = "the output already exists; left alone (if_output_exists: skip)";
+            item.output_bytes = existing.bytes;
+            item.finished_at = new Date(now).toISOString();
+            return;
+          }
+          const ageMin = existing.newest_mtime_ms === null ? Infinity : (now - existing.newest_mtime_ms) / 6e4;
+          if (o.if_output_exists === "protect_recent" && !ours && ageMin < o.protect_recent_minutes) {
+            return this.fail(item, `blocked: ${item.output_path} was written ${Math.max(0, Math.round(ageMin))} minutes ago (protect_recent_minutes ${o.protect_recent_minutes}). Use another name, wait, or set if_output_exists to 'overwrite' or 'skip'.`, now);
+          }
+          item.overwrote = true;
+        }
+        const free = await this.deps.getFreeBytes(b.output_dir);
+        if (b.cancel_requested || b.state !== "running") return;
+        const needed = estimateBytes(b.items, item);
+        let reserved = 0;
+        for (const r of b.items) if (r.state === "running" && r !== item) reserved += estimateBytes(b.items, r) ?? 0;
+        const status = spaceStatus(free === null ? null : Math.max(0, free - reserved), needed, o.min_free_gb);
+        b.free_space = { dir: b.output_dir, status, free_bytes: free, needed_bytes: needed, checked_at: new Date(now).toISOString() };
+        if (status === "low") {
+          return this.fail(item, `blocked: only ${((free ?? 0) / GIB).toFixed(1)} GB free on the output volume${reserved > 0 ? ` (${(Math.max(0, (free ?? 0) - reserved) / GIB).toFixed(1)} GB after ${(reserved / GIB).toFixed(1)} GB reserved for running items)` : ""}; this item needs about ${((needed ?? 0) / GIB).toFixed(1)} GB plus ${o.min_free_gb} GB spare.`, now);
+        }
+        if (status === "unknown") {
+          if (o.on_unknown_space === "stop") return this.fail(item, "blocked: free space on the output volume could not be measured (on_unknown_space: stop)", now);
+          const note = `Free space on ${b.output_dir} could not be measured (a network path or a failed lookup); rendering anyway. It is not known to be ok.`;
+          if (!b.notices.includes(note)) b.notices.push(note);
+        }
+        try {
+          const rec = launchAerenderJob({
+            registry: this.deps.registry,
+            spawn: this.deps.spawn,
+            aerender_path: o.aerender_path,
+            project_path: b.frozen_project,
+            comp_name: item.comp_name,
+            output_path: item.output_path,
+            output_module_template: item.output_module_template,
+            render_settings_template: item.render_settings_template,
+            start_frame: item.start_frame,
+            end_frame: item.end_frame,
+            max_cpu_percent: Math.max(1, Math.floor(o.max_cpu_percent / Math.max(1, o.concurrency)))
+          });
+          item.state = "running";
+          item.attempts++;
+          item.job_id = rec.job_id;
+          item.started_at = rec.started_at;
+          item.finished_at = void 0;
+          item.error = void 0;
+          item.percent = 0;
+          item.stalled = false;
+          item.stall_noted = false;
+          item.activity = { sig: "", changed_ms: now };
+        } catch (err) {
+          this.fail(item, `could not start aerender: ${errText(err)}`, now);
+        }
+      }
+      /** Cancels a batch: kills what runs, ends the batch. Finished renders stay. */
+      cancel(b) {
+        b.cancel_requested = true;
+        const now = new Date(this.deps.now()).toISOString();
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+          if (job && job.state === "running") {
+            const res = cancelAerenderJob(this.deps.registry, job, this.deps.killProcess, "ae_render_batch_cancel", this.deps.cancelHooks);
+            if (res.kill_unconfirmed) {
+              item.note = "cancel not confirmed: the aerender process could not be identified, so it was not killed";
+              b.notices.push(`Item ${item.index} (job ${job.job_id}, pid ${job.pid}): the cancel could not confirm the process is an aerender, so nothing was killed and the job stays running. Check the process, then call ae_aerender_cancel for the job; ae_render_batch_resume refuses until it is gone.`);
+              continue;
+            }
+          }
+          item.state = "cancelled";
+          item.error = "cancelled";
+          item.stalled = false;
+          item.finished_at = now;
+        }
+        b.state = "cancelled";
+        b.finished_at = now;
+        this.stopTimer(b.batch_id);
+        try {
+          this.store.save(b);
+        } catch (err) {
+          b.notices.push(`The cancelled state could not be saved to disk (${errText(err)}).`);
+        }
+      }
+      /**
+       * Gets a stopped or interrupted batch ready to run again: finished renders
+       * that still verify stay, and so do items skipped on purpose (their files
+       * were left alone deliberately and a resume must not overwrite them); an item
+       * whose runner died is adopted when its job ended cleanly or its log says it
+       * finished; everything else goes back to pending. Returns a refusal when an
+       * aerender of the batch is still alive (the pid must still be an aerender).
+       */
+      reconcile(b) {
+        let recovered = 0;
+        let reset = 0;
+        let kept = 0;
+        let skippedKept = 0;
+        for (const item of b.items) {
+          if (item.state === "running") {
+            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+            if (job && job.state === "running" && typeof job.pid === "number" && this.deps.isPidAlive(job.pid, job.job_id)) {
+              return { ok: false, message: `Item ${item.index} still has a live aerender (job ${job.job_id}, pid ${job.pid}). ${b.state === "cancelled" ? "The batch is already cancelled: stop it with ae_aerender_cancel on that job, or end the process by hand, then resume." : "Wait for it, or stop it with ae_render_batch_cancel / ae_aerender_cancel, then resume."}` };
+            }
+          }
+        }
+        for (const item of b.items) {
+          if (item.state === "succeeded") {
+            const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (v.ok) {
+              kept++;
+              continue;
+            }
+            item.note = `rendered again: ${v.reason}`;
+          } else if (item.state === "skipped") {
+            if (verifyOutput(item.output_path, null).ok) {
+              kept++;
+              skippedKept++;
+              continue;
+            }
+            item.note = "rendered: the file it had left alone is gone";
+          } else if (item.state === "running") {
+            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+            const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (job && v.ok && (job.state === "succeeded" || job.state === "running" && logFinished(job.log_path))) {
+              item.state = "succeeded";
+              item.output_bytes = v.bytes;
+              if (v.files !== void 0) item.output_files = v.files;
+              item.percent = 100;
+              item.finished_at = job.finished_at ?? new Date(this.deps.now()).toISOString();
+              item.note = "finished while the runner was away; adopted on resume";
+              recovered++;
+              continue;
+            }
+            if (job && job.state === "running") {
+              this.deps.registry.update(job.job_id, { state: "failed", error: "interrupted: its aerender process is gone", finished_at: new Date(this.deps.now()).toISOString() });
+            }
+            item.note = "interrupted; rendered again";
+          }
+          item.state = "pending";
+          item.error = void 0;
+          item.job_id = void 0;
+          item.finished_at = void 0;
+          item.percent = void 0;
+          item.output_files = void 0;
+          item.stalled = false;
+          item.stall_noted = false;
+          item.activity = void 0;
+          reset++;
+        }
+        b.state = "running";
+        b.cancel_requested = false;
+        b.finished_at = null;
+        return { ok: true, recovered, reset, kept, skipped_kept: skippedKept };
+      }
+    };
+    defaultIsPidAlive = (pid, registry, jobId, identify = (p) => isAerenderProcess(p)) => {
+      try {
+        process.kill(pid, 0);
+      } catch (err) {
+        if (err.code !== "EPERM") return false;
+      }
+      if (registry && pidHeldByLiveJob(registry, pid, jobId)) return false;
+      return identify(pid) !== false;
+    };
+    renderbatchTools = createRenderbatchTools();
+  }
+});
+
+// src/tools/ext/collect.ts
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return "?";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  return `${u === 0 ? v : v.toFixed(v >= 100 ? 0 : 1)} ${units[u]}`;
+}
+function pathKey2(p, caseInsensitive = WIN_OR_MAC) {
+  const s = p.replace(/\\/g, "/");
+  return caseInsensitive ? s.toLowerCase() : s;
+}
+function safeSegment(name, max = 120) {
+  let s = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
+  if (!s || s === "." || s === "..") s = "_";
+  const ext2 = path23.extname(s);
+  const stem = ext2 ? s.slice(0, -ext2.length) : s;
+  const room = Math.max(1, max - ext2.length);
+  let out = (stem.length > room ? stem.slice(0, room) : stem) + ext2;
+  if (RESERVED.test(stem)) out = `_${out}`;
+  return out;
+}
+function splitFrameName(name) {
+  const m = /^(.*?)(\d+)(\D*\.[^.]+)$/.exec(name);
+  return m ? { prefix: m[1], digits: m[2], suffix: m[3] } : null;
+}
+function matchFrames(names, base, caseInsensitive = WIN_OR_MAC) {
+  const own = splitFrameName(base);
+  if (!own) return [];
+  const fold = (s) => caseInsensitive ? s.toLowerCase() : s;
+  const padded = (d) => d.length > 1 && d.startsWith("0");
+  const out = [];
+  for (const n of names) {
+    const f = splitFrameName(n);
+    if (!f || fold(f.prefix) !== fold(own.prefix) || fold(f.suffix) !== fold(own.suffix)) continue;
+    const sameWidth = f.digits.length === own.digits.length;
+    if (!sameWidth && (padded(own.digits) || padded(f.digits))) continue;
+    out.push({ name: n, number: Number(f.digits) });
+  }
+  return out.sort((a, b) => a.number - b.number);
+}
+async function resolveSource(file, sequence) {
+  let warning;
+  if (sequence && splitFrameName(path23.basename(file))) {
+    const dir = path23.dirname(file);
+    let names = [];
+    try {
+      names = await fs24.promises.readdir(dir);
+    } catch {
+      names = [];
+    }
+    const frames = matchFrames(names, path23.basename(file));
+    if (frames.length > 0) {
+      const files = [];
+      try {
+        for (let i = 0; i < frames.length; i += 64) {
+          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile(path23.join(dir, f.name)))));
+        }
+      } catch (err) {
+        return { files: [], error: `a frame could not be read: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      const first = frames[0].number;
+      const last = frames[frames.length - 1].number;
+      const distinct = new Set(frames.map((f) => f.number)).size;
+      const res = { files, frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct) } };
+      if (files.length === 1) res.warning = `${path23.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
+      return res;
+    }
+    warning = `the frames next to ${path23.basename(file)} could not be listed: only this file is collected`;
+  } else if (sequence) {
+    warning = `${path23.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
+  }
+  try {
+    const one = { files: [await statFile(file)] };
+    if (warning) one.warning = warning;
+    return one;
+  } catch (err) {
+    const code = err.code;
+    return { files: [], error: code === "ENOENT" ? "the file is not on disk" : `the file could not be read: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+function sourceKey(file, sequence) {
+  const f = sequence ? splitFrameName(path23.basename(file)) : null;
+  if (!f) return pathKey2(file);
+  return `${pathKey2(path23.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
+}
+function planCollect(entries, resolved, opts = {}) {
+  const refs = [];
+  let skippedUnused = 0;
+  for (const e of entries) {
+    if (opts.only_used && e.used_in === 0 && !e.proxy_only) {
+      skippedUnused++;
+      continue;
+    }
+    if (e.proxy_only) continue;
+    refs.push({ role: "main", file: e.file, sequence: e.sequence, bin: e.bin, item_id: e.item_id });
+  }
+  if (opts.include_proxies !== false) {
+    for (const e of entries) {
+      if (e.proxy && !(opts.only_used && e.used_in === 0 && !e.proxy_only)) {
+        refs.push({ role: "proxy", file: e.proxy.file, sequence: e.proxy.sequence, bin: e.bin, item_id: e.item_id });
+      }
+    }
+  }
+  const groups = /* @__PURE__ */ new Map();
+  const physical = /* @__PURE__ */ new Map();
+  const takenDirs = /* @__PURE__ */ new Set();
+  const takenFiles = /* @__PURE__ */ new Set();
+  const unique = (taken, rel, split) => {
+    let candidate = rel;
+    for (let n = 2; taken.has(pathKey2(candidate)); n++) {
+      const [stem, ext2] = split(rel);
+      candidate = `${stem}_${n}${ext2}`;
+    }
+    taken.add(pathKey2(candidate));
+    return candidate;
+  };
+  const plan2 = { sources: [], files: [], bytes: 0, shared: [], problems: [], gaps: [], skipped_unused: skippedUnused, warnings: [] };
+  const sharedBy = /* @__PURE__ */ new Map();
+  for (const ref2 of refs) {
+    const key = sourceKey(ref2.file, ref2.sequence);
+    const gkey = `${key}|${ref2.role}`;
+    let g = groups.get(gkey);
+    const res = resolved.get(key) ?? { files: [], error: "not resolved" };
+    if (!g) {
+      let phys = physical.get(key);
+      if (!phys) {
+        const binDir = [...ref2.role === "proxy" ? ["_Proxies"] : [], ...ref2.bin.map((b) => safeSegment(b))].join("/");
+        const base = `_Footage${binDir ? `/${binDir}` : ""}`;
+        let destDir = base;
+        let destFirst = "";
+        if (res.files.length > 0) {
+          if (ref2.sequence && res.files.length >= 1 && splitFrameName(path23.basename(ref2.file))) {
+            const folder = unique(takenDirs, `${base}/${safeSegment(path23.basename(path23.dirname(ref2.file)) || "sequence")}`, (r) => [r, ""]);
+            destDir = folder;
+            destFirst = `${folder}/${safeSegment(path23.basename(res.files[0].path))}`;
+          } else {
+            const rel = unique(takenFiles, `${base}/${safeSegment(path23.basename(ref2.file))}`, (r) => {
+              const ext2 = path23.extname(r);
+              return [ext2 ? r.slice(0, -ext2.length) : r, ext2];
+            });
+            destFirst = rel;
+            destDir = path23.posix.dirname(rel);
+          }
+        }
+        phys = { dest_dir: destDir, dest_first: destFirst };
+        physical.set(key, phys);
+      }
+      g = {
+        key,
+        role: ref2.role,
+        sequence: ref2.sequence,
+        ae_files: [],
+        item_ids: [],
+        dest_first: phys.dest_first,
+        resolved: res
+      };
+      groups.set(gkey, g);
+      plan2.sources.push(g);
+    }
+    if (!g.ae_files.includes(ref2.file)) g.ae_files.push(ref2.file);
+    if (!g.item_ids.includes(ref2.item_id)) g.item_ids.push(ref2.item_id);
+    const sh = sharedBy.get(key) ?? { file: ref2.file, item_ids: /* @__PURE__ */ new Set() };
+    sh.item_ids.add(ref2.item_id);
+    sharedBy.set(key, sh);
+  }
+  const emitted = /* @__PURE__ */ new Set();
+  const warned = /* @__PURE__ */ new Set();
+  for (const g of plan2.sources) {
+    const res = g.resolved;
+    if (res.error || res.files.length === 0) {
+      plan2.problems.push({ item_ids: g.item_ids, file: g.ae_files[0], role: g.role, problem: res.error ?? "no files found" });
+      continue;
+    }
+    if (res.warning && !warned.has(g.key)) {
+      warned.add(g.key);
+      plan2.warnings.push(res.warning);
+    }
+    if (res.frames && res.frames.gaps > 0) {
+      plan2.gaps.push({ file: g.ae_files[0], missing_frames: res.frames.gaps, first: res.frames.first, last: res.frames.last });
+    }
+    if (emitted.has(g.key)) continue;
+    emitted.add(g.key);
+    const phys = physical.get(g.key);
+    const dir = phys?.dest_dir ?? "_Footage";
+    const ids = /* @__PURE__ */ new Set();
+    for (const other of plan2.sources) if (other.key === g.key) other.item_ids.forEach((i) => ids.add(i));
+    const roleOf = plan2.sources.some((o) => o.key === g.key && o.role === "main") ? "main" : "proxy";
+    for (let i = 0; i < res.files.length; i++) {
+      const f = res.files[i];
+      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path23.basename(f.path))}`;
+      plan2.files.push({ source: f.path, path: rel, bytes: f.bytes, mtime_ms: f.mtimeMs, role: roleOf, item_ids: [...ids] });
+      plan2.bytes += f.bytes;
+    }
+  }
+  for (const s of sharedBy.values()) if (s.item_ids.size > 1) plan2.shared.push({ file: s.file, item_ids: [...s.item_ids] });
+  return plan2;
+}
+function dosDateTime(d) {
+  const year = Math.max(1980, d.getFullYear());
+  return {
+    time: d.getHours() << 11 | d.getMinutes() << 5 | d.getSeconds() >> 1,
+    date: year - 1980 << 9 | d.getMonth() + 1 << 5 | d.getDate()
+  };
+}
+async function writeZip(zipPath, inputs, opts = {}) {
+  const part = `${zipPath}.part`;
+  const out = new ZipOut(part);
+  const central = [];
+  try {
+    for (const input of inputs) {
+      const name = Buffer.from(input.name, "utf8");
+      if (name.length > 65535) throw new Error(`zip name too long: ${input.name.slice(0, 80)}`);
+      const size = input.data ? input.data.length : (await fs24.promises.stat(input.file)).size;
+      const zip64 = opts.forceZip64 === true || size >= ZIP64_AT;
+      const ext2 = path23.extname(input.name).toLowerCase();
+      const method = STORED_EXT.has(ext2) || size === 0 ? 0 : 8;
+      const { time, date } = dosDateTime(input.mtime);
+      const offset = out.offset;
+      const flags = 2056;
+      const extra = Buffer.alloc(zip64 ? 20 : 0);
+      if (zip64) {
+        extra.writeUInt16LE(1, 0);
+        extra.writeUInt16LE(16, 2);
+      }
+      const h = Buffer.alloc(30);
+      h.writeUInt32LE(67324752, 0);
+      h.writeUInt16LE(zip64 ? 45 : 20, 4);
+      h.writeUInt16LE(flags, 6);
+      h.writeUInt16LE(method, 8);
+      h.writeUInt16LE(time, 10);
+      h.writeUInt16LE(date, 12);
+      h.writeUInt32LE(0, 14);
+      h.writeUInt32LE(zip64 ? U32_MAX : 0, 18);
+      h.writeUInt32LE(zip64 ? U32_MAX : 0, 22);
+      h.writeUInt16LE(name.length, 26);
+      h.writeUInt16LE(extra.length, 28);
+      await out.write(Buffer.concat([h, name, extra]));
+      const crc = new Crc32();
+      let usize = 0;
+      let csize = 0;
+      const counter = new import_node_stream.Transform({
+        transform(chunk, _enc, cb) {
+          crc.update(chunk);
+          usize += chunk.length;
+          cb(null, chunk);
+        }
+      });
+      const sink = new import_node_stream.Writable({
+        write(chunk, _enc, cb) {
+          csize += chunk.length;
+          out.write(chunk).then(() => cb(), cb);
+        }
+      });
+      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs24.createReadStream(input.file);
+      if (method === 8) await (0, import_promises.pipeline)(source, counter, zlib.createDeflateRaw({ level: 6 }), sink);
+      else await (0, import_promises.pipeline)(source, counter, sink);
+      if (!zip64 && (usize >= U32_MAX || csize >= U32_MAX)) throw new Error(`${input.name} grew past 4 GB while it was zipped`);
+      const d = Buffer.alloc(zip64 ? 24 : 16);
+      d.writeUInt32LE(134695760, 0);
+      d.writeUInt32LE(crc.value, 4);
+      if (zip64) {
+        d.writeBigUInt64LE(BigInt(csize), 8);
+        d.writeBigUInt64LE(BigInt(usize), 16);
+      } else {
+        d.writeUInt32LE(csize, 8);
+        d.writeUInt32LE(usize, 12);
+      }
+      await out.write(d);
+      central.push({ name, method, time, date, crc: crc.value, csize, usize, offset, zip64 });
+    }
+    const cdStart = out.offset;
+    for (const r of central) {
+      const big = r.zip64 || r.offset >= U32_MAX;
+      const extra = Buffer.alloc(big ? 28 : 0);
+      if (big) {
+        extra.writeUInt16LE(1, 0);
+        extra.writeUInt16LE(24, 2);
+        extra.writeBigUInt64LE(BigInt(r.usize), 4);
+        extra.writeBigUInt64LE(BigInt(r.csize), 12);
+        extra.writeBigUInt64LE(BigInt(r.offset), 20);
+      }
+      const c = Buffer.alloc(46);
+      c.writeUInt32LE(33639248, 0);
+      c.writeUInt16LE(45, 4);
+      c.writeUInt16LE(big ? 45 : 20, 6);
+      c.writeUInt16LE(2056, 8);
+      c.writeUInt16LE(r.method, 10);
+      c.writeUInt16LE(r.time, 12);
+      c.writeUInt16LE(r.date, 14);
+      c.writeUInt32LE(r.crc, 16);
+      c.writeUInt32LE(big ? U32_MAX : r.csize, 20);
+      c.writeUInt32LE(big ? U32_MAX : r.usize, 24);
+      c.writeUInt16LE(r.name.length, 28);
+      c.writeUInt16LE(extra.length, 30);
+      c.writeUInt32LE(big ? U32_MAX : r.offset, 42);
+      await out.write(Buffer.concat([c, r.name, extra]));
+    }
+    const cdSize = out.offset - cdStart;
+    const needZip64 = opts.forceZip64 === true || central.length >= 65535 || cdStart >= U32_MAX || cdSize >= U32_MAX;
+    if (needZip64) {
+      const z = Buffer.alloc(56);
+      z.writeUInt32LE(101075792, 0);
+      z.writeBigUInt64LE(44n, 4);
+      z.writeUInt16LE(45, 12);
+      z.writeUInt16LE(45, 14);
+      z.writeBigUInt64LE(BigInt(central.length), 24);
+      z.writeBigUInt64LE(BigInt(central.length), 32);
+      z.writeBigUInt64LE(BigInt(cdSize), 40);
+      z.writeBigUInt64LE(BigInt(cdStart), 48);
+      const loc = Buffer.alloc(20);
+      loc.writeUInt32LE(117853008, 0);
+      loc.writeBigUInt64LE(BigInt(out.offset), 8);
+      loc.writeUInt32LE(1, 16);
+      await out.write(Buffer.concat([z, loc]));
+    }
+    const e = Buffer.alloc(22);
+    e.writeUInt32LE(101010256, 0);
+    e.writeUInt16LE(needZip64 ? 65535 : central.length, 8);
+    e.writeUInt16LE(needZip64 ? 65535 : central.length, 10);
+    e.writeUInt32LE(needZip64 ? U32_MAX : cdSize, 12);
+    e.writeUInt32LE(needZip64 ? U32_MAX : cdStart, 16);
+    await out.write(e);
+    const total = out.offset;
+    await out.close();
+    await fs24.promises.rename(part, zipPath);
+    return { path: zipPath, entries: central.length, bytes: total, zip64: needZip64 || central.some((r) => r.zip64) };
+  } catch (err) {
+    await out.close().catch(() => void 0);
+    await fs24.promises.rm(part, { force: true }).catch(() => void 0);
+    throw err;
+  }
+}
+async function readZipDirectory(zipPath) {
+  const fh = await fs24.promises.open(zipPath, "r");
+  try {
+    const size = (await fh.stat()).size;
+    const tailLen = Math.min(size, 65557 + 20);
+    const tail = Buffer.alloc(tailLen);
+    await fh.read(tail, 0, tailLen, size - tailLen);
+    let eocd = -1;
+    for (let i = tailLen - 22; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === 101010256) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error("no end-of-central-directory record");
+    let count = tail.readUInt16LE(eocd + 10);
+    let cdSize = tail.readUInt32LE(eocd + 12);
+    let cdOffset = tail.readUInt32LE(eocd + 16);
+    let zip64 = false;
+    if (count === 65535 || cdSize === U32_MAX || cdOffset === U32_MAX) {
+      if (eocd < 20 || tail.readUInt32LE(eocd - 20) !== 117853008) throw new Error("ZIP64 locator missing");
+      const z64At = Number(tail.readBigUInt64LE(eocd - 20 + 8));
+      const rec = Buffer.alloc(56);
+      await fh.read(rec, 0, 56, z64At);
+      if (rec.readUInt32LE(0) !== 101075792) throw new Error("ZIP64 end record missing");
+      count = Number(rec.readBigUInt64LE(32));
+      cdSize = Number(rec.readBigUInt64LE(40));
+      cdOffset = Number(rec.readBigUInt64LE(48));
+      zip64 = true;
+    }
+    const cd = Buffer.alloc(cdSize);
+    await fh.read(cd, 0, cdSize, cdOffset);
+    const entries = [];
+    let p = 0;
+    for (let i = 0; i < count; i++) {
+      if (cd.readUInt32LE(p) !== 33639248) throw new Error(`bad central directory record ${i + 1}`);
+      const method = cd.readUInt16LE(p + 10);
+      const crc = cd.readUInt32LE(p + 16);
+      let csize = cd.readUInt32LE(p + 20);
+      let usize = cd.readUInt32LE(p + 24);
+      const nameLen = cd.readUInt16LE(p + 28);
+      const extraLen = cd.readUInt16LE(p + 30);
+      const commentLen = cd.readUInt16LE(p + 32);
+      let offset = cd.readUInt32LE(p + 42);
+      const name = cd.toString("utf8", p + 46, p + 46 + nameLen);
+      let x = p + 46 + nameLen;
+      const xEnd = x + extraLen;
+      while (x + 4 <= xEnd) {
+        const id = cd.readUInt16LE(x);
+        const len = cd.readUInt16LE(x + 2);
+        if (id === 1) {
+          let q = x + 4;
+          if (usize === U32_MAX) {
+            usize = Number(cd.readBigUInt64LE(q));
+            q += 8;
+          }
+          if (csize === U32_MAX) {
+            csize = Number(cd.readBigUInt64LE(q));
+            q += 8;
+          }
+          if (offset === U32_MAX) offset = Number(cd.readBigUInt64LE(q));
+          zip64 = true;
+        }
+        x += 4 + len;
+      }
+      entries.push({ name, method, crc, csize, usize, offset });
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return { entries, zip64 };
+  } finally {
+    await fh.close();
+  }
+}
+async function verifyZip(zipPath, expected) {
+  const errors = [];
+  const note = (m) => {
+    if (errors.length < 50) errors.push(m);
+  };
+  let dir;
+  try {
+    dir = await readZipDirectory(zipPath);
+  } catch (err) {
+    return { ok: false, entries: 0, zip64: false, errors: [`the central directory could not be read: ${err instanceof Error ? err.message : String(err)}`] };
+  }
+  const fh = await fs24.promises.open(zipPath, "r");
+  const seen = /* @__PURE__ */ new Set();
+  try {
+    for (const e of dir.entries) {
+      seen.add(e.name);
+      const lh = Buffer.alloc(30);
+      await fh.read(lh, 0, 30, e.offset);
+      if (lh.readUInt32LE(0) !== 67324752) {
+        note(`${e.name}: no local header at its offset`);
+        continue;
+      }
+      const start = e.offset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
+      const crc = new Crc32();
+      const sha = crypto11.createHash("sha1");
+      let n = 0;
+      try {
+        if (e.csize > 0) {
+          const raw = fs24.createReadStream(zipPath, { start, end: start + e.csize - 1 });
+          const stream = e.method === 8 ? raw.pipe(zlib.createInflateRaw()) : e.method === 0 ? raw : null;
+          if (!stream) {
+            note(`${e.name}: unsupported method ${e.method}`);
+            continue;
+          }
+          if (e.method === 8) raw.on("error", (err) => stream.destroy(err));
+          for await (const chunk of stream) {
+            crc.update(chunk);
+            sha.update(chunk);
+            n += chunk.length;
+          }
+        }
+      } catch (err) {
+        note(`${e.name}: could not be read back: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      if (crc.value !== e.crc) note(`${e.name}: CRC32 differs`);
+      if (n !== e.usize) note(`${e.name}: size ${n} is not the recorded ${e.usize}`);
+      const want = expected?.get(e.name);
+      if (want) {
+        if (want.bytes !== n) note(`${e.name}: ${n} bytes, the manifest has ${want.bytes}`);
+        else if (want.sha1 && want.sha1 !== sha.digest("hex")) note(`${e.name}: sha1 differs from the manifest`);
+      }
+    }
+  } finally {
+    await fh.close();
+  }
+  if (expected) {
+    for (const name of expected.keys()) if (!seen.has(name)) note(`${name}: missing from the zip`);
+  }
+  return { ok: errors.length === 0, entries: dir.entries.length, zip64: dir.zip64, errors };
+}
+async function sha1File(p) {
+  const h = crypto11.createHash("sha1");
+  await (0, import_promises.pipeline)(
+    fs24.createReadStream(p),
+    new import_node_stream.Writable({
+      write(chunk, _enc, cb) {
+        h.update(chunk);
+        cb();
+      }
+    })
+  );
+  return h.digest("hex");
+}
+async function copyHashed(src, dest, mtimeMs) {
+  await fs24.promises.mkdir(path23.dirname(dest), { recursive: true });
+  const part = `${dest}.part`;
+  const hash = crypto11.createHash("sha1");
+  let bytes = 0;
+  const tap = new import_node_stream.Transform({
+    transform(chunk, _enc, cb) {
+      hash.update(chunk);
+      bytes += chunk.length;
+      cb(null, chunk);
+    }
+  });
+  try {
+    await (0, import_promises.pipeline)(fs24.createReadStream(src), tap, fs24.createWriteStream(part));
+    await fs24.promises.rename(part, dest);
+    const when = new Date(mtimeMs);
+    await fs24.promises.utimes(dest, when, when).catch(() => void 0);
+  } catch (err) {
+    await fs24.promises.rm(part, { force: true }).catch(() => void 0);
+    throw err;
+  }
+  return { sha1: hash.digest("hex"), bytes };
+}
+function buildMappings(m, dest) {
+  const out = [];
+  for (const s of m.sources) {
+    if (!s.dest_first) continue;
+    const to = path23.join(dest, ...s.dest_first.split("/"));
+    for (const from of s.ae_files) out.push({ from, to, sequence: s.sequence, role: s.role, item_ids: s.item_ids });
+  }
+  return out;
+}
+function manifestPath(dest) {
+  return path23.join(dest, "manifest.json");
+}
+async function readManifest(dest) {
+  try {
+    const m = JSON.parse(await fs24.promises.readFile(manifestPath(dest), "utf8"));
+    return m && m.version === 1 && Array.isArray(m.files) && Array.isArray(m.sources) ? m : null;
+  } catch {
+    return null;
+  }
+}
+async function writeFileAtomic(p, text) {
+  await fs24.promises.mkdir(path23.dirname(p), { recursive: true });
+  const tmp = `${p}.tmp`;
+  await fs24.promises.writeFile(tmp, text, "utf8");
+  await fs24.promises.rename(tmp, p);
+}
+function diffManifests(prev, files) {
+  if (!prev) return null;
+  const before = new Map(prev.files.filter((f) => f.role !== "project").map((f) => [pathKey2(f.source), f.bytes]));
+  const now = new Map(files.map((f) => [pathKey2(f.source), f.bytes]));
+  const added = [];
+  const changed = [];
+  for (const f of files) {
+    const was = before.get(pathKey2(f.source));
+    if (was === void 0) added.push(f.source);
+    else if (was !== f.bytes) changed.push(f.source);
+  }
+  const removed = prev.files.filter((f) => f.role !== "project" && !now.has(pathKey2(f.source))).map((f) => f.source);
+  return { added: added.slice(0, MAX_LIST2), removed: removed.slice(0, MAX_LIST2), changed: changed.slice(0, MAX_LIST2) };
+}
+async function readAllFootage(ctx, toolName) {
+  const entries = [];
+  const noFile = [];
+  let offset = 0;
+  let path0 = "<unsaved>";
+  let dirty = false;
+  for (let page = 0; offset !== null && page < 400; page++) {
+    const res = await read(ctx, "collectFootage", { offset, limit: MAX_LIST2 }, toolName);
+    entries.push(...res.items);
+    noFile.push(...res.no_file);
+    path0 = res.project_path;
+    dirty = res.dirty;
+    offset = res.next_offset;
+  }
+  return { entries, noFile, project_path: path0, dirty };
+}
+async function resolveAll(entries, opts) {
+  const todo = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    if (opts.only_used && e.used_in === 0 && !e.proxy_only) continue;
+    if (!e.proxy_only) todo.set(sourceKey(e.file, e.sequence), { file: e.file, sequence: e.sequence });
+    if (e.proxy && opts.include_proxies !== false) todo.set(sourceKey(e.proxy.file, e.proxy.sequence), { file: e.proxy.file, sequence: e.proxy.sequence });
+  }
+  const list = [...todo.entries()];
+  const out = /* @__PURE__ */ new Map();
+  for (let i = 0; i < list.length; i += 8) {
+    const batch = list.slice(i, i + 8);
+    const res = await Promise.all(batch.map(([, v]) => resolveSource(v.file, v.sequence)));
+    batch.forEach(([k], j) => out.set(k, res[j]));
+  }
+  return out;
+}
+function destFolder(project2, dest) {
+  return path23.resolve(dest ?? path23.join(path23.dirname(project2), "_collect"));
+}
+function destProblem(dest) {
+  if (dest !== void 0 && !path23.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
+  return null;
+}
+async function inspectDest(dest) {
+  let st;
+  try {
+    st = await fs24.promises.stat(dest);
+  } catch {
+    return { exists: false, isDir: false, empty: true, manifest: null };
+  }
+  if (!st.isDirectory()) return { exists: true, isDir: false, empty: false, manifest: null };
+  const names = await fs24.promises.readdir(dest).catch(() => []);
+  const onlyOwnReports = names.length > 0 && names.every((n) => OWN_REPORT_FILES.has(n.toLowerCase()));
+  return { exists: true, isDir: true, empty: names.length === 0 || onlyOwnReports, manifest: await readManifest(dest) };
+}
+function savedProblem(state) {
+  if (state.project_path === "<unsaved>") return "The project has never been saved, so there is no .aep to copy. Save it first (ae_save).";
+  if (state.dirty !== false) return "The project has unsaved changes (or After Effects would not say). The .aep on disk is what gets copied, so save first (ae_save) and call again.";
+  return null;
+}
+function summarisePlan(plan2, noFile, extraWarnings = []) {
+  const placeholders = noFile.filter((n) => n.kind === "placeholder");
+  const noPath = noFile.filter((n) => n.kind === "none");
+  const warnings = [...extraWarnings, ...plan2.warnings];
+  if (noPath.length) warnings.push(`${noPath.length} footage item(s) have no file path in AE and are not solids or placeholders (see no_file_items): nothing can be collected for them.`);
+  if (plan2.gaps.length) warnings.push(`${plan2.gaps.length} image sequence(s) have gaps in their numbering (found by file name, not from AE): the missing frames stay missing.`);
+  return {
+    sources: plan2.sources.length,
+    files: plan2.files.length,
+    bytes: plan2.bytes,
+    bytes_human: formatBytes(plan2.bytes),
+    shared_files: plan2.shared.slice(0, MAX_LIST2),
+    shared_files_total: plan2.shared.length,
+    skipped_unused: plan2.skipped_unused,
+    problems: plan2.problems.slice(0, MAX_LIST2),
+    problems_total: plan2.problems.length,
+    sequences_with_gaps: plan2.gaps.slice(0, MAX_LIST2),
+    placeholders: placeholders.slice(0, MAX_LIST2),
+    placeholders_total: placeholders.length,
+    no_file_items: noPath.slice(0, MAX_LIST2),
+    no_file_items_total: noPath.length,
+    solids: noFile.filter((n) => n.kind === "solid").length,
+    warnings,
+    not_collected: NOT_COLLECTED
+  };
+}
+async function collectFiles(args, ctx) {
+  const hold = {};
+  try {
+    return await collectFilesBody(args, ctx, hold);
+  } finally {
+    hold.release?.();
+  }
+}
+async function collectFilesBody(args, ctx, hold) {
+  const tool = "ae_collect_files";
+  ctx.quarantine.assertClear();
+  const state = await read(ctx, "collectState", {}, tool);
+  if (args.expect && pathKey2(args.expect.project_path) !== pathKey2(state.project_path)) {
+    throw new BridgeError({
+      kind: "guard",
+      message: `Target guard refused: expected project_path "${args.expect.project_path}", but After Effects has "${state.project_path}" open. Stop and re-read state.`,
+      expected: args.expect,
+      actual: { project_path: state.project_path }
+    });
+  }
+  const problem = savedProblem(state);
+  if (problem) return bad2(problem);
+  const project2 = state.project_path;
+  if (!fs24.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
+  const badDest = destProblem(args.dest);
+  if (badDest) return bad2(badDest);
+  const dest = destFolder(project2, args.dest);
+  const aepDest = path23.join(dest, path23.basename(project2));
+  if (pathKey2(aepDest) === pathKey2(project2)) return bad2("dest is the project's own folder: the copy would overwrite the .aep. Pick another folder.");
+  const dry = args.dry_run !== false;
+  const destInfo = await inspectDest(dest);
+  let destIssue = null;
+  if (destInfo.exists && !destInfo.isDir) destIssue = `dest is a file, not a folder: ${dest}`;
+  else if (destInfo.exists && !destInfo.empty && !destInfo.manifest) {
+    destIssue = `dest ${dest} is not empty and has no manifest.json from this tool, so it is not a previous collect. Pick a new or empty folder: nothing there is overwritten.`;
+  } else if (destInfo.manifest && pathKey2(destInfo.manifest.project.path) !== pathKey2(project2)) {
+    destIssue = `dest ${dest} holds a collect of ${destInfo.manifest.project.path}, not of this project. Pick another folder.`;
+  }
+  if (destIssue && !dry) return bad2(destIssue);
+  if (!dry) {
+    const lockKey = pathKey2(dest);
+    if (collectLocks.has(lockKey)) {
+      return { ok: false, error: "busy", status: "busy", message: `Another ae_collect_files call is still copying into ${dest}. Wait for it to finish, then call again with the same arguments.` };
+    }
+    collectLocks.add(lockKey);
+    hold.release = () => {
+      collectLocks.delete(lockKey);
+    };
+    const running = zipJobs.get(lockKey);
+    if (running && running.state === "running") {
+      await Promise.race([running.promise, sleep(Math.max(1e3, (args.max_seconds ?? 50) * 1e3))]);
+      if (running.state === "running") {
+        return {
+          dry_run: false,
+          complete: destInfo.manifest?.complete === true,
+          project_path: project2,
+          dest,
+          zip: { ok: false, status: "running", path: `${dest}.zip`, message: "The zip is still being written (and read back to verify it) in the background. Nothing was copied this call; call ae_collect_files again with the same arguments to get the result." },
+          next: "The zip is still running. Call again with the same arguments."
+        };
+      }
+    }
+  }
+  const foot = await readAllFootage(ctx, tool);
+  const resolved = await resolveAll(foot.entries, args);
+  const plan2 = planCollect(foot.entries, resolved, args);
+  const warnings = [];
+  if (destIssue) warnings.push(destIssue);
+  const longest = plan2.files.reduce((n, f) => Math.max(n, path23.join(dest, f.path).length), 0);
+  if (process.platform === "win32" && longest > 240) warnings.push(`Some collected paths are ${longest} characters long; Windows may refuse paths past 259. Pick a shorter dest.`);
+  const sameFolder = plan2.files.filter((f) => pathKey2(path23.join(dest, f.path)) === pathKey2(f.source));
+  if (sameFolder.length) warnings.push(`${sameFolder.length} file(s) already sit at their collected path: they are left alone.`);
+  const projectBytes = fs24.statSync(project2).size;
+  const summary3 = summarisePlan(plan2, foot.noFile, warnings);
+  if (dry) {
+    return {
+      dry_run: true,
+      project_path: project2,
+      dest,
+      project_bytes: projectBytes,
+      total_bytes: plan2.bytes + projectBytes,
+      total_human: formatBytes(plan2.bytes + projectBytes),
+      ...summary3,
+      files_preview: plan2.files.slice(0, MAX_LIST2).map((f) => ({ source: f.source, path: f.path, bytes: f.bytes })),
+      files_truncated: plan2.files.length > MAX_LIST2,
+      next: "Call again with dry_run: false to copy."
+    };
+  }
+  const prev = args.restart ? null : destInfo.manifest;
+  const owned = new Set((destInfo.manifest?.files ?? []).filter((f) => f.sha1).map((f) => pathKey2(f.path)));
+  const keepAep = !!prev?.relinked && pathKey2(prev.project.path) === pathKey2(project2);
+  const t0 = Date.now();
+  const deadline = t0 + (args.max_seconds ?? 50) * 1e3;
+  await fs24.promises.mkdir(dest, { recursive: true });
+  const aepStat = fs24.statSync(project2);
+  let aepNote;
+  if (keepAep) {
+    aepNote = "kept: the copy there is already relinked (restart: true copies the .aep again)";
+  } else {
+    await copyHashed(project2, aepDest, aepStat.mtimeMs);
+    aepNote = "copied";
+  }
+  const prevSha = new Map((prev?.files ?? []).filter((f) => f.sha1).map((f) => [f.path, f]));
+  const files = plan2.files.map((f) => ({ ...f, sha1: null }));
+  const errors = [];
+  let copied = 0;
+  let resumed = 0;
+  let copiedBytes = 0;
+  let stoppedEarly = false;
+  const writeManifest = async (complete2) => {
+    const m = {
+      version: 1,
+      created: prev?.created ?? (/* @__PURE__ */ new Date()).toISOString(),
+      updated: (/* @__PURE__ */ new Date()).toISOString(),
+      complete: complete2,
+      project: { path: project2, name: path23.basename(project2) },
+      ae: state.ae,
+      options: { only_used: args.only_used === true, include_proxies: args.include_proxies !== false },
+      relinked: keepAep,
+      sources: plan2.sources.map((s) => ({
+        role: s.role,
+        sequence: s.sequence,
+        ae_files: s.ae_files,
+        item_ids: s.item_ids,
+        dest_first: s.dest_first,
+        frames: s.resolved.frames
+      })),
+      files: [...files, { source: project2, path: path23.basename(project2), bytes: fs24.existsSync(aepDest) ? fs24.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
+      not_collected: NOT_COLLECTED
+    };
+    await writeFileAtomic(manifestPath(dest), JSON.stringify(m));
+    return m;
+  };
+  await writeManifest(false);
+  for (const f of files) {
+    if (Date.now() > deadline) {
+      stoppedEarly = true;
+      break;
+    }
+    const target = path23.join(dest, ...f.path.split("/"));
+    try {
+      if (pathKey2(target) === pathKey2(f.source)) {
+        f.sha1 = await sha1File(f.source);
+        continue;
+      }
+      const st = await fs24.promises.stat(target).catch(() => null);
+      if (st && st.size === f.bytes && Math.abs(st.mtimeMs - f.mtime_ms) < 2e3) {
+        const was = prevSha.get(f.path);
+        f.sha1 = was && was.bytes === f.bytes ? was.sha1 : await sha1File(target);
+        resumed++;
+        continue;
+      }
+      if (st && !owned.has(pathKey2(f.path))) {
+        errors.push({ path: f.path, message: "conflict: a different file is already there and no previous collect put it there. It was left alone; move it away and call again." });
+        continue;
+      }
+      const got = await copyHashed(f.source, target, f.mtime_ms);
+      if (got.bytes !== f.bytes) throw new Error(`the source changed while it was copied (${got.bytes} bytes, expected ${f.bytes})`);
+      f.sha1 = got.sha1;
+      copied++;
+      copiedBytes += got.bytes;
+    } catch (err) {
+      errors.push({ path: f.path, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  const done = files.filter((f) => f.sha1).length;
+  const complete = !stoppedEarly && errors.length === 0 && done === files.length;
+  const manifest = await writeManifest(complete);
+  const changes = diffManifests(prev, plan2.files);
+  let reportInfo = null;
+  let zipInfo = null;
+  if (complete) {
+    const aepEntry = manifest.files.find((f) => f.role === "project");
+    if (aepEntry && fs24.existsSync(aepDest)) {
+      aepEntry.sha1 = await sha1File(aepDest);
+      aepEntry.bytes = fs24.statSync(aepDest).size;
+      await writeFileAtomic(manifestPath(dest), JSON.stringify(manifest));
+    }
+    if (args.report !== "none") {
+      try {
+        const file = path23.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
+        const lastStamp = await fs24.promises.readFile(path23.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
+        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs24.existsSync(file)) {
+          reportInfo = { path: file, unchanged: true, note: "The collect has not changed since the last report: it was kept as the baseline for the next diff." };
+        } else {
+          const r = await buildReport2(ctx, { dest, hash_outputs: true, manifest, deadline }, tool);
+          await writeFileAtomic(file, args.report === "json" ? JSON.stringify(r, null, 2) : renderReportMarkdown(r));
+          await writeFileAtomic(path23.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
+          reportInfo = { path: file };
+        }
+      } catch (err) {
+        reportInfo = { error: `The report could not be written: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+    if (args.zip) {
+      try {
+        zipInfo = await zipStep(dest, manifest, deadline);
+      } catch (err) {
+        zipInfo = { ok: false, error: `The zip could not be written: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+  }
+  return {
+    dry_run: false,
+    complete,
+    project_path: project2,
+    dest,
+    aep: { path: aepDest, status: aepNote },
+    copied_files: copied,
+    copied_bytes: copiedBytes,
+    resumed_files: resumed,
+    files_done: done,
+    files_total: files.length,
+    remaining: files.length - done - errors.length,
+    seconds: Math.round((Date.now() - t0) / 100) / 10,
+    errors: errors.slice(0, MAX_LIST2),
+    errors_total: errors.length,
+    manifest: manifestPath(dest),
+    changes_since_last_collect: changes,
+    report: reportInfo,
+    zip: zipInfo,
+    ...summary3,
+    next: complete ? "Done. ae_collect_relink points the copy at these files (it closes and reopens the open project)." : stoppedEarly ? "Stopped at max_seconds. Call again with the same arguments to continue." : "Some files failed (see errors). Fix them and call again."
+  };
+}
+function zipStamp(m) {
+  const rows = m.files.map((f) => [f.path, f.bytes, f.sha1]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  return crypto11.createHash("sha1").update(JSON.stringify(rows)).digest("hex");
+}
+async function zipStep(dest, manifest, deadline) {
+  const zipPath = `${dest}.zip`;
+  const stampPath = `${zipPath}.stamp`;
+  const stamp3 = zipStamp(manifest);
+  const key = pathKey2(dest);
+  let job = zipJobs.get(key);
+  if (job && job.stamp !== stamp3) {
+    if (job.state === "running") {
+      await Promise.race([job.promise, sleep(Math.max(1e3, deadline - Date.now()))]);
+      if (job.state === "running") {
+        return { ok: false, status: "running", path: zipPath, message: "A zip of an earlier state of this collect is still being written. Call ae_collect_files again with the same arguments once it is done; a new zip is written then." };
+      }
+    }
+    zipJobs.delete(key);
+    job = void 0;
+  }
+  if (!job) {
+    const stored = await fs24.promises.readFile(stampPath, "utf8").catch(() => null);
+    const st = stored !== null && stored.trim() === stamp3 ? await fs24.promises.stat(zipPath).catch(() => null) : null;
+    if (st) {
+      return { ok: true, path: zipPath, bytes: st.size, bytes_human: formatBytes(st.size), verified: true, verify_errors: [], up_to_date: true, note: "The zip already verified against this manifest: it was not written again." };
+    }
+    if (stored === null && fs24.existsSync(zipPath)) {
+      return { ok: false, status: "conflict", path: zipPath, error: "conflict", message: `${zipPath} already exists and was not written by this tool, so it was left alone. Move or rename it and call again.` };
+    }
+    const fresh = { stamp: stamp3, state: "running", promise: Promise.resolve(), result: null };
+    fresh.promise = zipCollect(dest, manifest, stamp3).then(
+      (r) => {
+        fresh.state = "done";
+        fresh.result = r;
+      },
+      (err) => {
+        fresh.state = "done";
+        fresh.result = { ok: false, error: `The zip could not be written: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    );
+    zipJobs.set(key, fresh);
+    job = fresh;
+  }
+  if (job.state === "running") {
+    await Promise.race([job.promise, sleep(Math.max(1e3, deadline - Date.now()))]);
+  }
+  if (job.state === "running") {
+    return { ok: false, status: "running", path: zipPath, message: "The zip is still being written (and read back to verify it) in the background. Call ae_collect_files again with the same arguments to get the result." };
+  }
+  zipJobs.delete(key);
+  return job.result ?? { ok: false, error: "The zip job ended without a result." };
+}
+async function zipCollect(dest, manifest, stamp3) {
+  const root = path23.basename(dest);
+  const zipPath = `${dest}.zip`;
+  const inputs = [];
+  const expected = /* @__PURE__ */ new Map();
+  for (const f of manifest.files) {
+    const abs = path23.join(dest, ...f.path.split("/"));
+    const st = await fs24.promises.stat(abs);
+    const name = `${root}/${f.path}`;
+    inputs.push({ name, file: abs, mtime: st.mtime });
+    expected.set(name, { bytes: st.size, sha1: f.sha1 });
+  }
+  for (const extra of ["manifest.json", "collect-report.md", "collect-report.json"]) {
+    const abs = path23.join(dest, extra);
+    if (fs24.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs24.statSync(abs).mtime });
+  }
+  await writeFileAtomic(`${zipPath}.stamp`, `pending ${stamp3}`);
+  const written = await writeZip(zipPath, inputs);
+  const check = await verifyZip(zipPath, expected);
+  if (check.ok) await writeFileAtomic(`${zipPath}.stamp`, stamp3);
+  return { ok: check.ok, path: zipPath, entries: written.entries, bytes: written.bytes, bytes_human: formatBytes(written.bytes), zip64: written.zip64, verified: check.ok, verify_errors: check.errors };
+}
+async function statSequenceOutput(pattern) {
+  const dir = path23.dirname(pattern);
+  const base = path23.basename(pattern);
+  const m = FRAME_TOKEN.exec(base);
+  const re = new RegExp(`^${escapeRe(base.slice(0, m.index))}\\d{${m[1].length},}${escapeRe(base.slice(m.index + m[0].length))}$`, WIN_OR_MAC ? "i" : "");
+  const names = await fs24.promises.readdir(dir);
+  let frames = 0;
+  let bytes = 0;
+  let oldest = Infinity;
+  let newest = 0;
+  for (const n of names) {
+    if (!re.test(n)) continue;
+    const st = await fs24.promises.stat(path23.join(dir, n)).catch(() => null);
+    if (!st || !st.isFile()) continue;
+    frames++;
+    bytes += st.size;
+    oldest = Math.min(oldest, st.mtimeMs);
+    newest = Math.max(newest, st.mtimeMs);
+  }
+  return { frames, bytes, oldest: frames > 0 ? oldest : 0, newest };
+}
+function diffReports(prev, cur) {
+  if (!prev || !prev.generated) return null;
+  const pf = new Map((prev.footage ?? []).map((f) => [pathKey2(f.file), f.bytes]));
+  const cf = new Map(cur.footage.map((f) => [pathKey2(f.file), f.bytes]));
+  const added = cur.footage.filter((f) => !pf.has(pathKey2(f.file))).map((f) => f.file);
+  const removed = (prev.footage ?? []).filter((f) => !cf.has(pathKey2(f.file))).map((f) => f.file);
+  const changed = cur.footage.filter((f) => pf.has(pathKey2(f.file)) && pf.get(pathKey2(f.file)) !== f.bytes).map((f) => f.file);
+  const pc = new Set((prev.comps ?? []).map((c) => c.name));
+  const cc = new Set(cur.comps.map((c) => c.name));
+  return {
+    since: prev.generated,
+    footage_added: added.slice(0, MAX_LIST2),
+    footage_removed: removed.slice(0, MAX_LIST2),
+    footage_changed: changed.slice(0, MAX_LIST2),
+    comps_added: [...cc].filter((n) => !pc.has(n)).slice(0, MAX_LIST2),
+    comps_removed: [...pc].filter((n) => !cc.has(n)).slice(0, MAX_LIST2),
+    expressions_before: prev.expressions?.count ?? null,
+    expressions_now: cur.expressions.count
+  };
+}
+async function buildReport2(ctx, opts, toolName) {
+  const info = await read(ctx, "collectInfo", {}, toolName);
+  const foot = await readAllFootage(ctx, toolName);
+  const project2 = info.project_path;
+  let pStat = null;
+  try {
+    pStat = project2 === "<unsaved>" ? null : fs24.statSync(project2);
+  } catch {
+    pStat = null;
+  }
+  const footEntries = foot.entries.filter((e) => !e.proxy_only);
+  const resolved = await resolveAll(footEntries, { include_proxies: false });
+  const footage = footEntries.slice(0, MAX_LIST2).map((e) => {
+    const r = resolved.get(sourceKey(e.file, e.sequence));
+    return {
+      item_id: e.item_id,
+      name: e.name,
+      file: e.file,
+      bin: e.bin,
+      sequence: e.sequence,
+      missing: e.missing,
+      used_in: e.used_in,
+      bytes: r && r.files.length ? r.files.reduce((n, f) => n + f.bytes, 0) : null,
+      ...r?.frames ? { frames: r.frames } : {},
+      ...r?.error ? { problem: r.error } : {},
+      proxy: e.proxy ? { file: e.proxy.file, in_use: e.proxy.in_use } : null
+    };
+  });
+  let fonts;
+  try {
+    const f = await read(ctx, "fontsInUse", {}, toolName);
+    fonts = (f.fonts ?? []).slice(0, MAX_LIST2);
+  } catch (err) {
+    fonts = { error: `Fonts could not be read: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const outputs = [];
+  let notHashed = 0;
+  for (const o of info.render_outputs.slice(0, MAX_LIST2)) {
+    const row = { comp: o.comp, status: o.status, output_module: o.output_module, file: o.file, exists: false, bytes: null, mtime: null, newer_than_project: null, sha1: null };
+    if (o.file && FRAME_TOKEN.test(path23.basename(o.file))) {
+      try {
+        const seqInfo = await statSequenceOutput(o.file);
+        row.frames = seqInfo.frames;
+        row.exists = seqInfo.frames > 0;
+        row.bytes = seqInfo.bytes;
+        row.mtime = seqInfo.newest > 0 ? new Date(seqInfo.newest).toISOString() : null;
+        row.newer_than_project = pStat && seqInfo.frames > 0 ? seqInfo.oldest >= pStat.mtimeMs : null;
+        row.note = seqInfo.frames > 0 ? `image sequence: ${seqInfo.frames} frame(s), frames not hashed` : "no frames of this image sequence are on disk";
+      } catch {
+        row.note = "the folder of this image sequence is not on disk";
+      }
+    } else if (o.file) {
+      try {
+        const st = await fs24.promises.stat(o.file);
+        row.exists = st.isFile();
+        row.bytes = st.size;
+        row.mtime = st.mtime.toISOString();
+        row.newer_than_project = pStat ? st.mtimeMs >= pStat.mtimeMs : null;
+        if (row.exists && opts.hash_outputs) {
+          if (opts.deadline !== void 0 && Date.now() > opts.deadline) {
+            row.note = "not hashed: max_seconds ran out (call again to hash it)";
+            notHashed++;
+          } else if (st.size <= HASH_LIMIT) row.sha1 = await sha1File(o.file);
+          else row.note = `larger than ${formatBytes(HASH_LIMIT)}: not hashed`;
+        }
+        if (row.exists && st.size === 0) row.note = "the file is empty";
+      } catch {
+        row.note = "the file is not on disk";
+      }
+    }
+    outputs.push(row);
+  }
+  let checkpoints = { dir: "", count: 0, latest: [] };
+  if (project2 !== "<unsaved>") {
+    const dir = checkpointDirFor(project2);
+    try {
+      const names = (await fs24.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
+      checkpoints = { dir, count: names.length, latest: names.slice(-5).reverse() };
+    } catch {
+      checkpoints = { dir, count: 0, latest: [] };
+    }
+  }
+  const m = opts.manifest === void 0 ? await readManifest(opts.dest) : opts.manifest;
+  const report = {
+    generated: (/* @__PURE__ */ new Date()).toISOString(),
+    project: { path: project2, name: path23.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
+    ae: info.ae,
+    comps: info.comps,
+    comps_truncated: info.comps_truncated,
+    footage,
+    footage_truncated: footEntries.length > MAX_LIST2,
+    fonts,
+    effects: info.effects,
+    effects_truncated: info.effects_truncated === true,
+    expressions: info.expressions,
+    outputs_not_hashed: notHashed,
+    render_outputs: outputs,
+    checkpoints,
+    collect: m ? { dest: opts.dest, complete: m.complete, files: m.files.length, relinked: m.relinked, updated: m.updated } : null,
+    collect_stamp: m ? zipStamp(m) : null,
+    not_collected: NOT_COLLECTED,
+    changes_since_last_report: null
+  };
+  let prev = null;
+  try {
+    prev = JSON.parse(await fs24.promises.readFile(path23.join(opts.dest, "collect-report.json"), "utf8"));
+  } catch {
+    prev = null;
+  }
+  report.changes_since_last_report = diffReports(prev, report);
+  return report;
+}
+function renderReportMarkdown(r) {
+  const L = [];
+  const ae = r.ae;
+  L.push(`# ${r.project.name} - delivery note`, "");
+  L.push(`Generated ${r.generated}`, "");
+  L.push("## Project", "");
+  L.push(`- File: \`${r.project.path}\`${r.project.bytes !== null ? ` (${formatBytes(r.project.bytes)}, saved ${r.project.mtime})` : ""}`);
+  L.push(`- After Effects ${ae.version ?? "?"}${ae.build_number !== void 0 ? ` (build ${ae.build_number}${ae.build_name ? `, ${ae.build_name}` : ""})` : ""}${ae.os ? ` on ${ae.os}` : ""}`);
+  if (r.collect) L.push(`- Collected into \`${r.collect.dest}\`: ${r.collect.files} files, ${r.collect.complete ? "complete" : "incomplete"}${r.collect.relinked ? ", relinked" : ""}`);
+  L.push("", `## Comps (${r.comps.length}${r.comps_truncated ? "+" : ""})`, "");
+  L.push("| Comp | Size | Frame rate | Duration | Layers |", "| --- | --- | --- | --- | --- |");
+  for (const c of r.comps) L.push(`| ${c.name} | ${c.width}x${c.height} | ${c.fps} | ${c.duration.toFixed(2)} s | ${c.num_layers} |`);
+  L.push("", `## Footage (${r.footage.length}${r.footage_truncated ? "+" : ""})`, "");
+  L.push("| Name | File | Size | Used in | Notes |", "| --- | --- | --- | --- | --- |");
+  for (const f of r.footage) {
+    const notes = [f.missing ? "missing in AE" : "", f.problem ?? "", f.sequence ? `sequence${f.frames ? `, ${f.frames.count} frames${f.frames.gaps ? `, ${f.frames.gaps} missing` : ""}` : ""}` : "", f.proxy ? "proxy" : ""].filter(Boolean).join("; ");
+    L.push(`| ${f.name} | \`${f.file}\` | ${f.bytes === null ? "?" : formatBytes(f.bytes)} | ${f.used_in} | ${notes} |`);
+  }
+  L.push("", "## Fonts", "");
+  if (Array.isArray(r.fonts)) {
+    if (r.fonts.length === 0) L.push("None found.");
+    for (const f of r.fonts) L.push(`- ${f.font}${f.uses !== void 0 ? ` (${f.uses} use${f.uses === 1 ? "" : "s"})` : ""}${f.missing ? " - missing on this machine" : ""}`);
+  } else {
+    L.push(r.fonts.error);
+  }
+  L.push("", "## Effects and expressions", "");
+  L.push(`- Expressions: ${r.expressions.count}${r.expressions.truncated ? " (partial: the scan stopped at its limit)" : ""}`);
+  for (const e of r.effects) L.push(`- ${e.name} (\`${e.match_name}\`) x ${e.count}`);
+  if (r.effects_truncated) L.push("- (the effects list was cut at 500 kinds)");
+  L.push("", "## Render outputs", "");
+  if (r.render_outputs.length === 0) L.push("The render queue is empty.");
+  for (const o of r.render_outputs) {
+    const verdict = !o.file ? "no file" : !o.exists ? "NOT ON DISK" : o.bytes === 0 ? "EMPTY" : o.newer_than_project === false ? "older than the saved project" : "ok";
+    L.push(`- ${o.comp ?? "?"} (${o.output_module ?? "?"}): ${o.file ?? "no file"} - ${verdict}${o.bytes !== null ? `, ${formatBytes(o.bytes)}` : ""}${o.sha1 ? `, sha1 ${o.sha1}` : ""}${o.note ? ` (${o.note})` : ""}`);
+  }
+  L.push("", "## Checkpoints", "");
+  L.push(`${r.checkpoints.count} in \`${r.checkpoints.dir || "-"}\`${r.checkpoints.latest.length ? `; latest: ${r.checkpoints.latest.join(", ")}` : ""}`);
+  if (r.changes_since_last_report) {
+    const c = r.changes_since_last_report;
+    L.push("", `## Changes since ${String(r.changes_since_last_report.since)}`, "");
+    for (const k of ["footage_added", "footage_removed", "footage_changed", "comps_added", "comps_removed"]) {
+      const v = c[k] ?? [];
+      if (v.length) L.push(`- ${k.replace("_", " ")}: ${v.join(", ")}`);
+    }
+  }
+  L.push("", "## Not collected", "");
+  for (const n of r.not_collected) L.push(`- ${n}`);
+  return L.join("\n") + "\n";
+}
+async function reportHandler(args, ctx) {
+  const tool = "ae_collect_report";
+  const badDest = destProblem(args.dest);
+  if (badDest) return bad2(badDest);
+  const state = await read(ctx, "collectState", {}, tool);
+  if (state.project_path === "<unsaved>" && !args.dest) return bad2("The project has never been saved: give dest.");
+  const dest = destFolder(state.project_path, args.dest);
+  const report = await buildReport2(ctx, { dest, hash_outputs: args.hash_outputs !== false, deadline: Date.now() + (args.max_seconds ?? 50) * 1e3 }, tool);
+  const format = args.format ?? "markdown";
+  let written = null;
+  let writeError = null;
+  if (args.write !== false) {
+    try {
+      written = path23.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
+      await writeFileAtomic(written, format === "json" ? JSON.stringify(report, null, 2) : renderReportMarkdown(report));
+      await writeFileAtomic(path23.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
+    } catch (err) {
+      writeError = `The report could not be written: ${err instanceof Error ? err.message : String(err)}`;
+      written = null;
+    }
+  }
+  if (format === "json") return { format, written, write_error: writeError, report };
+  const text = renderReportMarkdown(report);
+  return {
+    format,
+    written,
+    write_error: writeError,
+    markdown: text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) : text,
+    truncated: text.length > MAX_TEXT
+  };
+}
+function markReopenedSafely2() {
+  try {
+    getSessionTracker()?.markReopened();
+  } catch {
+  }
+}
+function expectedRelink(m) {
+  const main = /* @__PURE__ */ new Set();
+  const proxy = /* @__PURE__ */ new Set();
+  for (const src of m.sources) {
+    if (!src.dest_first) continue;
+    const into = src.role === "main" ? main : proxy;
+    for (const id of src.item_ids) into.add(id);
+  }
+  return { main: [...main], proxy: [...proxy] };
+}
+function pointsAt(actual, to, sequence) {
+  if (!actual) return false;
+  const a = pathKey2(actual);
+  const t = pathKey2(to);
+  if (a === t) return true;
+  return sequence && a.replace(/\/[^/]*$/, "") === t.replace(/\/[^/]*$/, "");
+}
+function verifyItemMismatches(relink, verify, trimmed, expected) {
+  const m = [];
+  const items = relink.items ?? [];
+  if (items.length === 0 && relink.relinked + relink.proxies_relinked > 0) {
+    m.push({ path: "verify", expected: "a per-item result from the relink", actual: null, message: "The relink reported success but gave no per-item results, so nothing could be checked against the read-back." });
+    return m;
+  }
+  if (relink.items_truncated) m.push({ path: "verify.items", expected: "every relinked item checked", actual: items.length, message: `Only the first ${items.length} relinked items were checked against the read-back.` });
+  const checks = new Map((verify.item_checks ?? []).map((c) => [c.item_id, c]));
+  const found = [];
+  const note = (p, exp, actual, message) => found.push({ path: p, expected: exp, actual, message });
+  if (expected && !relink.items_truncated) {
+    const mainDone = new Set(items.filter((i) => i.to !== null).map((i) => i.item_id));
+    const proxyDone = new Set(items.filter((i) => i.proxy_to !== null).map((i) => i.item_id));
+    const failed = new Set(relink.errors.filter((e) => e.item_id !== null).map((e) => `${e.role}:${e.item_id}`));
+    for (const id of expected.main) {
+      if (!mainDone.has(id) && !failed.has(`main:${id}`) && !failed.has(`layered:${id}`)) {
+        note(`items.${id}.missing`, "relinked in the copy", null, `item ${id} was collected but the relink did not find or relink it in the copy: it still points at the original footage`);
+      }
+    }
+    for (const id of expected.proxy) {
+      if (!proxyDone.has(id) && !failed.has(`proxy:${id}`)) {
+        note(`items.${id}.proxy_missing`, "proxy relinked in the copy", null, `item ${id}'s proxy was collected but the relink did not find or relink it in the copy: it still points at the original proxy`);
+      }
+    }
+  }
+  for (const it of items) {
+    const c = checks.get(it.item_id);
+    const label = `"${it.name}" (item ${it.item_id})`;
+    if (!c) {
+      note(`items.${it.item_id}`, "read back", null, `${label} was not in the read-back`);
+      continue;
+    }
+    if (!c.found) {
+      if (!trimmed) note(`items.${it.item_id}`, "present in the copy", "gone", `${label} is gone from the copy`);
+      continue;
+    }
+    if (c.name !== it.name) note(`items.${it.item_id}.name`, it.name, c.name, `${label}: the name changed to "${c.name}"`);
+    if (it.to && !pointsAt(c.file, it.to, it.sequence)) note(`items.${it.item_id}.file`, it.to, c.file, `${label} does not point at its collected file`);
+    if (it.proxy_to && !pointsAt(c.proxy_file, it.proxy_to, it.proxy_sequence)) note(`items.${it.item_id}.proxy`, it.proxy_to, c.proxy_file, `${label}: the proxy does not point at its collected file`);
+    if (c.use_proxy !== null && c.use_proxy !== it.use_proxy) note(`items.${it.item_id}.use_proxy`, it.use_proxy, c.use_proxy, `${label}: the proxy switch changed (relinking switched it ${c.use_proxy ? "on" : "off"})`);
+  }
+  m.push(...found.slice(0, MAX_ITEM_MISMATCHES));
+  if (found.length > MAX_ITEM_MISMATCHES) {
+    m.push({ path: "items", expected: 0, actual: found.length, message: `${found.length - MAX_ITEM_MISMATCHES} more relinked item(s) differ from what the relink intended` });
+  }
+  return m;
+}
+function relinkMismatches(original, before, after, extra) {
+  const m = [];
+  if (extra.phaseError) m.push({ path: "relink", expected: "the copy relinked and saved", actual: extra.phaseError, message: `Relinking the copy failed: ${extra.phaseError}. The copy was not saved.` });
+  if (extra.restoreError) {
+    m.push({ path: "reopen", expected: original, actual: null, message: `The original project could not be reopened: ${extra.restoreError}. Open ${original} by hand (File > Open); it was not changed.` });
+  }
+  if (extra.relink && extra.relink.errors_total > 0) {
+    m.push({ path: "relink.errors", expected: 0, actual: extra.relink.errors_total, message: `${extra.relink.errors_total} item(s) could not be relinked or trimmed in the copy (see relink.errors)` });
+  }
+  if (after) {
+    expectThat(m, pathKey2(after.project_path) === pathKey2(original), "project_path", original, after.project_path, "The original project is not the open one again");
+    expectThat(m, after.dirty === false, "dirty", false, after.dirty, "The reopened original has unsaved changes");
+    if (before) expectThat(m, after.num_items === before.num_items, "num_items", before.num_items, after.num_items, "The reopened original has a different number of items");
+  }
+  return m;
+}
+async function relinkHandler(args, ctx) {
+  const tool = "ae_collect_relink";
+  ctx.quarantine.assertClear();
+  const original = args.expect.project_path;
+  if (original === "<unsaved>") return bad2("The project has never been saved: there is nothing to collect or reopen.");
+  const badDest = destProblem(args.dest);
+  if (badDest) return bad2(badDest);
+  const dest = destFolder(original, args.dest);
+  const manifest = await readManifest(dest);
+  if (!manifest) return bad2(`No manifest in ${dest}. Run ae_collect_files with dry_run false first.`);
+  if (!manifest.complete) return bad2("The collect is not complete. Call ae_collect_files again until it says complete.");
+  if (pathKey2(manifest.project.path) !== pathKey2(original)) return bad2(`The collect in ${dest} is of ${manifest.project.path}, not the open project.`);
+  const copyPath = path23.join(dest, manifest.project.name);
+  if (!fs24.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
+  if (manifest.relinked) return bad2("The copy is already relinked. Run ae_collect_files with restart: true to copy the .aep again first.");
+  const mappings = buildMappings(manifest, dest);
+  if (mappings.length === 0) return bad2("The manifest has nothing to relink.");
+  const missing = mappings.filter((x) => !fs24.existsSync(x.to));
+  if (missing.length) return bad2(`${missing.length} collected file(s) are missing from ${dest}: ${missing[0].to}`, { missing: missing.slice(0, 20).map((x) => x.to) });
+  let reduceTo;
+  if (args.reduce_to_comp_ids?.length) {
+    const info = await read(ctx, "collectInfo", { scan: false }, tool);
+    reduceTo = [];
+    for (const id of args.reduce_to_comp_ids) {
+      const c = info.comps.find((x) => x.id === id);
+      if (!c) return bad2(`No comp with id ${id}${info.comps_truncated ? " in the first 500 comps" : ""}.`);
+      reduceTo.push({ id, name: c.name });
+    }
+  }
+  const removeUnused = args.remove_unused ?? manifest.options.only_used;
+  const trimmed = removeUnused || !!reduceTo;
+  const opId = ctx.bridge.newOpId();
+  let seq = 0;
+  const host = (fn, a, mutates) => ctx.bridge.evalRaw({
+    id: `${opId}_${++seq}`,
+    script: buildJsxCall(fn, a),
+    label: `${tool} (${fn})`,
+    // A close and open of a big project is slow: wait, never abort an evalScript in flight.
+    timeoutMs: SLOW_TIMEOUT_MS,
+    mutates,
+    toolName: tool
+  });
+  try {
+    return await ctx.queue.run(tool, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, args.expect, opId);
+      if (guard.dirty !== false) {
+        return bad2("The project has unsaved changes (or AE could not say). Save it first (ae_save): relinking closes it without saving.");
+      }
+      const before = (await host("collectState", {}, false)).result;
+      let phaseError = null;
+      let verifyError = null;
+      let relink = null;
+      let verify = null;
+      try {
+        await host("collectSwitch", { to_path: copyPath, expect_open: [original], label: "Open the collected copy" }, true);
+      } catch (err) {
+        const st = await host("collectState", {}, false).then((r) => r.result).catch(() => null);
+        if (st && pathKey2(st.project_path) === pathKey2(original)) throw err;
+        phaseError = err instanceof Error ? err.message : String(err);
+      } finally {
+        markReopenedSafely2();
+      }
+      if (!phaseError) {
+        try {
+          relink = (await host(
+            "collectRelink",
+            { expect: { project_path: copyPath }, mappings, remove_unused: removeUnused, reduce_to: reduceTo, label: "Relink collected footage" },
+            true
+          )).result;
+        } catch (err) {
+          phaseError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      if (!phaseError && relink) {
+        try {
+          verify = (await host("collectVerify", { mappings, items: relink.items ?? [] }, false)).result;
+        } catch (err) {
+          verifyError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      const relinkOk = !phaseError && !verifyError && relink !== null && verify !== null;
+      let restoreError = null;
+      let reopened = null;
+      let saveError = null;
+      try {
+        reopened = (await host(
+          "collectSwitch",
+          { to_path: original, expect_open: [copyPath, "<unsaved>"], save_first: relinkOk, discard_changes: !relinkOk, label: "Reopen the original project" },
+          true
+        )).result;
+      } catch (err) {
+        restoreError = err instanceof Error ? err.message : String(err);
+        if (relinkOk) {
+          const st = await host("collectState", {}, false).then((r) => r.result).catch(() => null);
+          if (st && pathKey2(st.project_path) === pathKey2(copyPath)) {
+            try {
+              reopened = (await host(
+                "collectSwitch",
+                { to_path: original, expect_open: [copyPath, "<unsaved>"], save_first: false, discard_changes: true, label: "Reopen the original project (copy not saved)" },
+                true
+              )).result;
+              saveError = restoreError;
+              restoreError = null;
+            } catch (err2) {
+              restoreError = err2 instanceof Error ? err2.message : String(err2);
+            }
+          }
+        }
+      } finally {
+        markReopenedSafely2();
+      }
+      const afterRead = await readAfterWrite(opId, async () => (await host("collectState", {}, false)).result);
+      const mismatches = relinkMismatches(original, before, afterRead.value, { phaseError, restoreError, relink, trimmed });
+      if (afterRead.failure) mismatches.push(afterRead.failure);
+      if (verifyError) {
+        mismatches.push({
+          path: "read_back",
+          expected: "a read-back of the relinked copy",
+          actual: null,
+          message: `The relink ran in the copy but reading it back failed (${verifyError}). The copy was discarded unsaved because it could not be verified; the original is unchanged. Run ae_collect_relink again.`
+        });
+      }
+      const itemMismatches2 = relinkOk && relink && verify ? verifyItemMismatches(relink, verify, trimmed, expectedRelink(manifest)) : [];
+      mismatches.push(...itemMismatches2);
+      const copySaved = relinkOk && reopened !== null && reopened.saved === true;
+      if (relinkOk && !copySaved) {
+        mismatches.push({
+          path: "copy.saved",
+          expected: "the relinked copy saved",
+          actual: reopened ? reopened.saved : null,
+          message: `The relinked copy was not saved (${saveError ? `the save failed: ${saveError}` : "the save or the switch back failed"}), so the file on disk is not relinked. The manifest still says relinked: false.`
+        });
+      }
+      if (copySaved && itemMismatches2.length === 0 && (relink?.errors_total ?? 0) === 0) {
+        try {
+          const m2 = { ...manifest, relinked: true, updated: (/* @__PURE__ */ new Date()).toISOString() };
+          const aep = m2.files.find((f) => f.role === "project");
+          if (aep) {
+            aep.sha1 = await sha1File(copyPath);
+            aep.bytes = fs24.statSync(copyPath).size;
+          }
+          await writeFileAtomic(manifestPath(dest), JSON.stringify(m2));
+        } catch (err) {
+          mismatches.push({ path: "manifest", expected: "relinked: true", actual: null, message: `The copy is relinked but the manifest could not be updated: ${err instanceof Error ? err.message : String(err)}` });
+        }
+      }
+      const receipt = buildReceipt({ before, after: afterRead.value, customMismatches: mismatches });
+      return {
+        op_id: opId,
+        applied: true,
+        copy_path: copyPath,
+        copy_saved: copySaved,
+        original_reopened: !restoreError && !!afterRead.value && pathKey2(afterRead.value.project_path) === pathKey2(original),
+        relinked: relink?.relinked ?? 0,
+        proxies_relinked: relink?.proxies_relinked ?? 0,
+        removed_unused: relink?.removed_unused ?? null,
+        reduced: relink?.reduced ?? null,
+        errors: relink?.errors ?? [],
+        errors_total: relink?.errors_total ?? 0,
+        in_copy: verify ? {
+          checked: verify.checked,
+          pointing_at_collected: verify.pointing_at_collected,
+          elsewhere: verify.elsewhere,
+          elsewhere_total: verify.elsewhere_total ?? verify.elsewhere.length,
+          elsewhere_truncated: verify.elsewhere_truncated === true
+        } : null,
+        lost: "The undo history and open viewers of the original project (it was closed and reopened).",
+        receipt
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+var crypto11, fs24, path23, import_node_stream, import_promises, zlib, MAX_LIST2, MAX_TEXT, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED, statFile, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe, MAX_ITEM_MISMATCHES, collectTools;
+var init_collect = __esm({
+  "src/tools/ext/collect.ts"() {
+    "use strict";
+    crypto11 = __toESM(require("node:crypto"), 1);
+    fs24 = __toESM(require("node:fs"), 1);
+    path23 = __toESM(require("node:path"), 1);
+    import_node_stream = require("node:stream");
+    import_promises = require("node:stream/promises");
+    zlib = __toESM(require("node:zlib"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_common();
+    init_mutate();
+    init_read_back();
+    init_session();
+    init_write_runner();
+    MAX_LIST2 = 500;
+    MAX_TEXT = 2e4;
+    WIN_OR_MAC = process.platform === "win32" || process.platform === "darwin";
+    DestSchema = external_exports.string().min(1).refine((p) => path23.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
+    AeCollectFilesSchema = external_exports.object({
+      dest: DestSchema,
+      dry_run: external_exports.boolean().optional().describe("Default true: report total bytes, the files, duplicates and what can't be collected, and copy nothing. Pass false to copy."),
+      only_used: external_exports.boolean().optional().describe("Leave out footage no comp uses (used_in 0). Default false."),
+      include_proxies: external_exports.boolean().optional().describe("Collect proxy files too. Default true."),
+      max_seconds: external_exports.number().min(5).max(600).optional().describe("How long one call copies before it stops between files and says what is left (default 50). Call again with the same arguments to continue."),
+      restart: external_exports.boolean().optional().describe("Copy the .aep again and ignore the manifest. Needed after a relink if the project changed since: a relinked copy is otherwise kept."),
+      zip: external_exports.boolean().optional().describe("When the collect is complete, also write <dest>.zip (ZIP64, streamed, stored for already-compressed media) and verify it by reading it back against the manifest."),
+      report: external_exports.enum(["markdown", "json", "none"]).optional().describe("Write the version report next to the manifest when complete. Default markdown."),
+      expect: ExpectSchema.optional().describe("If given, the open project must match, or the call refuses.")
+    });
+    AeCollectRelinkSchema = external_exports.object({
+      dest: DestSchema,
+      confirm_close_project: external_exports.literal(true).describe("Must be true. Relinking opens the copy, so the open project is closed without saving and reopened afterwards: its undo history and open viewers are lost."),
+      remove_unused: external_exports.boolean().optional().describe("Remove footage no comp uses from the COPY (removeUnusedFootage). Default: true when the collect used only_used."),
+      reduce_to_comp_ids: external_exports.array(external_exports.number().int()).min(1).max(500).optional().describe("Reduce the COPY to these comps and what they use (reduceProject)."),
+      expect: ExpectSchema
+    });
+    AeCollectReportSchema = external_exports.object({
+      dest: DestSchema,
+      format: external_exports.enum(["markdown", "json"]).optional().describe("What to return. Default markdown."),
+      write: external_exports.boolean().optional().describe("Write collect-report.md (or .json) and the .json used for the next 'changes since' diff into dest. Default true; dest is created."),
+      hash_outputs: external_exports.boolean().optional().describe("sha1 the render outputs on disk (up to 512 MB each). Default true."),
+      max_seconds: external_exports.number().min(5).max(600).optional().describe("How long hashing the render outputs may take (default 50). Outputs not hashed by then say so in their note; call again to hash them.")
+    });
+    RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+    statFile = async (p) => {
+      const st = await fs24.promises.stat(p);
+      if (!st.isFile()) throw new Error("not a file");
+      return { path: p, bytes: st.size, mtimeMs: st.mtimeMs };
+    };
+    CRC_TABLE = (() => {
+      const t = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+        t[n] = c >>> 0;
+      }
+      return t;
+    })();
+    Crc32 = class {
+      c = 4294967295;
+      update(buf) {
+        let c = this.c;
+        for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 255] ^ c >>> 8;
+        this.c = c;
+        return this;
+      }
+      get value() {
+        return (this.c ^ 4294967295) >>> 0;
+      }
+    };
+    STORED_EXT = /* @__PURE__ */ new Set([
+      ".mov",
+      ".mp4",
+      ".m4v",
+      ".mxf",
+      ".avi",
+      ".mkv",
+      ".webm",
+      ".r3d",
+      ".braw",
+      ".exr",
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".gif",
+      ".mp3",
+      ".aac",
+      ".m4a",
+      ".flac",
+      ".ogg",
+      ".zip",
+      ".gz",
+      ".7z",
+      ".rar",
+      ".heic",
+      ".jp2"
+    ]);
+    U32_MAX = 4294967295;
+    ZIP64_AT = 2147483647;
+    ZipOut = class {
+      offset = 0;
+      ws;
+      failure = null;
+      constructor(p) {
+        this.ws = fs24.createWriteStream(p);
+        this.ws.on("error", (e) => {
+          this.failure = e;
+        });
+      }
+      write(buf) {
+        if (this.failure) return Promise.reject(this.failure);
+        this.offset += buf.length;
+        return new Promise((res, rej) => this.ws.write(buf, (e) => e ? rej(e) : res()));
+      }
+      close() {
+        if (this.failure) return Promise.reject(this.failure);
+        return new Promise((res, rej) => {
+          this.ws.end((e) => e || this.failure ? rej(e ?? this.failure) : res());
+        });
+      }
+    };
+    NOT_COLLECTED = [
+      "Fonts: the DOM can't list font files. ae_fonts names the fonts the project uses; install them on the receiving machine.",
+      "Files that effects or 3D layers point to (LUTs in Apply Color LUT or Lumetri, glTF .bin files and textures, textures inside .c4d, plug-in assets): the DOM doesn't list them. AE's own Collect Files has the same gap.",
+      "Scripts, presets, expression-referenced files and anything the project reaches by absolute path through a script."
+    ];
+    read = (ctx, fn, args, toolName) => ctx.bridge.callHost(fn, args, { label: `${toolName} (${fn})`, mutates: false, toolName }).then((r) => r.result);
+    bad2 = (message, extra = {}) => ({ ok: false, error: "bad_args", message, ...extra });
+    OWN_REPORT_FILES = /* @__PURE__ */ new Set(["collect-report.md", "collect-report.json", "collect-report.md.tmp", "collect-report.json.tmp"]);
+    sleep = (ms) => new Promise((resolve4) => {
+      setTimeout(resolve4, ms);
+    });
+    collectLocks = /* @__PURE__ */ new Set();
+    zipJobs = /* @__PURE__ */ new Map();
+    HASH_LIMIT = 512 * 1024 * 1024;
+    FRAME_TOKEN = /\[(#+)\]/;
+    escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    MAX_ITEM_MISMATCHES = 50;
+    collectTools = [
+      {
+        name: "ae_collect_files",
+        description: "Collect Files without AE's dialog. Default is a DRY RUN: total bytes, the files, shared footage (collected once), missing files, sequences with gaps, and what can't be collected (fonts, files that effects point to). With dry_run false it copies the saved .aep (Node fs, never save-as) and every footage file and proxy into <dest>/_Footage/<bin path>, with a manifest.json of sources, new paths, bytes and sha1. The project must be saved with no unsaved changes. A call works for max_seconds (default 50) and is resumable: call again with the same arguments. With zip, a complete collect also gets <dest>.zip (ZIP64, streamed, verified by reading it back) and with report the version report. Image sequences are found by file name (AE's DOM has no frame list). dest must be absolute and either new, empty or a previous collect of this project: nothing else is overwritten (a file already at a collected path is reported as a conflict). A zip runs in the background past max_seconds: call again for the result (nothing is copied while it runs). An existing <dest>.zip this tool did not write is left alone and reported as a conflict. One copying call per folder at a time (a second gets status busy). Proxies of comps are collected too. The report is rewritten only when the collect changed. It changes nothing in AE; relinking the copy is the separate ae_collect_relink.",
+        schema: AeCollectFilesSchema,
+        handler: (args, ctx) => collectFiles(args, ctx)
+      },
+      {
+        name: "ae_collect_relink",
+        description: "Point the COPY made by ae_collect_files at the collected footage. Relinking needs the copy open, so this CLOSES the open project without saving, opens the copy, relinks (replace / replaceWithSequence(file, false) / setProxy, keeping item names and proxy on/off), optionally removes unused footage or reduces the copy to chosen comps, saves the copy and reopens the original. The undo history and open viewers of the original are lost, and AE may raise a missing-footage dialog that blocks until it is answered (ae_dialogs, ae_dialog_respond). Needs confirm_close_project: true and a project with no unsaved changes. The original .aep is never modified. The read-back (a separate evalScript) checks the original is open again and unchanged, and that every relinked item points at its collected file and kept its name and proxy switch; the copy counts as relinked only if it was saved, no item failed, and every collected item (found in the copy by item id, then by path) read back right. Layered PSD/AI items are not replaced (replace() would flatten them): they are listed as errors to relink by hand. Comp proxies are relinked too. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeCollectRelinkSchema,
+        handler: (args, ctx) => relinkHandler(args, ctx)
+      },
+      {
+        name: "ae_collect_report",
+        description: "The version report, doubling as a delivery note: AE version and build, comps with their specs, footage with sizes and frame counts, fonts, effects, expression count, render-queue outputs (on disk, size, sha1, newer than the saved project), checkpoints, what is not collected, and what changed since the last report. Markdown or JSON; written next to the manifest by default. Read-only in AE.",
+        schema: AeCollectReportSchema,
+        handler: (args, ctx) => reportHandler(args, ctx)
+      }
+    ];
+  }
+});
+
+// src/tools/ext/deliver.ts
+function duplicateStageIds(stages) {
+  if (!stages) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const dup = /* @__PURE__ */ new Set();
+  for (const s of stages) {
+    const id = s.id ?? s.kind;
+    if (seen.has(id)) dup.add(id);
+    seen.add(id);
+  }
+  return [...dup];
+}
+function defaultStages() {
+  return [
+    { kind: "preflight" },
+    { kind: "house_style" },
+    { kind: "save" },
+    { kind: "render" },
+    { kind: "verify" },
+    { kind: "scrub" },
+    { kind: "save", id: "save_final", checkpoint: false },
+    { kind: "loudness" },
+    { kind: "collect", args: { dry_run: false } }
+  ];
+}
+function normalizeStages(stages) {
+  return stages.map((s) => {
+    const info = KIND_INFO[s.kind];
+    const def = {
+      id: s.id ?? s.kind,
+      kind: s.kind,
+      tool: s.tool ?? info.tools[0],
+      args: { ...s.args ?? {} },
+      optional: s.optional ?? info.optional,
+      per_output: s.per_output ?? info.per_output,
+      fail_on: s.fail_on ?? "blocker"
+    };
+    if (s.checkpoint !== void 0) def.checkpoint = s.checkpoint;
+    return def;
+  });
+}
+function checkpointDue(mode, def, takenSoFar) {
+  if (def.kind === "checkpoint") return false;
+  if (def.checkpoint !== void 0) return def.checkpoint;
+  if (mode === "none") return false;
+  if (!KIND_INFO[def.kind].writes) return false;
+  if (mode === "start") return takenSoFar === 0;
+  return true;
+}
+function findingsOf(res) {
+  const planErrors = Array.isArray(res.errors) ? res.errors.map(
+    (e) => e && typeof e === "object" ? { severity: "blocker", message: e.message ?? e.code, where: typeof e.comp === "string" ? e.comp : e.item !== void 0 ? `item ${String(e.item)}` : void 0 } : e
+  ) : [];
+  const list = [...Array.isArray(res.findings) ? res.findings : [], ...planErrors];
+  const out = [];
+  for (const f of list) {
+    if (out.length >= MAX_FINDINGS2) break;
+    if (f === null || typeof f !== "object") continue;
+    const o = f;
+    const message = o.message ?? o.msg ?? o.what;
+    if (message === void 0) continue;
+    let where;
+    if (typeof o.where === "string") where = o.where;
+    else if (o.where && typeof o.where === "object") where = o.where.layer ?? o.where.item ?? o.where.comp ?? o.where.path;
+    else if (typeof o.layer === "string") where = o.layer;
+    else if (typeof o.time === "number") where = `t=${o.time}s`;
+    out.push({ severity: String(o.severity ?? "note"), message: clip2(message, 300), ...where !== void 0 ? { where: clip2(where, 200) } : {} });
+  }
+  return out;
+}
+function countsText2(counts) {
+  if (counts === null || typeof counts !== "object") return "";
+  return Object.entries(counts).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${v} ${k}`).join(", ");
+}
+function leftoverOf(kind, r, problems) {
+  const stray = "Inspect the project and remove it before the run goes on (it would be saved into the .aep and collected); retry is refused, skip needs an acknowledgement.";
+  if (kind === "scrub") {
+    const st = r.imported_state;
+    const left = r.left_in_project;
+    if (st === "left" || st === "unknown" || left && typeof left === "object" && st !== "kept_in_use") {
+      const ids = left && typeof left === "object" ? ` (item ${String(left.item_id)}${left.comp_id !== void 0 ? `, comp ${String(left.comp_id)}` : ""})` : "";
+      return `The scrub check ${st === "unknown" ? "could not confirm it removed" : "left"} its temporary comp and imported render in the project${ids}. ${stray}`;
+    }
+  }
+  if (kind === "verify") {
+    const st = r.imported_item_state;
+    if (st === "left" || st === "unknown") {
+      return `The verify ${st === "unknown" ? "could not confirm it removed" : "left"} the imported render in the project${r.imported_item !== void 0 && r.imported_item !== null ? ` (item ${String(r.imported_item)})` : ""}. ${stray}`;
+    }
+  }
+  if ((kind === "scrub" || kind === "verify") && problems.some((m) => m?.path === "cleanup")) {
+    return `The ${kind} could not clean up after itself: ${clip2(problems.find((m) => m?.path === "cleanup")?.message ?? "cleanup failed", 200)} ${stray}`;
+  }
+  return null;
+}
+function classifyStageResult(kind, res) {
+  if (res === null || typeof res !== "object") return { status: "ok", summary: "done", findings: [] };
+  const r = res;
+  const mismatches = Array.isArray(r.receipt?.mismatches) ? r.receipt.mismatches : Array.isArray(r.mismatches) ? r.mismatches : [];
+  const problems = Array.isArray(r.problems) ? r.problems : [];
+  const leftover = leftoverOf(kind, r, problems);
+  if (leftover) return { status: "blocked", unverified: true, summary: leftover, findings: findingsOf(r) };
+  if (r.error === "read_back_failed" || mismatches.some((m) => m?.path === "read_back") || problems.some((m) => m?.path === "read_back")) {
+    return {
+      status: "blocked",
+      unverified: true,
+      summary: "The step was applied but its read-back failed (often a popup in AE). Inspect the project before running it again.",
+      findings: []
+    };
+  }
+  if (kind === "loudness" && r.ok === false && r.error === "no_audio") {
+    return { status: "warn", summary: `No audio to measure: ${clip2(r.message ?? "the comp has no layer with audio switched on", 300)}`, findings: [] };
+  }
+  if (r.ok === false || typeof r.error === "string") {
+    const error = typeof r.error === "string" ? r.error : "failed";
+    const message = typeof r.message === "string" ? ` ${clip2(r.message, 400)}` : "";
+    const reached = r.applied === true;
+    return { status: "blocked", summary: `${error}:${message}`.trim(), findings: findingsOf(r), ...reached ? { unverified: true, applied: true } : {} };
+  }
+  if (r.receipt?.matches === false || r.matches === false) {
+    if (kind === "verify") {
+      const failed = (Array.isArray(r.checks) ? r.checks : []).filter((c) => c && c.ok === false);
+      const text = failed.map((c) => `${c.what}: expected ${JSON.stringify(c.expected)}, got ${JSON.stringify(c.actual)}`).join("; ");
+      return {
+        status: "blocked",
+        summary: `The render does not match the comp${text ? ` (${clip2(text, 400)})` : ""}.`,
+        findings: failed.slice(0, MAX_FINDINGS2).map((c) => ({ severity: "blocker", message: clip2(`${c.what}: expected ${JSON.stringify(c.expected)}, got ${JSON.stringify(c.actual)}${c.note ? ` (${c.note})` : ""}`, 300) }))
+      };
+    }
+    return { status: "blocked", summary: "The read-back differs from what was asked.", findings: mismatches.slice(0, MAX_FINDINGS2).map((m) => ({ severity: "blocker", message: clip2(m?.message ?? "mismatch", 300) })) };
+  }
+  const findings = findingsOf(r);
+  const counts = countsText2(r.counts);
+  if (kind === "loudness") {
+    if (r.verdict === void 0 && r.state === "rendering" && typeof r.job_id === "string") {
+      return { status: "ok", running: true, summary: "The audio is still rendering.", findings: [] };
+    }
+    if (r.verdict !== null && typeof r.verdict === "object") {
+      const v = r.verdict;
+      const advice = Array.isArray(v.advice) && typeof v.advice[0] === "string" ? ` ${clip2(v.advice[0], 300)}` : "";
+      const lufs = typeof r.measurement?.integrated_lufs === "number" ? `${r.measurement.integrated_lufs} LUFS` : "";
+      const tp = typeof r.measurement?.true_peak_dbtp === "number" ? `, true peak ${r.measurement.true_peak_dbtp} dBTP` : "";
+      if (v.measurable === false) return { status: "blocked", summary: `The loudness could not be measured (silent or below the gate).${advice}`, findings };
+      if (v.passes === false) {
+        const why = v.loudness_ok === false ? "loudness off target" : v.true_peak_ok === false ? "true peak over the ceiling" : "does not meet the target";
+        return { status: "blocked", summary: `Loudness fails: ${why}${lufs ? ` (${lufs}${tp})` : ""}.${advice}`, findings };
+      }
+      return { status: "ok", summary: `loudness ok${lufs ? `: ${lufs}${tp}` : ""}`, findings };
+    }
+  }
+  if (kind === "collect") {
+    if (r.complete === false) {
+      const errs = typeof r.errors_total === "number" && r.errors_total > 0 ? ` ${r.errors_total} file(s) failed.` : "";
+      const left = typeof r.remaining === "number" && r.remaining > 0 ? ` ${r.remaining} file(s) left.` : "";
+      return { status: "blocked", summary: `The collect is not complete.${errs}${left} Retry continues it with the same arguments.`, findings };
+    }
+    if (r.dry_run === true) return { status: "warn", summary: "Dry run: nothing was copied. Set dry_run false in the collect stage's args.", findings };
+    const zip = r.zip && typeof r.zip === "object" ? r.zip : null;
+    if (zip && zip.ok !== true) {
+      const why = zip.status === "running" ? "is still being written in the background; retry asks again for the result" : `failed: ${clip2(zip.message ?? zip.error ?? "it did not verify against the manifest", 300)}`;
+      return { status: "blocked", summary: `The files were copied but the zip ${why}.`, findings };
+    }
+    if (zip && zip.verified === false) {
+      return { status: "blocked", summary: `The files were copied but the zip did not verify against the manifest${Array.isArray(zip.verify_errors) && zip.verify_errors[0] ? `: ${clip2(zip.verify_errors[0], 200)}` : ""}.`, findings };
+    }
+    const gaps = [];
+    if (typeof r.problems_total === "number" && r.problems_total > 0) gaps.push(`${r.problems_total} problem(s) with the footage`);
+    if (typeof r.no_file_items_total === "number" && r.no_file_items_total > 0) gaps.push(`${r.no_file_items_total} item(s) with no file`);
+    if (Array.isArray(r.sequences_with_gaps) && r.sequences_with_gaps.length > 0) gaps.push(`${r.sequences_with_gaps.length} sequence(s) with gaps`);
+    if (r.report && typeof r.report === "object" && typeof r.report.error === "string") gaps.push(`the report was not written (${clip2(r.report.error, 150)})`);
+    const copied = `collected${typeof r.files_total === "number" ? ` ${r.files_total} file(s)` : ""}`;
+    if (gaps.length > 0) return { status: "warn", summary: `${copied}, but ${gaps.join("; ")}`, findings };
+    return { status: "ok", summary: copied, findings };
+  }
+  if (typeof r.verdict === "string") {
+    const v = r.verdict;
+    if (v === "blocked" || v === "fail" || v === "failed") return { status: "blocked", summary: `${v}${counts ? ` (${counts})` : ""}`, findings };
+    if (v === "warnings" || v === "warn") return { status: "warn", summary: `${v}${counts ? ` (${counts})` : ""}`, findings };
+    if (v === "incomplete") {
+      if (kind === "preflight") return { status: "blocked", summary: "The preflight did not cover the whole project, so blockers may be missing from it. Run it again.", findings };
+      return { status: "warn", summary: "The check did not finish, so blockers may be missing from it.", findings };
+    }
+    return { status: "ok", summary: `${v}${counts ? ` (${counts})` : ""}`, findings };
+  }
+  if (r.pass === false) return { status: "blocked", summary: "The check did not pass.", findings };
+  if (kind === "house_style") {
+    const c = r.counts && typeof r.counts === "object" ? r.counts : {};
+    if ((c.medium ?? 0) > 0 || (c.low ?? 0) > 0) return { status: "warn", summary: `house style: ${counts}`, findings };
+    return { status: "ok", summary: r.clean === true ? "house style: clean" : `house style: ${counts || "no findings"}`, findings };
+  }
+  if (kind === "verify") {
+    return { status: "ok", summary: "The render matches the comp.", findings };
+  }
+  if (r.clean === false) return { status: "warn", summary: counts || "findings", findings };
+  return { status: "ok", summary: counts ? `ok (${counts})` : "ok", findings };
+}
+function worstOf(statuses) {
+  let worst = "ok";
+  for (const s of statuses) {
+    if (s === "skipped") continue;
+    if (STATUS_RANK[s] > STATUS_RANK[worst]) worst = s;
+  }
+  return worst;
+}
+function applyFailOn(c, def) {
+  if (def.fail_on === "warning" && c.status === "warn") return { ...c, status: "blocked", summary: `${c.summary} (this stage stops on warnings)` };
+  return c;
+}
+function extractJobIds(res) {
+  if (res === null || typeof res !== "object") return [];
+  const r = res;
+  const ids = [];
+  const add = (v) => {
+    if (typeof v === "string" && v.length > 0 && !ids.includes(v)) ids.push(v);
+  };
+  add(r.job_id);
+  if (Array.isArray(r.job_ids)) r.job_ids.forEach(add);
+  if (Array.isArray(r.jobs)) {
+    for (const j of r.jobs) if (j && typeof j === "object") add(j.job_id);
+  }
+  return ids.slice(0, MAX_OUTPUTS);
+}
+function extractBatchId(res) {
+  if (res === null || typeof res !== "object") return void 0;
+  const id = res.batch_id;
+  return typeof id === "string" && id.length > 0 ? id : void 0;
+}
+function batchOutputs(items) {
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items) {
+    if (it === null || typeof it !== "object") continue;
+    const o = it;
+    if (o.state !== "succeeded" && o.state !== "skipped") continue;
+    if (typeof o.output_path !== "string" || o.output_path.length === 0) continue;
+    if (out.some((x) => x.path === o.output_path)) continue;
+    out.push({
+      path: o.output_path,
+      ...typeof o.job_id === "string" ? { job_id: o.job_id } : {},
+      ...typeof o.comp === "string" && o.comp.length > 0 ? { comp: o.comp } : {},
+      ...SEQUENCE_PATTERN.test(o.output_path) ? { sequence: true } : {}
+    });
+  }
+  return out.slice(0, MAX_OUTPUTS);
+}
+function extractOutputs(res) {
+  if (res === null || typeof res !== "object") return [];
+  const r = res;
+  const out = [];
+  const add = (p, jobId) => {
+    if (typeof p !== "string" || p.length === 0) return;
+    if (out.some((o) => o.path === p)) return;
+    out.push({ path: p, ...typeof jobId === "string" ? { job_id: jobId } : {}, ...SEQUENCE_PATTERN.test(p) ? { sequence: true } : {} });
+  };
+  add(r.output_path, r.job_id);
+  for (const key of ["outputs", "files", "jobs", "renders"]) {
+    if (!Array.isArray(r[key])) continue;
+    for (const o of r[key]) {
+      if (typeof o === "string") add(o);
+      else if (o && typeof o === "object") add(o.path ?? o.output_path ?? o.file, o.job_id);
+    }
+  }
+  return out.slice(0, MAX_OUTPUTS);
+}
+function outputArgsFor(kind, output) {
+  for (const key of KIND_INFO[kind].output_keys) {
+    if (key === "job_id" && output.job_id) return { job_id: output.job_id };
+    if (key === "path" && output.path && !output.sequence) return { path: output.path };
+  }
+  return null;
+}
+function outputLabel(o) {
+  return o.path ?? o.job_id ?? "output";
+}
+function passes(s) {
+  return s.status === "ok" || s.status === "warn" || s.status === "skipped" || s.status === "unavailable" && s.def.optional;
+}
+function isPollable(s) {
+  if (s.kind !== "render" && s.kind !== "loudness") return false;
+  if (!s.batch_id && !(s.job_ids && s.job_ids.length > 0)) return false;
+  if (s.status === "running") return true;
+  if (s.status === "error") return s.error === "job_unknown" || s.error === "unavailable";
+  if (s.status === "blocked") return s.error === "render_failed" || s.error === "batch_stopped";
+  return false;
+}
+function validateStageDef(def) {
+  if (def === null || typeof def !== "object") return "The stage definition is not an object.";
+  const d = def;
+  const info = typeof d.kind === "string" && Object.prototype.hasOwnProperty.call(KIND_INFO, d.kind) ? KIND_INFO[d.kind] : void 0;
+  if (!info) return `Unknown stage kind "${String(d.kind)}".`;
+  if (typeof d.tool !== "string" || !info.tools.includes(d.tool)) return `A ${String(d.kind)} stage runs ${info.tools.join(" or ")}, not "${String(d.tool)}".`;
+  if (typeof d.id !== "string" || !StageIdSchema.safeParse(d.id).success) return "The stage id is not valid.";
+  if (d.args === null || typeof d.args !== "object" || Array.isArray(d.args)) return "The stage args are not an object.";
+  if ("expect" in d.args) return "The stage args contain expect: the guard is added for you.";
+  return null;
+}
+function stagePrecheck(def) {
+  if (def.kind === "collect" && (typeof def.args.dest !== "string" || def.args.dest.length === 0)) {
+    return "The collect stage needs args.dest (an absolute folder for the copy). Set it in the recipe, then retry.";
+  }
+  return null;
+}
+function currentStage(run) {
+  return run.stages.find((s) => !passes(s));
+}
+function deriveState(run) {
+  if (run.state === "cancelled") return "cancelled";
+  const cur = currentStage(run);
+  if (!cur) return "done";
+  if (cur.status === "running") return "waiting";
+  if (cur.status === "pending") return "in_progress";
+  return "blocked";
+}
+function summarizeStages(stages) {
+  const s = { pending: 0, in_flight: 0, running: 0, ok: 0, warn: 0, blocked: 0, error: 0, unavailable: 0, skipped: 0 };
+  for (const st of stages) s[st.status]++;
+  return s;
+}
+function describeError(err) {
+  if (err instanceof QuarantineBlockedError) return { error: "quarantine", message: clip2(err.message), applied: false };
+  if (err instanceof QueueWaitError) return { error: "queued", message: clip2(err.message), applied: false };
+  if (err instanceof BridgeError) {
+    if (err.kind === "guard" || err.kind === "queued") return { error: err.kind, message: clip2(err.message), applied: false };
+    return { error: err.kind, message: clip2(err.message), applied: "unknown" };
+  }
+  return { error: "error", message: clip2(err instanceof Error ? err.message : String(err)), applied: "unknown" };
+}
+function nextHint(run) {
+  const cur = currentStage(run);
+  if (run.state === "cancelled") return "The run was cancelled. Start a new one with action 'start'.";
+  if (!cur) return "Delivery is complete. Show Jay the report; the files are listed under outputs.";
+  if (run.state === "waiting") return `Stage "${cur.id}" is still running. Call ae_deliver_step with action 'next' again to check it.`;
+  if (run.state === "blocked") {
+    if (isPollable(cur) && cur.status !== "running") {
+      if (cur.batch_id) {
+        return `Stopped at stage "${cur.id}". Fix the cause, call ae_render_batch_resume (it keeps the items that finished), then ae_deliver_step with action 'next' to follow the batch again. 'retry' is refused for a batch: a new one would see the files this one wrote as someone else's recent files.`;
+      }
+      return `Stopped at stage "${cur.id}". Call ae_deliver_step with action 'next' to check its render or audio job again. 'retry' starts a new one, and is refused while the old one may still be running.`;
+    }
+    if (cur.status === "unavailable") return `Stage "${cur.id}" needs ${cur.tool}, which this server doesn't have. Make it optional in the recipe and retry, or skip it with an acknowledgement if Jay agrees.`;
+    return `Stopped at stage "${cur.id}". Fix what it reports, then call ae_deliver_step with action 'retry'. Skip it (action 'skip', with acknowledge) only if Jay accepts what it found.`;
+  }
+  return "Call ae_deliver_step with action 'next' to run the remaining stages.";
+}
+function renderReport(run) {
+  const head2 = [];
+  head2.push(`Delivery report: ${run.recipe}`);
+  head2.push(`Run ${run.id}, ${run.state}. Project ${run.project_path}${run.comp_name ? `, comp "${run.comp_name}"` : ""}${run.ae_version ? `, After Effects ${run.ae_version}` : ""}.`);
+  head2.push(`Started ${run.created_at}, last change ${run.updated_at}.`);
+  if (run.stop_reason) head2.push(`Stopped: ${clip2(run.stop_reason, 600)}`);
+  head2.push("");
+  head2.push("Stages");
+  const withKids = run.stages.filter((s) => (s.children ?? []).length > 0).length;
+  const perStage = Math.max(5, Math.min(MAX_SHOWN, Math.floor(MAX_SHOWN * 2 / Math.max(1, withKids))));
+  const row = (c) => `    ${clip2(c.output, 120)}: ${c.status}${c.summary ? ` - ${clip2(c.summary, 120)}` : ""}`;
+  const outs = [];
+  if (run.outputs.length > 0) {
+    outs.push("");
+    outs.push("Outputs");
+    for (const o of run.outputs.slice(0, MAX_SHOWN * 2)) outs.push(`- ${clip2(o.path ?? "(no path)", 150)}${o.job_id ? ` (job ${o.job_id})` : ""}`);
+    if (run.outputs.length > MAX_SHOWN * 2) outs.push(`and ${run.outputs.length - MAX_SHOWN * 2} more (${run.outputs.length} in all)`);
+  }
+  const headText = head2.join("\n");
+  const outsText = outs.join("\n");
+  let room = Math.max(0, STRING_LIMIT - headText.length - outsText.length - 80 - run.stages.length * 40);
+  const take = (line) => {
+    if (line.length + 1 > room) return false;
+    room -= line.length + 1;
+    return true;
+  };
+  const blocks = run.stages.map((s) => {
+    const kids = s.children ?? [];
+    const bad4 = kids.filter((c) => c.status !== "ok").slice(0, perStage);
+    const good = kids.filter((c) => c.status === "ok").slice(0, Math.max(0, perStage - bad4.length));
+    return { s, kids, bad: bad4, good, top: [], findings: [], badShown: [], goodShown: [] };
+  });
+  for (const b of blocks) {
+    const lines = [`- ${b.s.id} (${b.s.tool}): ${b.s.status}${b.s.summary ? ` - ${clip2(b.s.summary, 400)}` : ""}`];
+    if (b.s.acknowledged) lines.push(`    accepted by hand: ${clip2(b.s.acknowledged, 300)}`);
+    if (b.s.checkpoint && b.s.checkpoint.path) lines.push(`    checkpoint ${b.s.checkpoint.status}: ${clip2(b.s.checkpoint.path, 200)}`);
+    for (const l of lines) if (take(l)) b.top.push(l);
+  }
+  for (const b of blocks) {
+    for (const f of (b.s.findings ?? []).slice(0, 5)) {
+      const l = `    [${f.severity}] ${clip2(f.message, 200)}${f.where ? ` (${clip2(f.where, 100)})` : ""}`;
+      if (take(l)) b.findings.push(l);
+    }
+  }
+  for (const b of blocks) for (const c of b.bad) if (take(row(c))) b.badShown.push(row(c));
+  for (const b of blocks) for (const c of b.good) if (take(row(c))) b.goodShown.push(row(c));
+  const stages = [];
+  for (const b of blocks) {
+    stages.push(...b.top, ...b.badShown, ...b.goodShown);
+    const hidden = b.kids.length - b.badShown.length - b.goodShown.length;
+    if (hidden > 0) stages.push(`    and ${hidden} more (${b.kids.length} in all)`);
+    stages.push(...b.findings);
+  }
+  const text = [headText, stages.join("\n"), ...outsText ? [outsText] : []].join("\n");
+  return text.length > STRING_LIMIT ? `${text.slice(0, STRING_LIMIT)}
+[report cut at ${STRING_LIMIT} characters]` : text;
+}
+function schemaAcceptsKey(schema, key) {
+  let s = schema;
+  for (let i = 0; i < 10 && s && s._def && s._def.typeName === "ZodEffects"; i++) s = s._def.schema;
+  if (s && s._def && s._def.typeName === "ZodObject" && typeof s.shape === "object") return key in s.shape;
+  return true;
+}
+function deliverPath(projectPath) {
+  return path24.join(path24.dirname(projectPath), `${path24.basename(projectPath, path24.extname(projectPath))}.deliver.json`);
+}
+function unreadable(err) {
+  if (err instanceof StoreUnreadableError) return { ok: false, error: err.kind, applied: false, message: err.message };
+  throw err;
+}
+function readStoreFile(file) {
+  let raw;
+  try {
+    raw = fs25.readFileSync(file, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.recipes) && Array.isArray(parsed.runs)) return { version: 1, recipes: parsed.recipes, runs: parsed.runs };
+  } catch {
+  }
+  fs25.renameSync(file, `${file}.${Date.now()}.bak`);
+  return null;
+}
+function loadStore(projectPath) {
+  if (projectPath !== "<unsaved>" && unsavedStores.has(projectPath)) {
+    const newer = memoryStores.get(projectPath);
+    if (newer) {
+      saveStore(projectPath, newer);
+      return newer;
+    }
+  }
+  if (projectPath !== "<unsaved>") {
+    const file = deliverPath(projectPath);
+    let found;
+    try {
+      found = readStoreFile(file);
+    } catch (e) {
+      throw new StoreUnreadableError(file, e);
+    }
+    if (found) {
+      memoryStores.set(projectPath, found);
+      return found;
+    }
+  }
+  const mem = memoryStores.get(projectPath);
+  if (mem) return mem;
+  const fresh = emptyStore();
+  memoryStores.set(projectPath, fresh);
+  return fresh;
+}
+function saveStore(projectPath, store) {
+  if (store.runs.length > KEPT_RUNS) store.runs = store.runs.slice(-KEPT_RUNS);
+  memoryStores.set(projectPath, store);
+  if (projectPath === "<unsaved>") return { file: null };
+  const file = deliverPath(projectPath);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs25.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs25.renameSync(tmp, file);
+    unsavedStores.delete(projectPath);
+    return { file };
+  } catch (e) {
+    unsavedStores.add(projectPath);
+    try {
+      fs25.unlinkSync(tmp);
+    } catch {
+    }
+    return { file: null, error: e.message };
+  }
+}
+function storeNotes(projectPath, saved) {
+  if (saved.error) return { state_file_error: saved.error, state_file_note: "The record could not be written next to the project; it is kept in this server's memory only." };
+  if (projectPath === "<unsaved>") return { state_file_note: "The project is unsaved, so the record is kept in this server's memory only; save the project to keep it beside the .aep." };
+  return {};
+}
+function newRunId() {
+  return `dl_${Date.now().toString(36)}_${crypto12.randomBytes(3).toString("hex")}`;
+}
+async function readProject(ctx, toolName, projectPath, extra = {}) {
+  const res = await ctx.bridge.callHost("deliverRead", { ...extra, expect: { project_path: projectPath } }, { label: `${toolName} (read project)`, mutates: false, toolName });
+  const read2 = res.result;
+  if (read2.guard_failed) {
+    throw new BridgeError({
+      kind: "guard",
+      op_id: ctx.bridge.newOpId(),
+      message: `Target guard refused ${toolName}: expected project_path "${projectPath}", but After Effects has "${read2.project_path ?? "<unsaved>"}" open. Nothing was run; stop and re-read state.`,
+      expected: { project_path: projectPath },
+      actual: { project_path: read2.project_path ?? "<unsaved>", comp_id: null }
+    });
+  }
+  return read2;
+}
+async function availability(def) {
+  const invalid = validateStageDef(def);
+  if (invalid) return { available: false, note: `invalid_stage: ${invalid}` };
+  const tool = await lookupTool(def.tool);
+  if (!tool) return { available: false, note: `${def.tool} is not registered on this server.` };
+  return { available: true };
+}
+async function deliverRecipe(args, ctx) {
+  const project2 = await readProject(ctx, "ae_deliver_recipe", args.expect.project_path, args.action === "set" && args.comp_id !== void 0 ? { comp_id: args.comp_id } : {});
+  const projectPath = project2.project_path ?? args.expect.project_path;
+  let store;
+  try {
+    store = loadStore(projectPath);
+  } catch (e) {
+    return unreadable(e);
+  }
+  const open = (name2) => store.runs.filter((r) => r.recipe === name2 && r.state !== "done" && r.state !== "cancelled").map((r) => r.id);
+  if (args.action === "list") {
+    return {
+      ok: true,
+      recipes: store.recipes.map((r) => ({ name: r.name, comp_id: r.comp_id ?? null, stages: r.stages.map((s) => s.id), checkpoint_mode: r.checkpoint_mode, updated_at: r.updated_at, open_runs: open(r.name) })),
+      state_file: projectPath === "<unsaved>" ? null : deliverPath(projectPath)
+    };
+  }
+  const name = args.name;
+  const existing = store.recipes.find((r) => r.name === name);
+  if (args.action === "get") {
+    if (!existing) return { ok: false, error: "not_found", message: `No recipe "${name}" in this project.`, known: store.recipes.map((r) => r.name) };
+    const stages2 = [];
+    for (const s of existing.stages) stages2.push({ ...s, ...await availability(s) });
+    return { ok: true, recipe: { ...existing, stages: stages2 }, open_runs: open(name) };
+  }
+  if (args.action === "delete") {
+    if (!existing) return { ok: false, error: "not_found", applied: false, message: `No recipe "${name}" in this project.` };
+    try {
+      store = loadStore(projectPath);
+    } catch (e) {
+      return unreadable(e);
+    }
+    store.recipes = store.recipes.filter((r) => r.name !== name);
+    const saved2 = saveStore(projectPath, store);
+    return { ok: true, applied: true, deleted: name, kept_runs: store.runs.filter((r) => r.recipe === name).length, state_file: saved2.file, ...storeNotes(projectPath, saved2) };
+  }
+  if (args.comp_id !== void 0 && project2.comp_found === false) {
+    return { ok: false, error: "not_found", applied: false, message: `Comp ${args.comp_id} is not a comp in this project. Nothing was written.` };
+  }
+  const stages = args.stages ? normalizeStages(args.stages) : existing ? existing.stages : normalizeStages(defaultStages());
+  const recipe = {
+    name,
+    ...args.comp_id !== void 0 ? { comp_id: args.comp_id } : existing?.comp_id !== void 0 ? { comp_id: existing.comp_id } : {},
+    checkpoint_mode: args.checkpoint_mode ?? existing?.checkpoint_mode ?? "each_write",
+    ...args.notes !== void 0 ? { notes: args.notes } : existing?.notes !== void 0 ? { notes: existing.notes } : {},
+    stages,
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const warnings = [];
+  for (const s of stages) {
+    const a = await availability(s);
+    if (!a.available) warnings.push(`${s.id}: ${a.note}${s.optional ? " The run will go on without it." : " The run will stop at it until the tool exists or the stage is made optional."}`);
+    if (s.kind === "render" && Object.keys(s.args).length === 0) warnings.push(`${s.id}: no args. The render stage needs its outputs (files, templates) in args, or the tool will refuse it.`);
+    if (s.kind === "collect" && stagePrecheck(s)) warnings.push(`${s.id}: no args.dest. The collect stage needs the folder to copy into; the run stops at it until the recipe names one.`);
+  }
+  if (recipe.comp_id === void 0) warnings.push("No comp_id: stages that take a comp get none, so they use their tool's own default or refuse.");
+  try {
+    store = loadStore(projectPath);
+  } catch (e) {
+    return unreadable(e);
+  }
+  store.recipes = store.recipes.filter((r) => r.name !== name);
+  store.recipes.push(recipe);
+  const saved = saveStore(projectPath, store);
+  return { ok: true, applied: true, recipe, replaced: existing !== void 0, ...warnings.length ? { warnings } : {}, state_file: saved.file, ...storeNotes(projectPath, saved) };
+}
+function persist(env) {
+  env.run.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  const projectPath = env.run.project_path;
+  if (projectPath !== "<unsaved>" && !unsavedStores.has(projectPath)) {
+    try {
+      const fresh = readStoreFile(deliverPath(projectPath));
+      if (fresh) {
+        const own = env.run;
+        env.store.recipes = fresh.recipes;
+        env.store.runs = fresh.runs.some((r) => r.id === own.id) ? fresh.runs.map((r) => r.id === own.id ? own : r) : [...fresh.runs, own];
+      }
+    } catch {
+    }
+  }
+  env.saved = saveStore(projectPath, env.store);
+}
+function expectOf(env) {
+  return { project_path: env.run.project_path };
+}
+function fileStamp(file) {
+  try {
+    const st = fs25.statSync(file);
+    return `${st.size}:${st.mtimeMs}`;
+  } catch {
+    return null;
+  }
+}
+function setError(st, err) {
+  const d = describeError(err);
+  st.status = "error";
+  st.error = d.error;
+  st.applied = d.applied;
+  st.summary = d.message;
+}
+function buildStageArgs(def, tool, run, extra = {}) {
+  const info = KIND_INFO[def.kind];
+  const args = { ...def.args };
+  const withOutput = Object.keys(extra).length > 0;
+  const ownTarget = def.kind === "loudness" && (args.audio_path !== void 0 || args.job_id !== void 0);
+  if (!ownTarget && (!withOutput || info.fill_with_output)) {
+    const fills = {
+      comp_id: run.comp_id,
+      comp_name: run.comp_name,
+      comp_ids: run.comp_id !== void 0 ? [run.comp_id] : void 0,
+      // ae_render_batch takes comp names
+      comps: run.comp_name !== void 0 ? [run.comp_name] : void 0
+    };
+    for (const key of info.fill) {
+      if (key === "comp_id" && def.kind === "verify" && extra.job_id !== void 0) continue;
+      if (args[key] === void 0 && fills[key] !== void 0 && schemaAcceptsKey(tool.schema, key)) args[key] = fills[key];
+    }
+  }
+  Object.assign(args, extra);
+  if (def.kind === "collect" && args.dry_run === void 0 && schemaAcceptsKey(tool.schema, "dry_run")) args.dry_run = false;
+  if (schemaAcceptsKey(tool.schema, "expect")) args.expect = { project_path: run.project_path };
+  if (def.kind === "checkpoint" && args.label === void 0) args.label = "deliver";
+  return args;
+}
+async function invoke(env, tool, def, extra = {}) {
+  const precheck = stagePrecheck(def);
+  if (precheck) return { outcome: { status: "blocked", summary: precheck, findings: [] }, raw: null };
+  const args = buildStageArgs(def, tool, env.run, extra);
+  const parsed = tool.schema.safeParse(args);
+  if (!parsed.success) {
+    const why = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
+    return { outcome: { status: "blocked", summary: `${def.tool} rejects the stage's arguments (${clip2(why, 300)}). Fix them in the recipe and retry.`, findings: [] }, raw: null };
+  }
+  let raw = await tool.handler(parsed.data, env.ctx);
+  if (def.kind === "preflight") {
+    for (let i = 0; i < MAX_PREFLIGHT_CALLS && raw && typeof raw === "object" && typeof raw.cursor === "string" && raw.complete === false; i++) {
+      const limits = {};
+      for (const k of ["max_slices", "budget_ms"]) if (def.args[k] !== void 0) limits[k] = def.args[k];
+      const next = tool.schema.safeParse({ ...limits, cursor: raw.cursor });
+      if (!next.success) break;
+      raw = await tool.handler(next.data, env.ctx);
+    }
+  }
+  if (def.kind === "collect") {
+    const again = (x) => x && typeof x === "object" && (x.complete === false && !(x.errors_total > 0) && x.remaining > 0 || x.complete === true && x.zip && typeof x.zip === "object" && x.zip.ok === false && x.zip.status === "running");
+    for (let i = 1; i < MAX_COLLECT_CALLS && again(raw); i++) {
+      raw = await tool.handler(parsed.data, env.ctx);
+    }
+  }
+  let outcome = applyFailOn(classifyStageResult(def.kind, raw), def);
+  if (raw && typeof raw === "object" && raw.applied === true && outcome.applied === void 0) outcome = { ...outcome, applied: true };
+  return { outcome, raw };
+}
+async function maybeCheckpoint(env, st) {
+  const def = st.def;
+  if (!checkpointDue(env.run.checkpoint_mode, def, env.run.checkpoints_taken)) return false;
+  if (env.run.project_path === "<unsaved>") {
+    st.checkpoint = { status: "skipped", note: "The project is unsaved: there is no file to copy." };
+    return false;
+  }
+  const stamp3 = fileStamp(env.run.project_path);
+  if (stamp3 !== null && env.run.last_checkpoint?.stamp === stamp3) {
+    st.checkpoint = { status: "reused", path: env.run.last_checkpoint.path, note: "The saved file hasn't changed since the last checkpoint." };
+    env.run.checkpoints_taken++;
+    return false;
+  }
+  const tool = await lookupTool("ae_checkpoint_create");
+  if (!tool) {
+    st.checkpoint = { status: "unavailable", note: "ae_checkpoint_create is not registered; this stage runs without a checkpoint." };
+    return false;
+  }
+  try {
+    const parsed = tool.schema.safeParse({ expect: expectOf(env), label: `deliver ${st.id}`.slice(0, 80) });
+    if (!parsed.success) throw new Error("ae_checkpoint_create rejected its arguments");
+    const r = await tool.handler(parsed.data, env.ctx);
+    if (r && typeof r === "object" && (r.ok === false || typeof r.error === "string")) throw new Error(clip2(r.message ?? r.error));
+    const p = typeof r?.checkpoint_path === "string" ? r.checkpoint_path : void 0;
+    st.checkpoint = { status: "created", ...p ? { path: p } : {} };
+    env.run.checkpoints_taken++;
+    if (stamp3 !== null) env.run.last_checkpoint = { stamp: stamp3, path: p };
+    return false;
+  } catch (err) {
+    setError(st, err);
+    st.applied = false;
+    st.summary = `The checkpoint before this stage failed, so the stage did not run: ${st.summary}`;
+    return true;
+  }
+}
+async function runPerOutput(env, st, tool) {
+  const def = st.def;
+  const info = KIND_INFO[def.kind];
+  const outputs = env.run.outputs;
+  if (outputs.length === 0) {
+    if (info.no_output === "comp") {
+      const { outcome } = await invoke(env, tool, def);
+      Object.assign(st, { status: outcome.status, summary: `no render files to check; ran on the comp: ${outcome.summary}`, findings: outcome.findings });
+      return;
+    }
+    const why = "The render stage reported no output files, so there is nothing to check. Give the render stage args that name its outputs, or this stage args.path.";
+    Object.assign(st, { status: info.no_output === "blocked" ? "blocked" : "warn", summary: why, findings: [] });
+    return;
+  }
+  const children = [];
+  const findings = [];
+  let unverified = false;
+  let compsByName;
+  let compsCut = false;
+  let inLookup = false;
+  for (const out of outputs.slice(0, MAX_OUTPUTS)) {
+    const extra = outputArgsFor(def.kind, out);
+    if (!extra) {
+      children.push({ output: outputLabel(out), status: "skipped", summary: "an image-sequence pattern has no single file for this tool" });
+      continue;
+    }
+    try {
+      if (def.kind === "verify" && def.args.comp_id === void 0 && extra.job_id === void 0 && out.comp !== void 0 && out.comp !== env.run.comp_name) {
+        if (!compsByName) {
+          inLookup = true;
+          const read2 = await readProject(env.ctx, "ae_deliver_step", env.run.project_path, { list_comps: true });
+          inLookup = false;
+          compsCut = read2.truncated === true;
+          compsByName = /* @__PURE__ */ new Map();
+          for (const c of read2.comps ?? []) compsByName.set(c.name, [...compsByName.get(c.name) ?? [], c.id]);
+        }
+        const ids = compsByName.get(out.comp) ?? [];
+        if (ids.length !== 1) {
+          children.push({
+            output: outputLabel(out),
+            status: "blocked",
+            summary: clip2(`unchecked: it was rendered from comp "${out.comp}", which ${ids.length === 0 ? compsCut ? "was not found in the comp list, which the host cut short" : "is not in the project" : "has several comps of that name"}. Set args.comp_id on the verify stage or check the file by hand.`, 300)
+          });
+          continue;
+        }
+        extra.comp_id = ids[0];
+      }
+      const { outcome } = await invoke(env, tool, def, extra);
+      children.push({ output: outputLabel(out), status: outcome.status, summary: clip2(outcome.summary, 300) });
+      findings.push(...outcome.findings);
+      if (outcome.unverified) unverified = true;
+      if (outcome.applied) st.applied = true;
+    } catch (err) {
+      const d = describeError(err);
+      const lookupFailed = inLookup;
+      inLookup = false;
+      children.push({ output: outputLabel(out), status: "blocked", summary: clip2(`${d.error}: ${d.message}`, 300) });
+      if (d.applied === "unknown" && !lookupFailed && st.applied !== true) st.applied = "unknown";
+      if (err instanceof BridgeError && err.kind !== "evalscript_error" || err instanceof QuarantineBlockedError || err instanceof QueueWaitError) {
+        if (lookupFailed && typeof err === "object" && err !== null) lookupErrors.add(err);
+        st.children = children;
+        if (unverified) st.error = "read_back_failed";
+        throw err;
+      }
+    }
+  }
+  const worst = worstOf(children.map((c) => c.status));
+  const counts = ["ok", "warn", "blocked", "skipped"].map((k) => [k, children.filter((c) => c.status === k).length]).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(", ");
+  st.children = children;
+  st.findings = findings.slice(0, MAX_FINDINGS2);
+  st.status = worst === "blocked" ? "blocked" : worst;
+  st.summary = `${children.length} output${children.length === 1 ? "" : "s"}: ${counts}`;
+  if (def.fail_on === "warning" && st.status === "warn") {
+    st.status = "blocked";
+    st.summary += " (this stage stops on warnings)";
+  }
+  if (unverified) st.error = "read_back_failed";
+  if (children.every((c) => c.status === "skipped")) {
+    st.status = "warn";
+    st.summary = "None of the outputs can be opened by path (image-sequence patterns).";
+  }
+}
+function hasOwnTarget(def) {
+  if (def.args.path !== void 0 || def.args.job_id !== void 0) return true;
+  return !KIND_INFO[def.kind].fill_with_output && def.args.comp_id !== void 0;
+}
+async function execute(env, st, tool) {
+  const def = st.def;
+  if (def.per_output && !hasOwnTarget(def) && KIND_INFO[def.kind].output_keys.length > 0) {
+    await runPerOutput(env, st, tool);
+    return;
+  }
+  const { outcome, raw } = await invoke(env, tool, def);
+  st.status = outcome.status;
+  st.summary = outcome.summary;
+  st.findings = outcome.findings;
+  if (outcome.applied) st.applied = true;
+  if (outcome.unverified) st.error = "read_back_failed";
+  if (def.kind === "loudness" && outcome.running && raw && typeof raw === "object" && typeof raw.job_id === "string") {
+    st.status = "running";
+    st.job_ids = [raw.job_id];
+    st.live = true;
+    st.summary = "The audio is rendering; next checks it.";
+    return;
+  }
+  if (def.kind === "render" && outcome.status !== "blocked") {
+    const jobs = extractJobIds(raw);
+    const outs = extractOutputs(raw);
+    const batchId = extractBatchId(raw);
+    if (batchId !== void 0) {
+      st.status = "running";
+      st.batch_id = batchId;
+      st.live = true;
+      st.summary = `started render batch ${batchId}`;
+      env.run.outputs = [];
+    } else if (jobs.length > 0) {
+      st.status = "running";
+      st.job_ids = jobs;
+      st.live = true;
+      st.summary = `started ${jobs.length} render job${jobs.length === 1 ? "" : "s"}`;
+      env.run.outputs = jobs.map((j) => outs.find((o) => o.job_id === j) ?? { job_id: j });
+    } else if (outs.length > 0) {
+      env.run.outputs = outs;
+    } else {
+      st.status = "warn";
+      st.summary = `${outcome.summary} The render reported no job ids or output files, so verify, scrub and loudness have no file to check unless their args name one.`;
+    }
+  }
+}
+async function runStage(env, st) {
+  const def = st.def;
+  st.attempts++;
+  st.started_at = (/* @__PURE__ */ new Date()).toISOString();
+  for (const k of ["summary", "findings", "children", "error", "applied", "checkpoint", "finished_at", "job_ids", "batch_id", "live"]) delete st[k];
+  const invalid = validateStageDef(def);
+  if (invalid) {
+    Object.assign(st, { status: "blocked", error: "invalid_stage", applied: false, summary: `invalid_stage: ${clip2(invalid, 300)} The stage was not run. Fix the recipe with ae_deliver_recipe and retry.` });
+    st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+    return;
+  }
+  const tool = await lookupTool(def.tool);
+  if (!tool) {
+    st.status = "unavailable";
+    st.summary = `${def.tool} is not registered on this server${def.optional ? "; this stage is optional, so the run goes on." : "; the run stops here until the tool exists or the stage is made optional."}`;
+    st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+    return;
+  }
+  st.status = "in_flight";
+  persist(env);
+  try {
+    if (await maybeCheckpoint(env, st)) {
+      st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+      return;
+    }
+    await execute(env, st, tool);
+  } catch (err) {
+    const keptUnverified = st.error === "read_back_failed";
+    const keptApplied = st.applied;
+    setError(st, err);
+    if (keptUnverified) st.error = "read_back_failed";
+    if (typeof err === "object" && err !== null && lookupErrors.has(err)) st.applied = keptApplied;
+    if (keptApplied === true) st.applied = true;
+    else if (keptApplied === "unknown" && st.applied !== true) st.applied = "unknown";
+  }
+  st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+}
+async function pollRender(env, st) {
+  st.status = "running";
+  delete st.error;
+  if (st.kind === "loudness") return pollLoudness(env, st);
+  if (st.batch_id) return pollBatch(env, st);
+  return pollJobs(env, st);
+}
+async function pollLoudness(env, st) {
+  const tool = await lookupTool(st.def.tool);
+  const jobId = st.job_ids?.[0];
+  if (!tool || !jobId) {
+    Object.assign(st, { status: "error", error: "unavailable", summary: `${st.def.tool} is not registered, so the audio render can't be followed. Skip this stage with an acknowledgement if Jay agrees.` });
+    return;
+  }
+  const args = { job_id: jobId, wait_seconds: 10 };
+  for (const k of ["standard", "target_lufs", "true_peak_max_db", "tolerance_lu"]) if (st.def.args[k] !== void 0) args[k] = st.def.args[k];
+  try {
+    const parsed = tool.schema.safeParse(args);
+    if (!parsed.success) throw new Error(`${st.def.tool} rejected the job id`);
+    const raw = await tool.handler(parsed.data, env.ctx);
+    const outcome = applyFailOn(classifyStageResult("loudness", raw), st.def);
+    if (outcome.running) {
+      st.summary = "The audio is still rendering.";
+      return;
+    }
+    st.live = false;
+    st.status = outcome.status;
+    st.summary = outcome.summary;
+    st.findings = outcome.findings;
+    st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+  } catch (err) {
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read the audio render ${jobId}: ${describeError(err).message}. Check it with ${st.def.tool} (job_id), then retry or skip.`, 400) });
+  }
+}
+async function pollBatch(env, st) {
+  const batchId = st.batch_id;
+  const status = await lookupTool("ae_render_batch_status");
+  if (!status) {
+    Object.assign(st, { status: "error", error: "unavailable", summary: "ae_render_batch_status is not registered, so the render batch can't be followed. Check the batch by hand, then skip this stage with an acknowledgement." });
+    return;
+  }
+  let r;
+  try {
+    const parsed = status.schema.safeParse({ batch_id: batchId });
+    if (!parsed.success) throw new Error("ae_render_batch_status rejected the batch id");
+    r = await status.handler(parsed.data, env.ctx);
+  } catch (err) {
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render batch ${batchId}: ${describeError(err).message}. Check it with ae_render_batch_status.`, 400) });
+    return;
+  }
+  if (r === null || typeof r !== "object" || r.ok === false) {
+    const why = r && typeof r === "object" && typeof r.message === "string" ? r.message : "no answer";
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render batch ${batchId}: ${why}`, 400) });
+    return;
+  }
+  const items = Array.isArray(r.items) ? r.items : [];
+  const itemStatus = (state2) => {
+    if (state2 === "failed" || state2 === "cancelled") return "blocked";
+    if (state2 === "skipped") return "warn";
+    return "ok";
+  };
+  st.children = items.slice(0, MAX_OUTPUTS).map((i) => ({
+    output: typeof i?.output_path === "string" ? i.output_path : `item ${String(i?.index)}`,
+    status: itemStatus(i?.state),
+    summary: clip2(`${String(i?.state)}${typeof i?.percent === "number" ? ` ${Math.round(i.percent)}%` : ""}${typeof i?.error === "string" ? `: ${i.error}` : ""}`, 300)
+  }));
+  const done = items.filter((i) => i?.state === "succeeded").length;
+  const failedItems = items.filter((i) => i?.state === "failed" || i?.state === "cancelled");
+  const state = String(r.state);
+  if (state === "running") {
+    st.live = true;
+    const pct2 = items.filter((i) => i?.state === "running" && typeof i.percent === "number").map((i) => i.percent);
+    st.summary = `${done} of ${items.length} render item${items.length === 1 ? "" : "s"} finished${pct2.length ? ` (running at ${Math.round(pct2.reduce((a, b) => a + b, 0) / pct2.length)}%)` : ""}${failedItems.length ? `, ${failedItems.length} failed` : ""}`;
+    if (r.runner_active === false) st.summary += ". This server is not driving the batch (it restarted): call ae_render_batch_resume, then next";
+    return;
+  }
+  st.live = r.runner_active === true;
+  if (state === "succeeded") {
+    const outs = batchOutputs(items);
+    const skipped = items.filter((i) => i?.state === "skipped").length;
+    env.run.outputs = outs;
+    st.job_ids = items.map((i) => i?.job_id).filter((j) => typeof j === "string").slice(0, MAX_OUTPUTS);
+    if (outs.length === 0) {
+      Object.assign(st, { status: "warn", summary: "The batch finished but none of its items produced a file, so verify, scrub and loudness have nothing to check unless their args name one." });
+    } else if (skipped > 0) {
+      Object.assign(st, { status: "warn", summary: `${items.length} render item${items.length === 1 ? "" : "s"} finished; ${skipped} stood on a file that already existed (if_output_exists), so it was not rendered now` });
+    } else {
+      Object.assign(st, { status: "ok", summary: `${items.length} render item${items.length === 1 ? "" : "s"} finished` });
+    }
+    st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+    return;
+  }
+  env.run.outputs = batchOutputs(items);
+  const first = failedItems[0];
+  const detail = first ? ` Item ${String(first.index)} (${String(first.comp ?? "")}/${String(first.spec ?? "")}): ${String(first.error ?? first.state)}.` : "";
+  const tail = " Fix the cause, then call ae_render_batch_resume and ae_deliver_step next; retry is refused for a batch (a new one would treat these files as someone else's recent files).";
+  Object.assign(st, {
+    status: "blocked",
+    error: state === "failed" ? "render_failed" : "batch_stopped",
+    summary: clip2(`Render batch ${batchId} ${state}.${detail}${tail}`, 600)
+  });
+}
+async function pollJobs(env, st) {
+  const status = await lookupTool("ae_aerender_status");
+  if (!status) {
+    Object.assign(st, { status: "error", error: "unavailable", summary: "ae_aerender_status is not registered, so the render can't be followed. Check the jobs by hand, then skip this stage with an acknowledgement." });
+    return;
+  }
+  const states = [];
+  for (const id of st.job_ids ?? []) {
+    try {
+      const parsed = status.schema.safeParse({ job_id: id });
+      if (!parsed.success) throw new Error("ae_aerender_status rejected the job id");
+      const r = await status.handler(parsed.data, env.ctx);
+      states.push({ job_id: id, state: String(r?.state ?? "unknown"), percent: typeof r?.percent === "number" ? r.percent : void 0, output_path: typeof r?.output_path === "string" ? r.output_path : void 0, exit_code: r?.exit_code, log_tail: typeof r?.log_tail === "string" ? r.log_tail : void 0 });
+    } catch (err) {
+      states.push({ job_id: id, state: "unknown", error: describeError(err).message });
+    }
+  }
+  for (const s of states) {
+    if (s.output_path) {
+      const o = { job_id: s.job_id, path: s.output_path, ...SEQUENCE_PATTERN.test(s.output_path) ? { sequence: true } : {} };
+      const at = env.run.outputs.findIndex((x) => x.job_id === s.job_id);
+      if (at >= 0) env.run.outputs[at] = o;
+      else env.run.outputs.push(o);
+    }
+  }
+  const failed = states.filter((s) => s.state === "failed");
+  const unknown = states.filter((s) => s.state === "unknown");
+  const running = states.filter((s) => s.state === "running");
+  st.live = running.length > 0 || unknown.length > 0;
+  st.children = states.map((s) => ({
+    output: s.output_path ?? s.job_id,
+    status: s.state === "succeeded" ? "ok" : s.state === "running" ? "ok" : "blocked",
+    summary: s.error ?? `${s.state}${s.percent !== void 0 ? ` ${Math.round(s.percent)}%` : ""}`
+  }));
+  if (failed.length > 0) {
+    const f = failed[0];
+    Object.assign(st, { status: "blocked", error: "render_failed", summary: clip2(`Render job ${f.job_id} failed (exit code ${String(f.exit_code)}). ${f.log_tail ? `Log tail: ${f.log_tail}` : ""}`, 600) });
+  } else if (unknown.length > 0) {
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render job ${unknown[0].job_id}: ${unknown[0].error ?? "unknown state"}. Check it by hand.`, 400) });
+  } else if (running.length > 0) {
+    const pct2 = running.map((s) => s.percent).filter((p) => typeof p === "number");
+    st.summary = `${running.length} of ${states.length} render job${states.length === 1 ? "" : "s"} still running${pct2.length ? ` (${Math.round(pct2.reduce((a, b) => a + b, 0) / pct2.length)}%)` : ""}`;
+  } else {
+    st.status = "ok";
+    st.summary = `${states.length} render job${states.length === 1 ? "" : "s"} finished`;
+    st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+  }
+}
+async function advance(env, maxStages) {
+  let ran = 0;
+  for (; ; ) {
+    const st = currentStage(env.run);
+    if (!st) break;
+    if (isPollable(st)) {
+      await pollRender(env, st);
+      persist(env);
+      if (!passes(st)) break;
+      continue;
+    }
+    if (st.status !== "pending") break;
+    if (ran >= maxStages) break;
+    await runStage(env, st);
+    ran++;
+    persist(env);
+    if (!passes(st)) break;
+  }
+  env.run.state = deriveState(env.run);
+  const cur = currentStage(env.run);
+  if (env.run.state === "blocked" && cur) env.run.stop_reason = `Stage "${cur.id}": ${cur.status}${cur.summary ? ` - ${cur.summary}` : ""}`;
+  else delete env.run.stop_reason;
+  persist(env);
+}
+function boundedChildren(children) {
+  if (children.length <= MAX_SHOWN) return children;
+  const rank = (c) => c.status === "blocked" ? 0 : c.status === "warn" ? 1 : 2;
+  return children.map((c, i) => ({ c, i })).sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i).slice(0, MAX_SHOWN).map((x) => x.c);
+}
+function stageRow(s) {
+  return {
+    id: s.id,
+    kind: s.kind,
+    tool: s.tool,
+    status: s.status,
+    ...s.summary ? { summary: s.summary } : {},
+    ...s.error ? { error: s.error } : {},
+    ...s.applied !== void 0 ? { applied: s.applied } : {},
+    ...s.findings && s.findings.length ? { findings: s.findings } : {},
+    ...s.children && s.children.length ? { outputs: boundedChildren(s.children) } : {},
+    ...s.children && s.children.length > MAX_SHOWN ? { outputs_total: s.children.length } : {},
+    ...s.job_ids ? { job_ids: s.job_ids.slice(0, MAX_SHOWN) } : {},
+    ...s.batch_id ? { batch_id: s.batch_id } : {},
+    ...s.checkpoint ? { checkpoint: s.checkpoint } : {},
+    ...s.acknowledged ? { acknowledged: s.acknowledged } : {},
+    attempts: s.attempts
+  };
+}
+function present(env, extra = {}) {
+  const run = env.run;
+  const cur = currentStage(run);
+  const blocked = run.state === "blocked";
+  return {
+    ok: !blocked,
+    ...blocked ? { error: "delivery_blocked" } : {},
+    run_id: run.id,
+    recipe: run.recipe,
+    state: run.state,
+    summary: summarizeStages(run.stages),
+    ...cur ? { stopped_at: cur.id } : {},
+    ...run.stop_reason ? { message: run.stop_reason } : {},
+    stages: run.stages.map(stageRow),
+    outputs: run.outputs.slice(0, MAX_SHOWN * 2),
+    ...run.outputs.length > MAX_SHOWN * 2 ? { outputs_total: run.outputs.length } : {},
+    next: nextHint(run),
+    ...run.state === "done" || blocked ? { report: renderReport(run) } : {},
+    state_file: env.saved.file,
+    ...storeNotes(run.project_path, env.saved),
+    ...extra
+  };
+}
+function findRun(store, runId) {
+  if (runId !== void 0) return store.runs.find((r) => r.id === runId);
+  for (let i = store.runs.length - 1; i >= 0; i--) {
+    const r = store.runs[i];
+    if (r.state !== "done" && r.state !== "cancelled") return r;
+  }
+  return void 0;
+}
+async function deliverStep(args, ctx) {
+  ctx.quarantine.assertClear();
+  const wantComp = args.action === "start";
+  let recipeForComp;
+  if (args.action === "start") {
+    try {
+      recipeForComp = loadStore(args.expect.project_path).recipes.find((r) => r.name === args.recipe);
+    } catch (e) {
+      return unreadable(e);
+    }
+  }
+  const project2 = await readProject(ctx, "ae_deliver_step", args.expect.project_path, { ...wantComp && recipeForComp?.comp_id !== void 0 ? { comp_id: recipeForComp.comp_id } : {} });
+  const projectPath = project2.project_path ?? args.expect.project_path;
+  let store;
+  try {
+    store = loadStore(projectPath);
+  } catch (e) {
+    return unreadable(e);
+  }
+  const maxStages = args.max_stages ?? MAX_STAGES;
+  if (args.action === "start") {
+    const recipe = store.recipes.find((r) => r.name === args.recipe);
+    if (!recipe) return { ok: false, error: "not_found", applied: false, message: `No recipe "${args.recipe}" in this project. Make one with ae_deliver_recipe (action 'set').`, known: store.recipes.map((r) => r.name) };
+    if (recipe.comp_id !== void 0 && project2.comp_found === false) {
+      return { ok: false, error: "not_found", applied: false, message: `The recipe's comp ${recipe.comp_id} is not a comp in this project any more. Update the recipe. Nothing was run.` };
+    }
+    const openRun = store.runs.find((r) => r.recipe === recipe.name && r.state !== "done" && r.state !== "cancelled");
+    if (openRun && !args.dry_run) {
+      return { ok: false, error: "run_open", applied: false, run_id: openRun.id, message: `Run ${openRun.id} of "${recipe.name}" is still open (${openRun.state}). Continue it with 'next', or end it with 'cancel', before starting another.` };
+    }
+    const run2 = {
+      id: newRunId(),
+      recipe: recipe.name,
+      ...recipe.comp_id !== void 0 ? { comp_id: recipe.comp_id } : {},
+      ...project2.comp ? { comp_name: project2.comp.name } : {},
+      project_path: projectPath,
+      ...project2.ae_version ? { ae_version: project2.ae_version } : {},
+      checkpoint_mode: recipe.checkpoint_mode,
+      created_at: (/* @__PURE__ */ new Date()).toISOString(),
+      updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+      state: "in_progress",
+      stages: recipe.stages.map((def) => ({ id: def.id, kind: def.kind, tool: def.tool, def: JSON.parse(JSON.stringify(def)), status: "pending", attempts: 0 })),
+      outputs: [],
+      checkpoints_taken: 0
+    };
+    if (args.dry_run) {
+      const plan2 = [];
+      let plannedCheckpoints = 0;
+      for (const s of run2.stages) {
+        const invalid = validateStageDef(s.def);
+        if (invalid) {
+          plan2.push({ id: s.id, kind: s.kind, tool: s.tool, available: false, valid: false, stops_run_if_unavailable: true, args_valid: false, args_note: `invalid_stage: ${invalid}` });
+          continue;
+        }
+        const tool = await lookupTool(s.tool);
+        let argsOk = "deferred";
+        let argsNote;
+        const waitsForOutput = s.def.per_output && !hasOwnTarget(s.def) && KIND_INFO[s.kind].output_keys.length > 0;
+        const precheck = stagePrecheck(s.def);
+        if (precheck) {
+          argsOk = false;
+          argsNote = precheck;
+        } else if (tool && !waitsForOutput) {
+          const parsed = tool.schema.safeParse(buildStageArgs(s.def, tool, run2));
+          argsOk = parsed.success;
+          if (!parsed.success) argsNote = parsed.error.issues.slice(0, 2).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
+        }
+        const planCheckpoint = () => {
+          const due = checkpointDue(run2.checkpoint_mode, s.def, plannedCheckpoints);
+          if (due) plannedCheckpoints++;
+          return due;
+        };
+        plan2.push({
+          id: s.id,
+          kind: s.kind,
+          tool: s.tool,
+          available: tool !== void 0,
+          stops_run_if_unavailable: !s.def.optional,
+          args_valid: argsOk,
+          ...argsNote ? { args_note: argsNote } : {},
+          per_output: s.def.per_output,
+          checkpoint_before: planCheckpoint(),
+          fail_on: s.def.fail_on
+        });
+      }
+      return { ok: true, dry_run: true, applied: false, recipe: recipe.name, comp: project2.comp ?? null, project_dirty: project2.dirty ?? null, stages: plan2, note: "Nothing was run or written. Arguments of per-output stages are checked when the render's files are known." };
+    }
+    store.runs.push(run2);
+    const env2 = { ctx, run: run2, store, saved: { file: null } };
+    persist(env2);
+    return await drive(env2, maxStages);
+  }
+  const run = findRun(store, args.run_id);
+  if (!run) {
+    return { ok: false, error: "unknown_run", applied: false, message: args.run_id ? `No run ${args.run_id} for this project.` : "No open run for this project. Start one with action 'start'." };
+  }
+  if (!pathsEqual(run.project_path, projectPath)) {
+    return { ok: false, error: "wrong_project", applied: false, message: `Run ${run.id} belongs to ${run.project_path}, but ${projectPath} is open.` };
+  }
+  if (activeRuns.has(run.id)) return { ok: false, error: "run_busy", applied: false, message: `Run ${run.id} is executing a stage right now.` };
+  const env = { ctx, run, store, saved: { file: null } };
+  for (const s of run.stages) {
+    if (s.status === "in_flight") {
+      Object.assign(s, { status: "error", error: "interrupted", applied: "unknown", summary: "The stage was running when the run was interrupted (AE or the panel may have crashed). It may be fully, partly or not applied: inspect the project, then retry or skip it." });
+    }
+  }
+  if (run.state === "cancelled") {
+    return { ok: false, error: "run_cancelled", applied: false, run_id: run.id, message: "This run was cancelled. Start a new one with action 'start'." };
+  }
+  if (args.action === "cancel") {
+    const notes = [];
+    for (const s of run.stages) {
+      if (s.status !== "running" && s.live !== true) continue;
+      if (s.batch_id) {
+        try {
+          const cancelBatch = await lookupTool("ae_render_batch_cancel");
+          if (!cancelBatch) throw new Error("ae_render_batch_cancel is not registered");
+          const parsed = cancelBatch.schema.safeParse({ batch_id: s.batch_id });
+          if (!parsed.success) throw new Error("rejected the batch id");
+          const answer = await cancelBatch.handler(parsed.data, ctx);
+          const unconfirmed = answer && typeof answer === "object" && Array.isArray(answer.kill_unconfirmed) ? answer.kill_unconfirmed.length : 0;
+          if (answer && typeof answer === "object" && answer.cancelled === true && unconfirmed > 0) {
+            notes.push(`render batch ${s.batch_id} is cancelled, but ${unconfirmed} aerender process(es) could not be confirmed stopped and may still be writing; check them with ae_render_batch_status, then ae_aerender_cancel or stop them by hand`);
+          } else if (answer && typeof answer === "object" && answer.cancelled === true) notes.push(`cancelled render batch ${s.batch_id}`);
+          else if (answer && typeof answer === "object" && answer.already_finished === true) notes.push(`render batch ${s.batch_id} had already finished (${String(answer.state)}); nothing to cancel`);
+          else if (answer && typeof answer === "object" && answer.ok === false) notes.push(`render batch ${s.batch_id} was not cancelled: ${String(answer.error ?? "refused")}${typeof answer.message === "string" ? ` (${clip2(answer.message, 200)})` : ""}`);
+          else notes.push(`render batch ${s.batch_id}: ae_render_batch_cancel did not say it cancelled anything; check it with ae_render_batch_status`);
+        } catch (err) {
+          notes.push(`could not cancel render batch ${s.batch_id}: ${describeError(err).message}`);
+        }
+      } else {
+        const cancel = await lookupTool("ae_aerender_cancel");
+        for (const id of s.job_ids ?? []) {
+          try {
+            if (!cancel) throw new Error("ae_aerender_cancel is not registered");
+            const parsed = cancel.schema.safeParse({ job_id: id });
+            if (!parsed.success) throw new Error("rejected the job id");
+            const answer = await cancel.handler(parsed.data, ctx);
+            if (answer && typeof answer === "object" && answer.kill_unconfirmed === true) {
+              notes.push(`render job ${id} could not be confirmed stopped and may still be writing; check it with ae_aerender_status, or stop the process by hand`);
+            } else if (answer && typeof answer === "object" && answer.already_finished === true) {
+              notes.push(`render job ${id} had already finished (${String(answer.state)}); nothing to cancel`);
+            } else {
+              notes.push(`cancelled render job ${id}`);
+            }
+          } catch (err) {
+            notes.push(`could not cancel render job ${id}: ${describeError(err).message}`);
+          }
+        }
+      }
+      Object.assign(s, { status: "skipped", live: false, summary: "cancelled with the run" });
+    }
+    run.state = "cancelled";
+    run.stop_reason = "Cancelled.";
+    persist(env);
+    return present(env, { ok: true, cancel_notes: notes });
+  }
+  const stopped = currentStage(run);
+  if (!stopped) {
+    run.state = "done";
+    persist(env);
+    return present(env, { ok: true, note: "Every stage has passed already." });
+  }
+  if (args.action === "retry" || args.action === "skip") {
+    if (args.stage !== void 0 && args.stage !== stopped.id) {
+      return { ok: false, error: "wrong_stage", applied: false, run_id: run.id, message: `The run is at stage "${stopped.id}", not "${args.stage}". Only the stopped stage can be retried or skipped; to redo an earlier one, start a new run.` };
+    }
+    if (stopped.status === "running") {
+      return { ok: false, error: "still_running", applied: false, run_id: run.id, message: `Stage "${stopped.id}" is still running. Use 'next' to follow it or 'cancel' to end the run.` };
+    }
+    if (stopped.status === "pending") {
+      return { ok: false, error: "not_stopped", applied: false, run_id: run.id, message: `Stage "${stopped.id}" has not run yet. Use 'next'.` };
+    }
+  }
+  if (args.action === "retry") {
+    if (stopped.live === true && (stopped.batch_id || stopped.job_ids && stopped.job_ids.length > 0)) {
+      return {
+        ok: false,
+        error: "jobs_may_be_running",
+        applied: false,
+        run_id: run.id,
+        message: `Stage "${stopped.id}" started background jobs that may still be running. Use 'next' to look at them again, or 'cancel' to end the run and its jobs, before starting them again.`
+      };
+    }
+    if (stopped.kind === "render" && stopped.batch_id) {
+      return {
+        ok: false,
+        error: "use_resume",
+        applied: false,
+        run_id: run.id,
+        message: `Stage "${stopped.id}" follows render batch ${stopped.batch_id}. Call ae_render_batch_resume (it keeps the items that finished and runs the rest), then 'next'. A new batch would treat the files this one wrote as someone else's recent files. To give up on it, 'cancel' the run, or 'skip' the stage with an acknowledgement.`
+      };
+    }
+    if ((stopped.error === "read_back_failed" || stopped.applied === "unknown" || stopped.applied === true && stopped.kind !== "render") && !REPEATABLE_KINDS.has(stopped.kind)) {
+      return {
+        ok: false,
+        error: "unverified_write",
+        applied: false,
+        run_id: run.id,
+        message: `Stage "${stopped.id}" changed the project, or may have, and its result could not be confirmed, so running it again could do it twice (an imported check item may still be in the project). Inspect the project, then 'skip' it with an acknowledgement, or 'cancel' the run.`
+      };
+    }
+  }
+  if (args.action === "skip") {
+    stopped.acknowledged = args.acknowledge;
+    stopped.summary = `skipped (was ${stopped.status}${stopped.summary ? `: ${clip2(stopped.summary, 200)}` : ""})`;
+    stopped.status = "skipped";
+    stopped.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+    persist(env);
+    return await drive(env, maxStages);
+  }
+  if (args.action === "retry") {
+    const current = store.recipes.find((r) => r.name === run.recipe)?.stages.find((d) => d.id === stopped.id && d.kind === stopped.kind);
+    if (current) {
+      stopped.def = JSON.parse(JSON.stringify(current));
+      stopped.tool = current.tool;
+    }
+    stopped.status = "pending";
+  }
+  return await drive(env, maxStages);
+}
+function pathsEqual(a, b) {
+  const n = (p) => p.replace(/\\/g, "/").toLowerCase();
+  return n(a) === n(b);
+}
+async function drive(env, maxStages) {
+  activeRuns.add(env.run.id);
+  try {
+    await advance(env, maxStages);
+  } finally {
+    activeRuns.delete(env.run.id);
+  }
+  if (env.run.state === "done" && env.run.project_dirty_at_end === void 0) {
+    try {
+      const p = await readProject(env.ctx, "ae_deliver_step", env.run.project_path);
+      env.run.project_dirty_at_end = p.dirty === true;
+      persist(env);
+    } catch {
+    }
+  }
+  return present(env);
+}
+async function deliverStatus(args, ctx) {
+  const project2 = await readProject(ctx, "ae_deliver_status", args.expect.project_path);
+  const projectPath = project2.project_path ?? args.expect.project_path;
+  let store;
+  try {
+    store = loadStore(projectPath);
+  } catch (e) {
+    return unreadable(e);
+  }
+  if (args.list) {
+    return {
+      ok: true,
+      runs: store.runs.slice().reverse().map((r) => ({ run_id: r.id, recipe: r.recipe, state: r.state, created_at: r.created_at, updated_at: r.updated_at, summary: summarizeStages(r.stages) })),
+      state_file: projectPath === "<unsaved>" ? null : deliverPath(projectPath)
+    };
+  }
+  const run = args.run_id ? store.runs.find((r) => r.id === args.run_id) : store.runs[store.runs.length - 1];
+  if (!run) return { ok: false, error: "unknown_run", message: args.run_id ? `No run ${args.run_id} for this project.` : "No delivery run in this project yet." };
+  const env = { ctx, run, store, saved: { file: projectPath === "<unsaved>" ? null : deliverPath(projectPath) } };
+  return present(env, {
+    ok: true,
+    error: void 0,
+    report: renderReport(run),
+    project: { dirty: project2.dirty ?? null, saved: project2.saved ?? null },
+    ...run.state === "done" && project2.dirty ? run.project_dirty_at_end === true ? { note: "The delivery ended with unsaved changes made by its own stages (a verify or scrub imports and removes a file). Save the project before relying on the file on disk." } : { note: "The project has unsaved changes made after this delivery ran; the delivered files may not match it." } : {}
+  });
+}
+var crypto12, fs25, path24, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip2, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
+var init_deliver = __esm({
+  "src/tools/ext/deliver.ts"() {
+    "use strict";
+    crypto12 = __toESM(require("node:crypto"), 1);
+    fs25 = __toESM(require("node:fs"), 1);
+    path24 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_quarantine();
+    init_queue();
+    init_common();
+    DeliverExpectSchema = ExpectSchema.omit({ comp_id: true }).strict().describe("Target guard verified before anything runs: the open project must be project_path (expect.comp_id is not accepted here; the recipe's comp is checked by the recipe). Refuses with kind:'guard' on mismatch.");
+    STAGE_KINDS = ["preflight", "house_style", "checkpoint", "save", "render", "verify", "scrub", "loudness", "collect"];
+    KIND_INFO = {
+      preflight: { tools: ["ae_preflight"], writes: false, per_output: false, optional: false, output_keys: [], fill: ["comp_ids"], fill_with_output: false, no_output: "comp" },
+      house_style: { tools: ["ae_house_style_check"], writes: false, per_output: false, optional: true, output_keys: [], fill: ["comp_id"], fill_with_output: false, no_output: "comp" },
+      checkpoint: { tools: ["ae_checkpoint_create"], writes: false, per_output: false, optional: false, output_keys: [], fill: [], fill_with_output: false, no_output: "comp" },
+      save: { tools: ["ae_save"], writes: true, per_output: false, optional: false, output_keys: [], fill: [], fill_with_output: false, no_output: "comp" },
+      render: { tools: ["ae_render_batch", "ae_aerender_start"], writes: true, per_output: false, optional: false, output_keys: [], fill: ["comp_id", "comp_name", "comps"], fill_with_output: false, no_output: "comp" },
+      verify: { tools: ["ae_verify_render"], writes: true, per_output: true, optional: false, output_keys: ["job_id", "path"], fill: ["comp_id"], fill_with_output: true, no_output: "blocked" },
+      scrub: { tools: ["ae_scrub_check"], writes: true, per_output: true, optional: true, output_keys: ["path"], fill: ["comp_id"], fill_with_output: false, no_output: "comp" },
+      loudness: { tools: ["ae_loudness_check"], writes: false, per_output: false, optional: true, output_keys: [], fill: ["comp_id"], fill_with_output: false, no_output: "comp" },
+      collect: { tools: ["ae_collect_files"], writes: true, per_output: false, optional: true, output_keys: [], fill: ["comp_id"], fill_with_output: false, no_output: "comp" }
+    };
+    MAX_STAGES = 20;
+    MAX_OUTPUTS = 500;
+    MAX_SHOWN = 40;
+    KEPT_RUNS = 20;
+    MAX_FINDINGS2 = 10;
+    MAX_PREFLIGHT_CALLS = 8;
+    MAX_COLLECT_CALLS = 4;
+    STRING_LIMIT = 2e4;
+    StageIdSchema = external_exports.string().regex(/^[a-z][a-z0-9_]{0,39}$/, "lower-case letters, digits and underscores, starting with a letter");
+    DeliverStageSchema = external_exports.object({
+      kind: external_exports.enum(STAGE_KINDS).describe(
+        "What the stage does: preflight (ae_preflight delivery gate), house_style (ae_house_style_check), checkpoint (ae_checkpoint_create), save (ae_save), render (ae_render_batch, or ae_aerender_start), verify (ae_verify_render on each rendered file), scrub (ae_scrub_check on each rendered file), loudness (ae_loudness_check on the comp's audio; needs a saved project), collect (ae_collect_files; needs args.dest and a saved project)."
+      ),
+      id: StageIdSchema.optional().describe("Name of the stage in the run table and for retry / skip. Default: the kind. Needed when a kind appears twice (two renders, say)."),
+      tool: external_exports.string().regex(/^ae_[a-z0-9_]+$/).optional().describe("Run another tool for this kind. Only the tools listed for the kind are accepted (render: ae_render_batch or ae_aerender_start). Default: the kind's first tool."),
+      args: external_exports.record(external_exports.string(), external_exports.unknown()).optional().describe(
+        "The tool's arguments, WITHOUT expect (added for you). comp_id, comp_name and comp_ids are filled from the recipe's comp when the tool takes them and you leave them out. A render stage needs its outputs here (ae_render_batch: output_dir and specs; comps is filled from the recipe's comp); the stages after it read the files it reports. A collect stage needs dest (dry_run defaults to false here)."
+      ),
+      optional: external_exports.boolean().optional().describe("Go on when the stage's tool is not registered on this server. Default: true for house_style, scrub, loudness and collect, false for the rest. A blocker always stops the run."),
+      per_output: external_exports.boolean().optional().describe("Run once for each file the render stage produced (verify and scrub do by default), with job_id or path filled in."),
+      fail_on: external_exports.enum(["blocker", "warning"]).optional().describe("What stops the run. Default 'blocker'; 'warning' makes this stage's warnings stop it too (a strict client)."),
+      checkpoint: external_exports.boolean().optional().describe("Force a checkpoint before this stage on or off. Default: follows the recipe's checkpoint_mode (on for stages that write).")
+    }).superRefine((v, ctx) => {
+      if (v.tool !== void 0 && !KIND_INFO[v.kind].tools.includes(v.tool)) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["tool"], message: `A ${v.kind} stage runs ${KIND_INFO[v.kind].tools.join(" or ")}, not ${v.tool}.` });
+      }
+      if (v.args && "expect" in v.args) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["args"], message: "args must not contain expect: the guard is added for you." });
+      }
+    });
+    CHECKPOINT_MODES = ["each_write", "start", "none"];
+    RecipeNameSchema = external_exports.string().regex(/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,59}$/, "letters, digits, space, _ . - (at most 60)").describe("The recipe's name, usually the client or the channel ('Acme YouTube').");
+    AeDeliverRecipeSchema = external_exports.object({
+      action: external_exports.enum(["list", "get", "set", "delete"]).describe("list: the recipes in <project>.deliver.json. get: one recipe with its stages and whether each tool is available. set: create or change a recipe. delete: remove one (runs already made are kept)."),
+      name: RecipeNameSchema.optional(),
+      comp_id: external_exports.number().int().optional().describe("set: the comp to deliver (a CompItem id). Checked now; the stages that take a comp get it unless their args say otherwise."),
+      stages: external_exports.array(DeliverStageSchema).min(1).max(MAX_STAGES).optional().describe(
+        "set: the stages, run in this order. Left out on a new recipe: preflight, house_style, save, render, verify, scrub, save (save_final), loudness, collect. Left out on an existing recipe: its stages are kept. A stage needs the tool it runs: the render stage in particular needs its args."
+      ),
+      checkpoint_mode: external_exports.enum(CHECKPOINT_MODES).optional().describe("set: each_write (default) takes a checkpoint (a copy of the saved .aep) before each stage that writes, reusing one when the file hasn't changed; start: once before the first such stage; none."),
+      notes: external_exports.string().max(1e3).optional().describe("set: free text kept with the recipe (the client's spec, say)."),
+      expect: DeliverExpectSchema
+    }).refine((v) => v.action === "list" || v.name !== void 0, { message: "get, set and delete need name." }).refine((v) => duplicateStageIds(v.stages).length === 0, { message: "Two stages share an id: give each repeated kind its own id." }).refine((v) => v.action === "set" || v.comp_id === void 0 && v.stages === void 0 && v.checkpoint_mode === void 0 && v.notes === void 0, {
+      message: "comp_id, stages, checkpoint_mode and notes apply to set only."
+    });
+    AeDeliverStepSchema = external_exports.object({
+      action: external_exports.enum(["start", "next", "retry", "skip", "cancel"]).describe(
+        "start: a new run from a recipe, then stages run until one blocks or waits. next: continue the run (polls a render that is in flight first). retry: run the stopped stage again, after you fixed what it reported. skip: pass the stopped stage with a written acknowledgement (only when Jay accepts what it found). cancel: stop the run and any render it started."
+      ),
+      recipe: RecipeNameSchema.optional().describe("start: which recipe."),
+      run_id: external_exports.string().regex(/^dl_[a-z0-9_]+$/).optional().describe("The run. Default: the latest run that is not done or cancelled."),
+      stage: StageIdSchema.optional().describe("retry / skip: the stopped stage's id. Optional; it must be the stage the run stopped at."),
+      acknowledge: external_exports.string().min(5).max(500).optional().describe("skip: why the stopped stage may be passed (kept in the record and the report). Never skip a blocker on your own: ask Jay."),
+      max_stages: external_exports.number().int().min(1).max(MAX_STAGES).optional().describe("Run at most this many stages in this call. Default: until one blocks, waits or the recipe ends."),
+      dry_run: external_exports.boolean().optional().describe("start: show the stages, their tools and whether each is available, check the arguments that don't depend on the render, and write nothing."),
+      expect: DeliverExpectSchema
+    }).refine((v) => v.action !== "start" || v.recipe !== void 0, { message: "start needs recipe." }).refine((v) => v.action === "start" || v.recipe === void 0, { message: "recipe applies to start only; the other actions use run_id." }).refine((v) => v.action !== "skip" || v.acknowledge !== void 0, { message: "skip needs acknowledge." }).refine((v) => v.action === "skip" || v.acknowledge === void 0, { message: "acknowledge applies to skip only." }).refine((v) => v.action === "retry" || v.action === "skip" || v.stage === void 0, { message: "stage applies to retry and skip." }).refine((v) => v.action === "start" || v.dry_run === void 0, { message: "dry_run applies to start only." });
+    AeDeliverStatusSchema = external_exports.object({
+      run_id: external_exports.string().regex(/^dl_[a-z0-9_]+$/).optional().describe("The run to show. Default: the latest run."),
+      list: external_exports.boolean().optional().describe("List the runs (newest first) instead of showing one."),
+      expect: DeliverExpectSchema
+    });
+    clip2 = (s, n = 500) => {
+      const str = typeof s === "string" ? s : String(s);
+      return str.length > n ? `${str.slice(0, n)}...` : str;
+    };
+    SEQUENCE_PATTERN = /\[#+\]/;
+    STATUS_RANK = { ok: 0, warn: 1, blocked: 2 };
+    REPEATABLE_KINDS = /* @__PURE__ */ new Set(["preflight", "house_style", "checkpoint", "save", "loudness", "collect"]);
+    memoryStores = /* @__PURE__ */ new Map();
+    unsavedStores = /* @__PURE__ */ new Set();
+    activeRuns = /* @__PURE__ */ new Set();
+    emptyStore = () => ({ version: 1, recipes: [], runs: [] });
+    StoreUnreadableError = class extends Error {
+      kind = "state_file_unreadable";
+      constructor(file, cause) {
+        super(`The delivery record ${file} could not be read: ${cause instanceof Error ? cause.message : String(cause)}. Nothing was run or written; try again when the file is free.`);
+      }
+    };
+    registryLookup = async (name) => {
+      const { ALL_TOOLS: ALL_TOOLS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
+      return ALL_TOOLS2.find((t) => t.name === name);
+    };
+    lookupTool = registryLookup;
+    lookupErrors = /* @__PURE__ */ new WeakSet();
+    deliverTools = [
+      {
+        name: "ae_deliver_recipe",
+        description: "The delivery recipe for a client or channel: an ordered list of stages (preflight, house_style, save, render, verify, scrub, save, loudness, collect) kept in <project>.deliver.json next to the .aep. action 'list' / 'get' read it ('get' also says whether each stage's tool exists on this server), 'set' creates or changes one (comp_id, stages, checkpoint_mode, notes; a new recipe without stages gets the default nine), 'delete' removes one. The render stage needs its outputs in args (ae_render_batch: output_dir and specs; the run follows the batch to the end), the collect stage needs dest. Verify and scrub leave the project changed, so the default recipe saves again before loudness and collect, which refuse a changed project. Edit a recipe per client; a run in progress takes the edited definition of a stage when that stage is retried. Changes nothing in After Effects. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeDeliverRecipeSchema,
+        handler: deliverRecipe
+      },
+      {
+        name: "ae_deliver_step",
+        description: "Run a delivery recipe one safe step at a time. 'start' makes a run from a recipe and runs its stages in order until one blocks, a render is in flight or max_stages is reached; 'next' continues (it follows a render that is running first), 'retry' runs the stopped stage again after you fixed what it reported, 'skip' passes it with a written acknowledgement (only when Jay accepts it), 'cancel' ends the run and its render. Each stage is an existing tool run through its own handler (guard, undo group and read-back stay that tool's); a checkpoint is taken before each stage that writes. A blocker stops the run; a warning is listed and the run goes on. A tool that isn't registered is reported as 'unavailable' (optional stages go on). The run is recorded in <project>.deliver.json, so it survives a restart, and every call returns the stage table and, when done or stopped, a report. dry_run on start shows the plan without running it. Each stage is its own undo step; the way back is the checkpoint (ae_checkpoint_revert). A verify or scrub that leaves its imported render or temporary comp in the project, or can't confirm it removed them, blocks the run and can't be retried (inspect, then skip). A collect with a zip waits for the zip and blocks if it failed. A render batch is not retried (use ae_render_batch_resume, then next). Up to 500 rendered files are followed; long lists are cut to 40 rows with outputs_total. expect takes project_path only. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeDeliverStepSchema,
+        handler: deliverStep
+      },
+      {
+        name: "ae_deliver_status",
+        description: "Show a delivery run: the stage table (status, findings, per-file results), the files it produced, what to do next and a plain-text report to hand to the client. Default the latest run; list: true lists the runs. Reads the record next to the .aep; changes nothing in After Effects.",
+        schema: AeDeliverStatusSchema,
+        handler: deliverStatus
+      }
+    ];
+  }
+});
+
+// src/audio.ts
+function fourcc(buf, at) {
+  return buf.toString("latin1", at, at + 4);
+}
+function readExtended80(buf, at) {
+  const expon = buf.readUInt16BE(at) & 32767;
+  const sign = buf[at] & 128 ? -1 : 1;
+  const hi = buf.readUInt32BE(at + 2);
+  const lo = buf.readUInt32BE(at + 6);
+  if (expon === 0 && hi === 0 && lo === 0) return 0;
+  const mantissa = hi * 2 ** 32 + lo;
+  return sign * mantissa * 2 ** (expon - 16383 - 63);
+}
+function intReader(bits, littleEndian) {
+  if (bits === 8) {
+    return littleEndian ? (b, at) => (b[at] - 128) / 128 : (b, at) => b.readInt8(at) / 128;
+  }
+  if (bits === 16) return littleEndian ? (b, at) => b.readInt16LE(at) / 32768 : (b, at) => b.readInt16BE(at) / 32768;
+  if (bits === 24) return littleEndian ? (b, at) => b.readIntLE(at, 3) / 8388608 : (b, at) => b.readIntBE(at, 3) / 8388608;
+  if (bits === 32) return littleEndian ? (b, at) => b.readInt32LE(at) / 2147483648 : (b, at) => b.readInt32BE(at) / 2147483648;
+  throw new AudioDecodeError(`Unsupported PCM bit depth ${bits}`);
+}
+function floatReader(bits, littleEndian) {
+  if (bits === 32) return littleEndian ? (b, at) => b.readFloatLE(at) : (b, at) => b.readFloatBE(at);
+  if (bits === 64) return littleEndian ? (b, at) => b.readDoubleLE(at) : (b, at) => b.readDoubleBE(at);
+  throw new AudioDecodeError(`Unsupported float bit depth ${bits}`);
+}
+function checkLength(frames, sampleRate, maxSeconds, channels = 1, maxDecodedBytes) {
+  if (!(sampleRate > 0)) throw new AudioDecodeError("Invalid sample rate in the audio header");
+  if (maxSeconds !== void 0 && frames / sampleRate > maxSeconds) {
+    throw new AudioDecodeError(`${Math.round(frames / sampleRate)} s of audio; analyse at most ${maxSeconds / 60} minutes at a time (use start/end)`);
+  }
+  if (maxDecodedBytes !== void 0 && frames * channels * 4 > maxDecodedBytes) {
+    throw new AudioDecodeError(`${channels} channels of ${Math.round(frames / sampleRate)} s would need ${Math.round(frames * channels * 4 / 1048576)} MB decoded; the limit is ${Math.round(maxDecodedBytes / 1048576)} MB. Measure a shorter range (use start/end)`);
+  }
+}
+function mixDown(buf, start, frames, channels, bytesPerSample, read2) {
+  const mono = new Float32Array(frames);
+  const block = channels * bytesPerSample;
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    const at = start + f * block;
+    for (let c = 0; c < channels; c++) sum += read2(buf, at + c * bytesPerSample);
+    mono[f] = sum / channels;
+  }
+  return mono;
+}
+function splitChannels(buf, start, frames, channels, bytesPerSample, read2) {
+  const out = [];
+  for (let c = 0; c < channels; c++) out.push(new Float32Array(frames));
+  const block = channels * bytesPerSample;
+  for (let f = 0; f < frames; f++) {
+    const at = start + f * block;
+    for (let c = 0; c < channels; c++) out[c][f] = read2(buf, at + c * bytesPerSample);
+  }
+  return out;
+}
+function samplesOf(opts, buf, start, frames, channels, bytesPerSample, read2) {
+  if (opts.perChannel) return { mono: new Float32Array(0), channelData: splitChannels(buf, start, frames, channels, bytesPerSample, read2) };
+  return { mono: mixDown(buf, start, frames, channels, bytesPerSample, read2) };
+}
+function decodeWav(buf, opts) {
+  let at = 12;
+  let fmt = null;
+  while (at + 8 <= buf.length) {
+    const id = fourcc(buf, at);
+    let size = buf.readUInt32LE(at + 4);
+    const body = at + 8;
+    if (id === "fmt ") {
+      if (size < 16 || body + 16 > buf.length) throw new AudioDecodeError("Malformed WAV fmt chunk");
+      let format = buf.readUInt16LE(body);
+      const channels = buf.readUInt16LE(body + 2);
+      const sampleRate = buf.readUInt32LE(body + 4);
+      const bits = buf.readUInt16LE(body + 14);
+      if (format === 65534 && size >= 26 && body + 26 <= buf.length) format = buf.readUInt16LE(body + 24);
+      fmt = { format, channels, sampleRate, bits };
+    } else if (id === "data") {
+      if (!fmt) throw new AudioDecodeError("WAV data chunk before fmt chunk");
+      const riffSize = buf.readUInt32LE(4);
+      const streaming = size === 0 && (riffSize === 0 || riffSize === 4294967295);
+      if (streaming || body + size > buf.length) size = buf.length - body;
+      if (size === 0) throw new AudioDecodeError("WAV file has no audio data");
+      const bytes = fmt.bits / 8;
+      if (fmt.channels < 1 || !(fmt.sampleRate > 0) || !Number.isInteger(bytes) || bytes < 1) throw new AudioDecodeError("Malformed WAV fmt chunk");
+      const frames = Math.floor(size / (bytes * fmt.channels));
+      checkLength(frames, fmt.sampleRate, opts.maxSeconds, fmt.channels, opts.maxDecodedBytes);
+      let read2;
+      if (fmt.format === 1) read2 = intReader(fmt.bits, true);
+      else if (fmt.format === 3) read2 = floatReader(fmt.bits, true);
+      else throw new AudioDecodeError(`Unsupported WAV format code ${fmt.format} (PCM and float only)`);
+      return {
+        sampleRate: fmt.sampleRate,
+        channels: fmt.channels,
+        frames,
+        ...samplesOf(opts, buf, body, frames, fmt.channels, bytes, read2),
+        format: `wav ${fmt.format === 3 ? "float" : "pcm"} ${fmt.bits}-bit`
+      };
+    }
+    at = body + size + size % 2;
+  }
+  throw new AudioDecodeError("WAV file has no data chunk");
+}
+function decodeAiff(buf, opts) {
+  const isAifc = fourcc(buf, 8) === "AIFC";
+  let at = 12;
+  let comm = null;
+  while (at + 8 <= buf.length) {
+    const id = fourcc(buf, at);
+    let size = buf.readUInt32BE(at + 4);
+    const body = at + 8;
+    if (id === "COMM") {
+      if (size < 18 || body + 18 > buf.length) throw new AudioDecodeError("Malformed AIFF COMM chunk");
+      comm = {
+        channels: buf.readInt16BE(body),
+        frames: buf.readUInt32BE(body + 2),
+        bits: buf.readInt16BE(body + 6),
+        sampleRate: readExtended80(buf, body + 8),
+        compression: isAifc && size >= 22 && body + 22 <= buf.length ? fourcc(buf, body + 18) : "NONE"
+      };
+    } else if (id === "SSND") {
+      if (!comm) throw new AudioDecodeError("AIFF SSND chunk before COMM chunk");
+      if (comm.channels < 1 || !(comm.sampleRate > 0)) throw new AudioDecodeError("Malformed AIFF COMM chunk");
+      if (size < 8 || body + 8 > buf.length) throw new AudioDecodeError("Malformed AIFF SSND chunk");
+      if (body + size > buf.length) size = buf.length - body;
+      const offset = buf.readUInt32BE(body);
+      const start = body + 8 + offset;
+      const c = comm.compression;
+      let read2;
+      let bits = comm.bits;
+      if (c === "NONE" || c === "twos") read2 = intReader(bits, false);
+      else if (c === "sowt") read2 = intReader(bits, true);
+      else if (c === "fl32" || c === "FL32") {
+        bits = 32;
+        read2 = floatReader(32, false);
+      } else if (c === "fl64" || c === "FL64") {
+        bits = 64;
+        read2 = floatReader(64, false);
+      } else throw new AudioDecodeError(`Unsupported AIFC compression '${c}'`);
+      const bytes = Math.ceil(bits / 8);
+      const available = Math.floor((body + size - start) / (bytes * comm.channels));
+      const frames = Math.max(0, Math.min(comm.frames, available));
+      checkLength(frames, comm.sampleRate, opts.maxSeconds, comm.channels, opts.maxDecodedBytes);
+      return {
+        sampleRate: comm.sampleRate,
+        channels: comm.channels,
+        frames,
+        ...samplesOf(opts, buf, start, frames, comm.channels, bytes, read2),
+        format: `${isAifc ? "aifc" : "aiff"} ${c} ${bits}-bit`
+      };
+    }
+    at = body + size + size % 2;
+  }
+  throw new AudioDecodeError("AIFF file has no SSND chunk");
+}
+function decodeAudio(buf, opts = {}) {
+  if (buf.length < 12) throw new AudioDecodeError("File too short to be audio");
+  const head2 = fourcc(buf, 0);
+  const kind = fourcc(buf, 8);
+  try {
+    if (head2 === "RIFF" && kind === "WAVE") return decodeWav(buf, opts);
+    if (head2 === "FORM" && (kind === "AIFF" || kind === "AIFC")) return decodeAiff(buf, opts);
+  } catch (err) {
+    if (err instanceof RangeError) throw new AudioDecodeError("Truncated or malformed audio file");
+    throw err;
+  }
+  throw new AudioDecodeError("Not a WAV or AIFF file");
+}
+function decodeAudioChannels(buf, opts = {}) {
+  const d = decodeAudio(buf, { ...opts, perChannel: true });
+  return { sampleRate: d.sampleRate, channels: d.channels, frames: d.frames, channelData: d.channelData ?? [], format: d.format };
+}
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i];
+      re[i] = re[j];
+      re[j] = t;
+      t = im[i];
+      im[i] = im[j];
+      im[j] = t;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wr = Math.cos(ang);
+    const wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1;
+      let ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k;
+        const b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci;
+        const ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr;
+        im[b] = im[a] - ti;
+        re[a] += tr;
+        im[a] += ti;
+        const ncr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = ncr;
+      }
+    }
+  }
+}
+async function onsetEnvelope(mono, sampleRate) {
+  const n = sampleRate > 6e4 ? 2048 : 1024;
+  const hop = n / 2;
+  const frames = Math.max(1, Math.floor(mono.length / hop) + 1);
+  const window = new Float64Array(n);
+  for (let i = 0; i < n; i++) window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / n);
+  const bins = n / 2;
+  let prev = new Float64Array(bins);
+  let cur = new Float64Array(bins);
+  const re = new Float64Array(n);
+  const im = new Float64Array(n);
+  const env = new Float64Array(frames);
+  for (let t = 0; t < frames; t++) {
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
+    const start = t * hop - n / 2;
+    for (let i = 0; i < n; i++) {
+      const s = start + i;
+      re[i] = s >= 0 && s < mono.length ? mono[s] * window[i] : 0;
+      im[i] = 0;
+    }
+    fft(re, im);
+    let flux = 0;
+    for (let k = 1; k < bins; k++) {
+      cur[k] = Math.log1p(100 * Math.hypot(re[k], im[k]));
+      if (t > 0) {
+        const d = cur[k] - prev[k];
+        if (d > 0) flux += d;
+      }
+    }
+    env[t] = flux;
+    const swap = prev;
+    prev = cur;
+    cur = swap;
+  }
+  return { env, hop, frameRate: sampleRate / hop };
+}
+function pickPeaks(env, frameRate, delta) {
+  const peaks = [];
+  const preMax = Math.max(1, Math.round(0.03 * frameRate));
+  const postMax = 1;
+  const avg = Math.max(1, Math.round(0.1 * frameRate));
+  const wait = Math.max(1, Math.round(0.05 * frameRate));
+  let last = -Infinity;
+  for (let t = 0; t < env.length; t++) {
+    const v = env[t];
+    if (v <= 0) continue;
+    let isMax = true;
+    for (let k = Math.max(0, t - preMax); k <= Math.min(env.length - 1, t + postMax); k++) {
+      if (env[k] > v) {
+        isMax = false;
+        break;
+      }
+    }
+    if (!isMax) continue;
+    let sum = 0;
+    let count = 0;
+    for (let k = Math.max(0, t - avg); k <= Math.min(env.length - 1, t + avg); k++) {
+      sum += env[k];
+      count++;
+    }
+    if (v < sum / count + delta) continue;
+    if (t - last < wait) continue;
+    peaks.push(t);
+    last = t;
+  }
+  return peaks;
+}
+function estimatePeriod(env, frameRate, minBpm, maxBpm) {
+  const mean = env.reduce((a2, b2) => a2 + b2, 0) / env.length;
+  const x = Array.from(env, (v) => v - mean);
+  const minLag = Math.max(1, Math.floor(60 * frameRate / maxBpm));
+  const maxLag = Math.min(x.length - 1, Math.ceil(60 * frameRate / minBpm));
+  if (maxLag <= minLag + 1) return null;
+  let r0 = 0;
+  for (const v of x) r0 += v * v;
+  if (r0 <= 0) return null;
+  const r = new Float64Array(maxLag + 2);
+  for (let lag = minLag - 1; lag <= maxLag + 1; lag++) {
+    if (lag < 1) continue;
+    let s = 0;
+    for (let t = 0; t + lag < x.length; t++) s += x[t] * x[t + lag];
+    r[lag] = s;
+  }
+  let best = -1;
+  let bestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const bpm = 60 * frameRate / lag;
+    const prior = Math.exp(-0.5 * Math.log2(bpm / 120) ** 2);
+    const score = r[lag] * prior;
+    if (score > bestScore) {
+      bestScore = score;
+      best = lag;
+    }
+  }
+  if (best < 0 || r[best] <= 0) return null;
+  const a = r[best - 1];
+  const b = r[best];
+  const c = r[best + 1];
+  const denom = a - 2 * b + c;
+  const shift = denom !== 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / denom)) : 0;
+  return { period: best + shift, confidence: Math.max(0, Math.min(1, b / r0)) };
+}
+async function trackBeats(env, period, tightness = 100) {
+  const n = env.length;
+  if (n === 0 || period <= 1) return [];
+  const sigma = Math.max(1, period / 16);
+  const radius = Math.ceil(3 * sigma);
+  const local = new Float64Array(n);
+  const max = env.reduce((m, v) => Math.max(m, v), 0) || 1;
+  for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
+    let s = 0;
+    for (let k = -radius; k <= radius; k++) {
+      const i = t + k;
+      if (i >= 0 && i < n) s += env[i] / max * Math.exp(-0.5 * (k / sigma) ** 2);
+    }
+    local[t] = s;
+  }
+  const score = new Float64Array(n);
+  const back = new Int32Array(n).fill(-1);
+  const lo = Math.round(period / 2);
+  const hi = Math.round(2 * period);
+  for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
+    let best = -Infinity;
+    let arg = -1;
+    for (let p = t - hi; p <= t - lo; p++) {
+      if (p < 0) continue;
+      const v = score[p] - tightness * Math.log((t - p) / period) ** 2;
+      if (v > best) {
+        best = v;
+        arg = p;
+      }
+    }
+    score[t] = local[t] + (arg >= 0 ? best : 0);
+    back[t] = arg;
+  }
+  let end = n - 1;
+  for (let t = Math.max(0, n - hi); t < n; t++) if (score[t] > score[end]) end = t;
+  const beats = [];
+  for (let t = end; t >= 0; t = back[t]) beats.push(t);
+  return beats.reverse();
+}
+async function analyzeAudio(mono, sampleRate, opts = {}) {
+  const duration = mono.length / sampleRate;
+  let peak = 0;
+  let sumSq = 0;
+  for (let i = 0; i < mono.length; i++) {
+    const a = Math.abs(mono[i]);
+    if (a > peak) peak = a;
+    sumSq += mono[i] * mono[i];
+  }
+  const rms = mono.length ? Math.sqrt(sumSq / mono.length) : 0;
+  const fps = opts.fps && opts.fps > 0 ? opts.fps : 25;
+  const spf = Math.max(1, sampleRate / fps);
+  const frameCount = Math.max(1, Math.ceil(mono.length / spf));
+  const frameRms = new Float64Array(frameCount);
+  const framePeak = new Float64Array(frameCount);
+  let silent = 0;
+  for (let f = 0; f < frameCount; f++) {
+    let s = 0;
+    let p = 0;
+    const end = Math.min(mono.length, Math.round((f + 1) * spf));
+    let count = 0;
+    for (let i = Math.round(f * spf); i < end; i++) {
+      s += mono[i] * mono[i];
+      const a = Math.abs(mono[i]);
+      if (a > p) p = a;
+      count++;
+    }
+    frameRms[f] = count ? Math.sqrt(s / count) : 0;
+    framePeak[f] = p;
+    if (toDb(frameRms[f]) < SILENCE_DB) silent++;
+  }
+  const { env, hop, frameRate } = await onsetEnvelope(mono, sampleRate);
+  const envMax = env.reduce((m, v) => Math.max(m, v), 0);
+  const norm2 = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
+  const sensitivity = Math.max(0, Math.min(1, opts.sensitivity ?? 0.5));
+  const delta = 0.02 + (1 - sensitivity) * 0.16;
+  const audible = toDb(peak) >= ONSET_FLOOR_DB;
+  const peakFrames = envMax > 0 && audible ? pickPeaks(norm2, frameRate, delta) : [];
+  const hitWindow = Math.round(0.05 * sampleRate);
+  const onsets = peakFrames.map((t) => {
+    const at = t * hop;
+    let p = 0;
+    for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
+    return { time: round32(at / sampleRate), strength: round32(norm2[t]), level_db: toDb(p) };
+  }).filter((o) => o.level_db >= ONSET_FLOOR_DB);
+  let tempo = null;
+  let beats = [];
+  const est = onsets.length >= 4 ? estimatePeriod(norm2, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
+  if (est) {
+    const first = onsets[0].time;
+    const last = onsets[onsets.length - 1].time;
+    const periodSec = est.period / frameRate;
+    beats = (await trackBeats(norm2, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
+    const near6 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
+    tempo = {
+      bpm: Math.round(60 / periodSec * 10) / 10,
+      period: round32(periodSec),
+      confidence: round32(est.confidence),
+      beats_on_onsets: beats.length ? round32(near6 / beats.length) : 0
+    };
+  }
+  const hits = [...onsets].sort((a, b) => b.level_db - a.level_db || b.strength - a.strength).slice(0, opts.hits ?? 20);
+  const out = {
+    duration: round32(duration),
+    sample_rate: sampleRate,
+    overall: { peak_db: toDb(peak), rms_db: toDb(rms), silent_ratio: round32(silent / frameCount) },
+    onsets,
+    tempo,
+    beats,
+    hits
+  };
+  if (opts.levels) {
+    const bucket = Math.max(1, Math.ceil(frameCount / MAX_LEVEL_POINTS));
+    const rmsDb = [];
+    const peakDb = [];
+    for (let i = 0; i < frameCount; i += bucket) {
+      let r = 0;
+      let p = 0;
+      for (let k = i; k < Math.min(frameCount, i + bucket); k++) {
+        r = Math.max(r, frameRms[k]);
+        p = Math.max(p, framePeak[k]);
+      }
+      rmsDb.push(toDb(r));
+      peakDb.push(toDb(p));
+    }
+    out.levels = { step: Math.round(bucket / fps * 1e6) / 1e6, fps, frames_per_point: bucket, rms_db: rmsDb, peak_db: peakDb };
+  }
+  return out;
+}
+function offsetAnalysis(a, offset) {
+  if (!offset) return a;
+  const sh = (t) => round32(t + offset);
+  return {
+    ...a,
+    onsets: a.onsets.map((o) => ({ ...o, time: sh(o.time) })),
+    beats: a.beats.map(sh),
+    hits: a.hits.map((o) => ({ ...o, time: sh(o.time) }))
+  };
+}
+var AudioDecodeError, SILENCE_DB, ONSET_FLOOR_DB, YIELD_EVERY, yieldToLoop, MAX_LEVEL_POINTS, toDb, round32;
+var init_audio = __esm({
+  "src/audio.ts"() {
+    "use strict";
+    AudioDecodeError = class extends Error {
+    };
+    SILENCE_DB = -50;
+    ONSET_FLOOR_DB = -60;
+    YIELD_EVERY = 2048;
+    yieldToLoop = () => new Promise((resolve4) => setImmediate(resolve4));
+    MAX_LEVEL_POINTS = 500;
+    toDb = (x) => Math.round(20 * Math.log10(Math.max(x, 1e-10)) * 10) / 10;
+    round32 = (x) => Math.round(x * 1e3) / 1e3;
+  }
+});
+
+// src/tools/ext/audio.ts
+function planCueKeys(times, opts) {
+  const gap = opts.frame / 2;
+  const sorted = [...times].sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] >= gap);
+  const base = opts.base ?? null;
+  const keys = [];
+  let last = -Infinity;
+  sorted.forEach((t, i) => {
+    const pre = t - Math.max(opts.attack, opts.frame);
+    if (pre >= 0 && pre > last + gap) keys.push({ time: round4(pre), value: base, kind: "pre" });
+    else if (pre < 0 && last === -Infinity && t >= gap) keys.push({ time: 0, value: base, kind: "pre" });
+    keys.push({ time: round4(t), value: opts.peak, kind: "peak" });
+    last = t;
+    const next = sorted[i + 1];
+    const post = t + Math.max(opts.decay, opts.frame);
+    const nextPre = next === void 0 ? Infinity : next - Math.max(opts.attack, opts.frame);
+    if (post < nextPre - gap) {
+      keys.push({ time: round4(post), value: base, kind: "post" });
+      last = post;
+    }
+  });
+  return keys;
+}
+function cueKeysMismatches(planned, afterRaw, written) {
+  const m = [];
+  const after = afterRaw;
+  if (!after) return m;
+  let checkedUpTo = Infinity;
+  if (after.truncated) {
+    checkedUpTo = after.keys.length ? after.keys[after.keys.length - 1].time : -Infinity;
+    const unchecked = planned.filter((k) => k.time > checkedUpTo + 15e-4).length;
+    m.push({
+      path: "keys",
+      expected: `${planned.length} planned keys read back`,
+      actual: `read-back stopped at ${after.keys.length} keys`,
+      message: `Read-back truncated at ${after.keys.length} keys; ${unchecked} planned key(s) after ${checkedUpTo}s were not verified`
+    });
+  }
+  for (const k of planned) {
+    if (k.time > checkedUpTo + 15e-4) continue;
+    const got = after.keys.find((x) => Math.abs(x.time - k.time) <= 15e-4);
+    if (!got) {
+      m.push({ path: `keys@${k.time}`, expected: k.value ?? written.base, actual: void 0, message: `No key at ${k.time}s` });
+      continue;
+    }
+    const want = k.value ?? written.base;
+    const actual = Array.isArray(want) && Array.isArray(got.value) ? got.value.slice(0, want.length) : got.value;
+    compareValues(want, actual, `keys@${k.time}`, m);
+  }
+  return m;
+}
+function sanitize(name) {
+  return name.replace(/[^\w.-]+/g, "_").slice(0, 60) || "comp";
+}
+function stamp() {
+  return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
+}
+function findRenderedAudio(outputPath) {
+  if (fs26.existsSync(outputPath)) return outputPath;
+  const dir = path25.dirname(outputPath);
+  const stem = path25.basename(outputPath, path25.extname(outputPath));
+  try {
+    const hit = fs26.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
+    return hit ? path25.join(dir, hit) : null;
+  } catch {
+    return null;
+  }
+}
+async function analyzeFile(file, offset, opts, maxSeconds = MAX_ANALYSIS_SECONDS) {
+  const stat = fs26.statSync(file);
+  if (stat.size > MAX_AUDIO_BYTES) throw new AudioDecodeError(`Audio file is over ${MAX_AUDIO_BYTES / 1048576} MB`);
+  const decoded = decodeAudio(await fs26.promises.readFile(file), { maxSeconds });
+  const analysis = offsetAnalysis(await analyzeAudio(decoded.mono, decoded.sampleRate, opts), offset);
+  const boundList = (list) => ({ list: list.slice(0, MAX_LIST3), truncated: list.length > MAX_LIST3 });
+  const beats = boundList(analysis.beats);
+  const onsets = boundList(analysis.onsets);
+  return {
+    source: { path: file, format: decoded.format, sample_rate: decoded.sampleRate, channels: decoded.channels, duration: analysis.duration },
+    time_offset: offset,
+    overall: analysis.overall,
+    tempo: analysis.tempo,
+    beats: beats.list,
+    beats_truncated: beats.truncated,
+    onsets: onsets.list,
+    onsets_truncated: onsets.truncated,
+    hits: analysis.hits,
+    ...analysis.levels ? { levels: { ...analysis.levels, start: offset } } : {}
+  };
+}
+function createAudioTools(options = {}) {
+  const startRender = options.startRender ?? (async (args, ctx) => {
+    const tool = aerenderTools.find((t) => t.name === "ae_aerender_start");
+    return await tool.handler(args, ctx);
+  });
+  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
+  const rendersDir = options.rendersDir ?? (() => getDefaultAerenderRegistry().rendersDir);
+  const pollMs = options.pollMs ?? 250;
+  const jobs = /* @__PURE__ */ new Map();
+  const metaFor = (jobId) => {
+    const known = jobs.get(jobId);
+    if (known) return known;
+    const job = getJob(jobId);
+    if (!job) return void 0;
+    try {
+      return JSON.parse(fs26.readFileSync(`${job.output_path}.json`, "utf8"));
+    } catch {
+      return void 0;
+    }
+  };
+  async function collect(jobId, waitSeconds, opts) {
+    const meta = metaFor(jobId);
+    if (!meta) return { ok: false, error: "unknown_job", message: `No audio render with job_id ${jobId}` };
+    const deadline = Date.now() + waitSeconds * 1e3;
+    let job = getJob(jobId);
+    while (job?.state === "running" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      job = getJob(jobId);
+    }
+    if (!job) return { ok: false, error: "unknown_job", message: `The render job ${jobId} is gone` };
+    if (job.state === "running") {
+      return { ok: true, state: "rendering", job_id: jobId, message: "Still rendering. Call ae_audio_analyze again with this job_id." };
+    }
+    if (job.state === "failed") {
+      return {
+        ok: false,
+        error: "render_failed",
+        job_id: jobId,
+        message: `aerender failed: ${job.error ?? "see the log"}. If the log says the output-module template is missing, pass output_module_template with an audio-only template that exists in this AE (ae_render_templates lists them).`,
+        log_path: job.log_path
+      };
+    }
+    const file = findRenderedAudio(meta.output_path);
+    if (!file) return { ok: false, error: "no_output", job_id: jobId, message: `aerender finished but wrote no audio file at ${meta.output_path}` };
+    try {
+      return { ok: true, state: "done", job_id: jobId, comp_id: meta.comp_id, ...await analyzeFile(file, meta.offset, { ...opts, fps: meta.fps }, MAX_ANALYSIS_SECONDS + 2 / (meta.fps || 25)) };
+    } catch (err) {
+      if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", job_id: jobId, message: err.message };
+      throw err;
+    }
+  }
+  return [
+    {
+      name: "ae_audio_analyze",
+      description: "Analyse a comp's sound: overall level, onsets (hits), tempo in BPM with a confidence, beat times, the strongest hits, and optionally levels per frame. All times are comp seconds. With comp_id the comp's audio is rendered by aerender in the background (an audio-only output-module template, default 'AIFF 48kHz'), so everything AE does to the sound counts, and AE stays usable; the project must be saved with no unsaved changes (ae_save first). If the render takes longer than wait_seconds the result is a job_id to call again with. With audio_path a WAV or AIFF is analysed directly. Analysis is plain JS on the server; no outside tools. Use the beats or onsets with ae_add_markers (markers on beats) or ae_cue_keys (a pulse on each beat). " + AGENT_SAFETY_GUIDANCE,
+      schema: AeAudioAnalyzeSchema,
+      handler: async (args, ctx) => {
+        const opts = {
+          levels: args.levels,
+          sensitivity: args.sensitivity,
+          min_bpm: args.min_bpm,
+          max_bpm: args.max_bpm,
+          hits: args.hits
+        };
+        const wait = args.wait_seconds ?? 30;
+        if (args.audio_path !== void 0) {
+          if (!path25.isAbsolute(args.audio_path) || !fs26.existsSync(args.audio_path)) {
+            return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
+          }
+          try {
+            return { ok: true, state: "done", ...await analyzeFile(args.audio_path, args.time_offset ?? 0, { ...opts, fps: args.fps }) };
+          } catch (err) {
+            if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", message: err.message };
+            throw err;
+          }
+        }
+        if (args.job_id !== void 0) return collect(args.job_id, wait, opts);
+        const info = (await ctx.bridge.callHost("audioCompInfo", { comp_id: args.comp_id }, {
+          label: "ae_audio_analyze (comp)",
+          mutates: false,
+          toolName: "ae_audio_analyze"
+        })).result;
+        if (!info.name_unique) {
+          return { ok: false, error: "ambiguous_comp", message: `Several comps are named "${info.name}"; aerender picks comps by name. Rename one first.` };
+        }
+        if (!info.audio_layers.length) {
+          return { ok: false, error: "no_audio", message: `"${info.name}" has no layer with audio switched on.` };
+        }
+        const start = args.start ?? 0;
+        const end = Math.min(args.end ?? info.duration, info.duration);
+        if (end <= start) return { ok: false, error: "bad_range", message: `Nothing to render between ${start}s and ${end}s (comp is ${info.duration}s).` };
+        const firstFrame = Math.round((info.display_start_time ?? 0) * info.fps);
+        const startFrame = firstFrame + Math.round(start * info.fps);
+        const endFrame = firstFrame + Math.max(Math.round(start * info.fps), Math.ceil(end * info.fps) - 1);
+        const renderedSeconds = (endFrame - startFrame + 1) / info.fps;
+        if (renderedSeconds > MAX_ANALYSIS_SECONDS + 1e-6) {
+          return {
+            ok: false,
+            error: "too_long",
+            message: `${Math.round(renderedSeconds)} s of audio; analyse at most ${MAX_ANALYSIS_SECONDS / 60} minutes at a time (use start/end)`
+          };
+        }
+        const dir = path25.join(rendersDir(), "audio");
+        fs26.mkdirSync(dir, { recursive: true });
+        const outputPath = path25.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
+        const started = await startRender(
+          {
+            expect: args.expect,
+            comp_name: info.name,
+            output_path: outputPath,
+            output_module_template: args.output_module_template ?? DEFAULT_AUDIO_TEMPLATE,
+            start_frame: startFrame,
+            end_frame: endFrame
+          },
+          ctx
+        );
+        if (!started?.job_id) return { ok: false, error: "render_not_started", detail: started };
+        const renderStart = Math.round(start * info.fps) / info.fps;
+        const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
+        jobs.set(started.job_id, meta);
+        try {
+          fs26.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+        } catch {
+        }
+        return collect(started.job_id, wait, opts);
+      }
+    },
+    {
+      name: "ae_cue_keys",
+      description: "Keyframe a property on cue times (beats or onsets from ae_audio_analyze, or marker times): for each cue the value jumps (or rises over `attack`) from base to `peak` and settles back over `decay`, in one undo group guarded by `expect`. Close cues chain peak to peak instead of colliding. Base defaults to the property's own value where the cues start. dry_run returns the planned keys without touching AE. The read-back (a separate evalScript) checks every planned key's time and value. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeCueKeysSchema,
+      handler: async (args, ctx) => {
+        const info = (await ctx.bridge.callHost("audioCompInfo", { comp_id: args.comp_id }, {
+          label: "ae_cue_keys (comp)",
+          mutates: false,
+          toolName: "ae_cue_keys"
+        })).result;
+        const one = (v) => Array.isArray(v) && v.length === 1 && typeof v[0] === "number" ? v[0] : v;
+        const peakValue = one(args.peak);
+        const baseValue = args.base === void 0 ? void 0 : one(args.base);
+        const planned = planCueKeys(args.times, {
+          attack: args.attack ?? 0,
+          decay: args.decay ?? 0.15,
+          frame: info.frame_duration || 1 / (info.fps || 25),
+          peak: peakValue,
+          base: baseValue
+        });
+        if (args.dry_run) return { ok: true, dry_run: true, count: planned.length, keys: planned };
+        const range = [planned[0].time, planned[planned.length - 1].time];
+        const snapshot = () => ({ host: "keysSnapshot", args: { comp_id: args.comp_id, layer: args.layer, path: args.path, start: range[0], end: range[1], max: MAX_SNAPSHOT_KEYS } });
+        return runGuardedWrite(ctx, {
+          toolName: "ae_cue_keys",
+          label: `ae_cue_keys(${args.times.length} cues)`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: snapshot,
+          write: {
+            host: "cueKeys",
+            args: {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              path: args.path,
+              keys: planned.map((k) => ({ time: k.time, value: k.value })),
+              base: baseValue,
+              ease: args.ease ?? "smooth",
+              clear_range: args.clear_existing ? range : void 0,
+              label: "Keys on cues"
+            }
+          },
+          check: (_before, after, w) => cueKeysMismatches(planned, after, w),
+          present: (_before, after, w) => ({
+            keys_set: w.set,
+            cleared: w.cleared,
+            base: w.base,
+            layer: w.layer,
+            property: w.property,
+            numKeys: after?.numKeys,
+            ...w.ease_warning ? { ease_warning: w.ease_warning } : {},
+            ...after?.truncated ? { readback_truncated: true } : {}
+          })
+        });
+      }
+    }
+  ];
+}
+var fs26, path25, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST3, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
+var init_audio2 = __esm({
+  "src/tools/ext/audio.ts"() {
+    "use strict";
+    fs26 = __toESM(require("node:fs"), 1);
+    path25 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_audio();
+    init_receipts();
+    init_common();
+    init_aerender();
+    init_write_runner();
+    DEFAULT_AUDIO_TEMPLATE = "AIFF 48kHz";
+    MAX_ANALYSIS_SECONDS = 20 * 60;
+    MAX_AUDIO_BYTES = 600 * 1024 * 1024;
+    MAX_LIST3 = 500;
+    MAX_SNAPSHOT_KEYS = 3 * MAX_LIST3;
+    AnalysisOptionFields = {
+      levels: external_exports.boolean().optional().describe("Include RMS and peak levels in dBFS, one point per comp frame (with audio_path: per `fps`, default 25), at most 500 points, pooled for long audio. levels.step is the seconds per point, levels.frames_per_point the frames pooled into each."),
+      sensitivity: external_exports.number().min(0).max(1).optional().describe("Onset sensitivity 0..1; higher finds quieter hits. Default 0.5."),
+      min_bpm: external_exports.number().min(30).max(300).optional().describe("Tempo search range. Default 60."),
+      max_bpm: external_exports.number().min(30).max(400).optional().describe("Default 200."),
+      hits: external_exports.number().int().min(1).max(100).optional().describe("How many of the strongest onsets to list as hits. Default 20.")
+    };
+    AeAudioAnalyzeSchema = external_exports.object({
+      comp_id: external_exports.number().int().optional().describe("Render this comp's audio with aerender and analyse it. The project must be saved, with no unsaved changes."),
+      expect: ExpectSchema.optional().describe("Required with comp_id."),
+      start: external_exports.number().min(0).optional().describe("With comp_id: comp seconds to start the render at. Default 0."),
+      end: external_exports.number().positive().optional().describe("With comp_id: comp seconds to end at. Default the comp's end."),
+      output_module_template: external_exports.string().min(1).optional().describe(`With comp_id: an audio-only output-module template. Default '${DEFAULT_AUDIO_TEMPLATE}', one of AE's own.`),
+      job_id: external_exports.string().min(1).optional().describe("Collect the analysis of a render this tool started earlier."),
+      audio_path: external_exports.string().min(1).optional().describe("Analyse this WAV or AIFF file instead (absolute path); nothing is rendered."),
+      time_offset: external_exports.number().optional().describe("With audio_path: seconds added to every time (e.g. the audio layer's start in the comp)."),
+      fps: external_exports.number().positive().max(240).optional().describe("With audio_path: the comp's frame rate for the levels. Default 25."),
+      wait_seconds: external_exports.number().min(0).max(120).optional().describe("How long to wait for the render before returning a job_id. Default 30."),
+      ...AnalysisOptionFields
+    }).refine((v) => [v.comp_id, v.job_id, v.audio_path].filter((x) => x !== void 0).length === 1, {
+      message: "Give exactly one of comp_id, job_id or audio_path."
+    }).refine((v) => v.comp_id === void 0 || v.expect !== void 0, { message: "comp_id needs expect." }).refine((v) => v.start === void 0 || v.end === void 0 || v.end > v.start, { message: "end must be after start." }).refine((v) => (v.min_bpm ?? 60) < (v.max_bpm ?? 200), { message: "min_bpm must be below max_bpm (defaults 60 and 200)." }).refine((v) => v.fps === void 0 || v.audio_path !== void 0, { message: "fps goes with audio_path." });
+    ValueSchema = external_exports.union([external_exports.number(), external_exports.array(external_exports.number()).min(1).max(4)]);
+    AeCueKeysSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema,
+      path: external_exports.array(external_exports.string().min(1)).min(1).describe("Property path by match names or names, e.g. ['ADBE Transform Group', 'ADBE Scale']."),
+      times: external_exports.array(external_exports.number().min(0)).min(1).max(MAX_LIST3).describe("Cue times in comp seconds: ae_audio_analyze's beats or onsets, or marker times."),
+      peak: ValueSchema.describe("The value at each cue, e.g. [115, 115] for Scale. It must fit the property: a number for a one-value property, 2 numbers (or 3 for a 3D one) for a pair, 4 for a colour."),
+      base: ValueSchema.optional().describe("The value between cues. Default: the property's own value where the cues start."),
+      attack: external_exports.number().min(0).max(5).optional().describe("Seconds from base to peak before each cue. Default 0: a jump one frame before the cue."),
+      decay: external_exports.number().min(0).max(10).optional().describe("Seconds from peak back to base. Default 0.15; 0 settles back one frame after the cue."),
+      ease: external_exports.enum(["smooth", "linear"]).optional().describe("Default smooth (easy ease on every key)."),
+      clear_existing: external_exports.boolean().optional().describe("Remove the property's keys between the first and last planned key first. Default false."),
+      dry_run: external_exports.boolean().optional().describe("Return the planned keys without touching AE."),
+      expect: ExpectSchema
+    });
+    round4 = (x) => Math.round(x * 1e4) / 1e4;
+    audioTools = createAudioTools();
+  }
+});
+
+// src/tools/ext/loudness.ts
+function decodedBudget(fileBytes) {
+  return Math.max(0, Math.min(MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES - fileBytes));
+}
+function kWeighting(sampleRate) {
+  const f1 = 1681.974450955533;
+  const g1 = 3.999843853973347;
+  const q1 = 0.7071752369554196;
+  const k1 = Math.tan(Math.PI * f1 / sampleRate);
+  const vh = 10 ** (g1 / 20);
+  const vb = vh ** 0.4996667741545416;
+  const a0 = 1 + k1 / q1 + k1 * k1;
+  const stage1 = {
+    b: [(vh + vb * k1 / q1 + k1 * k1) / a0, 2 * (k1 * k1 - vh) / a0, (vh - vb * k1 / q1 + k1 * k1) / a0],
+    a: [1, 2 * (k1 * k1 - 1) / a0, (1 - k1 / q1 + k1 * k1) / a0]
+  };
+  const f2 = 38.13547087602444;
+  const q2 = 0.5003270373238773;
+  const k2 = Math.tan(Math.PI * f2 / sampleRate);
+  const d0 = 1 + k2 / q2 + k2 * k2;
+  const stage2 = {
+    b: [1, -2, 1],
+    a: [1, 2 * (k2 * k2 - 1) / d0, (1 - k2 / q2 + k2 * k2) / d0]
+  };
+  return { stage1, stage2 };
+}
+function channelWeights(channels) {
+  if (channels === 6) return [1, 1, 1, 0, 1.41, 1.41];
+  if (channels === 5) return [1, 1, 1, 1.41, 1.41];
+  return new Array(channels).fill(1);
+}
+function oversamplingFor(sampleRate) {
+  if (sampleRate < 96e3) return 4;
+  if (sampleRate < 192e3) return 2;
+  return 1;
+}
+function besselI0(x) {
+  let sum = 1;
+  let term = 1;
+  const q = x * x / 4;
+  for (let k = 1; k < 60; k++) {
+    term *= q / (k * k);
+    sum += term;
+    if (term < sum * 1e-17) break;
+  }
+  return sum;
+}
+function makePolyphase(factor) {
+  const half = TAPS_PER_PHASE / 2;
+  const n = factor * TAPS_PER_PHASE + 1;
+  const centre2 = factor * TAPS_PER_PHASE / 2;
+  const h = new Float64Array(n);
+  for (let k = 0; k < n; k++) {
+    const x = (k - centre2) / factor;
+    const sinc = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
+    const r = 2 * k / (n - 1) - 1;
+    const w = besselI0(KAISER_BETA * Math.sqrt(Math.max(0, 1 - r * r))) / besselI0(KAISER_BETA);
+    h[k] = sinc * w;
+  }
+  const phases = [];
+  let l1 = 0;
+  for (let p = 0; p < factor; p++) {
+    const taps = [];
+    for (let k = p; k < n; k += factor) taps.push(h[k]);
+    const sum = taps.reduce((a, b) => a + b, 0);
+    const norm2 = Float64Array.from(taps, (v) => v / sum);
+    phases.push(norm2);
+    l1 = Math.max(l1, norm2.reduce((a, b) => a + Math.abs(b), 0));
+  }
+  return { factor, phases, half, l1 };
+}
+async function channelPeak(x, poly, integerFormat = true) {
+  let sample = 0;
+  let clipped = 0;
+  let over = 0;
+  let run = 0;
+  for (let i = 0; i < x.length; i++) {
+    const a = Math.abs(x[i]);
+    if (a > sample) sample = a;
+    if (a > 1) over++;
+    if (integerFormat && a >= FULL_SCALE) {
+      run++;
+      if (run === 3) clipped += 3;
+      else if (run > 3) clipped++;
+    } else run = 0;
+    if (i % YIELD_SAMPLES === YIELD_SAMPLES - 1) await yieldToLoop2();
+  }
+  let best = sample;
+  if (poly.factor > 1) {
+    const { half, phases } = poly;
+    const chunk = 512;
+    let worked = 0;
+    for (let a = 0; a < x.length; a += chunk) {
+      const b = Math.min(x.length, a + chunk);
+      let m = 0;
+      for (let i = Math.max(0, a - half); i < Math.min(x.length, b + half); i++) {
+        const v = Math.abs(x[i]);
+        if (v > m) m = v;
+      }
+      if (m * poly.l1 <= best) continue;
+      for (let n = a; n < b; n++) {
+        for (let p = 1; p < phases.length; p++) {
+          const taps = phases[p];
+          let acc = 0;
+          for (let j = 0; j < taps.length; j++) {
+            const idx = n + half - j;
+            if (idx >= 0 && idx < x.length) acc += taps[j] * x[idx];
+          }
+          const v = Math.abs(acc);
+          if (v > best) best = v;
+        }
+      }
+      worked += b - a;
+      if (worked >= YIELD_SAMPLES / 8) {
+        worked = 0;
+        await yieldToLoop2();
+      }
+    }
+  }
+  return { sample, true: best, clipped, over };
+}
+function quantile(sorted, p) {
+  if (sorted.length === 0) return NaN;
+  const at = p * (sorted.length - 1);
+  const lo = Math.floor(at);
+  const hi = Math.min(sorted.length - 1, lo + 1);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
+}
+function gatedLoudness(powers) {
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < powers.length; i++) {
+    if (lufsOf(powers[i]) > ABSOLUTE_GATE) {
+      sum += powers[i];
+      count++;
+    }
+  }
+  if (count === 0) return { lufs: null, aboveAbsolute: 0, gated: 0 };
+  const relative2 = lufsOf(sum / count) - 10;
+  let gsum = 0;
+  let gcount = 0;
+  for (let i = 0; i < powers.length; i++) {
+    const l = lufsOf(powers[i]);
+    if (l > ABSOLUTE_GATE && l > relative2) {
+      gsum += powers[i];
+      gcount++;
+    }
+  }
+  return { lufs: gcount ? lufsOf(gsum / gcount) : null, aboveAbsolute: count, gated: gcount };
+}
+function loudnessRange(shortTermPowers) {
+  const above = [];
+  let sum = 0;
+  for (let i = 0; i < shortTermPowers.length; i++) {
+    if (lufsOf(shortTermPowers[i]) > ABSOLUTE_GATE) {
+      above.push(shortTermPowers[i]);
+      sum += shortTermPowers[i];
+    }
+  }
+  if (!above.length) return null;
+  const relative2 = lufsOf(sum / above.length) - 20;
+  const kept = above.map(lufsOf).filter((l) => l > relative2).sort((a, b) => a - b);
+  if (!kept.length) return null;
+  return quantile(kept, 0.95) - quantile(kept, 0.1);
+}
+async function measureLoudness(channels, sampleRate, options = {}) {
+  const frames = channels[0]?.length ?? 0;
+  const step2 = Math.max(1, Math.round(0.1 * sampleRate));
+  const nSub = Math.floor(frames / step2);
+  const sub = new Float64Array(nSub);
+  const weights = channelWeights(channels.length);
+  const { stage1, stage2 } = kWeighting(sampleRate);
+  const [b10, b11, b12] = stage1.b;
+  const [, a11, a12] = stage1.a;
+  const [b20, b21, b22] = stage2.b;
+  const [, a21, a22] = stage2.a;
+  let since = 0;
+  for (let c = 0; c < channels.length; c++) {
+    const w = weights[c];
+    if (w === 0) continue;
+    const x = channels[c];
+    let s11 = 0;
+    let s12 = 0;
+    let s21 = 0;
+    let s22 = 0;
+    for (let j = 0; j < nSub; j++) {
+      let acc = 0;
+      const end = (j + 1) * step2;
+      for (let i = j * step2; i < end; i++) {
+        const v = x[i];
+        const y1 = b10 * v + s11;
+        s11 = b11 * v - a11 * y1 + s12;
+        s12 = b12 * v - a12 * y1;
+        const y = b20 * y1 + s21;
+        s21 = b21 * y1 - a21 * y + s22;
+        s22 = b22 * y1 - a22 * y;
+        acc += y * y;
+      }
+      sub[j] += w * acc;
+      since += step2;
+      if (since >= YIELD_SAMPLES) {
+        since = 0;
+        await yieldToLoop2();
+      }
+    }
+  }
+  const prefix = new Float64Array(nSub + 1);
+  for (let j = 0; j < nSub; j++) prefix[j + 1] = prefix[j] + sub[j];
+  const nBlocks = Math.max(0, nSub - 3);
+  const blockPower = new Float64Array(nBlocks);
+  for (let k = 0; k < nBlocks; k++) blockPower[k] = (prefix[k + 4] - prefix[k]) / (4 * step2);
+  const nShort = Math.max(0, nSub - 29);
+  const shortPower = new Float64Array(nShort);
+  for (let k = 0; k < nShort; k++) shortPower[k] = (prefix[k + 30] - prefix[k]) / (30 * step2);
+  const gate = gatedLoudness(blockPower);
+  let momentaryMax = -Infinity;
+  for (let k = 0; k < nBlocks; k++) momentaryMax = Math.max(momentaryMax, lufsOf(blockPower[k]));
+  let shortMax = -Infinity;
+  for (let k = 0; k < nShort; k++) shortMax = Math.max(shortMax, lufsOf(shortPower[k]));
+  const useShort = nShort > 0;
+  const series = useShort ? shortPower : blockPower;
+  const span = useShort ? 3 : 0.4;
+  const kind = useShort ? "short_term_3s" : "momentary_400ms";
+  let loudest = null;
+  let quietest = null;
+  let loudAt = -1;
+  let quietAt = -1;
+  for (let k = 0; k < series.length; k++) {
+    const l = lufsOf(series[k]);
+    if (l <= ABSOLUTE_GATE) continue;
+    if (loudAt < 0 || l > lufsOf(series[loudAt])) loudAt = k;
+    if (quietAt < 0 || l < lufsOf(series[quietAt])) quietAt = k;
+  }
+  const windowAt = (k) => {
+    const start = k * step2 / sampleRate;
+    return { start: round33(start), end: round33(start + span), lufs: round1(lufsOf(series[k])), kind };
+  };
+  if (loudAt >= 0) loudest = windowAt(loudAt);
+  if (quietAt >= 0) quietest = windowAt(quietAt);
+  const poly = makePolyphase(oversamplingFor(sampleRate));
+  const peaks = [];
+  for (const x of channels) peaks.push(await channelPeak(x, poly, !options.float));
+  const samplePeak = peaks.reduce((m, p) => Math.max(m, p.sample), 0);
+  const truePeak = peaks.reduce((m, p) => Math.max(m, p.true), 0);
+  const range = loudnessRange(shortPower);
+  const integrated = gate.lufs;
+  return {
+    duration: round33(frames / sampleRate),
+    sample_rate: sampleRate,
+    channels: channels.length,
+    integrated_lufs: integrated === null ? null : round1(integrated),
+    loudness_range_lu: range === null ? null : round1(range),
+    momentary_max_lufs: finiteOrNull(momentaryMax) === null ? null : round1(momentaryMax),
+    short_term_max_lufs: finiteOrNull(shortMax) === null ? null : round1(shortMax),
+    loudest_window: loudest,
+    quietest_window: quietest,
+    true_peak_dbtp: dbOf(truePeak),
+    sample_peak_dbfs: dbOf(samplePeak),
+    true_peak_per_channel_dbtp: peaks.map((p) => dbOf(p.true)),
+    oversampling: poly.factor,
+    blocks: { total: nBlocks, above_absolute_gate: gate.aboveAbsolute, gated: gate.gated },
+    clipped_samples: peaks.reduce((n, p) => n + p.clipped, 0),
+    over_samples: peaks.reduce((n, p) => n + p.over, 0)
+  };
+}
+function resolveStandard(c) {
+  const key = c.standard ?? "ebu_r128";
+  const base = key === "custom" ? { name: "Custom", target_lufs: -23, true_peak_max_db: -1, tolerance_lu: 1 } : STANDARDS[key];
+  return {
+    name: base.name,
+    target_lufs: c.target_lufs ?? base.target_lufs,
+    true_peak_max_db: c.true_peak_max_db ?? base.true_peak_max_db,
+    tolerance_lu: c.tolerance_lu ?? base.tolerance_lu
+  };
+}
+function assessLoudness(m, std) {
+  const advice = [];
+  if (m.clipped_samples > 0) {
+    advice.push(
+      `${m.clipped_samples} samples sit at full scale: the render was clipped at 0 dBFS, so these numbers describe the clipped file, not the mix. Lower the levels (a negative gain) and measure again.`
+    );
+  }
+  if (m.over_samples > 0) {
+    advice.push(
+      `${m.over_samples} samples of this float file are over 0 dBFS. They are intact here, but they clip when the mix is delivered as 16 or 24-bit audio: lower the levels (a negative gain) if that is the delivery.`
+    );
+  }
+  if (m.integrated_lufs === null) {
+    advice.push("Nothing in the audio is above the -70 LUFS gate: it is silent, or the audio layers are muted or out of the measured range.");
+    return {
+      measurable: false,
+      passes: false,
+      loudness_ok: false,
+      true_peak_ok: m.true_peak_dbtp === null || m.true_peak_dbtp <= std.true_peak_max_db,
+      deviation_lu: null,
+      gain_needed_db: null,
+      true_peak_after_gain_dbtp: null,
+      peak_conflict: false,
+      max_gain_within_peak_db: null,
+      lufs_at_peak_limit: null,
+      advice
+    };
+  }
+  const deviation = m.integrated_lufs - std.target_lufs;
+  const gain = std.target_lufs - m.integrated_lufs;
+  const loudnessOk = Math.abs(deviation) <= std.tolerance_lu + 1e-9;
+  const tp = m.true_peak_dbtp;
+  const tpOk = tp === null || tp <= std.true_peak_max_db + 1e-9;
+  const after = tp === null ? null : round1(tp + gain);
+  const headroom = tp === null ? null : round1(std.true_peak_max_db - tp);
+  const conflict = !loudnessOk && gain > 0 && after !== null && after > std.true_peak_max_db + 1e-9;
+  if (loudnessOk && tpOk) {
+    advice.push(`Meets ${std.name}: ${m.integrated_lufs} LUFS (target ${std.target_lufs} \xB1${std.tolerance_lu} LU) and a true peak of ${tp} dBTP (limit ${std.true_peak_max_db}).`);
+  }
+  if (!loudnessOk) {
+    const dir = gain > 0 ? "quieter" : "louder";
+    advice.push(`${m.integrated_lufs} LUFS is ${Math.abs(round1(deviation))} LU ${dir} than the target ${std.target_lufs} LUFS (\xB1${std.tolerance_lu}). A gain of ${gain > 0 ? "+" : ""}${round1(gain)} dB lands on the target.`);
+  }
+  if (!tpOk) {
+    advice.push(`The true peak ${tp} dBTP is over the ${std.true_peak_max_db} dBTP limit by ${round1(tp - std.true_peak_max_db)} dB; only a negative gain (or a limiter outside AE) fixes that.`);
+  }
+  let atLimit = null;
+  if (conflict && headroom !== null) {
+    atLimit = round1(m.integrated_lufs + Math.max(0, headroom));
+    advice.push(
+      `Loudness and true peak conflict: +${round1(gain)} dB would put the true peak at ${after} dBTP, over the ${std.true_peak_max_db} limit. The peak limit allows at most +${Math.max(0, headroom)} dB, which reaches ${atLimit} LUFS. AE has no limiter, so choose one: the loudness target or the peak ceiling. ae_loudness_apply refuses the gain unless allow_over_peak is set.`
+    );
+  }
+  return {
+    measurable: true,
+    passes: loudnessOk && tpOk,
+    loudness_ok: loudnessOk,
+    true_peak_ok: tpOk,
+    deviation_lu: round1(deviation),
+    gain_needed_db: round1(gain),
+    true_peak_after_gain_dbtp: after,
+    peak_conflict: conflict,
+    max_gain_within_peak_db: headroom,
+    lufs_at_peak_limit: atLimit,
+    advice
+  };
+}
+function pairsDiffer(want, got) {
+  if (!got) return true;
+  const n = Math.min(want.length, got.length);
+  for (let i = 0; i < n; i++) if (Math.abs(want[i] - got[i]) > VALUE_TOLERANCE) return true;
+  return false;
+}
+function levelsMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = compOf(beforeRaw);
+  const after = compOf(afterRaw);
+  if (!after) return m;
+  const cut = after.truncated === true;
+  const wrote = written.layers ?? [];
+  const tol = Math.max(15e-4, (after.frame_duration || 0) / 2);
+  const touched = /* @__PURE__ */ new Set();
+  for (const w of wrote) {
+    touched.add(w.id);
+    const now = after.layers.find((l) => l.id === w.id);
+    const where = `layers[${w.name}].levels`;
+    if (!now) {
+      if (!cut) m.push({ path: where, expected: "present", actual: void 0, message: `"${w.name}" is not in the read-back` });
+      continue;
+    }
+    const lv = now.levels;
+    if (!lv) {
+      m.push({ path: where, expected: "Audio Levels", actual: null, message: `"${w.name}" has no Audio Levels in the read-back` });
+      continue;
+    }
+    if (w.mode === "static") {
+      expectThat(m, lv.num_keys === 0, `${where}.num_keys`, 0, lv.num_keys, `"${w.name}" gained keys; expected a plain value`);
+      if (w.value && lv.num_keys === 0 && pairsDiffer(w.value, lv.value)) {
+        m.push({ path: `${where}.value`, expected: w.value, actual: lv.value, message: `"${w.name}" Audio Levels differ from what was set` });
+      }
+      continue;
+    }
+    const wantCount = w.key_count ?? w.keys.length;
+    expectThat(m, lv.num_keys === wantCount, `${where}.num_keys`, wantCount, lv.num_keys, `"${w.name}" has a different number of level keys than were set`);
+    const times = w.keys.map((k) => k.time).sort((a, b) => a - b);
+    let gap = Infinity;
+    for (let i = 1; i < times.length; i++) gap = Math.min(gap, times[i] - times[i - 1]);
+    const useTol = Math.min(tol, gap * 0.45);
+    const lastSeen = lv.keys.length ? lv.keys[lv.keys.length - 1].time : -Infinity;
+    for (const k of w.keys) {
+      if (lv.keys_truncated && k.time > lastSeen + useTol) continue;
+      let got;
+      for (const x of lv.keys) {
+        const d = Math.abs(x.time - k.time);
+        if (d <= useTol && (!got || d < Math.abs(got.time - k.time))) got = x;
+      }
+      if (!got) {
+        m.push({ path: `${where}@${k.time}`, expected: k.value, actual: void 0, message: `"${w.name}" has no level key at ${k.time}s` });
+      } else if (pairsDiffer(k.value, got.value)) {
+        m.push({ path: `${where}@${k.time}`, expected: k.value, actual: got.value, message: `"${w.name}" level key at ${k.time}s differs from what was set` });
+      }
+    }
+  }
+  if (before) {
+    for (const l of after.layers) {
+      if (touched.has(l.id)) continue;
+      const was = before.layers.find((x) => x.id === l.id);
+      if (was && !levelsSame(was.levels, l.levels)) {
+        m.push({ path: `layers[${l.name}].levels`, expected: was.levels, actual: l.levels, message: `The Audio Levels of "${l.name}" changed, but it was not a target` });
+      }
+    }
+  }
+  return m;
+}
+function sanitize2(name) {
+  return name.replace(/[^\w.-]+/g, "_").slice(0, 60) || "comp";
+}
+function pruneOldRenders(dir, now = Date.now()) {
+  let removed = 0;
+  let names = [];
+  try {
+    names = fs27.readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const n of names) {
+    if (!/^loudness_.+\.(aif|aiff|aifc|wav)(\.json)?$/i.test(n)) continue;
+    const p = path26.join(dir, n);
+    try {
+      if (now - fs27.statSync(p).mtimeMs > RENDER_KEEP_MS) {
+        fs27.unlinkSync(p);
+        removed++;
+      }
+    } catch {
+    }
+  }
+  return removed;
+}
+function stamp2() {
+  return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
+}
+function applyHint(m, std, verdict) {
+  if (!verdict.measurable || verdict.gain_needed_db === null || m.integrated_lufs === null) return null;
+  if (verdict.passes) return null;
+  let gain = Math.round((std.target_lufs - m.integrated_lufs) * 100) / 100;
+  let note = "Arguments for ae_loudness_apply. Then ae_save and measure again: the property read-back only confirms the dB values, not the new loudness.";
+  const tp = m.true_peak_dbtp;
+  if (!verdict.true_peak_ok && tp !== null) {
+    const down = Math.round((std.true_peak_max_db - tp) * 100) / 100;
+    if (down < gain) {
+      gain = down;
+      note = `The true peak is over the ceiling, so this is the negative gain that brings it to ${std.true_peak_max_db} dBTP; the loudness then reaches ${round1(m.integrated_lufs + gain)} LUFS (target ${std.target_lufs}). ` + note;
+    }
+  } else if (verdict.peak_conflict && verdict.max_gain_within_peak_db !== null) {
+    gain = Math.max(0, Math.round(verdict.max_gain_within_peak_db * 100) / 100);
+    note = `The full gain to the target would break the true-peak ceiling, so this is the most the ceiling allows; the loudness reaches ${verdict.lufs_at_peak_limit} LUFS (target ${std.target_lufs}). ` + note;
+  }
+  if (gain > 0 && tp !== null) {
+    const room = Math.max(0, Math.floor((std.true_peak_max_db - tp) * 100) / 100);
+    if (gain > room) {
+      gain = room;
+      if (!verdict.peak_conflict) note = `The true peak leaves only ${room} dB of room under ${std.true_peak_max_db} dBTP, so the gain is held there. ` + note;
+    }
+  }
+  gain = Math.max(-96, Math.min(48, gain));
+  if (Math.abs(gain) < 0.05) return null;
+  return {
+    gain_db: gain,
+    ...tp !== null ? { true_peak_db: tp } : {},
+    true_peak_max_db: std.true_peak_max_db,
+    reaches_lufs: round1(m.integrated_lufs + gain),
+    note
+  };
+}
+async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECONDS2, wholeFile = false) {
+  const stat = fs27.statSync(file);
+  if (stat.size > MAX_AUDIO_BYTES2) {
+    const mb = MAX_AUDIO_BYTES2 / 1048576;
+    throw new AudioDecodeError(
+      wholeFile ? `Audio file is over ${mb} MB. audio_path files are measured whole: trim the file, or render the comp with comp_id and start/end` : `Audio file is over ${mb} MB; measure a shorter range`
+    );
+  }
+  let decoded;
+  try {
+    decoded = decodeAudioChannels(await fs27.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
+  } catch (err) {
+    if (wholeFile && err instanceof AudioDecodeError && err.message.includes("use start/end")) {
+      const cut = err.message.replace(" (use start/end)", "").replace(". Measure a shorter range", "").replace(/[.;]\s*$/, "");
+      throw new AudioDecodeError(cut + ". audio_path files are measured whole: trim the file, or render the comp with comp_id and start/end");
+    }
+    throw err;
+  }
+  const m = await measureLoudness(decoded.channelData, decoded.sampleRate, { float: isFloatFormat(decoded.format) });
+  const std = resolveStandard(choice);
+  const verdict = assessLoudness(m, std);
+  const hint = applyHint(m, std, verdict);
+  const shift = (w) => w ? { ...w, start: round33(w.start + offset), end: round33(w.end + offset) } : null;
+  const { loudest_window, quietest_window, ...rest } = m;
+  return {
+    source: { path: file, format: decoded.format, sample_rate: decoded.sampleRate, channels: decoded.channels, duration: m.duration },
+    time_offset: offset,
+    standard: std,
+    measurement: rest,
+    loudest_window: shift(loudest_window),
+    quietest_window: shift(quietest_window),
+    clipped_in_render: m.clipped_samples > 0,
+    verdict,
+    ...hint ? { apply_hint: hint } : {}
+  };
+}
+function createLoudnessTools(options = {}) {
+  const startRender = options.startRender ?? (async (args, ctx) => {
+    const tool = aerenderTools.find((t) => t.name === "ae_aerender_start");
+    return await tool.handler(args, ctx);
+  });
+  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
+  const rendersDir = options.rendersDir ?? (() => getDefaultAerenderRegistry().rendersDir);
+  const pollMs = options.pollMs ?? 250;
+  const jobs = /* @__PURE__ */ new Map();
+  const metaFor = (jobId) => {
+    const known = jobs.get(jobId);
+    if (known) return known;
+    const job = getJob(jobId);
+    if (!job) return void 0;
+    try {
+      return JSON.parse(fs27.readFileSync(`${job.output_path}.json`, "utf8"));
+    } catch {
+      return void 0;
+    }
+  };
+  async function collect(jobId, waitSeconds, choice) {
+    const meta = metaFor(jobId);
+    if (!meta) return { ok: false, error: "unknown_job", message: `No audio render with job_id ${jobId}` };
+    const deadline = Date.now() + waitSeconds * 1e3;
+    let job = getJob(jobId);
+    while (job?.state === "running" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      job = getJob(jobId);
+    }
+    if (!job) return { ok: false, error: "unknown_job", message: `The render job ${jobId} is gone` };
+    if (job.state === "running") {
+      return { ok: true, state: "rendering", job_id: jobId, message: "Still rendering. Call ae_loudness_check again with this job_id." };
+    }
+    if (job.state === "failed") {
+      return {
+        ok: false,
+        error: "render_failed",
+        job_id: jobId,
+        message: `aerender failed: ${job.error ?? "see the log"}. If the log says the output-module template is missing, pass output_module_template with an audio-only template that exists in this AE (ae_render_templates lists them).`,
+        log_path: job.log_path
+      };
+    }
+    const file = findRenderedAudio(meta.output_path);
+    if (!file) return { ok: false, error: "no_output", job_id: jobId, message: `aerender finished but wrote no audio file at ${meta.output_path}` };
+    try {
+      return {
+        ok: true,
+        state: "done",
+        job_id: jobId,
+        comp_id: meta.comp_id,
+        ...await measureFile(file, meta.offset, choice, MAX_ANALYSIS_SECONDS2 + 2 / (meta.fps || 25))
+      };
+    } catch (err) {
+      if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", job_id: jobId, message: err.message };
+      throw err;
+    }
+  }
+  return [
+    {
+      name: "ae_loudness_check",
+      description: "Measure a comp's loudness the way a delivery check does: integrated loudness in LUFS (ITU-R BS.1770-4: K-weighted, 400 ms blocks, -70 LUFS and -10 LU gates), loudness range in LU (EBU Tech 3342), momentary and short-term maximum, true peak in dBTP (oversampled), and the loudest and quietest 3 s windows (comp seconds). It compares the result with EBU R128 (-23 LUFS, -1 dBTP), ATSC A/85 (-24, -2), streaming (-14, -1) or your own numbers, and returns the gain that meets the target, whether that gain breaks the true-peak ceiling (AE has no limiter, so it can't have both), and the arguments for ae_loudness_apply. With comp_id the audio is rendered by aerender in the background (AE stays usable; default template 'AIFF 48kHz', 16-bit, so a mix over 0 dBFS arrives clipped and the result says so); the project must be saved with no unsaved changes (ae_save first). The rendered AIFF and its .json note stay in the renders folder's audio subfolder (so a job_id can be collected again) and are deleted after 24 hours, when the next render starts. If the render takes longer than wait_seconds the result is a job_id to call again with. With audio_path a WAV or AIFF is measured directly. Plain JS on the server, no outside tools. This reads the saved project: after ae_loudness_apply, ae_save and measure again to see the new loudness. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeLoudnessCheckSchema,
+      handler: async (args, ctx) => {
+        const choice = { standard: args.standard, target_lufs: args.target_lufs, true_peak_max_db: args.true_peak_max_db, tolerance_lu: args.tolerance_lu };
+        const wait = args.wait_seconds ?? 30;
+        if (args.audio_path !== void 0) {
+          if (!path26.isAbsolute(args.audio_path) || !fs27.existsSync(args.audio_path)) {
+            return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
+          }
+          try {
+            return { ok: true, state: "done", ...await measureFile(args.audio_path, args.time_offset ?? 0, choice, MAX_ANALYSIS_SECONDS2, true) };
+          } catch (err) {
+            if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", message: err.message };
+            throw err;
+          }
+        }
+        if (args.job_id !== void 0) return collect(args.job_id, wait, choice);
+        const info = (await ctx.bridge.callHost("loudnessRead", { comp_id: args.comp_id, skip_keys: true }, {
+          label: "ae_loudness_check (comp)",
+          mutates: false,
+          toolName: "ae_loudness_check",
+          timeoutMs: SLOW_TIMEOUT_MS
+        })).result;
+        if (!info.name_unique) {
+          return { ok: false, error: "ambiguous_comp", message: `Several comps are named "${info.name}"; aerender picks comps by name. Rename one first.` };
+        }
+        if (!info.layers.some((l) => l.audio_enabled)) {
+          return { ok: false, error: "no_audio", message: `"${info.name}" has no layer with audio switched on.` };
+        }
+        const start = args.start ?? 0;
+        const end = Math.min(args.end ?? info.duration, info.duration);
+        if (end <= start) return { ok: false, error: "bad_range", message: `Nothing to render between ${start}s and ${end}s (comp is ${info.duration}s).` };
+        const firstFrame = Math.round((info.display_start_time ?? 0) * info.fps);
+        const startFrame = firstFrame + Math.round(start * info.fps);
+        const endFrame = firstFrame + Math.max(Math.round(start * info.fps), Math.ceil(end * info.fps) - 1);
+        const renderedSeconds = (endFrame - startFrame + 1) / info.fps;
+        if (renderedSeconds > MAX_ANALYSIS_SECONDS2 + 1e-6) {
+          return {
+            ok: false,
+            error: "too_long",
+            message: `${Math.round(renderedSeconds)} s of audio; measure at most ${MAX_ANALYSIS_SECONDS2 / 60} minutes at a time (use start/end)`
+          };
+        }
+        const dir = path26.join(rendersDir(), "audio");
+        fs27.mkdirSync(dir, { recursive: true });
+        pruneOldRenders(dir);
+        const outputPath = path26.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto13.randomBytes(3).toString("hex")}.aif`);
+        const started = await startRender(
+          {
+            expect: args.expect,
+            comp_name: info.name,
+            output_path: outputPath,
+            output_module_template: args.output_module_template ?? DEFAULT_AUDIO_TEMPLATE,
+            start_frame: startFrame,
+            end_frame: endFrame
+          },
+          ctx
+        );
+        if (!started?.job_id) return { ok: false, error: "render_not_started", detail: started };
+        const renderStart = Math.round(start * info.fps) / info.fps;
+        const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
+        jobs.set(started.job_id, meta);
+        try {
+          fs27.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+        } catch {
+        }
+        return collect(started.job_id, wait, choice);
+      }
+    },
+    {
+      name: "ae_loudness_apply",
+      description: "Change the level of a comp's audio: add gain_db to the Audio Levels of every layer with audio on (or the layers you name), and optionally fade in and fade out, in one undo group guarded by `expect`. Fades are fades of the mix by default (fade_scope 'comp': one ramp over the comp's first fade_in seconds and last fade_out seconds, so a layer that enters or leaves during a fade gets the part of the ramp that falls on it, and a layer outside both fades is left alone); fade_scope 'layer' fades every layer at its own in and out points. Existing level keys are all offset by the gain; a key inside a fade region is blended into the fade ramp (so the fade keeps the length asked for), and a fade key at the exact same time as an old key replaces it; a channel at the property's floor stays silent. Everything that can fail is checked first: a gain past the Audio Levels maximum, a locked layer, an expression on the levels, fades longer than the comp (fade_scope comp) or than the layer (fade_scope layer), a comp-scope fade that reaches no layer. AE has no limiter: pass true_peak_db and true_peak_max_db from ae_loudness_check and a gain that would take the true peak over the ceiling is refused (allow_over_peak to override). The read-back (a separate evalScript) checks each layer's static value or key count, and the key values up to 5000 keys per read (500 a layer), and that no other layer's levels moved; the result says when the read-back was capped. It confirms the dB values only: ae_save and ae_loudness_check again to measure the new loudness. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeLoudnessApplySchema,
+      handler: async (args, ctx) => {
+        const gain = args.gain_db ?? 0;
+        if (args.true_peak_db !== void 0 && args.true_peak_max_db !== void 0 && gain > 0 && !args.allow_over_peak) {
+          const after = args.true_peak_db + gain;
+          if (after > args.true_peak_max_db + 1e-9) {
+            const room = Math.max(0, Math.round((args.true_peak_max_db - args.true_peak_db) * 10) / 10);
+            return {
+              ok: false,
+              error: "true_peak_conflict",
+              message: `+${gain} dB would put the true peak at ${Math.round(after * 10) / 10} dBTP, over the ${args.true_peak_max_db} dBTP ceiling, and AE has no limiter to catch it. The ceiling allows at most +${room} dB. Use a smaller gain, or set allow_over_peak to accept a clipped render.`,
+              max_gain_db: room
+            };
+          }
+        }
+        const fades = [args.fade_in ? `in ${args.fade_in}s` : "", args.fade_out ? `out ${args.fade_out}s` : ""].filter(Boolean).join(" ");
+        const label = `ae_loudness_apply(${gain >= 0 ? "+" : ""}${gain} dB${fades ? `, fade ${fades}` : ""})`;
+        const readCall3 = () => ({ host: "loudnessRead", args: { comp_id: args.comp_id }, timeoutMs: SLOW_TIMEOUT_MS });
+        return runGuardedWrite(ctx, {
+          toolName: "ae_loudness_apply",
+          label,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: readCall3,
+          write: {
+            host: "loudnessApply",
+            timeoutMs: SLOW_TIMEOUT_MS,
+            args: {
+              comp_id: args.comp_id,
+              layers: args.layers,
+              gain_db: args.gain_db,
+              fade_in: args.fade_in,
+              fade_out: args.fade_out,
+              fade_scope: args.fade_scope,
+              fade_floor_db: args.fade_floor_db,
+              label: "Loudness gain and fades"
+            }
+          },
+          check: (before, after, w) => levelsMismatches(before, after, w),
+          present: (_before, after, w) => {
+            const wrote = w.layers ?? [];
+            const cut = compOf(after)?.layers.some((l) => l.levels?.keys_truncated) === true;
+            return {
+              gain_db: w.gain_db,
+              fade_in: w.fade_in,
+              fade_out: w.fade_out,
+              fade_floor_db: w.fade_floor_db,
+              fade_scope: w.fade_scope,
+              skipped: w.skipped,
+              layers: wrote.slice(0, 500).map((l) => ({
+                index: l.index,
+                id: l.id,
+                name: l.name,
+                mode: l.mode,
+                value: l.value,
+                keys: l.key_count ?? l.keys.length,
+                ...l.keys_truncated ? { keys_reported: l.keys.length } : {},
+                fade_in: l.fade_in || void 0,
+                fade_out: l.fade_out || void 0,
+                clamped: l.clamped || void 0
+              })),
+              ...cut ? { readback_keys_truncated: true } : {},
+              next_step: "ae_save, then ae_loudness_check again: the read-back confirms the dB values, not the new loudness."
+            };
+          }
+        });
+      }
+    }
+  ];
+}
+var fs27, crypto13, path26, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
+var init_loudness = __esm({
+  "src/tools/ext/loudness.ts"() {
+    "use strict";
+    fs27 = __toESM(require("node:fs"), 1);
+    crypto13 = __toESM(require("node:crypto"), 1);
+    path26 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_audio();
+    init_host();
+    init_common();
+    init_aerender();
+    init_audio2();
+    init_write_runner();
+    MAX_ANALYSIS_SECONDS2 = 20 * 60;
+    MAX_AUDIO_BYTES2 = 600 * 1024 * 1024;
+    MAX_DECODED_BYTES = 600 * 1024 * 1024;
+    TOTAL_AUDIO_BYTES = 1024 * 1024 * 1024;
+    RENDER_KEEP_MS = 24 * 3600 * 1e3;
+    TAPS_PER_PHASE = 24;
+    KAISER_BETA = 5.6;
+    FULL_SCALE = 0.99996;
+    YIELD_SAMPLES = 4e6;
+    yieldToLoop2 = () => new Promise((resolve4) => setImmediate(resolve4));
+    LUFS_OFFSET = -0.691;
+    ABSOLUTE_GATE = -70;
+    lufsOf = (power) => power > 0 ? LUFS_OFFSET + 10 * Math.log10(power) : -Infinity;
+    round1 = (x) => Math.round(x * 10) / 10;
+    round33 = (x) => Math.round(x * 1e3) / 1e3;
+    finiteOrNull = (x) => Number.isFinite(x) ? x : null;
+    dbOf = (amp) => amp > 0 ? round1(20 * Math.log10(amp)) : null;
+    isFloatFormat = (format) => /float|fl32|fl64/i.test(format);
+    STANDARDS = {
+      ebu_r128: { name: "EBU R128", target_lufs: -23, true_peak_max_db: -1, tolerance_lu: 0.5 },
+      atsc_a85: { name: "ATSC A/85", target_lufs: -24, true_peak_max_db: -2, tolerance_lu: 2 },
+      streaming: { name: "Streaming (-14 LUFS)", target_lufs: -14, true_peak_max_db: -1, tolerance_lu: 1 }
+    };
+    StandardField = external_exports.enum(["ebu_r128", "atsc_a85", "streaming", "custom"]).optional().describe(
+      "What to compare with. ebu_r128: -23 LUFS \xB10.5 LU, true peak -1 dBTP. atsc_a85: -24 LKFS \xB12 LU, -2 dBTP. streaming: -14 LUFS \xB11 LU, -1 dBTP. custom: start from -23 / -1 / \xB11 and set the numbers. Default ebu_r128."
+    );
+    AeLoudnessCheckSchema = external_exports.object({
+      comp_id: external_exports.number().int().optional().describe("Render this comp's audio with aerender and measure it. The project must be saved, with no unsaved changes. Needs expect."),
+      expect: ExpectSchema.optional().describe("Required with comp_id."),
+      start: external_exports.number().min(0).optional().describe("With comp_id: comp seconds to start the render at. Default 0."),
+      end: external_exports.number().positive().optional().describe("With comp_id: comp seconds to end at. Default the comp's end."),
+      output_module_template: external_exports.string().min(1).optional().describe(`With comp_id: an audio-only output-module template. Default '${DEFAULT_AUDIO_TEMPLATE}' (16-bit, so a mix over 0 dBFS is clipped in the file; the result says so).`),
+      job_id: external_exports.string().min(1).optional().describe("Collect the measurement of a render started earlier (by this tool or ae_audio_analyze)."),
+      audio_path: external_exports.string().min(1).optional().describe("Measure this WAV or AIFF (absolute path) instead; nothing is rendered."),
+      time_offset: external_exports.number().optional().describe("With audio_path: seconds added to the window times (e.g. the audio layer's start in the comp)."),
+      wait_seconds: external_exports.number().min(0).max(120).optional().describe("How long to wait for the render before returning a job_id. Default 30."),
+      standard: StandardField,
+      target_lufs: external_exports.number().min(-70).max(0).optional().describe("Target integrated loudness in LUFS; overrides the standard's."),
+      true_peak_max_db: external_exports.number().min(-30).max(3).optional().describe("True-peak ceiling in dBTP; overrides the standard's."),
+      tolerance_lu: external_exports.number().min(0).max(10).optional().describe("How far from the target still counts as meeting it, in LU; overrides the standard's.")
+    }).refine((v) => [v.comp_id, v.job_id, v.audio_path].filter((x) => x !== void 0).length === 1, {
+      message: "Give exactly one of comp_id, job_id or audio_path."
+    }).refine((v) => v.comp_id === void 0 || v.expect !== void 0, { message: "comp_id needs expect." }).refine((v) => v.comp_id !== void 0 || v.start === void 0 && v.end === void 0 && v.output_module_template === void 0, {
+      message: "start, end and output_module_template only apply with comp_id (they set the render); they are ignored for audio_path and job_id."
+    }).refine((v) => v.audio_path !== void 0 || v.time_offset === void 0, { message: "time_offset only applies with audio_path." }).refine((v) => v.start === void 0 || v.end === void 0 || v.end > v.start, { message: "end must be after start." }).refine((v) => v.standard !== "custom" || v.target_lufs !== void 0, { message: "standard 'custom' needs target_lufs." });
+    AeLoudnessApplySchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layers: external_exports.array(LayerSelectorSchema).min(1).max(500).optional().describe("The layers to change. Default: every layer with audio switched on (precomp layers included: their own Audio Levels carry the mix)."),
+      gain_db: external_exports.number().min(-96).max(48).optional().describe("dB added to each layer's Audio Levels (both channels). Level keys are all offset by it; a channel already at the property's floor stays silent. Use ae_loudness_check's gain_needed_db."),
+      fade_in: external_exports.number().min(0).max(3600).optional().describe("Seconds of fade in from fade_floor_db (or the layer's level if lower) up to the level. With fade_scope 'comp' (default) one ramp runs over the comp's first fade_in seconds, and a layer that starts during it gets the part of the ramp that falls on it. With 'layer' each layer fades in from its own in point."),
+      fade_out: external_exports.number().min(0).max(3600).optional().describe("Seconds of fade out to fade_floor_db (or the layer's level if lower). With fade_scope 'comp' (default) one ramp runs over the comp's last fade_out seconds, and a layer that ends during it gets the part of the ramp that falls on it; with 'layer' each layer fades out ending at its own out point."),
+      fade_scope: external_exports.enum(["comp", "layer"]).optional().describe("'comp' (default): fade the mix, at the start and end of the comp. 'layer': fade every layer at its own in and out points."),
+      fade_floor_db: external_exports.number().min(-192).max(-6).optional().describe("The level a fade starts or ends at (a layer already below it keeps its own level). Default -96 (raised to the property's own minimum if that is higher)."),
+      true_peak_db: external_exports.number().min(-200).max(30).optional().describe("The measured true peak (ae_loudness_check's true_peak_dbtp), to check the gain against the ceiling."),
+      true_peak_max_db: external_exports.number().min(-30).max(3).optional().describe("The true-peak ceiling in dBTP. With true_peak_db: a gain that takes the peak over it is refused."),
+      allow_over_peak: external_exports.boolean().optional().describe("Apply a gain that breaks the ceiling anyway (the render will clip). Default false."),
+      expect: ExpectSchema
+    }).refine((v) => v.gain_db !== void 0 && v.gain_db !== 0 || (v.fade_in ?? 0) > 0 || (v.fade_out ?? 0) > 0, {
+      message: "Give a gain_db other than 0, or a fade_in or fade_out."
+    }).refine((v) => v.true_peak_db === void 0 === (v.true_peak_max_db === void 0), {
+      message: "true_peak_db and true_peak_max_db go together."
+    });
+    VALUE_TOLERANCE = 0.02;
+    compOf = (v) => v && typeof v === "object" && Array.isArray(v.layers) ? v : null;
+    levelsSame = (a, b) => {
+      if (!a || !b) return !a && !b;
+      if (a.num_keys !== b.num_keys) return false;
+      if (a.num_keys === 0) return !(a.value && pairsDiffer(a.value, b.value));
+      const n = Math.min(a.keys.length, b.keys.length);
+      for (let i = 0; i < n; i++) {
+        if (Math.abs(a.keys[i].time - b.keys[i].time) > 15e-4 || pairsDiffer(a.keys[i].value, b.keys[i].value)) return false;
+      }
+      return true;
+    };
+    loudnessTools = createLoudnessTools();
+  }
+});
+
+// src/tools/ext/legibility.ts
+function relativeLuminance(r, g, b) {
+  const q = (v) => LIN[Math.max(0, Math.min(255, Math.round(v)))];
+  return 0.2126 * q(r) + 0.7152 * q(g) + 0.0722 * q(b);
+}
+function contrastRatio(l1, l2) {
+  const hi = Math.max(l1, l2);
+  const lo = Math.min(l1, l2);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function requiredRatio(o) {
+  const large = o.fontPx !== null && (o.fontPx >= o.largeTextPx || o.bold && o.fontPx >= o.largeTextPx * 0.78);
+  if (o.minRatio !== void 0) return { ratio: o.minRatio, large };
+  if (o.level === "AAA") return { ratio: large ? 4.5 : 7, large };
+  return { ratio: large ? 3 : 4.5, large };
+}
+function intersectBoxes(a, b) {
+  const x0 = Math.max(a[0], b[0]);
+  const y0 = Math.max(a[1], b[1]);
+  const x1 = Math.min(a[2], b[2]);
+  const y1 = Math.min(a[3], b[3]);
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+}
+function findOverlaps(items, minShare) {
+  const pairs2 = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const rect = intersectBoxes(items[i].box, items[j].box);
+      if (!rect) continue;
+      const area = boxArea(rect);
+      const smaller = Math.min(boxArea(items[i].box), boxArea(items[j].box));
+      if (smaller <= 0) continue;
+      const share = area / smaller;
+      if (share < minShare) continue;
+      pairs2.push({
+        a: { index: items[i].index, id: items[i].id, name: items[i].name },
+        b: { index: items[j].index, id: items[j].id, name: items[j].name },
+        rect: rect.map(r22),
+        area: r22(area),
+        share_of_smaller: r33(share)
+      });
+    }
+  }
+  pairs2.sort((x, y) => y.share_of_smaller - x.share_of_smaller);
+  return { pairs: pairs2.slice(0, MAX_OVERLAPS), truncated: pairs2.length > MAX_OVERLAPS };
+}
+function boxToRegion(box, comp, img, pad = 0) {
+  const sx = img.width / comp.width;
+  const sy = img.height / comp.height;
+  const x0 = Math.max(0, Math.floor((box[0] - pad) * sx));
+  const y0 = Math.max(0, Math.floor((box[1] - pad) * sy));
+  const x1 = Math.min(img.width, Math.ceil((box[2] + pad) * sx));
+  const y1 = Math.min(img.height, Math.ceil((box[3] + pad) * sy));
+  return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+}
+function sortPaired(ratios, bg) {
+  const order = ratios.map((_, i) => i).sort((a, b) => ratios[a] - ratios[b]);
+  const outR = new Float32Array(order.length);
+  const outB = new Uint8Array(order.length * 3);
+  order.forEach((from, to) => {
+    outR[to] = ratios[from];
+    outB[to * 3] = bg[from * 3];
+    outB[to * 3 + 1] = bg[from * 3 + 1];
+    outB[to * 3 + 2] = bg[from * 3 + 2];
+  });
+  return { ratios: outR, bg: outB };
+}
+function meanRgb(bg) {
+  const n = bg.length / 3;
+  if (n === 0) return null;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (let i = 0; i < bg.length; i += 3) {
+    r += bg[i];
+    g += bg[i + 1];
+    b += bg[i + 2];
+  }
+  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+}
+function analyzeGlyphs(orig, copy, region, o) {
+  const w = region.x1 - region.x0;
+  const h = region.y1 - region.y0;
+  const mask = new Uint8Array(w * h);
+  const limit = o.sensitivity * 255;
+  let glyph = 0;
+  let excluded = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const gx = region.x0 + x;
+      const gy = region.y0 + y;
+      if (inAny(o.exclude, gx, gy)) {
+        excluded++;
+        continue;
+      }
+      const i = (gy * orig.width + gx) * 4;
+      const d = Math.max(
+        Math.abs(orig.data[i] - copy.data[i]),
+        Math.abs(orig.data[i + 1] - copy.data[i + 1]),
+        Math.abs(orig.data[i + 2] - copy.data[i + 2]),
+        Math.abs(orig.data[i + 3] - copy.data[i + 3])
+      );
+      if (d > limit) {
+        mask[y * w + x] = 1;
+        glyph++;
+      }
+    }
+  }
+  if (glyph < MIN_PIXELS) return emptyAnalysis("no_glyph", { glyph_pixels: glyph, excluded_pixels: excluded });
+  const interior = [];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const k = y * w + x;
+      if (mask[k] && mask[k - 1] && mask[k + 1] && mask[k - w] && mask[k + w]) interior.push(k);
+    }
+  }
+  const seeds = interior.length >= MIN_PIXELS ? interior : maskIndexes(mask);
+  const bins = /* @__PURE__ */ new Map();
+  for (const k of seeds) {
+    const i = ((region.y0 + Math.floor(k / w)) * orig.width + region.x0 + k % w) * 4;
+    if (orig.data[i + 3] < 250) continue;
+    const key = orig.data[i] >> 4 << 8 | orig.data[i + 1] >> 4 << 4 | orig.data[i + 2] >> 4;
+    const e = bins.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n++;
+    e.r += orig.data[i];
+    e.g += orig.data[i + 1];
+    e.b += orig.data[i + 2];
+    bins.set(key, e);
+  }
+  let best = null;
+  for (const e of bins.values()) if (!best || e.n > best.n) best = e;
+  if (!best) return emptyAnalysis("transparent", { glyph_pixels: glyph, excluded_pixels: excluded });
+  const text = [best.r / best.n, best.g / best.n, best.b / best.n];
+  const textLum = relativeLuminance(text[0], text[1], text[2]);
+  const collect = (colourMatch) => {
+    const ratios = [];
+    const bg = [];
+    let transparent = 0;
+    let foreign = 0;
+    let own = 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!mask[y * w + x]) continue;
+        const i = ((region.y0 + y) * orig.width + region.x0 + x) * 4;
+        const isOwn = Math.abs(orig.data[i] - text[0]) <= COLOUR_TOL && Math.abs(orig.data[i + 1] - text[1]) <= COLOUR_TOL && Math.abs(orig.data[i + 2] - text[2]) <= COLOUR_TOL;
+        if (orig.data[i + 3] >= 250 && copy.data[i + 3] >= 250) {
+          if (isOwn) own++;
+          else if (!onBlendLine(orig.data, copy.data, i, text)) foreign++;
+        }
+        if (colourMatch && !isOwn) continue;
+        if (orig.data[i + 3] < 250 || copy.data[i + 3] < 250) {
+          transparent++;
+          continue;
+        }
+        const ratio = contrastRatio(textLum, relativeLuminance(copy.data[i], copy.data[i + 1], copy.data[i + 2]));
+        ratios.push(ratio);
+        bg.push(copy.data[i], copy.data[i + 1], copy.data[i + 2]);
+        if (ratio < o.required) {
+          const gx = region.x0 + x;
+          const gy = region.y0 + y;
+          if (gx < minX) minX = gx;
+          if (gy < minY) minY = gy;
+          if (gx > maxX) maxX = gx;
+          if (gy > maxY) maxY = gy;
+        }
+      }
+    }
+    const fail_bounds = maxX >= minX ? [minX, minY, maxX + 1, maxY + 1] : null;
+    return { ratios, bg, transparent, fail_bounds, foreign_share: own + foreign > 0 ? foreign / (own + foreign) : 0 };
+  };
+  let thin = false;
+  let got = collect(true);
+  if (got.ratios.length < MIN_PIXELS) {
+    thin = true;
+    got = collect(false);
+  }
+  if (got.ratios.length === 0) {
+    return emptyAnalysis(got.transparent > 0 ? "transparent" : "no_glyph", {
+      glyph_pixels: glyph,
+      transparent_pixels: got.transparent,
+      excluded_pixels: excluded,
+      text_rgb: text.map(Math.round)
+    });
+  }
+  const sorted = sortPaired(got.ratios, got.bg);
+  return {
+    status: "ok",
+    glyph_pixels: glyph,
+    core_pixels: sorted.ratios.length,
+    thin,
+    text_rgb: text.map(Math.round),
+    bg_mean: meanRgb(sorted.bg),
+    transparent_pixels: got.transparent,
+    excluded_pixels: excluded,
+    ratios: sorted.ratios,
+    bg: sorted.bg,
+    fail_bounds: got.fail_bounds,
+    foreign_share: r33(got.foreign_share)
+  };
+}
+function onBlendLine(orig, copy, i, text) {
+  const d0 = text[0] - copy[i];
+  const d1 = text[1] - copy[i + 1];
+  const d2 = text[2] - copy[i + 2];
+  const len2 = d0 * d0 + d1 * d1 + d2 * d2;
+  if (len2 < 1) return true;
+  const p0 = orig[i] - copy[i];
+  const p1 = orig[i + 1] - copy[i + 1];
+  const p2 = orig[i + 2] - copy[i + 2];
+  const t = Math.min(1, Math.max(0, (p0 * d0 + p1 * d1 + p2 * d2) / len2));
+  return Math.abs(p0 - t * d0) <= COLOUR_TOL && Math.abs(p1 - t * d1) <= COLOUR_TOL && Math.abs(p2 - t * d2) <= COLOUR_TOL;
+}
+function maskIndexes(mask) {
+  const out = [];
+  for (let k = 0; k < mask.length; k++) if (mask[k]) out.push(k);
+  return out;
+}
+function analyzeEstimate(frame, box, ringWidth, fill, o) {
+  const outer = {
+    x0: Math.max(0, box.x0 - ringWidth),
+    y0: Math.max(0, box.y0 - ringWidth),
+    x1: Math.min(frame.width, box.x1 + ringWidth),
+    y1: Math.min(frame.height, box.y1 + ringWidth)
+  };
+  const fillLum = relativeLuminance(fill[0], fill[1], fill[2]);
+  const ratios = [];
+  const bg = [];
+  let excluded = 0;
+  let transparent = 0;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let inBox = 0;
+  let fillSeen = 0;
+  for (let y = outer.y0; y < outer.y1; y++) {
+    for (let x = outer.x0; x < outer.x1; x++) {
+      const i = (y * frame.width + x) * 4;
+      const insideBox = x >= box.x0 && x < box.x1 && y >= box.y0 && y < box.y1;
+      if (insideBox) {
+        inBox++;
+        if (frame.data[i + 3] >= 250 && Math.abs(frame.data[i] - fill[0]) <= COLOUR_TOL && Math.abs(frame.data[i + 1] - fill[1]) <= COLOUR_TOL && Math.abs(frame.data[i + 2] - fill[2]) <= COLOUR_TOL) {
+          fillSeen++;
+        }
+        continue;
+      }
+      if (inAny(o.exclude, x, y)) {
+        excluded++;
+        continue;
+      }
+      if (frame.data[i + 3] < 250) {
+        transparent++;
+        continue;
+      }
+      const ratio = contrastRatio(fillLum, relativeLuminance(frame.data[i], frame.data[i + 1], frame.data[i + 2]));
+      ratios.push(ratio);
+      bg.push(frame.data[i], frame.data[i + 1], frame.data[i + 2]);
+      if (ratio < o.required) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const fill_seen_share = inBox > 0 ? fillSeen / inBox : 0;
+  if (ratios.length < MIN_PIXELS) {
+    return emptyAnalysis(transparent > 0 ? "transparent" : "no_background", {
+      excluded_pixels: excluded,
+      transparent_pixels: transparent,
+      text_rgb: fill,
+      fill_seen_share
+    });
+  }
+  const sorted = sortPaired(ratios, bg);
+  return {
+    status: "ok",
+    glyph_pixels: fillSeen,
+    core_pixels: sorted.ratios.length,
+    thin: false,
+    text_rgb: fill,
+    bg_mean: meanRgb(sorted.bg),
+    transparent_pixels: transparent,
+    excluded_pixels: excluded,
+    ratios: sorted.ratios,
+    bg: sorted.bg,
+    fail_bounds: maxX >= minX ? [minX, minY, maxX + 1, maxY + 1] : null,
+    fill_seen_share
+  };
+}
+function ratioStats(sorted, required, tolerance) {
+  const n = sorted.length;
+  if (n === 0) return { min: 0, low: 0, median: 0, fail_share: 1, pass: false };
+  let below = 0;
+  while (below < n && sorted[below] < required) below++;
+  const q = Math.min(n - 1, Math.floor(tolerance * n));
+  const share = below / n;
+  return {
+    min: r22(sorted[0]),
+    low: r22(sorted[q]),
+    median: r22(sorted[Math.floor((n - 1) / 2)]),
+    fail_share: r33(share),
+    pass: share <= tolerance
+  };
+}
+function scrimOpacityOver(text, bg, scrim, required, tolerance) {
+  const n = bg.length / 3;
+  if (n === 0) return null;
+  const textLum = relativeLuminance(text[0], text[1], text[2]);
+  const want = required * 1.03;
+  const stride = Math.max(1, Math.ceil(n / 2e4));
+  for (let pct2 = 5; pct2 <= 90; pct2 += 5) {
+    const t = pct2 / 100;
+    let below = 0;
+    let seen = 0;
+    for (let k = 0; k < n; k += stride) {
+      const m = mixRgb([bg[k * 3], bg[k * 3 + 1], bg[k * 3 + 2]], scrim, t);
+      seen++;
+      if (contrastRatio(textLum, relativeLuminance(m[0], m[1], m[2])) < want) below++;
+    }
+    if (below / seen <= tolerance) return pct2;
+  }
+  return null;
+}
+function failShareWith(text, bg, required) {
+  const n = bg.length / 3;
+  if (n === 0) return 1;
+  const lum = relativeLuminance(text[0], text[1], text[2]);
+  let below = 0;
+  for (let i = 0; i < bg.length; i += 3) {
+    if (contrastRatio(lum, relativeLuminance(bg[i], bg[i + 1], bg[i + 2])) < required) below++;
+  }
+  return below / n;
+}
+function suggestFixes(a) {
+  const fixes = [];
+  const n = a.analysis.ratios.length;
+  if (n === 0) return fixes;
+  const white = [255, 255, 255];
+  const black = [0, 0, 0];
+  const wShare = failShareWith(white, a.analysis.bg, a.required);
+  const bShare = failShareWith(black, a.analysis.bg, a.required);
+  const pick = wShare <= bShare ? white : black;
+  const share = Math.min(wShare, bShare);
+  fixes.push({
+    kind: "text_colour",
+    summary: `Make the text ${pick === white ? "white" : "black"} (${hex2(pick)}): ${r33(share * 100)}% of its pixels would still miss ${a.required}:1${share <= a.tolerance ? ", within the tolerance" : ", so a colour change alone is not enough"}.`,
+    reaches_ratio: share <= a.tolerance,
+    rgb: [pick[0] / 255, pick[1] / 255, pick[2] / 255],
+    hex: hex2(pick),
+    expected_fail_share: r33(share)
+  });
+  const options = [black, white].map((s) => ({ s, pct: scrimOpacityOver(a.textRgb, a.analysis.bg, s, a.required, a.tolerance) })).filter((o) => o.pct !== null).sort((x, y) => x.pct - y.pct);
+  const pad = Math.max(8, Math.round((a.fontPx ?? Math.max(8, a.box[3] - a.box[1])) * 0.35));
+  const rect = [
+    Math.max(0, Math.round(a.box[0] - pad)),
+    Math.max(0, Math.round(a.box[1] - pad)),
+    Math.min(a.comp.width, Math.round(a.box[2] + pad)),
+    Math.min(a.comp.height, Math.round(a.box[3] + pad))
+  ];
+  const w = Math.max(1, rect[2] - rect[0]);
+  const h = Math.max(1, rect[3] - rect[1]);
+  const cx = Math.round((rect[0] + rect[2]) / 2);
+  const cy = Math.round((rect[1] + rect[3]) / 2);
+  const chosen = options[0];
+  let colour = chosen ? chosen.s : white;
+  if (!chosen && a.textRgb.reduce((sum, v) => sum + v, 0) / 3 > 127) colour = black;
+  const pct2 = chosen ? chosen.pct : 90;
+  fixes.push({
+    kind: "scrim",
+    summary: chosen ? `Put a ${colour === black ? "black" : "white"} solid at ${pct2}% opacity directly below the text, covering ${w}x${h} px around it.` : `A ${colour === black ? "black" : "white"} scrim does not reach ${a.required}:1 even at 90% over the worst part of this background: change the text colour or the footage.`,
+    reaches_ratio: !!chosen,
+    colour: [colour[0] / 255, colour[1] / 255, colour[2] / 255],
+    opacity_percent: pct2,
+    rect,
+    create_layer_args: {
+      comp_id: a.compId,
+      type: "solid",
+      name: `Scrim: ${a.layer.name}`.slice(0, 200),
+      color: [colour[0] / 255, colour[1] / 255, colour[2] / 255],
+      width: Math.min(3e4, Math.max(1, Math.ceil(w))),
+      height: Math.min(3e4, Math.max(1, Math.ceil(h))),
+      placement: { below: { id: a.layer.id } }
+    },
+    then: [`Set the solid's Position to [${cx}, ${cy}] (ae_set_property).`, `Set its Opacity to ${pct2} (ae_set_property).`]
+  });
+  return fixes;
+}
+function hiddenReason(l, s) {
+  if (!l.enabled) return "the layer's video switch is off";
+  if (s.time < l.in_point || s.time >= l.out_point) return "the time is outside the layer's in and out points";
+  if (s.guide === true) return "the layer is a guide layer (not rendered)";
+  if (s.opacity !== null && s.opacity <= 0) return "the layer's opacity is 0";
+  return "another layer is soloed";
+}
+function skippedEntry(l, s) {
+  if (!s.visible) {
+    return { layer: head(l), time: s.time, status: "not_visible", measured: "none", reason: hiddenReason(l, s) };
+  }
+  if (!s.box) {
+    return { layer: head(l), time: s.time, status: "not_checkable", measured: "none", reason: s.box_reason ?? "no box" };
+  }
+  return null;
+}
+function domCaveats(l, s) {
+  const out = [];
+  if (l.animators > 0) out.push(`${l.animators} text animator(s): they can change the colour per character`);
+  if (l.effects > 0) out.push(`${l.effects} effect(s) on the layer can change its colour`);
+  if (l.layer_styles === true) out.push("layer styles are on");
+  if (s.mixed_fill === true) out.push("the characters have different fill colours");
+  if (l.track_matte) out.push(`the layer has a ${l.track_matte} track matte`);
+  if (l.is_track_matte) out.push("the layer is a track matte for another layer");
+  return out;
+}
+function measuredEntry(l, s, j, measured) {
+  const req = requiredRatio({ level: j.required.level, minRatio: j.required.minRatio, fontPx: s.screen_font_px, bold: s.bold, largeTextPx: j.required.largeTextPx });
+  const entry = {
+    layer: head(l),
+    time: s.time,
+    status: "inconclusive",
+    measured,
+    ...s.text ? { text: s.text.length > 60 ? s.text.slice(0, 59) + "\u2026" : s.text } : {},
+    box: s.box,
+    required_ratio: req.ratio,
+    large_text: req.large,
+    font_px: s.screen_font_px
+  };
+  return { entry, req };
+}
+function judgeAnalysis(l, s, a, j, o) {
+  const { entry, req } = measuredEntry(l, s, j, o.measured);
+  const notes = [];
+  const toComp = (b) => [b[0] * (o.comp.width / o.img.width), b[1] * (o.comp.height / o.img.height), b[2] * (o.comp.width / o.img.width), b[3] * (o.comp.height / o.img.height)].map(r22);
+  entry.glyph_pixels = a.glyph_pixels;
+  if (o.measured === "estimate") {
+    notes.push("An estimate: the fill colour is the DOM's and the background is the ring of pixels around the box, not what is behind the glyphs. Use ae_check_legibility for the exact figure.");
+    if (!s.fill_rgb) {
+      entry.reason = s.apply_fill === false ? "the layer has no fill (stroke only), so there is no fill colour to compare" : "the DOM gave no fill colour";
+      entry.notes = notes;
+      return entry;
+    }
+    const caveats = domCaveats(l, s);
+    if (caveats.length > 0) notes.push(`The DOM colour may not be what shows: ${caveats.join("; ")}.`);
+    if (a.status === "ok" && (a.fill_seen_share ?? 0) < 2e-3) {
+      entry.reason = "no pixel in the box has the layer's fill colour (animators, effects, layer styles, opacity or a blend mode change it, or the text is covered), so the estimate does not apply";
+      entry.notes = notes;
+      return entry;
+    }
+  } else {
+    if (a.status === "no_glyph" && a.excluded_pixels > 0) {
+      entry.reason = "the pixels in its box are shared with another text layer's box, so nothing was left to measure; see the overlaps";
+      entry.notes = notes;
+      return entry;
+    }
+    if (a.status === "no_glyph") {
+      entry.reason = o.frameChanged === false ? "switching the text off changed no pixel anywhere in the frame: the text is invisible here, or AE returned a cached frame for the copy" : "switching the text off changed (almost) no pixel in its box: the text is the colour of its background, covered by another layer, masked out or transparent";
+      const mayBeHidden = l.animators > 0 || l.effects > 0;
+      if (o.frameChanged !== false && mayBeHidden) {
+        entry.reason += "; the layer has " + (l.animators > 0 ? "text animators" : "effects") + " that may hide or move the characters at this time (a typewriter or opacity animator at 0%, a position animator), so this is not counted as a failure";
+      }
+      entry.status = o.frameChanged === false || mayBeHidden ? "inconclusive" : "fail";
+      entry.notes = notes;
+      return entry;
+    }
+  }
+  if (a.status !== "ok") {
+    entry.reason = a.status === "transparent" ? "the pixels behind the text are transparent, so the contrast depends on what the comp is placed over" : "no background pixels could be read around the box";
+    entry.notes = notes;
+    return entry;
+  }
+  const stats = ratioStats(a.ratios, req.ratio, j.tolerance);
+  entry.status = stats.pass ? "pass" : "fail";
+  entry.ratio = { min: stats.min, low: stats.low, median: stats.median };
+  entry.fail_share = stats.fail_share;
+  entry.measured_pixels = a.core_pixels;
+  if (a.text_rgb) entry.text_colour = hex2(a.text_rgb);
+  if (a.bg_mean) entry.background_mean = hex2(a.bg_mean);
+  if (a.fail_bounds) entry.fail_box = toComp(a.fail_bounds);
+  const foreign = a.foreign_share ?? 0;
+  if (o.measured === "pixels" && stats.pass && (foreign > FOREIGN_LIMIT || s.mixed_fill === true && foreign > 0.05)) {
+    entry.status = "inconclusive";
+    entry.reason = Math.round(foreign * 100) + "% of the glyph pixels are a different colour from the dominant text colour " + (a.text_rgb ? hex2(a.text_rgb) : "") + " (a second fill colour, a highlighted word or a coloured stroke) and were not measured, so a pass for the dominant colour does not show that all the text is legible";
+    notes.push("Only the dominant text colour was judged. Check the other colour separately.");
+  } else if (o.measured === "pixels" && stats.pass && s.mixed_fill === true && a.thin) {
+    entry.status = "inconclusive";
+    entry.reason = "the characters have different fill colours and no flat colour was found, so the whole glyph mask was judged as one";
+  }
+  if (a.thin) notes.push("Few solid pixels were found (small type or a gradient fill), so antialiased pixels are counted too: the ratio reads a little low.");
+  if (a.excluded_pixels > 0) notes.push(`${a.excluded_pixels} pixels shared with another text box were left out.`);
+  if (a.transparent_pixels > 0) notes.push(`${a.transparent_pixels} text pixels over a transparent background were not measured.`);
+  if (o.measured === "pixels" && s.fill_rgb && a.text_rgb) {
+    const dom = s.fill_rgb.map((v) => v * 255);
+    if (colourDistance(dom, a.text_rgb) > 30) {
+      entry.dom_fill_differs = true;
+      notes.push(`The render shows ${hex2(a.text_rgb)} but the layer's fill is ${hex2(dom)}: animators, effects, layer styles or opacity change it. The measured colour is the one used.`);
+    }
+  }
+  if (!stats.pass && o.fixes && a.text_rgb && a.core_pixels > 0) {
+    entry.fixes = suggestFixes({
+      compId: o.compId,
+      layer: head(l),
+      textRgb: a.text_rgb,
+      analysis: a,
+      required: req.ratio,
+      tolerance: j.tolerance,
+      box: s.box,
+      fontPx: s.screen_font_px,
+      comp: o.comp
+    });
+  }
+  if (notes.length > 0) entry.notes = notes;
+  return entry;
+}
+function overlayLabel(e) {
+  if (e.ratio) return `${e.layer.index} ${e.ratio.low.toFixed(1)}:1`;
+  return `${e.layer.index} ?`;
+}
+function drawLegibilityOverlay(frame, comp, entries, overlaps2, maxSize) {
+  const size = fitWithin(frame.width, frame.height, maxSize);
+  let base = resizeArea(frame, size.width, size.height);
+  if (hasTransparency(base)) base = flattenOnChecker(base, 8);
+  const sx = base.width / comp.width;
+  const sy = base.height / comp.height;
+  const scale = Math.max(1, Math.min(3, Math.round(Math.max(base.width, base.height) / 700)));
+  for (const o of overlaps2) {
+    fillRect(base, Math.round(o.rect[0] * sx), Math.round(o.rect[1] * sy), Math.round((o.rect[2] - o.rect[0]) * sx), Math.round((o.rect[3] - o.rect[1]) * sy), MAGENTA);
+  }
+  const placed = [];
+  for (const e of entries) {
+    if (!e.box || e.status === "not_visible" || e.status === "not_checkable") continue;
+    const colour = e.status === "pass" ? GREEN : e.status === "fail" ? RED : AMBER;
+    const x = Math.round(e.box[0] * sx);
+    const y = Math.round(e.box[1] * sy);
+    const w = Math.max(2, Math.round((e.box[2] - e.box[0]) * sx));
+    const h = Math.max(2, Math.round((e.box[3] - e.box[1]) * sy));
+    strokeRect(base, x, y, w, h, e.status === "fail" ? 3 : 2, colour);
+    if (e.fail_box) {
+      const fx = Math.round(e.fail_box[0] * sx);
+      const fy = Math.round(e.fail_box[1] * sy);
+      strokeRect(base, fx, fy, Math.max(2, Math.round((e.fail_box[2] - e.fail_box[0]) * sx)), Math.max(2, Math.round((e.fail_box[3] - e.fail_box[1]) * sy)), 1, [255, 255, 255, 255]);
+    }
+    const text = overlayLabel(e);
+    const lw = textWidth(text, scale) + 4;
+    const lh = GLYPH_HEIGHT * scale + 4;
+    let ly = y - lh >= 0 ? y - lh : y;
+    for (let tries = 0; tries < 12 && placed.some((p) => x < p.x + p.w && p.x < x + lw && ly < p.y + p.h && p.y < ly + lh); tries++) ly += lh + 1;
+    ly = Math.min(Math.max(0, ly), Math.max(0, base.height - lh));
+    drawLabel(base, text, Math.min(Math.max(0, x), Math.max(0, base.width - lw)), ly, scale, INK2, colour, 2);
+    placed.push({ x, y: ly, w: lw, h: lh });
+  }
+  return base;
+}
+function layerSummary(read2) {
+  return {
+    comp: { id: read2.comp.id, name: read2.comp.name, width: read2.comp.width, height: read2.comp.height },
+    times: read2.times,
+    text_layers: read2.text_layers,
+    truncated: read2.truncated
+  };
+}
+function overlapsAt(read2, ti, minShare) {
+  const items = [];
+  for (const l of read2.layers) {
+    const s = l.samples[ti];
+    if (s && s.visible && s.box) items.push({ ...head(l), box: s.box });
+  }
+  return findOverlaps(items, minShare);
+}
+function skippedEntries(read2, only) {
+  const all = [];
+  for (const l of read2.layers) {
+    for (const s of l.samples) {
+      const e = skippedEntry(l, s);
+      if (e && (!only || only.has(l.id))) all.push(e);
+    }
+  }
+  return { skipped: all.slice(0, SKIPPED_CAP), total: all.length };
+}
+function isAeBlocked(err) {
+  return err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued");
+}
+function withExtra(sk, extra) {
+  return { skipped: [...sk.skipped, ...extra].slice(0, SKIPPED_CAP), total: sk.total + extra.length };
+}
+async function readText(ctx, opId, tool, label, args) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${opId}_read`,
+    script: buildJsxCall("legibilityRead", { comp_id: args.comp_id, times: args.times, layers: args.layers }),
+    label: `${label} (read)`,
+    timeoutMs: SLOW_TIMEOUT_MS,
+    mutates: false,
+    toolName: tool
+  });
+  return res.result;
+}
+function summarise3(entries) {
+  const count = (s) => entries.filter((e) => e.status === s).length;
+  const failed = entries.filter((e) => e.status === "fail");
+  let verdict = "pass";
+  if (failed.length > 0) verdict = "fail";
+  else if (entries.length === 0 || entries.some((e) => e.status === "inconclusive")) verdict = "inconclusive";
+  const worst = failed.filter((e) => e.ratio).sort((a, b) => a.ratio.low - b.ratio.low).slice(0, 5).map((e) => ({ layer: e.layer, time: e.time, ratio_low: e.ratio.low, required: e.required_ratio }));
+  return { verdict, checked: entries.length, pass: count("pass"), fail: failed.length, inconclusive: count("inconclusive"), worst };
+}
+function writeOverlay(framesDir, compId, time, png) {
+  const file = path27.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto14.randomBytes(4).toString("hex")}.png`);
+  fs28.writeFileSync(file, encodePng(png));
+  return file;
+}
+function overlapReport(read2, minShare) {
+  const perTime = read2.times.map((time, ti) => {
+    const { pairs: pairs2, truncated } = overlapsAt(read2, ti, minShare);
+    return { time, overlaps: pairs2, ...truncated ? { truncated: true } : {} };
+  });
+  const { skipped, total } = skippedEntries(read2);
+  return {
+    ...layerSummary(read2),
+    min_overlap: minShare,
+    overlap_count: perTime.reduce((n, t) => n + t.overlaps.length, 0),
+    times_checked: perTime,
+    skipped,
+    ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+    notes: [NOTES_COMMON[0], "Only the layers' boxes are compared (DOM only, no render): two lines of text in the same layer never count, and glyphs that don't fill their box may not really collide."]
+  };
+}
+async function estimateHandler(args, ctx) {
+  const tool = "ae_estimate_legibility";
+  const framesDir = defaultFramesDir();
+  fs28.mkdirSync(framesDir, { recursive: true });
+  const opId = ctx.bridge.newOpId();
+  const label = `${tool}(${args.comp_id})`;
+  const judging = { required: { level: args.level, minRatio: args.min_ratio, largeTextPx: args.large_text_px }, tolerance: args.tolerance };
+  const got = await runQueued4(ctx, label, opId, async () => {
+    const read3 = await readText(ctx, opId, tool, label, args);
+    const frames = [];
+    let blocked = false;
+    for (let ti = 0; ti < read3.times.length; ti++) {
+      const needed = read3.layers.some((l) => l.samples[ti].visible && l.samples[ti].box);
+      if (!needed) {
+        frames.push({ error: "no text layer shows with a box at this time" });
+        continue;
+      }
+      if (blocked) {
+        frames.push({ error: BLOCKED_NOTE });
+        continue;
+      }
+      try {
+        const snap2 = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: read3.times[ti], frameIndex: ti, framesDir, toolName: tool });
+        frames.push(snap2);
+      } catch (err) {
+        frames.push({ error: errMessage2(err) });
+        if (isAeBlocked(err)) blocked = true;
+      }
+    }
+    return { read: read3, frames, blocked };
+  });
+  const { read: read2 } = got;
+  const comp = read2.comp;
+  const entries = [];
+  const offFrame = [];
+  const timeResults = read2.times.map((time, ti) => {
+    const frame = got.frames[ti];
+    const timeEntries = [];
+    let overlays = [];
+    let annotated;
+    let timeError;
+    let annotateError;
+    if ("error" in frame) {
+      const unrendered = read2.layers.filter((l) => l.samples[ti].visible && l.samples[ti].box);
+      if (unrendered.length > 0) timeError = frame.error;
+      for (const l of unrendered) {
+        timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: `this time could not be rendered: ${frame.error}` });
+      }
+    } else {
+      const pendingOff = [];
+      const items = read2.layers.filter((l) => l.samples[ti].visible && l.samples[ti].box);
+      try {
+        const img = decodePngFile(frame.path);
+        const regions = /* @__PURE__ */ new Map();
+        for (const l of items) {
+          const r = boxToRegion(l.samples[ti].box, comp, img);
+          if (r) regions.set(l.id, r);
+        }
+        for (const l of items) {
+          const s = l.samples[ti];
+          const box = regions.get(l.id);
+          if (!box) {
+            pendingOff.push({ layer: head(l), time: s.time, status: "not_checkable", measured: "none", reason: OFF_FRAME });
+            continue;
+          }
+          const exclude = [...regions.entries()].filter(([id]) => id !== l.id).map(([, r]) => r);
+          const ring = Math.max(4, Math.round((box.y1 - box.y0) * RING_SHARE));
+          const fill = s.fill_rgb ? s.fill_rgb.map((v) => v * 255) : null;
+          const analysis = fill ? analyzeEstimate(img, box, ring, fill, { required: requiredRatio({ level: args.level, minRatio: args.min_ratio, fontPx: s.screen_font_px, bold: s.bold, largeTextPx: args.large_text_px }).ratio, exclude }) : emptyAnalysis("no_background");
+          timeEntries.push(judgeAnalysis(l, s, analysis, judging, { measured: "estimate", compId: comp.id, comp, img, fixes: false }));
+        }
+        overlays = overlapsAt(read2, ti, args.min_overlap).pairs;
+        offFrame.push(...pendingOff);
+        if (args.annotate) {
+          try {
+            annotated = writeOverlay(framesDir, comp.id, time, drawLegibilityOverlay(img, comp, timeEntries, overlays, args.max_size));
+          } catch (err) {
+            annotateError = errMessage2(err);
+          }
+        }
+      } catch (err) {
+        timeError = errMessage2(err);
+        timeEntries.length = 0;
+        overlays = [];
+        for (const l of items) {
+          timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: `this time could not be measured: ${timeError}` });
+        }
+      }
+    }
+    entries.push(...timeEntries);
+    return {
+      time,
+      ...annotated ? { annotated_path: annotated } : {},
+      ...timeError ? { error: timeError } : {},
+      ...annotateError ? { annotate_error: annotateError } : {},
+      layers: timeEntries,
+      overlaps: overlays
+    };
+  });
+  const { skipped, total } = withExtra(skippedEntries(read2), offFrame);
+  return {
+    ok: true,
+    read_only: true,
+    mode: "estimate",
+    ...got.blocked ? { ae_blocked: BLOCKED_NOTE } : {},
+    ...layerSummary(read2),
+    required: { level: args.level, ...args.min_ratio !== void 0 ? { min_ratio: args.min_ratio } : {}, large_text_px: args.large_text_px, tolerance: args.tolerance },
+    ...summarise3(entries),
+    times_checked: timeResults,
+    skipped,
+    ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+    notes: [
+      "ESTIMATE. The fill colour is the one the DOM reports for the first character, which ignores animators, effects, layer styles, opacity and blend modes, and the background is the ring of pixels around each box, not what is behind the glyphs. Treat a pass as 'probably fine' and any figure as approximate; ae_check_legibility measures the real glyph pixels.",
+      ...NOTES_COMMON
+    ]
+  };
+}
+function tempCompMismatches(before, after, cleanupError, copyId) {
+  const m = [];
+  if (cleanupError) {
+    m.push({
+      path: "temp_comp",
+      expected: "the temporary comp removed",
+      actual: copyId,
+      message: `The temporary comp (id ${copyId}) was not removed: ${cleanupError}. Delete it in the Project panel; its name starts with "chroma-legibility-copy".`
+    });
+  }
+  const b = before;
+  const a = after;
+  if (b && a) {
+    expectThat(m, a.temp_comps <= b.temp_comps, "temp_comps", b.temp_comps, a.temp_comps, "A temporary legibility comp is still in the project");
+    if (Array.isArray(b.layers) && Array.isArray(a.layers)) {
+      const now = new Map(a.layers.map((l) => [l.id, l.enabled]));
+      for (const l of b.layers) {
+        if (l.enabled && now.get(l.id) !== true) {
+          expectThat(m, false, `layers.${l.id}.enabled`, true, now.get(l.id), `Text layer ${l.id} of the original comp was switched off (or is gone); the check should only have changed its copy`);
+        }
+      }
+    }
+  }
+  return m;
+}
+function testableLayers(read2) {
+  const all = read2.layers.filter((l) => l.samples.some((s) => s.visible && s.box));
+  return { tested: all.slice(0, MAX_TEST_LAYERS), overflow: all.slice(MAX_TEST_LAYERS) };
+}
+async function matchedPair(p) {
+  const { ctx, opId, compId, copyId, time, index, framesDir, toolName } = p;
+  let a = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index * 4, framesDir, toolName });
+  let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: index * 4 + 1, framesDir, toolName });
+  if (a.time !== b.time) {
+    const later = Math.max(a.time, b.time);
+    if (a.time < later) a = await captureCompFrame({ ctx, opId, compId, time: later, frameIndex: index * 4 + 2, framesDir, toolName });
+    else b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: index * 4 + 3, framesDir, toolName });
+    if (a.time !== b.time) throw new Error(`the original and the copy rendered at different times (${a.time}s and ${b.time}s)`);
+  }
+  return { original: a.path, copy: b.path, time: a.time };
+}
+function frameDiffers(a, b, sensitivity) {
+  const limit = sensitivity * 255;
+  const n = a.width * a.height * 4;
+  for (let i = 0; i < n; i += 4) {
+    if (Math.abs(a.data[i] - b.data[i]) > limit || Math.abs(a.data[i + 1] - b.data[i + 1]) > limit || Math.abs(a.data[i + 2] - b.data[i + 2]) > limit || Math.abs(a.data[i + 3] - b.data[i + 3]) > limit) {
+      return true;
+    }
+  }
+  return false;
+}
+async function checkHandler(args, ctx) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const label = `ae_check_legibility(${args.comp_id})`;
+  const toolName = "ae_check_legibility";
+  const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+  const framesDir = defaultFramesDir();
+  const judging = { required: { level: args.level, minRatio: args.min_ratio, largeTextPx: args.large_text_px }, tolerance: args.tolerance };
+  let proofLayerIds = [];
+  const state = async (phase) => {
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_${phase}`,
+      script: buildJsxCall("legibilityState", proofLayerIds.length > 0 ? { comp_id: args.comp_id, layer_ids: proofLayerIds } : {}),
+      label: `${label} (${phase})`,
+      mutates: false,
+      toolName
+    });
+    return res.result ?? null;
+  };
+  try {
+    return await ctx.queue.run(label, async () => {
+      ctx.quarantine.assertClear();
+      const read2 = await readText(ctx, opId, toolName, label, args);
+      const { tested, overflow } = testableLayers(read2);
+      if (tested.length === 0) {
+        const { skipped: skipped2, total: total2 } = skippedEntries(read2);
+        return {
+          ok: false,
+          error: "nothing_to_check",
+          message: read2.text_layers === 0 ? "The comp has no text layers." : "No text layer shows with a measurable box at the chosen times.",
+          ...layerSummary(read2),
+          skipped: skipped2,
+          ...total2 > skipped2.length ? { skipped_truncated: true, skipped_total: total2 } : {}
+        };
+      }
+      const guard = await verifyTargetGuard(ctx, expect, opId);
+      const checkpoint = await autoCheckpoint(ctx, guard, toolName);
+      const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+      const sessionFields = await noteBeforeWrite(ctx, note);
+      proofLayerIds = tested.map((l) => l.id);
+      const before = await state("before");
+      fs28.mkdirSync(framesDir, { recursive: true });
+      beginInflight(note);
+      let begun;
+      try {
+        const begin = await ctx.bridge.evalRaw({
+          id: opId,
+          script: buildJsxCall("legibilityBegin", { comp_id: args.comp_id, layers: tested.map(head), expect }),
+          label,
+          mutates: true,
+          toolName
+        });
+        begun = begin.result ?? {};
+      } catch (err) {
+        endInflight(opId);
+        throw err;
+      }
+      const copyId = begun.copy_id;
+      const comp = read2.comp;
+      const entries = [];
+      let timeResults = [];
+      const offFrame = [];
+      let blocked = false;
+      try {
+        if (typeof copyId !== "number") throw new Error("AE returned no id for the temporary comp, so nothing was rendered");
+        for (let ti = 0; ti < read2.times.length; ti++) {
+          const time = read2.times[ti];
+          const rows = tested.filter((l) => l.samples[ti].visible && l.samples[ti].box);
+          const overlaps2 = overlapsAt(read2, ti, args.min_overlap).pairs;
+          if (rows.length === 0) {
+            timeResults.push({ time, layers: [], overlaps: overlaps2, note: "no tested text layer shows with a box at this time" });
+            continue;
+          }
+          const timeEntries = [];
+          if (blocked) {
+            for (const l of rows) {
+              timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: "AE stopped responding, so this time was not rendered" });
+            }
+            timeResults.push({ time, error: "not rendered: AE stopped responding", layers: timeEntries, overlaps: overlaps2 });
+            entries.push(...timeEntries);
+            continue;
+          }
+          const pendingOff = [];
+          try {
+            const pair = await matchedPair({ ctx, opId, compId: args.comp_id, copyId, time, index: ti, framesDir, toolName });
+            const orig = decodePngFile(pair.original);
+            const copy = decodePngFile(pair.copy);
+            if (orig.width !== copy.width || orig.height !== copy.height) {
+              throw new Error(`the renders differ in size (${orig.width}x${orig.height} and ${copy.width}x${copy.height})`);
+            }
+            const changed = frameDiffers(orig, copy, args.sensitivity);
+            const regions = /* @__PURE__ */ new Map();
+            for (const l of rows) {
+              const r = boxToRegion(l.samples[ti].box, comp, orig, Math.max(2, 0.04 * (l.samples[ti].box[3] - l.samples[ti].box[1])));
+              if (r) regions.set(l.id, r);
+            }
+            for (const l of rows) {
+              const s = l.samples[ti];
+              const region = regions.get(l.id);
+              if (!region) {
+                pendingOff.push({ layer: head(l), time: s.time, status: "not_checkable", measured: "none", reason: OFF_FRAME });
+                continue;
+              }
+              const exclude = [...regions.entries()].filter(([id]) => id !== l.id).map(([, r]) => r);
+              const required = requiredRatio({ level: args.level, minRatio: args.min_ratio, fontPx: s.screen_font_px, bold: s.bold, largeTextPx: args.large_text_px }).ratio;
+              const analysis = analyzeGlyphs(orig, copy, region, { sensitivity: args.sensitivity, required, exclude });
+              timeEntries.push(judgeAnalysis(l, s, analysis, judging, { measured: "pixels", compId: comp.id, comp, img: orig, fixes: args.fixes, frameChanged: changed }));
+            }
+            offFrame.push(...pendingOff);
+            let annotated;
+            let annotateError;
+            if (args.annotate) {
+              try {
+                annotated = writeOverlay(framesDir, comp.id, pair.time, drawLegibilityOverlay(orig, comp, timeEntries, overlaps2, args.max_size));
+              } catch (err) {
+                annotateError = errMessage2(err);
+              }
+            }
+            timeResults.push({
+              time: pair.time,
+              frames: { original: pair.original, copy: pair.copy },
+              ...annotated ? { annotated_path: annotated } : {},
+              ...annotateError ? { annotate_error: annotateError } : {},
+              frame_changed: changed,
+              layers: timeEntries,
+              overlaps: overlaps2
+            });
+          } catch (err) {
+            if (isAeBlocked(err)) blocked = true;
+            timeEntries.length = 0;
+            for (const l of rows) {
+              timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: `this time could not be measured: ${errMessage2(err)}` });
+            }
+            timeResults.push({ time, error: errMessage2(err), layers: timeEntries, overlaps: overlaps2 });
+          }
+          entries.push(...timeEntries);
+        }
+      } catch (err) {
+        timeResults = [...timeResults, { error: errMessage2(err), layers: [], overlaps: [] }];
+      }
+      let cleanupError = null;
+      let removed = false;
+      const removeId = `${opId}_remove`;
+      beginInflight({ ...note, opId: removeId });
+      try {
+        if (typeof copyId !== "number") {
+          throw new Error("AE returned no id for the temporary comp, so it could not be removed by id");
+        }
+        const end = await ctx.bridge.evalRaw({
+          id: removeId,
+          script: buildJsxCall("legibilityEnd", { copy_id: copyId, expect }),
+          label: `${label} (remove copy)`,
+          mutates: true,
+          toolName
+        });
+        removed = end.result?.removed === true;
+      } catch (err) {
+        cleanupError = errMessage2(err);
+      } finally {
+        endInflight(removeId);
+        endInflight(opId);
+      }
+      const { value: after, failure } = await readAfterWrite(opId, () => state("after"));
+      const custom2 = [...failure ? [failure] : [], ...tempCompMismatches(before, failure ? null : after, cleanupError, copyId)];
+      const receipt = buildReceipt({ before, after, customMismatches: custom2 });
+      await noteAfterWrite(ctx, note, { skipRead: !!failure });
+      const untestedAll = [];
+      for (const l of overflow) {
+        for (const s of l.samples) {
+          if (s.visible && s.box) {
+            untestedAll.push({ layer: head(l), time: s.time, status: "inconclusive", measured: "none", reason: `only ${MAX_TEST_LAYERS} text layers are tested per call; pass \`layers\` for the rest` });
+          }
+        }
+      }
+      entries.push(...untestedAll);
+      const untested = untestedAll.slice(0, SKIPPED_CAP);
+      const olderCopies = before?.temp_comps ?? 0;
+      const { skipped, total } = withExtra(skippedEntries(read2), offFrame);
+      return {
+        op_id: opId,
+        applied: true,
+        mode: "exact",
+        ...layerSummary(read2),
+        required: { level: args.level, ...args.min_ratio !== void 0 ? { min_ratio: args.min_ratio } : {}, large_text_px: args.large_text_px, tolerance: args.tolerance, sensitivity: args.sensitivity },
+        ...summarise3(entries),
+        times_checked: timeResults,
+        skipped,
+        ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+        ...untested.length > 0 ? { untested, ...untestedAll.length > untested.length ? { untested_truncated: true, untested_total: untestedAll.length } : {} } : {},
+        ...blocked ? { ae_blocked: BLOCKED_NOTE } : {},
+        temp_comp: { copy_removed: removed, switched_off: begun.switched_off },
+        notes: [
+          "EXACT. For each time the comp is rendered with the text on and, in a temporary copy, with the tested text layers off. The pixels that differ are the glyphs (so their colour is the text as it renders, animators, effects and layer styles included) and the copy's pixels at those positions are the background (grades and layers above included). Where two tested text boxes overlap, those pixels are left out of both and the overlap is reported.",
+          "Text so close to its background that no channel differs by more than `sensitivity` can't be told apart from it: such a layer is reported as a failure when the frame differs elsewhere, and as inconclusive when the frame differs nowhere or the layer has animators/effects that may hide it.",
+          "Fixes are suggestions, computed from the background pixels; a scrim's opacity is chosen so that no more than the tolerance of them miss the ratio once blended (in encoded sRGB). Nothing was applied.",
+          "Text with a second colour (a highlighted word, a coloured stroke) is judged on its dominant colour only: when the other colour covers a large share of the glyphs, a pass is reported as inconclusive.",
+          ...olderCopies > 0 ? [`The project already had ${olderCopies} comp(s) named 'chroma-legibility-copy ...' before this run (left by an earlier run, or made by hand). They were not touched; delete them if they are not wanted.`] : [],
+          ...NOTES_COMMON
+        ],
+        checkpoint,
+        receipt,
+        ...sessionFields
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+var crypto14, fs28, path27, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r22, r33, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage2, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
+var init_legibility = __esm({
+  "src/tools/ext/legibility.ts"() {
+    "use strict";
+    crypto14 = __toESM(require("node:crypto"), 1);
+    fs28 = __toESM(require("node:fs"), 1);
+    path27 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_common();
+    init_mutate();
+    init_read_back();
+    init_render();
+    init_frames();
+    init_png_utils();
+    init_session();
+    init_write_runner();
+    MAX_CHECK_TIMES = 6;
+    MAX_OVERLAP_TIMES = 12;
+    CompId = external_exports.number().int().describe("The composition holding the text layers.");
+    Layers = external_exports.array(LayerSelectorSchema).min(1).max(200).optional().describe("Only these text layers (by id, index or a unique name). Default: every text layer in the comp. A selector that is not a text layer is refused.");
+    timesField = (max) => external_exports.array(external_exports.number().min(0)).min(1).max(max).optional().describe(
+      `Comp times in seconds to check (up to ${max}), clamped to the last frame. Default: the comp's current time, read without moving the time indicator. Text changes over time (animators, fades, a moving background), so check the times that matter, such as the end of each title's fade-in.`
+    );
+    Level = external_exports.enum(["AA", "AAA"]).default("AA").describe("WCAG 2.x level: AA needs 4.5:1 (3:1 for large text), AAA needs 7:1 (4.5:1 for large text). Default AA. These are web standards; use `min_ratio` for a house rule.");
+    MinRatio = external_exports.number().min(1).max(21).optional().describe("Contrast ratio to require of every text layer, whatever its size. Overrides `level`.");
+    LargeTextPx = external_exports.number().positive().max(2e3).default(24).describe("Font size in comp pixels, as it lands on the frame (scale and parents included), from which text counts as large (WCAG's 18 pt = 24 px). Bold text counts from 78% of this. Default 24.");
+    Tolerance = external_exports.number().min(0).max(0.5).default(0.1).describe("Share of a layer's solid text pixels allowed below the required ratio before it fails. Default 0.1 (a layer passes when 90% of its pixels reach the ratio). Antialiased edges are left out, except for thin type, where they are counted too.");
+    Annotate = external_exports.boolean().default(true).describe("Write an annotated PNG per time: text boxes green (pass), red (fail, ratio printed) or amber (not conclusive), overlaps in magenta. Default true.");
+    MaxSize = external_exports.number().int().min(200).max(4096).default(1600).describe("Longest edge of the annotated PNG in pixels. Default 1600.");
+    MinOverlap = external_exports.number().min(0).max(1).default(0.02).describe("Two text boxes overlap when their intersection is at least this share of the smaller box. Default 0.02.");
+    AeCheckTextOverlapSchema = external_exports.object({
+      comp_id: CompId,
+      times: timesField(MAX_OVERLAP_TIMES),
+      layers: Layers,
+      min_overlap: MinOverlap
+    });
+    AeEstimateLegibilitySchema = external_exports.object({
+      comp_id: CompId,
+      times: timesField(MAX_CHECK_TIMES),
+      layers: Layers,
+      level: Level,
+      min_ratio: MinRatio,
+      large_text_px: LargeTextPx,
+      tolerance: Tolerance,
+      min_overlap: MinOverlap,
+      annotate: Annotate,
+      max_size: MaxSize
+    });
+    AeCheckLegibilitySchema = external_exports.object({
+      comp_id: CompId,
+      times: timesField(MAX_CHECK_TIMES),
+      layers: Layers,
+      level: Level,
+      min_ratio: MinRatio,
+      large_text_px: LargeTextPx,
+      tolerance: Tolerance,
+      min_overlap: MinOverlap,
+      sensitivity: external_exports.number().min(5e-3).max(0.25).default(0.02).describe(
+        "A pixel belongs to the text when a colour channel differs by more than this (0..1) between the render with the text on and with it off. Default 0.02. Lower finds fainter text (and shadows or glow, which are part of the layer); text closer to its background than this cannot be told apart and counts as not visible."
+      ),
+      fixes: external_exports.boolean().default(true).describe("Suggest fixes for failing layers (a text colour, a scrim behind the text). Nothing is applied. Default true."),
+      annotate: Annotate,
+      max_size: MaxSize,
+      expect: ExpectSchema
+    });
+    LIN = new Float64Array(256);
+    for (let i = 0; i < 256; i++) {
+      const c = i / 255;
+      LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+    hex2 = (rgb) => "#" + [0, 1, 2].map((i) => Math.max(0, Math.min(255, Math.round(rgb[i]))).toString(16).padStart(2, "0")).join("");
+    r22 = (v) => Math.round(v * 100) / 100;
+    r33 = (v) => Math.round(v * 1e3) / 1e3;
+    boxArea = (b) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    MAX_OVERLAPS = 200;
+    inAny = (list, x, y) => {
+      if (!list) return false;
+      for (const r of list) if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return true;
+      return false;
+    };
+    MIN_PIXELS = 6;
+    COLOUR_TOL = 26;
+    emptyAnalysis = (status, extra = {}) => ({
+      status,
+      glyph_pixels: 0,
+      core_pixels: 0,
+      thin: false,
+      text_rgb: null,
+      bg_mean: null,
+      transparent_pixels: 0,
+      excluded_pixels: 0,
+      ratios: new Float32Array(0),
+      bg: new Uint8Array(0),
+      fail_bounds: null,
+      ...extra
+    });
+    mixRgb = (a, b, t) => [
+      b[0] * t + a[0] * (1 - t),
+      b[1] * t + a[1] * (1 - t),
+      b[2] * t + a[2] * (1 - t)
+    ];
+    head = (l) => ({ index: l.index, id: l.id, name: l.name });
+    FOREIGN_LIMIT = 0.3;
+    colourDistance = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+    GREEN = [64, 224, 64, 255];
+    RED = [255, 48, 48, 255];
+    AMBER = [255, 176, 0, 255];
+    INK2 = [16, 16, 16, 255];
+    MAGENTA = [255, 0, 255, 96];
+    errMessage2 = (err) => err instanceof Error ? err.message : String(err);
+    NOTES_COMMON = [
+      "Boxes are each text layer's sourceRectAtTime moved through its transforms and parents: the whole layer, not single glyphs. Text inside precomps, 3D text and text parented to a 3D layer are not checked (listed as not checkable).",
+      "Ratios are WCAG 2.x contrast ratios on the PNG's pixel values taken as sRGB. Whether AE writes sRGB with colour management on (OCIO, linear blending, 16/32 bpc) is unmeasured: in a wide-gamut or linear-light project the figures can be off."
+    ];
+    SKIPPED_CAP = 100;
+    BLOCKED_NOTE = "AE stopped responding during a render (often a modal dialog); the remaining times were not rendered. Check ae_dialogs, then run again.";
+    OFF_FRAME = "its box is outside the frame at this time";
+    runQueued4 = async (ctx, label, opId, fn) => {
+      try {
+        return await ctx.queue.run(label, fn);
+      } catch (err) {
+        if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+        throw err;
+      }
+    };
+    RING_SHARE = 0.3;
+    MAX_TEST_LAYERS = 100;
+    legibilityTools = [
+      {
+        name: "ae_check_text_overlap",
+        description: "READ-ONLY, no render. Finds text layers whose boxes overlap other text at the chosen times (default the comp's current time), from the DOM: each text layer's sourceRectAtTime moved through its transforms and parents. Returns the overlapping pairs (layer index, id, name; the intersection rectangle in comp pixels; its share of the smaller box) and the text layers that can't be boxed (switched off, outside their in/out points, 3D, empty). Boxes are whole layers, not glyphs: a box can overlap while the glyphs don't touch. Text in precomps is not seen. For contrast against the picture use ae_estimate_legibility or ae_check_legibility. Strictly read-only: never moves the time indicator or changes selection, solo or the project.",
+        schema: AeCheckTextOverlapSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "legibilityRead",
+            { comp_id: args.comp_id, times: args.times, layers: args.layers },
+            { label: `ae_check_text_overlap(${args.comp_id})`, mutates: false, toolName: "ae_check_text_overlap", timeoutMs: SLOW_TIMEOUT_MS }
+          );
+          return { ok: true, read_only: true, ...overlapReport(res.result, args.min_overlap) };
+        }
+      },
+      {
+        name: "ae_estimate_legibility",
+        description: "READ-ONLY estimate of text legibility from one normal render per time: the WCAG contrast ratio between each text layer's fill colour (as the DOM reports it) and the pixels in a ring around its box, plus text boxes that overlap other text, and an annotated PNG (failing boxes red with the ratio printed). WEAK by design: the DOM colour ignores animators, effects, layer styles, opacity and blend modes (a layer whose fill colour is not found in its box is reported as not conclusive), and the ring is beside the text, not behind the glyphs. Use it for a quick look that changes nothing in the project; use ae_check_legibility for the real figure. Required ratio by WCAG level and text size (`level`, `large_text_px`), or `min_ratio`. Strictly read-only: the comp's time, resolution, selection and solo are not touched, nothing lands on the undo stack. Each time is a render.",
+        schema: AeEstimateLegibilitySchema,
+        handler: estimateHandler
+      },
+      {
+        name: "ae_check_legibility",
+        description: "Exact legibility check: the WCAG contrast ratio of each text layer against the real picture behind it, at chosen times. How: it duplicates the comp, switches the tested text layers OFF in the copy, renders the original and the copy at the same times and diffs them. The changed pixels are the glyphs, so the text colour is what actually renders (animators, effects and layer styles included), and the copy's pixels at those positions are the true background (grades and layers above included). The copy is removed again. Returns per layer and time: pass/fail, the ratio (min, `low` = the ratio reached by (1 - `tolerance`) of the measured pixels, 90% at the default; median), the required ratio (by `level` and size, or `min_ratio`), the text and mean background colour, the box where it fails, text boxes that overlap other text, and an annotated PNG (failing boxes in red with the ratio printed). With `fixes` it suggests, for failures, a text colour and a scrim (colour, opacity, rectangle, and ready ae_create_layer arguments); nothing is applied. It writes to the project: a temporary comp named 'chroma-legibility-copy ...' appears in the Project panel for the length of the renders, in two undo groups (add the copy, remove the copy), with an automatic checkpoint first; the receipt checks the copy is gone and the original text layers are still on. Refuses before the checkpoint when no text layer shows at the chosen times. Not checked: text in precomps, 3D text. Unmeasured: the colour space of AE's PNG (taken as sRGB). Renders twice per time, so keep `times` few. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeCheckLegibilitySchema,
+        handler: checkHandler
+      }
+    ];
+  }
+});
+
 // src/tools/ext/animate.ts
 function rovingMismatches(roving, afterSnapshot) {
   const want = Array.isArray(roving) ? roving : [];
@@ -20923,14 +28833,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path35 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path44 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path35,
+          path: path44,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path35} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path44} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -21586,10 +29496,10 @@ var init_animate = __esm({
 
 // src/tools/ext/ask.ts
 function checkImagePath(p) {
-  if (!path21.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!path28.isAbsolute(p)) return `image_path must be absolute: ${p}`;
   if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
   try {
-    const st = fs22.statSync(p);
+    const st = fs29.statSync(p);
     if (!st.isFile()) return `image_path is not a file: ${p}`;
     if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
   } catch {
@@ -21632,12 +29542,12 @@ function presentAnswer(q, a) {
 function sameCurve(a, b) {
   return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
 }
-var fs22, path21, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
+var fs29, path28, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
 var init_ask = __esm({
   "src/tools/ext/ask.ts"() {
     "use strict";
-    fs22 = __toESM(require("node:fs"), 1);
-    path21 = __toESM(require("node:path"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path28 = __toESM(require("node:path"), 1);
     init_zod();
     init_animate();
     PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
@@ -21729,788 +29639,2179 @@ var init_ask = __esm({
   }
 });
 
-// src/audio.ts
-function fourcc(buf, at) {
-  return buf.toString("latin1", at, at + 4);
+// src/tools/ext/variants.ts
+function countTargets(ops) {
+  return ops.reduce((n, op) => n + ("layers" in op ? op.layers.length : 1), 0);
 }
-function readExtended80(buf, at) {
-  const expon = buf.readUInt16BE(at) & 32767;
-  const sign = buf[at] & 128 ? -1 : 1;
-  const hi = buf.readUInt32BE(at + 2);
-  const lo = buf.readUInt32BE(at + 6);
-  if (expon === 0 && hi === 0 && lo === 0) return 0;
-  const mantissa = hi * 2 ** 32 + lo;
-  return sign * mantissa * 2 ** (expon - 16383 - 63);
-}
-function intReader(bits, littleEndian) {
-  if (bits === 8) {
-    return littleEndian ? (b, at) => (b[at] - 128) / 128 : (b, at) => b.readInt8(at) / 128;
-  }
-  if (bits === 16) return littleEndian ? (b, at) => b.readInt16LE(at) / 32768 : (b, at) => b.readInt16BE(at) / 32768;
-  if (bits === 24) return littleEndian ? (b, at) => b.readIntLE(at, 3) / 8388608 : (b, at) => b.readIntBE(at, 3) / 8388608;
-  if (bits === 32) return littleEndian ? (b, at) => b.readInt32LE(at) / 2147483648 : (b, at) => b.readInt32BE(at) / 2147483648;
-  throw new AudioDecodeError(`Unsupported PCM bit depth ${bits}`);
-}
-function floatReader(bits, littleEndian) {
-  if (bits === 32) return littleEndian ? (b, at) => b.readFloatLE(at) : (b, at) => b.readFloatBE(at);
-  if (bits === 64) return littleEndian ? (b, at) => b.readDoubleLE(at) : (b, at) => b.readDoubleBE(at);
-  throw new AudioDecodeError(`Unsupported float bit depth ${bits}`);
-}
-function checkLength(frames, sampleRate, maxSeconds) {
-  if (!(sampleRate > 0)) throw new AudioDecodeError("Invalid sample rate in the audio header");
-  if (maxSeconds !== void 0 && frames / sampleRate > maxSeconds) {
-    throw new AudioDecodeError(`${Math.round(frames / sampleRate)} s of audio; analyse at most ${maxSeconds / 60} minutes at a time (use start/end)`);
-  }
-}
-function mixDown(buf, start, frames, channels, bytesPerSample, read) {
-  const mono = new Float32Array(frames);
-  const block = channels * bytesPerSample;
-  for (let f = 0; f < frames; f++) {
-    let sum = 0;
-    const at = start + f * block;
-    for (let c = 0; c < channels; c++) sum += read(buf, at + c * bytesPerSample);
-    mono[f] = sum / channels;
-  }
-  return mono;
-}
-function decodeWav(buf, opts) {
-  let at = 12;
-  let fmt = null;
-  while (at + 8 <= buf.length) {
-    const id = fourcc(buf, at);
-    let size = buf.readUInt32LE(at + 4);
-    const body = at + 8;
-    if (id === "fmt ") {
-      if (size < 16 || body + 16 > buf.length) throw new AudioDecodeError("Malformed WAV fmt chunk");
-      let format = buf.readUInt16LE(body);
-      const channels = buf.readUInt16LE(body + 2);
-      const sampleRate = buf.readUInt32LE(body + 4);
-      const bits = buf.readUInt16LE(body + 14);
-      if (format === 65534 && size >= 26 && body + 26 <= buf.length) format = buf.readUInt16LE(body + 24);
-      fmt = { format, channels, sampleRate, bits };
-    } else if (id === "data") {
-      if (!fmt) throw new AudioDecodeError("WAV data chunk before fmt chunk");
-      const riffSize = buf.readUInt32LE(4);
-      const streaming = size === 0 && (riffSize === 0 || riffSize === 4294967295);
-      if (streaming || body + size > buf.length) size = buf.length - body;
-      if (size === 0) throw new AudioDecodeError("WAV file has no audio data");
-      const bytes = fmt.bits / 8;
-      if (fmt.channels < 1 || !(fmt.sampleRate > 0) || !Number.isInteger(bytes) || bytes < 1) throw new AudioDecodeError("Malformed WAV fmt chunk");
-      const frames = Math.floor(size / (bytes * fmt.channels));
-      checkLength(frames, fmt.sampleRate, opts.maxSeconds);
-      let read;
-      if (fmt.format === 1) read = intReader(fmt.bits, true);
-      else if (fmt.format === 3) read = floatReader(fmt.bits, true);
-      else throw new AudioDecodeError(`Unsupported WAV format code ${fmt.format} (PCM and float only)`);
-      return {
-        sampleRate: fmt.sampleRate,
-        channels: fmt.channels,
-        frames,
-        mono: mixDown(buf, body, frames, fmt.channels, bytes, read),
-        format: `wav ${fmt.format === 3 ? "float" : "pcm"} ${fmt.bits}-bit`
-      };
-    }
-    at = body + size + size % 2;
-  }
-  throw new AudioDecodeError("WAV file has no data chunk");
-}
-function decodeAiff(buf, opts) {
-  const isAifc = fourcc(buf, 8) === "AIFC";
-  let at = 12;
-  let comm = null;
-  while (at + 8 <= buf.length) {
-    const id = fourcc(buf, at);
-    let size = buf.readUInt32BE(at + 4);
-    const body = at + 8;
-    if (id === "COMM") {
-      if (size < 18 || body + 18 > buf.length) throw new AudioDecodeError("Malformed AIFF COMM chunk");
-      comm = {
-        channels: buf.readInt16BE(body),
-        frames: buf.readUInt32BE(body + 2),
-        bits: buf.readInt16BE(body + 6),
-        sampleRate: readExtended80(buf, body + 8),
-        compression: isAifc && size >= 22 && body + 22 <= buf.length ? fourcc(buf, body + 18) : "NONE"
-      };
-    } else if (id === "SSND") {
-      if (!comm) throw new AudioDecodeError("AIFF SSND chunk before COMM chunk");
-      if (comm.channels < 1 || !(comm.sampleRate > 0)) throw new AudioDecodeError("Malformed AIFF COMM chunk");
-      if (size < 8 || body + 8 > buf.length) throw new AudioDecodeError("Malformed AIFF SSND chunk");
-      if (body + size > buf.length) size = buf.length - body;
-      const offset = buf.readUInt32BE(body);
-      const start = body + 8 + offset;
-      const c = comm.compression;
-      let read;
-      let bits = comm.bits;
-      if (c === "NONE" || c === "twos") read = intReader(bits, false);
-      else if (c === "sowt") read = intReader(bits, true);
-      else if (c === "fl32" || c === "FL32") {
-        bits = 32;
-        read = floatReader(32, false);
-      } else if (c === "fl64" || c === "FL64") {
-        bits = 64;
-        read = floatReader(64, false);
-      } else throw new AudioDecodeError(`Unsupported AIFC compression '${c}'`);
-      const bytes = Math.ceil(bits / 8);
-      const available = Math.floor((body + size - start) / (bytes * comm.channels));
-      const frames = Math.max(0, Math.min(comm.frames, available));
-      checkLength(frames, comm.sampleRate, opts.maxSeconds);
-      return {
-        sampleRate: comm.sampleRate,
-        channels: comm.channels,
-        frames,
-        mono: mixDown(buf, start, frames, comm.channels, bytes, read),
-        format: `${isAifc ? "aifc" : "aiff"} ${c} ${bits}-bit`
-      };
-    }
-    at = body + size + size % 2;
-  }
-  throw new AudioDecodeError("AIFF file has no SSND chunk");
-}
-function decodeAudio(buf, opts = {}) {
-  if (buf.length < 12) throw new AudioDecodeError("File too short to be audio");
-  const head = fourcc(buf, 0);
-  const kind = fourcc(buf, 8);
-  try {
-    if (head === "RIFF" && kind === "WAVE") return decodeWav(buf, opts);
-    if (head === "FORM" && (kind === "AIFF" || kind === "AIFC")) return decodeAiff(buf, opts);
-  } catch (err) {
-    if (err instanceof RangeError) throw new AudioDecodeError("Truncated or malformed audio file");
-    throw err;
-  }
-  throw new AudioDecodeError("Not a WAV or AIFF file");
-}
-function fft(re, im) {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      let t = re[i];
-      re[i] = re[j];
-      re[j] = t;
-      t = im[i];
-      im[i] = im[j];
-      im[j] = t;
-    }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = -2 * Math.PI / len;
-    const wr = Math.cos(ang);
-    const wi = Math.sin(ang);
-    for (let i = 0; i < n; i += len) {
-      let cr = 1;
-      let ci = 0;
-      for (let k = 0; k < len / 2; k++) {
-        const a = i + k;
-        const b = a + len / 2;
-        const tr = re[b] * cr - im[b] * ci;
-        const ti = re[b] * ci + im[b] * cr;
-        re[b] = re[a] - tr;
-        im[b] = im[a] - ti;
-        re[a] += tr;
-        im[a] += ti;
-        const ncr = cr * wr - ci * wi;
-        ci = cr * wi + ci * wr;
-        cr = ncr;
+function findOverlap(ops) {
+  const seen = /* @__PURE__ */ new Map();
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const keys = [];
+    if (op.op === "comp_duration") {
+      keys.push({ key: "comp_duration", what: "the comp duration" });
+    } else {
+      let propPath = null;
+      if (op.op === "offset") propPath = op.path ?? ["ADBE Transform Group", "ADBE Position"];
+      else if (op.op === "color" || op.op === "set_value" || op.op === "ease") propPath = op.path ?? null;
+      if (op.op !== "shift_time" && !propPath) continue;
+      for (const sel2 of op.layers) {
+        let who = null;
+        if (sel2.id !== void 0) who = `id ${sel2.id}`;
+        else if (sel2.index !== void 0) who = `index ${sel2.index}`;
+        else if (sel2.name !== void 0) who = `name ${sel2.name}`;
+        if (!who) continue;
+        const where = `${op.op === "shift_time" ? "the start time" : propPath.join(" > ")} of layer (${who})`;
+        if (op.op === "shift_time") {
+          keys.push({ key: `start|${who}`, what: where });
+        } else if (op.op === "ease") {
+          keys.push({ key: `ease ${propPath.join(">")}|${who}`, what: where });
+        } else if (op.op === "offset") {
+          keys.push({ key: `prop ${propPath.join(">")}|${who}`, what: where });
+        } else {
+          keys.push({ key: `prop ${propPath.join(">")}|${who}`, what: where });
+          keys.push({ key: `ease ${propPath.join(">")}|${who}`, what: where });
+        }
       }
     }
-  }
-}
-async function onsetEnvelope(mono, sampleRate) {
-  const n = sampleRate > 6e4 ? 2048 : 1024;
-  const hop = n / 2;
-  const frames = Math.max(1, Math.floor(mono.length / hop) + 1);
-  const window = new Float64Array(n);
-  for (let i = 0; i < n; i++) window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / n);
-  const bins = n / 2;
-  let prev = new Float64Array(bins);
-  let cur = new Float64Array(bins);
-  const re = new Float64Array(n);
-  const im = new Float64Array(n);
-  const env = new Float64Array(frames);
-  for (let t = 0; t < frames; t++) {
-    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
-    const start = t * hop - n / 2;
-    for (let i = 0; i < n; i++) {
-      const s = start + i;
-      re[i] = s >= 0 && s < mono.length ? mono[s] * window[i] : 0;
-      im[i] = 0;
+    for (const k of keys) {
+      const first = seen.get(k.key);
+      if (first !== void 0) return { index: i, message: `op ${i + 1} (${op.op}) changes ${k.what}, which op ${first + 1} already changes in this variant; combine them into one op or use separate variants.` };
     }
-    fft(re, im);
-    let flux = 0;
-    for (let k = 1; k < bins; k++) {
-      cur[k] = Math.log1p(100 * Math.hypot(re[k], im[k]));
-      if (t > 0) {
-        const d = cur[k] - prev[k];
-        if (d > 0) flux += d;
+    for (const k of keys) seen.set(k.key, i);
+  }
+  return null;
+}
+function toHostOps(ops) {
+  return ops.map((op) => {
+    if (op.op !== "ease") return { ...op };
+    const curve = typeof op.ease === "string" ? [...EASE_PRESETS[op.ease]] : op.ease;
+    return { op: "ease", layers: op.layers, ...op.path ? { path: op.path } : {}, curve };
+  });
+}
+function summariseOps(ops) {
+  const parts = ops.map((op) => {
+    if (op.op === "comp_duration") return `duration ${op.seconds}s`;
+    const n = op.layers.length;
+    const on = `${n} layer${n === 1 ? "" : "s"}`;
+    if (op.op === "color") return `colour on ${on}`;
+    if (op.op === "set_value") return `set value on ${on}`;
+    if (op.op === "offset") return `move ${on} by [${op.delta.join(", ")}]${op.cumulative ? " (fanned)" : ""}`;
+    if (op.op === "shift_time") return `shift ${on}${op.offset ? ` by ${op.offset}s` : ""}${op.stagger ? ` staggered ${op.stagger}s` : ""}`;
+    return `ease ${typeof op.ease === "string" ? op.ease : `[${op.ease.join(", ")}]`} on ${on}`;
+  });
+  const text = parts.join("; ");
+  return text.length > 380 ? `${text.slice(0, 377)}...` : text;
+}
+function defaultTimes(original) {
+  const start = original.workAreaStart ?? 0;
+  const span = original.workAreaDuration ?? original.duration ?? 0;
+  return [Math.round((start + span / 2) * 1e3) / 1e3];
+}
+function unverifiedProbes(afterRaw, written) {
+  const after = asRead2(afterRaw);
+  if (!after) return 0;
+  return Math.max(0, written - (Array.isArray(after.probes) ? after.probes.length : 0));
+}
+function probeMismatches(where, probes, read2, fps, probesTruncated = false) {
+  const m = [];
+  const frame = (fps > 0 ? 1 / fps : 0.05) * 1.01 + 1e-6;
+  const halfFrame = (fps > 0 ? 1 / fps : 0.05) * 0.5;
+  probes.forEach((p, i) => {
+    const got = read2[i];
+    const name = `${where}.${p.kind}[${i}]${p.layer_index ? ` layer ${p.layer_index}` : ""}${p.path ? ` ${p.path[p.path.length - 1]}` : ""}`;
+    if (!got) {
+      if (!probesTruncated) m.push({ path: name, expected: p.expected, actual: void 0, message: "The property was not read back" });
+      return;
+    }
+    if (!got.ok) {
+      m.push({ path: name, expected: p.expected, actual: got.error, message: `The property could not be read back: ${got.error ?? "unknown error"}` });
+      return;
+    }
+    if (p.kind === "start_time" || p.kind === "comp_duration") {
+      expectThat(m, typeof got.actual === "number" && near4(got.actual, p.expected, p.kind === "start_time" ? halfFrame : frame), name, p.expected, got.actual, p.kind === "start_time" ? "Start time differs" : "Duration differs");
+    } else if (p.kind === "values") {
+      const want = p.expected.slice(0, MAX_PROBE_KEYS);
+      const have = got.actual;
+      expectThat(m, Array.isArray(have) && have.length === want.length, name, want.length, Array.isArray(have) ? have.length : have, "Number of values (keys) differs");
+      if (!Array.isArray(have) || have.length !== want.length) return;
+      want.forEach((w, k) => {
+        const h = have[k] ?? [];
+        const wv = Array.isArray(w) ? w : [w];
+        expectThat(m, wv.every((x, d) => typeof h[d] === "number" && near4(h[d], x)), `${name}[${k}]`, wv, h, "Value differs");
+      });
+    } else if (p.kind === "ease") {
+      const have = got.actual;
+      const speedNear = (a, b) => Math.abs(a - b) <= 1e-3 + 0.02 * Math.abs(b);
+      for (const w of p.keys ?? []) {
+        const h = Array.isArray(have) ? have.find((x) => x.key === w.key) : void 0;
+        if (!h) {
+          m.push({ path: `${name} key ${w.key}`, expected: w, actual: void 0, message: "Key not read back" });
+          continue;
+        }
+        if (w.in_influence !== void 0) expectThat(m, h.in_influence !== null && near4(h.in_influence, w.in_influence, 1), `${name} key ${w.key} in`, w.in_influence, h.in_influence, "In influence differs");
+        if (w.out_influence !== void 0) expectThat(m, h.out_influence !== null && near4(h.out_influence, w.out_influence, 1), `${name} key ${w.key} out`, w.out_influence, h.out_influence, "Out influence differs");
+        if (w.in_speed !== void 0) expectThat(m, typeof h.in_speed === "number" && speedNear(h.in_speed, w.in_speed), `${name} key ${w.key} in speed`, w.in_speed, h.in_speed, "In speed differs");
+        if (w.out_speed !== void 0) expectThat(m, typeof h.out_speed === "number" && speedNear(h.out_speed, w.out_speed), `${name} key ${w.key} out speed`, w.out_speed, h.out_speed, "Out speed differs");
+        expectThat(m, h.in_interp === "bezier" && h.out_interp === "bezier", `${name} key ${w.key} interpolation`, "bezier", `${h.in_interp}/${h.out_interp}`, "Key is not bezier");
       }
-    }
-    env[t] = flux;
-    const swap = prev;
-    prev = cur;
-    cur = swap;
-  }
-  return { env, hop, frameRate: sampleRate / hop };
-}
-function pickPeaks(env, frameRate, delta) {
-  const peaks = [];
-  const preMax = Math.max(1, Math.round(0.03 * frameRate));
-  const postMax = 1;
-  const avg = Math.max(1, Math.round(0.1 * frameRate));
-  const wait = Math.max(1, Math.round(0.05 * frameRate));
-  let last = -Infinity;
-  for (let t = 0; t < env.length; t++) {
-    const v = env[t];
-    if (v <= 0) continue;
-    let isMax = true;
-    for (let k = Math.max(0, t - preMax); k <= Math.min(env.length - 1, t + postMax); k++) {
-      if (env[k] > v) {
-        isMax = false;
-        break;
-      }
-    }
-    if (!isMax) continue;
-    let sum = 0;
-    let count = 0;
-    for (let k = Math.max(0, t - avg); k <= Math.min(env.length - 1, t + avg); k++) {
-      sum += env[k];
-      count++;
-    }
-    if (v < sum / count + delta) continue;
-    if (t - last < wait) continue;
-    peaks.push(t);
-    last = t;
-  }
-  return peaks;
-}
-function estimatePeriod(env, frameRate, minBpm, maxBpm) {
-  const mean = env.reduce((a2, b2) => a2 + b2, 0) / env.length;
-  const x = Array.from(env, (v) => v - mean);
-  const minLag = Math.max(1, Math.floor(60 * frameRate / maxBpm));
-  const maxLag = Math.min(x.length - 1, Math.ceil(60 * frameRate / minBpm));
-  if (maxLag <= minLag + 1) return null;
-  let r0 = 0;
-  for (const v of x) r0 += v * v;
-  if (r0 <= 0) return null;
-  const r = new Float64Array(maxLag + 2);
-  for (let lag = minLag - 1; lag <= maxLag + 1; lag++) {
-    if (lag < 1) continue;
-    let s = 0;
-    for (let t = 0; t + lag < x.length; t++) s += x[t] * x[t + lag];
-    r[lag] = s;
-  }
-  let best = -1;
-  let bestScore = -Infinity;
-  for (let lag = minLag; lag <= maxLag; lag++) {
-    const bpm = 60 * frameRate / lag;
-    const prior = Math.exp(-0.5 * Math.log2(bpm / 120) ** 2);
-    const score = r[lag] * prior;
-    if (score > bestScore) {
-      bestScore = score;
-      best = lag;
-    }
-  }
-  if (best < 0 || r[best] <= 0) return null;
-  const a = r[best - 1];
-  const b = r[best];
-  const c = r[best + 1];
-  const denom = a - 2 * b + c;
-  const shift = denom !== 0 ? Math.max(-0.5, Math.min(0.5, 0.5 * (a - c) / denom)) : 0;
-  return { period: best + shift, confidence: Math.max(0, Math.min(1, b / r0)) };
-}
-async function trackBeats(env, period, tightness = 100) {
-  const n = env.length;
-  if (n === 0 || period <= 1) return [];
-  const sigma = Math.max(1, period / 16);
-  const radius = Math.ceil(3 * sigma);
-  const local = new Float64Array(n);
-  const max = env.reduce((m, v) => Math.max(m, v), 0) || 1;
-  for (let t = 0; t < n; t++) {
-    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
-    let s = 0;
-    for (let k = -radius; k <= radius; k++) {
-      const i = t + k;
-      if (i >= 0 && i < n) s += env[i] / max * Math.exp(-0.5 * (k / sigma) ** 2);
-    }
-    local[t] = s;
-  }
-  const score = new Float64Array(n);
-  const back = new Int32Array(n).fill(-1);
-  const lo = Math.round(period / 2);
-  const hi = Math.round(2 * period);
-  for (let t = 0; t < n; t++) {
-    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
-    let best = -Infinity;
-    let arg = -1;
-    for (let p = t - hi; p <= t - lo; p++) {
-      if (p < 0) continue;
-      const v = score[p] - tightness * Math.log((t - p) / period) ** 2;
-      if (v > best) {
-        best = v;
-        arg = p;
-      }
-    }
-    score[t] = local[t] + (arg >= 0 ? best : 0);
-    back[t] = arg;
-  }
-  let end = n - 1;
-  for (let t = Math.max(0, n - hi); t < n; t++) if (score[t] > score[end]) end = t;
-  const beats = [];
-  for (let t = end; t >= 0; t = back[t]) beats.push(t);
-  return beats.reverse();
-}
-async function analyzeAudio(mono, sampleRate, opts = {}) {
-  const duration = mono.length / sampleRate;
-  let peak = 0;
-  let sumSq = 0;
-  for (let i = 0; i < mono.length; i++) {
-    const a = Math.abs(mono[i]);
-    if (a > peak) peak = a;
-    sumSq += mono[i] * mono[i];
-  }
-  const rms = mono.length ? Math.sqrt(sumSq / mono.length) : 0;
-  const fps = opts.fps && opts.fps > 0 ? opts.fps : 25;
-  const spf = Math.max(1, sampleRate / fps);
-  const frameCount = Math.max(1, Math.ceil(mono.length / spf));
-  const frameRms = new Float64Array(frameCount);
-  const framePeak = new Float64Array(frameCount);
-  let silent = 0;
-  for (let f = 0; f < frameCount; f++) {
-    let s = 0;
-    let p = 0;
-    const end = Math.min(mono.length, Math.round((f + 1) * spf));
-    let count = 0;
-    for (let i = Math.round(f * spf); i < end; i++) {
-      s += mono[i] * mono[i];
-      const a = Math.abs(mono[i]);
-      if (a > p) p = a;
-      count++;
-    }
-    frameRms[f] = count ? Math.sqrt(s / count) : 0;
-    framePeak[f] = p;
-    if (toDb(frameRms[f]) < SILENCE_DB) silent++;
-  }
-  const { env, hop, frameRate } = await onsetEnvelope(mono, sampleRate);
-  const envMax = env.reduce((m, v) => Math.max(m, v), 0);
-  const norm2 = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
-  const sensitivity = Math.max(0, Math.min(1, opts.sensitivity ?? 0.5));
-  const delta = 0.02 + (1 - sensitivity) * 0.16;
-  const audible = toDb(peak) >= ONSET_FLOOR_DB;
-  const peakFrames = envMax > 0 && audible ? pickPeaks(norm2, frameRate, delta) : [];
-  const hitWindow = Math.round(0.05 * sampleRate);
-  const onsets = peakFrames.map((t) => {
-    const at = t * hop;
-    let p = 0;
-    for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
-    return { time: round32(at / sampleRate), strength: round32(norm2[t]), level_db: toDb(p) };
-  }).filter((o) => o.level_db >= ONSET_FLOOR_DB);
-  let tempo = null;
-  let beats = [];
-  const est = onsets.length >= 4 ? estimatePeriod(norm2, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
-  if (est) {
-    const first = onsets[0].time;
-    const last = onsets[onsets.length - 1].time;
-    const periodSec = est.period / frameRate;
-    beats = (await trackBeats(norm2, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
-    const near5 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
-    tempo = {
-      bpm: Math.round(60 / periodSec * 10) / 10,
-      period: round32(periodSec),
-      confidence: round32(est.confidence),
-      beats_on_onsets: beats.length ? round32(near5 / beats.length) : 0
-    };
-  }
-  const hits = [...onsets].sort((a, b) => b.level_db - a.level_db || b.strength - a.strength).slice(0, opts.hits ?? 20);
-  const out = {
-    duration: round32(duration),
-    sample_rate: sampleRate,
-    overall: { peak_db: toDb(peak), rms_db: toDb(rms), silent_ratio: round32(silent / frameCount) },
-    onsets,
-    tempo,
-    beats,
-    hits
-  };
-  if (opts.levels) {
-    const bucket = Math.max(1, Math.ceil(frameCount / MAX_LEVEL_POINTS));
-    const rmsDb = [];
-    const peakDb = [];
-    for (let i = 0; i < frameCount; i += bucket) {
-      let r = 0;
-      let p = 0;
-      for (let k = i; k < Math.min(frameCount, i + bucket); k++) {
-        r = Math.max(r, frameRms[k]);
-        p = Math.max(p, framePeak[k]);
-      }
-      rmsDb.push(toDb(r));
-      peakDb.push(toDb(p));
-    }
-    out.levels = { step: Math.round(bucket / fps * 1e6) / 1e6, fps, frames_per_point: bucket, rms_db: rmsDb, peak_db: peakDb };
-  }
-  return out;
-}
-function offsetAnalysis(a, offset) {
-  if (!offset) return a;
-  const sh = (t) => round32(t + offset);
-  return {
-    ...a,
-    onsets: a.onsets.map((o) => ({ ...o, time: sh(o.time) })),
-    beats: a.beats.map(sh),
-    hits: a.hits.map((o) => ({ ...o, time: sh(o.time) }))
-  };
-}
-var AudioDecodeError, SILENCE_DB, ONSET_FLOOR_DB, YIELD_EVERY, yieldToLoop, MAX_LEVEL_POINTS, toDb, round32;
-var init_audio = __esm({
-  "src/audio.ts"() {
-    "use strict";
-    AudioDecodeError = class extends Error {
-    };
-    SILENCE_DB = -50;
-    ONSET_FLOOR_DB = -60;
-    YIELD_EVERY = 2048;
-    yieldToLoop = () => new Promise((resolve3) => setImmediate(resolve3));
-    MAX_LEVEL_POINTS = 500;
-    toDb = (x) => Math.round(20 * Math.log10(Math.max(x, 1e-10)) * 10) / 10;
-    round32 = (x) => Math.round(x * 1e3) / 1e3;
-  }
-});
-
-// src/tools/ext/audio.ts
-function planCueKeys(times, opts) {
-  const gap = opts.frame / 2;
-  const sorted = [...times].sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] >= gap);
-  const base = opts.base ?? null;
-  const keys = [];
-  let last = -Infinity;
-  sorted.forEach((t, i) => {
-    const pre = t - Math.max(opts.attack, opts.frame);
-    if (pre >= 0 && pre > last + gap) keys.push({ time: round4(pre), value: base, kind: "pre" });
-    else if (pre < 0 && last === -Infinity && t >= gap) keys.push({ time: 0, value: base, kind: "pre" });
-    keys.push({ time: round4(t), value: opts.peak, kind: "peak" });
-    last = t;
-    const next = sorted[i + 1];
-    const post = t + Math.max(opts.decay, opts.frame);
-    const nextPre = next === void 0 ? Infinity : next - Math.max(opts.attack, opts.frame);
-    if (post < nextPre - gap) {
-      keys.push({ time: round4(post), value: base, kind: "post" });
-      last = post;
     }
   });
-  return keys;
+  return m;
 }
-function cueKeysMismatches(planned, afterRaw, written) {
+function createMismatches(variants, beforeRaw, afterRaw, written) {
   const m = [];
-  const after = afterRaw;
-  if (!after) return m;
-  let checkedUpTo = Infinity;
-  if (after.truncated) {
-    checkedUpTo = after.keys.length ? after.keys[after.keys.length - 1].time : -Infinity;
-    const unchecked = planned.filter((k) => k.time > checkedUpTo + 15e-4).length;
-    m.push({
-      path: "keys",
-      expected: `${planned.length} planned keys read back`,
-      actual: `read-back stopped at ${after.keys.length} keys`,
-      message: `Read-back truncated at ${after.keys.length} keys; ${unchecked} planned key(s) after ${checkedUpTo}s were not verified`
-    });
+  const before = asRead2(beforeRaw);
+  const after = asRead2(afterRaw);
+  if (!after || !after.original) return m;
+  const afterOriginal = after.original;
+  const copies = written.copies ?? [];
+  expectThat(m, copies.length === variants.length, "copies", variants.length, copies.length, "Number of copies differs from the number of variants");
+  if (before?.original?.digest && afterOriginal.digest) {
+    expectThat(m, before.original.digest === afterOriginal.digest, "original.digest", before.original.digest, afterOriginal.digest, "The original comp changed while the copies were made");
   }
-  for (const k of planned) {
-    if (k.time > checkedUpTo + 15e-4) continue;
-    const got = after.keys.find((x) => Math.abs(x.time - k.time) <= 15e-4);
-    if (!got) {
-      m.push({ path: `keys@${k.time}`, expected: k.value ?? written.base, actual: void 0, message: `No key at ${k.time}s` });
-      continue;
-    }
-    const want = k.value ?? written.base;
-    const actual = Array.isArray(want) && Array.isArray(got.value) ? got.value.slice(0, want.length) : got.value;
-    compareValues(want, actual, `keys@${k.time}`, m);
+  expectThat(m, afterOriginal.numLayers === (before?.original?.numLayers ?? afterOriginal.numLayers), "original.numLayers", before?.original?.numLayers, afterOriginal.numLayers, "The original comp's layer count changed");
+  for (const c of copies) {
+    const seen = after.copies.find((x) => x.comp_id === c.comp_id);
+    expectThat(m, !!seen && seen.exists, `copies[${c.variant_id}]`, "exists", seen?.exists ? "exists" : "missing", "A variant copy is not in the project");
+    if (!seen || !seen.exists) continue;
+    expectThat(m, seen.numLayers === afterOriginal.numLayers, `copies[${c.variant_id}].numLayers`, afterOriginal.numLayers, seen.numLayers, "The copy's layer count differs from the original's");
+    expectThat(m, seen.in_folder === true, `copies[${c.variant_id}].folder`, true, seen.in_folder, "The copy is not in the variants folder");
+  }
+  const all = copies.flatMap((c) => c.probes);
+  m.push(...probeMismatches("variants", all, after.probes, afterOriginal.fps, after.probes_truncated === true));
+  return m;
+}
+function cleanupMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = asRead2(beforeRaw);
+  const after = asRead2(afterRaw);
+  if (!after) return m;
+  const cleanup = written.cleanup;
+  for (const id of cleanup?.removed ?? []) {
+    const seen = after.copies.find((x) => x.comp_id === id);
+    expectThat(m, !seen || !seen.exists, `copies[${id}]`, "removed", "still in the project", "A copy that was removed is still in the project");
+  }
+  for (const id of cleanup?.parked ?? []) {
+    const seen = after.copies.find((x) => x.comp_id === id);
+    expectThat(m, !!seen && seen.exists && seen.in_folder === true, `copies[${id}]`, "parked in the folder", seen?.exists ? "elsewhere" : "missing", "A parked copy is not in the variants folder");
+  }
+  if (before?.original && after.original) {
+    expectThat(m, after.original.numLayers === before.original.numLayers, "original.numLayers", before.original.numLayers, after.original.numLayers, "The original's layer count changed");
   }
   return m;
 }
-function sanitize(name) {
-  return name.replace(/[^\w.-]+/g, "_").slice(0, 60) || "comp";
+function promoteMismatches(beforeRaw, afterRaw, written) {
+  const after = asRead2(afterRaw);
+  if (!after) return [];
+  return [...probeMismatches("pick", written.probes ?? [], after.probes, after.original?.fps ?? 0, after.probes_truncated === true), ...cleanupMismatches(beforeRaw, afterRaw, written)];
 }
-function stamp() {
-  return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
-}
-function findRenderedAudio(outputPath) {
-  if (fs23.existsSync(outputPath)) return outputPath;
-  const dir = path22.dirname(outputPath);
-  const stem = path22.basename(outputPath, path22.extname(outputPath));
+function saveSet(ctx, rec) {
   try {
-    const hit = fs23.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
-    return hit ? path22.join(dir, hit) : null;
+    fs30.mkdirSync(setsDir(ctx), { recursive: true });
+    const tmp = `${setFile(ctx, rec.set_id)}.${process.pid}.tmp`;
+    try {
+      fs30.writeFileSync(tmp, JSON.stringify(rec, null, 2));
+      fs30.renameSync(tmp, setFile(ctx, rec.set_id));
+    } catch (err) {
+      try {
+        fs30.rmSync(tmp, { force: true });
+      } catch {
+      }
+      throw err;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+function loadSet(ctx, id) {
+  try {
+    return JSON.parse(fs30.readFileSync(setFile(ctx, id), "utf8"));
   } catch {
     return null;
   }
 }
-async function analyzeFile(file, offset, opts, maxSeconds = MAX_ANALYSIS_SECONDS) {
-  const stat = fs23.statSync(file);
-  if (stat.size > MAX_AUDIO_BYTES) throw new AudioDecodeError(`Audio file is over ${MAX_AUDIO_BYTES / 1048576} MB`);
-  const decoded = decodeAudio(await fs23.promises.readFile(file), { maxSeconds });
-  const analysis = offsetAnalysis(await analyzeAudio(decoded.mono, decoded.sampleRate, opts), offset);
-  const boundList = (list) => ({ list: list.slice(0, MAX_LIST2), truncated: list.length > MAX_LIST2 });
-  const beats = boundList(analysis.beats);
-  const onsets = boundList(analysis.onsets);
-  return {
-    source: { path: file, format: decoded.format, sample_rate: decoded.sampleRate, channels: decoded.channels, duration: analysis.duration },
-    time_offset: offset,
-    overall: analysis.overall,
-    tempo: analysis.tempo,
-    beats: beats.list,
-    beats_truncated: beats.truncated,
-    onsets: onsets.list,
-    onsets_truncated: onsets.truncated,
-    hits: analysis.hits,
-    ...analysis.levels ? { levels: { ...analysis.levels, start: offset } } : {}
-  };
+function normProjectPath(p) {
+  if (p === "<unsaved>") return p;
+  let s = p.split("\\").join("/");
+  if (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  if (process.platform === "win32") s = s.toLowerCase();
+  return s;
 }
-function createAudioTools(options = {}) {
-  const startRender = options.startRender ?? (async (args, ctx) => {
-    const tool = aerenderTools.find((t) => t.name === "ae_aerender_start");
-    return await tool.handler(args, ctx);
-  });
-  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
-  const rendersDir = options.rendersDir ?? (() => getDefaultAerenderRegistry().rendersDir);
-  const pollMs = options.pollMs ?? 250;
-  const jobs = /* @__PURE__ */ new Map();
-  const metaFor = (jobId) => {
-    const known = jobs.get(jobId);
-    if (known) return known;
-    const job = getJob(jobId);
-    if (!job) return void 0;
-    try {
-      return JSON.parse(fs23.readFileSync(`${job.output_path}.json`, "utf8"));
-    } catch {
-      return void 0;
-    }
-  };
-  async function collect(jobId, waitSeconds, opts) {
-    const meta = metaFor(jobId);
-    if (!meta) return { ok: false, error: "unknown_job", message: `No audio render with job_id ${jobId}` };
-    const deadline = Date.now() + waitSeconds * 1e3;
-    let job = getJob(jobId);
-    while (job?.state === "running" && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, pollMs));
-      job = getJob(jobId);
-    }
-    if (!job) return { ok: false, error: "unknown_job", message: `The render job ${jobId} is gone` };
-    if (job.state === "running") {
-      return { ok: true, state: "rendering", job_id: jobId, message: "Still rendering. Call ae_audio_analyze again with this job_id." };
-    }
-    if (job.state === "failed") {
-      return {
-        ok: false,
-        error: "render_failed",
-        job_id: jobId,
-        message: `aerender failed: ${job.error ?? "see the log"}. If the log says the output-module template is missing, pass output_module_template with an audio-only template that exists in this AE (ae_render_templates lists them).`,
-        log_path: job.log_path
-      };
-    }
-    const file = findRenderedAudio(meta.output_path);
-    if (!file) return { ok: false, error: "no_output", job_id: jobId, message: `aerender finished but wrote no audio file at ${meta.output_path}` };
-    try {
-      return { ok: true, state: "done", job_id: jobId, comp_id: meta.comp_id, ...await analyzeFile(file, meta.offset, { ...opts, fps: meta.fps }, MAX_ANALYSIS_SECONDS + 2 / (meta.fps || 25)) };
-    } catch (err) {
-      if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", job_id: jobId, message: err.message };
-      throw err;
-    }
+function dropSet(ctx, id) {
+  try {
+    fs30.rmSync(setFile(ctx, id), { force: true });
+  } catch {
   }
-  return [
-    {
-      name: "ae_audio_analyze",
-      description: "Analyse a comp's sound: overall level, onsets (hits), tempo in BPM with a confidence, beat times, the strongest hits, and optionally levels per frame. All times are comp seconds. With comp_id the comp's audio is rendered by aerender in the background (an audio-only output-module template, default 'AIFF 48kHz'), so everything AE does to the sound counts, and AE stays usable; the project must be saved with no unsaved changes (ae_save first). If the render takes longer than wait_seconds the result is a job_id to call again with. With audio_path a WAV or AIFF is analysed directly. Analysis is plain JS on the server; no outside tools. Use the beats or onsets with ae_add_markers (markers on beats) or ae_cue_keys (a pulse on each beat). " + AGENT_SAFETY_GUIDANCE,
-      schema: AeAudioAnalyzeSchema,
-      handler: async (args, ctx) => {
-        const opts = {
-          levels: args.levels,
-          sensitivity: args.sensitivity,
-          min_bpm: args.min_bpm,
-          max_bpm: args.max_bpm,
-          hits: args.hits
-        };
-        const wait = args.wait_seconds ?? 30;
-        if (args.audio_path !== void 0) {
-          if (!path22.isAbsolute(args.audio_path) || !fs23.existsSync(args.audio_path)) {
-            return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
-          }
-          try {
-            return { ok: true, state: "done", ...await analyzeFile(args.audio_path, args.time_offset ?? 0, { ...opts, fps: args.fps }) };
-          } catch (err) {
-            if (err instanceof AudioDecodeError) return { ok: false, error: "bad_audio", message: err.message };
-            throw err;
-          }
-        }
-        if (args.job_id !== void 0) return collect(args.job_id, wait, opts);
-        const info = (await ctx.bridge.callHost("audioCompInfo", { comp_id: args.comp_id }, {
-          label: "ae_audio_analyze (comp)",
-          mutates: false,
-          toolName: "ae_audio_analyze"
-        })).result;
-        if (!info.name_unique) {
-          return { ok: false, error: "ambiguous_comp", message: `Several comps are named "${info.name}"; aerender picks comps by name. Rename one first.` };
-        }
-        if (!info.audio_layers.length) {
-          return { ok: false, error: "no_audio", message: `"${info.name}" has no layer with audio switched on.` };
-        }
-        const start = args.start ?? 0;
-        const end = Math.min(args.end ?? info.duration, info.duration);
-        if (end <= start) return { ok: false, error: "bad_range", message: `Nothing to render between ${start}s and ${end}s (comp is ${info.duration}s).` };
-        const firstFrame = Math.round((info.display_start_time ?? 0) * info.fps);
-        const startFrame = firstFrame + Math.round(start * info.fps);
-        const endFrame = firstFrame + Math.max(Math.round(start * info.fps), Math.ceil(end * info.fps) - 1);
-        const renderedSeconds = (endFrame - startFrame + 1) / info.fps;
-        if (renderedSeconds > MAX_ANALYSIS_SECONDS + 1e-6) {
-          return {
-            ok: false,
-            error: "too_long",
-            message: `${Math.round(renderedSeconds)} s of audio; analyse at most ${MAX_ANALYSIS_SECONDS / 60} minutes at a time (use start/end)`
-          };
-        }
-        const dir = path22.join(rendersDir(), "audio");
-        fs23.mkdirSync(dir, { recursive: true });
-        const outputPath = path22.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
-        const started = await startRender(
-          {
-            expect: args.expect,
-            comp_name: info.name,
-            output_path: outputPath,
-            output_module_template: args.output_module_template ?? DEFAULT_AUDIO_TEMPLATE,
-            start_frame: startFrame,
-            end_frame: endFrame
-          },
-          ctx
-        );
-        if (!started?.job_id) return { ok: false, error: "render_not_started", detail: started };
-        const renderStart = Math.round(start * info.fps) / info.fps;
-        const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
-        jobs.set(started.job_id, meta);
-        try {
-          fs23.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
-        } catch {
-        }
-        return collect(started.job_id, wait, opts);
-      }
-    },
-    {
-      name: "ae_cue_keys",
-      description: "Keyframe a property on cue times (beats or onsets from ae_audio_analyze, or marker times): for each cue the value jumps (or rises over `attack`) from base to `peak` and settles back over `decay`, in one undo group guarded by `expect`. Close cues chain peak to peak instead of colliding. Base defaults to the property's own value where the cues start. dry_run returns the planned keys without touching AE. The read-back (a separate evalScript) checks every planned key's time and value. " + AGENT_SAFETY_GUIDANCE,
-      schema: AeCueKeysSchema,
-      handler: async (args, ctx) => {
-        const info = (await ctx.bridge.callHost("audioCompInfo", { comp_id: args.comp_id }, {
-          label: "ae_cue_keys (comp)",
-          mutates: false,
-          toolName: "ae_cue_keys"
-        })).result;
-        const one = (v) => Array.isArray(v) && v.length === 1 && typeof v[0] === "number" ? v[0] : v;
-        const peakValue = one(args.peak);
-        const baseValue = args.base === void 0 ? void 0 : one(args.base);
-        const planned = planCueKeys(args.times, {
-          attack: args.attack ?? 0,
-          decay: args.decay ?? 0.15,
-          frame: info.frame_duration || 1 / (info.fps || 25),
-          peak: peakValue,
-          base: baseValue
-        });
-        if (args.dry_run) return { ok: true, dry_run: true, count: planned.length, keys: planned };
-        const range = [planned[0].time, planned[planned.length - 1].time];
-        const snapshot = () => ({ host: "keysSnapshot", args: { comp_id: args.comp_id, layer: args.layer, path: args.path, start: range[0], end: range[1], max: MAX_SNAPSHOT_KEYS } });
-        return runGuardedWrite(ctx, {
-          toolName: "ae_cue_keys",
-          label: `ae_cue_keys(${args.times.length} cues)`,
-          expect: args.expect,
-          compId: args.comp_id,
-          read: snapshot,
-          write: {
-            host: "cueKeys",
-            args: {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-              keys: planned.map((k) => ({ time: k.time, value: k.value })),
-              base: baseValue,
-              ease: args.ease ?? "smooth",
-              clear_range: args.clear_existing ? range : void 0,
-              label: "Keys on cues"
-            }
-          },
-          check: (_before, after, w) => cueKeysMismatches(planned, after, w),
-          present: (_before, after, w) => ({
-            keys_set: w.set,
-            cleared: w.cleared,
-            base: w.base,
-            layer: w.layer,
-            property: w.property,
-            numKeys: after?.numKeys,
-            ...w.ease_warning ? { ease_warning: w.ease_warning } : {},
-            ...after?.truncated ? { readback_truncated: true } : {}
-          })
-        });
-      }
-    }
-  ];
 }
-var fs23, path22, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST2, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
-var init_audio2 = __esm({
-  "src/tools/ext/audio.ts"() {
-    "use strict";
-    fs23 = __toESM(require("node:fs"), 1);
-    path22 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_audio();
-    init_receipts();
-    init_common();
-    init_aerender();
-    init_write_runner();
-    DEFAULT_AUDIO_TEMPLATE = "AIFF 48kHz";
-    MAX_ANALYSIS_SECONDS = 20 * 60;
-    MAX_AUDIO_BYTES = 600 * 1024 * 1024;
-    MAX_LIST2 = 500;
-    MAX_SNAPSHOT_KEYS = 3 * MAX_LIST2;
-    AnalysisOptionFields = {
-      levels: external_exports.boolean().optional().describe("Include RMS and peak levels in dBFS, one point per comp frame (with audio_path: per `fps`, default 25), at most 500 points, pooled for long audio. levels.step is the seconds per point, levels.frames_per_point the frames pooled into each."),
-      sensitivity: external_exports.number().min(0).max(1).optional().describe("Onset sensitivity 0..1; higher finds quieter hits. Default 0.5."),
-      min_bpm: external_exports.number().min(30).max(300).optional().describe("Tempo search range. Default 60."),
-      max_bpm: external_exports.number().min(30).max(400).optional().describe("Default 200."),
-      hits: external_exports.number().int().min(1).max(100).optional().describe("How many of the strongest onsets to list as hits. Default 20.")
+function logPick(ctx, rec, pickedId, cleanup) {
+  try {
+    const picked = rec.variants.find((v) => v.id === pickedId);
+    const entry = {
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      set_id: rec.set_id,
+      project_path: rec.project_path,
+      comp: { id: rec.original.comp_id, name: rec.original.name },
+      picked: picked ? { id: picked.id, label: picked.label, ops: picked.ops } : { id: pickedId },
+      rejected: rec.variants.filter((v) => v.id !== pickedId).map((v) => ({ id: v.id, label: v.label, ops: v.ops })),
+      cleanup
     };
-    AeAudioAnalyzeSchema = external_exports.object({
-      comp_id: external_exports.number().int().optional().describe("Render this comp's audio with aerender and analyse it. The project must be saved, with no unsaved changes."),
-      expect: ExpectSchema.optional().describe("Required with comp_id."),
-      start: external_exports.number().min(0).optional().describe("With comp_id: comp seconds to start the render at. Default 0."),
-      end: external_exports.number().positive().optional().describe("With comp_id: comp seconds to end at. Default the comp's end."),
-      output_module_template: external_exports.string().min(1).optional().describe(`With comp_id: an audio-only output-module template. Default '${DEFAULT_AUDIO_TEMPLATE}', one of AE's own.`),
-      job_id: external_exports.string().min(1).optional().describe("Collect the analysis of a render this tool started earlier."),
-      audio_path: external_exports.string().min(1).optional().describe("Analyse this WAV or AIFF file instead (absolute path); nothing is rendered."),
-      time_offset: external_exports.number().optional().describe("With audio_path: seconds added to every time (e.g. the audio layer's start in the comp)."),
-      fps: external_exports.number().positive().max(240).optional().describe("With audio_path: the comp's frame rate for the levels. Default 25."),
-      wait_seconds: external_exports.number().min(0).max(120).optional().describe("How long to wait for the render before returning a job_id. Default 30."),
-      ...AnalysisOptionFields
-    }).refine((v) => [v.comp_id, v.job_id, v.audio_path].filter((x) => x !== void 0).length === 1, {
-      message: "Give exactly one of comp_id, job_id or audio_path."
-    }).refine((v) => v.comp_id === void 0 || v.expect !== void 0, { message: "comp_id needs expect." }).refine((v) => v.start === void 0 || v.end === void 0 || v.end > v.start, { message: "end must be after start." }).refine((v) => (v.min_bpm ?? 60) < (v.max_bpm ?? 200), { message: "min_bpm must be below max_bpm (defaults 60 and 200)." }).refine((v) => v.fps === void 0 || v.audio_path !== void 0, { message: "fps goes with audio_path." });
-    ValueSchema = external_exports.union([external_exports.number(), external_exports.array(external_exports.number()).min(1).max(4)]);
-    AeCueKeysSchema = external_exports.object({
-      comp_id: external_exports.number().int(),
-      layer: LayerSelectorSchema,
-      path: external_exports.array(external_exports.string().min(1)).min(1).describe("Property path by match names or names, e.g. ['ADBE Transform Group', 'ADBE Scale']."),
-      times: external_exports.array(external_exports.number().min(0)).min(1).max(MAX_LIST2).describe("Cue times in comp seconds: ae_audio_analyze's beats or onsets, or marker times."),
-      peak: ValueSchema.describe("The value at each cue, e.g. [115, 115] for Scale. It must fit the property: a number for a one-value property, 2 numbers (or 3 for a 3D one) for a pair, 4 for a colour."),
-      base: ValueSchema.optional().describe("The value between cues. Default: the property's own value where the cues start."),
-      attack: external_exports.number().min(0).max(5).optional().describe("Seconds from base to peak before each cue. Default 0: a jump one frame before the cue."),
-      decay: external_exports.number().min(0).max(10).optional().describe("Seconds from peak back to base. Default 0.15; 0 settles back one frame after the cue."),
-      ease: external_exports.enum(["smooth", "linear"]).optional().describe("Default smooth (easy ease on every key)."),
-      clear_existing: external_exports.boolean().optional().describe("Remove the property's keys between the first and last planned key first. Default false."),
-      dry_run: external_exports.boolean().optional().describe("Return the planned keys without touching AE."),
+    const file = path29.join(dataDirOf(ctx), "variant-picks.jsonl");
+    fs30.mkdirSync(path29.dirname(file), { recursive: true });
+    fs30.appendFileSync(file, `${JSON.stringify(entry)}
+`);
+    return file;
+  } catch {
+    return null;
+  }
+}
+function copyDuration(ops, original) {
+  let d = original.duration;
+  for (const op of ops) if (op.op === "comp_duration") d = op.seconds;
+  return d;
+}
+function clampRenderTime(time, duration, fps) {
+  if (typeof duration !== "number" || !(duration > 0)) return Math.max(0, time);
+  const frame = fps && fps > 0 ? 1 / fps : 1 / 30;
+  return Math.max(0, Math.min(time, duration - frame));
+}
+async function renderVariants(ctx, setId, original, copies, times, tileSize) {
+  const out = { times, variants: [], errors: [] };
+  const framesDir = path29.join(dataDirOf(ctx), "frames");
+  const shots = /* @__PURE__ */ new Map();
+  try {
+    fs30.mkdirSync(framesDir, { recursive: true });
+    const opId = ctx.bridge.newOpId();
+    await ctx.queue.run(`ae_variants(${original.comp_id}) frames`, async () => {
+      for (const c of copies) {
+        const list = [];
+        shots.set(c.variant_id, list);
+        for (let i = 0; i < times.length; i++) {
+          const time = clampRenderTime(times[i], c.duration, original.fps);
+          try {
+            const snap2 = await captureCompFrame({ ctx, opId: `${opId}_${c.variant_id}`, compId: c.comp_id, time, frameIndex: i, framesDir, toolName: "ae_variants" });
+            list.push({ time: snap2.time, path: snap2.path });
+          } catch (err) {
+            out.errors.push(`${c.variant_id} @ ${time}s: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    out.errors.push(`rendering stopped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    const allTiles = [];
+    let columns = 1;
+    for (const c of copies) {
+      const list = shots.get(c.variant_id) ?? [];
+      const rendered = { variant_id: c.variant_id, frames: [] };
+      out.variants.push(rendered);
+      if (!list.length) continue;
+      const layout = sheetLayout(list.length, original.width, original.height, tileSize, list.length, true);
+      const tiles = list.map((shot, index) => {
+        const full = decodePngFile(shot.path);
+        const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
+        rendered.frames.push({ time: shot.time, path: shot.path, flags: analysis.flags });
+        return { image: resizeArea(full, layout.tileWidth, layout.tileHeight), label: `${upper(c.variant_id)} ${shot.time.toFixed(2)}s`, flagged: analysis.flags.length > 0 };
+      });
+      const strip2 = path29.join(framesDir, `variant_${setId}_${c.variant_id}_${crypto15.randomBytes(3).toString("hex")}.png`);
+      fs30.writeFileSync(strip2, encodePng(buildContactSheet(tiles, layout)));
+      rendered.strip_path = strip2;
+      allTiles.push(...tiles);
+      columns = Math.max(columns, list.length);
+    }
+    if (allTiles.length) {
+      const layout = sheetLayout(copies.length * columns, original.width, original.height, tileSize, columns, true);
+      const padded = [];
+      for (const r of out.variants) {
+        const own = allTiles.splice(0, r.frames.length);
+        for (let i = 0; i < columns; i++) {
+          padded.push(own[i] ?? { image: resizeArea({ width: 1, height: 1, data: Buffer.from([24, 24, 24, 255]) }, layout.tileWidth, layout.tileHeight), flagged: false });
+        }
+      }
+      const sheet = path29.join(framesDir, `variants_${setId}_${crypto15.randomBytes(3).toString("hex")}.png`);
+      fs30.writeFileSync(sheet, encodePng(buildContactSheet(padded, layout)));
+      out.sheet_path = sheet;
+    }
+  } catch (err) {
+    out.errors.push(`building the sheets failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return out;
+}
+async function askWhich(ctx, variants, rendered, args, compName, folderName = VARIANTS_FOLDER) {
+  try {
+    const parsed = AeAskUserSchema.parse({
+      question: args.question ?? `Which variant of "${compName}" should I apply?`,
+      kind: "choice",
+      options: variants.map((v) => {
+        const strip2 = rendered.variants.find((r) => r.variant_id === v.id)?.strip_path;
+        return { id: v.id, label: v.label, description: summariseOps(v.ops), ...strip2 ? { image_path: strip2 } : {} };
+      }),
+      allow_other: true,
+      context: `The copies are in the '${folderName}' folder; your comp is untouched until you pick.`,
+      ...args.wait_seconds !== void 0 ? { wait_seconds: args.wait_seconds } : {}
+    });
+    const answer = await askTools[0].handler(parsed, ctx);
+    const chosen = answer?.status === "answered" ? answer.chosen?.[0]?.id : void 0;
+    return { ask: answer, ...chosen && variants.some((v) => v.id === chosen) ? { chosen_variant_id: chosen } : {} };
+  } catch (err) {
+    return { ask: { ok: false, error: "ask_failed", message: err instanceof Error ? err.message : String(err) } };
+  }
+}
+var crypto15, fs30, path29, VARIANTS_FOLDER, MAX_TARGETS, MAX_PROBE_KEYS, EASE_PRESETS, Layers2, PropertyPath2, ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp, VariantOpSchema, VariantSchema, CleanupSchema, SetIdSchema, AeVariantsSchema, AeVariantsPickSchema, AeVariantsDiscardSchema, asRead2, near4, setsDir, setFile, upper, hostVariants, probesOf, variantsTools;
+var init_variants = __esm({
+  "src/tools/ext/variants.ts"() {
+    "use strict";
+    crypto15 = __toESM(require("node:crypto"), 1);
+    fs30 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_common();
+    init_animate();
+    init_ask();
+    init_frames();
+    init_motion();
+    init_png_utils();
+    init_write_runner();
+    VARIANTS_FOLDER = "chroma variants";
+    MAX_TARGETS = 500;
+    MAX_PROBE_KEYS = 500;
+    EASE_PRESETS = {
+      easy_ease: [0.333, 0, 0.667, 1],
+      gentle: [0.25, 0.1, 0.25, 1],
+      snappy: [0.2, 0, 0, 1],
+      expo_out: [0.16, 1, 0.3, 1],
+      ease_in: [0.42, 0, 0.99, 1],
+      overshoot: [0.34, 1.56, 0.64, 1],
+      anticipate: [0.6, -0.28, 0.74, 0.05]
+    };
+    Layers2 = external_exports.array(LayerSelectorSchema).min(1).max(50).describe("The layers to change, picked in the original comp (id, index or a unique name). Their position in this list is what `stagger` and `cumulative` count.");
+    PropertyPath2 = external_exports.array(external_exports.string().min(1)).min(1).max(8).describe('Match-name path to the property, such as ["ADBE Transform Group", "ADBE Opacity"] or ["ADBE Effect Parade", "ADBE Fill", "ADBE Fill-0002"]. Find paths with the property tools.');
+    ColorOp = external_exports.object({
+      op: external_exports.literal("color"),
+      layers: Layers2,
+      path: PropertyPath2,
+      color: external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4).describe("[r, g, b] or [r, g, b, a], each 0..1. A keyframed colour gets this value on every key.")
+    }).describe("Set a colour property (a fill, a stroke, an effect colour) on each layer.");
+    SetValueOp = external_exports.object({
+      op: external_exports.literal("set_value"),
+      layers: Layers2,
+      path: PropertyPath2,
+      value: external_exports.union([external_exports.number(), external_exports.array(external_exports.number()).min(2).max(3)]).describe("A number, or [x, y(, z)] for a vector. Dimensions you leave out keep their value.")
+    }).describe("Set a number or vector property (opacity, scale, an effect amount). Refused on a keyframed property or one with an expression; checked against the property's own limits.");
+    OffsetOp = external_exports.object({
+      op: external_exports.literal("offset"),
+      layers: Layers2,
+      delta: external_exports.array(external_exports.number()).min(2).max(3).describe("[dx, dy(, dz)] added to the property."),
+      path: PropertyPath2.optional().describe("Default Transform > Position. Any 2D or 3D property."),
+      cumulative: external_exports.boolean().optional().describe("Layer n in `layers` (counting from 0) moves by delta x n, for a fanned-out layout. Default false: every layer moves by delta.")
+    }).describe("Move a position-like property by an amount. A keyframed property moves every key by it.");
+    ShiftTimeOp = external_exports.object({
+      op: external_exports.literal("shift_time"),
+      layers: Layers2,
+      offset: external_exports.number().optional().describe("Seconds added to every layer's start time."),
+      stagger: external_exports.number().optional().describe("Extra seconds per layer: layer n in `layers` (from 0) starts stagger x n later.")
+    }).describe("Shift when layers start, with an optional stagger. Offset and stagger are each 0 or at least one frame of the comp. Only one shift_time per layer in a variant.");
+    EaseOp = external_exports.object({
+      op: external_exports.literal("ease"),
+      layers: Layers2,
+      path: PropertyPath2.optional().describe("The animated property (a number, vector or colour with two or more keyframes). Default: every Transform property of each layer that has two or more keyframes, Position and Anchor Point included. A spatial property (Position, Anchor Point) refuses overshoot, anticipate and any curve with y1 below 0 or y2 above 1, so give such a curve an explicit non-spatial path."),
+      ease: external_exports.union([external_exports.enum(Object.keys(EASE_PRESETS)), EASE_CURVE_ARRAY_SCHEMA]).describe(
+        `A preset (${Object.keys(EASE_PRESETS).join(", ")}) or your own cubic-bezier [x1, y1, x2, y2], such as the user's preferred_ease from ae_taste. It shapes every segment between neighbouring keys. Overshoot, anticipate and other curves that leave 0..1 are refused as a whole when they meet a keyed Position or Anchor Point. Speeds come from each segment's duration and straight-line distance, so on a curved motion path they are approximate.`
+      )
+    }).describe("Re-ease the keyframes of animated properties with a curve.");
+    CompDurationOp = external_exports.object({
+      op: external_exports.literal("comp_duration"),
+      seconds: external_exports.number().positive().max(10800).describe("The comp's new duration in seconds. Layers keep their own length.")
+    }).describe("Change the comp's duration.");
+    VariantOpSchema = external_exports.discriminatedUnion("op", [ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp]);
+    VariantSchema = external_exports.object({
+      id: external_exports.string().regex(/^[A-Za-z0-9_-]{1,40}$/, "id: letters, digits, _ and - only, up to 40").describe("Short id (it names the copy and is what the user's pick returns), such as 'a' or 'warm'."),
+      label: external_exports.string().min(1).max(120).describe("What the user sees on the button, such as 'Snappy ease, warm palette'."),
+      ops: external_exports.array(VariantOpSchema).min(1).max(20)
+    });
+    CleanupSchema = external_exports.enum(["delete", "park"]).describe("'delete' (default) removes the copies; 'park' leaves them in the 'chroma variants' folder. Only comps in that folder that no other comp uses are ever removed.");
+    SetIdSchema = external_exports.string().regex(/^vs_[0-9a-f]{8}$/, "set_id comes from ae_variants").describe("The set_id ae_variants returned.");
+    AeVariantsSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The comp to make variants of. It is left untouched; variants are copies."),
+      variants: external_exports.array(VariantSchema).min(2).max(6).describe("2 to 6 versions of the change, 3 to 6 is typical. Each is a list of ops applied to its own copy of the comp."),
+      times: external_exports.array(external_exports.number().min(0)).min(1).max(3).optional().describe("Comp times (seconds) to render of each variant, 1 to 3. Default: the middle of the work area. Pick moments that show the change."),
+      ask: external_exports.boolean().optional().describe("Ask the user which variant through ae_ask_user, with a picture per option (default true). Needs the panel; without it the result says so and you ask in the chat."),
+      question: external_exports.string().min(1).max(500).optional().describe("The question to ask. Default names the comp."),
+      wait_seconds: external_exports.number().int().min(0).max(600).optional().describe("How long to wait for the user's answer (default 120). On a timeout the ask_id comes back for ae_ask_user."),
+      tile_size: external_exports.number().int().min(64).max(800).optional().describe("Longest edge in pixels of each rendered frame on the sheets. Default 360."),
+      dry_run: external_exports.boolean().optional().describe("Only check the ops against the comp and list what each variant would change. Creates and renders nothing."),
+      folder_name: external_exports.string().min(1).max(80).optional().describe(`Project folder for the copies. Default '${VARIANTS_FOLDER}'.`),
+      expect: ExpectSchema
+    }).superRefine((v, ctx) => {
+      const ids = v.variants.map((x) => x.id);
+      if (new Set(ids).size !== ids.length) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Variant ids must be unique.", path: ["variants"] });
+      const total = v.variants.reduce((n, x) => n + countTargets(x.ops), 0);
+      if (total > MAX_TARGETS) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: `At most ${MAX_TARGETS} layer changes across all variants (this has ${total}).`, path: ["variants"] });
+      }
+      v.variants.forEach((x, vi) => {
+        x.ops.forEach((op, oi) => {
+          if (op.op === "shift_time" && !op.offset && !op.stagger) {
+            ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "shift_time needs a non-zero offset or stagger.", path: ["variants", vi, "ops", oi] });
+          }
+        });
+        const clash = findOverlap(x.ops);
+        if (clash) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: clash.message, path: ["variants", vi, "ops", clash.index] });
+      });
+    });
+    AeVariantsPickSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The original comp the variants were made from."),
+      set_id: SetIdSchema,
+      variant_id: external_exports.string().min(1).describe("The id of the variant the user chose (the ae_ask_user answer, or `chosen_variant_id`)."),
+      cleanup: CleanupSchema.optional(),
       expect: ExpectSchema
     });
-    round4 = (x) => Math.round(x * 1e4) / 1e4;
-    audioTools = createAudioTools();
+    AeVariantsDiscardSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The original comp the variants were made from."),
+      set_id: SetIdSchema,
+      cleanup: CleanupSchema.optional(),
+      expect: ExpectSchema
+    });
+    asRead2 = (v) => v && typeof v === "object" ? v : null;
+    near4 = (a, b, tol = 1e-3) => Math.abs(a - b) <= tol + 1e-6 * Math.max(Math.abs(a), Math.abs(b));
+    setsDir = (ctx) => path29.join(dataDirOf(ctx), "variants");
+    setFile = (ctx, id) => path29.join(setsDir(ctx), `${id}.json`);
+    upper = (s) => s.toUpperCase();
+    hostVariants = (variants) => variants.map((v) => ({ id: v.id, label: v.label, ops: toHostOps(v.ops) }));
+    probesOf = (copies) => (copies ?? []).flatMap((c) => c.probes.map((p) => ({ ...p, comp_id: c.comp_id })));
+    variantsTools = [
+      {
+        name: "ae_variants",
+        description: "Try 2 to 6 versions of a change without touching the user's comp, and let them pick. Each variant is a list of ops (colour, set value, offset, shift or stagger start times, re-ease keyframes with a preset or curve, comp duration) applied to its own COPY of the comp, made in one undo group and parked in a 'chroma variants' folder. The tool then renders 1 to 3 frames of each copy, tiles them into labelled contact sheets and, by default, asks the user with ae_ask_user (a picture per button). The answer comes back as `chosen_variant_id`; apply it with ae_variants_pick, or throw the copies away with ae_variants_discard. Use it when the choice is a matter of taste (an ease, a palette, a layout, a timing) rather than guessing one version. Ops change only the layers of the comp itself: the contents of a nested precomp are shared with the copy and are never edited, and an expression that names another comp keeps pointing at the original (both are listed under `warnings`). `dry_run` checks the ops and lists what each variant would change without creating anything. Every frame is a render, so keep `times` to 1 or 2 on heavy comps. The read-back (a separate evalScript) checks the copies exist with the original's layer count, that every property holds what its op set, and that the original is unchanged. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeVariantsSchema,
+        handler: async (args, ctx) => {
+          const folder = args.folder_name ?? VARIANTS_FOLDER;
+          const variants = hostVariants(args.variants);
+          if (args.dry_run) {
+            const res = await ctx.bridge.callHost("variantsPlan", { comp_id: args.comp_id, variants, folder_name: folder }, { label: `ae_variants(${args.comp_id}) dry run`, mutates: false, toolName: "ae_variants" });
+            return { ok: true, ...res.result };
+          }
+          const setId = `vs_${crypto15.randomBytes(4).toString("hex")}`;
+          let unverified = 0;
+          const result = await runGuardedWrite(ctx, {
+            toolName: "ae_variants",
+            label: `ae_variants(${args.variants.length} variants of comp ${args.comp_id})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: (phase, w) => ({
+              host: "variantsRead",
+              args: {
+                comp_id: args.comp_id,
+                folder_name: folder,
+                ...phase === "after" ? { copy_ids: (w?.copies ?? []).map((c) => c.comp_id), probes: probesOf(w?.copies) } : {}
+              }
+            }),
+            write: { host: "variantsCreate", args: { comp_id: args.comp_id, variants, folder_name: folder, label: "Chroma AE MCP: variants" } },
+            check: (before, after, w) => {
+              unverified = unverifiedProbes(after, probesOf(w.copies).length);
+              return createMismatches(args.variants, before, after, w);
+            },
+            present: (before, _after, w) => {
+              const b = asRead2(before);
+              const mine = w.original?.digest ? {} : b?.original?.digest ? { digest: b.original.digest, digest_basis: b.original.digest_basis, digest_truncated: b.original.digest_truncated } : {};
+              return {
+                set_id: setId,
+                original: { ...w.original, ...mine },
+                folder: w.folder,
+                copies: (w.copies ?? []).map(({ probes: _probes, ...rest }) => rest),
+                warnings: w.warnings
+              };
+            }
+          });
+          const shown = { set_id: setId, ...result };
+          const original = shown.original && typeof shown.original === "object" ? shown.original : { comp_id: args.comp_id, name: "", width: 0, height: 0, fps: 30, duration: 0, workAreaStart: 0, workAreaDuration: 0, numLayers: 0 };
+          const copies = (Array.isArray(shown.copies) ? shown.copies : []).map((c) => {
+            const v = args.variants.find((x) => x.id === c.variant_id);
+            const duration = v ? copyDuration(v.ops, original) : void 0;
+            return typeof duration === "number" && duration > 0 ? { ...c, duration } : c;
+          });
+          shown.copies = copies;
+          if (unverified > 0) {
+            shown.unverified_probes = unverified;
+            shown.receipt_note = `${unverified} written properties were not read back (the read-back covers 500 probes); the receipt does not vouch for them.`;
+          }
+          const times = args.times ?? defaultTimes(original);
+          const saved = saveSet(ctx, {
+            set_id: setId,
+            created_at: (/* @__PURE__ */ new Date()).toISOString(),
+            project_path: args.expect.project_path,
+            folder_name: folder,
+            original: { comp_id: original.comp_id, name: original.name, digest: original.digest, digest_basis: original.digest_basis },
+            times,
+            variants: args.variants.map((v) => {
+              const c = copies.find((x) => x.variant_id === v.id);
+              return { id: v.id, label: v.label, ops: v.ops, copy_comp_id: c?.comp_id ?? -1, copy_name: c?.name ?? "" };
+            })
+          });
+          const rendered = await renderVariants(ctx, setId, original, copies, times, args.tile_size ?? 360);
+          const asked = args.ask === false ? {} : await askWhich(ctx, args.variants, rendered, args, original.name, folder);
+          const picked = asked.chosen_variant_id;
+          return {
+            ...shown,
+            record_saved: saved,
+            renders: rendered,
+            ...asked,
+            next: !saved ? `The variant record could not be stored, so ae_variants_pick and ae_variants_discard will not find set ${setId}. The copies exist in the '${folder}' folder: ${copies.map((c) => `${c.name} (comp ${c.comp_id})`).join(", ") || "none listed"}. Tell the user, and have them keep one by hand and delete the rest in After Effects (one undo removes them all).` : picked ? `The user chose "${picked}". Apply it with ae_variants_pick { comp_id: ${args.comp_id}, set_id: "${setId}", variant_id: "${picked}" }.` : `Show the sheet (renders.sheet_path) or ask the user, then ae_variants_pick { comp_id: ${args.comp_id}, set_id: "${setId}", variant_id } to apply one, or ae_variants_discard { comp_id: ${args.comp_id}, set_id: "${setId}" } to drop them all.`
+          };
+        }
+      },
+      {
+        name: "ae_variants_pick",
+        description: "Apply the variant the user chose to the original comp, as ONE undo step, then remove ALL the copies, the chosen one included, since its change now lives on the original (cleanup 'delete', default), or leave them all in the 'chroma variants' folder ('park'). It replays the chosen variant's ops on the original; keys are never copied back from the copy. Before it changes anything it checks the original is exactly as it was when the variants were made and refuses if the user edited it in the meantime (make new variants of the current comp). A set made without a digest of the original (its first read failed) is refused as no_digest and can only be discarded. The pick is appended to variant-picks.jsonl in the server's data folder (apart from ae_taste). The read-back (a separate evalScript) checks every property holds what the op set and that the copies are gone or parked. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeVariantsPickSchema,
+        handler: async (args, ctx) => {
+          const rec = loadSet(ctx, args.set_id);
+          if (!rec) {
+            return { ok: false, error: "unknown_set", message: `No saved variant set ${args.set_id} (it is removed once a variant is picked or discarded). Make new variants with ae_variants.` };
+          }
+          if (rec.original.comp_id !== args.comp_id) {
+            return { ok: false, error: "bad_args", message: `Set ${args.set_id} was made from comp ${rec.original.comp_id} ("${rec.original.name}"), not ${args.comp_id}.` };
+          }
+          if (normProjectPath(rec.project_path) !== normProjectPath(args.expect.project_path)) {
+            return { ok: false, error: "bad_args", message: `Set ${args.set_id} was made in project "${rec.project_path}", not "${args.expect.project_path}". Comp ids only mean something inside one project.` };
+          }
+          const chosen = rec.variants.find((v) => v.id === args.variant_id);
+          if (!chosen) {
+            return { ok: false, error: "unknown_variant", message: `No variant "${args.variant_id}" in set ${args.set_id}.`, available: rec.variants.map((v) => ({ id: v.id, label: v.label })) };
+          }
+          if (typeof rec.original.digest !== "string" || rec.original.digest.length === 0) {
+            return {
+              ok: false,
+              error: "no_digest",
+              message: `Set ${args.set_id} has no digest of the original, so there is no way to tell whether the comp was edited while choosing, and offset and shift_time are not safe to replay on an edited comp. Make new variants with ae_variants, or discard this set with ae_variants_discard.`
+            };
+          }
+          const cleanup = args.cleanup ?? "delete";
+          const copyIds = rec.variants.map((v) => v.copy_comp_id).filter((id) => id >= 0);
+          let unverified = 0;
+          const result = await runGuardedWrite(ctx, {
+            toolName: "ae_variants_pick",
+            label: `ae_variants_pick(${chosen.id} on comp ${args.comp_id})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: (phase, w) => ({
+              host: "variantsRead",
+              args: { comp_id: args.comp_id, folder_name: rec.folder_name, copy_ids: copyIds, ...phase === "after" ? { probes: w?.probes ?? [] } : {} }
+            }),
+            write: {
+              host: "variantsPromote",
+              args: { comp_id: args.comp_id, ops: toHostOps(chosen.ops), digest: rec.original.digest, copy_ids: copyIds, cleanup, folder_name: rec.folder_name, label: `Chroma AE MCP: apply variant ${chosen.id}` }
+            },
+            check: (before, after, w) => {
+              unverified = unverifiedProbes(after, (w.probes ?? []).length);
+              return promoteMismatches(before, after, w);
+            },
+            present: (_before, after, w) => {
+              const read2 = asRead2(after);
+              const original = read2?.original ? { ...w.original, ...read2.original } : w.original;
+              return { set_id: rec.set_id, applied_variant: { id: chosen.id, label: chosen.label }, changes: w.changes, cleanup: w.cleanup, original };
+            }
+          });
+          const log = logPick(ctx, rec, chosen.id, cleanup);
+          dropSet(ctx, rec.set_id);
+          return {
+            ...result,
+            pick_log: log,
+            drift_checked: true,
+            ...unverified > 0 ? { unverified_probes: unverified, receipt_note: `${unverified} written properties were not read back (the read-back covers 500 probes); the receipt does not vouch for them.` } : {}
+          };
+        }
+      },
+      {
+        name: "ae_variants_discard",
+        description: "Throw away a set of variants without applying any: removes the copies (cleanup 'delete', default) or leaves them in the 'chroma variants' folder ('park'), in one undo group. The original comp is not touched. Only comps inside that folder which no other comp uses are removed. Use it when the user liked none of them. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeVariantsDiscardSchema,
+        handler: async (args, ctx) => {
+          const rec = loadSet(ctx, args.set_id);
+          if (!rec) {
+            return { ok: false, error: "unknown_set", message: `No saved variant set ${args.set_id} (it is removed once a variant is picked or discarded).` };
+          }
+          if (rec.original.comp_id !== args.comp_id) {
+            return { ok: false, error: "bad_args", message: `Set ${args.set_id} was made from comp ${rec.original.comp_id} ("${rec.original.name}"), not ${args.comp_id}.` };
+          }
+          if (normProjectPath(rec.project_path) !== normProjectPath(args.expect.project_path)) {
+            return { ok: false, error: "bad_args", message: `Set ${args.set_id} was made in project "${rec.project_path}", not "${args.expect.project_path}".` };
+          }
+          const cleanup = args.cleanup ?? "delete";
+          const copyIds = rec.variants.map((v) => v.copy_comp_id).filter((id) => id >= 0);
+          const result = await runGuardedWrite(ctx, {
+            toolName: "ae_variants_discard",
+            label: `ae_variants_discard(${rec.set_id})`,
+            // Guarded on the project only: the copies can be discarded after the original comp is gone.
+            expect: { project_path: args.expect.project_path },
+            read: () => ({ host: "variantsRead", args: { folder_name: rec.folder_name, copy_ids: copyIds } }),
+            write: { host: "variantsDiscard", args: { copy_ids: copyIds, cleanup, folder_name: rec.folder_name, label: "Chroma AE MCP: discard variants" } },
+            check: (before, after, w) => cleanupMismatches(before, after, w),
+            present: (_before, _after, w) => ({ set_id: rec.set_id, cleanup: w.cleanup })
+          });
+          dropSet(ctx, rec.set_id);
+          return result;
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/learntaste.ts
+function median2(values) {
+  if (values.length === 0) return NaN;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function timeEps(fps) {
+  return fps && fps > 0 ? 0.5 / fps : 0.02;
+}
+function numsDiffer(a, b) {
+  if (a === null || b === null) return a !== b;
+  const x = Array.isArray(a) ? a : [a];
+  const y = Array.isArray(b) ? b : [b];
+  if (x.length !== y.length) return true;
+  return x.some((v, i) => Math.abs(v - y[i]) > Math.max(1e-3, 1e-3 * Math.abs(v)));
+}
+function dim(v, i) {
+  if (v === null) return null;
+  const x = Array.isArray(v) ? v[i] : i === 0 ? v : void 0;
+  return typeof x === "number" ? x : null;
+}
+function hasOvershoot(keys) {
+  if (keys.length < 3) return false;
+  let dims = 1;
+  for (const k of keys) if (Array.isArray(k.v)) dims = Math.max(dims, k.v.length);
+  for (let d = 0; d < dims; d++) {
+    const v = keys.map((k) => dim(k.v, d));
+    for (let i = 1; i < keys.length - 1; i++) {
+      const p = v[i - 1];
+      const c = v[i];
+      const n = v[i + 1];
+      if (p === null || c === null || n === null) continue;
+      const into = c - p;
+      const back = n - c;
+      if (Math.abs(into) < 1e-6 || into * back >= 0) continue;
+      const share = Math.abs(back) / Math.abs(into);
+      if (share < 0.02 || share > 0.5) continue;
+      if (i + 2 >= keys.length) return true;
+      const after = v[i + 2];
+      if (after === null) continue;
+      const next = after - n;
+      const rests = Math.abs(next) < 0.02 * Math.abs(into);
+      const settling = next * into > 0 && Math.abs(next) <= Math.abs(back);
+      if (rests || settling) return true;
+    }
+  }
+  return false;
+}
+function marginShare(pos, width, height) {
+  const x = dim(pos, 0);
+  const y = dim(pos, 1);
+  if (x === null || y === null || width <= 0 || height <= 0) return null;
+  if (x < 0 || y < 0 || x > width || y > height) return null;
+  return Math.min(x, width - x, y, height - y) / Math.min(width, height);
+}
+function restPosition(props) {
+  const p = props.position;
+  if (p && !p.separated) return restValue(p);
+  if (p && p.separated) {
+    const x = restValue(props.position_x);
+    const y = restValue(props.position_y);
+    if (typeof x === "number" && typeof y === "number") return [x, y];
+  }
+  return null;
+}
+function restValue(p) {
+  if (!p || p.separated) return null;
+  if (p.keys.length > 0) return p.keys[p.keys.length - 1].v;
+  return p.value;
+}
+function push(out, layer, o) {
+  out.push({ layer_id: layer.id, layer_name: layer.name, layer_kind: layer.kind, ...o });
+}
+function diffEase(out, layer, name, b, n) {
+  for (let k = 0; k < b.keys.length; k++) {
+    const bk = b.keys[k];
+    const nk = n.keys[k];
+    if (bk.inT !== nk.inT || bk.outT !== nk.outT) {
+      push(out, layer, {
+        kind: "interp_changed",
+        prop: name,
+        before: { in: bk.inT, out: bk.outT },
+        after: { in: nk.inT, out: nk.outT },
+        detail: `key ${k + 1} of ${name}: interpolation ${bk.inT}/${bk.outT} -> ${nk.inT}/${nk.outT}`
+      });
+    }
+    const sides = [
+      { kind: "ease_out_influence", label: "outgoing", bT: bk.outT, nT: nk.outT, b: bk.outE[0]?.i, n: nk.outE[0]?.i, live: k < b.keys.length - 1 },
+      { kind: "ease_in_influence", label: "incoming", bT: bk.inT, nT: nk.inT, b: bk.inE[0]?.i, n: nk.inE[0]?.i, live: k > 0 }
+    ];
+    for (const side of sides) {
+      if (!side.live) continue;
+      if (side.nT !== "bezier" || typeof side.n !== "number") continue;
+      if (side.bT === "bezier") {
+        if (typeof side.b !== "number" || Math.abs(side.n - side.b) <= 1) continue;
+        push(out, layer, {
+          kind: side.kind,
+          prop: name,
+          before: side.b,
+          after: side.n,
+          detail: `key ${k + 1} of ${name}: ${side.label} influence ${round(side.b, 1)}% -> ${round(side.n, 1)}%`
+        });
+      } else {
+        push(out, layer, {
+          kind: side.kind,
+          prop: name,
+          before: null,
+          after: side.n,
+          detail: `key ${k + 1} of ${name}: ${side.label} side went from ${side.bT} to bezier, influence ${round(side.n, 1)}%`
+        });
+      }
+    }
+  }
+}
+function diffKeyed(out, layer, name, b, n, eps) {
+  if (hasOvershoot(b.keys) !== hasOvershoot(n.keys)) {
+    const removed = hasOvershoot(b.keys);
+    push(out, layer, {
+      kind: removed ? "overshoot_removed" : "overshoot_added",
+      prop: name,
+      before: removed,
+      after: !removed,
+      detail: removed ? `${name}: the overshoot past the last value is gone` : `${name}: an overshoot past the last value was added`
+    });
+  }
+  if (b.keys.length !== n.keys.length) {
+    const grew = n.keys.length > b.keys.length;
+    push(out, layer, {
+      kind: grew ? "keys_added" : "keys_removed",
+      prop: name,
+      before: b.keys.length,
+      after: n.keys.length,
+      detail: `${name}: ${b.keys.length} keys -> ${n.keys.length}`
+    });
+    return;
+  }
+  const bt = b.keys.map((k) => k.t);
+  const nt = n.keys.map((k) => k.t);
+  const bFirst = bt[0];
+  const bLast = bt[bt.length - 1];
+  const nFirst = nt[0];
+  const nLast = nt[nt.length - 1];
+  if (typeof bFirst === "number" && typeof bLast === "number" && typeof nFirst === "number" && typeof nLast === "number") {
+    const bSpan = bLast - bFirst;
+    const nSpan = nLast - nFirst;
+    let respaced = false;
+    if (b.keys.length >= 2 && bSpan > eps && Math.abs(nSpan - bSpan) > eps && Math.abs(nSpan / bSpan - 1) > 0.02) {
+      respaced = true;
+      push(out, layer, {
+        kind: "animation_timing",
+        prop: name,
+        before: round(bSpan),
+        after: round(nSpan),
+        ratio: round(nSpan / bSpan),
+        detail: `${name}: the animation lasts ${round(bSpan)} s -> ${round(nSpan)} s`
+      });
+    }
+    if (!respaced && Math.abs(nFirst - bFirst) > eps) {
+      push(out, layer, {
+        kind: "animation_offset",
+        prop: name,
+        before: bFirst,
+        after: nFirst,
+        detail: `${name}: the animation starts ${round(nFirst - bFirst)} s ${nFirst > bFirst ? "later" : "earlier"}`
+      });
+    }
+  }
+  diffEase(out, layer, name, b, n);
+  const changed = [];
+  for (let k = 0; k < b.keys.length; k++) if (numsDiffer(b.keys[k].v, n.keys[k].v)) changed.push(k);
+  if (changed.length > 0) {
+    const kind = name === "position" || name === "position_x" || name === "position_y" ? "position_nudge" : "value_changed";
+    push(out, layer, {
+      kind,
+      prop: name,
+      before: changed.slice(0, MAX_LISTED_VALUES).map((k) => b.keys[k].v),
+      after: changed.slice(0, MAX_LISTED_VALUES).map((k) => n.keys[k].v),
+      detail: `${name}: ${changed.length} of ${b.keys.length} key values changed`
+    });
+  }
+}
+function diffLayer(out, b, n, comp, eps) {
+  const bLen = b.outPoint - b.inPoint;
+  const nLen = n.outPoint - n.inPoint;
+  if (bLen > eps && Math.abs(nLen - bLen) > eps) {
+    push(out, n, {
+      kind: "layer_duration",
+      before: round(bLen),
+      after: round(nLen),
+      ratio: round(nLen / bLen),
+      detail: `layer length ${round(bLen)} s -> ${round(nLen)} s`
+    });
+  }
+  if (Math.abs(n.inPoint - b.inPoint) > eps) {
+    push(out, n, {
+      kind: "start_offset",
+      before: b.inPoint,
+      after: n.inPoint,
+      detail: `layer starts ${round(n.inPoint - b.inPoint)} s ${n.inPoint > b.inPoint ? "later" : "earlier"}`
+    });
+  }
+  for (const name of Object.keys(b.props)) {
+    const bp = b.props[name];
+    const np = n.props[name];
+    if (!np) continue;
+    if (bp.separated || np.separated || bp.truncated || np.truncated) continue;
+    if (bp.keys.length > 0 && np.keys.length > 0) {
+      diffKeyed(out, n, name, bp, np, eps);
+    } else if (bp.keys.length !== np.keys.length) {
+      const grew = np.keys.length > 0;
+      push(out, n, {
+        kind: grew ? "keys_added" : "keys_removed",
+        prop: name,
+        before: bp.keys.length,
+        after: np.keys.length,
+        detail: `${name}: ${bp.keys.length} keys -> ${np.keys.length}`
+      });
+    } else if (!bp.expr && !np.expr && numsDiffer(bp.value, np.value)) {
+      push(out, n, {
+        kind: name === "position" || name === "position_x" || name === "position_y" ? "position_nudge" : "value_changed",
+        prop: name,
+        before: bp.value,
+        after: np.value,
+        detail: `${name}: ${JSON.stringify(bp.value)} -> ${JSON.stringify(np.value)}`
+      });
+    }
+  }
+  if (n.kind === "text" && !n.parented && !b.parented && !n.threeD && !b.threeD) {
+    const bRest = restPosition(b.props);
+    const nRest = restPosition(n.props);
+    if (bRest !== null && nRest !== null && numsDiffer(bRest, nRest)) {
+      const mb = marginShare(bRest, comp.width, comp.height);
+      const mn = marginShare(nRest, comp.width, comp.height);
+      if (mb !== null && mn !== null && Math.abs(mn - mb) > 5e-3) {
+        push(out, n, {
+          kind: "edge_margin",
+          prop: "position",
+          before: round(mb),
+          after: round(mn),
+          detail: `distance from the nearest edge ${round(mb * 100, 1)}% -> ${round(mn * 100, 1)}% of the short side (from the layer's position, not its bounds)`
+        });
+      }
+    }
+  }
+  if (b.text && n.text) {
+    if (b.text.fontSize && n.text.fontSize && Math.abs(n.text.fontSize / b.text.fontSize - 1) > 0.01) {
+      push(out, n, {
+        kind: "font_size",
+        before: b.text.fontSize,
+        after: n.text.fontSize,
+        ratio: round(n.text.fontSize / b.text.fontSize),
+        detail: `font size ${b.text.fontSize} -> ${n.text.fontSize}`
+      });
+    }
+    if (b.text.fillColor && n.text.fillColor && b.text.fillColor.some((c, i) => Math.abs(c - n.text.fillColor[i]) > 0.01)) {
+      push(out, n, {
+        kind: "fill_color",
+        before: b.text.fillColor,
+        after: n.text.fillColor,
+        detail: `fill colour ${hex3(b.text.fillColor)} -> ${hex3(n.text.fillColor)}`
+      });
+    }
+  }
+}
+function hex3(c) {
+  const h = (v) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, "0");
+  return `#${h(c[0] ?? 0)}${h(c[1] ?? 0)}${h(c[2] ?? 0)}`;
+}
+function diffTasteSnapshots(before, now, trackedIds = null) {
+  const out = [];
+  const eps = timeEps(now.fps ?? before.fps);
+  const tracked = trackedIds ? new Set(trackedIds) : null;
+  const nowById = new Map(now.layers.map((l) => [l.id, l]));
+  const beforeIds = new Set(before.layers.map((l) => l.id));
+  let compared = 0;
+  for (const b of before.layers) {
+    if (tracked && !tracked.has(b.id)) continue;
+    const n = nowById.get(b.id);
+    if (!n) {
+      const gone = now.missing ? now.missing.includes(b.id) : !now.truncated;
+      if (gone) {
+        push(out, b, { kind: "layer_removed", before: b.name, after: null, detail: `layer "${b.name}" was deleted` });
+      }
+      continue;
+    }
+    compared += 1;
+    diffLayer(out, b, n, now, eps);
+  }
+  if (!tracked && !before.truncated && !now.truncated) {
+    for (const n of now.layers) {
+      if (!beforeIds.has(n.id)) push(out, n, { kind: "layer_added", before: null, after: n.name, detail: `layer "${n.name}" was added` });
+    }
+  }
+  const counts = {};
+  for (const o of out) counts[o.kind] = (counts[o.kind] ?? 0) + 1;
+  return { observations: out, compared_layers: compared, counts };
+}
+function samplesFromObservations(obs) {
+  const s = {};
+  const add = (name, v) => {
+    (s[name] ??= []).push(v);
+  };
+  for (const o of obs) {
+    if (o.kind === "ease_out_influence") add("ease_out", [o.before, o.after]);
+    else if (o.kind === "ease_in_influence") add("ease_in", [o.before, o.after]);
+    else if (o.kind === "overshoot_removed") add("overshoot_removed", 1);
+    else if (o.kind === "overshoot_added") add("overshoot_added", 1);
+    else if (o.kind === "layer_duration" && o.ratio !== void 0) add("layer_duration", o.ratio);
+    else if (o.kind === "animation_timing" && o.ratio !== void 0) add("animation_timing", o.ratio);
+    else if (o.kind === "edge_margin") add("edge_margin", [o.before, o.after]);
+    else if (o.kind === "font_size" && o.ratio !== void 0) add("font_size", o.ratio);
+    else if (o.kind === "fill_color") add("fill_color", o.after);
+  }
+  return s;
+}
+function confidenceOf(samples, consistency, reviews) {
+  if (samples < 2 || consistency < 0.6) return "low";
+  if (samples >= 6 && consistency >= 0.8 && reviews >= 2) return "high";
+  if (samples >= 3 && consistency >= 0.7) return "medium";
+  return "low";
+}
+function shareWithin(values, target, tol) {
+  if (values.length === 0) return 0;
+  return values.filter((v) => Math.abs(v - target) <= tol).length / values.length;
+}
+function agentUsed(list) {
+  const was = list.map((p) => p[0]).filter((v) => typeof v === "number");
+  if (was.length === 0) return "the agent used linear keys";
+  return `the agent used about ${Math.round(median2(was))}%`;
+}
+function buildRules(series, reviews) {
+  const rules = [];
+  const rev = (...names) => Math.max(0, ...names.map((n) => reviews[n] ?? 0));
+  const outs = easePairs(series.ease_out);
+  const ins = easePairs(series.ease_in);
+  if (outs.length > 0 || ins.length > 0) {
+    const outMed = outs.length ? median2(outs.map((p) => p[1])) : NaN;
+    const inMed = ins.length ? median2(ins.map((p) => p[1])) : NaN;
+    const shares = [];
+    if (outs.length) shares.push(shareWithin(outs.map((p) => p[1]), outMed, 15));
+    if (ins.length) shares.push(shareWithin(ins.map((p) => p[1]), inMed, 15));
+    const consistency = Math.min(...shares);
+    const n = Math.max(outs.length, ins.length);
+    const parts = [];
+    if (outs.length) parts.push(`outgoing influence about ${Math.round(outMed)}% (${agentUsed(outs)})`);
+    if (ins.length) parts.push(`incoming influence about ${Math.round(inMed)}% (${agentUsed(ins)})`);
+    let value;
+    let text = `The user sets ${parts.join(" and ")} on their keyframes.`;
+    if (outs.length && ins.length) {
+      const curve = [round(clamp(outMed / 100, 1e-3, 1)), 0, round(clamp(1 - inMed / 100, 0, 0.999)), 1];
+      value = curve;
+      text += ` As a cubic-bezier: [${curve.join(", ")}].`;
+    } else {
+      value = outs.length ? outMed : inMed;
+    }
+    rules.push({
+      id: "ease_influence",
+      kind: "ease_influence",
+      text,
+      value,
+      confidence: confidenceOf(n, consistency, rev("ease_out", "ease_in")),
+      samples: n,
+      reviews: rev("ease_out", "ease_in"),
+      consistency: round(consistency, 2)
+    });
+  }
+  const removed = numbers(series.overshoot_removed).length;
+  const added = numbers(series.overshoot_added).length;
+  if (removed > 0 && removed > added) {
+    const total = removed + added;
+    const consistency = removed / total;
+    rules.push({
+      id: "overshoot",
+      kind: "overshoot",
+      text: `The user removes overshoot (animations that travel past their last value): ${removed} of ${total} changes took it out.`,
+      value: null,
+      confidence: confidenceOf(total, consistency, rev("overshoot_removed", "overshoot_added")),
+      samples: total,
+      reviews: rev("overshoot_removed", "overshoot_added"),
+      consistency: round(consistency, 2)
+    });
+  }
+  const ratioRule = (id, name, noun, unit) => {
+    const ratios = numbers(series[name]);
+    if (ratios.length === 0) return;
+    const med = median2(ratios);
+    if (Math.abs(med - 1) < 0.05) return;
+    const consistency = shareWithin(ratios, med, 0.1);
+    const dir = med < 1 ? "smaller" : "larger";
+    let text;
+    if (id === "font_size") text = `The user makes text ${dir}: to about ${pct(med)}% of the size the agent set.`;
+    else text = `The user makes ${noun} ${med < 1 ? "shorter" : "longer"}: to about ${pct(med)}% of ${unit} the agent set.`;
+    rules.push({
+      id,
+      kind: id,
+      text,
+      value: round(med),
+      confidence: confidenceOf(ratios.length, consistency, rev(name)),
+      samples: ratios.length,
+      reviews: rev(name),
+      consistency: round(consistency, 2)
+    });
+  };
+  ratioRule("layer_duration", "layer_duration", "layers", "the length");
+  ratioRule("animation_timing", "animation_timing", "animations", "the duration");
+  ratioRule("font_size", "font_size", "text", "the size");
+  const margins = pairs(series.edge_margin);
+  if (margins.length > 0) {
+    const pulledIn = margins.filter((p) => p[1] > p[0]);
+    if (pulledIn.length > margins.length / 2) {
+      const afters = pulledIn.map((p) => p[1]);
+      const med = median2(afters);
+      const consistency = pulledIn.length / margins.length * shareWithin(afters, med, 0.03);
+      rules.push({
+        id: "edge_margin",
+        kind: "edge_margin",
+        text: `The user pulls titles in from the edge: keep text at least about ${pct(med)}% of the comp's short side from the nearest edge (the agent left about ${pct(median2(pulledIn.map((p) => p[0])))}%). Judged from layer positions, not text bounds.`,
+        value: round(med),
+        confidence: confidenceOf(margins.length, consistency, rev("edge_margin")),
+        samples: margins.length,
+        reviews: rev("edge_margin"),
+        consistency: round(consistency, 2)
+      });
+    }
+  }
+  const colours = (series.fill_color ?? []).filter((s) => Array.isArray(s) && s.length >= 3);
+  if (colours.length > 0) {
+    let best = colours[0];
+    let bestN = 0;
+    for (const c of colours) {
+      const same = colours.filter((o) => o.every((v, i) => Math.abs(v - c[i]) <= 0.03)).length;
+      if (same > bestN) {
+        best = c;
+        bestN = same;
+      }
+    }
+    if (bestN >= 2) {
+      const consistency = bestN / colours.length;
+      rules.push({
+        id: "fill_color",
+        kind: "fill_color",
+        text: `The user changes text fill to ${hex3(best)} (${bestN} of ${colours.length} colour changes).`,
+        value: best.slice(0, 3).map((v) => round(v)),
+        confidence: confidenceOf(bestN, consistency, rev("fill_color")),
+        samples: bestN,
+        reviews: rev("fill_color"),
+        consistency: round(consistency, 2)
+      });
+    }
+  }
+  return rules;
+}
+function emptyLedger() {
+  return { version: 1, baselines: [], evidence: {}, proposals: {}, applied: {} };
+}
+function ledgerPath(ctx) {
+  return path30.join(dataDirOf(ctx), "learn-taste.json");
+}
+function loadLedger(file) {
+  try {
+    const parsed = JSON.parse(fs31.readFileSync(file, "utf8"));
+    const base = emptyLedger();
+    if (Array.isArray(parsed.baselines)) base.baselines = parsed.baselines.filter((b) => b && typeof b.id === "string" && b.snapshot && Array.isArray(b.snapshot.layers)).slice(-MAX_BASELINES);
+    if (parsed.evidence && typeof parsed.evidence === "object") {
+      for (const name of SERIES) {
+        const list = parsed.evidence[name];
+        if (Array.isArray(list)) base.evidence[name] = list.filter((e) => e && typeof e.review_id === "string" && Array.isArray(e.values)).slice(-MAX_ENTRIES_PER_SERIES);
+      }
+    }
+    if (parsed.proposals && typeof parsed.proposals === "object") base.proposals = parsed.proposals;
+    if (parsed.applied && typeof parsed.applied === "object") base.applied = parsed.applied;
+    return base;
+  } catch {
+    return emptyLedger();
+  }
+}
+function saveLedger(file, ledger) {
+  fs31.mkdirSync(path30.dirname(file), { recursive: true, mode: 448 });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs31.writeFileSync(tmp, JSON.stringify(ledger), { encoding: "utf8", mode: 384 });
+  fs31.renameSync(tmp, file);
+}
+function baselineKey(projectPath, compId) {
+  return `${normalizeGuardPath(projectPath)}|${compId}`;
+}
+function recordEvidence(evidence, reviewId, at, samples) {
+  for (const name of SERIES) {
+    const kept = (evidence[name] ?? []).filter((e) => e.review_id !== reviewId);
+    const values = samples[name];
+    if (values && values.length > 0) kept.push({ review_id: reviewId, at, values: values.slice(0, MAX_SAMPLES_PER_SERIES) });
+    if (kept.length > 0) evidence[name] = kept.slice(-MAX_ENTRIES_PER_SERIES);
+    else delete evidence[name];
+  }
+}
+function collectSeries(evidence) {
+  const series = {};
+  const reviews = {};
+  for (const name of SERIES) {
+    const entries = evidence[name];
+    if (!entries || entries.length === 0) continue;
+    series[name] = entries.flatMap((e) => e.values).slice(-MAX_SAMPLES_PER_SERIES);
+    reviews[name] = new Set(entries.map((e) => e.review_id)).size;
+  }
+  return { series, reviews };
+}
+async function readComp(ctx, toolName, compId, opts = {}) {
+  const res = await ctx.bridge.callHost(
+    "learntasteRead",
+    {
+      comp_id: compId,
+      ...opts.layers && opts.layers.length > 0 ? { layers: opts.layers } : {},
+      ...opts.tolerateMissing ? { tolerate_missing: true } : {},
+      ...opts.headerOnly ? { header_only: true } : {}
+    },
+    { label: `${toolName}(${compId})`, mutates: false, toolName }
+  );
+  return res.result;
+}
+function newBaselineId(ledger) {
+  const n = ledger.baselines.length;
+  return `base_${Date.now().toString(36)}_${n}`;
+}
+async function baselineHandler(args, ctx) {
+  const snapshot = await readComp(ctx, "ae_taste_baseline", args.comp_id, { layers: args.layers });
+  const file = ledgerPath(ctx);
+  const ledger = loadLedger(file);
+  const key = baselineKey(snapshot.project_path, snapshot.comp_id);
+  const baseline = {
+    id: newBaselineId(ledger),
+    key,
+    taken_at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...args.note ? { note: args.note } : {},
+    tracked_ids: args.layers && args.layers.length > 0 ? snapshot.layers.map((l) => l.id) : null,
+    snapshot
+  };
+  ledger.baselines = [...ledger.baselines.filter((b) => b.key !== key), baseline].slice(-MAX_BASELINES);
+  saveLedger(file, ledger);
+  const keyed = snapshot.layers.reduce((n, l) => n + Object.values(l.props).filter((p) => p.keys.length > 0).length, 0);
+  return {
+    ok: true,
+    baseline_id: baseline.id,
+    comp_id: snapshot.comp_id,
+    comp_name: snapshot.name,
+    project_path: snapshot.project_path,
+    layers: snapshot.layers.length,
+    animated_properties: keyed,
+    tracked: baseline.tracked_ids ? "the layers you named" : "every layer",
+    truncated: snapshot.truncated,
+    ledger_path: file,
+    next: "Hand the comp back to the user. When they say they have edited it, call ae_learn_taste for this comp."
+  };
+}
+function reviewOverlap(base, now, tracked) {
+  const ids = (tracked ?? base.layers.map((l) => l.id)).filter((id) => base.layers.some((l) => l.id === id));
+  if (ids.length === 0) return 1;
+  const present2 = new Set(now.layers.map((l) => l.id));
+  return ids.filter((id) => present2.has(id)).length / ids.length;
+}
+function ruleLabel(r) {
+  const v = r.value;
+  if (r.kind === "ease_influence") {
+    if (Array.isArray(v) && v.length === 4) return `Ease: out ${pct(v[0])}% / in ${pct(1 - v[2])}%`;
+    if (typeof v === "number") return `Ease: influence about ${Math.round(v)}%`;
+    return "Ease influence";
+  }
+  if (r.kind === "overshoot") return "No overshoot";
+  if (r.kind === "layer_duration" && typeof v === "number") return `Layer length: ${pct(v)}% of mine`;
+  if (r.kind === "animation_timing" && typeof v === "number") return `Animation time: ${pct(v)}% of mine`;
+  if (r.kind === "font_size" && typeof v === "number") return `Font size: ${pct(v)}% of mine`;
+  if (r.kind === "edge_margin" && typeof v === "number") return `Edge margin: ${pct(v)}% of short side`;
+  if (r.kind === "fill_color" && Array.isArray(v)) return `Text fill: ${hex3(v)}`;
+  return r.kind.replace(/_/g, " ");
+}
+function askOptionOf(r) {
+  return {
+    id: r.id,
+    label: ruleLabel(r),
+    description: `${r.text.slice(0, 330)} (${r.confidence} confidence: ${r.samples} edit${r.samples === 1 ? "" : "s"} in ${r.reviews} review${r.reviews === 1 ? "" : "s"})`
+  };
+}
+async function learnHandler(args, ctx) {
+  const head2 = await readComp(ctx, "ae_learn_taste", args.comp_id, { headerOnly: true });
+  const file = ledgerPath(ctx);
+  const ledger = loadLedger(file);
+  const key = baselineKey(head2.project_path, head2.comp_id);
+  const baseline = args.baseline_id ? ledger.baselines.find((b) => b.id === args.baseline_id) : ledger.baselines.find((b) => b.key === key);
+  if (!baseline) {
+    return {
+      ok: false,
+      error: "no_baseline",
+      message: args.baseline_id ? `No baseline ${args.baseline_id}. At most ${MAX_BASELINES} are kept, one per comp.` : "No baseline for this comp in this project. A baseline has to be taken (ae_taste_baseline) after the agent's work, before the user edits; without it there is nothing to compare.",
+      baselines: ledger.baselines.map((b) => ({ baseline_id: b.id, comp_id: b.snapshot.comp_id, comp_name: b.snapshot.name, project_path: b.snapshot.project_path, taken_at: b.taken_at }))
+    };
+  }
+  if (baseline.key !== key) {
+    return { ok: false, error: "wrong_comp", message: `Baseline ${baseline.id} was taken in ${baseline.snapshot.project_path} (comp ${baseline.snapshot.comp_id}), not here.` };
+  }
+  const tracked = baseline.tracked_ids && baseline.tracked_ids.length > 0 ? baseline.tracked_ids : null;
+  const now = await readComp(
+    ctx,
+    "ae_learn_taste",
+    args.comp_id,
+    tracked ? { layers: tracked.map((id) => ({ id })), tolerateMissing: true } : {}
+  );
+  if (!now.truncated && reviewOverlap(baseline.snapshot, now, baseline.tracked_ids) < 0.5) {
+    return {
+      ok: false,
+      error: "baseline_mismatch",
+      message: "Fewer than half of the baseline's layers are in this comp now. It looks like another project (unsaved projects share one path) or a rebuilt comp, so no edits were attributed. Take a new baseline."
+    };
+  }
+  const diff = diffTasteSnapshots(baseline.snapshot, now, baseline.tracked_ids);
+  const baselineAt = Date.parse(baseline.taken_at);
+  const tracker2 = getSessionTracker();
+  const agentSteps = (tracker2?.steps() ?? []).filter(
+    (st) => normalizeGuardPath(st.project_path) === normalizeGuardPath(now.project_path) && Date.parse(st.at) > baselineAt
+  );
+  const loggedWrites = tracker2?.agentWritesSince(now.project_path, baseline.taken_at) ?? [];
+  const agentWrote = agentSteps.length > 0 || loggedWrites.length > 0;
+  const agentTools = [.../* @__PURE__ */ new Set([...loggedWrites.map((w) => w.tool), ...agentSteps.map((st) => st.tool)])];
+  const revisionBack = now.revision !== null && baseline.snapshot.revision !== null && now.revision < baseline.snapshot.revision;
+  const record = args.record !== false;
+  const samples = samplesFromObservations(diff.observations);
+  const hasSamples = Object.keys(samples).length > 0;
+  const evidence = JSON.parse(JSON.stringify(ledger.evidence));
+  const useSamples = !revisionBack && !agentWrote;
+  if (useSamples) recordEvidence(evidence, baseline.id, (/* @__PURE__ */ new Date()).toISOString(), samples);
+  const gathered = collectSeries(evidence);
+  const rules = buildRules(gathered.series, gathered.reviews);
+  const saved = new Map((ctx.settings?.get().taste.rules ?? []).map((r) => [r.id, r]));
+  if (record && useSamples) {
+    ledger.evidence = evidence;
+    ledger.proposals = Object.fromEntries(rules.map((r) => [r.id, r]));
+    baseline.reviewed_at = (/* @__PURE__ */ new Date()).toISOString();
+    saveLedger(file, ledger);
+  }
+  const max = args.max_observations ?? 100;
+  const proposals = rules.map((r) => ({ ...r, already_saved: saved.has(r.id), worth_asking: r.confidence !== "low" && !saved.has(r.id) }));
+  const askable = record && useSamples ? proposals.filter((r) => r.worth_asking) : [];
+  let next;
+  if (agentWrote) {
+    next = "The agent wrote after the baseline, so nothing was recorded or put to the user. Take a new baseline now, and review again after the user's next edits.";
+  } else if (revisionBack) {
+    next = "The project looks reopened or reverted, so nothing was counted. Take a new baseline.";
+  } else if (!record && proposals.some((r) => r.worth_asking)) {
+    next = "This review was not recorded (record false), so its rules cannot be saved. Review again with record true, then ask the user.";
+  } else if (askable.length > 0) {
+    next = "Pass `ask` to ae_ask_user. Then save the chosen rules with ae_taste_rules { action: 'save', rule_ids, ask_id }. Do not save anything the user did not choose.";
+  } else {
+    next = "No rule is confident enough to ask about yet. Rules marked low are kept as evidence and gain confidence when more reviews agree. Don't act on them.";
+  }
+  const notes = [...CAVEATS];
+  if (revisionBack) {
+    notes.push("The project revision went back since the baseline: the project was probably reopened or reverted (or the agent's write undone). The changes below are shown but not counted as the user's taste.");
+  }
+  if (agentWrote) {
+    notes.push(
+      `The agent wrote to this project after the baseline (${agentTools.join(", ")}), and those writes are indistinguishable from the user's edits, so none of the changes below were counted as taste. Take a new baseline (ae_taste_baseline) after your own writes, and review once the user has edited.`
+    );
+  }
+  if (tracked && diff.compared_layers === 0) {
+    notes.push("None of the layers the baseline tracks were found in the comp now, so nothing could be compared.");
+  }
+  if (diff.observations.length === 0) notes.push("Nothing the review tracks has changed since the baseline.");
+  if (now.truncated || baseline.snapshot.truncated) notes.push("A read hit a cap (500 layers, 200 keys per property or 3000 properties), so some layers or keys were not compared.");
+  if (!hasSamples && diff.observations.length > 0) notes.push("The changes found are not the kind that make a rule (deleted or added layers, value tweaks).");
+  return {
+    ok: true,
+    baseline_id: baseline.id,
+    comp_id: now.comp_id,
+    comp_name: now.name,
+    baseline_taken_at: baseline.taken_at,
+    compared_layers: diff.compared_layers,
+    changed: diff.observations.length > 0,
+    suspected_undo_or_reopen: revisionBack,
+    agent_wrote_since_baseline: agentWrote,
+    recorded: record && useSamples,
+    counts: diff.counts,
+    observations: diff.observations.slice(0, max),
+    observations_truncated: diff.observations.length > max,
+    proposals,
+    ask: askable.length > 0 ? {
+      question: "I noticed patterns in how you changed my work. Which should I keep as your defaults?",
+      kind: "choice",
+      multi_select: true,
+      allow_other: false,
+      context: "Nothing is saved until you pick.",
+      options: [
+        ...askable.map(askOptionOf),
+        { id: "none", label: "None of these" }
+      ]
+    } : null,
+    next,
+    notes
+  };
+}
+function toTasteRule(p, now) {
+  return { id: p.id, kind: p.kind, text: p.text, value: p.value, confidence: p.confidence, samples: p.samples, reviews: p.reviews, saved_at: now };
+}
+async function rulesHandler(args, ctx) {
+  if (!ctx.settings) {
+    return { ok: false, error: "no_settings", message: "This server has no settings store, so taste rules can't be kept." };
+  }
+  const file = ledgerPath(ctx);
+  const ledger = loadLedger(file);
+  const current = ctx.settings.get().taste.rules ?? [];
+  if (args.action === "list") {
+    return {
+      ok: true,
+      saved: current,
+      proposals: Object.values(ledger.proposals),
+      baselines: ledger.baselines.length,
+      ledger_path: file,
+      settings_path: ctx.settings.path
+    };
+  }
+  const ids = [...new Set(args.rule_ids ?? [])];
+  if (args.action === "forget") {
+    const known = new Set(current.map((r) => r.id));
+    const unknown = ids.filter((id) => !known.has(id));
+    const patch2 = { rules: current.filter((r) => !ids.includes(r.id)) };
+    const cleared = [];
+    const taste2 = ctx.settings.get().taste;
+    const handChanged = { ease: false };
+    if (known.has("ease_influence") && ids.includes("ease_influence")) {
+      const ruleValue = current.find((r) => r.id === "ease_influence")?.value;
+      const set = ledger.applied.ease_influence?.set ?? (Array.isArray(ruleValue) ? ruleValue : null);
+      if (set && taste2.preferred_ease && JSON.stringify(taste2.preferred_ease) === JSON.stringify(set)) {
+        patch2.preferred_ease = ledger.applied.ease_influence?.previous ?? null;
+        cleared.push("preferred_ease");
+      } else if (set && taste2.preferred_ease) {
+        handChanged.ease = true;
+      }
+    }
+    if (known.has("overshoot") && ids.includes("overshoot") && taste2.avoid_overshoot) {
+      const previous = ledger.applied.overshoot?.previous ?? false;
+      patch2.avoid_overshoot = previous;
+      if (!previous) cleared.push("avoid_overshoot");
+    }
+    ctx.settings.updateTaste(patch2);
+    if (ids.includes("ease_influence")) delete ledger.applied.ease_influence;
+    if (ids.includes("overshoot")) delete ledger.applied.overshoot;
+    for (const id of ids) for (const s of RULE_SERIES[id] ?? []) delete ledger.evidence[s];
+    for (const id of ids) delete ledger.proposals[id];
+    saveLedger(file, ledger);
+    const stillSet = [];
+    const after = ctx.settings.get().taste;
+    if (ids.includes("ease_influence") && known.has("ease_influence") && after.preferred_ease && !cleared.includes("preferred_ease") && handChanged.ease) {
+      stillSet.push("preferred_ease");
+    }
+    return {
+      ok: true,
+      forgotten: ids.filter((id) => known.has(id)),
+      not_saved: unknown,
+      also_cleared: cleared,
+      ...stillSet.length > 0 ? { still_set: stillSet, note: "These settings were changed by hand since the rule was saved, so they were left as they are. Change them with ae_taste." } : {},
+      taste: after
+    };
+  }
+  const missing = ids.filter((id) => !ledger.proposals[id]);
+  if (missing.length > 0) {
+    return { ok: false, error: "unknown_rule", message: `No proposed rule ${missing.join(", ")}. Run ae_learn_taste to get current proposals; nothing was saved.` };
+  }
+  if (args.ask_id !== void 0) {
+    const found = ctx.asks?.get(args.ask_id);
+    if (!ctx.asks) {
+      return { ok: false, error: "no_asks", message: "This server has no question store; ask in the chat and pass confirmed_in_chat: true after the user says yes. Nothing was saved." };
+    }
+    if (!found || !found.answer) {
+      return { ok: false, error: "not_answered", message: "That question has no answer (unknown, expired or still waiting). Nothing was saved." };
+    }
+    const chosen = new Set(found.answer.status === "answered" ? found.answer.choice_ids : []);
+    const notChosen = ids.filter((id) => !chosen.has(id));
+    if (notChosen.length > 0) {
+      return { ok: false, error: "not_confirmed", message: `The user did not choose ${notChosen.join(", ")}. Nothing was saved.`, chosen: [...chosen] };
+    }
+    const options = found.question.options;
+    const mismatched = ids.filter((id) => {
+      const want = askOptionOf(ledger.proposals[id]);
+      const got = options.find((o) => o.id === id);
+      return !got || got.label !== want.label || got.description !== want.description;
+    });
+    if (mismatched.length > 0) {
+      return {
+        ok: false,
+        error: "ask_mismatch",
+        message: `The question the user answered does not match the current proposal for ${mismatched.join(", ")} (it was not built from the "ask" ae_learn_taste returned, or a later review changed the rule). Nothing was saved. Run ae_learn_taste with record true and put its "ask" to the user again.`
+      };
+    }
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const byId3 = new Map(current.map((r) => [r.id, r]));
+  for (const id of ids) byId3.set(id, toTasteRule(ledger.proposals[id], now));
+  const taste = ctx.settings.get().taste;
+  let rules = [...byId3.values()];
+  if (rules.length > MAX_TASTE_RULES) rules = rules.slice(-MAX_TASTE_RULES);
+  const patch = { rules };
+  const applied = [];
+  const ease = ids.includes("ease_influence") ? ledger.proposals.ease_influence : void 0;
+  if (ease && Array.isArray(ease.value) && ease.value.length === 4) {
+    ledger.applied.ease_influence = { set: ease.value, previous: ledger.applied.ease_influence?.previous ?? taste.preferred_ease };
+    patch.preferred_ease = ease.value;
+    applied.push("preferred_ease");
+  }
+  if (ids.includes("overshoot")) {
+    ledger.applied.overshoot = { previous: ledger.applied.overshoot?.previous ?? taste.avoid_overshoot };
+    patch.avoid_overshoot = true;
+    applied.push("avoid_overshoot");
+  }
+  ctx.settings.updateTaste(patch);
+  saveLedger(file, ledger);
+  return {
+    ok: true,
+    saved: ids,
+    also_set: applied,
+    taste: ctx.settings.get().taste,
+    message: "Saved. ae_taste shows them. Only preferred_ease and avoid_overshoot are enforced by ae_motion_review today; the other rules are for you to read before animating."
+  };
+}
+var fs31, path30, round, MAX_LISTED_VALUES, SERIES, RULE_SERIES, MAX_SAMPLES_PER_SERIES, pct, clamp, pairs, easePairs, numbers, MAX_BASELINES, MAX_ENTRIES_PER_SERIES, AeTasteBaselineSchema, AeLearnTasteSchema, AeTasteRulesSchema, CAVEATS, learntasteTools;
+var init_learntaste = __esm({
+  "src/tools/ext/learntaste.ts"() {
+    "use strict";
+    fs31 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_jsx();
+    init_settings();
+    init_session();
+    init_common();
+    round = (n, places = 3) => Math.round(n * 10 ** places) / 10 ** places;
+    MAX_LISTED_VALUES = 20;
+    SERIES = [
+      "ease_out",
+      "ease_in",
+      "overshoot_removed",
+      "overshoot_added",
+      "layer_duration",
+      "animation_timing",
+      "edge_margin",
+      "font_size",
+      "fill_color"
+    ];
+    RULE_SERIES = {
+      ease_influence: ["ease_out", "ease_in"],
+      overshoot: ["overshoot_removed", "overshoot_added"],
+      layer_duration: ["layer_duration"],
+      animation_timing: ["animation_timing"],
+      edge_margin: ["edge_margin"],
+      font_size: ["font_size"],
+      fill_color: ["fill_color"]
+    };
+    MAX_SAMPLES_PER_SERIES = 200;
+    pct = (x) => Math.round(x * 100);
+    clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+    pairs = (list) => (list ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && s.every((v) => typeof v === "number"));
+    easePairs = (list) => (list ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && typeof s[1] === "number" && (s[0] === null || typeof s[0] === "number"));
+    numbers = (list) => (list ?? []).filter((s) => typeof s === "number");
+    MAX_BASELINES = 20;
+    MAX_ENTRIES_PER_SERIES = 60;
+    AeTasteBaselineSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The comp the agent just worked in."),
+      layers: external_exports.array(LayerSelectorSchema).max(500).optional().describe("Only these layers (the ones the agent made or changed), by id, index or unique name. Default: every layer in the comp, which also reports layers the user adds or deletes."),
+      note: external_exports.string().max(200).optional().describe("One line on what was just done, kept with the baseline.")
+    });
+    AeLearnTasteSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The comp to review: it must have a baseline from ae_taste_baseline."),
+      baseline_id: external_exports.string().min(1).max(80).optional().describe("A specific baseline. Default: the latest one for this comp in this project."),
+      record: external_exports.boolean().optional().describe("Default true: remember what this review found, so rules gain confidence across reviews. False reviews without remembering. The same baseline reviewed again replaces its earlier samples, never adds to them."),
+      max_observations: external_exports.number().int().min(1).max(500).optional().describe("How many of the individual changes to list (default 100). Counts and rules always cover all of them.")
+    });
+    AeTasteRulesSchema = external_exports.object({
+      action: external_exports.enum(["list", "save", "forget"]).describe("'list' shows the proposals from the latest review and the saved rules. 'save' keeps the confirmed ones. 'forget' removes saved rules and the evidence behind them."),
+      rule_ids: external_exports.array(external_exports.string().min(1).max(80)).min(1).max(20).optional().describe("The rules to save or forget (the ids ae_learn_taste returned)."),
+      ask_id: external_exports.string().min(1).optional().describe("For 'save': the ask_id of the answered ae_ask_user question built from ae_learn_taste's `ask`. Each rule_id must be among the options the user chose."),
+      confirmed_in_chat: external_exports.boolean().optional().describe("For 'save' when the question could not go through ae_ask_user: true only if the user said yes to exactly these rules in the chat.")
+    }).refine((v) => v.action === "list" || v.rule_ids !== void 0 && v.rule_ids.length > 0, { message: "save and forget need rule_ids." }).refine((v) => v.action !== "save" || v.ask_id !== void 0 || v.confirmed_in_chat === true, {
+      message: "Saving needs the user's yes: pass the answered ask_id, or confirmed_in_chat: true."
+    });
+    CAVEATS = [
+      "After Effects cannot say who made a change: edits by other tools, an expression, or an undo of the agent's own write look the same as the user's edits. Treat every rule as a guess until the user confirms it.",
+      "Only stored values are compared (an expression's result is not), and a layer's position stands in for its bounds."
+    ];
+    learntasteTools = [
+      {
+        name: "ae_taste_baseline",
+        description: "Remember how a comp looked when you finished: layer timing, position, scale, rotation and opacity (every key with its time, value, ease influence and speed, and interpolation), and text size and colour. Call it right after you finish a piece of work and hand it back, so ae_learn_taste can later tell what the user changed. One baseline is kept per comp; a new one replaces the old. Pass `layers` to track only the layers you made or changed. Position with separated X/Y is read through its X and Y properties. Reads After Effects without changing anything (no undo step, selection or time); the snapshot is kept in learn-taste.json next to settings.json.",
+        schema: AeTasteBaselineSchema,
+        handler: baselineHandler
+      },
+      {
+        name: "ae_learn_taste",
+        description: "Learn from what the user changed after you finished. Compares the comp now with the baseline from ae_taste_baseline and sorts the edits: ease influence (in and out), layer lengths, animation timing, overshoot removed, titles pulled in from the edge, font size, text colour. It proposes rules with a confidence (low, medium, high) and returns `ask`, a question for ae_ask_user. Saves nothing: call ae_taste_rules to keep what the user picks. Confidence needs several edits that agree, and 'high' several reviews. After Effects cannot say who made a change (other tools, expressions and an undo look the same), so never act on a rule the user did not confirm. If you wrote to the project after the baseline (the session ledger shows it), nothing is counted: take a new baseline after your own writes. Reads After Effects without changing anything. With record false it also leaves its own files alone, and then returns no `ask` (review again with record true before asking).",
+        schema: AeLearnTasteSchema,
+        handler: learnHandler
+      },
+      {
+        name: "ae_taste_rules",
+        description: "List the taste rules proposed by the last ae_learn_taste and the ones already saved, save the ones the user chose, or forget saved ones. Saving needs the user's yes: the ask_id of the answered ae_ask_user question (each rule_id must be among their choices), or confirmed_in_chat true if they agreed in the chat. Saved rules go to settings.json under taste.rules (ae_taste shows them); an ease rule with both an in and an out also sets preferred_ease, and the overshoot rule sets avoid_overshoot. Forgetting also clears the evidence so the rule is not proposed again at once, and puts preferred_ease / avoid_overshoot back if the rule had set them. Never touches the AE project.",
+        schema: AeTasteRulesSchema,
+        handler: rulesHandler
+      }
+    ];
+  }
+});
+
+// src/tools/ext/projectsession.ts
+function leaveVerdict(dirty, ifDirty, projectPath) {
+  if (dirty === false) return { proceed: true };
+  const policy = ifDirty ?? "ask";
+  if (policy === "discard") return { proceed: true };
+  if (policy === "save") {
+    if (projectPath === "<unsaved>") {
+      return { proceed: false, reason: "The project has never been saved, so it has no file to save to. Save it once in After Effects (File > Save As), or discard it." };
+    }
+    return { proceed: true };
+  }
+  return {
+    proceed: false,
+    reason: dirty === null ? "After Effects would not say whether the open project has unsaved changes." : "The open project has unsaved changes."
+  };
+}
+function recoveryDirs(projectPath, projectDir, autoSaveDir) {
+  const out = [];
+  let base = null;
+  if (projectDir) {
+    base = projectDir;
+  } else if (projectPath !== "<unsaved>") {
+    let dir = path31.dirname(projectPath);
+    const leaf = path31.basename(dir);
+    if (leaf === "_mcp_checkpoints" || leaf === "_mcp_backups" || AUTO_SAVE_FOLDER.test(leaf)) dir = path31.dirname(dir);
+    base = dir;
+  }
+  if (autoSaveDir) out.push({ source: "auto_save", dir: autoSaveDir });
+  if (base) {
+    try {
+      for (const e of fs32.readdirSync(base, { withFileTypes: true })) {
+        if (e.isDirectory() && AUTO_SAVE_FOLDER.test(e.name)) out.push({ source: "auto_save", dir: path31.join(base, e.name) });
+      }
+    } catch {
+    }
+    out.push({ source: "backup", dir: path31.join(base, "_mcp_backups") });
+    out.push({ source: "checkpoint", dir: path31.join(base, "_mcp_checkpoints") });
+  }
+  return out;
+}
+function scanRecoveryFiles(dirs, projectFileMtimeMs, nowMs, info) {
+  const files = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const { source, dir } of dirs) {
+    let entries;
+    try {
+      entries = fs32.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    let n = 0;
+    for (const e of entries) {
+      if (!e.isFile() || !/\.aepx?$/i.test(e.name)) continue;
+      if (++n > MAX_SCAN_PER_DIR) {
+        info?.capped_dirs.push(dir);
+        break;
+      }
+      const full = path31.join(dir, e.name);
+      if (seen.has(full)) continue;
+      seen.add(full);
+      try {
+        const st = fs32.statSync(full);
+        files.push({
+          source,
+          name: e.name,
+          path: full,
+          size: st.size,
+          modified_at: st.mtime.toISOString(),
+          age_minutes: Math.max(0, Math.round((nowMs - st.mtimeMs) / 6e4)),
+          newer_than_project: projectFileMtimeMs !== null && st.mtimeMs > projectFileMtimeMs,
+          same_project: null,
+          mtimeMs: st.mtimeMs
+        });
+      } catch {
+      }
+    }
+  }
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+  return files.map(({ mtimeMs: _m, ...rest }) => rest);
+}
+function countUnsavedWrites(steps, projectPath, sinceMs) {
+  let n = 0;
+  for (const s of steps) {
+    if (s.tool === "ae_project_session") continue;
+    if (!pathsMatchForGuard(projectPath, s.project_path)) continue;
+    const at = Date.parse(s.at);
+    if (Number.isFinite(at) && at > sinceMs) n++;
+  }
+  return n;
+}
+function countAgentWrites(writes) {
+  return writes.filter((w) => w.tool !== "ae_project_session" && w.tool !== "ae_save").length;
+}
+function autosaveDue(policy, unsavedWrites, minutesSinceSave) {
+  if (!policy.enabled) return { due: false };
+  if (policy.after_writes !== void 0 && unsavedWrites !== null && unsavedWrites >= policy.after_writes) {
+    return { due: true, why: `${unsavedWrites} unsaved writes (limit ${policy.after_writes})` };
+  }
+  if (policy.after_minutes !== void 0 && minutesSinceSave >= policy.after_minutes) {
+    return { due: true, why: `${Math.floor(minutesSinceSave)} minutes since the last save (limit ${policy.after_minutes})` };
+  }
+  return { due: false };
+}
+function openNotes(written, after) {
+  const notes = [];
+  const s = stateOf2(after);
+  if (!s || written.applied === false || written.opened !== true) return notes;
+  if (s.project_path === "<unsaved>") {
+    notes.push(
+      "After Effects opened the file but the project has no path: it was most likely converted from an older version. Save As (to a new name) before working on it."
+    );
+  }
+  if (s.dirty === true) {
+    notes.push(
+      "The project reads as having unsaved changes right after opening (After Effects may have substituted missing fonts or footage). Not treated as a failure; check ae_dialogs and the missing footage before saving."
+    );
+  }
+  return notes;
+}
+function openMismatches(target, written, after) {
+  const out = [];
+  if (written.applied === false) return out;
+  const s = stateOf2(after);
+  expectThat(out, written.opened === true, "opened", true, written.opened, `app.open did not open the project${written.error ? `: ${String(written.error)}` : "."}`);
+  if (!s) return out;
+  const converted = written.opened === true && s.project_path === "<unsaved>";
+  if (!converted) {
+    expectThat(out, pathsMatchForGuard(target, s.project_path), "project_path", target, s.project_path, "The open project is not the file that was asked for.");
+  }
+  return out;
+}
+function emptyProjectMismatches(kind, written, after) {
+  const out = [];
+  if (written.applied === false) return out;
+  const flag = kind === "new" ? written.created : written.closed;
+  expectThat(out, flag === true, kind === "new" ? "created" : "closed", true, flag, `The project was not ${kind === "new" ? "created" : "closed"}${written.error ? `: ${String(written.error)}` : "."}`);
+  const s = stateOf2(after);
+  if (!s) return out;
+  expectThat(out, s.project_path === "<unsaved>", "project_path", "<unsaved>", s.project_path, "A project with a file is still open.");
+  return out;
+}
+function prefsMismatches(written, after) {
+  const out = [];
+  if (written.applied === false) return out;
+  const prefs = after && typeof after === "object" ? after : null;
+  const list = Array.isArray(written.written) ? written.written : [];
+  const failed = Array.isArray(written.failed) ? written.failed : [];
+  for (const f of failed) {
+    out.push({ path: `failed.${f.field}`, expected: "written", actual: "refused", message: `After Effects refused the ${f.field} preference${f.error ? `: ${f.error}` : "."}` });
+  }
+  if (written.saved_to_disk === false) {
+    out.push({ path: "saved_to_disk", expected: true, actual: false, message: `saveToDisk failed${written.error ? `: ${String(written.error)}` : "."}` });
+  }
+  if (!prefs) return out;
+  for (const w of list) {
+    const hit = prefs.fields[w.field];
+    const want = hit?.type === "long" && typeof w.value === "boolean" ? w.value ? 1 : 0 : w.value;
+    expectThat(out, !!hit && hit.value === want, `fields.${w.field}`, want, hit?.value, `The ${w.field} preference does not read back the value written.`);
+  }
+  return out;
+}
+function sinceSave(projectPath, deps) {
+  const now = (deps.now ?? Date.now)();
+  const mtime = (deps.fileMtimeMs ?? defaultMtime)(projectPath);
+  const since = Math.max(mtime ?? 0, policyState.last_auto_save_at ?? 0);
+  let writes = null;
+  if (deps.steps) {
+    writes = countUnsavedWrites(deps.steps(), projectPath, since);
+  } else {
+    const tracker2 = getSessionTracker();
+    if (tracker2) writes = countAgentWrites(tracker2.agentWritesSince(projectPath, since > 0 ? new Date(since).toISOString() : null));
+  }
+  return {
+    writes,
+    minutes: (now - Math.max(since, policyState.started_at)) / 6e4
+  };
+}
+function keepOwnBackups(saved, deps) {
+  const bp = saved && typeof saved === "object" ? saved.backup_path : null;
+  if (typeof bp !== "string" || bp.length === 0) return;
+  policyState.own_backups.push(bp);
+  const remove = deps.removeFile ?? ((f) => fs32.unlinkSync(f));
+  while (policyState.own_backups.length > MAX_POLICY_BACKUPS) {
+    const old = policyState.own_backups.shift();
+    try {
+      remove(old);
+    } catch {
+    }
+  }
+}
+async function autosaveTick(ctx, deps = {}) {
+  const skip = (reason) => {
+    policyState.last_skip = reason;
+    return { saved: false, skipped: reason };
+  };
+  const busy = () => ctx.queue.inFlight !== null || ctx.queue.depth > 0;
+  try {
+    const target = policyState.policy.project_path;
+    if (!policyState.policy.enabled) return skip("The policy is off.");
+    if (!target) return skip("The policy has no project to save.");
+    if (ctx.quarantine.isQuarantined) return skip("Writes are quarantined.");
+    if (busy()) return skip("A write or read is in flight or queued.");
+    const { writes, minutes } = sinceSave(target, deps);
+    const due = autosaveDue(policyState.policy, writes, minutes);
+    if (!due.due) return skip("No threshold reached.");
+    const dialogs = await (deps.dialogs ?? defaultDialogs)();
+    if (dialogs === null) return skip("Open dialogs could not be listed, so After Effects was not touched.");
+    if (dialogs.length > 0) return skip("A dialog is open in After Effects.");
+    if (busy()) return skip("A write or read is in flight or queued.");
+    const read2 = await ctx.bridge.callHost("projectsessionState", {}, {
+      label: "quiet:ae_project_session (autosave check)",
+      mutates: false,
+      toolName: TOOL2
+    });
+    const state = read2.result;
+    if (state.project_path === "<unsaved>") return skip("The project has never been saved.");
+    if (!pathsMatchForGuard(target, state.project_path)) return skip("A different project is open than the one the policy was enabled for.");
+    if (state.dirty !== true) return skip("The project has no unsaved changes.");
+    if (busy()) return skip("A write or read is in flight or queued.");
+    const saved = await (deps.save ?? defaultSave)(ctx, target);
+    keepOwnBackups(saved, deps);
+    const receipt = saved && typeof saved === "object" ? saved.receipt : void 0;
+    if (receipt && receipt.matches === false) {
+      const first = Array.isArray(receipt.mismatches) ? receipt.mismatches[0] : void 0;
+      policyState.last_save_matched = false;
+      policyState.last_error = `The timed save's receipt did not match${typeof first?.message === "string" ? `: ${first.message}` : "."}`;
+      return skip(policyState.last_error);
+    }
+    policyState.auto_saves++;
+    policyState.last_auto_save_at = (deps.now ?? Date.now)();
+    policyState.last_skip = null;
+    policyState.last_error = null;
+    policyState.last_save_matched = receipt ? true : null;
+    return { saved: true };
+  } catch (err) {
+    policyState.last_error = err instanceof Error ? err.message : String(err);
+    return skip(`The check failed: ${policyState.last_error}`);
+  }
+}
+function setAutosavePolicy(ctx, policy, deps = {}) {
+  if (policyState.timer) clearInterval(policyState.timer);
+  policyState.timer = null;
+  policyState.policy = policy;
+  policyState.ctx = ctx;
+  if (!policy.enabled) return;
+  policyState.started_at = (deps.now ?? Date.now)();
+  policyState.last_skip = null;
+  policyState.own_backups = [];
+  policyState.timer = setInterval(() => {
+    if (policyState.ticking) return;
+    policyState.ticking = true;
+    void autosaveTick(ctx, deps).finally(() => {
+      policyState.ticking = false;
+    });
+  }, TICK_MS);
+  policyState.timer.unref?.();
+}
+function disablePolicyForSwitch() {
+  if (!policyState.policy.enabled) return false;
+  if (policyState.timer) clearInterval(policyState.timer);
+  policyState.timer = null;
+  policyState.policy = { enabled: false };
+  policyState.last_skip = "Turned off: this tool opened, created or closed a project.";
+  return true;
+}
+function policyStatus(deps = {}) {
+  const target = policyState.policy.project_path;
+  const writes = policyState.policy.enabled && target ? sinceSave(target, deps).writes : null;
+  return {
+    ...policyState.policy,
+    // Writes the agent made since the last save; null without session tracking or an enabled policy.
+    unsaved_writes: writes,
+    auto_saves: policyState.auto_saves,
+    last_auto_save_at: policyState.last_auto_save_at ? new Date(policyState.last_auto_save_at).toISOString() : null,
+    last_skip: policyState.last_skip,
+    last_error: policyState.last_error,
+    last_save_matched: policyState.last_save_matched,
+    backups_kept: policyState.own_backups.length,
+    max_backups: MAX_POLICY_BACKUPS,
+    backup_note: `Each timed save copies the whole .aep into _mcp_backups; the policy deletes its own oldest copies beyond ${MAX_POLICY_BACKUPS}.`,
+    persists_across_restart: false
+  };
+}
+async function readState(ctx, label) {
+  const res = await ctx.bridge.callHost("projectsessionRead", {}, { label, mutates: false, toolName: TOOL2 });
+  return res.result;
+}
+function needsUserResult(state, reason) {
+  return {
+    applied: false,
+    needs_user: true,
+    reason,
+    dirty: state.dirty,
+    project_path: state.project_path,
+    options: ["save", "discard", "cancel"],
+    message: "Ask the user: save the changes, discard them, or cancel. Then call again with if_dirty: 'save' or 'discard', or stop for 'cancel'. Nothing was changed."
+  };
+}
+async function leaveAndRun(ctx, args, kind, target) {
+  ctx.quarantine.assertClear();
+  const expect = args.expect;
+  const state = await readState(ctx, `${TOOL2} (${kind} check)`);
+  if (!pathsMatchForGuard(expect.project_path, state.project_path)) {
+    throw new BridgeError({
+      kind: "guard",
+      message: "Target guard refused mutation: the open project does not match expect.project_path. Stop and re-read state.",
+      expected: { project_path: expect.project_path },
+      actual: { project_path: state.project_path }
+    });
+  }
+  const verdict = leaveVerdict(state.dirty, args.if_dirty, state.project_path);
+  if (!verdict.proceed) return needsUserResult(state, verdict.reason ?? "The open project has unsaved changes.");
+  if (kind === "open" && target && !fs32.existsSync(target)) {
+    throw new BridgeError({ kind: "guard", message: `Project file does not exist on disk: "${target}".`, expected: { path: target }, actual: { exists: false } });
+  }
+  const hostName = kind === "open" ? "projectsessionOpen" : kind === "new" ? "projectsessionNew" : "projectsessionClose";
+  let backupPath = null;
+  if (args.if_dirty === "save") backupPath = backupProjectFile(state.project_path);
+  const hostArgs2 = { if_dirty: args.if_dirty ?? "ask", backup_taken: backupPath !== null };
+  if (kind === "open") hostArgs2.path = target;
+  const write = { host: hostName, args: hostArgs2, timeoutMs: SLOW_TIMEOUT_MS };
+  let result;
+  try {
+    result = await runGuardedWrite(ctx, {
+      toolName: TOOL2,
+      label: `${TOOL2}(${kind})`,
+      expect,
+      read: () => ({ host: "projectsessionRead", args: {} }),
+      write,
+      check: (_before, after, written) => {
+        if (kind === "open") return openMismatches(target, written, after);
+        return emptyProjectMismatches(kind, written, after);
+      },
+      present: (before, after, written) => {
+        const now = stateOf2(after);
+        return {
+          ...written,
+          // The write's own script read these; the separate read-back is the trusted value.
+          ...now ? { project_path: now.project_path, dirty: now.dirty } : {},
+          action: kind,
+          backup_path: backupPath,
+          notes: kind === "open" ? openNotes(written, after) : [],
+          project: summary(now),
+          previous_project: summary(stateOf2(before)),
+          missing_footage: now?.missing_footage ?? null,
+          baseline: "the open project is the baseline ae_session_changes compares against from now on"
+        };
+      }
+    });
+  } catch (err) {
+    if (!(err instanceof BridgeError && (err.kind === "guard" || err.kind === "queued"))) markReopened();
+    throw err;
+  }
+  if (result.closed_previous === true || result.closed === true) markReopened();
+  if (result.applied !== false && disablePolicyForSwitch()) {
+    return { ...result, policy_disabled: "The timed-save policy was turned off because this tool opened, created or closed a project. Enable it again for this project if the user still wants it." };
+  }
+  return result;
+}
+function markReopened() {
+  try {
+    getSessionTracker()?.markReopened();
+  } catch {
+  }
+}
+function backupProjectFile(projectPath) {
+  if (projectPath === "<unsaved>" || !fs32.existsSync(projectPath)) return null;
+  try {
+    const ext2 = path31.extname(projectPath) || ".aep";
+    const base = path31.basename(projectPath, ext2);
+    const dir = path31.join(path31.dirname(projectPath), "_mcp_backups");
+    fs32.mkdirSync(dir, { recursive: true });
+    const stem = `${base}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
+    let target = path31.join(dir, `${stem}${ext2}`);
+    for (let n = 2; fs32.existsSync(target); n++) target = path31.join(dir, `${stem}-${n}${ext2}`);
+    fs32.copyFileSync(projectPath, target);
+    return target;
+  } catch (err) {
+    throw new BridgeError({
+      kind: "guard",
+      message: `Could not back up the project before saving it, so nothing was changed: ${err instanceof Error ? err.message : String(err)}`,
+      expected: { backup: true },
+      actual: { backup: false }
+    });
+  }
+}
+async function recover(ctx, args) {
+  const state = await readState(ctx, `${TOOL2} (recover list)`);
+  const dirs = recoveryDirs(state.project_path, args.project_dir, args.auto_save_dir);
+  let projectMtime = null;
+  if (state.project_path !== "<unsaved>") {
+    try {
+      projectMtime = fs32.statSync(state.project_path).mtimeMs;
+    } catch {
+      projectMtime = null;
+    }
+  }
+  const scan = { capped_dirs: [] };
+  const files = scanRecoveryFiles(dirs, projectMtime, Date.now(), scan);
+  const base = state.project_path === "<unsaved>" ? null : path31.basename(state.project_path, path31.extname(state.project_path)).toLowerCase();
+  for (const f of files) f.same_project = base === null ? null : f.name.toLowerCase().startsWith(base);
+  if (base !== null) {
+    const ordered = [...files.filter((f) => f.same_project), ...files.filter((f) => !f.same_project)];
+    files.splice(0, files.length, ...ordered);
+  }
+  if (args.path) {
+    const listed = files.find((f) => pathsMatchForGuard(args.path, f.path));
+    if (!listed) {
+      throw new BridgeError({
+        kind: "guard",
+        message: "That file is not one recover lists. Call recover without `path` and pick from its files.",
+        expected: { path: args.path },
+        actual: { listed: files.slice(0, 5).map((f) => f.path) }
+      });
+    }
+    const opened = await leaveAndRun(ctx, args, "open", listed.path);
+    const o = opened;
+    if (o.applied === false || o.opened !== true) return { ...opened, recover_target: listed.path };
+    return {
+      ...opened,
+      recovered_from: { source: listed.source, name: listed.name, modified_at: listed.modified_at },
+      note: "The open project is the recovery copy, not the original. Ask the user to Save As over the original or to a new name before working on it: otherwise ae_save, timed saves and auto checkpoints write into the recovery folder."
+    };
+  }
+  const limit = args.limit ?? 20;
+  return {
+    project_path: state.project_path,
+    dirty: state.dirty,
+    searched: dirs.map((d) => ({ source: d.source, dir: d.dir, exists: fs32.existsSync(d.dir) })),
+    files: files.slice(0, limit),
+    total: files.length,
+    truncated: files.length > limit,
+    scan_truncated: scan.capped_dirs.length > 0,
+    capped_dirs: scan.capped_dirs,
+    hint: dirs.length === 0 ? "The open project has never been saved: pass project_dir (the folder it would be in) or auto_save_dir." : "Pick a file and call recover again with its `path` to open it. Files with newer_than_project may hold work the saved project lacks; same_project is true for files named after the open project (the others belong to other projects)."
+  };
+}
+async function autosave(ctx, args) {
+  if (args.policy) {
+    const p2 = args.policy;
+    if (!p2.enabled) {
+      setAutosavePolicy(ctx, { enabled: false });
+      return { action: "autosave", changed: "policy", policy: policyStatus() };
+    }
+    const target = args.expect.project_path;
+    const state2 = await readState(ctx, `${TOOL2} (policy target)`);
+    if (state2.project_path === "<unsaved>" || !pathsMatchForGuard(target, state2.project_path)) {
+      throw new BridgeError({
+        kind: "guard",
+        message: state2.project_path === "<unsaved>" ? "The open project has never been saved, so a timed save has no file to write. Save it once in After Effects first." : "expect.project_path is not the open project. The timed save is tied to one project: re-read the state and try again.",
+        expected: { project_path: target },
+        actual: { project_path: state2.project_path }
+      });
+    }
+    setAutosavePolicy(ctx, { enabled: true, project_path: state2.project_path, after_writes: p2.after_writes, after_minutes: p2.after_minutes });
+    return { action: "autosave", changed: "policy", policy: policyStatus() };
+  }
+  if (args.set) {
+    ctx.quarantine.assertClear();
+    const expect = args.expect;
+    const result = await runGuardedWrite(ctx, {
+      toolName: TOOL2,
+      label: `${TOOL2}(autosave set)`,
+      expect,
+      read: () => ({ host: "projectsessionPrefs", args: {} }),
+      write: { host: "projectsessionPrefsSet", args: { set: args.set } },
+      check: (_before, after, written) => prefsMismatches(written, after),
+      present: (_before, after, written) => ({
+        ...written,
+        action: "autosave",
+        auto_save: after,
+        note: "After Effects may read these preferences only at its next launch. The read-back shows what the preferences hold, not what the running session uses."
+      })
+    });
+    return result;
+  }
+  const prefs = await ctx.bridge.callHost("projectsessionPrefs", { probe: args.probe ?? [] }, {
+    label: `${TOOL2} (autosave read)`,
+    mutates: false,
+    toolName: TOOL2
+  });
+  const state = await readState(ctx, `${TOOL2} (autosave state)`);
+  const p = prefs.result;
+  const notFound = ["enabled", "interval_minutes", "max_versions"].filter((f) => !p.fields[f]);
+  return {
+    action: "autosave",
+    project_path: state.project_path,
+    dirty: state.dirty,
+    auto_save: p,
+    not_found: notFound,
+    policy: policyStatus(),
+    hint: notFound.length > 0 ? "Some Auto-Save preference keys were not found under the names probed (they are undocumented). Pass `probe` to look up others, or ask the user to check Edit > Preferences > Auto-Save." : "AE's own Auto-Save writes rolling copies without touching the project file; prefer it. Ask the user before changing it."
+  };
+}
+var fs32, path31, ACTIONS, ABSOLUTE_PATH, MAX_RECOVERY_FILES, MAX_SCAN_PER_DIR, MIN_POLICY_MINUTES, MAX_POLICY_BACKUPS, AUTO_SAVE_FOLDER, SetPrefsSchema, PolicySchema, ProbeSchema, AeProjectSessionSchema, summary, stateOf2, TOOL2, TICK_MS, policyState, defaultMtime, defaultDialogs, defaultSave, projectsessionTools;
+var init_projectsession = __esm({
+  "src/tools/ext/projectsession.ts"() {
+    "use strict";
+    fs32 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_common();
+    init_mutate();
+    init_dialogs();
+    init_session();
+    init_write_runner();
+    ACTIONS = ["open", "new", "close", "recover", "autosave"];
+    ABSOLUTE_PATH = /^([A-Za-z]:[\\/]|\/|\\\\)/;
+    MAX_RECOVERY_FILES = 100;
+    MAX_SCAN_PER_DIR = 5e3;
+    MIN_POLICY_MINUTES = 5;
+    MAX_POLICY_BACKUPS = 10;
+    AUTO_SAVE_FOLDER = /^Adobe After Effects.*Auto-Save$/i;
+    SetPrefsSchema = external_exports.object({
+      enabled: external_exports.boolean().optional().describe("Turn AE's Auto-Save on or off."),
+      interval_minutes: external_exports.number().int().min(1).max(1440).optional().describe("Save every N minutes."),
+      max_versions: external_exports.number().int().min(1).max(1e3).optional().describe("Maximum project versions to keep.")
+    }).refine((s) => s.enabled !== void 0 || s.interval_minutes !== void 0 || s.max_versions !== void 0, {
+      message: "set needs at least one of enabled, interval_minutes, max_versions."
+    });
+    PolicySchema = external_exports.object({
+      enabled: external_exports.boolean().describe("Turn the server's timed save on or off."),
+      after_writes: external_exports.number().int().min(1).max(200).optional().describe("Save once this many agent writes are unsaved (1-200: the write log holds only the latest 200 writes per project)."),
+      after_minutes: external_exports.number().min(MIN_POLICY_MINUTES).max(240).optional().describe("Save once this many minutes have passed since the last save. At least 5: every timed save also copies the whole .aep to _mcp_backups.")
+    }).refine((p) => !p.enabled || p.after_writes !== void 0 || p.after_minutes !== void 0, {
+      message: "Turning the policy on needs after_writes, after_minutes or both."
+    });
+    ProbeSchema = external_exports.object({
+      section: external_exports.string().min(1).max(200),
+      key: external_exports.string().min(1).max(200),
+      type: external_exports.enum(["bool", "long", "float", "string"]).optional().describe("Default long.")
+    });
+    AeProjectSessionSchema = external_exports.object({
+      action: external_exports.enum(ACTIONS).describe(
+        "open: open a project file. new: create an empty project. close: close the open project. recover: list the newest Auto-Save, backup and checkpoint files (add `path` to open one). autosave: read AE's Auto-Save preferences and the server's timed-save policy; change them with `set` or `policy`."
+      ),
+      expect: ExpectSchema.optional().describe(
+        "Required for open, new, close, recover with `path`, and autosave with `set` or an enabled `policy`. Not needed for reads."
+      ),
+      path: external_exports.string().min(1).max(4096).optional().describe("open: the absolute path of the .aep or .aepx to open. recover: one of the files recover listed, to open."),
+      if_dirty: external_exports.enum(["ask", "save", "discard"]).optional().describe(
+        "What to do when the open project has unsaved changes (or AE won't say). Default 'ask': nothing happens and the result has needs_user. Ask the user first (ae_ask_user), then call again with 'save' (closes with a save; the project must have a file) or 'discard' (throws the unsaved changes away; use it only on an explicit yes)."
+      ),
+      project_dir: external_exports.string().min(1).max(4096).optional().describe("recover: the folder to search when the open project has never been saved (or none is open)."),
+      auto_save_dir: external_exports.string().min(1).max(4096).optional().describe("recover: a custom Auto-Save folder, if the user set one in Preferences."),
+      limit: external_exports.number().int().min(1).max(MAX_RECOVERY_FILES).optional().describe("recover: how many files to list. Default 20."),
+      set: SetPrefsSchema.optional().describe(
+        "autosave: change AE's Auto-Save preferences. Only keys the read found are written, and AE may apply them only at its next launch."
+      ),
+      policy: PolicySchema.optional().describe(
+        "autosave: the opt-in server policy that saves the project after N unsaved writes or M minutes. It overwrites the user's .aep while they edit, so enable it only on request."
+      ),
+      probe: external_exports.array(ProbeSchema).max(20).optional().describe("autosave: extra preference section/key pairs to look up, to find the real Auto-Save names."),
+      user_confirmed: external_exports.boolean().optional().describe("Must be true to use autosave `set`, to enable autosave `policy`, and to use if_dirty 'discard' (open, new, close, recover). Set it only after the user said yes.")
+    }).superRefine((v, ctx) => {
+      const issue = (message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+      const mutating = v.action === "open" || v.action === "new" || v.action === "close" || v.action === "recover" && v.path !== void 0 || v.action === "autosave" && v.set !== void 0;
+      if (mutating && !v.expect) issue("expect is required for this action.");
+      if (v.action === "autosave" && v.policy?.enabled === true && !v.expect) {
+        issue("Enabling the policy needs expect.project_path: the policy saves only that project.");
+      }
+      if (v.action === "open") {
+        if (!v.path) issue("open needs path.");
+      }
+      if (v.path !== void 0 && v.action !== "open" && v.action !== "recover") issue("path applies to open and recover only.");
+      if (v.path !== void 0 && !ABSOLUTE_PATH.test(v.path)) issue("path must be absolute.");
+      if (v.path !== void 0 && (v.action === "open" || v.action === "recover") && !/\.aepx?$/i.test(v.path)) issue("path must be an .aep or .aepx file.");
+      if (v.project_dir !== void 0 && !ABSOLUTE_PATH.test(v.project_dir)) issue("project_dir must be absolute.");
+      if (v.auto_save_dir !== void 0 && !ABSOLUTE_PATH.test(v.auto_save_dir)) issue("auto_save_dir must be absolute.");
+      if (v.if_dirty !== void 0 && !["open", "new", "close", "recover"].includes(v.action)) issue("if_dirty applies to open, new, close and recover.");
+      if ((v.project_dir !== void 0 || v.auto_save_dir !== void 0 || v.limit !== void 0) && v.action !== "recover") {
+        issue("project_dir, auto_save_dir and limit apply to recover only.");
+      }
+      if ((v.set !== void 0 || v.policy !== void 0 || v.probe !== void 0) && v.action !== "autosave") {
+        issue("set, policy and probe apply to autosave only.");
+      }
+      if (v.if_dirty === "discard" && v.user_confirmed !== true) {
+        issue("if_dirty 'discard' throws away unsaved changes: ask the user first (ae_ask_user), then call again with user_confirmed: true.");
+      }
+      if (v.set !== void 0 && v.policy !== void 0) issue("Give set or policy, not both.");
+      if (v.set !== void 0 && v.user_confirmed !== true) issue("set needs user_confirmed: true, after the user said yes.");
+      if (v.policy?.enabled === true && v.user_confirmed !== true) issue("Enabling the policy needs user_confirmed: true, after the user said yes.");
+    });
+    summary = (s) => s ? { project_path: s.project_path, dirty: s.dirty, num_items: s.num_items } : null;
+    stateOf2 = (v) => v && typeof v === "object" ? v : null;
+    TOOL2 = "ae_project_session";
+    TICK_MS = 3e4;
+    policyState = {
+      policy: { enabled: false },
+      started_at: 0,
+      timer: null,
+      ctx: null,
+      ticking: false,
+      auto_saves: 0,
+      last_auto_save_at: null,
+      last_skip: null,
+      last_error: null,
+      last_save_matched: null,
+      own_backups: []
+    };
+    defaultMtime = (p) => {
+      try {
+        return fs32.statSync(p).mtimeMs;
+      } catch {
+        return null;
+      }
+    };
+    defaultDialogs = async () => {
+      const res = await listBlockingDialogs({ screenshots: false });
+      return res.ok ? res.dialogs ?? [] : null;
+    };
+    defaultSave = async (ctx, projectPath) => {
+      const save = mutateTools.find((t) => t.name === "ae_save");
+      if (!save) throw new Error("ae_save is not registered.");
+      return save.handler({ expect: { project_path: projectPath }, backup: true }, ctx);
+    };
+    projectsessionTools = [
+      {
+        name: "ae_project_session",
+        description: "Open, create, close and recover After Effects projects without losing work, and manage AE's Auto-Save. open / new / close read the unsaved-changes flag first. With unsaved changes the result is `needs_user` (save, discard or cancel) and nothing is touched: ask the user (ae_ask_user), then repeat with `if_dirty: 'save'` or `'discard'`. The save prompt is never suppressed; if AE raises a dialog (missing footage or fonts, a file converted from an older version), it blocks until answered, so read it with ae_dialogs and answer through the user or ae_dialog_respond. After open, a separate read-back reports the open path, dirty flag, item count and missing footage (`missing_footage.count`, with paths), and the session tracker takes the project as its new baseline. Opening, creating or closing a project ends the undo history of the old one (Ctrl+Z cannot reach earlier steps), and these calls add no undo step. A file that fails to open leaves an untitled project; the host then re-opens the previous file when it was clean or just saved (`restored_previous`). `if_dirty: 'save'` first copies the .aep to `_mcp_backups` (`backup_path`) and then closes with a save (the host refuses to save without that copy). `if_dirty: 'discard'` also needs `user_confirmed: true`, set only after the user said yes. open and recover `path` and recover `project_dir` / `auto_save_dir` must be absolute; open and recover `path` must end in .aep or .aepx. The write may take up to 10 minutes (a very large project, or a dialog the user answers slowly) before it times out. recover lists the newest .aep/.aepx files (by modified time) in AE's Auto-Save folder next to the project, `_mcp_backups` and `_mcp_checkpoints`; repeat with `path` to open one. A custom Auto-Save folder is passed as `auto_save_dir`. autosave with no `set` or `policy` reads AE's Auto-Save preferences (the key names are undocumented: the host probes likely ones and says which it found; add `probe` to look up others) and `saveProjectOnCrash`. `set` changes found keys only after the user said yes (`user_confirmed: true`), and AE may apply them at its next launch. `policy` is an opt-in server timer (needs `expect.project_path`, the open saved project, which it is tied to; M is at least 5 minutes) that saves after N unsaved writes or M minutes (ae_save, backup first), only when that project is still open, has been saved before, is dirty, nothing is queued or running and no dialog is open. It overwrites the user's .aep while they edit and writes a full copy to `_mcp_backups` each time (it deletes its own oldest copies beyond 10, only those made since it was last enabled in this server session), so enable it only on request. It turns itself off when this tool opens, creates or closes a project (including re-opening the same one), stays in server memory, and reports `unsaved_writes` (the agent's writes since the last save, from the session write log when session tracking is on, else null) and `last_save_matched`; a timed save whose receipt does not match is not counted. Mutating actions take `expect`. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeProjectSessionSchema,
+        handler: async (args, ctx) => {
+          switch (args.action) {
+            case "open":
+              return leaveAndRun(ctx, args, "open", args.path);
+            case "new":
+              return leaveAndRun(ctx, args, "new");
+            case "close":
+              return leaveAndRun(ctx, args, "close");
+            case "recover":
+              return recover(ctx, args);
+            default:
+              return autosave(ctx, args);
+          }
+        }
+      }
+    ];
   }
 });
 
 // src/tools/ext/brief.ts
 function briefPath(projectPath) {
-  return path23.join(path23.dirname(projectPath), `${path23.basename(projectPath, path23.extname(projectPath))}.brief.json`);
+  return path32.join(path32.dirname(projectPath), `${path32.basename(projectPath, path32.extname(projectPath))}.brief.json`);
 }
 function isEmpty(v) {
   if (v === void 0 || v === null || v === "") return true;
@@ -22520,7 +31821,7 @@ function isEmpty(v) {
 }
 function readBrief(file) {
   try {
-    const parsed = JSON.parse(fs24.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs33.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -22552,12 +31853,12 @@ async function openProjectPath(ctx) {
 function isLinear(c) {
   return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
 }
-var fs24, path23, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
+var fs33, path32, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
 var init_brief = __esm({
   "src/tools/ext/brief.ts"() {
     "use strict";
-    fs24 = __toESM(require("node:fs"), 1);
-    path23 = __toESM(require("node:path"), 1);
+    fs33 = __toESM(require("node:fs"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     BriefFieldsSchema = external_exports.object({
@@ -22650,8 +31951,8 @@ var init_brief = __esm({
             }
             brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
             const tmp = `${file}.tmp-${process.pid}`;
-            fs24.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
-            fs24.renameSync(tmp, file);
+            fs33.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
+            fs33.renameSync(tmp, file);
             saved = true;
           }
           const missing = missingFields(brief);
@@ -22721,7 +32022,7 @@ function compSettingsMismatches(args, beforeRaw, afterRaw, written) {
   const after = infoOf2(afterRaw);
   if (!after) return m;
   const s = args.settings ?? {};
-  const unreadable2 = new Set(after.unreadable ?? []);
+  const unreadable3 = new Set(after.unreadable ?? []);
   const missing = (key) => {
     m.push({ path: `settings.${key}`, expected: s[key], actual: void 0, message: "This setting could not be read back" });
   };
@@ -22745,7 +32046,7 @@ function compSettingsMismatches(args, beforeRaw, afterRaw, written) {
     else expectThat(m, after.display_start_frame === s.display_start_frame, "settings.display_start_frame", s.display_start_frame, after.display_start_frame, "Start frame differs");
   }
   if (s.renderer !== void 0) {
-    if (unreadable2.has("renderer") || after.renderer === void 0) missing("renderer");
+    if (unreadable3.has("renderer") || after.renderer === void 0) missing("renderer");
     else expectThat(m, after.renderer === s.renderer, "settings.renderer", s.renderer, after.renderer, "Renderer differs");
   }
   if (s.resolution_factor !== void 0) {
@@ -22772,7 +32073,7 @@ function compSettingsMismatches(args, beforeRaw, afterRaw, written) {
     if (applied.length !== args.guides.length) {
       m.push({ path: "guides", expected: args.guides.length, actual: applied.length, message: "The host applied a different number of guide operations" });
     }
-    if (before && !before.guides_truncated && !after.guides_truncated && !unreadable2.has("guides")) {
+    if (before && !before.guides_truncated && !after.guides_truncated && !unreadable3.has("guides")) {
       const want = simulateGuides(before.guides, applied);
       expectThat(m, after.guide_count === want.length, "guides.length", want.length, after.guide_count, "Guide count differs");
       if (after.guide_count === want.length) {
@@ -23005,7 +32306,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs25.readFileSync(filePath, "utf8");
+  const text = fs34.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -23026,8 +32327,8 @@ function cellValue(target, cell) {
   if (target === "text") return { value: String(cell) };
   if (target === "footage") {
     const p = String(cell).trim();
-    if (!path24.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs25.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!path33.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs34.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -23086,10 +32387,10 @@ function prepareRows(rows, mapping, namePattern2, templateName) {
 function normText(s) {
   return s.replace(/\r\n?/g, "\n");
 }
-function checkBuild(prepared, mapping, read) {
+function checkBuild(prepared, mapping, read2) {
   const mismatches = [];
   const offFrame = [];
-  read.forEach((c, ci) => {
+  read2.forEach((c, ci) => {
     const row = prepared[ci];
     mapping.forEach((m, mi) => {
       const expected = row?.values[mi];
@@ -23194,12 +32495,12 @@ async function templateInfo(ctx, compId) {
   });
   return res.result;
 }
-var fs25, path24, DataMappingSchema, AeBuildFromDataSchema, dataTools;
+var fs34, path33, DataMappingSchema, AeBuildFromDataSchema, dataTools;
 var init_data = __esm({
   "src/tools/ext/data.ts"() {
     "use strict";
-    fs25 = __toESM(require("node:fs"), 1);
-    path24 = __toESM(require("node:path"), 1);
+    fs34 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -23238,7 +32539,7 @@ var init_data = __esm({
         handler: async (args, ctx) => {
           let rows;
           if (args.data_path) {
-            if (!path24.isAbsolute(args.data_path) || !fs25.existsSync(args.data_path)) {
+            if (!path33.isAbsolute(args.data_path) || !fs34.existsSync(args.data_path)) {
               return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
             }
             try {
@@ -23465,22 +32766,22 @@ function walkPresetsUnfiltered(folders, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs26.readdirSync(dir, { withFileTypes: true });
+        entries = fs35.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path25.join(dir, e.name);
+        const full = path34.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const rawCategory = path25.relative(folder.path, dir).split(path25.sep).join("/");
+          const rawCategory = path34.relative(folder.path, dir).split(path34.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           all.push({
             name,
             path: full,
-            category: rawCategory || path25.basename(folder.path),
+            category: rawCategory || path34.basename(folder.path),
             matchKey: `${rawCategory}/${name}`.toLowerCase(),
             source: kind
           });
@@ -23507,12 +32808,12 @@ function findPresets(folders, filter, source) {
   const presets = matched.map(({ matchKey, ...rest }) => rest);
   return { presets, scanned: cached.scanned };
 }
-var fs26, path25, EffectSelectorSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, effectsTools;
+var fs35, path34, EffectSelectorSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, effectsTools;
 var init_effects = __esm({
   "src/tools/ext/effects.ts"() {
     "use strict";
-    fs26 = __toESM(require("node:fs"), 1);
-    path25 = __toESM(require("node:path"), 1);
+    fs35 = __toESM(require("node:fs"), 1);
+    path34 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -23640,12 +32941,12 @@ var init_effects = __esm({
         description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
         schema: AeApplyPresetSchema,
         handler: async (args, ctx) => {
-          if (!path25.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs26.existsSync(args.preset_path)) {
+          if (!path34.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs35.existsSync(args.preset_path)) {
             return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
           }
           return runEffectWrite(args, ctx, {
             toolName: "ae_apply_preset",
-            label: `ae_apply_preset(${path25.basename(args.preset_path)})`,
+            label: `ae_apply_preset(${path34.basename(args.preset_path)})`,
             host: "applyPreset",
             hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
             check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -23923,12 +33224,12 @@ function detectScreenColor(img, minCoverage = 0.1) {
   const blue = pick(2);
   const best = green.coverage >= blue.coverage ? { ...green, kind: "green" } : { ...blue, kind: "blue" };
   if (best.coverage < minCoverage) return null;
-  const median2 = (v) => {
+  const median3 = (v) => {
     const s = [...v].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
-  const round = (v) => Math.round(v * 1e3) / 1e3;
-  return { color: [round(median2(best.rs)), round(median2(best.gs)), round(median2(best.bs))], kind: best.kind, coverage: round(best.coverage) };
+  const round5 = (v) => Math.round(v * 1e3) / 1e3;
+  return { color: [round5(median3(best.rs)), round5(median3(best.gs)), round5(median3(best.bs))], kind: best.kind, coverage: round5(best.coverage) };
 }
 function measureKey(before, after, screen, edge = 3) {
   const { width: w, height: h } = before;
@@ -23991,18 +33292,18 @@ function measureKey(before, after, screen, edge = 3) {
       }
     }
   }
-  const pct = (v, of) => of > 0 ? Math.round(v / of * 1e4) / 100 : 0;
+  const pct2 = (v, of) => of > 0 ? Math.round(v / of * 1e4) / 100 : 0;
   const r4 = (v) => Math.round(v * 1e4) / 1e4;
   return {
-    screen_pixels_pct: pct(screenCount, n),
-    subject_pixels_pct: pct(subject, n),
-    screen_left_pct: pct(screenLeft, screenCount),
+    screen_pixels_pct: pct2(screenCount, n),
+    subject_pixels_pct: pct2(subject, n),
+    screen_left_pct: pct2(screenLeft, screenCount),
     screen_residual_alpha: screenCount ? r4(residual / screenCount) : 0,
-    holes_pct: pct(holes, subject),
+    holes_pct: pct2(holes, subject),
     spill_before: spillN ? r4(spillB / spillN) : 0,
     spill_after: spillN ? r4(spillA / spillN) : 0,
     subject_color_shift: spillN ? r4(shift / spillN) : 0,
-    recoloured_pct: pct(recoloured, spillN)
+    recoloured_pct: pct2(recoloured, spillN)
   };
 }
 function worstMetrics(all) {
@@ -24061,11 +33362,11 @@ function keyAdvice(m, kl, target) {
   }
   return { verdict: findings.length === 0 ? "clean" : "needs_work", findings };
 }
-function keyPreview(pairs, tile = 480) {
-  const fit = fitWithin(pairs[0].before.width, pairs[0].before.height, tile);
+function keyPreview(pairs2, tile = 480) {
+  const fit = fitWithin(pairs2[0].before.width, pairs2[0].before.height, tile);
   const gap = 6;
-  const out = createCanvas(fit.width * 2 + gap * 3, (fit.height + gap) * pairs.length + gap, [24, 24, 24, 255]);
-  pairs.forEach((p, row) => {
+  const out = createCanvas(fit.width * 2 + gap * 3, (fit.height + gap) * pairs2.length + gap, [24, 24, 24, 255]);
+  pairs2.forEach((p, row) => {
     const y = gap + row * (fit.height + gap);
     blit(out, resizeArea(p.before, fit.width, fit.height), gap, y);
     blit(out, flattenOnChecker(resizeArea(p.after, fit.width, fit.height), 8, 90, 60), gap * 2 + fit.width, y);
@@ -24088,12 +33389,12 @@ async function queued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs27, path26, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs36, path35, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs27 = __toESM(require("node:fs"), 1);
-    path26 = __toESM(require("node:path"), 1);
+    fs36 = __toESM(require("node:fs"), 1);
+    path35 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -24131,7 +33432,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs27.mkdirSync(framesDir, { recursive: true });
+          fs36.mkdirSync(framesDir, { recursive: true });
           const label = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -24225,12 +33526,12 @@ var init_key = __esm({
           }
           const analyse = () => {
             const kl = run.info.keylight;
-            const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-            const previewPath = path26.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs27.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            const pairs2 = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
+            const previewPath = path35.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+            fs36.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
-            const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
-            const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before, p.after, run.screen)) : [];
+            const canMeasure = below.length === 0 && pairs2.every((p) => p.before !== null) && run.screen !== null;
+            const perFrame = canMeasure ? pairs2.map((p) => measureKey(p.before, p.after, run.screen)) : [];
             const worst = perFrame.length ? worstMetrics(perFrame) : null;
             const target = {
               comp_id: args.comp_id,
@@ -24400,8 +33701,8 @@ var init_keyframes = __esm({
           const badIndex = (snap2) => (args.keys ?? []).find((i) => i > snap2.numKeys);
           if (args.dry_run) {
             const snap2 = (await readSelection("ae_remove_keyframes (dry run)")).result;
-            const bad3 = badIndex(snap2);
-            if (bad3 !== void 0) return { ok: false, error: "bad_args", message: `Key ${bad3} out of range (1..${snap2.numKeys})` };
+            const bad4 = badIndex(snap2);
+            if (bad4 !== void 0) return { ok: false, error: "bad_args", message: `Key ${bad4} out of range (1..${snap2.numKeys})` };
             const would = selectKeys(snap2.keys, args);
             const count = selectionCount(snap2, args);
             const truncated = snap2.truncated === true;
@@ -24753,20 +34054,20 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
   }
   if (args.action === "trim") {
     const tol = (after.frameDuration ?? 0.05) * 1.01 + 1e-6;
-    const near5 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
+    const near6 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
     for (const t of w.trims ?? []) {
       if (!w.applied_ids?.includes(t.id)) {
         const lb = byId(before, t.id);
         const la = byId(after, t.id);
         if (!la || !lb) continue;
-        const pairs = [
+        const pairs2 = [
           ["startTime", la.startTime, lb.startTime, t.start_time],
           ["inPoint", la.inPoint, lb.inPoint, t.in_point],
           ["outPoint", la.outPoint, lb.outPoint, t.out_point]
         ];
-        for (const [field, got, was, planned] of pairs) {
+        for (const [field, got, was, planned] of pairs2) {
           if (got === void 0 || was === void 0) continue;
-          if (!near5(got, was) && !near5(got, planned)) {
+          if (!near6(got, was) && !near6(got, planned)) {
             m.push({ path: `layer[${la.name}].${field}`, expected: was, actual: got, message: `"${la.name}" was reported as not trimmed but its ${field} changed` });
           }
         }
@@ -24862,8 +34163,8 @@ function hostArgs(args) {
 async function dryRun(args, ctx) {
   const label = `ae_layer_ops(${args.action}, dry run)`;
   const base = { mutates: false, toolName: "ae_layer_ops" };
-  const read = opsRead(args);
-  const beforeRes = await ctx.bridge.callHost(read.host, read.args, { label: `${label} (read)`, ...base });
+  const read2 = opsRead(args);
+  const beforeRes = await ctx.bridge.callHost(read2.host, read2.args, { label: `${label} (read)`, ...base });
   const planRes = await ctx.bridge.callHost("layeropsPlan", hostArgs(args), { label, ...base });
   const plan2 = planRes.result;
   const before = stackOf(beforeRes.result);
@@ -25072,38 +34373,38 @@ var init_layerops = __esm({
       expect: ExpectSchema
     });
     AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
-      const bad3 = (message, path35) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path35 ? [path35] : void 0 });
+      const bad4 = (message, path44) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path44 ? [path44] : void 0 });
       const allowed = new Set(ACTION_FIELDS[v.action]);
       for (const key of ALL_ACTION_FIELDS) {
-        if (!allowed.has(key) && v[key] !== void 0) bad3(`${key} does not apply to the ${v.action} action.`, key);
+        if (!allowed.has(key) && v[key] !== void 0) bad4(`${key} does not apply to the ${v.action} action.`, key);
       }
-      if (v.action !== "sort" && v.layers === void 0 && v.where === void 0) bad3(`${v.action} needs layers or where.`, "layers");
-      if (v.where !== void 0 && Object.values(v.where).every((x) => x === void 0)) bad3("where is empty; give at least one field.", "where");
+      if (v.action !== "sort" && v.layers === void 0 && v.where === void 0) bad4(`${v.action} needs layers or where.`, "layers");
+      if (v.where !== void 0 && Object.values(v.where).every((x) => x === void 0)) bad4("where is empty; give at least one field.", "where");
       if (v.action === "parent") {
-        if (v.unparent && v.parent) bad3("Give parent or unparent, not both.", "parent");
-        if (!v.unparent && !v.parent) bad3("parent needs the new parent layer, or unparent: true.", "parent");
-        if (v.unparent && v.keep_position === false) bad3("keep_position false needs a new parent; unparent: true keeps the position.", "keep_position");
+        if (v.unparent && v.parent) bad4("Give parent or unparent, not both.", "parent");
+        if (!v.unparent && !v.parent) bad4("parent needs the new parent layer, or unparent: true.", "parent");
+        if (v.unparent && v.keep_position === false) bad4("keep_position false needs a new parent; unparent: true keeps the position.", "keep_position");
       }
       if (v.action === "reorder") {
-        if (!v.move_to) bad3("reorder needs move_to.", "move_to");
-        if ((v.move_to === "before" || v.move_to === "after") && !v.relative_to) bad3(`move_to ${v.move_to} needs relative_to.`, "relative_to");
-        if ((v.move_to === "beginning" || v.move_to === "end") && v.relative_to) bad3("relative_to goes with move_to before or after.", "relative_to");
+        if (!v.move_to) bad4("reorder needs move_to.", "move_to");
+        if ((v.move_to === "before" || v.move_to === "after") && !v.relative_to) bad4(`move_to ${v.move_to} needs relative_to.`, "relative_to");
+        if ((v.move_to === "beginning" || v.move_to === "end") && v.relative_to) bad4("relative_to goes with move_to before or after.", "relative_to");
       }
-      if (v.action === "sort" && !v.sort_by) bad3("sort needs sort_by.", "sort_by");
+      if (v.action === "sort" && !v.sort_by) bad4("sort needs sort_by.", "sort_by");
       if (v.action === "duplicate" && v.to_comp_id !== void 0) {
-        if (v.to_comp_id === v.comp_id) bad3("to_comp_id is the same comp; leave it out to duplicate in place.", "to_comp_id");
-        if (v.count !== void 0 && v.count > 1) bad3("count above 1 works for duplicates in the same comp only.", "count");
+        if (v.to_comp_id === v.comp_id) bad4("to_comp_id is the same comp; leave it out to duplicate in place.", "to_comp_id");
+        if (v.count !== void 0 && v.count > 1) bad4("count above 1 works for duplicates in the same comp only.", "count");
       }
       if (v.action === "trim") {
-        if (v.in_point === void 0 && v.out_point === void 0 && v.start_time === void 0) bad3("trim needs in_point, out_point or start_time.", "in_point");
-        if (v.in_point !== void 0 && v.out_point !== void 0 && v.in_point >= v.out_point) bad3("in_point must be before out_point.", "in_point");
+        if (v.in_point === void 0 && v.out_point === void 0 && v.start_time === void 0) bad4("trim needs in_point, out_point or start_time.", "in_point");
+        if (v.in_point !== void 0 && v.out_point !== void 0 && v.in_point >= v.out_point) bad4("in_point must be before out_point.", "in_point");
       }
       if (v.action === "rename") {
-        if (v.find === void 0 && v.template === void 0) bad3("rename needs find (with replace) or template.", "find");
-        if (v.replace !== void 0 && v.find === void 0) bad3("replace goes with find.", "replace");
+        if (v.find === void 0 && v.template === void 0) bad4("rename needs find (with replace) or template.", "find");
+        if (v.replace !== void 0 && v.find === void 0) bad4("replace goes with find.", "replace");
       }
       if (v.action === "switches" && SWITCH_FIELDS.every((k) => v[k] === void 0)) {
-        bad3(`switches needs at least one of: ${SWITCH_FIELDS.join(", ")}.`, "shy");
+        bad4(`switches needs at least one of: ${SWITCH_FIELDS.join(", ")}.`, "shy");
       }
     });
     MAX_WARNINGS = 100;
@@ -25524,9 +34825,9 @@ var init_layers = __esm({
 });
 
 // src/style.ts
-function hexToRgb(hex2) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex2.trim());
-  if (!m) throw new Error(`Not a #rrggbb colour: ${hex2}`);
+function hexToRgb(hex4) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex4.trim());
+  if (!m) throw new Error(`Not a #rrggbb colour: ${hex4}`);
   const n = parseInt(m[1], 16);
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 }
@@ -25558,9 +34859,9 @@ function isNeutral(c) {
 }
 function nearestBrand(c, palette) {
   let best = null;
-  for (const hex2 of palette) {
-    const d = deltaE(c, hexToRgb(hex2));
-    if (!best || d < best.delta_e) best = { hex: hex2.toLowerCase(), delta_e: Math.round(d * 10) / 10 };
+  for (const hex4 of palette) {
+    const d = deltaE(c, hexToRgb(hex4));
+    if (!best || d < best.delta_e) best = { hex: hex4.toLowerCase(), delta_e: Math.round(d * 10) / 10 };
   }
   return best;
 }
@@ -25593,7 +34894,7 @@ function alignMismatches(args, afterRaw, written) {
     m.push({ path: "layers", expected: after.layers.length, actual: rects.length, message: "Some boxes could not be read back" });
     return m;
   }
-  const near5 = (a, b) => Math.abs(a - b) <= 0.5;
+  const near6 = (a, b) => Math.abs(a - b) <= 0.5;
   if (args.align) {
     const edge = {
       left: (r) => [r[0], box[0]],
@@ -25605,13 +34906,13 @@ function alignMismatches(args, afterRaw, written) {
     };
     after.layers.forEach((l, i) => {
       const [got, want] = edge[args.align](rects[i]);
-      expectThat(m, near5(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
+      expectThat(m, near6(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
     });
   } else {
     const h = args.distribute === "horizontal";
     const cs = rects.map((r) => centre(r, h)).sort((a, b) => a - b);
     const step2 = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
-    cs.forEach((c, i) => expectThat(m, near5(c, cs[0] + step2 * i), `centres[${i}]`, Math.round((cs[0] + step2 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
+    cs.forEach((c, i) => expectThat(m, near6(c, cs[0] + step2 * i), `centres[${i}]`, Math.round((cs[0] + step2 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
   }
   return m;
 }
@@ -25642,21 +34943,21 @@ function styleFindings(layers, opts) {
     const seen = /* @__PURE__ */ new Set();
     for (const c of l.colours) {
       if (!c.rgb) continue;
-      const hex2 = rgbToHex(c.rgb);
-      if (seen.has(hex2)) continue;
-      seen.add(hex2);
+      const hex4 = rgbToHex(c.rgb);
+      if (seen.has(hex4)) continue;
+      seen.add(hex4);
       if (opts.neutrals_ok && isNeutral(c.rgb)) continue;
-      const near5 = nearestBrand(c.rgb, opts.brand_colors);
-      if (near5 && near5.delta_e > opts.tolerance) {
+      const near6 = nearestBrand(c.rgb, opts.brand_colors);
+      if (near6 && near6.delta_e > opts.tolerance) {
         out.push({
           severity: "low",
           kind: "off_palette_colour",
           layer,
-          message: `"${l.name}" uses ${hex2} (${c.where}), ${near5.delta_e} delta E from the nearest brand colour ${near5.hex}.`,
-          colour: hex2,
+          message: `"${l.name}" uses ${hex4} (${c.where}), ${near6.delta_e} delta E from the nearest brand colour ${near6.hex}.`,
+          colour: hex4,
           where: c.where,
-          nearest: near5.hex,
-          delta_e: near5.delta_e
+          nearest: near6.hex,
+          delta_e: near6.delta_e
         });
       }
     }
@@ -25668,12 +34969,12 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs28.rmdirSync(cur);
+      fs37.rmdirSync(cur);
     } catch {
       return;
     }
-    if (path27.resolve(cur) === path27.resolve(top)) return;
-    const up = path27.dirname(cur);
+    if (path36.resolve(cur) === path36.resolve(top)) return;
+    const up = path36.dirname(cur);
     if (up === cur) return;
     cur = up;
   }
@@ -25697,12 +34998,12 @@ function cleanBriefStyle(brief) {
   }
   return { colors, fonts, ignored };
 }
-var fs28, path27, AeAlignSchema, centre, AePurgeUnusedSchema, AeExportMogrtSchema, AeHouseStyleCheckSchema, SAFE_AREA_MAX2, layoutTools;
+var fs37, path36, AeAlignSchema, centre, AePurgeUnusedSchema, AeExportMogrtSchema, AeHouseStyleCheckSchema, SAFE_AREA_MAX2, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs28 = __toESM(require("node:fs"), 1);
-    path27 = __toESM(require("node:path"), 1);
+    fs37 = __toESM(require("node:fs"), 1);
+    path36 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -25776,8 +35077,8 @@ var init_layout = __esm({
         description: "Find project items nothing uses: footage, solids and placeholders in no comp, and optionally empty folders. By default it only lists them; with apply (and expect) it removes them in one undo group, re-checking each is still unused first. Comps are never removed. The read-back (a separate evalScript) checks they are gone. " + AGENT_SAFETY_GUIDANCE,
         schema: AePurgeUnusedSchema,
         handler: async (args, ctx) => {
-          const read = { host: "unusedItems", args: { kinds: args.kinds, empty_folders: args.empty_folders } };
-          const found = (await ctx.bridge.callHost(read.host, read.args, { label: "ae_purge_unused (scan)", mutates: false, toolName: "ae_purge_unused" })).result;
+          const read2 = { host: "unusedItems", args: { kinds: args.kinds, empty_folders: args.empty_folders } };
+          const found = (await ctx.bridge.callHost(read2.host, read2.args, { label: "ae_purge_unused (scan)", mutates: false, toolName: "ae_purge_unused" })).result;
           const keep = new Set(args.keep ?? []);
           const targets = [...found.items, ...found.folders].filter((i) => !keep.has(i.id));
           const cut = found.truncated === true ? { truncated: true, total_unused: found.total_unused, note: "The scan stops at 500 items; apply this list, then run it again for the rest." } : {};
@@ -25788,7 +35089,7 @@ var init_layout = __esm({
             toolName: "ae_purge_unused",
             label: `ae_purge_unused(${ids.length})`,
             expect: args.expect,
-            read: () => read,
+            read: () => read2,
             write: { host: "purgeItems", args: { ids, label: `Remove ${ids.length} unused item${ids.length === 1 ? "" : "s"}` } },
             check: (_before, after) => {
               const left = [...after?.items ?? [], ...after?.folders ?? []].filter((i) => ids.includes(i.id));
@@ -25804,8 +35105,8 @@ var init_layout = __esm({
         schema: AeExportMogrtSchema,
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
-            if (!path27.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs28.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (!path36.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
+            if (fs37.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -25813,7 +35114,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs28.mkdirSync(path27.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs37.mkdirSync(path36.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -25825,15 +35126,15 @@ var init_layout = __esm({
                 });
               } catch (err) {
                 const refused = err instanceof BridgeError && (err.kind === "evalscript_error" || err.kind === "guard");
-                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path27.dirname(args.path), createdDir);
+                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path36.dirname(args.path), createdDir);
                 throw err;
               }
               const r = res.result;
-              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path27.dirname(args.path), createdDir);
+              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path36.dirname(args.path), createdDir);
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs28.statSync(args.path);
+                  const st = fs37.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -25866,9 +35167,9 @@ var init_layout = __esm({
           try {
             gathered = await ctx.queue.run(`ae_house_style_check(${args.comp_id})`, async () => {
               let n = 0;
-              const read = (fn, hostArgs2, what) => ctx.bridge.evalRaw({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs2), label: `${label} (${what})`, mutates: false, toolName: label });
-              const status2 = (await read("status", {}, "status")).result;
-              const scan2 = (await read("styleScan", { comp_id: args.comp_id, time: args.time }, "scan")).result;
+              const read2 = (fn, hostArgs2, what) => ctx.bridge.evalRaw({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs2), label: `${label} (${what})`, mutates: false, toolName: label });
+              const status2 = (await read2("status", {}, "status")).result;
+              const scan2 = (await read2("styleScan", { comp_id: args.comp_id, time: args.time }, "scan")).result;
               const bounds2 = [];
               const unchecked2 = [];
               const texts = scan2.layers.filter((x) => x.kind === "text" && x.enabled);
@@ -25876,7 +35177,7 @@ var init_layout = __esm({
                 const t = args.time ?? scan2.time;
                 for (const l of texts.slice(0, SAFE_AREA_MAX2)) {
                   try {
-                    bounds2.push((await read("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, `bounds ${l.name}`)).result);
+                    bounds2.push((await read2("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, `bounds ${l.name}`)).result);
                   } catch (err) {
                     if (!(err instanceof BridgeError) || err.kind !== "evalscript_error") throw err;
                     unchecked2.push({ layer: l.name, reason: err instanceof Error ? err.message : String(err) });
@@ -25933,15 +35234,15 @@ var init_layout = __esm({
 function cuesFromTranscript(t) {
   let text = t.text;
   if (t.path !== void 0) {
-    if (!path28.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    if (!path37.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs29.statSync(t.path);
+      stat = fs38.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs29.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs38.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -25967,7 +35268,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
     return fresh.length;
   };
   if (!before.truncated) {
-    const lo = before.numMarkers + countFresh(near4);
+    const lo = before.numMarkers + countFresh(near5);
     const hi = before.numMarkers + countFresh((a, b) => Math.abs(a - b) <= SAME_KEY);
     expectThat(m, after.numMarkers >= lo && after.numMarkers <= hi, "numMarkers", lo === hi ? lo : `${lo}..${hi}`, after.numMarkers, "Marker count is not what adding should give");
   }
@@ -25980,7 +35281,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
   const nearest = (time) => {
     let best;
     for (const x of after.markers) {
-      if (near4(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
+      if (near5(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
     }
     return best;
   };
@@ -26024,7 +35325,7 @@ function removeMarkersMismatches(beforeRaw, afterRaw, written) {
   const want = before.numMarkers - count;
   expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count did not drop by the number removed");
   for (const r of removed) {
-    if (after.markers.some((x) => near4(x.time, r.time) && x.comment === r.comment)) {
+    if (after.markers.some((x) => near5(x.time, r.time) && x.comment === r.comment)) {
       m.push({ path: `markers@${r.time}`, expected: "removed", actual: r.comment, message: `Marker at ${r.time}s is still there` });
     }
   }
@@ -26045,12 +35346,12 @@ function selectForRemoval(list, args) {
     return false;
   });
 }
-var fs29, path28, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerInputSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near4, listRead, markersTools;
+var fs38, path37, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerInputSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near5, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs29 = __toESM(require("node:fs"), 1);
-    path28 = __toESM(require("node:path"), 1);
+    fs38 = __toESM(require("node:fs"), 1);
+    path37 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
     init_common();
@@ -26103,7 +35404,7 @@ var init_markers = __esm({
       message: "Say which markers: all, start/end, comment_contains, or indexes."
     });
     listOf = (v) => v && typeof v === "object" ? v : null;
-    near4 = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
+    near5 = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
     listRead = (compId, layer) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
     markersTools = [
       {
@@ -26527,10 +35828,10 @@ function summarize(comps) {
   return s;
 }
 function hashFingerprint(fp) {
-  return crypto10.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
+  return crypto16.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
 }
 function jobsPath(projectPath) {
-  return path29.join(path29.dirname(projectPath), `${path29.basename(projectPath, path29.extname(projectPath))}.jobs.json`);
+  return path38.join(path38.dirname(projectPath), `${path38.basename(projectPath, path38.extname(projectPath))}.jobs.json`);
 }
 function rememberJob(job) {
   memoryJobs.delete(job.id);
@@ -26544,7 +35845,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs30.readFileSync(file, "utf8");
+    raw = fs39.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -26554,7 +35855,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs30.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs39.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -26568,8 +35869,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs30.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs30.renameSync(tmp, file);
+    fs39.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs39.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -26586,7 +35887,7 @@ function loadJob(projectPath, id) {
   return memoryJobs.get(id) ?? null;
 }
 function newJobId() {
-  return `mc_${Date.now().toString(36)}_${crypto10.randomBytes(3).toString("hex")}`;
+  return `mc_${Date.now().toString(36)}_${crypto16.randomBytes(3).toString("hex")}`;
 }
 function planFromProbe(comps, names, probe) {
   const byId3 = new Map(probe.map((p) => [p.id, p]));
@@ -26673,17 +35974,17 @@ async function multiCompApply(args, ctx) {
       return { ok: false, error: "not_found", applied: false, message: `Not comps in this project: ${resolved.missing_ids.join(", ")}. Nothing was written.`, missing_ids: resolved.missing_ids };
     }
     if (resolved.truncated) {
-      return bad2(`The selection matches ${resolved.matched} comps, more than the ${TABLE_LIMIT} a job can list. Narrow it with folder_id, nested_in, name_pattern or comp_ids. Nothing was written.`, { matched: resolved.matched });
+      return bad3(`The selection matches ${resolved.matched} comps, more than the ${TABLE_LIMIT} a job can list. Narrow it with folder_id, nested_in, name_pattern or comp_ids. Nothing was written.`, { matched: resolved.matched });
     }
     if (resolved.partial) {
-      return bad2("The scan of the project was cut short, so the selection may be incomplete. Narrow it with folder_id, nested_in or comp_ids. Nothing was written.");
+      return bad3("The scan of the project was cut short, so the selection may be incomplete. Narrow it with folder_id, nested_in or comp_ids. Nothing was written.");
     }
     if (resolved.comps.length === 0) {
       return { ok: false, error: "no_comps", applied: false, message: "The selection matches no comps. Nothing was written." };
     }
     const limit = args.max_comps ?? 100;
     if (resolved.comps.length > limit) {
-      return bad2(`The selection is ${resolved.comps.length} comps, over max_comps ${limit}. Narrow it or raise max_comps (at most ${MAX_JOB_COMPS}). Nothing was written.`, { matched: resolved.comps.length });
+      return bad3(`The selection is ${resolved.comps.length} comps, over max_comps ${limit}. Narrow it or raise max_comps (at most ${MAX_JOB_COMPS}). Nothing was written.`, { matched: resolved.comps.length });
     }
     job = {
       id: newJobId(),
@@ -26707,11 +36008,11 @@ async function multiCompApply(args, ctx) {
       comps: resolved.comps.map((c) => ({ comp_id: c.id, name: c.name, status: "pending" }))
     };
   }
-  const tool = await lookupTool(job.tool);
-  if (!tool) return bad2(`The write tool ${job.tool} is not available on this server. Nothing was written.`);
+  const tool = await lookupTool2(job.tool);
+  if (!tool) return bad3(`The write tool ${job.tool} is not available on this server. Nothing was written.`);
   const scan = scanLayerSelectors(job.args);
   if (job.comps.length > 1 && scan.positional.length > 0) {
-    return bad2(
+    return bad3(
       `Layer selectors by index or id (${scan.positional.join(", ")}) pick a different layer in every comp. Select layers by name for more than one comp. Nothing was written.`
     );
   }
@@ -26723,7 +36024,7 @@ async function multiCompApply(args, ctx) {
     else invalid.push({ comp_id: c.comp_id, message: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ") });
   }
   if (invalid.length > 0) {
-    return bad2(`${job.tool} rejects its arguments (${invalid[0].message}). Nothing was written.`, { invalid: invalid.slice(0, 20), invalid_count: invalid.length });
+    return bad3(`${job.tool} rejects its arguments (${invalid[0].message}). Nothing was written.`, { invalid: invalid.slice(0, 20), invalid_count: invalid.length });
   }
   const todo = job.comps.filter(
     (c) => c.status === "pending" || resuming && args.retry_failed === true && (c.status === "failed" || c.status === "unverified" && c.error === "interrupted")
@@ -26822,7 +36123,7 @@ async function multiCompApply(args, ctx) {
         }
         continue;
       }
-      if (wrote && job.pause_ms > 0) await sleep(job.pause_ms);
+      if (wrote && job.pause_ms > 0) await sleep2(job.pause_ms);
       for (const k of ["reason", "error", "applied", "receipt_matches", "mismatches", "fingerprint_before", "fingerprint_after", "changed", "fingerprint_note", "undo_steps", "user_changed"]) delete entry[k];
       const started = Date.now();
       let capped3 = false;
@@ -26897,9 +36198,9 @@ async function multiCompApply(args, ctx) {
   } finally {
     activeJobs.delete(job.id);
   }
-  const summary2 = summarize(job.comps);
+  const summary3 = summarize(job.comps);
   const interrupted = job.comps.filter((c) => c.status === "unverified" && c.error === "interrupted");
-  job.state = stoppedAt || summary2.pending > 0 || interrupted.length > 0 ? "stopped" : "done";
+  job.state = stoppedAt || summary3.pending > 0 || interrupted.length > 0 ? "stopped" : "done";
   if (job.state === "stopped" && !job.stop_reason) {
     job.stop_reason = interrupted.length > 0 ? `${interrupted.length} comp(s) were being written when the job was interrupted and may be half done: ${interrupted.slice(0, 5).map((c) => `"${c.name}"`).join(", ")}. Inspect them; retry_failed runs them again.` : "Comps left pending.";
   }
@@ -26909,7 +36210,7 @@ async function multiCompApply(args, ctx) {
   const written = writtenNow;
   const undoSteps = written.reduce((n, c) => n + (c.undo_steps ?? 1), 0);
   const userChangedList = job.comps.filter((c) => c.user_changed).slice(0, 20).map((c) => ({ comp_id: c.comp_id, name: c.name, user_changed: c.user_changed }));
-  const clean = summary2.failed === 0 && summary2.unverified === 0 && summary2.pending === 0;
+  const clean = summary3.failed === 0 && summary3.unverified === 0 && summary3.pending === 0;
   return {
     ok: clean,
     ...clean ? {} : { error: stoppedAt ? "job_stopped" : "comps_failed" },
@@ -26918,7 +36219,7 @@ async function multiCompApply(args, ctx) {
     job_id: job.id,
     state: job.state,
     tool: job.tool,
-    summary: summary2,
+    summary: summary3,
     ...stoppedAt ? { stopped_at: stoppedAt } : {},
     ...job.state === "stopped" && job.stop_reason ? { message: job.stop_reason } : {},
     comps: job.comps.slice(0, TABLE_LIMIT).map((c) => ({ ...c })),
@@ -26929,7 +36230,7 @@ async function multiCompApply(args, ctx) {
     ...userChangedList.length > 0 ? { user_changed: userChangedList } : {},
     job_file: store.file,
     ...jobFileNotes(job, store),
-    ...job.state === "stopped" ? { resume: `Call ae_multi_comp_apply again with resume_job_id "${job.id}" to run the ${summary2.pending} pending comp(s)${summary2.failed ? "; add retry_failed to run the failed ones again" : ""}.` } : {}
+    ...job.state === "stopped" ? { resume: `Call ae_multi_comp_apply again with resume_job_id "${job.id}" to run the ${summary3.pending} pending comp(s)${summary3.failed ? "; add retry_failed to run the failed ones again" : ""}.` } : {}
   };
 }
 function jobFileNotes(job, store) {
@@ -26941,13 +36242,13 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto10, fs30, path29, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup, lookupTool, sleep, PROBE_NAME_LIMIT, call, bad2, multicompTools;
+var crypto16, fs39, path38, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
-    crypto10 = __toESM(require("node:crypto"), 1);
-    fs30 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    crypto16 = __toESM(require("node:crypto"), 1);
+    fs39 = __toESM(require("node:fs"), 1);
+    path38 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -27037,15 +36338,15 @@ var init_multicomp = __esm({
     shortMismatches = (list) => (Array.isArray(list) ? list : []).slice(0, 5).map((m) => ({ path: String(m?.path ?? ""), message: String(m?.message ?? "").slice(0, 300) }));
     memoryJobs = /* @__PURE__ */ new Map();
     activeJobs = /* @__PURE__ */ new Set();
-    registryLookup = async (name) => {
+    registryLookup2 = async (name) => {
       const { ALL_TOOLS: ALL_TOOLS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
       return ALL_TOOLS2.find((t) => t.name === name);
     };
-    lookupTool = registryLookup;
-    sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+    lookupTool2 = registryLookup2;
+    sleep2 = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
     PROBE_NAME_LIMIT = 50;
     call = (ctx, fn, args, label) => ctx.bridge.callHost(fn, args, { label, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
-    bad2 = (message, extra = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra });
+    bad3 = (message, extra = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra });
     multicompTools = [
       {
         name: "ae_multi_comp_apply",
@@ -27065,7 +36366,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path30.join(defaultDataDir(), "ui");
+  return path39.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -27088,7 +36389,7 @@ function runPowerShellScript2(ps1Args) {
     scriptPath,
     ...ps1Args
   ];
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     (0, import_node_child_process2.execFile)(
       "powershell.exe",
       fullArgs,
@@ -27100,11 +36401,11 @@ function runPowerShellScript2(ps1Args) {
       (err, stdout, stderr) => {
         const outStr = typeof stdout === "string" ? stdout.trim() : "";
         if (outStr.length > 0) {
-          resolve3(outStr);
+          resolve4(outStr);
           return;
         }
         const errMsg = err instanceof Error ? err.message : typeof stderr === "string" && stderr.trim().length > 0 ? stderr.trim() : "powershell_exec_failed";
-        resolve3(
+        resolve4(
           JSON.stringify({
             ok: false,
             error: errMsg
@@ -27114,13 +36415,13 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process2, fs31, path30, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process2, fs40, path39, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     import_node_child_process2 = require("node:child_process");
-    fs31 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
+    fs40 = __toESM(require("node:fs"), 1);
+    path39 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
     init_common();
@@ -27297,7 +36598,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs31.mkdirSync(outDir, { recursive: true });
+            fs40.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           const rawStdout = await runPowerShellScript2([
@@ -27350,41 +36651,41 @@ function versionToken(name) {
 function namePattern(name, sequence) {
   const tok = versionToken(name);
   if (!tok) return null;
-  let after = escapeRe(tok.after);
+  let after = escapeRe2(tok.after);
   let frameAware = false;
   if (sequence) {
     const fm = /^(.*?)(\d+)(\.[^.]+)$/.exec(tok.after);
     if (fm) {
-      after = `${escapeRe(fm[1])}\\d+${escapeRe(fm[3])}`;
+      after = `${escapeRe2(fm[1])}\\d+${escapeRe2(fm[3])}`;
       frameAware = true;
     }
   }
-  return { re: new RegExp(`^${escapeRe(tok.before)}(\\d{1,5})${after}$`, process.platform === "win32" ? "i" : ""), frameAware };
+  return { re: new RegExp(`^${escapeRe2(tok.before)}(\\d{1,5})${after}$`, process.platform === "win32" ? "i" : ""), frameAware };
 }
 function listDir(dir) {
   try {
-    return fs32.readdirSync(dir);
+    return fs41.readdirSync(dir);
   } catch {
     return [];
   }
 }
 function findVersions(file, sequence) {
-  const dir = path31.dirname(file);
-  const base = path31.basename(file);
+  const dir = path40.dirname(file);
+  const base = path40.basename(file);
   const own = versionToken(base);
-  const dirName = path31.basename(dir);
+  const dirName = path40.basename(dir);
   const dirTok = versionToken(dirName);
   const byVersion = /* @__PURE__ */ new Map();
   const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
   if (dirTok && sequence && (!own || own.number === dirTok.number)) {
-    const parent = path31.dirname(dir);
-    const dirRe = new RegExp(`^${escapeRe(dirTok.before)}(\\d{1,5})${escapeRe(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
+    const parent = path40.dirname(dir);
+    const dirRe = new RegExp(`^${escapeRe2(dirTok.before)}(\\d{1,5})${escapeRe2(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
     for (const sib of listDir(parent)) {
       const m = dirRe.exec(sib);
       if (!m) continue;
-      const ext2 = path31.extname(base).toLowerCase();
-      for (const f of listDir(path31.join(parent, sib))) {
-        if (path31.extname(f).toLowerCase() === ext2) add(Number(m[1]), path31.join(parent, sib, f));
+      const ext2 = path40.extname(base).toLowerCase();
+      for (const f of listDir(path40.join(parent, sib))) {
+        if (path40.extname(f).toLowerCase() === ext2) add(Number(m[1]), path40.join(parent, sib, f));
       }
     }
     return { current: dirTok.number, versions: firstOfEach(byVersion) };
@@ -27394,7 +36695,7 @@ function findVersions(file, sequence) {
   if (!pat) return { current: null, versions: [] };
   for (const n of listDir(dir)) {
     const m = pat.re.exec(n);
-    if (m) add(Number(m[1]), path31.join(dir, n));
+    if (m) add(Number(m[1]), path40.join(dir, n));
   }
   return { current: own.number, versions: firstOfEach(byVersion) };
 }
@@ -27409,15 +36710,15 @@ function planVersion(file, sequence, want) {
   return { current, latest, target, newer };
 }
 function versionLogPath(projectPath) {
-  const ext2 = path31.extname(projectPath);
-  return path31.join(path31.dirname(projectPath), `${path31.basename(projectPath, ext2)}.versions.json`);
+  const ext2 = path40.extname(projectPath);
+  return path40.join(path40.dirname(projectPath), `${path40.basename(projectPath, ext2)}.versions.json`);
 }
 function appendVersionLog(projectPath, entries, notes) {
   const file = versionLogPath(projectPath);
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs32.readFileSync(file, "utf8");
+    raw = fs41.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -27432,24 +36733,24 @@ function appendVersionLog(projectPath, entries, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs32.renameSync(file, aside);
+      fs41.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs32.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs32.renameSync(tmp, file);
+  fs41.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs41.renameSync(tmp, file);
   return file;
 }
-var fs32, path31, VERSION_RE, escapeRe;
+var fs41, path40, VERSION_RE, escapeRe2;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs32 = __toESM(require("node:fs"), 1);
-    path31 = __toESM(require("node:path"), 1);
+    fs41 = __toESM(require("node:fs"), 1);
+    path40 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
-    escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    escapeRe2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 });
 
@@ -27521,7 +36822,7 @@ function batchMismatches(ops, afterRaw, offset) {
   });
   return m;
 }
-var PathSchema3, AeGetEssentialGraphicsSchema, AeSetEssentialGraphicsSchema, asAe, AeRenderTemplatesSchema, AeVersionFootageSchema, BatchOpSchema, AeBatchSetSchema, readOps, sleep2, productionTools;
+var PathSchema3, AeGetEssentialGraphicsSchema, AeSetEssentialGraphicsSchema, asAe, AeRenderTemplatesSchema, AeVersionFootageSchema, BatchOpSchema, AeBatchSetSchema, readOps, sleep3, productionTools;
 var init_production = __esm({
   "src/tools/ext/production.ts"() {
     "use strict";
@@ -27581,7 +36882,7 @@ var init_production = __esm({
       expect: ExpectSchema
     });
     readOps = (ops) => ops.map((o) => ({ layer: o.layer, path: o.path, ...o.keyframes?.length ? { times: o.keyframes.map((k) => k.time) } : {} }));
-    sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+    sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
     productionTools = [
       {
         name: "ae_get_essential_graphics",
@@ -27742,7 +37043,7 @@ var init_production = __esm({
           }
           for (let start = 0; start < args.ops.length; start += size) {
             const ops = args.ops.slice(start, start + size);
-            if (start > 0) await sleep2(250);
+            if (start > 0) await sleep3(250);
             const res = await runGuardedWrite(ctx, {
               toolName: "ae_batch_set",
               label: `ae_batch_set(${start + 1}-${start + ops.length} of ${args.ops.length})`,
@@ -27998,12 +37299,12 @@ function sanitizeCheckpointLabel(label) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs33, path32, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs42, path41, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs33 = __toESM(require("node:fs"), 1);
-    path32 = __toESM(require("node:path"), 1);
+    fs42 = __toESM(require("node:fs"), 1);
+    path41 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -28139,7 +37440,16 @@ var init_receipts2 = __esm({
       "ae_path_write",
       "ae_path_operator",
       "ae_path_link",
-      "ae_path_connector"
+      "ae_path_connector",
+      "ae_render_queue_edit",
+      "ae_render_queue_duplicate",
+      "ae_render_queue_apply_spec",
+      "ae_loudness_apply",
+      "ae_check_legibility",
+      "ae_variants",
+      "ae_variants_pick",
+      "ae_variants_discard",
+      "ae_project_session"
     ];
     AeCheckpointRevertSchema = external_exports.object({
       expect: ExpectSchema,
@@ -28245,7 +37555,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs33.existsSync(actualProjectPath)) {
+              if (!fs42.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -28254,16 +37564,16 @@ var init_receipts2 = __esm({
                   actual: { project_path: actualProjectPath }
                 });
               }
-              const ext2 = path32.extname(actualProjectPath) || ".aep";
-              const baseName = path32.basename(actualProjectPath, ext2);
+              const ext2 = path41.extname(actualProjectPath) || ".aep";
+              const baseName = path41.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs33.mkdirSync(checkpointDir, { recursive: true });
-              const stamp2 = formatBackupTimestamp(/* @__PURE__ */ new Date());
+              fs42.mkdirSync(checkpointDir, { recursive: true });
+              const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
-              const checkpointFileName = `${baseName}_${stamp2}_${safeLabel}${ext2}`;
-              const checkpointPath = path32.join(checkpointDir, checkpointFileName);
-              fs33.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs33.statSync(checkpointPath);
+              const checkpointFileName = `${baseName}_${stamp3}_${safeLabel}${ext2}`;
+              const checkpointPath = path41.join(checkpointDir, checkpointFileName);
+              fs42.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs42.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -28279,7 +37589,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs33.existsSync(checkpointPath)
+                  checkpoint_exists: fs42.existsSync(checkpointPath)
                 }
               });
               return {
@@ -28322,7 +37632,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs33.existsSync(checkpointDir)) {
+          if (!fs42.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -28330,10 +37640,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries = fs33.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries = fs42.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries.map((e) => {
-            const fullPath = path32.join(checkpointDir, e.name);
-            const stat = fs33.statSync(fullPath);
+            const fullPath = path41.join(checkpointDir, e.name);
+            const stat = fs42.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -28386,7 +37696,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs33.existsSync(args.checkpoint_path)) {
+              if (!fs42.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -28821,7 +38131,7 @@ function roots(ctx, projectPath, only) {
   if (only !== "project") out.push({ scope: "global", root: globalSkillsRoot(dataDirOf(ctx)) });
   return out;
 }
-function summary(s) {
+function summary2(s) {
   return {
     name: s.name,
     display_name: s.display_name,
@@ -28834,7 +38144,7 @@ function summary(s) {
     dir: s.dir
   };
 }
-function unreadable(skill) {
+function unreadable2(skill) {
   return { ok: false, error: "unreadable_skill", message: `Skill "${skill.name}" in ${skill.dir} can't be read: ${skill.error}` };
 }
 function lintSteps(steps) {
@@ -28907,8 +38217,8 @@ var init_skills2 = __esm({
             if (!skill) {
               return { ok: false, error: "not_found", message: `No skill named "${args.name}".`, roots: where, ...recent };
             }
-            if (skill.error) return unreadable(skill);
-            return { ok: true, skill: { ...summary(skill), instructions: skill.instructions, steps: skill.steps }, ...recent };
+            if (skill.error) return unreadable2(skill);
+            return { ok: true, skill: { ...summary2(skill), instructions: skill.instructions, steps: skill.steps }, ...recent };
           }
           const skills = listSkills(where);
           return {
@@ -28916,7 +38226,7 @@ var init_skills2 = __esm({
             project_path: projectPath,
             roots: where,
             count: skills.length,
-            skills: skills.map(summary),
+            skills: skills.map(summary2),
             ...recent
           };
         }
@@ -28995,7 +38305,7 @@ ${args.description}`,
           if (!skill) {
             return { ok: false, error: "not_found", message: `No skill named "${args.name}". See ae_skill_list.` };
           }
-          if (skill.error) return unreadable(skill);
+          if (skill.error) return unreadable2(skill);
           if (skill.steps.length === 0) {
             return { ok: false, error: "no_steps", message: `Skill "${skill.name}" has no numbered .jsx steps in ${skill.dir}.` };
           }
@@ -29199,12 +38509,12 @@ async function queued2(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs34, path33, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
+var fs43, path42, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
 var init_track = __esm({
   "src/tools/ext/track.ts"() {
     "use strict";
-    fs34 = __toESM(require("node:fs"), 1);
-    path33 = __toESM(require("node:path"), 1);
+    fs43 = __toESM(require("node:fs"), 1);
+    path42 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -29285,7 +38595,7 @@ var init_track = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs34.mkdirSync(framesDir, { recursive: true });
+          fs43.mkdirSync(framesDir, { recursive: true });
           const patchSize = (args.pattern_size ?? 31) | 1;
           const opts = {
             patchSize,
@@ -29333,14 +38643,14 @@ var init_track = __esm({
                   points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
                 }
               }
-              fs34.rmSync(snap2.path, { force: true });
+              fs43.rmSync(snap2.path, { force: true });
               if (lostAt2) break;
             }
             return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast };
           });
           const { points, lostAt } = tracked;
-          const previewPath = path33.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-          fs34.writeFileSync(
+          const previewPath = path42.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+          fs43.writeFileSync(
             previewPath,
             encodePng(
               drawTrackPreview(
@@ -29352,21 +38662,21 @@ var init_track = __esm({
             )
           );
           const conf = points.slice(1).map((p) => p.confidence);
-          const r22 = (v) => Math.round(v * 100) / 100;
+          const r23 = (v) => Math.round(v * 100) / 100;
           const result = {
             ok: true,
             comp_id: args.comp_id,
-            start: r22(tracked.start),
-            end: r22(tracked.end),
+            start: r23(tracked.start),
+            end: r23(tracked.end),
             frames_requested: tracked.times.length,
             frames_tracked: points.length,
             lost_at: lostAt,
-            mean_confidence: conf.length ? r22(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
-            min_confidence: conf.length ? r22(Math.min(...conf)) : null,
+            mean_confidence: conf.length ? r23(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
+            min_confidence: conf.length ? r23(Math.min(...conf)) : null,
             adapted_frames: points.filter((p) => p.adapted).length,
-            pattern_contrast: r22(tracked.contrast),
+            pattern_contrast: r23(tracked.contrast),
             preview_path: previewPath,
-            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r22(p.x), r22(p.y), r22(p.confidence)]),
+            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r23(p.x), r23(p.y), r23(p.confidence)]),
             path_format: "[time_s, x_px, y_px, confidence]"
           };
           if (!args.apply) return result;
@@ -29409,7 +38719,7 @@ var init_track = __esm({
           if (write.made.numKeys !== points.length) {
             mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
           }
-          keys.forEach((k, i) => compareValues(values[i].map(r22), k.value.slice(0, 2).map(r22), `keyframes[${i + 1}].value`, mismatches));
+          keys.forEach((k, i) => compareValues(values[i].map(r23), k.value.slice(0, 2).map(r23), `keyframes[${i + 1}].value`, mismatches));
           const receipt = buildReceipt({ before: null, after: { null: write.made, keys_read: keys.length }, customMismatches: mismatches });
           return {
             ...result,
@@ -29441,6 +38751,15 @@ var init_ext = __esm({
     init_interpret();
     init_paths();
     init_memory();
+    init_rqedit();
+    init_renderbatch();
+    init_collect();
+    init_deliver();
+    init_loudness();
+    init_legibility();
+    init_variants();
+    init_learntaste();
+    init_projectsession();
     init_aerender();
     init_animate();
     init_annotate();
@@ -29521,7 +38840,16 @@ var init_ext = __esm({
       ...scrubTools,
       ...interpretTools,
       ...pathsTools,
-      ...memoryTools
+      ...memoryTools,
+      ...rqeditTools,
+      ...renderbatchTools,
+      ...collectTools,
+      ...deliverTools,
+      ...loudnessTools,
+      ...legibilityTools,
+      ...variantsTools,
+      ...learntasteTools,
+      ...projectsessionTools
     ];
   }
 });
@@ -29796,15 +39124,15 @@ var AskStore = class {
     const e = this.entries.get(id);
     if (!e) return Promise.resolve(null);
     if (e.answer) return Promise.resolve(e.answer);
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const waiter = (a) => {
         clearTimeout(timer);
-        resolve3(a);
+        resolve4(a);
       };
       const timer = setTimeout(() => {
         const i = e.waiters.indexOf(waiter);
         if (i >= 0) e.waiters.splice(i, 1);
-        resolve3(null);
+        resolve4(null);
       }, ms);
       e.waiters.push(waiter);
     });
@@ -29827,7 +39155,7 @@ function validCurve(curve) {
 init_assets2();
 init_diagnostics();
 init_dialogs();
-var path34 = __toESM(require("node:path"), 1);
+var path43 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 init_zod();
@@ -30088,7 +39416,7 @@ async function handleRpc(message, ctx) {
 }
 
 // src/panel-host.ts
-var crypto11 = __toESM(require("node:crypto"), 1);
+var crypto17 = __toESM(require("node:crypto"), 1);
 init_dialogs();
 init_host();
 init_jsx();
@@ -30122,7 +39450,7 @@ var PanelHost = class {
     }
   }
   newOpId() {
-    return `op_${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
+    return `op_${Date.now()}_${crypto17.randomBytes(4).toString("hex")}`;
   }
   /**
    * Calls the panel's evalScript queue, racing against a timeout via setTimeout.
@@ -30176,8 +39504,8 @@ var PanelHost = class {
           try {
             blocking = await Promise.race([
               this.describeDialogs(),
-              new Promise((resolve3) => {
-                budget = setTimeout(() => resolve3([]), DESCRIBE_DIALOGS_BUDGET_MS);
+              new Promise((resolve4) => {
+                budget = setTimeout(() => resolve4([]), DESCRIBE_DIALOGS_BUDGET_MS);
               })
             ]);
           } catch {
@@ -30298,9 +39626,9 @@ function sendResponse(res, statusCode, headers, body) {
   res.end(body);
 }
 function readRequestBody(req) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve4, reject) => {
     if (typeof req.on !== "function") {
-      resolve3("");
+      resolve4("");
       return;
     }
     const chunks = [];
@@ -30310,7 +39638,7 @@ function readRequestBody(req) {
       );
     });
     req.on("end", () => {
-      resolve3(Buffer.concat(chunks).toString("utf8"));
+      resolve4(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", (err) => {
       reject(err instanceof Error ? err : new Error(String(err)));
@@ -30321,7 +39649,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path34.join(resolvedDataDir, "quarantine.json")
+    path43.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -30334,7 +39662,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path34.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path43.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo

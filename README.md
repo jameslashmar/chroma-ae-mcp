@@ -101,7 +101,7 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 
 ---
 
-## Tools (120)
+## Tools (149)
 
 | Group | Tools |
 |---|---|
@@ -137,6 +137,14 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 | Footage | `ae_get_footage_interpretation`, `ae_set_footage_interpretation` (alpha, fields, pulldown, conform rate, loop, pixel aspect, without the dialog), `ae_footage_proxy` |
 | Paths | `ae_path_read`, `ae_path_write` (shape and mask paths as JSON: resample, smooth, mirror), `ae_path_operator` (Trim Paths with a draw-on, Offset, Repeater), `ae_path_link`, `ae_path_connector` (a line between two layers that follows both) |
 | Memory | `ae_memory_status`, `ae_memory_purge` (RAM caches; undo history only after a save and an explicit yes) |
+| Render queue | `ae_render_queue_inspect`, `ae_render_queue_edit` (settings, templates, time span, skip frames, output modules and files of items already queued; finished items are refused, duplicate them instead), `ae_render_queue_duplicate`, `ae_delivery_specs` (a library of delivery specs and which of them this AE's templates can meet), `ae_render_queue_apply_spec` (one output per spec, on the item or on duplicates), `ae_check_delivery_file` (exists, extension, size limit) |
+| Batch render | `ae_render_batch_plan` (dry run: unique comps, templates, colliding outputs, free space), `ae_render_batch` (comps x specs rendered one after another by aerender in the background, from a frozen copy of the saved project; other sizes are comps made with `ae_reframe`), `ae_render_batch_status`, `ae_render_batch_resume` (keeps what finished and verifies, retries the rest), `ae_render_batch_cancel` (says when a process could not be confirmed stopped) |
+| Collect and deliver | `ae_collect_files` (Collect Files without the dialog: dry run, a resumable copy with a sha1 manifest that never overwrites other files, optional zip), `ae_collect_relink` (opens the collected copy and points its footage at the collected files; asks first), `ae_collect_report`; `ae_deliver_recipe`, `ae_deliver_step`, `ae_deliver_status` (a delivery chain run stage by stage: preflight, house style, save, render, verify, scrub, loudness, collect; it stops at the first blocker and can retry, skip with a written acknowledgement, or cancel) |
+| Loudness | `ae_loudness_check` (integrated LUFS, loudness range and true peak of the comp's audio or a WAV/AIFF, against EBU R128, ATSC A/85, streaming or custom targets), `ae_loudness_apply` (a gain and fades on Audio Levels, one undo step, read back) |
+| Legibility | `ae_check_text_overlap`, `ae_estimate_legibility` (from one rendered frame), `ae_check_legibility` (WCAG contrast of each text layer against the real picture behind it, on a temporary comp copy; two-colour or animator-hidden text comes back inconclusive, never as a pass) |
+| Variants | `ae_variants` (2 to 6 versions of a change on comp copies: colour, a value, an offset, a shift or stagger, a new ease, comp duration; frames rendered for the user to choose), `ae_variants_pick` (replays the pick on the original after a drift check), `ae_variants_discard` |
+| Taste learning | `ae_taste_baseline` (after the agent's work), `ae_learn_taste` (what the user changed since: ease influence, durations, timing, overshoot, edge margin, font size, colour; proposes rules, counts nothing if the agent wrote since), `ae_taste_rules` (saves only the rules the user confirmed in `ae_ask_user`) |
+| Projects | `ae_project_session`: open, create, close and recover projects (asks before unsaved work is lost; a save first copies the .aep to `_mcp_backups`), list Auto-Save, backup and checkpoint files, read or change AE's Auto-Save preferences, and an opt-in timed save for one project |
 | Popups | `ae_dialogs`, `ae_dialog_respond` (Windows through UI Automation; macOS through System Events, which needs Accessibility permission for After Effects) |
 | Diagnostics | `ae_diagnostics`: one file for triage with versions, what is in flight and for how long, queue, quarantine, settings, popups and the end of the log, token redacted. The panel's **Save diagnostics** button writes the same file. |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |
@@ -146,8 +154,8 @@ Each tool's schema and description, as the agent sees them, live in `server/src/
 **Native panels.** CEP extensions open directly. AE's own Window-menu panels open through `app.executeCommand`, which does work through CEP (measured), but those commands **toggle**, so `ae_open_panel` refuses a native panel unless `allow_toggle` is set after checking with `ae_ui_screenshot`.
 
 **Where it keeps things.**
-- Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/`, `session-state.json` and `inflight-ops.json` (`ae_session_changes`).
-- Next to a project: `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `<name>.jobs.json` (`ae_multi_comp_apply`'s jobs), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
+- Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/` (and `renders/batches/<id>/` for `ae_render_batch`), `session-state.json` and `inflight-ops.json` (`ae_session_changes`), `learn-taste.json` (`ae_learn_taste`), `variants/` and `variant-picks.jsonl` (`ae_variants`).
+- Next to a project: `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `<name>.jobs.json` (`ae_multi_comp_apply`'s jobs), `<name>.deliver.json` (`ae_deliver_step`'s runs), `_collect/` (`ae_collect_files`: the .aep copy, `_Footage/`, `manifest.json` and the report), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
 - Audio renders for `ae_audio_analyze` go to `renders/audio/` in the data dir.
 
 ---

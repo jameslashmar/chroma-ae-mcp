@@ -640,6 +640,19 @@ async function listDialogsInternal(opts: {
 }
 
 /**
+ * Open dialogs without swallowing a failure: `ok: false` means the list could
+ * not be read, which a caller must not take as "no dialog". Never throws.
+ */
+export async function listBlockingDialogs(opts: { screenshots: boolean }): Promise<{ ok: boolean; dialogs?: object[]; error?: string }> {
+  try {
+    const res = await listDialogsInternal(opts);
+    return res.ok ? { ok: true, dialogs: res.dialogs } : { ok: false, error: res.error };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Helper for Claude to wire into the evalScript timeout path in `panel-host.ts`.
  * Returns currently open modal/blocking dialogs in After Effects (or `[]` on non-Windows/error).
  */
