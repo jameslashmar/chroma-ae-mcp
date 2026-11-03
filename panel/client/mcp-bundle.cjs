@@ -9923,16 +9923,16 @@ function presentAnswer(q, a) {
       message: "The user dismissed the question. Don't ask it again unprompted; go on with a sensible default and say which."
     };
   }
-  const byId = new Map(q.options.map((o) => [o.id, o]));
+  const byId2 = new Map(q.options.map((o) => [o.id, o]));
   return {
     status: "answered",
     ask_id: q.id,
     question: q.question,
-    chosen: a.choice_ids.map((id) => ({ id, label: byId.get(id)?.label ?? id })),
+    chosen: a.choice_ids.map((id) => ({ id, label: byId2.get(id)?.label ?? id })),
     ...a.other ? { other: a.other } : {},
     ...a.curve ? {
       curve: a.curve,
-      edited: !a.choice_ids.some((id) => sameCurve(byId.get(id)?.curve, a.curve)),
+      edited: !a.choice_ids.some((id) => sameCurve(byId2.get(id)?.curve, a.curve)),
       next: "Apply it with ae_set_keyframe_ease { ease: { curve } }. Ask whether it should become the user's default; if so, save it with ae_taste."
     } : {},
     answered_after_s: Math.round((a.answered_at - q.asked_at) / 100) / 10
@@ -12274,6 +12274,333 @@ var keyTools = [
   }
 ];
 
+// src/tools/ext/write-runner.ts
+async function runGuardedWrite(ctx, spec) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const expect = {
+    project_path: spec.expect.project_path,
+    comp_id: spec.expect.comp_id ?? spec.compId
+  };
+  const read = async (phase, written) => {
+    const call = spec.read?.(phase, written);
+    if (!call) return null;
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_${phase}`,
+      script: buildJsxCall(call.host, call.args),
+      label: `${spec.label} (${phase})`,
+      mutates: false,
+      toolName: spec.toolName
+    });
+    return res.result ?? null;
+  };
+  try {
+    return await ctx.queue.run(spec.label, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, expect, opId);
+      const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
+      const before = await read("before");
+      const write = await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
+        label: spec.label,
+        mutates: true,
+        toolName: spec.toolName
+      });
+      const written = write.result ?? {};
+      const after = await read("after", written);
+      const receipt = buildReceipt({
+        before,
+        after,
+        customMismatches: spec.check?.(before, after, written) ?? []
+      });
+      return {
+        op_id: opId,
+        applied: true,
+        ...spec.present?.(before, after, written) ?? written,
+        checkpoint,
+        receipt
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+function expectThat(mismatches, ok, path23, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path23, expected, actual, message });
+}
+
+// src/tools/ext/layers.ts
+var stackOf = (v) => v && typeof v === "object" ? v : null;
+var byId = (stack, id) => stack?.layers.find((l) => l.id === id);
+function resolveInStack(stack, sel) {
+  if (!stack || !sel) return void 0;
+  if (sel.id !== void 0) return stack.layers.find((l) => l.id === sel.id);
+  if (sel.index !== void 0) return stack.layers.find((l) => l.index === sel.index);
+  const named = stack.layers.filter((l) => l.name === sel.name);
+  return named.length === 1 ? named[0] : void 0;
+}
+var LAYER_TYPES = ["solid", "null", "adjustment", "text", "shape", "camera", "light", "footage", "precomp"];
+var MATTE_TYPES = ["alpha", "alpha_inverted", "luma", "luma_inverted", "none"];
+var PlacementSchema = external_exports.object({
+  above: LayerSelectorSchema.optional().describe("Put the new layer directly above this one."),
+  below: LayerSelectorSchema.optional().describe("Put the new layer directly below this one."),
+  index: external_exports.number().int().positive().optional().describe("The 1-based index the new layer should end up at."),
+  bottom: external_exports.boolean().optional().describe("Put the new layer at the bottom of the stack.")
+}).refine((p) => [p.above, p.below, p.index, p.bottom ? true : void 0].filter((v) => v !== void 0).length === 1, {
+  message: "Placement takes exactly one of above, below, index or bottom."
+}).describe("Where the layer goes. Default: the top of the stack, as in AE.");
+var Color = external_exports.array(external_exports.number().min(0).max(1)).length(3);
+var AeCreateLayerSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  type: external_exports.enum(LAYER_TYPES),
+  name: external_exports.string().min(1).max(200).optional().describe("Layer name. Text layers are named after their text by default."),
+  color: Color.optional().describe("Solid colour [r, g, b] in 0..1 (solid and adjustment). Default white."),
+  width: external_exports.number().int().min(1).max(3e4).optional().describe("Solid width in pixels. Default the comp's."),
+  height: external_exports.number().int().min(1).max(3e4).optional().describe("Solid height in pixels. Default the comp's."),
+  text: external_exports.string().max(2e4).optional().describe("Text layer content."),
+  box_size: external_exports.array(external_exports.number().positive()).length(2).optional().describe("Paragraph (box) text of [width, height] instead of point text."),
+  light_type: external_exports.enum(["parallel", "spot", "point", "ambient"]).optional(),
+  item_id: external_exports.number().int().optional().describe("Project item for footage (a FootageItem) or precomp (a CompItem) layers."),
+  duration: external_exports.number().positive().optional().describe("Layer length in seconds. Default the comp's."),
+  start_time: external_exports.number().optional().describe("Layer start time in comp seconds. Default 0."),
+  three_d: external_exports.boolean().optional().describe("Make it a 3D layer (cameras and lights always are)."),
+  parent: LayerSelectorSchema.optional().describe("Parent the new layer to this layer."),
+  placement: PlacementSchema.optional(),
+  expect: ExpectSchema
+}).refine((v) => v.type === "footage" || v.type === "precomp" ? v.item_id !== void 0 : true, {
+  message: "footage and precomp layers need item_id."
+});
+var AePrecomposeSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layers: external_exports.array(LayerSelectorSchema).min(1).max(500).describe("The layers to move into the new comp."),
+  name: external_exports.string().min(1).max(200).optional().describe("Name of the new comp. Default 'Pre-comp N'."),
+  move_all_attributes: external_exports.boolean().optional().describe(
+    "Default true: the new comp takes the comp's size and length, and the layers keep their effects and keyframes inside it. False leaves effects, masks and transforms on the precomp layer in this comp, and the new comp takes the layer's source size; AE allows it for one layer only."
+  ),
+  expect: ExpectSchema
+});
+var AeSetTrackMatteSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.describe("The layer the matte applies to."),
+  type: external_exports.enum(MATTE_TYPES).describe("'none' removes the matte."),
+  matte: LayerSelectorSchema.optional().describe("The matte layer. Any layer in the comp on AE 23+; the layer directly above on older AE."),
+  hide_matte: external_exports.boolean().optional().describe("Turn off the matte layer's video, as AE's UI does. Default true."),
+  show_matte: external_exports.boolean().optional().describe("With type 'none': turn the old matte layer's video back on."),
+  expect: ExpectSchema
+}).refine((v) => v.type === "none" || v.matte !== void 0, { message: "Give the matte layer, or type 'none' to remove it." });
+function kindsFor(type) {
+  if (type === "footage") return ["footage", "audio", "solid"];
+  return [type];
+}
+function createLayerMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = stackOf(beforeRaw);
+  const after = stackOf(afterRaw);
+  if (!before || !after) return m;
+  expectThat(m, after.numLayers === before.numLayers + 1, "numLayers", before.numLayers + 1, after.numLayers, "Layer count did not grow by one");
+  const made = byId(after, written.id);
+  if (!made) {
+    m.push({ path: "layer", expected: written.id, actual: void 0, message: "The new layer is not in the read-back" });
+    return m;
+  }
+  expectThat(m, kindsFor(args.type).includes(made.kind), "layer.kind", args.type, made.kind, "The new layer is of another kind");
+  if (args.name) expectThat(m, made.name === args.name, "layer.name", args.name, made.name, "Name differs");
+  if (args.type === "text" && args.text !== void 0 && made.text !== void 0 && args.text.length <= 200) {
+    const norm = (s) => s.replace(/\r\n?|\n/g, "\n");
+    expectThat(m, norm(made.text) === norm(args.text), "layer.text", args.text, made.text, "Text differs");
+  }
+  if (args.three_d && args.type !== "camera" && args.type !== "light") {
+    expectThat(m, made.threeD === true, "layer.threeD", true, made.threeD, "Layer is not 3D");
+  }
+  if (args.type === "adjustment") expectThat(m, made.adjustment === true, "layer.adjustment", true, made.adjustment, "Not an adjustment layer");
+  if (args.light_type) expectThat(m, made.lightType === args.light_type, "layer.lightType", args.light_type, made.lightType, "Light type differs");
+  if (args.parent) {
+    const parent = resolveInStack(before, args.parent);
+    const parentNow = parent ? byId(after, parent.id) : void 0;
+    expectThat(m, parentNow !== void 0 && made.parent === parentNow.index, "layer.parent", parentNow?.index, made.parent, "Parent differs");
+  }
+  const p = args.placement;
+  if (p?.index !== void 0) {
+    const want = Math.min(p.index, after.numLayers);
+    expectThat(m, made.index === want, "layer.index", want, made.index, "Layer is not at the requested index");
+  } else if (p?.bottom) {
+    expectThat(m, made.index === after.numLayers, "layer.index", after.numLayers, made.index, "Layer is not at the bottom");
+  } else if (p?.above || p?.below) {
+    const ref = resolveInStack(before, p.above ?? p.below);
+    const refNow = ref ? byId(after, ref.id) : void 0;
+    const want = refNow ? p.above ? refNow.index - 1 : refNow.index + 1 : void 0;
+    expectThat(m, want !== void 0 && made.index === want, "layer.index", want, made.index, p.above ? "Layer is not directly above its reference" : "Layer is not directly below its reference");
+  } else {
+    expectThat(m, made.index === 1, "layer.index", 1, made.index, "Layer is not at the top");
+  }
+  return m;
+}
+function precomposeMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = stackOf(beforeRaw);
+  const after = stackOf(afterRaw);
+  if (!before || !after) return m;
+  const indexes = written.layer_indexes ?? [];
+  const names = written.layer_names ?? [];
+  const want = before.numLayers - indexes.length + 1;
+  expectThat(m, after.numLayers === want, "numLayers", want, after.numLayers, "Layer count is not what precomposing should leave");
+  const precompLayer = after.layers.find((l) => l.sourceId === written.new_comp_id);
+  const top = indexes.length ? Math.min(...indexes) : void 0;
+  expectThat(m, precompLayer !== void 0 && precompLayer.index === top, "precomp_layer.index", top, precompLayer?.index, "The precomp layer is not where the topmost precomposed layer was");
+  const inner = after.with_comp;
+  if (!inner) {
+    m.push({ path: "new_comp", expected: written.new_comp_id, actual: void 0, message: "The new comp could not be read back" });
+    return m;
+  }
+  const innerNames = inner.layers.map((l) => l.name);
+  expectThat(m, JSON.stringify(innerNames) === JSON.stringify(names), "new_comp.layers", names, innerNames, "The new comp does not hold the precomposed layers in order");
+  return m;
+}
+function trackMatteMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const after = stackOf(afterRaw);
+  if (!after) return m;
+  const target = byId(after, written.layer?.id);
+  if (!target) {
+    m.push({ path: "layer", expected: written.layer, actual: void 0, message: "The layer is not in the read-back" });
+    return m;
+  }
+  expectThat(m, target.trackMatte?.type === args.type, "layer.trackMatte.type", args.type, target.trackMatte?.type, "Track matte type differs");
+  if (args.type === "none") {
+    const prev = written.previous_matte;
+    if (args.show_matte && prev?.id !== void 0) {
+      const prevNow = byId(after, prev.id);
+      expectThat(m, prevNow?.enabled === true, "previous_matte.enabled", true, prevNow?.enabled, "The old matte layer is still hidden");
+    }
+    return m;
+  }
+  const matteId = written.matte?.id;
+  expectThat(m, target.trackMatte?.layer?.id === matteId, "layer.trackMatte.layer", matteId, target.trackMatte?.layer?.id, "Track matte layer differs");
+  const matte = byId(after, matteId);
+  if (args.hide_matte !== false) {
+    expectThat(m, matte?.enabled === false, "matte.enabled", false, matte?.enabled, "The matte layer's video is still on");
+  }
+  const before = stackOf(beforeRaw);
+  for (const l of after.layers) {
+    if (l.id === target.id) continue;
+    const was = byId(before, l.id);
+    if (was && JSON.stringify(was.trackMatte) !== JSON.stringify(l.trackMatte) && was.index === l.index) {
+      m.push({ path: `layers[${l.index}].trackMatte`, expected: was.trackMatte, actual: l.trackMatte, message: `The matte on "${l.name}" changed too` });
+    }
+  }
+  return m;
+}
+var stackRead = (compId, withComp) => ({
+  host: "layerStack",
+  args: withComp === void 0 ? { comp_id: compId } : { comp_id: compId, with_comp_id: withComp }
+});
+var layersTools = [
+  {
+    name: "ae_create_layer",
+    description: "Create a layer in a comp: solid, null, adjustment, text (point or box), shape (empty), camera, light, footage or precomp (from a project item), with a name, length, start time, 3D switch, parent and place in the stack, in one undo group guarded by `expect`. The read-back (a separate evalScript) checks the layer count, kind, name, text, parent and index. Solids add a solid item to the project, as in AE. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeCreateLayerSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_create_layer",
+      label: `ae_create_layer(${args.type}${args.name ? ` "${args.name}"` : ""})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => stackRead(args.comp_id),
+      write: {
+        host: "createLayer",
+        args: {
+          comp_id: args.comp_id,
+          type: args.type,
+          name: args.name,
+          color: args.color,
+          width: args.width,
+          height: args.height,
+          text: args.text,
+          box_size: args.box_size,
+          light_type: args.light_type,
+          item_id: args.item_id,
+          duration: args.duration,
+          start_time: args.start_time,
+          three_d: args.three_d,
+          parent: args.parent,
+          placement: args.placement,
+          label: `Create ${args.type} layer`
+        }
+      },
+      check: (before, after, w) => createLayerMismatches(args, before, after, w),
+      present: (_before, after, w) => ({ layer: byId(stackOf(after), w.id) ?? w })
+    })
+  },
+  {
+    name: "ae_precompose",
+    description: "Precompose layers into a new comp (Layer > Pre-compose), in one undo group guarded by `expect`. move_all_attributes (default true) moves effects and keyframes into the new comp; false keeps them on the precomp layer and works for one layer only. The read-back (a separate evalScript) checks the precomp layer sits where the topmost layer was and the new comp holds the layers in order. " + AGENT_SAFETY_GUIDANCE,
+    schema: AePrecomposeSchema,
+    handler: async (args, ctx) => {
+      if (args.move_all_attributes === false && args.layers.length > 1) {
+        return {
+          ok: false,
+          error: "bad_args",
+          message: "Leaving attributes in the comp works for one layer only (AE's rule). Precompose several layers with move_all_attributes true."
+        };
+      }
+      return runGuardedWrite(ctx, {
+        toolName: "ae_precompose",
+        label: `ae_precompose(${args.layers.length} layer${args.layers.length === 1 ? "" : "s"})`,
+        expect: args.expect,
+        compId: args.comp_id,
+        read: (phase, w) => stackRead(args.comp_id, phase === "after" ? w?.new_comp_id : void 0),
+        write: {
+          host: "precomposeLayers",
+          args: { comp_id: args.comp_id, layers: args.layers, name: args.name, move_all_attributes: args.move_all_attributes, label: "Pre-compose" }
+        },
+        check: (before, after, w) => precomposeMismatches(before, after, w),
+        present: (_before, after, w) => {
+          const stack = stackOf(after);
+          const inner = stack?.with_comp;
+          return {
+            new_comp: { id: w.new_comp_id, name: w.new_comp_name, layers: inner?.layers.map((l) => ({ index: l.index, id: l.id, name: l.name })) },
+            precomp_layer: stack?.layers.find((l) => l.sourceId === w.new_comp_id),
+            move_all_attributes: w.move_all_attributes
+          };
+        }
+      });
+    }
+  },
+  {
+    name: "ae_set_track_matte",
+    description: "Set or remove a layer's track matte (alpha, alpha inverted, luma, luma inverted), in one undo group guarded by `expect`. On AE 23+ the matte can be any layer in the comp (setTrackMatte); on older AE it must be the layer directly above, and the tool refuses otherwise instead of matting with the wrong layer. The matte layer's video is turned off as AE's UI does (hide_matte: false keeps it on). The read-back (a separate evalScript) checks the type, the matte layer, its visibility, and that no other layer's matte changed. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeSetTrackMatteSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_set_track_matte",
+      label: `ae_set_track_matte(${args.type})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => stackRead(args.comp_id),
+      write: {
+        host: "setTrackMatte",
+        args: {
+          comp_id: args.comp_id,
+          layer: args.layer,
+          matte: args.matte,
+          type: args.type,
+          hide_matte: args.hide_matte,
+          show_matte: args.show_matte,
+          label: args.type === "none" ? "Remove track matte" : "Set track matte"
+        }
+      },
+      check: (before, after, w) => trackMatteMismatches(args, before, after, w),
+      present: (_before, after, w) => {
+        const stack = stackOf(after);
+        const layerId = w.layer?.id;
+        return { layer: byId(stack, layerId), matte: w.matte, previous_matte: w.previous_matte, api: w.api };
+      }
+    })
+  }
+];
+
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
 var fs18 = __toESM(require("node:fs"), 1);
@@ -13577,7 +13904,10 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_skill_run",
   "ae_build_from_data",
   "ae_reframe",
-  "ae_import_assets"
+  "ae_import_assets",
+  "ae_create_layer",
+  "ae_precompose",
+  "ae_set_track_matte"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -14895,7 +15225,8 @@ var extTools = [
   ...diagnosticsTools,
   ...panelsTools,
   ...trackTools,
-  ...keyTools
+  ...keyTools,
+  ...layersTools
 ];
 
 // src/tools/quarantine.ts

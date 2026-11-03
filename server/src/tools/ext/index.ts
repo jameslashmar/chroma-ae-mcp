@@ -11,6 +11,7 @@ import { effectsTools } from "./effects.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
 import { keyTools } from "./key.js";
+import { layersTools } from "./layers.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { receiptsTools } from "./receipts.js";
@@ -38,4 +39,5 @@ export const extTools: ToolDefinition<any>[] = [
   ...panelsTools,
   ...trackTools,
   ...keyTools,
+  ...layersTools,
 ];

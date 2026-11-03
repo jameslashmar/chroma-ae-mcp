@@ -125,11 +125,14 @@ async function main() {
       "for (var k = 1; k <= 3; k++) p.setInterpolationTypeAtKey(k, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       // An empty comp for ae_skill_run to write into, so the Smoke comp keeps its three layers.
       'var sk = app.project.items.addComp("Skill target", 320, 180, 1, 1, 25);',
-      "return { comp_id: c.id, skill_comp_id: sk.id };",
+      // An empty comp for the 0.4 layer, audio and animation tools, so they leave the Smoke comp alone.
+      'var lc = app.project.items.addComp("Layers", 640, 360, 1, 3, 25);',
+      "return { comp_id: c.id, skill_comp_id: sk.id, layers_comp_id: lc.id };",
     ].join("\n"),
   });
   const COMP = scene.result?.comp_id;
   const SKILL_COMP = scene.result?.skill_comp_id;
+  const LAYERS_COMP = scene.result?.layers_comp_id;
   if (typeof COMP !== "number") throw new Error("Could not build the smoke scene: " + JSON.stringify(scene));
 
   let r = await call("ae_run_jsx", {
@@ -297,6 +300,33 @@ async function main() {
   r = await call("ae_import_assets", { expect: { project_path: AEP } });
   const again = await call("ae_import_assets", { dry_run: true, expect: { project_path: AEP } });
   check("ae_import_assets", r.ok && r.imported?.length === 1 && r.receipt?.matches === true && again.to_import?.length === 0, `${r.imported?.[0]?.name} into ${r.bin}; ${cpNote(r)}`);
+
+  // ---------- 0.4: layers ----------
+  // Plate (solid), then MATTE (text) on top, then Ctrl (null) between them, so
+  // the matte is not the layer directly above: that needs AE 23's setTrackMatte.
+  const LC = LAYERS_COMP;
+  r = await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Plate", color: [0.2, 0.4, 0.8], expect });
+  check("ae_create_layer (solid)", r.applied && r.receipt?.matches === true && r.layer?.kind === "solid" && r.checkpoint?.status === want("reused"), cpNote(r));
+  r = await call("ae_create_layer", { comp_id: LC, type: "text", text: "MATTE", expect });
+  check("ae_create_layer (text)", r.applied && r.receipt?.matches === true && r.layer?.text === "MATTE" && r.layer?.index === 1, `${r.layer?.name} #${r.layer?.index}`);
+  r = await call("ae_create_layer", { comp_id: LC, type: "null", name: "Ctrl", placement: { below: { name: "MATTE" } }, expect });
+  check("ae_create_layer (null, placed)", r.applied && r.receipt?.matches === true && r.layer?.index === 2, `#${r.layer?.index}`);
+  r = await call("ae_create_layer", { comp_id: LC, type: "light", name: "Key", light_type: "spot", parent: { name: "Ctrl" }, placement: { bottom: true }, expect });
+  check("ae_create_layer (light, parented)", r.applied && r.receipt?.matches === true && r.layer?.lightType === "spot" && r.layer?.parent === 2, `#${r.layer?.index}, parent ${r.layer?.parent}`);
+  r = await call("ae_set_track_matte", { comp_id: LC, layer: { name: "Plate" }, matte: { name: "MATTE" }, type: "alpha", expect });
+  check(
+    "ae_set_track_matte",
+    r.applied && r.receipt?.matches === true && r.layer?.trackMatte?.type === "alpha" && r.layer?.trackMatte?.layer?.name === "MATTE",
+    `api ${r.api}; ${(r.receipt?.mismatches ?? []).map((m) => m.message).join("; ")}`
+  );
+  r = await call("ae_set_track_matte", { comp_id: LC, layer: { name: "Plate" }, type: "none", show_matte: true, expect });
+  check("ae_set_track_matte (remove)", r.applied && r.receipt?.matches === true && r.layer?.trackMatte?.type === "none", `previous ${r.previous_matte?.name}`);
+  r = await call("ae_precompose", { comp_id: LC, layers: [{ name: "MATTE" }, { name: "Plate" }], name: "Smoke Precomp", expect });
+  check(
+    "ae_precompose",
+    r.applied && r.receipt?.matches === true && r.new_comp?.layers?.length === 2 && r.precomp_layer?.index === 1,
+    `${r.new_comp?.name}: ${(r.new_comp?.layers ?? []).map((l) => l.name).join(", ")}`
+  );
 
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));

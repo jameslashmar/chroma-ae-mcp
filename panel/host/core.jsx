@@ -336,6 +336,8 @@
     try { s.blendingMode = String(l.blendingMode); } catch (e4) {}
     try { s.trackMatteType = String(l.trackMatteType); } catch (e5) {}
     try { if (l.source) s.sourceId = l.source.id; } catch (e6) {}
+    // AE 23+: the matte is a layer reference, not always the layer above.
+    try { if (l.trackMatteLayer) s.trackMatteLayer = l.trackMatteLayer.index; } catch (e7) {}
     return s;
   }
 
