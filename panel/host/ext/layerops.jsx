@@ -897,6 +897,7 @@
     if (!hasIn && !hasOut && !hasStart) fail("bad_args", "trim needs in_point, out_point or start_time");
     var apply = [];
     var trims = [];
+    var shiftedOut = [];
     for (var i = 0; i < targets.length; i++) {
       var t = targets[i];
       var start = t.startTime;
@@ -908,6 +909,7 @@
         outP = outP + (args.start_time - start);
         start = args.start_time;
       }
+      var shifted = outP;
       if (hasIn) inP = args.in_point;
       if (hasOut) outP = args.out_point;
       if (!(inP < outP)) {
@@ -916,8 +918,10 @@
       }
       apply.push(t);
       trims.push({ id: t.id, start_time: start, in_point: inP, out_point: outP });
+      shiftedOut.push(shifted);
     }
     plan.out.trims = trims;
+    plan.work.shiftedOut = shiftedOut;
     plan.work.apply = apply;
     plan.work.trims = trims;
     plan.work.hasStart = hasStart;
@@ -971,7 +975,14 @@
       if (hasFind) base = replaceAll(base, args.find, rep, caseSensitive);
       var result = base;
       if (hasTemplate) {
-        result = tpl.split("{name}").join(base).split("{n}").join(pad(counter, width)).split("{index}").join(pad(t.index, width));
+        var nText = pad(counter, width);
+        var indexText = pad(t.index, width);
+        // One pass, so a placeholder inside the layer's own name is never expanded.
+        result = tpl.replace(/\{(name|n|index)\}/g, function (m, key) {
+          if (key === "name") return base;
+          if (key === "n") return nText;
+          return indexText;
+        });
         counter++;
       }
       if (result === name) {
@@ -1266,7 +1277,8 @@
       try {
         if (w.hasStart) t.startTime = tr.start_time;
         // Set the point that moves away from the other one first, so the in point is never past the out point.
-        if (tr.in_point >= t.outPoint) {
+        // Compare with the out point as it will be after the start moved, worked out before the write.
+        if (tr.in_point >= w.shiftedOut[i]) {
           t.outPoint = tr.out_point;
           t.inPoint = tr.in_point;
         } else {
@@ -1359,10 +1371,17 @@
       for (c = 0; c < changes.length; c++) {
         if (changes[c].key !== "locked") other = true;
       }
+      var didUnlock = false;
       try {
         if (wasLocked && other) {
-          l.locked = false;
-          unlocked.push(l.id);
+          try {
+            l.locked = false;
+            didUnlock = true;
+            unlocked.push(l.id);
+          } catch (eU) {
+            skip(plan, l, "AE refused to unlock it: " + eU.message);
+            continue;
+          }
         }
         for (c = 0; c < changes.length; c++) {
           if (changes[c].key === "locked") continue;
@@ -1378,9 +1397,10 @@
         var finalLock = wasLocked;
         if (args.locked !== undefined && args.locked !== null) finalLock = args.locked;
         try {
-          if ((prop(l, "locked") === true) !== finalLock) l.locked = finalLock;
+          // No read of the live lock here (a read after a write in one call can be stale).
+          if (didUnlock || finalLock !== wasLocked) l.locked = finalLock;
           if (finalLock !== wasLocked) applied.push({ id: l.id, key: "locked", from: wasLocked, to: finalLock });
-          if (wasLocked && other && finalLock) relocked.push(l.id);
+          if (didUnlock && finalLock) relocked.push(l.id);
         } catch (e2) {
           skip(plan, l, "AE refused to set the lock: " + e2.message, "locked");
         }

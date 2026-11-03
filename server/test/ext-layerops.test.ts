@@ -169,7 +169,10 @@ describe("findIndexReferences", () => {
 
   it("flags index arithmetic it can't evaluate", () => {
     const refs = findIndexReferences("thisComp.layer(Math.max(1, index - 1))");
-    expect(refs).toEqual([]);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ relative: true, parsed: false, text: "layer(Math.max(1, index - 1))" });
+    expect(findIndexReferences("thisComp.layer(parseInt(x) + index)")[0]).toMatchObject({ parsed: false });
+    expect(findIndexReferences("thisComp.layer(Math.max(1, 2)).opacity")).toEqual([]);
     const odd = findIndexReferences("thisComp.layer(index * 2)");
     expect(odd).toHaveLength(1);
     expect(odd[0]).toMatchObject({ relative: true, parsed: false });
@@ -297,6 +300,20 @@ describe("nameReferenceWarnings", () => {
 
 describe("layerOpsMismatches", () => {
   const before = stack([L(1, 10, "A"), L(2, 11, "B"), L(3, 12, "C")]);
+
+  it("flags a layer unlocked for the edit that was not locked again", () => {
+    const lockedBefore = stack([L(1, 10, "A", { locked: true }), L(2, 11, "B"), L(3, 12, "C")]);
+    const w = { action: "switches", targets: [{ id: 10 }], changes: [{ id: 10, key: "shy", from: false, to: true }], unlocked: [10], relocked: [10] };
+    expect(layerOpsMismatches({ action: "switches" }, lockedBefore, stack([L(1, 10, "A", { locked: true, shy: true }), L(2, 11, "B"), L(3, 12, "C")]), w)).toEqual([]);
+    const open = stack([L(1, 10, "A", { locked: false, shy: true }), L(2, 11, "B"), L(3, 12, "C")]);
+    expect(layerOpsMismatches({ action: "switches" }, lockedBefore, open, w).map((x) => x.path)).toContain("layer[A].locked");
+    const notRelocked = { ...w, relocked: [] };
+    expect(layerOpsMismatches({ action: "switches" }, lockedBefore, open, notRelocked).map((x) => x.path)).toContain("layer[10].locked");
+    // Asked to end unlocked: not a mismatch.
+    const asked = { ...w, relocked: [], changes: [{ id: 10, key: "locked", from: true, to: false }] };
+    expect(layerOpsMismatches({ action: "switches", locked: false }, lockedBefore, open, { ...asked, changes: [] })).toEqual([]);
+    expect(layerOpsMismatches({ action: "switches", locked: false }, lockedBefore, open, asked).filter((x) => x.path.includes("locked"))).toEqual([]);
+  });
 
   it("checks a re-parent by id across the index shift", () => {
     const after = stack([L(1, 10, "A", { parent: 3 }), L(2, 11, "B"), L(3, 12, "C")]);
@@ -429,6 +446,19 @@ describe("ae_layer_ops handler", () => {
     const out2 = (await tool.handler(sw, q.ctx)) as any;
     expect(q.calls[1]!.script).not.toContain("scan_expressions");
     expect(out2.receipt.matches).toBe(true);
+  });
+
+  it("a dry run for a copy to another comp predicts the destination's shifted references", async () => {
+    const D1 = L(1, 50, "D1");
+    const D2 = L(2, 51, "D2");
+    const { ctx } = fakeAe({
+      layeropsRead: [stack([L(1, 10, "A")], { with_comp: stack([D1, D2], { comp_id: 2, expressions: [ex(D1, "thisComp.layer(2).opacity")] }) })],
+      layeropsPlan: [{ action: "duplicate", to_comp_id: 2, targets: [{ id: 10 }], skipped: [], warnings: [], dry_run: true, would_change: 1 }],
+    });
+    const args = AeLayerOpsSchema.parse({ action: "duplicate", comp_id: 1, layers: [{ index: 1 }], to_comp_id: 2, dry_run: true, expect: expectArg });
+    const out = (await tool.handler(args, ctx)) as any;
+    expect(out.would_break_expressions).toHaveLength(1);
+    expect(out.would_break_expressions[0]).toMatchObject({ layer_name: "D1", kind: "index", now: { index: 2, layer_name: "D1" } });
   });
 
   it("a dry run reads and plans without a guard, a write or a checkpoint, and predicts the breaks", async () => {
@@ -874,6 +904,23 @@ describe("layerops.jsx: trim", () => {
     expect([a.startTime, a.inPoint, a.outPoint]).toEqual([1, 1, 2]);
   });
 
+  it("decides the order from the planned out point, not a read right after the write", () => {
+    const { comp, A } = scene(["A"]);
+    const a = layer(comp, "A");
+    let inP = 0;
+    let outP = 10;
+    let start = 0;
+    Object.defineProperty(a, "startTime", { configurable: true, get: () => start, set: (v: number) => { inP += v - start; outP += v - start; start = v; } });
+    // A stale read: the out point still looks like it did before the start moved.
+    let stale = true;
+    Object.defineProperty(a, "outPoint", { configurable: true, get: () => (stale ? 10 : outP), set: (v: number) => { outP = v; } });
+    Object.defineProperty(a, "inPoint", { configurable: true, get: () => inP, set: (v: number) => { if (v >= outP) throw new Error("in past out"); inP = v; } });
+    const r = A.layeropsApply({ action: "trim", comp_id: comp.id, layers: sel("A"), start_time: -8, in_point: 5, out_point: 9, expect: GUARD });
+    stale = false;
+    expect(r.skipped).toEqual([]);
+    expect([inP, outP]).toEqual([5, 9]);
+  });
+
   it("skips a layer whose in point would pass its out point", () => {
     const { comp, A } = scene(["A", "B"]);
     layer(comp, "B").outPoint = 20;
@@ -909,6 +956,12 @@ describe("layerops.jsx: rename", () => {
     expect(order(comp)).toEqual(["Row 005", "Row 006", "Row 007"]);
     A.layeropsApply({ action: "rename", comp_id: comp.id, where: { has_parent: false }, template: "{index}_{name}", number_pad: 2, expect: GUARD });
     expect(order(comp)).toEqual(["01_Row 005", "02_Row 006", "03_Row 007"]);
+  });
+
+  it("never expands placeholders that sit inside the layer's own name", () => {
+    const { comp, A } = scene(["Shot {n}", "Take {index}"]);
+    A.layeropsApply({ action: "rename", comp_id: comp.id, layers: sel("Shot {n}", "Take {index}"), template: "{name} v{n}", expect: GUARD });
+    expect(order(comp)).toEqual(["Shot {n} v1", "Take {index} v2"]);
   });
 
   it("skips names that would be empty or too long, and warns about shared names", () => {
@@ -1031,6 +1084,32 @@ describe("layerops.jsx: switches", () => {
     A.layeropsApply({ action: "switches", comp_id: comp.id, layers: sel("A", "B"), locked: true, enabled: false, expect: GUARD });
     expect(layer(comp, "B").locked).toBe(true);
     expect(layer(comp, "B").enabled).toBe(false);
+  });
+
+  it("relocks even when a read of locked right after the unlock comes back stale", () => {
+    const { comp, A } = scene(["A"]);
+    const a = layer(comp, "A");
+    let lock = true;
+    const sets: boolean[] = [];
+    Object.defineProperty(a, "locked", { configurable: true, get: () => true, set: (v: boolean) => { sets.push(v); lock = v; } });
+    const r = A.layeropsApply({ action: "switches", comp_id: comp.id, layers: sel("A"), solo: true, unlock_locked: true, expect: GUARD });
+    expect(sets[0]).toBe(false);
+    expect(sets[sets.length - 1]).toBe(true);
+    expect(lock).toBe(true);
+    expect(r.relocked).toHaveLength(1);
+  });
+
+  it("skips a layer AE will not unlock instead of throwing, and keeps going", () => {
+    const { comp, A } = scene(["A", "B"]);
+    const a = layer(comp, "A");
+    let lock = true;
+    Object.defineProperty(a, "locked", { configurable: true, get: () => lock, set: (v: boolean) => { if (v === false) throw new Error("no unlock"); lock = v; } });
+    const r = A.layeropsApply({ action: "switches", comp_id: comp.id, layers: sel("A", "B"), solo: true, unlock_locked: true, expect: GUARD });
+    expect(r.skipped.map((x: any) => x.name)).toContain("A");
+    expect(r.skipped[0].reason).toContain("unlock");
+    expect(layer(comp, "B").solo).toBe(true);
+    expect(layer(comp, "A").solo).toBe(false);
+    expect(r.unlocked).toEqual([]);
   });
 
   it("selects with where and is read back by a separate read", () => {

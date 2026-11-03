@@ -380,7 +380,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             customMismatches: afterRead.failure ? [afterRead.failure] : undefined,
           });
           recordRunJsx({ op_id: opId, label: args.label, code: args.code, mutates: true, at: new Date().toISOString() });
-          await noteAfterWrite(ctx, note);
+          await noteAfterWrite(ctx, note, { skipRead: !!afterRead.failure });
 
           return {
             op_id: opId,
@@ -481,7 +481,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             })
           );
           if (afterRead.failure) {
-            await noteAfterWrite(ctx, note);
+            await noteAfterWrite(ctx, note, { skipRead: true });
             return {
               op_id: opId,
               applied: true as const,

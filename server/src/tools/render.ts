@@ -61,7 +61,7 @@ export const AeRenderQueueAddSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Run the ae_preflight delivery check on this comp (and the comps it nests) first, and refuse to add it to the queue if it finds a blocker (missing footage or fonts, expressions in error, no output). Nothing is changed when it refuses. Default false."
+      "Run the ae_preflight delivery check on this comp (and the comps it nests) first, and refuse to add it to the queue if it finds a blocker (missing footage or fonts, expressions in error). A missing output folder is only a warning and does not refuse. Nothing is changed when it refuses. Default false."
     ),
   expect: ExpectSchema,
 });

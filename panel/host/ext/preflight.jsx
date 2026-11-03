@@ -178,9 +178,9 @@
         out.fonts_check = "available";
         for (var m = 0; m < mf.length && out.missing_fonts.length < MAX_LIST; m++) {
           var fname = "";
-          try { fname = String(mf[m].postScriptName); } catch (e6) {}
+          try { var pv = mf[m].postScriptName; if (pv !== undefined && pv !== null) fname = String(pv); } catch (e6) {}
           if (fname.length === 0) {
-            try { fname = String(mf[m].nativeName); } catch (e7) {}
+            try { var fv = mf[m].nativeFullName; if (fv !== undefined && fv !== null) fname = String(fv); } catch (e7) {}
           }
           if (fname.length > 0) out.missing_fonts.push(clip(fname, 200));
         }
@@ -249,7 +249,7 @@
         for (var j = 0; j < u.length && j < MAX_USED_IN; j++) usedIn.push(u[j].id);
       } catch (e0) {}
       if (it instanceof CompItem) {
-        var c = { id: it.id, name: clip(it.name, 200), width: it.width, height: it.height, fps: it.frameRate, duration: it.duration, layers: it.numLayers, renderer: null, used_n: used, used_in: usedIn };
+        var c = { id: it.id, name: clip(it.name, 20000), width: it.width, height: it.height, fps: it.frameRate, duration: it.duration, layers: it.numLayers, renderer: null, used_n: used, used_in: usedIn };
         try { c.renderer = String(it.renderer); } catch (e1) {}
         try {
           var cps = it.proxySource;

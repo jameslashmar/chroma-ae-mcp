@@ -248,6 +248,8 @@ export interface JobRecord {
   selection: Record<string, unknown>;
   comps: JobComp[];
   checkpoint?: unknown;
+  /** Why the first checkpoint attempt made no copy, kept while no real copy exists. */
+  checkpoint_skipped_reason?: string;
 }
 
 export interface Outcome {
@@ -476,6 +478,15 @@ export function planFromProbe(comps: JobComp[], names: string[], probe: ProbeRes
   return plan;
 }
 
+/** A checkpoint result that names a real copy; autoCheckpoint also answers {status:"skipped"} when it made none. */
+function isRealCheckpoint(c: unknown): boolean {
+  if (c === null || typeof c !== "object") return false;
+  const st = (c as { status?: unknown }).status;
+  return st === "created" || st === "reused";
+}
+
+const PROBE_NAME_LIMIT = 50;
+
 const call = <T>(ctx: ToolContext, fn: string, args: unknown, label: string) =>
   ctx.bridge.callHost<T>(fn, args, { label, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
 
@@ -606,14 +617,28 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
   );
   let probe: ProbeResult["comps"] = [];
   if (todo.length) {
-    const probed = await call<ProbeResult>(
-      ctx,
-      "multicompProbe",
-      { comp_ids: todo.map((c) => c.comp_id), layer_names: scan.names, expect: { project_path: args.expect.project_path } },
-      "ae_multi_comp_apply (probe layers)"
-    );
-    if (probed.guard_failed) throw guardChanged(opId, args.expect, probed.project_path);
-    probe = probed.comps;
+    // The host probes at most PROBE_NAME_LIMIT names per call, so a long list goes in chunks whose `found` maps are merged.
+    const nameChunks: string[][] = [];
+    for (let i = 0; i < scan.names.length; i += PROBE_NAME_LIMIT) nameChunks.push(scan.names.slice(i, i + PROBE_NAME_LIMIT));
+    if (nameChunks.length === 0) nameChunks.push([]);
+    for (const chunk of nameChunks) {
+      const probed = await call<ProbeResult>(
+        ctx,
+        "multicompProbe",
+        { comp_ids: todo.map((c) => c.comp_id), layer_names: chunk, expect: { project_path: args.expect.project_path } },
+        "ae_multi_comp_apply (probe layers)"
+      );
+      if (probed.guard_failed) throw guardChanged(opId, args.expect, probed.project_path);
+      if (probe.length === 0) {
+        probe = probed.comps.map((p) => ({ ...p, found: { ...p.found } }));
+      } else {
+        const byId = new Map(probe.map((p) => [p.id, p]));
+        for (const p of probed.comps) {
+          const into = byId.get(p.id);
+          if (into) Object.assign(into.found, p.found);
+        }
+      }
+    }
   }
   const plan = planFromProbe(todo, scan.names, probe);
 
@@ -676,6 +701,7 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
   let store = saveJob(job);
   activeJobs.add(job.id);
   let stoppedAt: { comp_id: number; name: string } | null = null;
+  const writtenNow: JobComp[] = [];
   try {
     let wrote = false;
     for (const entry of todo) {
@@ -712,6 +738,7 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
       let outcome: Outcome;
       let fatal = false;
       let checkpoint: unknown;
+      let skippedCheckpoint: unknown;
       let userChanged: string | undefined;
       let undoSteps: number | undefined;
       // Marked before the write starts, so a crash during it leaves a record that says the comp may be half done.
@@ -723,7 +750,10 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
         outcome = classifyResult(result);
         const r = result as { checkpoint?: unknown; chunks?: Array<{ checkpoint?: unknown; done?: number }>; user_changed?: unknown } | null;
         // ae_batch_set reports one checkpoint per chunk, not one at the top.
-        checkpoint = r?.checkpoint ?? (Array.isArray(r?.chunks) ? r?.chunks?.find((ch) => ch?.checkpoint !== undefined && ch?.checkpoint !== null)?.checkpoint : undefined);
+        const candidates: unknown[] = [r?.checkpoint];
+        if (Array.isArray(r?.chunks)) for (const ch of r.chunks) candidates.push(ch?.checkpoint);
+        checkpoint = candidates.find(isRealCheckpoint);
+        skippedCheckpoint = candidates.find((c) => c !== undefined && c !== null && !isRealCheckpoint(c));
         if (typeof r?.user_changed === "string" && r.user_changed.length > 0) userChanged = r.user_changed.slice(0, 500);
         if (Array.isArray(r?.chunks)) undoSteps = Math.max(1, r.chunks.filter((ch) => (ch?.done ?? 0) > 0).length);
         wrote = true;
@@ -734,7 +764,13 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
         wrote = wrote || outcome.applied !== false;
       }
       // Once the write may have happened, nothing below may throw.
-      if (job.checkpoint === undefined && checkpoint !== undefined && checkpoint !== null) job.checkpoint = checkpoint;
+      if (job.checkpoint === undefined && checkpoint !== undefined) {
+        job.checkpoint = checkpoint;
+        delete job.checkpoint_skipped_reason;
+      } else if (job.checkpoint === undefined && job.checkpoint_skipped_reason === undefined && skippedCheckpoint !== undefined) {
+        const reason = (skippedCheckpoint as { reason?: unknown }).reason;
+        job.checkpoint_skipped_reason = typeof reason === "string" && reason ? reason.slice(0, 300) : "The automatic checkpoint made no copy.";
+      }
       if (job.fingerprints && outcome.applied !== false) {
         try {
           const fpAfter = await call<{ truncated?: boolean } | null>(ctx, "compFingerprint", { comp_id: entry.comp_id }, `ae_multi_comp_apply (fingerprint after ${entry.name})`);
@@ -750,6 +786,7 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
       Object.assign(entry, outcome, { duration_ms: Date.now() - started });
       if (userChanged !== undefined) entry.user_changed = userChanged;
       if (undoSteps !== undefined) entry.undo_steps = undoSteps;
+      if (entry.applied === true || outcome.status === "ok") writtenNow.push(entry);
       store = saveJob(job);
       if (outcome.status === "unverified" || fatal) {
         stoppedAt = { comp_id: entry.comp_id, name: entry.name };
@@ -779,8 +816,10 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
   }
   store = saveJob(job);
 
-  const anyApplied = job.comps.some((c) => c.applied === true || c.status === "ok");
-  const written = job.comps.filter((c) => c.applied === true || c.status === "ok");
+  // applied and the undo count describe this call only; job_applied covers comps written by earlier calls too.
+  const jobApplied = job.comps.some((c) => c.applied === true || c.status === "ok");
+  const anyApplied = writtenNow.length > 0;
+  const written = writtenNow;
   const undoSteps = written.reduce((n, c) => n + (c.undo_steps ?? 1), 0);
   const userChangedList = job.comps.filter((c) => c.user_changed).slice(0, 20).map((c) => ({ comp_id: c.comp_id, name: c.name, user_changed: c.user_changed }));
   const clean = summary.failed === 0 && summary.unverified === 0 && summary.pending === 0;
@@ -788,6 +827,7 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
     ok: clean,
     ...(clean ? {} : { error: stoppedAt ? "job_stopped" : "comps_failed" }),
     applied: anyApplied,
+    job_applied: jobApplied,
     job_id: job.id,
     state: job.state,
     tool: job.tool,
@@ -799,9 +839,9 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
     checkpoint: job.checkpoint ?? null,
     checkpoint_note:
       job.checkpoint === undefined || job.checkpoint === null
-        ? "No automatic checkpoint was captured for this job, so there is no copy of the last save to go back to; only Ctrl+Z undoes it."
+        ? `No automatic checkpoint copy was made for this job${job.checkpoint_skipped_reason ? ` (${job.checkpoint_skipped_reason})` : ""}, so there is no copy of the last save to go back to; only Ctrl+Z undoes it.`
         : "One automatic checkpoint (a copy of the last save) covers the whole job when the project wasn't saved between comps; it is the way back across all comps. ae_checkpoint_revert restores it.",
-    undo_note: `Each written comp is its own undo step, and an ae_batch_set comp has one per chunk (an undo group can't span evalScripts): ${undoSteps} step${undoSteps === 1 ? "" : "s"} of Ctrl+Z to undo by hand, from ${written.length} written comp${written.length === 1 ? "" : "s"}.`,
+    undo_note: `Each written comp is its own undo step, and an ae_batch_set comp has one per chunk (an undo group can't span evalScripts): ${undoSteps} step${undoSteps === 1 ? "" : "s"} of Ctrl+Z to undo by hand, from ${written.length} comp${written.length === 1 ? "" : "s"} written in this call.`,
     ...(userChangedList.length > 0 ? { user_changed: userChangedList } : {}),
     job_file: store.file,
     ...jobFileNotes(job, store),
@@ -827,7 +867,7 @@ export const multicompTools: ToolDefinition<any>[] = [
   {
     name: "ae_multi_comp_apply",
     description:
-      "Run one existing guarded write (ae_set_property, ae_set_text, ae_add_effect, ae_set_effect, ae_remove_effect, ae_apply_preset, ae_batch_set, ae_create_layer, ae_set_track_matte, ae_add_markers, ae_remove_markers, ae_remove_keyframes, ae_set_keyframe_ease, ae_mask, ae_text_animator, ae_shape, ae_align) " +
+      `Run one existing guarded write (${MULTICOMP_WRITE_TOOLS.join(", ")}) ` +
       "on many comps in one call: pick the comps by comp_ids, a folder_id (subfolders included), nested_in (every comp inside a comp) or a name_pattern, and give op {tool, args} without comp_id and expect. " +
       "Each comp goes through that tool's own handler, so its guard, undo group and separate-evalScript read-back stay in force, and comps are written one at a time with a pause so AE's UI keeps up. " +
       "The result is a per-comp table (ok, skipped, failed, unverified) with an optional fingerprint hash before and after. " +

@@ -503,7 +503,7 @@ function resolveRoots(s: ScanState): void {
   if (explicit) {
     finals = new Set(ids);
   } else {
-    const queued = project.render_queue.items.filter((it) => it.render && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
+    const queued = project.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
     if (o.scope === "delivery" && queued.length > 0) {
       ids = queued.map((it) => it.comp_id as number);
       finals = new Set(ids);
@@ -720,7 +720,7 @@ function renderQueueFindings(s: ScanState): Finding[] {
   const out: Finding[] = [];
   if (!p) return out;
   const explicit = Boolean((s.opts.comp_ids && s.opts.comp_ids.length) || (s.opts.comp_names && s.opts.comp_names.length));
-  const items = s.opts.check_queue_outputs === false ? [] : p.render_queue.items.filter((it) => it.render && it.status !== "done" && (!explicit || (it.comp_id !== null && s.roots.includes(it.comp_id))));
+  const items = s.opts.check_queue_outputs === false ? [] : p.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && (!explicit || (it.comp_id !== null && s.roots.includes(it.comp_id))));
   for (const it of items) {
     const where = { rq_index: it.index, ...(it.comp_id !== null ? { comp_id: it.comp_id } : {}), ...(it.comp_name ? { comp: it.comp_name } : {}) };
     if (it.status === "needs_output" || it.outputs.length === 0 || it.outputs.every((o) => o.file === null)) {
@@ -801,7 +801,7 @@ function footageFindings(s: ScanState): Finding[] {
         fix: used ? { tool: "ae_replace_footage", hint: `Point item ${f.id} at the real file.` } : { tool: "ae_purge_unused", hint: "Remove unused items." },
       });
     }
-    if (f.proxy && (used || f.used_n === 0)) {
+    if (f.proxy && used) {
       if (f.proxy.use) {
         out.push({
           severity: "warning",
@@ -1373,6 +1373,7 @@ export interface GateSummary {
   blockers: Finding[];
   warnings: Finding[];
   comps_checked: number;
+  expressions: string;
   note?: string;
 }
 
@@ -1383,7 +1384,7 @@ export interface GateSummary {
  */
 export async function runPreflightGate(ctx: ToolContext, o: GateOptions): Promise<{ blocked: boolean; summary: GateSummary }> {
   // Items already in the queue are not the caller's concern here: the tool brings its own output (aerender's -output overrides too).
-  const opts: ScanOptions = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names }, o.planned_output), check_queue_outputs: false };
+  const opts: ScanOptions = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names, force_eval: true }, o.planned_output), check_queue_outputs: false };
   const state = newScanState(opts);
   const call = makeScanCall(ctx, o.opId, o.toolName);
   const { complete } = await runScan(state, call, { maxSlices: 300, deadline: Date.now() + 60_000 });
@@ -1396,6 +1397,7 @@ export async function runPreflightGate(ctx: ToolContext, o: GateOptions): Promis
     blockers: findings.filter((f) => f.severity === "blocker").slice(0, 20),
     warnings: findings.filter((f) => f.severity === "warning").slice(0, 20),
     comps_checked: state.seen.size,
+    expressions: `forced evaluation of the root comps' expressions, then expressionError (${state.forced_evals} forced${state.force_capped > 0 ? `, ${state.force_capped} only read the cheap way (cap)` : ""})`,
     ...(complete ? {} : { note: "The preflight did not finish within its limits; run ae_preflight to read the rest." }),
   };
   return { blocked: counts.blocker > 0, summary };

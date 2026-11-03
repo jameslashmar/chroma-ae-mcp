@@ -36,7 +36,7 @@ import { z } from "zod";
 import { SLOW_TIMEOUT_MS, type HostTransport } from "../../host.js";
 import { buildJsxCall, pathsMatchForGuard } from "../../jsx.js";
 import type { QuarantineStore } from "../../quarantine.js";
-import { dataDirOf, type ExpectGuard, type ToolContext, type ToolDefinition } from "../common.js";
+import { type ExpectGuard, type ToolContext, type ToolDefinition } from "../common.js";
 
 // ---------- snapshot shape (what sessionSnapshot returns) ----------
 
@@ -123,6 +123,11 @@ const MAX_OP_PROJECTS = 200;
 const MAX_INTERRUPTED = 20;
 const MAX_SHOWN_IDS = 100;
 const MAX_STEP_ITEM_IDS = 100;
+const MAX_PENDING_LINES = 10;
+/** A snapshot read inside a write only stops waiting after this long (never aborts the evalScript): a stuck AE must not hold the queue for the 120 s default. */
+export const SNAPSHOT_TIMEOUT_MS = 8_000;
+const UNSAVED = "<unsaved>";
+const UNKNOWN_PROJECT = "<unknown>";
 /** A write cannot run longer than the largest eval timeout; a record older than this is dead whatever its pid says. */
 const MAX_INFLIGHT_AGE_MS = SLOW_TIMEOUT_MS + 5 * 60_000;
 
@@ -172,6 +177,18 @@ export interface SessionDiff {
   };
   /** One line for a write receipt; null when nothing changed. */
   user_changed: string | null;
+}
+
+/**
+ * Two "<unsaved>" snapshots are one project only while most item ids carry
+ * over. After File > New, or an AE restart into a new project, the ids hardly
+ * overlap. Capped lists cannot be judged, so they count as the same.
+ */
+function unsavedItemsDiffer(prevIds: number[] | undefined, live: SessionSnapshot, prevTruncated = false): boolean {
+  if (!prevIds || prevIds.length === 0 || prevTruncated || live.items_truncated) return false;
+  const now = new Set(live.item_ids);
+  const kept = prevIds.filter((id) => now.has(id)).length;
+  return kept < Math.ceil(prevIds.length * 0.5);
 }
 
 function sameList(a: number[], b: number[]): boolean {
@@ -230,7 +247,8 @@ function describeComp(c: CompChange): string | null {
  * from another project yields only the swap: nothing else is comparable.
  */
 export function diffSnapshots(prev: StoredSnapshot, live: SessionSnapshot, serviceId: string): SessionDiff {
-  const swapped = !pathsMatchForGuard(prev.project_path, live.project_path);
+  const bothUnsaved = prev.project_path === UNSAVED && live.project_path === UNSAVED;
+  const swapped = !pathsMatchForGuard(prev.project_path, live.project_path) || (bothUnsaved && unsavedItemsDiffer(prev.item_ids, live, prev.items_truncated));
   const restarted = prev.service_id !== serviceId;
   const buildChanged = !!prev.build && !!live.build && prev.build !== live.build;
   const reopened = !swapped && prev.revision !== null && live.revision !== null && live.revision < prev.revision;
@@ -326,8 +344,25 @@ export type UndoReach = "not_reachable" | "possibly_reachable";
  * otherwise says only "possibly": the user's own undos, the Levels of Undo
  * limit and Edit > Purge are invisible to scripts.
  */
-export function undoReach(step: UndoStep, live: SessionSnapshot, serviceId: string): { reach: UndoReach; why: string } {
+export function undoReach(
+  step: UndoStep,
+  live: SessionSnapshot,
+  serviceId: string,
+  opts: { reopenedAt?: string | null } = {}
+): { reach: UndoReach; why: string } {
+  // A project the server itself closed and reopened (checkpoint revert, open) lost its undo history, whatever path or ids it has now.
+  const reopenedMs = opts.reopenedAt ? Date.parse(opts.reopenedAt) : NaN;
+  const stepMs = Date.parse(step.at);
+  if (Number.isFinite(reopenedMs) && Number.isFinite(stepMs) && stepMs < reopenedMs) {
+    return {
+      reach: "not_reachable",
+      why: "the project was closed and reopened after this step (a checkpoint revert or open); After Effects clears the undo history when a project closes",
+    };
+  }
   let prefix = "";
+  if (step.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step.item_ids, live)) {
+    return { reach: "not_reachable", why: "another unsaved project is open (its items hardly overlap the step's)" };
+  }
   if (!pathsMatchForGuard(step.project_path, live.project_path)) {
     if (!looksLikeSaveAs(step, live)) {
       return { reach: "not_reachable", why: `another project is open (the step was made in ${step.project_path})` };
@@ -371,9 +406,41 @@ interface StateFile {
   steps: UndoStep[];
   op_projects: Record<string, string>;
   interrupted: InterruptedOp[];
+  /** When a tool last closed and reopened a project: undo steps before it are gone. */
+  reopened_at: string | null;
 }
 
-const emptyState = (): StateFile => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [] });
+const emptyState = (): StateFile => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [], reopened_at: null });
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Keeps what a saved state file holds only where its shape is right; anything else starts empty. Never throws. */
+function sanitizeState(saved: unknown): StateFile {
+  const out = emptyState();
+  if (!isPlainObject(saved)) return out;
+  if (isPlainObject(saved.snapshots)) {
+    for (const [k, v] of Object.entries(saved.snapshots)) {
+      if (isPlainObject(v) && typeof v.project_path === "string" && Array.isArray(v.item_ids) && Array.isArray(v.comps)) {
+        out.snapshots[k] = v as unknown as StoredSnapshot;
+      }
+    }
+  }
+  if (typeof saved.last_key === "string" && out.snapshots[saved.last_key]) out.last_key = saved.last_key;
+  if (isPlainObject(saved.touched)) {
+    for (const [k, v] of Object.entries(saved.touched)) if (Array.isArray(v)) out.touched[k] = v.filter((x): x is number => typeof x === "number");
+  }
+  if (Array.isArray(saved.steps)) {
+    out.steps = saved.steps.filter((x): x is UndoStep => isPlainObject(x) && typeof x.op_id === "string" && typeof x.at === "string");
+  }
+  if (isPlainObject(saved.op_projects)) {
+    for (const [k, v] of Object.entries(saved.op_projects)) if (typeof v === "string") out.op_projects[k] = v;
+  }
+  if (Array.isArray(saved.interrupted)) {
+    out.interrupted = saved.interrupted.filter((x): x is InterruptedOp => isPlainObject(x) && typeof x.op_id === "string" && typeof x.project_path === "string");
+  }
+  if (typeof saved.reopened_at === "string") out.reopened_at = saved.reopened_at;
+  return out;
+}
 
 function writeJson(file: string, value: unknown): void {
   try {
@@ -420,8 +487,13 @@ export interface TrackerOptions {
 export class SessionTracker {
   /** Op ids whose write-ahead record this process holds right now (guarded writes and the bridge hook share it). */
   private readonly active = new Set<string>();
-  /** What the user changed before an unguarded write; the next guarded write reports it, so the baseline update cannot swallow it. */
-  pendingUserChanged: string | null = null;
+  /** What the user changed before an unguarded write; a guarded write reports it, so the baseline update cannot swallow it. */
+  private pendingLines: string[] = [];
+  private pendingDropped = 0;
+  /** The pending lines each write's receipt carries; they leave pending only once the write is done (commitReported). */
+  private readonly reported = new Map<string, { lines: string[]; dropped: number }>();
+  /** Writes whose before-snapshot failed or timed out: AE is likely blocked, so their after-snapshot is skipped. */
+  private readonly skipAfter = new Set<string>();
   readonly rendersJobsFile: string | null;
   private readonly maxInflightAgeMs: number;
   readonly serviceId = crypto.randomBytes(6).toString("hex");
@@ -442,8 +514,68 @@ export class SessionTracker {
     this.pid = opts.pid ?? process.pid;
     this.rendersJobsFile = opts.rendersJobsFile ?? null;
     this.maxInflightAgeMs = opts.maxInflightAgeMs ?? MAX_INFLIGHT_AGE_MS;
-    const saved = readJson<Partial<StateFile>>(this.statePath);
-    this.state = { ...emptyState(), ...(saved && typeof saved === "object" ? saved : {}) };
+    this.state = sanitizeState(readJson<unknown>(this.statePath));
+  }
+
+  get pendingUserChanged(): string | null {
+    if (this.pendingLines.length === 0) return null;
+    const note = this.pendingDropped > 0 ? ` (${this.pendingDropped} earlier change line(s) dropped)` : "";
+    return this.pendingLines.join(" ") + note;
+  }
+
+  /** Null clears; a string replaces the lines with that one. */
+  set pendingUserChanged(value: string | null) {
+    this.pendingLines = value ? [value] : [];
+    this.pendingDropped = 0;
+  }
+
+  /** Adds a line unless pending has it already; keeps the last MAX_PENDING_LINES. */
+  addPending(line: string): void {
+    if (this.pendingLines.some((l) => l.includes(line))) return;
+    this.pendingLines.push(line);
+    while (this.pendingLines.length > MAX_PENDING_LINES) {
+      this.pendingLines.shift();
+      this.pendingDropped++;
+    }
+  }
+
+  /** The pending lines a receipt is about to carry; they stay pending until commitReported. */
+  takePendingFor(opId: string): { lines: string[]; note: string } {
+    const lines = [...this.pendingLines];
+    const dropped = lines.length > 0 ? this.pendingDropped : 0;
+    this.reported.set(opId, { lines, dropped });
+    for (const old of [...this.reported.keys()].slice(0, Math.max(0, this.reported.size - 50))) this.reported.delete(old);
+    return { lines, note: dropped > 0 ? ` (${dropped} earlier change line(s) dropped)` : "" };
+  }
+
+  /** The write's result is being returned: the pending lines it carried have been reported. */
+  commitReported(opId: string): void {
+    const rep = this.reported.get(opId);
+    this.reported.delete(opId);
+    if (!rep) return;
+    const lines = rep.lines;
+    this.pendingDropped = Math.max(0, this.pendingDropped - rep.dropped);
+    this.pendingLines = this.pendingLines.filter((l) => !lines.includes(l));
+    if (this.pendingLines.length === 0) this.pendingDropped = 0;
+  }
+
+  markSkipAfter(opId: string): void {
+    this.skipAfter.add(opId);
+    for (const old of [...this.skipAfter].slice(0, Math.max(0, this.skipAfter.size - 50))) this.skipAfter.delete(old);
+  }
+
+  takeSkipAfter(opId: string): boolean {
+    return this.skipAfter.delete(opId);
+  }
+
+  /** A tool closed and reopened a project (checkpoint revert, open): earlier undo steps are gone. */
+  markReopened(): void {
+    this.state.reopened_at = this.now().toISOString();
+    this.save();
+  }
+
+  reopenedAt(): string | null {
+    return this.state.reopened_at;
   }
 
   private save(): void {
@@ -496,7 +628,10 @@ export class SessionTracker {
     this.state.snapshots[key] = stored;
     this.state.last_key = key;
     const keys = Object.keys(this.state.snapshots);
-    for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) delete this.state.snapshots[old];
+    for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) {
+      delete this.state.snapshots[old];
+      delete this.state.touched[old];
+    }
     const touched = new Set(this.state.touched[key] ?? []);
     for (const c of snap.comps) if (!c.missing) touched.add(c.id);
     this.state.touched[key] = [...touched].slice(-MAX_TOUCHED);
@@ -534,7 +669,8 @@ export class SessionTracker {
     const record: InflightOp = { ...op, pid: this.pid, service_id: this.serviceId, started_at: this.now().toISOString() };
     writeJson(this.inflightPath, { ops: [...this.readInflight().filter((o) => o.op_id !== op.op_id), record] });
     this.active.add(op.op_id);
-    this.state.op_projects[op.op_id] = op.project_path;
+    // An op that started before any project was known has no project to compare against later.
+    if (op.project_path !== UNKNOWN_PROJECT) this.state.op_projects[op.op_id] = op.project_path;
     const ids = Object.keys(this.state.op_projects);
     for (const old of ids.slice(0, Math.max(0, ids.length - MAX_OP_PROJECTS))) delete this.state.op_projects[old];
     this.save();
@@ -575,8 +711,9 @@ export class SessionTracker {
         keep.push(op);
         continue;
       }
+      const where = op.project_path === UNKNOWN_PROJECT ? "" : ` (project ${op.project_path})`;
       const reason =
-        `After Effects or its panel service went down while this write was in flight (project ${op.project_path}); ` +
+        `After Effects or its panel service went down while this write was in flight${where}; ` +
         `whether it was applied is unknown. Do not retry it: inspect the project (ae_comp_diff against the last checkpoint, ae_checkpoint_list), then ae_acknowledge.`;
       let quarantined = false;
       if (quarantine) {
@@ -619,7 +756,7 @@ let tracker: SessionTracker | null = null;
 
 /** Turns tracking on. Run once at startup; recovers writes a restart interrupted. */
 export function installSessionTracking(opts: { dataDir: string; quarantine?: QuarantineStore } & Partial<TrackerOptions>): SessionTracker {
-  tracker = new SessionTracker({
+  const t = new SessionTracker({
     dataDir: opts.dataDir,
     now: opts.now,
     isPidAlive: opts.isPidAlive,
@@ -627,8 +764,13 @@ export function installSessionTracking(opts: { dataDir: string; quarantine?: Qua
     rendersJobsFile: opts.rendersJobsFile,
     maxInflightAgeMs: opts.maxInflightAgeMs,
   });
-  tracker.recoverInterrupted(opts.quarantine);
-  return tracker;
+  tracker = t;
+  try {
+    t.recoverInterrupted(opts.quarantine);
+  } catch {
+    // Recovery is bookkeeping; the tracker works without it.
+  }
+  return t;
 }
 
 export function getSessionTracker(): SessionTracker | null {
@@ -655,6 +797,7 @@ async function readSnapshot(
     label: `${toolName} (session ${phase})`,
     mutates: false,
     toolName,
+    timeoutMs: SNAPSHOT_TIMEOUT_MS,
   });
   const snap = res.result;
   return snap && typeof snap === "object" && typeof (snap as SessionSnapshot).project_path === "string" ? snap : null;
@@ -674,18 +817,25 @@ export interface WriteInfo {
  */
 export async function noteBeforeWrite(ctx: ToolContext, info: WriteInfo): Promise<{ user_changed?: string }> {
   if (!tracker) return {};
+  const t = tracker;
   try {
     // Changes found before an unguarded write (see installSessionBridgeHook) ride on this receipt.
-    const pending = tracker.pendingUserChanged;
-    tracker.pendingUserChanged = null;
+    // They stay pending until noteAfterWrite: if the write is refused or throws, the next receipt still has them.
+    const taken = t.takePendingFor(info.opId);
+    const lines = [...taken.lines];
     let found: string | null = null;
-    const prev = tracker.baselineFor(info.expect.project_path) ?? tracker.lastBaseline();
+    const prev = t.baselineFor(info.expect.project_path) ?? t.lastBaseline();
     if (prev) {
-      const live = await readSnapshot(ctx, info.opId, "before", info.toolName, tracker.compsToRead(info.expect.project_path, [info.expect.comp_id]));
-      if (live) found = diffSnapshots(prev, live, tracker.serviceId).user_changed;
+      try {
+        const live = await readSnapshot(ctx, info.opId, "before", info.toolName, t.compsToRead(info.expect.project_path, [info.expect.comp_id]));
+        if (live) found = diffSnapshots(prev, live, t.serviceId).user_changed;
+      } catch {
+        // AE is likely blocked: the write goes on, and its after-snapshot is skipped.
+        t.markSkipAfter(info.opId);
+      }
     }
-    const lines = [pending, found].filter((x): x is string => !!x);
-    return lines.length ? { user_changed: lines.join(" ") } : {};
+    if (found && !lines.some((l) => l.includes(found!))) lines.push(found);
+    return lines.length ? { user_changed: lines.join(" ") + taken.note } : {};
   } catch {
     return {};
   }
@@ -722,20 +872,30 @@ export function endInflight(opId: string): void {
  * After an applied write (and its read-back), inside the queue lease: the
  * new baseline and the undo step. Never throws.
  */
-export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo): Promise<void> {
+export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean } = {}): Promise<void> {
   if (!tracker) return;
+  const t = tracker;
   try {
-    const compIds = tracker.compsToRead(info.expect.project_path, [info.expect.comp_id]);
+    // The receipt is about to be returned, so the pending lines it carried have been reported.
+    t.commitReported(info.opId);
+  } catch {
+    // see above
+  }
+  try {
+    // A failed read-back or a before-snapshot that failed means AE is likely stuck: no more reads behind it.
+    const blocked = t.takeSkipAfter(info.opId);
+    if (opts.skipRead || blocked) return;
+    const compIds = t.compsToRead(info.expect.project_path, [info.expect.comp_id]);
     const snap = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
     if (!snap) return;
-    tracker.record(snap, { op_id: info.opId, tool: info.toolName });
-    tracker.addStep({
+    t.record(snap, { op_id: info.opId, tool: info.toolName });
+    t.addStep({
       op_id: info.opId,
       tool: info.toolName,
       label: info.label,
       at: new Date().toISOString(),
       project_path: snap.project_path,
-      service_id: tracker.serviceId,
+      service_id: t.serviceId,
       revision_after: snap.revision,
       checkpoint: info.checkpoint ?? null,
       build: snap.build,
@@ -768,6 +928,14 @@ async function readOpenProject(
   return { snap, dropped: first.dropped };
 }
 
+function markReopenedSafely(t: SessionTracker): void {
+  try {
+    t.markReopened();
+  } catch {
+    // Bookkeeping only.
+  }
+}
+
 /**
  * Covers every mutating eval that is not a guarded write. Many tools call
  * evalRaw or callHost with mutates:true directly (imports, effects, text,
@@ -793,20 +961,39 @@ export function installSessionBridgeHook(bridge: HostTransport): () => void {
   const original: EvalRaw = target.evalRaw.bind(bridge);
   const hooked = (async (p: Parameters<EvalRaw>[0]) => {
     const t = tracker;
-    if (!t || p.mutates !== true || t.isInflight(p.id)) return original(p);
+    if (!t || p.mutates !== true) return original(p);
+    const opensProject = typeof p.script === "string" && p.script.includes("openProject(");
+    if (t.isInflight(p.id)) {
+      // A guarded write already did its own bookkeeping; only the reopen marker is the hook's.
+      try {
+        return await original(p);
+      } finally {
+        // A thrown or timed-out open may already have closed the project: it counts as a reopen too.
+        if (opensProject) markReopenedSafely(t);
+      }
+    }
     const toolName = p.toolName ?? "unknown";
     const raw = { bridge: { evalRaw: original } };
     const read = (phase: string) => (ids: number[]) => readSnapshot(raw, p.id, phase, toolName, ids);
-    let projectPath = t.lastBaseline()?.project_path ?? "<unknown>";
+    let projectPath = UNKNOWN_PROJECT;
+    let skipAfter = false;
     try {
       const prev = t.lastBaseline();
       if (prev) {
-        const live = await readOpenProject(t, read("before"), []);
-        if (live) {
-          projectPath = live.snap.project_path;
-          const base = t.baselineFor(live.snap.project_path) ?? prev;
-          const line = diffSnapshots(base, live.snap, t.serviceId).user_changed;
-          if (line && !(t.pendingUserChanged ?? "").includes(line)) t.pendingUserChanged = [t.pendingUserChanged, line].filter(Boolean).join(" ");
+        projectPath = prev.project_path;
+        try {
+          const live = await readOpenProject(t, read("before"), []);
+          if (live) {
+            projectPath = live.snap.project_path;
+            const base = t.baselineFor(live.snap.project_path) ?? prev;
+            const line = diffSnapshots(base, live.snap, t.serviceId).user_changed;
+            if (line) t.addPending(line);
+          } else {
+            skipAfter = true;
+          }
+        } catch {
+          // AE is likely blocked (timeout or unreachable): send the write, but do not queue an after-snapshot behind it.
+          skipAfter = true;
         }
       }
       t.begin({ op_id: p.id, tool: toolName, label: p.label, project_path: projectPath, comp_id: null, last_known_hash: null });
@@ -822,12 +1009,15 @@ export function installSessionBridgeHook(bridge: HostTransport): () => void {
       } catch {
         // see above
       }
+      if (opensProject) markReopenedSafely(t);
     }
-    try {
-      const after = await readOpenProject(t, read("after"), []);
-      if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
-    } catch {
-      // see above
+    if (!skipAfter) {
+      try {
+        const after = await readOpenProject(t, read("after"), []);
+        if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
+      } catch {
+        // see above
+      }
     }
     return res;
   }) as EvalRaw;
@@ -930,7 +1120,40 @@ export const sessionTools: ToolDefinition<any>[] = [
       "Before the first write after a start there is no baseline; pass rebase:true to start one.",
     schema: AeSessionChangesSchema,
     handler: async (args: SessionArgs, ctx) => {
-      const t = tracker ?? installSessionTracking({ dataDir: dataDirOf(ctx), quarantine: ctx.quarantine });
+      const t = tracker;
+      if (!t) {
+        // Tracking was not installed (stdio server, or sessionTracking:false): do not turn it on from a read.
+        const res = await ctx.bridge.callHost<SessionSnapshot>(
+          "sessionSnapshot",
+          { comp_ids: args.comp_ids ?? [] },
+          { label: "ae_session_changes", mutates: false, toolName: "ae_session_changes" }
+        );
+        const snapNow = res.result;
+        return {
+          tracking_enabled: false,
+          live: snapNow
+            ? {
+                project_path: snapNow.project_path,
+                dirty: snapNow.dirty,
+                revision: snapNow.revision,
+                num_items: snapNow.num_items,
+                active_item: snapNow.active_item,
+                ae_version: snapNow.ae_version,
+                build: snapNow.build,
+                render_queue: snapNow.render_queue,
+                comps: snapNow.comps,
+              }
+            : null,
+          baseline: null,
+          changes: null,
+          undo_steps: [],
+          interrupted_ops: [],
+          quarantine: ctx.quarantine.list(),
+          notes: [
+            "Session tracking is off in this server (no baseline, no undo steps, no write-ahead records), so nothing is compared. The live state above is all this tool can give.",
+          ],
+        };
+      }
       const last = t.lastBaseline();
       const extra = args.comp_ids ?? [];
       const readIds = async (ids: number[]) => {
@@ -966,7 +1189,7 @@ export const sessionTools: ToolDefinition<any>[] = [
 
       const quarantine: QuarantineView[] = ctx.quarantine.list().map((e) => {
         const project = t.projectOfOp(e.op_id);
-        return { ...e, project_path: project, stale: project !== null && !pathsMatchForGuard(project, live.project_path) };
+        return { ...e, project_path: project, stale: project !== null && project !== UNKNOWN_PROJECT && !pathsMatchForGuard(project, live.project_path) };
       });
 
       const interrupted = t.interrupted().map((o) => {
@@ -993,7 +1216,7 @@ export const sessionTools: ToolDefinition<any>[] = [
               .steps()
               .slice(-(args.max_undo_steps ?? 10))
               .reverse()
-              .map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId) }));
+              .map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt() }) }));
 
       let jobsFile = t.rendersJobsFile;
       if (!jobsFile) {
@@ -1023,6 +1246,7 @@ export const sessionTools: ToolDefinition<any>[] = [
       }
 
       return {
+        tracking_enabled: true,
         live: {
           project_path: live.project_path,
           dirty: live.dirty,

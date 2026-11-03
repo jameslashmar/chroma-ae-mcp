@@ -95,10 +95,10 @@ const READ = (layers: HostLayer[], over: Partial<HostRead> = {}, comp: Partial<H
   ...over,
 });
 
-const box = (read: HostRead, index: number) => {
+const box = (read: HostRead, index: number, include3d = true) => {
   const byId = layerMap(read.layers);
   const layer = read.layers.find((l) => l.index === index)!;
-  return layerBox(layer, byId, cameraModel(read, byId), read.comp);
+  return layerBox(layer, byId, cameraModel(read, byId), read.comp, include3d);
 };
 
 const near = (a: number[], b: number[], eps = 1e-6) => {
@@ -213,6 +213,15 @@ describe("layer boxes", () => {
     expect(box(READ([noRect]), 2).reason).toMatch(/no content rect/);
   });
 
+  it("gives no box when the layer or a parent has Auto-Orient on", () => {
+    const own = HL(1, { auto_orient_active: true });
+    expect(box(READ([own]), 1)).toMatchObject({ box: null, reason: expect.stringMatching(/Auto-Orient/) });
+    const parent = HL(2, { kind: "null", auto_orient_active: true });
+    const kid = HL(1, { parent_id: parent.id });
+    expect(box(READ([kid, parent]), 1).box).toBeNull();
+    expect(box(READ([HL(1, { auto_orient_active: false })]), 1).box).not.toBeNull();
+  });
+
   it("leaves a 2D layer under a 3D parent unmodelled", () => {
     const parent = HL(2, { kind: "null", three_d: true });
     const kid = HL(1, { parent_id: parent.id });
@@ -273,6 +282,38 @@ describe("3D projection", () => {
     const r = box(READ([at(-5000)]), 1);
     expect(r.box).toBeNull();
     expect(r.reason).toMatch(/behind the camera/);
+  });
+
+  it("returns box null for a 3D layer unless include_3d is on", () => {
+    const read = READ([at(0)]);
+    expect(box(read, 1, false)).toEqual({ box: null, reason: "3D: needs a live check of the projection" });
+    expect(box(read, 1, true).box).not.toBeNull();
+  });
+
+  it("uses the two-node aim for a camera that is a parent", () => {
+    const cam = HL(2, {
+      kind: "camera",
+      three_d: true,
+      rect: null,
+      skip_reason: "cameras and lights have no picture",
+      camera: { zoom: 2000, two_node: true },
+      transform: T({ position: [1500, 250, -1000], point_of_interest: [500, 250, 0] }),
+    });
+    const kid = HL(1, { three_d: true, rect, parent_id: cam.id, transform: T({ position: [0, 0, 2000] }) });
+    const byId = layerMap([kid, cam]);
+    const withAim = chainMatrix(kid, byId).matrix!;
+    const flat = chainMatrix(kid, layerMap([kid, { ...cam, camera: { zoom: 2000, two_node: false } }])).matrix!;
+    expect(withAim).not.toEqual(flat);
+    // The child sits 2000 along the camera's aim, so its origin is on the line to the point of interest.
+    const o = transformPoint(withAim, [0, 0, 0]);
+    expect(o[0]).toBeLessThan(1500);
+  });
+
+  it("falls back to the default camera with a note when the active camera was past the layer cap", () => {
+    const read = READ([at(0)], { active_camera_id: 999, truncated: true, total_layers: 700 });
+    const model = cameraModel(read, layerMap(read.layers));
+    expect(model.source).toBe("default");
+    expect(model.note).toMatch(/999.*past the 500 layers/);
   });
 
   it("notes when a camera's zoom could not be read and falls back to AE's default", () => {
@@ -630,10 +671,18 @@ describe("ae_annotate_frame handler", () => {
     expect([res.width, res.height]).toEqual([500, 250]);
   });
 
-  it("notes the camera used for a 3D layer and that the projection is an estimate", async () => {
+  it("leaves 3D layers unboxed by default, with the reason", async () => {
     const read = READ([HL(1, { three_d: true, rect: { left: -100, top: -50, width: 200, height: 100 }, transform: T({ position: [500, 250, 0] }) })]);
     const { ctx } = fakeAe([read], () => solid(1000, 500, [10, 10, 10, 255]));
     const res = (await tool.handler(AeAnnotateFrameSchema.parse({ comp_id: 1, time: 1 }), ctx)) as Record<string, any>;
+    expect(res.frames[0].layers[0]).toMatchObject({ box: null, reason: "3D: needs a live check of the projection" });
+    expect(res.notes.join(" ")).not.toMatch(/estimate/);
+  });
+
+  it("with include_3d notes the camera used and that the projection is an estimate", async () => {
+    const read = READ([HL(1, { three_d: true, rect: { left: -100, top: -50, width: 200, height: 100 }, transform: T({ position: [500, 250, 0] }) })]);
+    const { ctx } = fakeAe([read], () => solid(1000, 500, [10, 10, 10, 255]));
+    const res = (await tool.handler(AeAnnotateFrameSchema.parse({ comp_id: 1, time: 1, include_3d: true }), ctx)) as Record<string, any>;
     expect(res.frames[0].layers[0].box.projection).toBe("3d-estimated");
     expect(res.frames[0].notes.join(" ")).toMatch(/default comp camera/);
     expect(res.notes.join(" ")).toMatch(/estimate/);
@@ -775,7 +824,7 @@ describe("annotate.jsx", () => {
   });
 
   it("gives a camera its zoom, point of interest, rotation and the active camera id, and no rect", () => {
-    const { project, comp } = scene();
+    const { project, comp, logo } = scene();
     const cam = comp.layers.addCamera("Cam 1");
     cam.threeDLayer = true;
     const tr = cam.group.property("ADBE Transform Group") as FakeGroup;
@@ -798,6 +847,25 @@ describe("annotate.jsx", () => {
     (cam as any).autoOrient = 0;
     res = plain(A.annotateRead({ comp_id: comp.id, time: 1 }));
     expect(res.layers.find((l: any) => l.name === "Cam 1").camera.two_node).toBe(false);
+
+    // Layers report whether Auto-Orient is on; cameras are exempt.
+    G.AutoOrientType = { CAMERA_OR_POINT_OF_INTEREST: 7, NO_AUTO_ORIENT: 4 };
+    (logo as any).autoOrient = 4;
+    res = plain(A.annotateRead({ comp_id: comp.id, time: 1 }));
+    expect(res.layers.find((l: any) => l.name === "Logo").auto_orient_active).toBe(false);
+    expect(res.layers.find((l: any) => l.name === "Cam 1").auto_orient_active).toBe(false);
+    (logo as any).autoOrient = 3;
+    res = plain(A.annotateRead({ comp_id: comp.id, time: 1 }));
+    expect(res.layers.find((l: any) => l.name === "Logo").auto_orient_active).toBe(true);
+
+    // A light's aim is not modelled, so a light with Auto-Orient on reports it.
+    const light = comp.layers.addLight("Light 1");
+    (light as any).autoOrient = 7;
+    res = plain(A.annotateRead({ comp_id: comp.id, time: 1 }));
+    expect(res.layers.find((l: any) => l.name === "Light 1")).toMatchObject({ kind: "light", auto_orient_active: true });
+    (light as any).autoOrient = 4;
+    res = plain(A.annotateRead({ comp_id: comp.id, time: 1 }));
+    expect(res.layers.find((l: any) => l.name === "Light 1").auto_orient_active).toBe(false);
 
     // Outside its in/out range it is not the active camera.
     cam.outPoint = 0.5;

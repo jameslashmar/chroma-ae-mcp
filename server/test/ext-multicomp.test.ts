@@ -583,6 +583,78 @@ describe("ae_multi_comp_apply review fixes", () => {
     expect(out.checkpoint_note).toContain("No automatic checkpoint");
   });
 
+  it("does not offer ae_checkpoint_revert when the checkpoint was skipped", async () => {
+    const { ctx } = fakeAe(SCENE, aep);
+    one("ae_set_property", async () => ({ applied: true, checkpoint: { status: "skipped", reason: "The project was never saved." }, receipt: { matches: true, mismatches: [] } }));
+    const out = await run(single("ae_set_property"), ctx);
+    expect(out.checkpoint).toBeNull();
+    expect(out.checkpoint_note).toContain("never saved");
+    expect(out.checkpoint_note).not.toContain("ae_checkpoint_revert");
+  });
+
+  it("lets a later real checkpoint replace an earlier skipped one, also in batch chunks", async () => {
+    const { ctx } = fakeAe(SCENE, aep);
+    one("ae_batch_set", async (a) => ({
+      ok: true,
+      applied: true,
+      done: 2,
+      matches: true,
+      chunks: [
+        { done: 1, matches: true, checkpoint: { status: "skipped", reason: "off" } },
+        ...(a.comp_id === 2 ? [{ done: 1, matches: true, checkpoint: { status: "created", path: "C:/cp.aep" } }] : []),
+      ],
+    }));
+    const out = await run(AeMultiCompApplySchema.parse({ op: { tool: "ae_batch_set", args: {} }, comp_ids: [1, 2], pause_ms: 0, expect: { project_path: aep } }), ctx);
+    expect(out.checkpoint).toMatchObject({ status: "created" });
+    expect(out.checkpoint_note).toContain("ae_checkpoint_revert");
+  });
+
+  it("reports applied for this call only on a resume that writes nothing", async () => {
+    const { ctx } = fakeAe(SCENE, aep);
+    one("ae_set_property", async () => ({ applied: true, receipt: { matches: true, mismatches: [] } }));
+    const t = new Date().toISOString();
+    saveJob({
+      id: "mc_done_1",
+      created_at: t,
+      updated_at: t,
+      state: "stopped",
+      project_path: aep,
+      tool: "ae_set_property",
+      args: { layer: { name: "Title" }, value: 5 },
+      on_failure: "stop",
+      fingerprints: false,
+      pause_ms: 0,
+      selection: {},
+      comps: [
+        { comp_id: 1, name: "Promo 16x9", status: "ok", applied: true },
+        { comp_id: 3, name: "Promo 1x1", status: "pending" },
+      ],
+    });
+    const out = await run(resume("mc_done_1"), ctx);
+    expect(out.comps[1].status).toBe("skipped");
+    expect(out).toMatchObject({ applied: false, job_applied: true });
+    expect(out.undo_note).toContain("0 steps");
+  });
+
+  it("probes more than 50 layer names in chunks", async () => {
+    const names = Array.from({ length: 120 }, (_, i) => `L${i}`);
+    const scene: Scene = { comps: [{ id: 1, name: "Promo A", layers: names }] };
+    const { ctx, calls } = fakeAe(scene, aep);
+    one("ae_batch_set", async () => ({}), z.object({ comp_id: z.number(), ops: z.array(z.any()), expect: z.any() }));
+    const out = await run(
+      AeMultiCompApplySchema.parse({
+        op: { tool: "ae_batch_set", args: { ops: names.map((n) => ({ layer: { name: n } })) } },
+        comp_ids: [1],
+        pause_ms: 0,
+        dry_run: true,
+        expect: { project_path: aep },
+      }),
+      ctx
+    );
+    expect(calls.filter((c) => c === "multicompProbe")).toHaveLength(3);
+    expect(out.comps[0].plan).not.toBe("skip");
+  });
+
   it("does not call a capped fingerprint unchanged", async () => {
     const { ctx, opts } = fakeAe(SCENE, aep);
     fakeWriteTool();

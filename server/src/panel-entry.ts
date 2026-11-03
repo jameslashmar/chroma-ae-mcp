@@ -120,8 +120,12 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   // What the user changed between the agent's writes, and a write-ahead record
   // so a write cut short by an AE crash is reported rather than retried.
   if (opts.sessionTracking !== false) {
-    installSessionTracking({ dataDir: resolvedDataDir, quarantine });
-    installSessionBridgeHook(host);
+    try {
+      installSessionTracking({ dataDir: resolvedDataDir, quarantine });
+      installSessionBridgeHook(host);
+    } catch (err) {
+      opts.log?.("WARN", `Session tracking is off: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   const log = opts.log;

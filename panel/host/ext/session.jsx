@@ -22,7 +22,7 @@
   }
 
   var MAX_LIST = 500;
-  var MAX_ITEMS = 2000;
+  var MAX_ITEMS = 500;
   // Layers hashed across ALL comps in one snapshot. A comp that does not fit whole is
   // skipped (hash empty, hash_truncated true), never hashed in part, so two snapshots
   // stay comparable. The layer count and the selection are still read.
@@ -181,14 +181,23 @@
       out.render_queue = info;
     } catch (e7) {}
 
+    // The hash budget is spent in ascending comp id order, whatever order the comps were asked
+    // for, so the same comp is hashed or skipped alike in every snapshot of the same comp set.
+    var order = [];
+    for (i = 0; i < wanted.length; i++) order.push(wanted[i]);
+    order.sort(function (a, b) { return a - b; });
     var budget = { left: HASH_BUDGET };
-    for (i = 0; i < wanted.length; i++) {
-      var comp = compById(wanted[i]);
+    var states = {};
+    for (i = 0; i < order.length; i++) {
+      var comp = compById(order[i]);
       if (comp) {
-        out.comps.push(compState(comp, budget));
+        states[order[i]] = compState(comp, budget);
       } else {
-        out.comps.push({ id: wanted[i], missing: true });
+        states[order[i]] = { id: order[i], missing: true };
       }
+    }
+    for (i = 0; i < wanted.length; i++) {
+      out.comps.push(states[wanted[i]]);
     }
     return out;
   };

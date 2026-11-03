@@ -95,6 +95,7 @@ describe("schemas", () => {
       { resolution_factor: [1, 100] },
       { background_color: [0, 0, 2] },
       { work_area: {} },
+      { work_area: { start: 2, end: 6 } },
       { work_area: { duration: 0 } },
       { display_start_time: 90000 },
       { display_start_time: 1, display_start_frame: 25 },
@@ -114,6 +115,7 @@ describe("schemas", () => {
     expect(g([{ action: "set", index: 0, orientation: "vertical", position: 10 }])).toBe(false);
     expect(g([{ action: "remove", index: 1 }])).toBe(true);
     expect(g([{ action: "remove" }])).toBe(false);
+    expect(g([{ action: "add", orientation: "vertical", position: 10, position_type: "percent" }])).toBe(false);
     expect(g([{ action: "add", orientation: "horizontal", position: 200000 }])).toBe(false);
   });
 
@@ -374,6 +376,8 @@ describe("compsettings.jsx", () => {
     bad({ background_color: [1, 1, 5] }, /0\.\.1/);
     bad({ display_start_time: 1, display_start_frame: 25 }, /not both/);
     bad({ bogus: 1 }, /Unknown setting/);
+    bad({ motion_blur_samples: 64, motion_blur_adaptive_limit: 16 }, /cannot be above/);
+    expect(undo.begun).toBe(0);
     bad({ work_area: { start: 8, duration: 5 } }, /past the comp's length/);
     bad({ work_area: { duration: 0.01 } }, /shorter than one frame/);
     expect(() => A.compsettingsApply({ comp_id: comp.id, expect: GUARD })).toThrow(/Nothing to change/);
@@ -469,6 +473,14 @@ describe("compsettings.jsx", () => {
 });
 
 describe("compsettings review fixes", () => {
+  it("refuses samples above the comp's current adaptive limit before the undo group", () => {
+    const { A, comp, undo } = richScene();
+    comp.motionBlurAdaptiveSampleLimit = 16;
+    expect(() => A.compsettingsApply({ comp_id: comp.id, settings: { motion_blur_samples: 64 }, expect: GUARD })).toThrow(/cannot be above/);
+    expect(undo.begun).toBe(0);
+    expect(comp.motionBlurSamplesPerFrame).toBe(16);
+  });
+
   it("refuses an out-of-range display_start_frame before the undo group opens", () => {
     const { A, comp, undo, guides } = richScene();
     const run = (settings: object) =>

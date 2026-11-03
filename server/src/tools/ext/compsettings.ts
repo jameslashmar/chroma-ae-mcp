@@ -102,6 +102,7 @@ export const CompSettingsValuesSchema = z
         start: z.number().min(0).optional().describe("Work area start in seconds."),
         duration: z.number().positive().optional().describe("Work area length in seconds, at least one frame."),
       })
+      .strict()
       .refine((w) => w.start !== undefined || w.duration !== undefined, { message: "work_area needs start or duration." })
       .optional()
       .describe("Work area. start + duration must not pass the comp's length; the tool refuses it before touching AE."),
@@ -118,6 +119,7 @@ export const GuideOpSchema = z
     index: z.number().int().min(0).optional().describe("set / remove: 0-based index of the guide, as ae_get_comp_settings lists it at that step."),
     position: z.number().min(-100000).max(100000).optional().describe("add / set: position in pixels from the comp's top-left."),
   })
+  .strict()
   .refine((g) => g.action !== "add" || (g.orientation !== undefined && g.position !== undefined && g.index === undefined), {
     message: "add needs orientation and position, and no index.",
   })

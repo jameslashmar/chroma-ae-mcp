@@ -15,6 +15,7 @@ import {
   installSessionBridgeHook,
   installSessionTracking,
   resetSessionTracking,
+  SNAPSHOT_TIMEOUT_MS,
   SessionTracker,
   sessionTools,
   undoReach,
@@ -525,9 +526,13 @@ describe("session.jsx", () => {
     const h1 = hash();
     expect(h1).not.toBe(h0);
     main.layer(1)!.moveToEnd();
-    expect(hash()).not.toBe(h1);
+    const h2 = hash();
+    expect(h2).not.toBe(h1);
     main.layer(1)!.outPoint = 1;
-    expect(hash()).not.toBe(h1);
+    const h3 = hash();
+    expect(h3).not.toBe(h2);
+    main.layer(1)!.inPoint = 0.5;
+    expect(hash()).not.toBe(h3);
   });
 
   it("reads the asked-for comps, marks a missing one, and keeps the active comp once", () => {
@@ -871,5 +876,343 @@ describe("session.jsx hash budget", () => {
     expect(b).toMatchObject({ num_layers: 5001, hash: "", hash_truncated: true });
     expect(sm.hash).toMatch(/^[0-9a-f]{8}$/);
     expect(sm.hash_truncated).toBe(false);
+  });
+});
+
+// ---------- review fixes ----------
+
+describe("undo reach after a reopen, and unsaved projects", () => {
+  const step = (extra: Partial<UndoStep> = {}): UndoStep => ({
+    op_id: "op_1",
+    tool: "x",
+    label: "x",
+    at: "2020-01-01T00:00:00.000Z",
+    project_path: "C:/p/show.aep",
+    service_id: SERVICE,
+    revision_after: null,
+    checkpoint: null,
+    build: "100",
+    item_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    num_items: 10,
+    ...extra,
+  });
+  const live = (extra: Partial<SessionSnapshot> = {}) =>
+    snap({ project_path: "C:/p/_mcp_backups/show.aep", num_items: 10, item_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ...extra });
+
+  it("checkpoint revert, then the same item ids at a new path: not reachable", () => {
+    // Without the marker the item match reads as a Save As.
+    expect(undoReach(step(), live(), SERVICE).reach).toBe("possibly_reachable");
+    const r = undoReach(step(), live(), SERVICE, { reopenedAt: "2020-06-01T00:00:00.000Z" });
+    expect(r.reach).toBe("not_reachable");
+    expect(r.why).toContain("reopened");
+    // Even at the same path.
+    expect(undoReach(step(), live({ project_path: "C:/p/show.aep" }), SERVICE, { reopenedAt: "2020-06-01T00:00:00.000Z" }).reach).toBe("not_reachable");
+    // A step made after the reopen is not affected.
+    const later = step({ at: "2021-01-01T00:00:00.000Z", project_path: "C:/p/_mcp_backups/show.aep" });
+    expect(undoReach(later, live(), SERVICE, { reopenedAt: "2020-06-01T00:00:00.000Z" }).reach).toBe("possibly_reachable");
+  });
+
+  it("treats two unsaved projects with hardly any shared items as different projects", () => {
+    const other = snap({ project_path: "<unsaved>", item_ids: [41, 42, 43], num_items: 3 });
+    const d = diffSnapshots(stored({ project_path: "<unsaved>" }), other, SERVICE);
+    expect(d.project_swapped).toBe(true);
+    expect(d.items).toBeNull();
+    const same = diffSnapshots(stored({ project_path: "<unsaved>" }), snap({ project_path: "<unsaved>", item_ids: [1, 2, 3, 4], num_items: 4 }), SERVICE);
+    expect(same.project_swapped).toBe(false);
+    expect(same.items).toMatchObject({ added: [4] });
+    const r = undoReach(step({ project_path: "<unsaved>" }), snap({ project_path: "<unsaved>", item_ids: [41, 42, 43], num_items: 3 }), SERVICE);
+    expect(r.reach).toBe("not_reachable");
+  });
+
+  it("the bridge hook marks a project reopen, and ae_session_changes then proves older steps gone", async () => {
+    const dir = tmp();
+    const { ctx } = fakeAe({ sessionSnapshot: () => unsavedSnap(), openProject: () => ({ ok: true }) }, dir);
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    t.addStep({ ...step({ project_path: "<unsaved>" }), item_ids: [1, 2, 3], num_items: 3 });
+    expect(t.reopenedAt()).toBeNull();
+    await ctx.bridge.callHost("openProject" as never, {}, { label: "revert", mutates: true, toolName: "ae_checkpoint_revert" });
+    expect(t.reopenedAt()).not.toBeNull();
+    const out: any = await tool.handler(AeSessionChangesSchema.parse({}), ctx);
+    expect(out.undo_steps[0]).toMatchObject({ reach: "not_reachable" });
+  });
+
+  it("marks the reopen even when the open itself throws, so older steps still read not_reachable", async () => {
+    const dir = tmp();
+    const { ctx } = fakeAe({ sessionSnapshot: () => unsavedSnap(), openProject: () => { throw new Error("modal dialog"); } }, dir);
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    t.addStep({ ...step({ project_path: "<unsaved>" }), item_ids: [1, 2, 3], num_items: 3 });
+    await expect(ctx.bridge.callHost("openProject" as never, {}, { label: "revert", mutates: true, toolName: "ae_checkpoint_revert" })).rejects.toThrow();
+    expect(t.reopenedAt()).not.toBeNull();
+    const out: any = await tool.handler(AeSessionChangesSchema.parse({}), ctx);
+    expect(out.undo_steps[0]).toMatchObject({ reach: "not_reachable" });
+  });
+});
+
+describe("tracker bookkeeping", () => {
+  it("tells a receipt how many pending change lines were dropped, and forgets the count once reported", () => {
+    const t = new SessionTracker({ dataDir: tmp() });
+    for (let i = 0; i < 13; i++) t.addPending(`change number ${i}`);
+    const taken = t.takePendingFor("op_1");
+    expect(taken.lines.length).toBeLessThan(13);
+    expect(taken.note).toMatch(/\(\d+ earlier change line\(s\) dropped\)/);
+    t.commitReported("op_1");
+    expect(t.pendingUserChanged).toBeNull();
+    t.addPending("fresh");
+    expect(t.takePendingFor("op_2").note).toBe("");
+  });
+
+  it("does not remember an unknown project as an op's project, so its quarantine entry is not called stale", () => {
+    const t = new SessionTracker({ dataDir: tmp() });
+    t.begin({ op_id: "op_u", tool: "ae_import_assets", label: "import", project_path: "<unknown>", comp_id: null, last_known_hash: null });
+    t.begin({ op_id: "op_k", tool: "x", label: "x", project_path: "C:/p/show.aep", comp_id: null, last_known_hash: null });
+    expect(t.projectOfOp("op_u")).toBeNull();
+    expect(t.projectOfOp("op_k")).toBe("C:/p/show.aep");
+  });
+
+  it("starts empty from a state file of the wrong shape, and installing never throws", () => {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, "session-state.json"), JSON.stringify({ last_key: "k", snapshots: null, touched: [], steps: "x", op_projects: 5, interrupted: {} }));
+    const t = new SessionTracker({ dataDir: dir });
+    expect(t.lastBaseline()).toBeNull();
+    expect(t.steps()).toEqual([]);
+    expect(t.interrupted()).toEqual([]);
+    expect(() => installSessionTracking({ dataDir: dir })).not.toThrow();
+    fs.writeFileSync(path.join(dir, "session-state.json"), JSON.stringify({ snapshots: { a: { project_path: 1 } }, last_key: "a" }));
+    expect(new SessionTracker({ dataDir: dir }).lastBaseline()).toBeNull();
+  });
+
+  it("caps the pending user-change lines and drops duplicates", () => {
+    const t = new SessionTracker({ dataDir: tmp() });
+    t.addPending("Since the last write: a.");
+    t.addPending("Since the last write: a.");
+    expect(t.pendingUserChanged).toBe("Since the last write: a.");
+    for (let i = 0; i < 15; i++) t.addPending(`Since the last write: change ${i}.`);
+    const text = t.pendingUserChanged!;
+    expect(text).toContain("change 14");
+    expect(text).not.toContain("change 0.");
+    expect(text).toContain("earlier change line(s) dropped");
+  });
+
+  it("drops a project's touched comps when its baseline is evicted", () => {
+    const t = new SessionTracker({ dataDir: tmp() });
+    for (let i = 0; i < 12; i++) t.record(snap({ project_path: `C:/p/proj${i}.aep` }), { op_id: `op_${i}`, tool: "x" });
+    expect(t.baselineFor("C:/p/proj0.aep")).toBeNull();
+    expect(t.touchedComps("C:/p/proj0.aep")).toEqual([]);
+    expect(t.touchedComps("C:/p/proj11.aep")).toEqual([5]);
+  });
+});
+
+describe("session snapshots around a write", () => {
+  const withTimeouts = (ctx: ToolContext) => {
+    const seen: Array<{ fn: string; timeoutMs: number | undefined }> = [];
+    const bridge = ctx.bridge as unknown as { evalRaw: (p: any) => Promise<unknown> };
+    const orig = bridge.evalRaw.bind(bridge);
+    bridge.evalRaw = (p: any) => {
+      const script = String(p.script);
+      seen.push({ fn: script.slice("__chromaAe.".length, script.indexOf("(")), timeoutMs: p.timeoutMs });
+      return orig(p);
+    };
+    return seen;
+  };
+
+  it("gives the session snapshot reads a short timeout", async () => {
+    const dir = tmp();
+    const { ctx } = fakeAe(
+      { layerStack: () => stack(1), createLayer: () => ({ index: 1, id: 11, name: "Ctrl", kind: "null" }), sessionSnapshot: () => unsavedSnap() },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    const seen = withTimeouts(ctx);
+    await createTool.handler(createArgs(), ctx);
+    const snaps = seen.filter((s) => s.fn === "sessionSnapshot");
+    expect(snaps).toHaveLength(2);
+    for (const s of snaps) {
+      expect(s.timeoutMs).toBe(SNAPSHOT_TIMEOUT_MS);
+      expect(s.timeoutMs!).toBeLessThanOrEqual(15_000);
+    }
+  });
+
+  it("skips the after-snapshot when the read-back failed", async () => {
+    const dir = tmp();
+    let stacks = 0;
+    const { ctx, calls } = fakeAe(
+      {
+        layerStack: () => {
+          if (++stacks > 1) throw new Error("AE is blocked");
+          return stack(1);
+        },
+        createLayer: () => ({ index: 1, id: 11, name: "Ctrl", kind: "null" }),
+        sessionSnapshot: () => unsavedSnap(),
+      },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    const out: any = await createTool.handler(createArgs(), ctx);
+    expect(out.applied).toBe(true);
+    expect(JSON.stringify(out.receipt)).toContain("read_back");
+    // Only the before-snapshot ran; no step and no new baseline.
+    expect(calls.filter((c) => c === "sessionSnapshot")).toHaveLength(1);
+    expect(t.steps()).toEqual([]);
+    expect(t.lastBaseline()?.op_id).toBe("op_0");
+  });
+
+  it("skips the after-snapshot when the before-snapshot failed", async () => {
+    const dir = tmp();
+    const { ctx, calls } = fakeAe(
+      {
+        layerStack: () => stack(1),
+        createLayer: () => ({ index: 1, id: 11, name: "Ctrl", kind: "null" }),
+        sessionSnapshot: () => {
+          throw new Error("timed out");
+        },
+      },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    const out: any = await createTool.handler(createArgs(), ctx);
+    expect(out.applied).toBe(true);
+    expect(calls.filter((c) => c === "sessionSnapshot")).toHaveLength(1);
+  });
+
+  it("the hook skips its after-snapshot when its before-snapshot failed", async () => {
+    const dir = tmp();
+    const { ctx, calls } = fakeAe(
+      {
+        sessionSnapshot: () => {
+          throw new Error("timed out");
+        },
+        importFile: () => ({ ok: true }),
+      },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    await ctx.bridge.callHost("importFile" as never, {}, { label: "import", mutates: true, toolName: "ae_import_assets" });
+    expect(calls).toEqual(["sessionSnapshot", "importFile"]);
+    expect(fs.existsSync(path.join(dir, "inflight-ops.json"))).toBe(false);
+  });
+
+  it("the hook's first write with no baseline stores no project for the op", async () => {
+    const dir = tmp();
+    const { ctx } = fakeAe({ sessionSnapshot: () => unsavedSnap(), importFile: () => ({ ok: true }) }, dir);
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    await ctx.bridge.callHost("importFile" as never, {}, { label: "import", mutates: true, toolName: "ae_import_assets" });
+    expect(Object.keys((t as any).state.op_projects)).toEqual([]);
+  });
+});
+
+describe("pending user changes", () => {
+  const edited = () => unsavedSnap({ comps: [comp(1, { name: "Main", num_layers: 8, hash: "user" })] });
+
+  function setup() {
+    const dir = tmp();
+    let failCreate = true;
+    const { ctx } = fakeAe(
+      {
+        layerStack: () => stack(1),
+        createLayer: () => {
+          if (failCreate) throw new Error("refused");
+          return { index: 1, id: 11, name: "Ctrl", kind: "null" };
+        },
+        importFile: () => ({ ok: true }),
+        sessionSnapshot: () => edited(),
+      },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    t.record(unsavedSnap(), { op_id: "op_0", tool: "x" });
+    return {
+      ctx,
+      t,
+      allowCreate: () => {
+        failCreate = false;
+      },
+    };
+  }
+
+  it("keeps the line when the guarded write fails, and clears it once a result carried it", async () => {
+    const { ctx, t, allowCreate } = setup();
+    await ctx.bridge.callHost("importFile" as never, {}, { label: "import", mutates: true, toolName: "ae_import_assets" });
+    expect(t.pendingUserChanged).toContain("layers 3 -> 8");
+
+    await expect(createTool.handler(createArgs(), ctx)).rejects.toThrow();
+    expect(t.pendingUserChanged).toContain("layers 3 -> 8");
+
+    allowCreate();
+    const out: any = await createTool.handler(createArgs(), ctx);
+    expect(out.applied).toBe(true);
+    expect(out.user_changed).toContain("layers 3 -> 8");
+    expect(t.pendingUserChanged).toBeNull();
+    const next: any = await createTool.handler(createArgs(), ctx);
+    expect(next.user_changed).toBeUndefined();
+  });
+
+  it("does not repeat a change that is both pending and in the fresh diff", async () => {
+    const { ctx, t, allowCreate } = setup();
+    t.addPending(diffSnapshots(t.lastBaseline()!, edited(), t.serviceId).user_changed!);
+    allowCreate();
+    const out: any = await createTool.handler(createArgs(), ctx);
+    expect(out.user_changed.match(/layers 3 -> 8/g)).toHaveLength(1);
+  });
+});
+
+describe("ae_session_changes with tracking off", () => {
+  it("does not install tracking from a read", async () => {
+    const dir = tmp();
+    const { ctx, calls } = fakeAe({ sessionSnapshot: () => unsavedSnap() }, dir);
+    expect(getSessionTracker()).toBeNull();
+    const out: any = await tool.handler(AeSessionChangesSchema.parse({}), ctx);
+    expect(getSessionTracker()).toBeNull();
+    expect(out.tracking_enabled).toBe(false);
+    expect(out.live.project_path).toBe("<unsaved>");
+    expect(out.undo_steps).toEqual([]);
+    expect(out.notes.join(" ")).toContain("tracking is off");
+    expect(calls).toEqual(["sessionSnapshot"]);
+    expect(fs.existsSync(path.join(dir, "session-state.json"))).toBe(false);
+  });
+});
+
+describe("session.jsx, bounded lists and deterministic hashing", () => {
+  it("caps item_ids at 500 and says so", () => {
+    const project = new FakeProject();
+    for (let i = 0; i < 503; i++) project.addComp(`C${i}`, 64, 64, 1);
+    const { A } = loadHost(project, ["layers.jsx", "session.jsx"]);
+    const s = A.sessionSnapshot({});
+    expect(s.num_items).toBe(503);
+    expect(s.item_ids).toHaveLength(500);
+    expect(s.items_truncated).toBe(true);
+  });
+
+  it("spends the hash budget in comp id order, whatever order the comps are asked in, and returns them in the asked order", () => {
+    const project = new FakeProject();
+    const a = project.addComp("A", 640, 360, 4);
+    const b = project.addComp("B", 640, 360, 4);
+    expect(a.id).toBeLessThan(b.id);
+    const { A } = loadHost(project, ["layers.jsx", "session.jsx"]);
+    for (let i = 0; i < 3; i++) A.createLayer({ comp_id: b.id, type: "null", name: "M" + i, expect: { project_path: "<unsaved>" } });
+    // A reports 4998 layers (a stub keeps the hash loop cheap); with B's 3 the total is over the 5000 budget.
+    Object.defineProperty(a, "numLayers", { get: () => 4998, configurable: true });
+    (a as any).layer = (i: number) => ({ id: i, name: "L", inPoint: 0, outPoint: 1 });
+    const x = A.sessionSnapshot({ comp_ids: [a.id, b.id] });
+    const y = A.sessionSnapshot({ comp_ids: [b.id, a.id] });
+    expect(y.comps.map((c: { id: number }) => c.id)).toEqual([b.id, a.id]);
+    const get = (s: any, id: number) => s.comps.find((c: { id: number }) => c.id === id);
+    for (const s of [x, y]) {
+      expect(get(s, a.id).hash_truncated).toBe(false);
+      expect(get(s, a.id).hash).not.toBe("");
+      expect(get(s, b.id).hash_truncated).toBe(true);
+      expect(get(s, b.id).hash).toBe("");
+    }
+    expect(get(x, a.id).hash).toBe(get(y, a.id).hash);
   });
 });

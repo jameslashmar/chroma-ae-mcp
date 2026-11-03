@@ -143,6 +143,7 @@
       selected: selected[l.id] === true,
       three_d: false,
       parent_id: null,
+      auto_orient_active: false,
       in_point: l.inPoint,
       out_point: l.outPoint,
       visible: false,
@@ -165,6 +166,17 @@
     try {
       if (l.parent) o.parent_id = l.parent.id;
     } catch (e2) {}
+    // Auto-Orient (along path, toward camera) changes the rotation AE applies,
+    // and the outline maths does not model it. Only cameras are exempt: their
+    // point-of-interest aim is modelled (cameraLocalMatrix). A light's aim is
+    // not modelled, so a light with Auto-Orient on reports it as active.
+    if (kind !== "camera") {
+      try {
+        if (typeof AutoOrientType !== "undefined") {
+          o.auto_orient_active = l.autoOrient !== AutoOrientType.NO_AUTO_ORIENT;
+        }
+      } catch (eao) {}
+    }
     var hasVideo = true;
     try {
       if (l.hasVideo === false) hasVideo = false;

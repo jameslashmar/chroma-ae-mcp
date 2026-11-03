@@ -117,7 +117,8 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
         custom = [readBackFailure];
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom });
-      await noteAfterWrite(ctx, note);
+      // A failed read-back means AE is likely stuck: no session snapshot behind it.
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure });
       return {
         op_id: opId,
         applied: true as const,

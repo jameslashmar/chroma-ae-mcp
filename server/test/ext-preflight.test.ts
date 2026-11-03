@@ -349,7 +349,7 @@ describe("ae_preflight delivery", () => {
     return world({
       project: project({
         dirty: true,
-        render_queue: { numItems: 2, rendering: false, truncated: false, items: [rqItem({ outputs: [{ file: "C:/missing/final.mov", folder: "C:/missing", folder_exists: false }] }), rqItem({ index: 2, comp_id: 1, status: "needs_output", outputs: [{ file: null, folder: null, folder_exists: null }] })] },
+        render_queue: { numItems: 2, rendering: false, truncated: false, items: [rqItem({ outputs: [{ file: "C:/missing/final.mov", folder: "C:/missing", folder_exists: false }] }), rqItem({ index: 2, comp_id: 1, render: false, status: "needs_output", outputs: [{ file: null, folder: null, folder_exists: null }] })] },
       }),
       comps: [
         { info: comp(1, "Main", { used_n: 0 }), layers: ["Title", "Bounce", "Wiggle", "Glow"], issues, precomps: [2], counts: { effects: 1, expressions: 2 } },
@@ -705,7 +705,7 @@ describe("review fixes", () => {
   });
   const oldItemWorld = () =>
     world({
-      project: project({ render_queue: { numItems: 1, rendering: false, truncated: false, items: [rqItem({ status: "needs_output", outputs: [{ file: null, folder: null, folder_exists: null }] })] } }),
+      project: project({ render_queue: { numItems: 1, rendering: false, truncated: false, items: [rqItem({ render: false, status: "needs_output", outputs: [{ file: null, folder: null, folder_exists: null }] })] } }),
       comps: [{ info: comp(1, "Main"), layers: ["BG"] }],
     });
 
@@ -786,6 +786,29 @@ describe("review fixes", () => {
     expect(find(r, "duplicate_comp_name")).toHaveLength(1);
   });
 
+  it("a needs_output queue item (render false) is a delivery root and an output_missing blocker", async () => {
+    const { ctx } = fakeAe(oldItemWorld());
+    const r = (await tool.handler(AePreflightSchema.parse({}), ctx)) as any;
+    const f = find(r, "output_missing");
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("blocker");
+    expect(r.checked.comps.map((c: any) => c.id)).toEqual([1]);
+  });
+
+  it("a proxy on footage nothing uses raises no warning", async () => {
+    const { ctx } = fakeAe(world({ footage: [footage(13, "proxied.mov", { used_n: 0, used_in: [], proxy: { use: true, file: "C:/proxy/p.mov", missing: true } })], comps: [{ info: comp(1, "Main"), layers: ["a"] }] }));
+    const r = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), ctx)) as any;
+    expect(codes(r)).not.toContain("proxy_in_use");
+    expect(codes(r)).not.toContain("proxy_file_missing");
+  });
+
+  it("the gate says how it read expressions", async () => {
+    const { ctx, calls } = fakeAe(oldItemWorld());
+    const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId: "op_e", comp_ids: [1] });
+    expect(gate.summary.expressions).toMatch(/forced evaluation/);
+    expect((calls.find((c: any) => c.fn === "preflightLayers") as any).args.force_eval).toBe(true);
+  });
+
   it("reports a comp whose proxy is on", async () => {
     const { ctx } = fakeAe(world({ comps: [{ info: comp(1, "Main", { proxy: { use: true, file: "C:/p/comp.mov", missing: false } }), layers: ["a"] }] }));
     const r = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), ctx)) as any;
@@ -842,6 +865,13 @@ describe("preflight.jsx", () => {
     return fx;
   }
 
+  it("preflightProject never reports the literal name 'undefined' for a font", () => {
+    const { proj } = scene();
+    proj.renderQueue = { numItems: 0, rendering: false, item: () => ({}) };
+    const { A } = host(proj, { fonts: { missingOrSubstitutedFonts: [{ nativeFullName: "Brand Bold" }, { postScriptName: undefined }, { postScriptName: null, nativeFullName: null }] } });
+    expect(A.preflightProject().missing_fonts).toEqual(["Brand Bold"]);
+  });
+
   it("preflightProject reports settings, unsaved changes, fonts and the render queue", () => {
     const { proj, main } = scene();
     proj.renderQueue = {
@@ -850,13 +880,13 @@ describe("preflight.jsx", () => {
       item: (i: number) =>
         i === 1
           ? { comp: main, status: 4, render: true, numOutputModules: 1, outputModule: () => ({ file: { fsName: "C:/out/final.mov", parent: { fsName: "C:/out", exists: false } } }) }
-          : { comp: main, status: 2, render: true, numOutputModules: 1, outputModule: () => ({ file: null }) },
+          : { comp: main, status: 2, render: false, numOutputModules: 1, outputModule: () => ({ file: null }) },
     };
     const { A } = host(proj);
     const p = A.preflightProject();
     expect(p).toMatchObject({ project_path: "C:/Projects/Demo.aep", saved: true, dirty: true, bits_per_channel: 16, linear_blending: true, installed_effects: 2, effects_check: "available", fonts_check: "available", missing_fonts: ["Brand-Bold"] });
     expect(p.render_queue.items[0]).toMatchObject({ index: 1, comp_id: main.id, status: "queued", render: true, outputs: [{ file: "C:/out/final.mov", folder: "C:/out", folder_exists: false }] });
-    expect(p.render_queue.items[1]).toMatchObject({ status: "needs_output", outputs: [{ file: null }] });
+    expect(p.render_queue.items[1]).toMatchObject({ status: "needs_output", render: false, outputs: [{ file: null }] });
   });
 
   it("preflightProject copes with AE that has no font list or effect list", () => {

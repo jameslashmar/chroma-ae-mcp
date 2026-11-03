@@ -364,6 +364,24 @@
       if (!hasProp(comp, def.prop)) fail("bad_args", def.key + " is not available on this After Effects build");
       plan.scalars.push({ def: def, value: s[def.key] });
     }
+    if (given(s.motion_blur_samples) || given(s.motion_blur_adaptive_limit)) {
+      // Samples can never exceed the adaptive limit; judge the pair AE would end up with.
+      var effSamples = s.motion_blur_samples;
+      var effLimit = s.motion_blur_adaptive_limit;
+      if (!given(effSamples)) {
+        try { effSamples = comp.motionBlurSamplesPerFrame; } catch (eS) { effSamples = null; }
+      }
+      if (!given(effLimit)) {
+        try { effLimit = comp.motionBlurAdaptiveSampleLimit; } catch (eL) { effLimit = null; }
+      }
+      if (isNum(effSamples) && isNum(effLimit) && effSamples > effLimit) {
+        fail(
+          "bad_args",
+          "motion_blur_samples (" + effSamples + ") cannot be above motion_blur_adaptive_limit (" + effLimit + "); " +
+            (given(s.motion_blur_adaptive_limit) ? "raise the limit or lower the samples" : "raise motion_blur_adaptive_limit too, or lower the samples")
+        );
+      }
+    }
     if (given(s.display_start_time) && given(s.display_start_frame)) {
       fail("bad_args", "Give display_start_time or display_start_frame, not both (they set the same value)");
     }

@@ -88,6 +88,12 @@ export const AeAnnotateFrameSchema = z.object({
     .max(0.5)
     .default(0.2)
     .describe("Title-safe margin as a share of width and height, both sides together. Default 0.2 (AE's 10% per side)."),
+  include_3d: z
+    .boolean()
+    .default(false)
+    .describe(
+      "EXPERIMENTAL and UNMEASURED. Draw boxes for 3D layers by projecting them through the active camera (or AE's default camera). The projection maths has not been checked against a render: X/Y rotation signs and the rotation order are guesses, so a box can be wrong. Default false: 3D layers are listed with `box: null` and a reason."
+    ),
   include_extents: z
     .boolean()
     .default(false)
@@ -162,6 +168,8 @@ export interface HostLayer {
   selected: boolean;
   three_d: boolean;
   parent_id: number | null;
+  /** True when Auto-Orient is on for a layer that is not a camera or light. Absent in reads from older hosts. */
+  auto_orient_active?: boolean;
   in_point: number;
   out_point: number;
   visible: boolean;
@@ -342,6 +350,9 @@ export function chainMatrix(layer: HostLayer, byId: LayerMap): Chain {
   while (cur) {
     if (nodes.length >= MAX_PARENT_DEPTH) return { matrix: null, reason: "parent chain is deeper than 20 layers", has3dAncestor };
     if (!cur.transform) return { matrix: null, reason: `layer ${cur.index} has no transform group`, has3dAncestor };
+    if (cur.auto_orient_active === true) {
+      return { matrix: null, reason: `layer ${cur.index} has Auto-Orient on, which is not modelled`, has3dAncestor };
+    }
     nodes.push(cur);
     if (cur !== layer && cur.three_d) has3dAncestor = true;
     if (cur.parent_id === null) break;
@@ -350,12 +361,23 @@ export function chainMatrix(layer: HostLayer, byId: LayerMap): Chain {
   }
   let m = mat4Identity();
   for (let k = nodes.length - 1; k >= 0; k--) {
-    m = mat4Mul(m, layerLocalMatrix(nodes[k].transform!, nodes[k].three_d));
+    m = mat4Mul(m, nodes[k].kind === "camera" ? cameraLocalMatrix(nodes[k]) : layerLocalMatrix(nodes[k].transform!, nodes[k].three_d));
   }
   return { matrix: m, reason: null, has3dAncestor };
 }
 
 // ---------- camera ----------
+
+/** A camera layer's own transform: position * aim (two-node, at its point of interest) * rotation. */
+function cameraLocalMatrix(cam: HostLayer): Mat4 {
+  const t = cam.transform!;
+  const pos: Vec3 = [num(t.position, 0, 0), num(t.position, 1, 0), num(t.position, 2, 0)];
+  let aim = mat4Identity();
+  if (cam.camera?.two_node && t.point_of_interest) {
+    aim = lookAtRotation(pos, [num(t.point_of_interest, 0, 0), num(t.point_of_interest, 1, 0), num(t.point_of_interest, 2, 0)]);
+  }
+  return mat4Mul(translation(pos[0], pos[1], pos[2]), mat4Mul(aim, layerRotation(t)));
+}
 
 export interface CameraModel {
   /** World (comp) space to camera space. */
@@ -397,7 +419,12 @@ function lookAtRotation(from: Vec3, to: Vec3): Mat4 {
 export function cameraModel(read: HostRead, byId: LayerMap): CameraModel {
   const { width, height } = read.comp;
   const cam = read.active_camera_id === null ? undefined : byId.get(read.active_camera_id);
-  if (!cam) return defaultCamera(width, height);
+  if (!cam) {
+    if (read.active_camera_id !== null) {
+      return defaultCamera(width, height, `the active camera (id ${read.active_camera_id}) is past the 500 layers read; the default camera was used`);
+    }
+    return defaultCamera(width, height);
+  }
   const t = cam.transform;
   if (!t) return defaultCamera(width, height, `camera "${cam.name}" has no transform group; the default camera was used`);
   let parent: Chain;
@@ -408,12 +435,7 @@ export function cameraModel(read: HostRead, byId: LayerMap): CameraModel {
     parent = p ? chainMatrix(p, byId) : { matrix: null, reason: "its parent is not in the list read", has3dAncestor: false };
   }
   if (!parent.matrix) return defaultCamera(width, height, `camera "${cam.name}": ${parent.reason}; the default camera was used`);
-  const pos: Vec3 = [num(t.position, 0, 0), num(t.position, 1, 0), num(t.position, 2, 0)];
-  let aim = mat4Identity();
-  if (cam.camera?.two_node && t.point_of_interest) {
-    aim = lookAtRotation(pos, [num(t.point_of_interest, 0, 0), num(t.point_of_interest, 1, 0), num(t.point_of_interest, 2, 0)]);
-  }
-  const local = mat4Mul(translation(pos[0], pos[1], pos[2]), mat4Mul(aim, layerRotation(t)));
+  const local = cameraLocalMatrix(cam);
   const view = mat4Invert(mat4Mul(parent.matrix, local));
   if (!view) return defaultCamera(width, height, `camera "${cam.name}" has a singular transform; the default camera was used`);
   const zoomOk = typeof cam.camera?.zoom === "number" && cam.camera.zoom > 0;
@@ -444,6 +466,8 @@ export interface LayerBox {
   projection: "2d" | "3d-estimated";
 }
 
+export const NO_3D_REASON = "3D: needs a live check of the projection";
+
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 
 /**
@@ -455,10 +479,12 @@ export function layerBox(
   layer: HostLayer,
   byId: LayerMap,
   cam: CameraModel,
-  comp: { width: number; height: number }
+  comp: { width: number; height: number },
+  include3d = false
 ): { box: LayerBox | null; reason: string | null } {
   if (layer.skip_reason) return { box: null, reason: layer.skip_reason };
   if (!layer.rect) return { box: null, reason: "no content rect" };
+  if (layer.three_d && !include3d) return { box: null, reason: NO_3D_REASON };
   const chain = chainMatrix(layer, byId);
   if (!chain.matrix) return { box: null, reason: chain.reason };
   if (!layer.three_d && chain.has3dAncestor) {
@@ -566,13 +592,13 @@ export const colorFor = (index: number): Rgba => LAYER_COLORS[Math.abs(index) % 
 const hex = (c: Rgba): string => "#" + c.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("");
 
 /** Builds the index of picked layers, with each one's outline. */
-export function buildIndex(read: HostRead, picked: HostLayer[]): IndexEntry[] {
+export function buildIndex(read: HostRead, picked: HostLayer[], include3d = false): IndexEntry[] {
   const byId = layerMap(read.layers);
   const cam = cameraModel(read, byId);
   const comp = read.comp;
   return picked
     .map((l) => {
-      const { box, reason } = layerBox(l, byId, cam, comp);
+      const { box, reason } = layerBox(l, byId, cam, comp, include3d);
       const parent = l.parent_id === null ? null : (byId.get(l.parent_id)?.index ?? null);
       const offscreen = box ? box.bbox[2] <= 0 || box.bbox[3] <= 0 || box.bbox[0] >= comp.width || box.bbox[1] >= comp.height : false;
       return {
@@ -920,7 +946,7 @@ export const annotateTools: ToolDefinition<any>[] = [
       "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. " +
       "Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. " +
       "Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. " +
-      "Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers are projected through the camera by an estimate (`projection: '3d-estimated'`). " +
+      "Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera by an unmeasured, experimental estimate (`projection: '3d-estimated'`). " +
       "Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeAnnotateFrameSchema,
@@ -988,7 +1014,7 @@ export const annotateTools: ToolDefinition<any>[] = [
         const img = decodePngFile(shot.path);
         const view = makeView(comp, img, args.zoom, budget);
         const picked = chooseLayers(shot.read.layers, args.layers, args.layer_ids);
-        const index = buildIndex(shot.read, picked);
+        const index = buildIndex(shot.read, picked, args.include_3d);
         const missing = missingLayerIds(shot.read, picked, args.layers, args.layer_ids);
         const base = renderBase(img, view, args.checkerboard);
         drawAnnotations(base, view, comp, index, draw);
@@ -1004,7 +1030,8 @@ export const annotateTools: ToolDefinition<any>[] = [
         if (picked.length === 0) notes.push(`No layers matched \`layers: ${args.layers}\`${args.layer_ids ? " and layer_ids" : ""}.`);
         if (index.some((e) => e.three_d && e.box)) {
           const cam = cameraModel(shot.read, layerMap(shot.read.layers));
-          notes.push(cam.source === "layer" ? `3D layers use camera "${cam.name}".` : "3D layers use AE's default comp camera.");
+          if (cam.source === "layer") notes.push(`3D layers use camera "${cam.name}".`);
+          else if (!cam.note) notes.push("3D layers use AE's default comp camera.");
           if (cam.note) notes.push(cam.note);
         }
         if (shot.read.truncated) notes.push(`Only the first 500 of ${shot.read.total_layers} layers were read.`);

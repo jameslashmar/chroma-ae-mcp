@@ -318,21 +318,38 @@ export interface IndexReference {
 export function findIndexReferences(expression: string): IndexReference[] {
   const { codeOnly } = maskExpression(expression);
   const out: IndexReference[] = [];
-  const re = /layer\s*\(([^()]*)\)/g;
+  const re = /layer\s*\(/g;
   for (let m = re.exec(codeOnly); m !== null; m = re.exec(codeOnly)) {
     if (!readsThisComp(codeOnly, m.index)) continue;
-    const arg = m[1]!.trim();
-    const full = m[0];
-    const argStart = m.index + full.indexOf("(") + 1;
+    // Find the matching close paren, so an argument with its own parentheses is read whole.
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < codeOnly.length; i++) {
+      const ch = codeOnly[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+    }
+    if (close === -1) continue;
+    const raw = codeOnly.slice(open + 1, close);
+    const arg = raw.trim();
+    const full = codeOnly.slice(m.index, close + 1);
+    const argStart = open + 1;
     if (/^\d+$/.test(arg)) {
-      out.push({ value: Number(arg), relative: false, parsed: true, start: argStart, end: argStart + m[1]!.length, text: full });
+      out.push({ value: Number(arg), relative: false, parsed: true, start: argStart, end: argStart + raw.length, text: full });
     } else if (/\bindex\b/.test(arg)) {
       const rel = /^(?:thisLayer\s*\.\s*)?index\s*(?:([+-])\s*(\d+))?$/.exec(arg);
       if (rel) {
         const delta = rel[1] ? (rel[1] === "-" ? -Number(rel[2]) : Number(rel[2])) : 0;
-        out.push({ value: delta, relative: true, parsed: true, start: argStart, end: argStart + m[1]!.length, text: full });
+        out.push({ value: delta, relative: true, parsed: true, start: argStart, end: argStart + raw.length, text: full });
       } else {
-        out.push({ value: 0, relative: true, parsed: false, start: argStart, end: argStart + m[1]!.length, text: full });
+        out.push({ value: 0, relative: true, parsed: false, start: argStart, end: argStart + raw.length, text: full });
       }
     }
   }
@@ -546,6 +563,9 @@ interface Written extends Record<string, unknown> {
   changes?: Array<{ id: number; key: string; from: unknown; to: unknown }>;
   to_comp_id?: number;
   no_op?: boolean;
+  /** Ids unlocked for the edit, and the ids the host relocked afterwards. */
+  unlocked?: number[];
+  relocked?: number[];
 }
 
 /** The switch each `switches` key lands in on a read-back layer. */
@@ -567,7 +587,7 @@ const SWITCH_FIELD: Record<string, keyof OpsLayer> = {
 /** The fields of a layer no action here changes by itself: if one differs, the write touched a layer it shouldn't have. */
 const BYSTANDER_FIELDS = ["name", "enabled", "shy", "solo", "locked", "label", "guide", "threeD", "motionBlur", "blendMode"] as const;
 
-export function layerOpsMismatches(args: Pick<OpsArgs, "action">, beforeRaw: unknown, afterRaw: unknown, w: Written): ReceiptMismatch[] {
+export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, beforeRaw: unknown, afterRaw: unknown, w: Written): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = stackOf(beforeRaw);
   const after = stackOf(afterRaw);
@@ -675,6 +695,33 @@ export function layerOpsMismatches(args: Pick<OpsArgs, "action">, beforeRaw: unk
     }
   }
 
+  // Layers unlocked for the edit must be locked again, unless the call asked for them unlocked or they are gone.
+  // The exemptions come from the call's args and the full read-back, not from the host's capped report lists.
+  if (!(args.action === "switches" && args.locked === false)) {
+    const gone = new Set((w.deleted ?? []).map((d) => d.id));
+    const MAX_RELOCK_MISMATCHES = 50;
+    let reported = 0;
+    let more = 0;
+    for (const id of w.unlocked ?? []) {
+      const l = byId(after, id);
+      if (gone.has(id) || (complete && !l)) continue;
+      const before = m.length;
+      if (!(w.relocked ?? []).includes(id)) {
+        m.push({ path: `layer[${id}].locked`, expected: true, actual: "not relocked", message: "A layer unlocked for the edit was not reported as locked again" });
+      }
+      if (l && l.locked !== undefined) expectThat(m, l.locked === true, `layer[${l.name}].locked`, true, l.locked, "A layer unlocked for the edit is still unlocked");
+      if (m.length > before) {
+        if (reported >= MAX_RELOCK_MISMATCHES) {
+          m.length = before;
+          more++;
+        } else {
+          reported++;
+        }
+      }
+    }
+    if (more > 0) m.push({ path: "locked", expected: true, actual: "not relocked", message: `${more} more unlocked layers were not locked again` });
+  }
+
   // Layers the action did not name must come out as they went in.
   if (complete) {
     for (const l of after.layers) {
@@ -750,6 +797,28 @@ async function dryRun(args: OpsArgs, ctx: ToolContext) {
       const id = plan.order_after![index - 1];
       return typeof id === "number" ? { layer_id: id, layer_name: nameOf.get(id) ?? "" } : undefined;
     });
+  }
+  if (before && plan.to_comp_id !== undefined && before.with_comp) {
+    // Copies land on top of the destination: every layer there moves down by the number of copies.
+    const dest = before.with_comp;
+    const copies = Number((plan as { would_change?: unknown }).would_change ?? 0) || 0;
+    const skippedIds = new Set(((plan as { skipped?: Array<{ id?: number }> }).skipped ?? []).map((x) => x.id));
+    const map: IndexMap = new Map();
+    for (const l of dest.layers) map.set(l.id, l.index + copies);
+    const byIndex = new Map(dest.layers.map((l) => [l.index + copies, l]));
+    would_break = [
+      ...indexReferenceWarnings(dest, map, (index) => {
+        if (index <= copies) return { layer_id: 0, layer_name: "(a copy)" };
+        const l = byIndex.get(index);
+        return l ? { layer_id: l.id, layer_name: l.name } : undefined;
+      }),
+      ...copiedToCompWarnings({ ...before, with_comp: undefined }, before, {
+        ...plan,
+        duplicates: (plan.targets ?? [])
+          .filter((t) => !skippedIds.has(t.id))
+          .map((t) => ({ source_id: t.id, id: 0, name: "" })),
+      }),
+    ].slice(0, MAX_WARNINGS);
   }
   return {
     ...plan,
