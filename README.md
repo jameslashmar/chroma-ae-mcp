@@ -221,3 +221,7 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 ## Credits
 
 Ideas and small pieces are borrowed (MIT) from [Engine-Room-Games/after-effects-mcp](https://github.com/Engine-Room-Games/after-effects-mcp) and [JUNKDOGE-JOE/after-effects-mcp](https://github.com/JUNKDOGE-JOE/after-effects-mcp). See `ATTRIBUTION.md`.
+
+## License
+
+MIT. See `LICENSE`. Third-party notices are in `ATTRIBUTION.md`.

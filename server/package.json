@@ -2,6 +2,7 @@
   "name": "chroma-ae-mcp",
   "version": "0.3.0",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "chroma-ae-mcp": "./dist/index.js"
   },
