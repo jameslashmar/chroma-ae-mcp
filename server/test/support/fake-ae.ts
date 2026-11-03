@@ -74,6 +74,11 @@ export class FakeFile {
   }
 }
 
+export class ImportOptions {
+  sequence = false;
+  constructor(public file: FakeFile) {}
+}
+
 export class CompItem {}
 export class FolderItem {}
 export class FootageItem {}
@@ -653,6 +658,15 @@ export class FakeProject {
   addComp(name: string, w = 640, h = 360, dur = 3, folder?: FakeFolder) {
     return this.place(new FakeComp(this, name, w, h, dur), folder);
   }
+  /** Imports describe themselves from the file name: "<w>x<h>_<fps>fps_<frames>f[_audio].ext". */
+  importFile(io: ImportOptions) {
+    const name = io.file.fsName.split(/[\/]/).pop() as string;
+    const m = /(\d+)x(\d+)_(\d+(?:\.\d+)?)fps_(\d+)f(_audio)?/.exec(name);
+    const f = this.addFootage(name, m ? Number(m[1]) : 100, m ? Number(m[2]) : 100, Object.assign(new FileSource(), { isStill: false }));
+    f.file = { fsName: io.file.fsName };
+    Object.assign(f, { frameRate: m ? Number(m[3]) : 25, duration: m ? Number(m[4]) / Number(m[3]) : 1, hasVideo: true, hasAudio: Boolean(m?.[5]), imported_as_sequence: io.sequence });
+    return f;
+  }
   addFolder(name: string, folder?: FakeFolder) {
     return this.place(new FakeFolder(this, name), folder);
   }
@@ -714,6 +728,7 @@ export function loadHost(project: FakeProject, extFiles: string[], extra: Record
     TrackMatteType,
     LightType,
     MaskMode,
+    ImportOptions,
     app: {
       project,
       version: "26.2.1",

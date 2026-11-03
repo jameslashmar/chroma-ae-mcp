@@ -1,3 +1,77 @@
+# Handover: 0.4, roadmap P2 and P3, 2026-11-03 to 2026-11-04
+
+Emre asked for every remaining P2 item and the P3 items that stay inside After Effects, in the recommended order, with all After Effects testing left to the end. This section covers:
+- what was built;
+- how it was checked, and what has **not** been checked yet;
+- what to watch for in the first live run.
+
+Everything is on the local branch `feat/roadmap-0.4`, off `main` at `6f72ea6` (0.3.0), one commit per package. It has not been pushed to this repo.
+
+## Where it is
+
+| Commit | Package | Tools added |
+|---|---|---|
+| `878e1ff` | Tests: the stdio relay tests get 20 s (they timed out under a full parallel run) | – |
+| `7221e49` | Layers | `ae_create_layer`, `ae_precompose`, `ae_set_track_matte` |
+| `d4ed954` | Audio and markers | `ae_audio_analyze`, `ae_cue_keys`, `ae_get_markers`, `ae_add_markers`, `ae_remove_markers` |
+| `5b90e95` | Animation | `ae_get_keyframes`, `ae_remove_keyframes`; `rove_between` on `ae_set_keyframe_ease`; roving fixes and rest bounds in `ae_motion_review` |
+| `c1132de` | Reads | `ae_comp_tree`, `ae_fonts`; filters and paging on `ae_get_project` and `ae_get_comp` |
+| `ca14892` | Production | `ae_shape`, `ae_get_essential_graphics`, `ae_set_essential_graphics`, `ae_render_templates`, `ae_version_footage`, `ae_batch_set` |
+| `33e2549` | P3 | `ae_mask`, `ae_text_animator`, `ae_align`, `ae_purge_unused`, `ae_export_mogrt`, `ae_house_style_check` |
+| (last) | Render check and docs | `ae_verify_render`; README, FEATURES, this section |
+
+Tools: 55 → 80. Unit tests: 258 → 419 (39 files).
+
+**Shared pieces:**
+- `server/src/tools/ext/write-runner.ts`: the guarded write as one function (guard, checkpoint, before read, write, separate after read, receipt). All new write tools use it.
+- `server/test/support/fake-ae.ts`: a small simulated AE DOM. `host-jsx.test.ts`, `host-jsx-p3.test.ts` and `ext-verify.test.ts` run the new `panel/host/ext/*.jsx` under `node:vm` against it. It follows AE where the host code depends on it, and found real bugs before AE ever saw the code. It is not AE: the live run is still the proof.
+- Pure modules with their own tests: `audio.ts` (decoding and analysis), `transcript.ts`, `versions.ts`, `style.ts`.
+
+## How it was checked
+
+- `npm run build`, `npm test` (419 passing), `node scripts/lint-jsx.mjs` (21 files, 0 issues), `npm run bundle` and `scripts/check-bundle.cjs` (80 tools over the in-panel MCP): green after every package.
+- **Not run in After Effects.** AE had a client project open with unsaved changes when the work started, so nothing touched it. Emre then asked to leave all AE testing to the end.
+- The live smoke test (`qa/smoke-mcp.mjs`) has a step for every new tool: 54 → 99 checks. It builds a `Layers` comp and an `Audio` comp (a generated 120 BPM click track) next to the old `Smoke` comp. It runs the MOGRT export and `ae_audio_analyze` right after `ae_save`, because both need a saved, unchanged project. It verifies the final aerender output with `ae_verify_render`.
+
+## What to watch in the first live run
+
+These are the AE behaviours the code relies on but nobody has measured yet:
+1. **Track mattes:** whether `setTrackMatte` turns the matte's video off by itself. The tool turns it off either way.
+2. **`ae_audio_analyze`:**
+   - that AE 26 ships an output-module template named exactly `AIFF 48kHz` (`ae_render_templates` says);
+   - that aerender keeps the `.aif` extension;
+   - that `-s`/`-e` count from the comp's display start frame (the tool adds it).
+3. **Marker times:** whether they come back within 1.5 ms of what was written.
+4. **Match names nobody has used here yet:**
+   - text animators (`ADBE Text Position 3D`, `ADBE Text Scale 3D`, `ADBE Text Fill Color`, `ADBE Text Range Type2`, `ADBE Text Range Shape`, `ADBE Text Levels Max Ease`);
+   - masks (`ADBE Mask Offset` for expansion);
+   - precomp overrides (`ADBE Layer Overrides`).
+5. **Essential Graphics:**
+   - `addToMotionGraphicsTemplateAs` and `setMotionGraphicsControllerName` on AE 26;
+   - the value types of overrides (text overrides as a TextDocument).
+6. **`ae_export_mogrt`:** the `exportAsMotionGraphicsTemplate(overwrite, path)` signature, and whether AE raises a dialog. If it does, the call times out naming it; read it with `ae_dialogs`, never suppress it.
+7. **Rest bounds and `ae_align`:** `sourceRectAtTime` on solids and footage, and the sign of rotation in the box maths.
+8. **`ae_fonts`:** `app.fonts.missingOrSubstitutedFonts` and `fontObject.isSubstitute` on AE 26.
+9. **`ae_verify_render`:** importing aerender's PNG output with `ImportOptions.sequence`, and the frame count from `duration * frameRate`.
+10. **`ae_render_templates` with `allow_temp`:** it adds and removes a render-queue item. Check this leaves only an undo step and a changed flag.
+
+Fix what fails, add the measured behaviour to `docs/BUILDERS.md`, and put the measured facts in the tool descriptions where an agent needs them.
+
+## Not done, and why
+
+- **Deadline submission and the Premiere round trip:** both leave After Effects, which is out of scope (Emre's rule: everything through AE itself). `ae_export_mogrt` covers the template side of a Premiere handoff.
+- **VO transcription:** `ae_add_markers` places what a transcript says (SRT, VTT, ElevenLabs, Whisper); producing the transcript stays outside, as VoxMark does today.
+- **Render verification uses AE, not ffprobe** (no outside tools): `ae_verify_render` imports the render back and removes it again. That is two undo steps and a changed project, as its result says.
+- **Left for when a job needs them:** typed tools to parent, reorder, duplicate and delete layers (`ae_run_jsx` does these today), single-layer snapshots, matching a reference frame, audio levels and fades, a project JSON export, several AE instances, failure recovery by id.
+
+## Suggested next steps
+
+1. Run the live smoke test on Windows: AE with an empty project, then `node qa/smoke-mcp.mjs --dir <a fresh scratch folder>`. Fix what it finds.
+2. On a Mac: the smoke test, and the macOS popup reading that was still open from 0.3.
+3. Release 0.4.0: bump `VERSION`, `scripts/package.ps1`, tag, release.
+
+---
+
 # Handover: AE control and roadmap P2, 2026-10-29 to 2026-10-30
 
 This picks up where the work stands after two sessions with Emre on the Windows PC:

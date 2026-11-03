@@ -2703,8 +2703,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path27, errorMaps, issueData } = params;
-  const fullPath = [...path27, ...issueData.path || []];
+  const { data, path: path28, errorMaps, issueData } = params;
+  const fullPath = [...path28, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2820,11 +2820,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path27, key) {
+  constructor(parent, value, path28, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path27;
+    this._path = path28;
     this._key = key;
   }
   get path() {
@@ -8446,7 +8446,7 @@ var diagnosticsTools = [
 ];
 
 // src/panel-entry.ts
-var path26 = __toESM(require("node:path"), 1);
+var path27 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -9416,14 +9416,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path27 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path28 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path27,
+          path: path28,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path27} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path28} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -10478,8 +10478,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path27, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path27, expected, actual, message });
+function expectThat(mismatches, ok, path28, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path28, expected, actual, message });
 }
 
 // src/tools/ext/audio.ts
@@ -13925,14 +13925,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path27, target, taste) {
+function reviewProperty(s, analysis, speeds, path28, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path27 }
+    property: { name: s.property.name, path: path28 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys, extra = {}) => ({
@@ -13940,7 +13940,7 @@ function reviewProperty(s, analysis, speeds, path27, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path27,
+      path: path28,
       keys,
       ease: easeArg,
       ...extra,
@@ -16211,7 +16211,8 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_mask",
   "ae_text_animator",
   "ae_align",
-  "ae_purge_unused"
+  "ae_purge_unused",
+  "ae_verify_render"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -17604,6 +17605,127 @@ var trackTools = [
   }
 ];
 
+// src/tools/ext/verify.ts
+var fs26 = __toESM(require("node:fs"), 1);
+var path26 = __toESM(require("node:path"), 1);
+var AeVerifyRenderSchema = external_exports.object({
+  path: external_exports.string().min(1).optional().describe("Absolute path of the render: a movie, or one frame of an image sequence."),
+  job_id: external_exports.string().min(1).optional().describe("Or an ae_aerender_start job: its output, comp and frame range."),
+  comp_id: external_exports.number().int().optional().describe("The comp it should match. Default: the job's comp."),
+  sequence: external_exports.boolean().optional().describe("Import as an image sequence. Default: yes for a numbered still (name.0001.png)."),
+  keep_imported: external_exports.boolean().optional().describe("Leave the imported render in the project. Default false: it is removed again."),
+  expect: ExpectSchema
+}).refine((v) => v.path === void 0 !== (v.job_id === void 0), { message: "Give path or job_id." });
+var STILL = /\.(png|jpe?g|tiff?|exr|dpx|tga|psd|bmp|cin|hdr|webp)$/i;
+function looksLikeSequence(file) {
+  return STILL.test(file) && /\d+\.[^.]+$/.test(path26.basename(file));
+}
+function firstFrameOf(output) {
+  if (!/\[#+\]/.test(output)) return fs26.existsSync(output) ? output : null;
+  const dir = path26.dirname(output);
+  const base = path26.basename(output);
+  const m = /^(.*)\[(#+)\](.*)$/.exec(base);
+  if (!m) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
+  try {
+    const frames = fs26.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
+    return frames.length ? path26.join(dir, frames[0]) : null;
+  } catch {
+    return null;
+  }
+}
+function renderChecks(r, c, jobFrames) {
+  const out = [];
+  if (!r.still) {
+    const compFrames = Math.round(c.duration * c.fps);
+    const workFrames = Math.round(c.work_area_duration * c.fps);
+    if (jobFrames !== void 0) {
+      out.push({ what: "frames", expected: jobFrames, actual: r.frames, ok: r.frames === jobFrames, note: "the job's frame range" });
+    } else {
+      const ok = r.frames === compFrames || r.frames === workFrames;
+      out.push({
+        what: "frames",
+        expected: compFrames === workFrames ? compFrames : [compFrames, workFrames],
+        actual: r.frames,
+        ok,
+        note: r.frames === workFrames && compFrames !== workFrames ? "matches the work area" : compFrames === workFrames ? void 0 : "the comp or its work area"
+      });
+    }
+    out.push({ what: "fps", expected: c.fps, actual: r.fps, ok: Math.abs(r.fps - c.fps) < 0.01 });
+  }
+  const sameSize = r.width === c.width && r.height === c.height;
+  const half = r.width * 2 === c.width && r.height * 2 === c.height;
+  out.push({ what: "size", expected: [c.width, c.height], actual: [r.width, r.height], ok: sameSize, ...half ? { note: "half resolution: check the render settings" } : {} });
+  if (c.has_audio) out.push({ what: "audio", expected: true, actual: r.has_audio, ok: r.has_audio, ...r.has_audio ? {} : { note: "the comp has sound; the output module may have audio off" } });
+  return out;
+}
+function createVerifyTools(options = {}) {
+  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
+  return [
+    {
+      name: "ae_verify_render",
+      description: "Check a finished render by importing it back into After Effects: its frame count, frame rate, size and audio are read by AE (any format AE can open, image sequences too) and compared with the comp, or with the aerender job's frame range when given a job_id. The imported item is removed again unless keep_imported; the import and removal are two undo steps and mark the project changed. Guarded by `expect`, with an automatic checkpoint. No outside tools (no ffprobe). " + AGENT_SAFETY_GUIDANCE,
+      schema: AeVerifyRenderSchema,
+      handler: async (args, ctx) => {
+        let file = args.path;
+        let compName;
+        let jobFrames;
+        if (args.job_id) {
+          const job = getJob(args.job_id);
+          if (!job) return { ok: false, error: "unknown_job", message: `No aerender job ${args.job_id}` };
+          if (job.state !== "succeeded") return { ok: false, error: "not_finished", message: `The job is ${job.state}${job.error ? `: ${job.error}` : ""}.` };
+          file = firstFrameOf(job.output_path) ?? void 0;
+          if (!file) return { ok: false, error: "no_output", message: `No render found at ${job.output_path}` };
+          compName = job.comp_name;
+          if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
+        }
+        if (!file || !path26.isAbsolute(file) || !fs26.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+        const stat = fs26.statSync(file);
+        if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
+        if (args.comp_id === void 0 && !compName) return { ok: false, error: "bad_args", message: "Give comp_id to compare with." };
+        const sequence = args.sequence ?? looksLikeSequence(file);
+        const jsxPath = file.replace(/\\/g, "/");
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const call = (suffix, fn, a, mutates) => ctx.bridge.evalRaw({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_verify_render (${suffix})`, mutates, toolName: "ae_verify_render" });
+        try {
+          return await ctx.queue.run("ae_verify_render", async () => {
+            ctx.quarantine.assertClear();
+            const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
+            const guard = await verifyTargetGuard(ctx, expect, opId);
+            const checkpoint = await autoCheckpoint(ctx, guard, "ae_verify_render");
+            const comp = (await call("comp", "verifyCompInfo", { comp_id: args.comp_id, comp_name: compName }, false)).result;
+            const imported = (await call("import", "verifyImport", { path: jsxPath, sequence, expect, label: "Verify render: import" }, true)).result;
+            const render = (await call("read", "verifyRead", { item_id: imported.item_id }, false)).result;
+            let removed = false;
+            if (!args.keep_imported) {
+              await call("remove", "verifyRemove", { item_id: imported.item_id, expect, label: "Verify render: remove" }, true);
+              removed = true;
+            }
+            const checks = renderChecks(render, comp, jobFrames);
+            return {
+              ok: true,
+              matches: checks.every((c) => c.ok),
+              file: { path: file, size: stat.size, modified: stat.mtime.toISOString(), sequence },
+              render,
+              comp: { comp_id: comp.comp_id, name: comp.name },
+              checks,
+              imported_item: removed ? null : imported.item_id,
+              project_changed: true,
+              checkpoint
+            };
+          });
+        } catch (err) {
+          if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+          throw err;
+        }
+      }
+    }
+  ];
+}
+var verifyTools = createVerifyTools();
+
 // src/tools/ext/index.ts
 var extTools = [
   ...exploreTools,
@@ -17632,7 +17754,8 @@ var extTools = [
   ...shapesTools,
   ...productionTools,
   ...masksTools,
-  ...layoutTools
+  ...layoutTools,
+  ...verifyTools
 ];
 
 // src/tools/quarantine.ts
@@ -18203,7 +18326,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path26.join(resolvedDataDir, "quarantine.json")
+    path27.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -18216,7 +18339,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path26.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path27.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo

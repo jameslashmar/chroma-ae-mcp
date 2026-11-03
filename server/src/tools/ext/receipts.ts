@@ -519,6 +519,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_text_animator",
   "ae_align",
   "ae_purge_unused",
+  "ae_verify_render",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

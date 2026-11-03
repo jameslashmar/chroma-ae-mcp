@@ -26,6 +26,7 @@ import { reframeTools } from "./reframe.js";
 import { shapesTools } from "./shapes.js";
 import { skillsTools } from "./skills.js";
 import { trackTools } from "./track.js";
+import { verifyTools } from "./verify.js";
 
 // Each tool group in this folder exports an array of tools; list it here.
 export const extTools: ToolDefinition<any>[] = [
@@ -56,4 +57,5 @@ export const extTools: ToolDefinition<any>[] = [
   ...productionTools,
   ...masksTools,
   ...layoutTools,
+  ...verifyTools,
 ];

@@ -532,7 +532,7 @@ async function main() {
   );
   r = await call("ae_audio_analyze", { audio_path: CLICKS_WAV });
   check("ae_audio_analyze (file)", r.ok && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3 && r.onsets?.length === 8, `${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets`);
-  r = await call("ae_export_mogrt", { comp_id: PRE, path: path.join(RENDER, "smoke_template.mogrt"), overwrite: true, expect });
+  r = await call("ae_export_mogrt", { comp_id: PRE, path: path.join(RENDER, "qa_template.mogrt"), overwrite: true, expect });
   check("ae_export_mogrt", r.ok && r.file?.size > 0 && r.file?.fresh === true, `${r.controllers} controller(s), ${r.file?.size} bytes ${r.message ?? ""}`);
 
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 90, expect });
@@ -627,6 +627,16 @@ async function main() {
     job.state === "succeeded" && job.exit_code === 0 && frames.length === (pngTemplate ? 5 : 1),
     `${job.state}, ${frames.length} file(s)`
   );
+
+  // The render read back by AE itself, against the job's five frames.
+  if (job.state === "succeeded") {
+    const v = await call("ae_verify_render", { job_id: r.job_id, expect });
+    check(
+      "ae_verify_render",
+      v.ok && v.matches === true && v.render?.frames === 5 && v.imported_item === null,
+      (v.checks ?? []).map((c) => `${c.what} ${JSON.stringify(c.actual)}${c.ok ? "" : " (expected " + JSON.stringify(c.expected) + ")"}`).join(", ") || String(v.message ?? v.error)
+    );
+  }
 }
 
 let fatal = null;

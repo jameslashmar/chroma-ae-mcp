@@ -25,7 +25,9 @@ Exception: an edit your task names explicitly.
     - a before read → the write → an after read in a **separate** `evalRaw`;
     - `buildReceipt`.
   - Every mutating tool takes `expect: ExpectSchema` (from `../common.js`), and its description ends with `AGENT_SAFETY_GUIDANCE`.
+  - `runGuardedWrite` in `ext/write-runner.ts` does all of the above in one call: give it the read, the write and the checks. The 0.4 tools use it; prefer it for new ones.
 - **Tests:** `server/test/ext-<group>.test.ts` (vitest). Use a fake `HostTransport` (see `test/panel-host.test.ts`) to check schemas, the guard and receipt flow, and any pure logic.
+  - The `.jsx` itself can run under `node:vm` against `test/support/fake-ae.ts`, a small simulated AE DOM (`loadHost(project, ["yourgroup.jsx"])`; see `host-jsx.test.ts`). Extend the fake where your code needs more of AE, following AE's behaviour. It catches ES3 and logic slips; it doesn't replace the live smoke test.
 
 ## Rules measured on AE 26 (breaking them is a bug)
 - **ES3 only in `.jsx`:** no `let`/`const`/arrows/template strings/classes. **Never chained ternaries.** Use if/else. `scripts/lint-jsx.mjs` enforces this.
