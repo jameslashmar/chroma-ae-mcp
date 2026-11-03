@@ -369,6 +369,51 @@ const CLIENTS = {
   },
 };
 
+// What the panel's Copy button puts on the clipboard for one client, with a line
+// saying where it goes. Claude Code and Codex get a CLI command; Claude Desktop and
+// Cursor get the entry to add under "mcpServers" in their JSON config.
+// opts: { port, token }. Throws when Node or the relay can't be found.
+function setupText(id, opts, env) {
+  const e = env || defaultEnv();
+  const o = opts || {};
+  const quote = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+  if (id === "claude-code") {
+    return {
+      kind: "command",
+      text:
+        "claude mcp add --scope user --transport http " + NAME + " http://127.0.0.1:" + o.port +
+        '/mcp --header "Authorization: Bearer ' + o.token + '"',
+      where: "Paste it into a terminal, then start a new Claude Code session.",
+    };
+  }
+  const entry = stdioEntry(e);
+  if (id === "codex") {
+    return {
+      kind: "command",
+      text: "codex mcp add " + NAME + " -- " + quote(entry.command) + " " + quote(entry.args[0]),
+      where: "Paste it into a terminal, then start a new Codex session.",
+    };
+  }
+  const json = JSON.stringify({ [NAME]: entry }, null, 2);
+  // The entry alone, without the outer braces, so it pastes into an existing "mcpServers".
+  const text = json.slice(1, -1).replace(/^\n/, "").replace(/\n$/, "").replace(/^ {2}/gm, "");
+  if (id === "claude-desktop") {
+    return {
+      kind: "config",
+      text,
+      where: 'Add it inside "mcpServers" in claude_desktop_config.json (Settings > Developer > Edit Config), then quit and reopen Claude Desktop.',
+    };
+  }
+  if (id === "cursor") {
+    return {
+      kind: "config",
+      text,
+      where: 'Add it inside "mcpServers" in ~/.cursor/mcp.json, then reload Cursor\'s MCP settings.',
+    };
+  }
+  throw new Error("Unknown client " + id);
+}
+
 function status(env) {
   const e = env || defaultEnv();
   return Object.keys(CLIENTS).map((id) => {
@@ -394,6 +439,7 @@ module.exports = {
   NAME,
   status,
   setRegistered,
+  setupText,
   upsertTomlTable,
   codexTable,
   tomlString,

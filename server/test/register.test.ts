@@ -202,3 +202,37 @@ describe("register.cjs config editing", () => {
     expect(JSON.parse(fs.readFileSync(real, "utf8")).mcpServers["chroma-ae"]).toBeDefined();
   });
 });
+
+describe("register.cjs setup text (the panel's Copy button)", () => {
+  it("gives Claude Code its claude mcp add command with the token", () => {
+    const { env } = fakeEnv();
+    const s = register.setupText("claude-code", { port: 7790, token: "abc123" }, env);
+    expect(s.kind).toBe("command");
+    expect(s.text).toBe(
+      'claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp --header "Authorization: Bearer abc123"'
+    );
+  });
+
+  it("gives Codex a codex mcp add command for the relay, without the token", () => {
+    const { env, node, relayPath } = fakeEnv();
+    const s = register.setupText("codex", { port: 7790, token: "abc123" }, env);
+    expect(s.text).toBe(`codex mcp add chroma-ae -- "${node}" "${relayPath}"`);
+    expect(s.text).not.toContain("abc123");
+  });
+
+  it("gives Claude Desktop and Cursor an entry that pastes inside mcpServers", () => {
+    const { env, node, relayPath } = fakeEnv();
+    for (const id of ["claude-desktop", "cursor"]) {
+      const s = register.setupText(id, { port: 7790, token: "abc123" }, env);
+      expect(s.kind).toBe("config");
+      expect(JSON.parse("{" + s.text + "}")).toEqual({ "chroma-ae": { command: node, args: [relayPath] } });
+      expect(s.where).toContain("mcpServers");
+    }
+  });
+
+  it("says so when Node is missing", () => {
+    const { env } = fakeEnv();
+    env.pathEnv = "";
+    expect(() => register.setupText("cursor", {}, env)).toThrow(/Node\.js was not found/);
+  });
+});

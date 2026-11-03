@@ -380,7 +380,23 @@
   // A session starts at the service's "Listening on" line.
   var TOOL_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(OK|ERR)\]\s+tool\s+(\S+)\s+(ok|failed)\s+\((\d+)ms\)(?::\s*(.*))?$/;
   var CHECKPOINT_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[OK\]\s+Checkpoint saved before\s+(\S+):\s*(.*)$/;
-  var SESSION_START_LINE = /^\[\d{2}:\d{2}:\d{2}\]\s+\[OK\]\s+Listening on /;
+  var SESSION_START_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[OK\]\s+Listening on \S*?:(\d+)/;
+  var EVENT_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(OK|WARN|ERR)\]\s+(.*)$/;
+
+  // Service lines other than tool calls, in plain words for the Log. Per-evalScript
+  // lines ("<- label [id] ...") stay in the raw log only: each tool call has its own row.
+  function describeEvent(text) {
+    var m;
+    if (/^<- /.test(text)) return null;
+    if (/^Token loaded from /.test(text)) return { title: "Token loaded", detail: text.replace(/^Token loaded from /, "") };
+    if (/^Token written to /.test(text)) return { title: "New token saved", detail: text.replace(/^Token written to /, "") };
+    m = /^Loaded MCP bundle \((.*)\)$/.exec(text);
+    if (m) return { title: "MCP tools loaded", detail: m[1] };
+    if (/^Loaded host\/core\.jsx/.test(text)) return { title: "After Effects scripting ready", detail: "" };
+    m = /^Diagnostics saved to (.*)$/.exec(text);
+    if (m) return { title: "Diagnostics saved", detail: m[1] };
+    return { title: text, detail: "" };
+  }
 
   function parseToolLine(rawLine) {
     var line = String(rawLine || "").replace(/\r$/, "");
@@ -392,10 +408,28 @@
     if (m) {
       return { kind: "checkpoint", time: m[1], tool: m[2], file: m[3] };
     }
-    if (SESSION_START_LINE.test(line)) {
-      return { kind: "session" };
+    m = SESSION_START_LINE.exec(line);
+    if (m) {
+      return { kind: "session", time: m[1], level: "ok", title: "Server started", detail: "port " + m[2] };
+    }
+    m = EVENT_LINE.exec(line);
+    if (m) {
+      var d = describeEvent(m[3]);
+      if (!d) return null;
+      return { kind: "event", time: m[1], level: m[2].toLowerCase(), title: d.title, detail: d.detail };
     }
     return null;
+  }
+
+  function toSeconds(t) {
+    var parts = String(t).split(":");
+    return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseInt(parts[2], 10);
+  }
+
+  // Seconds from a to b, allowing for midnight.
+  function secondsBetween(a, b) {
+    var d = toSeconds(b) - toSeconds(a);
+    return d < 0 ? d + 86400 : d;
   }
 
   function median(values) {
@@ -423,7 +457,22 @@
       var p = parseToolLine(rawLine);
       if (!p) return null;
       if (p.kind === "session") {
+        // Keep the start-up lines written just before "Listening on" (token, bundle,
+        // core.jsx) with the new session.
+        var keep = [];
+        for (var k = s.entries.length - 1; k >= 0; k--) {
+          var prev = s.entries[k];
+          if (prev.kind !== "event" || secondsBetween(prev.time, p.time) > 60) break;
+          keep.unshift(prev);
+        }
         reset();
+        s.entries = keep;
+        s.entries.push(p);
+        return p;
+      }
+      if (p.kind === "event") {
+        s.entries.push(p);
+        if (s.entries.length > limit) s.entries.shift();
         return p;
       }
       if (p.kind === "tool") {
@@ -461,8 +510,63 @@
     return { ingest: ingest, snapshot: snapshot, reset: reset };
   }
 
+  // ---------- Updates from GitHub releases ----------
+  var RELEASES_API = "https://api.github.com/repos/jameslashmar/chroma-ae-mcp/releases/latest";
+
+  // "v0.4.1" or "0.4.1" -> [0, 4, 1]; anything else -> null.
+  function parseVersion(v) {
+    var m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(v || "").trim());
+    return m ? [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)] : null;
+  }
+
+  // 1 when a is newer than b, -1 when older, 0 when equal or either is not x.y.z.
+  function compareVersions(a, b) {
+    var pa = parseVersion(a);
+    var pb = parseVersion(b);
+    if (!pa || !pb) return 0;
+    for (var i = 0; i < 3; i++) {
+      if (pa[i] !== pb[i]) return pa[i] > pb[i] ? 1 : -1;
+    }
+    return 0;
+  }
+
+  // The GitHub "latest release" JSON -> what the panel needs, or null when the
+  // release has no .zxp. The SHA256 comes from the asset's digest, or failing that
+  // from the release notes (package.ps1 prints it and the notes carry it).
+  function parseLatestRelease(json) {
+    if (!json || typeof json !== "object") return null;
+    var version = String(json.tag_name || "").replace(/^v/, "");
+    if (!parseVersion(version) || json.draft || json.prerelease) return null;
+    var assets = json.assets || [];
+    var zxp = null;
+    for (var i = 0; i < assets.length; i++) {
+      if (/\.zxp$/i.test(String(assets[i].name || ""))) { zxp = assets[i]; break; }
+    }
+    if (!zxp || !zxp.browser_download_url) return null;
+    var sha = null;
+    var dm = /^sha256:([0-9a-f]{64})$/i.exec(String(zxp.digest || ""));
+    if (dm) {
+      sha = dm[1].toLowerCase();
+    } else {
+      var bm = /\b([0-9a-f]{64})\b/i.exec(String(json.body || ""));
+      if (bm) sha = bm[1].toLowerCase();
+    }
+    return {
+      version: version,
+      notesUrl: String(json.html_url || ""),
+      fileName: String(zxp.name),
+      url: String(zxp.browser_download_url),
+      size: typeof zxp.size === "number" ? zxp.size : 0,
+      sha256: sha
+    };
+  }
+
   var api = {
     PANEL_VERSION: PANEL_VERSION,
+    RELEASES_API: RELEASES_API,
+    parseVersion: parseVersion,
+    compareVersions: compareVersions,
+    parseLatestRelease: parseLatestRelease,
     parseToolLine: parseToolLine,
     createSessionStats: createSessionStats,
     DEFAULT_PORT: DEFAULT_PORT,

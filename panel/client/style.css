@@ -223,10 +223,44 @@ input:focus-visible {
   padding-top: 2px;
 }
 
-.register-label {
-  font-weight: 600;
+.register-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
 }
+
+.register-toggle:hover { color: #fff; }
+.register-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+
+/* Which AIs are set up, shown while the section is closed. */
+.register-summary {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.register-toggle[aria-expanded="true"] .register-summary { display: none; }
+
+.register-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.register-body[hidden] { display: none; }
 
 .register-clients {
   display: grid;
@@ -304,9 +338,24 @@ input:focus-visible {
 .minor-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 4px;
   min-width: 0;
+  flex-shrink: 0;
 }
+
+.setup-where {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+  margin-top: -2px;
+}
+
+.setup-where:empty { display: none; }
+.setup-where.err { color: var(--err-text); }
 
 .btn-link {
   border: none;
@@ -319,8 +368,10 @@ input:focus-visible {
 .btn-link:hover { color: var(--text-strong); text-decoration: underline; }
 .btn-link:disabled { opacity: 0.5; cursor: default; }
 
+.inflight:empty { display: none; }
+
 .inflight {
-  margin-left: auto;
+  text-align: center;
   min-width: 0;
   color: var(--busy-text);
   font-family: var(--mono);
@@ -328,6 +379,50 @@ input:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------- Update available ---------- */
+
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #1d2a38;
+  border: 1px solid #2c4a6b;
+  border-radius: 4px;
+}
+
+.update-bar[hidden] { display: none; }
+
+.update-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.update-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.update-status {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-status:empty { display: none; }
+.update-status.err { color: var(--err-text); }
+
+.btn-small {
+  height: 28px;
+  padding: 0 12px;
+  flex-shrink: 0;
 }
 
 /* ---------- Log: closed, open, or filling the panel ---------- */
@@ -465,6 +560,14 @@ body.log-full .log-expand {
   background: var(--border-strong);
 }
 
+.entry.event .entry-dot {
+  border-color: #8a8a8a;
+}
+
+.entry.warn .entry-dot {
+  border-color: #e6b450;
+}
+
 .entry.failed .entry-dot {
   border-color: var(--err-dot);
 }
@@ -496,6 +599,15 @@ body.log-full .log-expand {
   font-weight: 400;
 }
 
+.entry.event .entry-title {
+  color: #bdbdbd;
+  font-weight: 400;
+}
+
+.entry.warn .entry-title {
+  color: #e6b450;
+}
+
 .entry.failed .entry-title {
   color: var(--err-text);
 }
@@ -503,7 +615,9 @@ body.log-full .log-expand {
 .entry-meta {
   color: var(--text-muted);
   font-size: 10.5px;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .raw-log {
@@ -540,7 +654,7 @@ body.log-full .log-expand {
 
 .log-entry.warn { color: #e6b450; }
 .log-entry.err { color: #f48771; }
-.log-entry.ok { color: #86e3a6; }
+
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -556,7 +670,8 @@ body.log-full .log-expand {
 
 /* While a question is open, the setup details step aside to give it room. */
 body.asking .top,
-body.asking .log-section {
+body.asking .log-section,
+body.asking .minor-actions {
   display: none;
 }
 

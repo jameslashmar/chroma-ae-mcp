@@ -13,6 +13,15 @@
     </span>
   </header>
 
+  <div id="update-bar" class="update-bar" hidden>
+    <div class="update-text">
+      <span id="update-title" class="update-title"></span>
+      <span id="update-status" class="update-status" role="status" aria-live="polite"></span>
+    </div>
+    <button id="update-notes" class="btn-link" type="button" title="Open the release notes in your browser">What's new</button>
+    <button id="update-btn" class="btn btn-primary btn-small" type="button">Update</button>
+  </div>
+
   <section id="ask" class="ask" hidden>
     <div class="ask-head">
       <span class="ask-title">Claude asks</span>
@@ -55,14 +64,16 @@
     </div>
 
     <div class="register">
-      <span class="register-label">Register with</span>
-      <div id="register-clients" class="register-clients"></div>
-      <button id="copy-setup-btn" class="btn btn-primary btn-wide" type="button">Copy setup command</button>
-      <div class="minor-actions">
-        <button id="regen-token-btn" class="btn-link" type="button" title="Make a new Bearer token">New token</button>
-        <button id="diagnostics-btn" class="btn-link" type="button" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
-        <span id="inflight-label" class="inflight" title="The call After Effects is running now"></span>
+      <button id="register-toggle" class="register-toggle" type="button" aria-expanded="true" aria-controls="register-body">
+        <svg class="chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 1 7.5 5 2.5 9z" fill="currentColor"></path></svg>
+        Register with<span id="register-summary" class="register-summary"></span>
+      </button>
+      <div id="register-body" class="register-body">
+        <div id="register-clients" class="register-clients" role="radiogroup" aria-label="AI to set up"></div>
+        <button id="copy-setup-btn" class="btn btn-primary btn-wide" type="button">Copy setup command</button>
+        <div id="setup-where" class="setup-where"></div>
       </div>
+      <span id="inflight-label" class="inflight" title="The call After Effects is running now"></span>
     </div>
   </div>
 
@@ -87,6 +98,12 @@
       </details>
     </div>
   </section>
+
+  <footer class="minor-actions">
+    <button id="regen-token-btn" class="btn-link" type="button" title="Make a new Bearer token">New token</button>
+    <button id="diagnostics-btn" class="btn-link" type="button" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
+    <button id="update-check-btn" class="btn-link" type="button" title="Look for a newer release on GitHub">Check for updates</button>
+  </footer>
 
   <script src="./common.js"></script>
   <script src="./panel.js"></script>

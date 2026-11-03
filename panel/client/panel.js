@@ -8,6 +8,10 @@
   "use strict";
 
   var http = require("http");
+  var https = require("https");
+  var crypto = require("crypto");
+  var os = require("os");
+  var childProcess = require("child_process");
   var fs = require("fs");
   var path = require("path");
 
@@ -61,8 +65,7 @@
       msg = level;
       level = "";
     }
-    var ts = new Date().toISOString().substring(11, 19);
-    appendLogRow(level, "[" + ts + "] " + msg);
+    renderLogLine(common.formatLogLine(level, msg));
   }
 
   // ---------- Token file reading & setup command display ----------
@@ -91,7 +94,7 @@
   function renderLogLine(rawLine) {
     var trimmed = String(rawLine || "").replace(/\r$/, "");
     if (!trimmed) return;
-    if (stats.ingest(trimmed)) statsDirty = true;
+    if (stats && stats.ingest(trimmed)) statsDirty = true;
     var parsed = common.parseLogLine(trimmed);
     appendLogRow(parsed.level, parsed.text);
   }
@@ -212,8 +215,13 @@
 
   function entryNode(e) {
     var row = document.createElement("div");
-    var failed = e.kind === "tool" && !e.ok;
-    row.className = "entry" + (e.kind === "checkpoint" ? " checkpoint" : "") + (failed ? " failed" : "");
+    var failed = (e.kind === "tool" && !e.ok) || e.level === "err";
+    var cls = "entry";
+    if (e.kind === "checkpoint") cls += " checkpoint";
+    if (e.kind === "event" || e.kind === "session") cls += " event";
+    if (e.level === "warn") cls += " warn";
+    if (failed) cls += " failed";
+    row.className = cls;
     var rail = document.createElement("div");
     rail.className = "entry-rail";
     var dot = document.createElement("span");
@@ -228,7 +236,11 @@
     title.className = "entry-title";
     var meta = document.createElement("div");
     meta.className = "entry-meta";
-    if (e.kind === "checkpoint") {
+    if (e.kind === "event" || e.kind === "session") {
+      title.textContent = e.title;
+      meta.textContent = e.time.substring(0, 5) + (e.detail ? " · " + e.detail : "");
+      if (e.detail) meta.title = e.detail;
+    } else if (e.kind === "checkpoint") {
       title.textContent = "Checkpoint saved";
       meta.textContent = e.time.substring(0, 5) + " · before " + e.tool;
       meta.title = e.file;
@@ -434,12 +446,15 @@
           logUi("err", "Token file is unavailable at " + paths.tokenPath);
           return;
         }
-        var cmd = common.buildSetupCommand(boundPort, sessionToken);
-        common.copyTextToClipboard(cmd, function (copied) {
+        var setup = chosenSetup(sessionToken);
+        if (!setup) return;
+        var label = chosenLabel();
+        common.copyTextToClipboard(setup.text, function (copied) {
           if (copied) {
-            logUi("ok", "Copied setup command to clipboard");
+            logUi("ok", "Copied the " + label + " setup " + (setup.kind === "command" ? "command" : "config entry"));
+            flashCopied();
           } else {
-            logUi("err", "Failed to copy setup command to clipboard");
+            logUi("err", "Failed to copy the " + label + " setup to the clipboard");
           }
         });
       });
@@ -493,45 +508,132 @@
     return register;
   }
 
-  function renderRegister() {
-    if (!$registerClients || !loadRegister()) return;
-    var clients = register.status();
-    $registerClients.innerHTML = "";
-    clients.forEach(function (c) {
-      var chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "register-chip" + (c.registered ? " on" : "");
-      chip.textContent = String(c.label).replace(/^Claude\s+/, "");
-      chip.setAttribute("aria-pressed", c.registered ? "true" : "false");
-      chip.title = c.registered ? c.label + " is registered. Click to remove." : "Click to register chroma-ae with " + c.label + ".";
-      chip.addEventListener("click", function () {
-        toggleRegistration(c, chip);
-      });
-      $registerClients.appendChild(chip);
+  // One AI is chosen at a time; Copy puts that AI's setup on the clipboard.
+  var CLIENT_KEY = "chroma-ae-mcp.client";
+  var $setupWhere = el("setup-where");
+  var chosenClient = "claude-code";
+  var clientList = [];
+  try {
+    chosenClient = window.localStorage.getItem(CLIENT_KEY) || "claude-code";
+  } catch (e) {}
+
+  function chosenLabel() {
+    for (var i = 0; i < clientList.length; i++) {
+      if (clientList[i].id === chosenClient) return clientList[i].label;
+    }
+    return "Claude Code";
+  }
+
+  // { kind, text, where } for the chosen AI, or null (and the reason shown) when it can't be built.
+  function chosenSetup(token) {
+    if (!loadRegister()) return null;
+    try {
+      return register.setupText(chosenClient, { port: boundPort, token: token });
+    } catch (e) {
+      if ($setupWhere) {
+        $setupWhere.textContent = e && e.message ? e.message : String(e);
+        $setupWhere.classList.add("err");
+      }
+      return null;
+    }
+  }
+
+  var copiedTimer = null;
+  function flashCopied() {
+    if (!$copySetupBtn) return;
+    $copySetupBtn.textContent = "Copied";
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(function () { copiedTimer = null; renderSetupHint(); }, 1500);
+  }
+
+  function renderSetupHint() {
+    var setup = chosenSetup(common.maskToken(sessionToken));
+    var label = chosenLabel();
+    var already = false;
+    for (var i = 0; i < clientList.length; i++) {
+      if (clientList[i].id === chosenClient) already = clientList[i].registered;
+    }
+    if ($copySetupBtn && !copiedTimer) {
+      $copySetupBtn.textContent = setup && setup.kind === "config" ? "Copy config for " + label : "Copy setup command";
+    }
+    if (!setup || !$setupWhere) return;
+    $setupWhere.classList.remove("err");
+    $setupWhere.textContent = (already ? label + " already has chroma-ae. " : "") + setup.where;
+  }
+
+  // The section twirls closed once it has done its job. Until the user chooses,
+  // it starts closed when any AI is already set up and open when none is.
+  var REGISTER_OPEN_KEY = "chroma-ae-mcp.registerOpen";
+  var $registerToggle = el("register-toggle");
+  var $registerBody = el("register-body");
+  var $registerSummary = el("register-summary");
+  var registerOpenSet = false;
+
+  function setRegisterOpen(open, remember) {
+    registerOpenSet = true;
+    if ($registerBody) $registerBody.hidden = !open;
+    if ($registerToggle) $registerToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (remember) {
+      try { window.localStorage.setItem(REGISTER_OPEN_KEY, open ? "1" : "0"); } catch (e) {}
+    }
+  }
+
+  function bindRegisterToggle() {
+    if (!$registerToggle) return;
+    var stored = null;
+    try { stored = window.localStorage.getItem(REGISTER_OPEN_KEY); } catch (e) {}
+    if (stored === "1" || stored === "0") setRegisterOpen(stored === "1", false);
+    $registerToggle.addEventListener("click", function () {
+      setRegisterOpen($registerToggle.getAttribute("aria-expanded") !== "true", true);
     });
   }
 
-  function toggleRegistration(c, chip) {
-    var on = !c.registered;
-    if (!on && typeof window !== "undefined" && typeof window.confirm === "function") {
-      if (!window.confirm("Remove chroma-ae from " + c.label + "?")) return;
+  function renderRegister() {
+    if (!$registerClients || !loadRegister()) return;
+    clientList = register.status();
+    var setUp = clientList.filter(function (c) { return c.registered; }).map(function (c) {
+      return String(c.label).replace(/^Claude\s+/, "");
+    });
+    if ($registerSummary) $registerSummary.textContent = setUp.length ? "Set up: " + setUp.join(", ") : "Nothing set up";
+    if (!registerOpenSet) setRegisterOpen(setUp.length === 0, false);
+    var known = clientList.some(function (c) { return c.id === chosenClient; });
+    if (!known) chosenClient = "claude-code";
+    $registerClients.innerHTML = "";
+    clientList.forEach(function (c) {
+      var chip = document.createElement("button");
+      var on = c.id === chosenClient;
+      chip.type = "button";
+      chip.className = "register-chip" + (on ? " on" : "");
+      chip.textContent = String(c.label).replace(/^Claude\s+/, "");
+      chip.setAttribute("role", "radio");
+      chip.setAttribute("aria-checked", on ? "true" : "false");
+      chip.tabIndex = on ? 0 : -1;
+      chip.title = "Set up chroma-ae in " + c.label;
+      chip.addEventListener("click", function () { chooseClient(c.id, true); });
+      chip.addEventListener("keydown", function (ev) {
+        var step = 0;
+        if (ev.key === "ArrowRight" || ev.key === "ArrowDown") step = 1;
+        if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") step = -1;
+        if (!step) return;
+        ev.preventDefault();
+        var idx = 0;
+        for (var i = 0; i < clientList.length; i++) if (clientList[i].id === c.id) idx = i;
+        var next = clientList[(idx + step + clientList.length) % clientList.length];
+        chooseClient(next.id, true);
+      });
+      $registerClients.appendChild(chip);
+    });
+    renderSetupHint();
+  }
+
+  function chooseClient(id, focus) {
+    chosenClient = id;
+    try { window.localStorage.setItem(CLIENT_KEY, id); } catch (e) {}
+    renderRegister();
+    if (focus && $registerClients) {
+      var on = $registerClients.querySelector(".register-chip.on");
+      if (on) on.focus();
     }
-    refreshTokenFromDisk();
-    if (on && c.id === "claude-code" && !common.isValidToken(sessionToken)) {
-      logUi("err", "Token file is unavailable at " + paths.tokenPath);
-      return;
-    }
-    chip.disabled = true;
-    register.setRegistered(c.id, on, { port: boundPort, token: sessionToken }).then(
-      function (msg) {
-        logUi("ok", c.label + ": " + msg);
-        renderRegister();
-      },
-      function (e) {
-        logUi("err", c.label + ": " + (e && e.message ? e.message : String(e)));
-        renderRegister();
-      }
-    );
   }
 
   // Claude Code holds the token itself, so a new token means registering again.
@@ -974,6 +1076,212 @@
     stopPreviews();
   }
 
+  // ---------- Update from the latest GitHub release ----------
+  // Checks once at start-up and on "Check for updates". "Update" downloads the
+  // release's .zxp to Downloads, checks its SHA256, and opens it, so the ZXP
+  // installer that is registered for .zxp installs it. AE then needs a restart.
+  // A dev install (panel/ junctioned into CEP) never updates this way: an installer
+  // could delete through the junction into the repo.
+  var $updateBar = el("update-bar");
+  var $updateTitle = el("update-title");
+  var $updateStatus = el("update-status");
+  var $updateBtn = el("update-btn");
+  var $updateNotes = el("update-notes");
+  var $updateCheckBtn = el("update-check-btn");
+  var latestRelease = null;
+  var updating = false;
+  var UPDATE_FIRST_CHECK_MS = 8000;
+
+  function setUpdateStatus(text, isErr) {
+    if (!$updateStatus) return;
+    $updateStatus.textContent = text || "";
+    $updateStatus.classList.toggle("err", !!isErr);
+  }
+
+  function isDevInstall() {
+    try {
+      return fs.lstatSync(common.resolveExtensionDir(host)).isSymbolicLink();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // GET with redirects (release downloads redirect to GitHub's object store).
+  function httpsGet(url, onResponse, onError, hops) {
+    hops = hops || 0;
+    var req = https.get(url, {
+      headers: { "User-Agent": "chroma-ae-mcp/" + common.PANEL_VERSION, "Accept": "application/vnd.github+json" },
+      timeout: 20000
+    }, function (res) {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 5) {
+        res.resume();
+        httpsGet(res.headers.location, onResponse, onError, hops + 1);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        onError(new Error("GitHub answered " + res.statusCode));
+        return;
+      }
+      onResponse(res);
+    });
+    req.on("timeout", function () { req.destroy(new Error("timed out")); });
+    req.on("error", onError);
+  }
+
+  function checkForUpdate(manual) {
+    if ($updateCheckBtn) {
+      $updateCheckBtn.disabled = true;
+      $updateCheckBtn.textContent = "Checking…";
+    }
+    function done(label) {
+      if (!$updateCheckBtn) return;
+      $updateCheckBtn.disabled = false;
+      $updateCheckBtn.textContent = label || "Check for updates";
+      if (label) setTimeout(function () { $updateCheckBtn.textContent = "Check for updates"; }, 4000);
+    }
+    httpsGet(common.RELEASES_API, function (res) {
+      var body = "";
+      res.setEncoding("utf8");
+      res.on("data", function (d) { body += d; });
+      res.on("end", function () {
+        var rel = null;
+        try { rel = common.parseLatestRelease(JSON.parse(body)); } catch (e) {}
+        if (!rel) {
+          if (manual) logUi("warn", "Update check: the latest release has no installable .zxp");
+          done(manual ? "No update found" : "");
+          return;
+        }
+        if (common.compareVersions(rel.version, common.PANEL_VERSION) > 0) {
+          showUpdate(rel);
+          done("");
+        } else {
+          if (manual) logUi("ok", "Up to date (v" + common.PANEL_VERSION + ")");
+          done(manual ? "Up to date" : "");
+        }
+      });
+    }, function (err) {
+      if (manual) logUi("warn", "Update check failed: " + err.message);
+      done(manual ? "Check failed" : "");
+    });
+  }
+
+  function showUpdate(rel) {
+    latestRelease = rel;
+    if (!$updateBar) return;
+    $updateTitle.textContent = "v" + rel.version + " is out";
+    if (isDevInstall()) {
+      $updateBtn.hidden = true;
+      setUpdateStatus("Dev install: update with git pull.");
+    } else {
+      $updateBtn.hidden = false;
+      setUpdateStatus("You have v" + common.PANEL_VERSION + ".");
+    }
+    $updateBar.hidden = false;
+  }
+
+  function downloadDir() {
+    var dl = path.join(os.homedir(), "Downloads");
+    try {
+      if (fs.statSync(dl).isDirectory()) return dl;
+    } catch (e) {}
+    return path.dirname(paths.logPath);
+  }
+
+  function openFile(file) {
+    var cmd = process.platform === "win32" ? "explorer.exe" : "open";
+    var child = childProcess.spawn(cmd, [file], { detached: true, stdio: "ignore" });
+    child.on("error", function () {});
+    child.unref();
+  }
+
+  function runUpdate() {
+    var rel = latestRelease;
+    if (!rel || updating) return;
+    if (!rel.sha256) {
+      setUpdateStatus("The release has no SHA256 to check against.", true);
+      logUi("err", "Update: v" + rel.version + " has no SHA256, not installing");
+      return;
+    }
+    updating = true;
+    $updateBtn.disabled = true;
+    var target = path.join(downloadDir(), rel.fileName);
+    var partial = target + ".part";
+    setUpdateStatus("Downloading…");
+    function fail(msg) {
+      updating = false;
+      $updateBtn.disabled = false;
+      try { fs.unlinkSync(partial); } catch (e) {}
+      setUpdateStatus(msg, true);
+      logUi("err", "Update: " + msg);
+    }
+    httpsGet(rel.url, function (res) {
+      var total = parseInt(res.headers["content-length"], 10) || rel.size || 0;
+      var got = 0;
+      var hash = crypto.createHash("sha256");
+      var out;
+      try {
+        out = fs.createWriteStream(partial);
+      } catch (e) {
+        res.resume();
+        fail("Can't write " + partial);
+        return;
+      }
+      res.on("data", function (d) {
+        got += d.length;
+        hash.update(d);
+        if (total) setUpdateStatus("Downloading… " + Math.round((got / total) * 100) + "%");
+      });
+      res.on("error", function (e) { out.destroy(); fail("Download failed: " + e.message); });
+      out.on("error", function (e) { fail("Can't save the file: " + e.message); });
+      out.on("finish", function () {
+        var sha = hash.digest("hex");
+        if (sha !== rel.sha256) {
+          fail("Download didn't match the release's SHA256. Nothing was installed.");
+          return;
+        }
+        try {
+          try { fs.unlinkSync(target); } catch (e) {}
+          fs.renameSync(partial, target);
+        } catch (e) {
+          fail("Can't save " + target);
+          return;
+        }
+        updating = false;
+        $updateBtn.disabled = false;
+        $updateBtn.textContent = "Open again";
+        setUpdateStatus("Installer opened. Restart After Effects when it's done.");
+        logUi("ok", "Update v" + rel.version + " downloaded to " + target);
+        openFile(target);
+      });
+      res.pipe(out);
+    }, function (err) {
+      fail("Download failed: " + err.message);
+    });
+  }
+
+  function bindUpdate() {
+    if ($updateCheckBtn) $updateCheckBtn.addEventListener("click", function () { checkForUpdate(true); });
+    if ($updateBtn) $updateBtn.addEventListener("click", function () {
+      if ($updateBtn.textContent === "Open again" && latestRelease) {
+        openFile(path.join(downloadDir(), latestRelease.fileName));
+        return;
+      }
+      runUpdate();
+    });
+    if ($updateNotes) $updateNotes.addEventListener("click", function () {
+      if (!latestRelease || !latestRelease.notesUrl) return;
+      try {
+        if (typeof cep !== "undefined" && cep.util && cep.util.openURLInDefaultBrowser) {
+          cep.util.openURLInDefaultBrowser(latestRelease.notesUrl);
+          return;
+        }
+      } catch (e) {}
+      openFile(latestRelease.notesUrl);
+    });
+    setTimeout(function () { checkForUpdate(false); }, UPDATE_FIRST_CHECK_MS);
+  }
+
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("beforeunload", shutdown);
     window.addEventListener("unload", shutdown);
@@ -996,6 +1304,8 @@
     bindSetupActions();
     bindAskActions();
     bindDiagnostics();
+    bindUpdate();
+    bindRegisterToggle();
     renderRegister();
 
     tick();
