@@ -17,6 +17,7 @@ import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ToolDefinition } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite } from "../read-back.js";
 
 export interface Margins {
   top: number;
@@ -199,19 +200,26 @@ export const reframeTools: ToolDefinition<any>[] = [
             toolName: "ae_reframe",
           });
           const made = write.result.comps;
-          // Separate evalScripts for the read-back.
-          const after = await projectSnapshot("after");
-          const report = await ctx.bridge.evalRaw<{
-            comps: Array<{ comp_id: number; width: number; height: number; outside_safe: unknown[] }>;
-          }>({
-            id: `${opId}_report`,
-            script: buildJsxCall("reframeReport", { comps: made.map((m) => ({ comp_id: m.comp_id, safe: m.safe })) }),
-            label: "ae_reframe (read back)",
-            mutates: false,
-            toolName: "ae_reframe",
-          });
+          // Separate evalScripts for the read-back. The comps exist from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () => projectSnapshot("after"));
+          const reportRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<{
+              comps: Array<{ comp_id: number; width: number; height: number; outside_safe: unknown[] }>;
+            }>({
+              id: `${opId}_report`,
+              script: buildJsxCall("reframeReport", { comps: made.map((m) => ({ comp_id: m.comp_id, safe: m.safe })) }),
+              label: "ae_reframe (read back)",
+              mutates: false,
+              toolName: "ae_reframe",
+            })
+          );
+          const after = afterRead.value;
+          const reportComps = reportRead.value?.result?.comps ?? [];
           const mismatches: ReceiptMismatch[] = [];
-          report.result.comps.forEach((r, i) => {
+          const readFailure = afterRead.failure ?? reportRead.failure;
+          if (readFailure) mismatches.push(readFailure);
+          reportComps.forEach((r, i) => {
             const t = targets[i];
             if (r.width !== t.width || r.height !== t.height) {
               mismatches.push({ path: `${t.name}.size`, expected: [t.width, t.height], actual: [r.width, r.height], message: `${t.name} is not ${t.width}x${t.height}` });
@@ -226,11 +234,12 @@ export const reframeTools: ToolDefinition<any>[] = [
               ...m,
               aspect: targets[i].aspect,
               margins: targets[i].margins,
-              outside_safe: report.result.comps[i]?.outside_safe ?? [],
+              // null: the layout couldn't be read back, so it is unchecked (not clean).
+              outside_safe: reportRead.failure ? null : reportComps[i]?.outside_safe ?? [],
             })),
             next: "Check each new comp with ae_contact_sheet; nudge anything in outside_safe with ae_set_property.",
             checkpoint,
-            receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches }),
+            receipt: buildReceipt({ before: before.result, after: after?.result ?? null, customMismatches: mismatches }),
           };
         });
       } catch (err) {

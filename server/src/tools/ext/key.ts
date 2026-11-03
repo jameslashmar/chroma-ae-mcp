@@ -26,6 +26,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite, readBackMismatch } from "../read-back.js";
 import { captureCompFrame, decodePngFile } from "./frames.js";
 import { blit, createCanvas, encodePng, fitWithin, flattenOnChecker, resizeArea, type RgbaImage } from "./png-utils.js";
 
@@ -394,7 +395,7 @@ export const keyTools: ToolDefinition<any>[] = [
           screen = detected?.color ?? null;
         }
 
-        let write: { checkpoint: unknown; result: Record<string, unknown>; after: KeyInfo } | null = null;
+        let write: { checkpoint: unknown; result: Record<string, unknown>; after: KeyInfo | null; failure: ReceiptMismatch | null } | null = null;
         if (!args.check_only) {
           if (!screen) {
             return { error: "no_screen" as const, times };
@@ -418,15 +419,25 @@ export const keyTools: ToolDefinition<any>[] = [
             mutates: true,
             toolName: "ae_key_greenscreen",
           });
-          // Separate evalScript for the read-back.
-          const after = await readInfo(times, "after");
-          write = { checkpoint, result: res.result, after };
+          // Separate evalScript for the read-back. The key is applied from here
+          // on, so a failed read or render is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () => readInfo(times, "after"));
+          write = { checkpoint, result: res.result, after: afterRead.value, failure: afterRead.failure };
         }
 
         const after: string[] = [];
-        for (let i = 0; i < times.length; i++) after.push(await capture(times[i], times.length + i));
+        let renderFailure: ReceiptMismatch | null = null;
+        // A failed read-back usually means AE is blocked (a popup): don't wait on renders too.
+        if (!write?.failure) {
+          try {
+            for (let i = 0; i < times.length; i++) after.push(await capture(times[i], times.length + i));
+          } catch (err) {
+            if (!write) throw err;
+            renderFailure = readBackMismatch(opId, "rendering the keyed frames failed", err);
+          }
+        }
         const finalInfo = write?.after ?? info;
-        return { times, before, after, screen, detected, write, info: finalInfo };
+        return { times, before, after, screen, detected, write, info: finalInfo, failure: write?.failure ?? renderFailure };
       });
 
       if ("error" in run) {
@@ -437,57 +448,89 @@ export const keyTools: ToolDefinition<any>[] = [
         };
       }
 
-      const kl = run.info.keylight;
-      const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]!) : null, after: decodePngFile(a) }));
-      const previewPath = path.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-      fs.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
-
-      const below = run.info.layers_below_visible;
-      const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
-      const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before!, p.after, run.screen!)) : [];
-      const worst = perFrame.length ? worstMetrics(perFrame) : null;
-      const target = {
-        comp_id: args.comp_id,
-        layer_id: run.info.layer.id,
-        expect: { project_path: run.info.project_path, comp_id: args.comp_id },
-      };
-      const advice = worst && kl ? keyAdvice(worst, kl, target) : null;
-
-      let receipt;
-      if (run.write) {
-        const mismatches: ReceiptMismatch[] = [];
-        if (!kl) {
-          mismatches.push({ path: "keylight", expected: "present", actual: null, message: "No Keylight on the layer after keying" });
-        } else {
-          compareValues([...run.screen!, 1], kl.screen_colour, "keylight.screen_colour", mismatches);
-          for (const k of KEYLIGHT_ARG_KEYS) if (args[k] !== undefined) compareValues(args[k], (kl as any)[k], `keylight.${k}`, mismatches);
-        }
-        if ((args.cleanup ?? true) && !(run.info.has_key_cleaner && run.info.has_spill_suppressor)) {
-          mismatches.push({ path: "cleanup", expected: "Key Cleaner and Advanced Spill Suppressor", actual: run.info, message: "Cleanup effects missing after keying" });
-        }
-        receipt = buildReceipt({ before: null, after: run.info, customMismatches: mismatches });
+      if (run.write && run.failure) {
+        return {
+          ok: true,
+          applied: true,
+          layer: run.info.layer,
+          times: run.times,
+          screen_color: run.screen,
+          added: run.write.result.added,
+          checkpoint: run.write.checkpoint,
+          receipt: buildReceipt({ before: null, after: run.write.after, customMismatches: [run.failure] }),
+        };
       }
 
-      let note: string | undefined;
-      if (below.length > 0) note = `Layers below the plate show through (${below.join(", ")}), so the alpha can't be measured; precomp the plate or check the preview.`;
-      else if (!canMeasure) note = "No frames from before the key are kept for this layer (a key made by hand or in another session), so only the preview is returned.";
+      // Decoding the frames and measuring them runs after the key is applied: if it throws,
+      // the key is reported as applied with what failed, not as a bare error.
+      const analyse = () => {
+        const kl = run.info.keylight;
+        const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]!) : null, after: decodePngFile(a) }));
+        const previewPath = path.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+        fs.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
 
-      return {
-        ok: true,
-        applied: run.write !== null,
-        layer: run.info.layer,
-        times: run.times,
-        screen_color: run.screen,
-        ...(run.detected ? { screen_detected: { kind: run.detected.kind, coverage: run.detected.coverage } } : {}),
-        keylight: kl,
-        ...(run.write ? { added: run.write.result.added, checkpoint: run.write.checkpoint, receipt } : {}),
-        metrics: worst,
-        per_frame: perFrame.length > 1 ? perFrame : undefined,
-        verdict: advice?.verdict ?? "unchecked",
-        findings: advice?.findings ?? [],
-        ...(note ? { note } : {}),
-        preview_path: previewPath,
+        const below = run.info.layers_below_visible;
+        const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
+        const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before!, p.after, run.screen!)) : [];
+        const worst = perFrame.length ? worstMetrics(perFrame) : null;
+        const target = {
+          comp_id: args.comp_id,
+          layer_id: run.info.layer.id,
+          expect: { project_path: run.info.project_path, comp_id: args.comp_id },
+        };
+        const advice = worst && kl ? keyAdvice(worst, kl, target) : null;
+
+        let receipt;
+        if (run.write) {
+          const mismatches: ReceiptMismatch[] = [];
+          if (!kl) {
+            mismatches.push({ path: "keylight", expected: "present", actual: null, message: "No Keylight on the layer after keying" });
+          } else {
+            compareValues([...run.screen!, 1], kl.screen_colour, "keylight.screen_colour", mismatches);
+            for (const k of KEYLIGHT_ARG_KEYS) if (args[k] !== undefined) compareValues(args[k], (kl as any)[k], `keylight.${k}`, mismatches);
+          }
+          if ((args.cleanup ?? true) && !(run.info.has_key_cleaner && run.info.has_spill_suppressor)) {
+            mismatches.push({ path: "cleanup", expected: "Key Cleaner and Advanced Spill Suppressor", actual: run.info, message: "Cleanup effects missing after keying" });
+          }
+          receipt = buildReceipt({ before: null, after: run.info, customMismatches: mismatches });
+        }
+
+        let note: string | undefined;
+        if (below.length > 0) note = `Layers below the plate show through (${below.join(", ")}), so the alpha can't be measured; precomp the plate or check the preview.`;
+        else if (!canMeasure) note = "No frames from before the key are kept for this layer (a key made by hand or in another session), so only the preview is returned.";
+
+        return {
+          ok: true,
+          applied: run.write !== null,
+          layer: run.info.layer,
+          times: run.times,
+          screen_color: run.screen,
+          ...(run.detected ? { screen_detected: { kind: run.detected.kind, coverage: run.detected.coverage } } : {}),
+          keylight: kl,
+          ...(run.write ? { added: run.write.result.added, checkpoint: run.write.checkpoint, receipt } : {}),
+          metrics: worst,
+          per_frame: perFrame.length > 1 ? perFrame : undefined,
+          verdict: advice?.verdict ?? "unchecked",
+          findings: advice?.findings ?? [],
+          ...(note ? { note } : {}),
+          preview_path: previewPath,
+        };
       };
+      if (!run.write) return analyse();
+      try {
+        return analyse();
+      } catch (err) {
+        return {
+          ok: true,
+          applied: true,
+          layer: run.info.layer,
+          times: run.times,
+          screen_color: run.screen,
+          added: run.write.result.added,
+          checkpoint: run.write.checkpoint,
+          receipt: buildReceipt({ before: null, after: run.info, customMismatches: [readBackMismatch(opId, "checking the keyed frames failed", err)] }),
+        };
+      }
     },
   },
 ];

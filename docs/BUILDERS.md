@@ -25,7 +25,11 @@ Exception: an edit your task names explicitly.
     - a before read → the write → an after read in a **separate** `evalRaw`;
     - `buildReceipt`.
   - Every mutating tool takes `expect: ExpectSchema` (from `../common.js`), and its description ends with `AGENT_SAFETY_GUIDANCE`.
+  - `runGuardedWrite` in `ext/write-runner.ts` does all of the above in one call: give it the read, the write and the checks. The 0.4 tools use it; prefer it for new ones.
+  - **Once the write's evalScript has returned, never throw.** The change is in the project; a bare error makes the caller resend it. Put a failed read-back or check into the receipt with `readAfterWrite` / `checkAfterWrite` / `readBackMismatch` from `tools/read-back.ts` (runGuardedWrite does this for you). Read the write's own result from the top level of runGuardedWrite's return, not through `present`, which is skipped when the read-back fails.
+  - **Validate before `A.withUndo`.** `A.withUndo` only closes the group; it doesn't undo a half-done write. Check every type, length, selector and value first, including a property's hard limits (`hasMin`/`minValue`, `hasMax`/`maxValue`: AE throws "out of range" mid-write) and separated dimensions.
 - **Tests:** `server/test/ext-<group>.test.ts` (vitest). Use a fake `HostTransport` (see `test/panel-host.test.ts`) to check schemas, the guard and receipt flow, and any pure logic.
+  - The `.jsx` itself can run under `node:vm` against `test/support/fake-ae.ts`, a small simulated AE DOM (`loadHost(project, ["yourgroup.jsx"])`; see `host-jsx.test.ts`). Extend the fake where your code needs more of AE, following AE's behaviour. It catches ES3 and logic slips; it doesn't replace the live smoke test.
 
 ## Rules measured on AE 26 (breaking them is a bug)
 - **ES3 only in `.jsx`:** no `let`/`const`/arrows/template strings/classes. **Never chained ternaries.** Use if/else. `scripts/lint-jsx.mjs` enforces this.
@@ -45,7 +49,9 @@ Exception: an edit your task names explicitly.
 - **Never suppress AE dialogs** (no `app.beginSuppressDialogs`). Jay's rule: popups are read and answered through `ae_dialogs` / `ae_dialog_respond`, never hidden.
 - **Node code that runs in the panel** (anything reachable from `panel-entry.ts`) must work on **Node 17.7.2**: no `fetch`, no `Headers`, no `AbortSignal.timeout`, no `structuredClone`, no native modules. Pure-JS deps only.
 - **Child processes:** `windowsHide: true` always. Never block the eval queue waiting on a long process; run it as a background job with a status tool.
-- **Bound every list** (500 entries, `truncated: true`) **and every string** (20k).
+- **Bound every list** (500 entries, `truncated: true`) **and every string** (20k). When a read is capped, say so, and don't let a capped read make a receipt flag a correct write or a dry run under-count.
+- **`property()` returns null for a missing property** rather than throwing: test for null as well as catching.
+- **Image sequences import with Force alphabetical order off** (`ImportOptions.forceAlphabetical = false`, `replaceWithSequence(file, false)`): numbered order, with placeholders for missing frames, as AE's Import dialog does by default.
 
 ## Definition of done for your task
 - Code compiles under the strict tsconfig.

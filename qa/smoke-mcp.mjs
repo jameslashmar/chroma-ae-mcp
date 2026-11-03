@@ -74,6 +74,37 @@ async function call(name, args = {}) {
   return parsed;
 }
 
+const CLICKS_WAV = path.join(MEDIA, "clicks.wav");
+
+/** A 48 kHz 16-bit mono WAV of short noise bursts on every beat at `bpm`, starting a quarter beat in. */
+function clickWav(bpm, seconds) {
+  const sr = 48000;
+  const n = Math.round(seconds * sr);
+  const data = Buffer.alloc(n * 2);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 31 - 1);
+  for (let t = (60 / bpm) / 4; t < seconds; t += 60 / bpm) {
+    const start = Math.round(t * sr);
+    for (let i = 0; i < 0.03 * sr && start + i < n; i++) {
+      data.writeInt16LE(Math.round(rnd() * 0.8 * Math.exp(-i / (0.006 * sr)) * 32767), (start + i) * 2);
+    }
+  }
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0, "latin1");
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write("WAVEfmt ", 8, "latin1");
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(sr, 24);
+  head.writeUInt32LE(sr * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write("data", 36, "latin1");
+  head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
 const results = [];
 function check(tool, ok, note = "") {
   results.push({ tool, ok: Boolean(ok), note });
@@ -98,6 +129,7 @@ async function main() {
   fs.mkdirSync(MEDIA, { recursive: true });
   fs.writeFileSync(path.join(MEDIA, "a.png"), Buffer.from(RED_PNG, "base64"));
   fs.writeFileSync(path.join(MEDIA, "b.png"), Buffer.from(BLUE_PNG, "base64"));
+  fs.writeFileSync(CLICKS_WAV, clickWav(120, 4));
 
   const settings = await call("ae_auto_checkpoint");
   const autoOn = settings.auto_checkpoint?.enabled === true;
@@ -125,11 +157,18 @@ async function main() {
       "for (var k = 1; k <= 3; k++) p.setInterpolationTypeAtKey(k, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
       // An empty comp for ae_skill_run to write into, so the Smoke comp keeps its three layers.
       'var sk = app.project.items.addComp("Skill target", 320, 180, 1, 1, 25);',
-      "return { comp_id: c.id, skill_comp_id: sk.id };",
+      // An empty comp for the 0.4 layer, audio and animation tools, so they leave the Smoke comp alone.
+      'var lc = app.project.items.addComp("Layers", 640, 360, 1, 3, 25);',
+      // The 120 BPM click track in a comp of its own, for ae_audio_analyze.
+      `var wav = app.project.importFile(new ImportOptions(new File(${JSON.stringify(CLICKS_WAV.replace(/\\/g, "/"))})));`,
+      'var au = app.project.items.addComp("Audio", 320, 180, 1, 4, 25); au.layers.add(wav);',
+      "return { comp_id: c.id, skill_comp_id: sk.id, layers_comp_id: lc.id, audio_comp_id: au.id };",
     ].join("\n"),
   });
   const COMP = scene.result?.comp_id;
   const SKILL_COMP = scene.result?.skill_comp_id;
+  const LAYERS_COMP = scene.result?.layers_comp_id;
+  const AUDIO_COMP = scene.result?.audio_comp_id;
   if (typeof COMP !== "number") throw new Error("Could not build the smoke scene: " + JSON.stringify(scene));
 
   let r = await call("ae_run_jsx", {
@@ -298,8 +337,203 @@ async function main() {
   const again = await call("ae_import_assets", { dry_run: true, expect: { project_path: AEP } });
   check("ae_import_assets", r.ok && r.imported?.length === 1 && r.receipt?.matches === true && again.to_import?.length === 0, `${r.imported?.[0]?.name} into ${r.bin}; ${cpNote(r)}`);
 
+  // ---------- 0.4: layers ----------
+  // Plate (solid), then MATTE (text) on top, then Ctrl (null) between them, so
+  // the matte is not the layer directly above: that needs AE 23's setTrackMatte.
+  const LC = LAYERS_COMP;
+  r = await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Plate", color: [0.2, 0.4, 0.8], expect });
+  check("ae_create_layer (solid)", r.applied && r.receipt?.matches === true && r.layer?.kind === "solid" && r.checkpoint?.status === want("reused"), cpNote(r));
+  r = await call("ae_create_layer", { comp_id: LC, type: "text", text: "MATTE", expect });
+  check("ae_create_layer (text)", r.applied && r.receipt?.matches === true && r.layer?.text === "MATTE" && r.layer?.index === 1, `${r.layer?.name} #${r.layer?.index}`);
+  r = await call("ae_create_layer", { comp_id: LC, type: "null", name: "Ctrl", placement: { below: { name: "MATTE" } }, expect });
+  check("ae_create_layer (null, placed)", r.applied && r.receipt?.matches === true && r.layer?.index === 2, `#${r.layer?.index}`);
+  r = await call("ae_create_layer", { comp_id: LC, type: "light", name: "Key", light_type: "spot", parent: { name: "Ctrl" }, placement: { bottom: true }, expect });
+  check("ae_create_layer (light, parented)", r.applied && r.receipt?.matches === true && r.layer?.lightType === "spot" && r.layer?.parent === 2, `#${r.layer?.index}, parent ${r.layer?.parent}`);
+  r = await call("ae_set_track_matte", { comp_id: LC, layer: { name: "Plate" }, matte: { name: "MATTE" }, type: "alpha", expect });
+  check(
+    "ae_set_track_matte",
+    r.applied && r.receipt?.matches === true && r.layer?.trackMatte?.type === "alpha" && r.layer?.trackMatte?.layer?.name === "MATTE",
+    `api ${r.api}; ${(r.receipt?.mismatches ?? []).map((m) => m.message).join("; ")}`
+  );
+  r = await call("ae_set_track_matte", { comp_id: LC, layer: { name: "Plate" }, type: "none", show_matte: true, expect });
+  check("ae_set_track_matte (remove)", r.applied && r.receipt?.matches === true && r.layer?.trackMatte?.type === "none", `previous ${r.previous_matte?.name}`);
+  r = await call("ae_precompose", { comp_id: LC, layers: [{ name: "MATTE" }, { name: "Plate" }], name: "Smoke Precomp", expect });
+  check(
+    "ae_precompose",
+    r.applied && r.receipt?.matches === true && r.new_comp?.layers?.length === 2 && r.precomp_layer?.index === 1,
+    `${r.new_comp?.name}: ${(r.new_comp?.layers ?? []).map((l) => l.name).join(", ")}`
+  );
+
+  // ---------- 0.4: markers and cue keys ----------
+  r = await call("ae_add_markers", { comp_id: LC, markers: [{ time: 0.5, comment: "one" }, { time: 1, comment: "two", label: 3 }], expect });
+  check("ae_add_markers", r.applied && r.receipt?.matches === true && r.added === 2 && r.checkpoint?.status === want("reused"), `${r.numMarkers} markers`);
+  r = await call("ae_add_markers", {
+    comp_id: LC,
+    layer: { name: "Ctrl" },
+    transcript: { text: "1\n00:00:00,500 --> 00:00:01,000\nANNA: Hello.\n\n2\n00:00:01,200 --> 00:00:02,000\nBEN: Hi there.\n" },
+    expect,
+  });
+  check("ae_add_markers (transcript)", r.applied && r.receipt?.matches === true && r.added === 2 && r.relative_to === "layer", `${r.numMarkers} on Ctrl`);
+  r = await call("ae_get_markers", { comp_id: LC });
+  check("ae_get_markers", r.numMarkers === 2 && r.markers?.[1]?.comment === "two" && r.markers?.[1]?.label === 3, JSON.stringify(r.markers?.map((m) => [m.time, m.comment])));
+  r = await call("ae_remove_markers", { comp_id: LC, comment_contains: "one", expect });
+  check("ae_remove_markers", r.applied && r.receipt?.matches === true && r.removed?.length === 1 && r.numMarkers === 1, `${r.numMarkers} left`);
+  r = await call("ae_cue_keys", { comp_id: LC, layer: { name: "Ctrl" }, path: ["ADBE Transform Group", "ADBE Scale"], times: [0.5, 1, 1.5, 2], peak: [120, 120], expect });
+  check("ae_cue_keys", r.applied && r.receipt?.matches === true && r.keys_set >= 8, `${r.keys_set} keys, base ${JSON.stringify(r.base)}; ${(r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
+  // ---------- 0.4: keyframes, roving, rest bounds ----------
+  const SCALE = ["ADBE Transform Group", "ADBE Scale"];
+  const POS = ["ADBE Transform Group", "ADBE Position"];
+  r = await call("ae_get_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE });
+  check("ae_get_keyframes", r.numKeys >= 8 && r.keys?.[1]?.in?.name === "easy ease", `${r.numKeys} keys; key 2 in: ${r.keys?.[1]?.in?.name}`);
+  r = await call("ae_remove_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE, start: 1.4, expect });
+  check("ae_remove_keyframes (range)", r.applied && r.receipt?.matches === true && r.removed?.length >= 3, `${r.removed?.length} removed, ${r.numKeys} left`);
+  r = await call("ae_remove_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE, all: true, static_value_at: 0, expect });
+  check("ae_remove_keyframes (all)", r.applied && r.receipt?.matches === true && r.numKeys === 0, `kept ${JSON.stringify(r.static_value)}`);
+
+  // A linear move through a middle key: the review's fix eases the ends and roves the middle.
+  await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Mover", color: [1, 0.5, 0], width: 80, height: 80, expect });
+  await call("ae_set_property", {
+    comp_id: LC,
+    layer: { name: "Mover" },
+    path: POS,
+    keyframes: [
+      { time: 0, value: [100, 180], interp: "linear" },
+      { time: 1, value: [320, 180], interp: "linear" },
+      { time: 2, value: [540, 180], interp: "linear" },
+    ],
+    expect,
+  });
+  r = await call("ae_motion_review", { comp_id: LC });
+  const moverLinear = (r.findings ?? []).find((f) => f.kind === "linear" && f.layer?.name === "Mover");
+  check("ae_motion_review (roving fix)", moverLinear?.fix?.args?.rove_between === true, String(moverLinear?.message ?? JSON.stringify(r.by_kind)));
+  if (moverLinear?.fix) {
+    r = await call("ae_set_keyframe_ease", moverLinear.fix.args);
+    check("ae_set_keyframe_ease (rove_between)", r.applied && r.receipt?.matches === true && JSON.stringify(r.result?.roving) === "[2]", `roving ${JSON.stringify(r.result?.roving)}`);
+  }
+  r = await call("ae_motion_review", { comp_id: LC });
+  const moverLeft = (r.findings ?? []).filter((f) => f.layer?.name === "Mover" && f.severity === "medium");
+  check("ae_motion_review (after roving)", r.ok && moverLeft.length === 0, `${moverLeft.length} medium on Mover`);
+
+  // A box that comes to rest half past the right edge.
+  await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Edge", color: [0.2, 1, 0.4], width: 100, height: 100, expect });
+  await call("ae_set_property", { comp_id: LC, layer: { name: "Edge" }, path: POS, keyframes: [{ time: 0, value: [320, 300] }, { time: 1, value: [640, 300] }], expect });
+  r = await call("ae_motion_review", { comp_id: LC });
+  const edgeCut = (r.findings ?? []).find((f) => f.kind === "cut_off" && f.layer?.name === "Edge");
+  check("ae_motion_review (rest bounds)", Boolean(edgeCut) && edgeCut.suggested_shift?.[0] < 0, String(edgeCut?.message ?? JSON.stringify(r.bounds_unchecked ?? r.by_kind)));
+
+  // ---------- 0.4: reads ----------
+  r = await call("ae_comp_tree", {});
+  const layersNode = (r.comps ?? []).find((c) => c.name === "Layers");
+  check("ae_comp_tree", layersNode?.contains === 1 && (r.unused ?? []).some((c) => c.name === "Skill target"), `${r.num_comps} comps, unused ${(r.unused ?? []).map((c) => c.name).join(", ")}`);
+  r = await call("ae_comp_tree", { comp_id: LC });
+  check("ae_comp_tree (one comp)", r.contains?.[0]?.name === "Smoke Precomp", JSON.stringify(r.contains?.map((n) => n.name)));
+  r = await call("ae_fonts", {});
+  check("ae_fonts", r.text_layers >= 2 && r.fonts?.length >= 1 && typeof r.missing_known === "boolean", `${(r.fonts ?? []).map((f) => `${f.font}${f.missing ? " (missing)" : ""}`).join(", ")}`);
+  r = await call("ae_get_project", { type: "comp", sort: "name", limit: 2 });
+  check("ae_get_project (paged)", r.items?.length === 2 && r.total >= 5 && r.next_offset === 2, `${r.total} comps; ${(r.items ?? []).map((i) => i.name).join(", ")}`);
+  r = await call("ae_get_comp", { comp_id: LC, limit: 1 });
+  check("ae_get_comp (paged)", r.layers?.length === 1 && r.next_offset === 1, `${r.numLayers} layers, next ${r.next_offset}`);
+
+  // ---------- 0.4: shapes, Essential Graphics, templates, versions, batch ----------
+  await call("ae_create_layer", { comp_id: LC, type: "shape", name: "Art", expect });
+  r = await call("ae_shape", {
+    comp_id: LC,
+    layer: { name: "Art" },
+    add: [
+      { type: "rect", name: "Card", size: [200, 120], roundness: 12, fill: { color: [0, 0.5, 1] }, stroke: { color: [1, 1, 1], width: 4 } },
+      { type: "polygon", name: "Hex", points: 6, outer_radius: 60, fill: { color: [1, 0.8, 0] } },
+    ],
+    expect,
+  });
+  check("ae_shape", r.applied && r.receipt?.matches === true && r.contents?.length === 2, `${(r.contents ?? []).map((c) => `${c.name}: ${(c.items ?? []).map((i) => i.kind).join("+")}`).join("; ")}`);
+
+  r = await call("ae_render_templates", {});
+  check("ae_render_templates", r.render_settings?.length > 0 && r.output_modules?.length > 0 && typeof r.audio_template_found === "boolean", `${r.source}; AIFF 48kHz ${r.audio_template_found ? "found" : "missing"}`);
+
+  // The precomp made earlier from MATTE and Plate becomes a template; its layer in Layers gets an override.
+  const PRE = (await call("ae_get_project", { type: "comp", name_contains: "Smoke Precomp" })).items?.[0]?.id;
+  r = await call("ae_set_essential_graphics", { comp_id: PRE, action: "add", layer: { name: "MATTE" }, path: ["ADBE Transform Group", "ADBE Opacity"], name: "Matte opacity", expect });
+  check("ae_set_essential_graphics (add)", r.applied && r.receipt?.matches === true, `${r.essential_graphics?.controllers?.length} controllers`);
+  r = await call("ae_set_essential_graphics", { comp_id: PRE, action: "template_name", name: "Smoke Template", expect });
+  check("ae_set_essential_graphics (name)", r.applied && r.receipt?.matches === true, String(r.essential_graphics?.template_name));
+  r = await call("ae_set_essential_graphics", { comp_id: LC, action: "set_override", layer: { name: "Smoke Precomp" }, name: "Matte opacity", value: 50, expect });
+  check("ae_set_essential_graphics (override)", r.applied && r.receipt?.matches === true, JSON.stringify(r.essential_graphics?.overrides));
+  r = await call("ae_get_essential_graphics", { comp_id: LC, layer: { name: "Smoke Precomp" } });
+  check("ae_get_essential_graphics", r.overrides?.[0]?.value === 50, JSON.stringify(r.overrides));
+
+  r = await call("ae_batch_set", {
+    comp_id: LC,
+    ops: [
+      { layer: { name: "Mover" }, path: ["ADBE Transform Group", "ADBE Opacity"], value: 60 },
+      { layer: { name: "Edge" }, path: ["ADBE Transform Group", "ADBE Opacity"], expression: "50 + 50 * Math.sin(time * 4)" },
+      { layer: { name: "Art" }, path: ["ADBE Transform Group", "ADBE Rotate Z"], keyframes: [{ time: 0, value: 0 }, { time: 2, value: 90 }] },
+    ],
+    expect,
+  });
+  check("ae_batch_set", r.ok && r.done === 3 && r.matches === true, `${r.chunks?.length} chunk(s); ${(r.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
+  // A still with two versions on disk: import v001, then version up.
+  fs.writeFileSync(path.join(MEDIA, "tile_v001.png"), Buffer.from(RED_PNG, "base64"));
+  fs.writeFileSync(path.join(MEDIA, "tile_v002.png"), Buffer.from(BLUE_PNG, "base64"));
+  const tile = await call("ae_import_footage", { paths: [path.join(MEDIA, "tile_v001.png")], expect });
+  const tileId = tile.item_ids?.[0];
+  r = await call("ae_version_footage", { item_ids: [tileId] });
+  check("ae_version_footage (report)", r.outdated === 1 && r.items?.[0]?.latest === 2, `item ${tileId}: v${r.items?.[0]?.current} -> v${r.items?.[0]?.latest}`);
+  r = await call("ae_version_footage", { item_ids: [tileId], update: true, expect });
+  check("ae_version_footage (update)", r.applied && r.receipt?.matches === true && Boolean(r.log_path), `${path.basename(String(r.items?.[0]?.target))}, log ${path.basename(String(r.log_path))}`);
+
+  // ---------- 0.4: masks, text animators, layout, purge, house style ----------
+  r = await call("ae_mask", { comp_id: LC, layer: { name: "Mover" }, add: [{ name: "Round", shape: "ellipse", box: [0, 0, 80, 80], feather: [6, 6] }], expect });
+  check("ae_mask (add)", r.applied && r.receipt?.matches === true && r.masks?.[0]?.vertices === 4, JSON.stringify(r.masks?.[0]?.box));
+  r = await call("ae_mask", { comp_id: LC, layer: { name: "Mover" }, set: [{ mask: { name: "Round" }, mode: "subtract", inverted: true }], expect });
+  check("ae_mask (set)", r.applied && r.receipt?.matches === true && r.masks?.[0]?.mode === "subtract", `${r.masks?.[0]?.mode}, inverted ${r.masks?.[0]?.inverted}`);
+
+  await call("ae_create_layer", { comp_id: LC, type: "text", text: "Reveal me", name: "Reveal", expect });
+  r = await call("ae_text_animator", {
+    comp_id: LC,
+    layer: { name: "Reveal" },
+    properties: { opacity: 0, position: [0, 30, 0] },
+    selector: { based_on: "characters", shape: "ramp_up" },
+    reveal: { from: 0, to: 100, start_time: 0, duration: 1.5 },
+    expect,
+  });
+  check("ae_text_animator", r.applied && r.receipt?.matches === true, `${(r.animator?.properties ?? []).map((p) => p.matchName).join(", ")}; ${(r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
+  for (const n of ["Box1", "Box2", "Box3"]) await call("ae_create_layer", { comp_id: LC, type: "solid", name: n, width: 40, height: 40, color: [0.9, 0.9, 0.9], expect });
+  await call("ae_batch_set", {
+    comp_id: LC,
+    ops: [80, 200, 520].map((x, i) => ({ layer: { name: `Box${i + 1}` }, path: ["ADBE Transform Group", "ADBE Position"], value: [x, 260] })),
+    expect,
+  });
+  r = await call("ae_align", { comp_id: LC, layers: [{ name: "Box1" }, { name: "Box2" }, { name: "Box3" }], distribute: "horizontal", expect });
+  check("ae_align (distribute)", r.applied && r.receipt?.matches === true, (r.moved ?? []).map((m) => `${m.name} ${Math.round(m.delta?.[0])}`).join(", "));
+  r = await call("ae_align", { comp_id: LC, layers: [{ name: "Box1" }, { name: "Box2" }, { name: "Box3" }], align: "top", to: "title_safe", expect });
+  check("ae_align (top, title safe)", r.applied && r.receipt?.matches === true && Math.abs((r.layers?.[0]?.rect?.[1] ?? 0) - 36) < 0.6, JSON.stringify(r.layers?.map((l) => l.rect?.map((v) => Math.round(v)))));
+
+  r = await call("ae_purge_unused", {});
+  const purgeable = r.count;
+  check("ae_purge_unused (list)", r.dry_run === true && purgeable >= 1, (r.items ?? []).map((i) => `${i.name} (${i.kind})`).join(", "));
+  r = await call("ae_purge_unused", { kinds: ["footage"], apply: true, expect });
+  check("ae_purge_unused (apply)", r.applied && r.receipt?.matches === true && (r.removed ?? []).length >= 1, `${(r.removed ?? []).length} removed`);
+
+  r = await call("ae_house_style_check", { comp_id: LC, brand_colors: ["#3399ff", "#ffcc00"], fonts: ["Arial"], min_font_size: 10 });
+  check("ae_house_style_check", r.ok && Array.isArray(r.findings) && r.checked?.text >= 1, `${r.counts?.medium} medium, ${r.counts?.low} low: ${[...new Set((r.findings ?? []).map((f) => f.kind))].join(", ")}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
+
+  // The project is saved and clean now, which aerender needs. Nothing here writes.
+  r = await call("ae_audio_analyze", { comp_id: AUDIO_COMP, expect, wait_seconds: 120 });
+  check(
+    "ae_audio_analyze (aerender)",
+    r.ok && r.state === "done" && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3,
+    `${r.state ?? r.error}: ${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets, ${r.beats?.length} beats ${r.message ?? ""}`
+  );
+  r = await call("ae_audio_analyze", { audio_path: CLICKS_WAV });
+  check("ae_audio_analyze (file)", r.ok && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3 && r.onsets?.length === 8, `${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets`);
+  r = await call("ae_export_mogrt", { comp_id: PRE, path: path.join(RENDER, "qa_template.mogrt"), overwrite: true, expect });
+  check("ae_export_mogrt", r.ok && r.file?.size > 0 && r.file?.fresh === true, `${r.controllers} controller(s), ${r.file?.size} bytes ${r.message ?? ""}`);
 
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 90, expect });
   check("ae_set_property (after save)", r.applied && r.checkpoint?.status === want("created") && !r.checkpoint?.unsaved_changes_not_included, cpNote(r));
@@ -393,6 +627,16 @@ async function main() {
     job.state === "succeeded" && job.exit_code === 0 && frames.length === (pngTemplate ? 5 : 1),
     `${job.state}, ${frames.length} file(s)`
   );
+
+  // The render read back by AE itself, against the job's five frames.
+  if (job.state === "succeeded") {
+    const v = await call("ae_verify_render", { job_id: r.job_id, expect });
+    check(
+      "ae_verify_render",
+      v.ok && v.matches === true && v.render?.frames === 5 && v.imported_item === null,
+      (v.checks ?? []).map((c) => `${c.what} ${JSON.stringify(c.actual)}${c.ok ? "" : " (expected " + JSON.stringify(c.expected) + ")"}`).join(", ") || String(v.message ?? v.error)
+    );
+  }
 }
 
 let fatal = null;

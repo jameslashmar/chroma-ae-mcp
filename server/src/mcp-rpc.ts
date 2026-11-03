@@ -22,7 +22,8 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [
 
 export const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 export const SERVER_NAME = "chroma-ae-mcp";
-export const SERVER_VERSION = "0.2.0";
+// Kept equal to the repo's VERSION file (test/version.test.ts checks).
+export const SERVER_VERSION = "0.3.0";
 
 export type JsonRpcId = string | number | null;
 

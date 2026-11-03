@@ -19,6 +19,7 @@ import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, compareValues, type ReceiptMismatch } from "../../receipts.js";
 import { defaultFramesDir } from "../render.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ExpectGuard, type ToolContext, type ToolDefinition } from "../common.js";
+import { readAfterWrite } from "../read-back.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
 import { captureCompFrame, decodePngFile } from "./frames.js";
 import { drawLine, encodePng, fitWithin, resizeArea, strokeRect, type RgbaImage } from "./png-utils.js";
@@ -434,22 +435,25 @@ export const trackTools: ToolDefinition<any>[] = [
           mutates: true,
           toolName: "ae_track_point",
         });
-        // Separate evalScript for the read-back.
-        const after = await ctx.bridge.evalRaw<{ keyframes: Array<{ time: number; value: unknown }> }>({
-          id: `${opId}_after`,
-          script: buildJsxCall("getKeyframeEase", {
-            comp_id: args.comp_id,
-            layer: { id: made.result.layer_id },
-            path: ["ADBE Transform Group", "ADBE Position"],
-          }),
-          label: `${label} (after)`,
-          mutates: false,
-          toolName: "ae_track_point",
-        });
-        return { checkpoint, made: made.result, after: after.result };
+        // Separate evalScript for the read-back. The null exists from here on,
+        // so a failed read is reported, never thrown.
+        const afterRead = await readAfterWrite(opId, () =>
+          ctx.bridge.evalRaw<{ keyframes: Array<{ time: number; value: unknown }> }>({
+            id: `${opId}_after`,
+            script: buildJsxCall("getKeyframeEase", {
+              comp_id: args.comp_id,
+              layer: { id: made.result.layer_id },
+              path: ["ADBE Transform Group", "ADBE Position"],
+            }),
+            label: `${label} (after)`,
+            mutates: false,
+            toolName: "ae_track_point",
+          })
+        );
+        return { checkpoint, made: made.result, after: afterRead.value?.result ?? null, failure: afterRead.failure };
       });
 
-      const mismatches: ReceiptMismatch[] = [];
+      const mismatches: ReceiptMismatch[] = write.failure ? [write.failure] : [];
       // AE always stores keyframes in ascending time order regardless of insertion order,
       // but `times`/`values` run backward for a backward track (end < start). Re-order the
       // read-back to match `values`' order before zipping index-for-index, or a backward

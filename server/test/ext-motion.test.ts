@@ -24,8 +24,12 @@ import {
   type PropertyKey,
   type PropertySamples,
   renderMotionGraph,
+  restTimes,
+  reviewBounds,
   reviewProperty,
   sampleSpeeds,
+  shiftInto,
+  type LayerBounds,
   segmentProfile,
   sortFindings,
   sheetLayout,
@@ -607,7 +611,8 @@ describe("ext/motion review rules", () => {
     expect(f).toHaveLength(1);
     expect(f[0]).toMatchObject({ kind: "linear", severity: "medium", keys: [1, 3], time: 0 });
     expect(f[0].message).toMatch(/constant speed \(100\.0 px\/s\) from key 1 to key 3/);
-    expect(f[0].message).toMatch(/The key in between keeps its linear speed.*roving/);
+    // Position is spatial, so the fix roves the key in between as well.
+    expect(f[0].message).toMatch(/also makes the key in between roving/);
     expect(f[0].fix).toEqual({
       tool: "ae_set_keyframe_ease",
       args: {
@@ -616,9 +621,27 @@ describe("ext/motion review rules", () => {
         path: POS,
         keys: [1, 3],
         ease: "easy_ease",
+        rove_between: true,
         expect: { project_path: "C:/jobs/Shot.aep", comp_id: 7 },
       },
     });
+  });
+
+  it("can't rove a non-spatial property's middle key, and says so", () => {
+    const s = samplesOf((t) => [100 * t], [key(1, 0, [0], "linear"), key(2, 1, [100], "linear"), key(3, 2, [200], "linear")], { spatial: false });
+    s.property = { ...s.property, name: "Scale", matchName: "ADBE Scale" };
+    const f = review(s, ["ADBE Transform Group", "ADBE Scale"]);
+    expect(f[0].kind).toBe("linear");
+    expect(f[0].fix?.args.rove_between).toBeUndefined();
+    expect(f[0].message).toMatch(/isn't spatial, so AE can't rove it/);
+  });
+
+  it("doesn't call a roving key between frames a mistake", () => {
+    const keys = [key(1, 0, [0, 0]), { ...key(2, 0.517, [50, 0]), roving: true }, key(3, 1, [100, 0])];
+    const s = samplesOf((t) => [100 * smoothstep(t), 0], keys);
+    expect(review(s).some((x) => x.kind === "subframe_key")).toBe(false);
+    const fixed = [key(1, 0, [0, 0]), key(2, 0.517, [50, 0]), key(3, 1, [100, 0])];
+    expect(review(samplesOf((t) => [100 * smoothstep(t), 0], fixed)).some((x) => x.kind === "subframe_key")).toBe(true);
   });
 
   it("keeps a key between frames from blending two linear segments (measured on AE 26.2.1)", () => {
@@ -838,7 +861,7 @@ describe("ae_motion_review against a fake AE", () => {
         quarantine,
       });
       const tool = motionTools.find((t) => t.name === "ae_motion_review")!;
-      const res = (await tool.handler(AeMotionReviewSchema.parse({ comp_id: 7 }), { bridge: host, queue, quarantine })) as Record<string, any>;
+      const res = (await tool.handler(AeMotionReviewSchema.parse({ comp_id: 7, bounds: false }), { bridge: host, queue, quarantine })) as Record<string, any>;
 
       expect(scripts).toHaveLength(3);
       const sampleCalls = scripts.filter((s) => s.includes("__chromaAe.sampleProperty("));
@@ -956,5 +979,140 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     const A = simulatedComp();
     expect(A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ball" }] }).layers_scanned).toBe(1);
     expect(() => A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ghost" }] })).toThrow(/No layer named/);
+  });
+
+  it("walks only a parent's Transform group, and reports the requested layer count", () => {
+    class CompItem {}
+    const transform = (id: number) =>
+      group("Transform", "ADBE Transform Group", PropertyType.NAMED_GROUP, [prop("Position", "ADBE Position", 2, PropertyValueType.ThreeD_SPATIAL)]);
+    const mk = (name: string, id: number, kids: any[]) => {
+      const g: any = { ...group(name, "ADBE Vector Layer", PropertyType.NAMED_GROUP, kids), index: id === 11 ? 1 : 2, id, parent: null };
+      const byIndex = g.property;
+      g.property = (k: number | string) => (typeof k === "string" ? kids.find((c) => c.matchName === k) : byIndex(k));
+      return g;
+    };
+    const parent = mk("Rig", 12, [
+      group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [
+        group("Blur", "ADBE Gaussian Blur 2", PropertyType.NAMED_GROUP, [prop("Blurriness", "ADBE Gaussian Blur 2-0001", 3)]),
+      ]),
+      transform(12),
+    ]);
+    const child = mk("Ball", 11, [transform(11)]);
+    child.parent = parent;
+    const layers = [child, parent];
+    const comp = Object.assign(new CompItem(), {
+      id: 5, name: "Shot", frameRate: 25, width: 640, height: 360, workAreaStart: 0, workAreaDuration: 2, numLayers: 2,
+      layer: (sel: number | string) => (typeof sel === "number" ? layers[sel - 1] : layers.find((l) => l.name === sel) ?? null),
+    });
+    const G: Record<string, any> = {
+      __chromaAe: {}, Array, CompItem, PropertyType, PropertyValueType,
+      KeyframeInterpolationType: { LINEAR: 6612, BEZIER: 6613, HOLD: 6614 },
+      app: { project: { file: null, itemByID: (id: number) => (id === 5 ? comp : null) } },
+    };
+    G.$ = { global: G };
+    vm.runInNewContext(source, G);
+    const res = G.__chromaAe.listAnimatedProperties({ comp_id: 5, layers: [{ id: 11 }] });
+    const rig = res.properties.filter((p: any) => p.layer.id === 12);
+    expect(rig.map((p: any) => p.path)).toEqual([["ADBE Transform Group", "ADBE Position"]]);
+    expect(rig[0].ancestor_only).toBe(true);
+    expect(res.layers_scanned).toBe(1);
+    expect(res.ancestors_scanned).toBe(1);
+    expect(res.truncated).toBe(false);
+  });
+});
+
+describe("ae_motion_review frame and safe-area check", () => {
+  const comp = { width: 1920, height: 1080 };
+  const safe = { action: 0.1, title: 0.2 };
+  const bounds = (rect: [number, number, number, number], extra: Partial<LayerBounds> = {}): LayerBounds => ({
+    layer: { index: 1, id: 11, name: "Title" },
+    kind: "text",
+    checkable: true,
+    reason: null,
+    samples: [{ time: 2, visible: true, rect }],
+    ...extra,
+  });
+
+  it("finds rest times: a still stretch and the last key, not while another transform property moves", () => {
+    // Position moves 0-1s, holds still 1-2s, moves again 2-3s; Scale moves 1.4-1.6s.
+    const pos = samplesOf(
+      (t) => (t <= 1 ? [100 * t, 0] : t <= 2 ? [100, 0] : [100 + 100 * (t - 2), 0]),
+      [key(1, 0, [0, 0], "linear"), key(2, 1, [100, 0], "linear"), key(3, 2, [100, 0], "linear"), key(4, 3, [200, 0], "linear")]
+    );
+    const posA = analyzeMotion(pos, sampleSpeeds(pos));
+    expect(restTimes([{ samples: pos, analysis: posA }], 25)).toEqual([1.5, 3]);
+    const scale = samplesOf((t) => [100 + 20 * smoothstep(Math.min(1, Math.max(0, (t - 1.4) / 0.2)))], [key(1, 1.4, [100]), key(2, 1.6, [120])], { spatial: false });
+    scale.property = { ...scale.property, name: "Scale", matchName: "ADBE Scale" };
+    const scaleA = analyzeMotion(scale, sampleSpeeds(scale));
+    expect(restTimes([{ samples: pos, analysis: posA }, { samples: scale, analysis: scaleA }], 25)).toEqual([1.6, 3]);
+  });
+
+  it("flags text resting past title safe, with the shift that brings it in", () => {
+    const f = reviewBounds(bounds([100, 500, 900, 600]), comp, safe);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ kind: "outside_safe", severity: "low", suggested_shift: [92, 0] });
+    expect(f[0].message).toMatch(/title-safe area \(20%\).*left by 92 px/);
+  });
+
+  it("calls a non-text layer past action safe info, and a partly cut-off layer low", () => {
+    const av = reviewBounds(bounds([60, 500, 400, 600], { kind: "av" }), comp, safe);
+    expect(av[0]).toMatchObject({ kind: "outside_safe", severity: "info", suggested_shift: [36, 0] });
+    const cut = reviewBounds(bounds([1800, 500, 2000, 600], { kind: "shape" }), comp, safe);
+    expect(cut[0]).toMatchObject({ kind: "cut_off", severity: "low" });
+    expect(cut[0].message).toMatch(/40% of it is cut off \(past the right by 80 px\)/);
+  });
+
+  it("leaves backgrounds, layers parked off-frame, hidden layers and 3D layers alone", () => {
+    expect(reviewBounds(bounds([-10, -10, 1930, 1090], { kind: "av" }), comp, safe)).toEqual([]);
+    expect(reviewBounds(bounds([2000, 0, 2400, 100]), comp, safe)).toEqual([]);
+    expect(reviewBounds(bounds([100, 500, 900, 600], { samples: [{ time: 2, visible: false, rect: [100, 500, 900, 600] }] }), comp, safe)).toEqual([]);
+    expect(reviewBounds(bounds([100, 500, 900, 600], { checkable: false, reason: "3D layer" }), comp, safe)).toEqual([]);
+  });
+
+  it("centres a box too wide for the safe area", () => {
+    expect(shiftInto([0, 100, 1800, 200], [192, 108, 1728, 972])).toEqual([60, 8]);
+  });
+
+  it("reads each resting layer's box and reports what it couldn't check", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-bounds-"));
+    try {
+      const queue = new SingleWriterQueue();
+      const quarantine = new QuarantineStore(path.join(dir, "quarantine.json"));
+      const eased = samplesOf((t) => [100 * smoothstep(t), 0], [key(1, 0, [0, 0]), key(2, 1, [100, 0])]);
+      const scripts: string[] = [];
+      const host = new PanelHost({
+        evalScript: async (script) => {
+          scripts.push(script);
+          if (script.includes("listAnimatedProperties(")) {
+            return {
+              ok: true,
+              durationMs: 1,
+              result: {
+                comp: { id: 7, name: "Shot", fps: 25, width: 1920, height: 1080, workAreaStart: 0, workAreaDuration: 2 },
+                project_path: "C:/jobs/Shot.aep",
+                layers_scanned: 1,
+                truncated: false,
+                properties: [{ layer: eased.layer, path: ["ADBE Transform Group", "ADBE Position"], name: "Position", matchName: "ADBE Position", num_keys: 2, first_key_time: 0, last_key_time: 1, expression: false }],
+              },
+            };
+          }
+          if (script.includes("layerBoundsAt(")) {
+            return { ok: true, durationMs: 1, result: { ...bounds([1800, 500, 2000, 600], { kind: "av" }), layer: eased.layer } };
+          }
+          return { ok: true, durationMs: 1, result: eased };
+        },
+        queue,
+        quarantine,
+      });
+      const tool = motionTools.find((t) => t.name === "ae_motion_review")!;
+      const res = (await tool.handler(AeMotionReviewSchema.parse({ comp_id: 7 }), { bridge: host, queue, quarantine })) as Record<string, any>;
+      const boundsCall = scripts.find((s) => s.includes("layerBoundsAt("));
+      expect(boundsCall).toContain('"times":[1]');
+      expect(res.by_kind).toEqual({ cut_off: 1 });
+      expect(res.bounds_checked).toBe(1);
+      expect(res.findings[0]).toMatchObject({ kind: "cut_off", layer: { name: "Ball" } });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

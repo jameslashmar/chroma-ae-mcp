@@ -12,6 +12,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { checkpointDirFor, formatBackupTimestamp, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite } from "../read-back.js";
 
 export interface FingerprintKeyframe {
   time: number;
@@ -503,6 +504,23 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_build_from_data",
   "ae_reframe",
   "ae_import_assets",
+  "ae_create_layer",
+  "ae_precompose",
+  "ae_set_track_matte",
+  "ae_add_markers",
+  "ae_remove_markers",
+  "ae_cue_keys",
+  "ae_remove_keyframes",
+  "ae_shape",
+  "ae_set_essential_graphics",
+  "ae_render_templates",
+  "ae_version_footage",
+  "ae_batch_set",
+  "ae_mask",
+  "ae_text_animator",
+  "ae_align",
+  "ae_purge_unused",
+  "ae_verify_render",
 ];
 
 export const AeCheckpointRevertSchema = z.object({
@@ -868,24 +886,30 @@ export const receiptsTools: ToolDefinition<any>[] = [
             toolName: "ae_checkpoint_revert",
           });
 
-          // Separate evalScript for read-back verification
-          const afterStatus = await ctx.bridge.evalRaw<{
-            project_path?: string;
-            dirty?: boolean;
-          }>({
-            id: `${opId}_after`,
-            script: buildJsxCall("status", {}),
-            label: "ae_checkpoint_revert (after status)",
-            mutates: false,
-            toolName: "ae_checkpoint_revert",
-          });
+          // Separate evalScript for read-back verification. The checkpoint is
+          // open from here on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<{
+              project_path?: string;
+              dirty?: boolean;
+            }>({
+              id: `${opId}_after`,
+              script: buildJsxCall("status", {}),
+              label: "ae_checkpoint_revert (after status)",
+              mutates: false,
+              toolName: "ae_checkpoint_revert",
+            })
+          );
+          const afterStatus = afterRead.value ?? { result: undefined };
 
           const reopenedPath =
             afterStatus.result?.project_path ??
             openResp.result?.project_path ??
             args.checkpoint_path;
 
-          const receipt = buildReceipt({
+          const receipt = afterRead.failure
+            ? buildReceipt({ before: beforeStatus.result ?? null, after: null, customMismatches: [afterRead.failure] })
+            : buildReceipt({
             before: beforeStatus.result ?? {
               project_path: actualProjectPath,
               dirty: isDirty,

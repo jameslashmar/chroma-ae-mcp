@@ -177,6 +177,8 @@
       };
       try { key.in_ease = easeList(p.keyInTemporalEase(k)); } catch (e1) {}
       try { key.out_ease = easeList(p.keyOutTemporalEase(k)); } catch (e2) {}
+      // AE places roving keys wherever the speed comes out even, often between frames.
+      try { if (p.keyRoving(k) === true) key.roving = true; } catch (e2b) {}
       keys.push(key);
     }
 
@@ -215,19 +217,57 @@
   // step there is the sibling's 1-based position, which property() also
   // accepts and which can't collide.
   // Bounded by MAX_ANIMATED results and MAX_VISITED properties.
+  // Each entry's layer carries `parents` (ids, nearest first), so the review can
+  // count a parent's motion when it decides a child is at rest. When `layers`
+  // narrows the scan, the parents are scanned too, marked ancestor_only.
   A.listAnimatedProperties = function (args) {
     var c = requireComp(args.comp_id);
     var layers = [];
+    var ancestorOnly = {};
+    var requested = 0;
     var i;
     if (args.layers && args.layers.length > 0) {
-      for (i = 0; i < args.layers.length; i++) layers.push(findLayer(c, args.layers[i]));
+      var seen = {};
+      for (i = 0; i < args.layers.length; i++) {
+        var chosen = findLayer(c, args.layers[i]);
+        layers.push(chosen);
+        seen[chosen.id] = true;
+      }
+      requested = layers.length;
+      for (i = 0; i < requested; i++) {
+        var up = null;
+        try { up = layers[i].parent; } catch (eUp) { up = null; }
+        for (var depth = 0; up && depth < 20; depth++) {
+          if (!seen[up.id]) {
+            seen[up.id] = true;
+            ancestorOnly[up.id] = true;
+            layers.push(up);
+          }
+          try { up = up.parent; } catch (eUp2) { up = null; }
+        }
+      }
     } else {
       for (i = 1; i <= c.numLayers; i++) layers.push(c.layer(i));
+      requested = layers.length;
+    }
+    var chains = {};
+    function parentIds(layer) {
+      if (chains[layer.id]) return chains[layer.id];
+      var ids = [];
+      var cur = null;
+      try { cur = layer.parent; } catch (eP0) { cur = null; }
+      for (var d = 0; cur && d < 20; d++) {
+        ids.push(cur.id);
+        try { cur = cur.parent; } catch (eP1) { cur = null; }
+      }
+      chains[layer.id] = ids;
+      return ids;
     }
 
     var found = [];
     var visited = 0;
     var truncated = false;
+    var ancestorsTruncated = false;
 
     function walk(group, path, depth, layer, indexed) {
       if (depth > MAX_DEPTH) return;
@@ -235,7 +275,13 @@
       try { n = group.numProperties; } catch (e0) { n = 0; }
       for (var k = 1; k <= n; k++) {
         if (found.length >= MAX_ANIMATED || visited >= MAX_VISITED) {
-          truncated = true;
+          // A parent only feeds the review's rest times: running out of room
+          // there must not report the requested layers as cut short.
+          if (ancestorOnly[layer.id]) {
+            ancestorsTruncated = true;
+          } else {
+            truncated = true;
+          }
           return;
         }
         visited++;
@@ -255,8 +301,8 @@
           if (keys >= 2 && valueTypeName(p) !== null) {
             var expr = false;
             try { expr = p.canSetExpression && p.expressionEnabled && p.expression !== ""; } catch (e3) { expr = false; }
-            found.push({
-              layer: { index: layer.index, id: layer.id, name: layer.name },
+            var entry = {
+              layer: { index: layer.index, id: layer.id, name: layer.name, parents: parentIds(layer) },
               path: nextPath,
               name: p.name,
               matchName: p.matchName,
@@ -264,7 +310,9 @@
               first_key_time: p.keyTime(1),
               last_key_time: p.keyTime(keys),
               expression: expr
-            });
+            };
+            if (ancestorOnly[layer.id]) entry.ancestor_only = true;
+            found.push(entry);
           }
         } else {
           walk(p, nextPath, depth + 1, layer, p.propertyType === PropertyType.INDEXED_GROUP);
@@ -273,7 +321,14 @@
     }
 
     for (i = 0; i < layers.length; i++) {
-      walk(layers[i], [], 1, layers[i], false);
+      if (ancestorOnly[layers[i].id]) {
+        // Only a parent's Transform group moves its children.
+        var tg = null;
+        try { tg = layers[i].property("ADBE Transform Group"); } catch (eTg) { tg = null; }
+        if (tg) walk(tg, ["ADBE Transform Group"], 2, layers[i], false);
+      } else {
+        walk(layers[i], [], 1, layers[i], false);
+      }
       if (truncated) break;
     }
 
@@ -291,9 +346,124 @@
         workAreaDuration: c.workAreaDuration
       },
       project_path: projectPath,
-      layers_scanned: layers.length,
+      layers_scanned: requested,
+      ancestors_scanned: layers.length - requested,
+      ancestors_truncated: ancestorsTruncated,
       properties: found,
       truncated: truncated
     };
+  };
+
+  // ---------- layer bounds ----------
+
+  var MAX_BOUND_TIMES = 20;
+  var MAX_PARENT_DEPTH = 20;
+
+  // The 2D transform of a layer at time t, as [a, b, c, d, e, f] mapping
+  // layer (x, y) to parent (a*x + b*y + c, d*x + e*y + f):
+  // position * rotation * scale * (-anchor). Positive rotation is clockwise
+  // on screen, which this gives with y pointing down.
+  function localMatrix(l, t) {
+    var tr = l.property("ADBE Transform Group");
+    var an = tr.property("ADBE Anchor Point").valueAtTime(t, false);
+    var po = tr.property("ADBE Position").valueAtTime(t, false);
+    var sc = tr.property("ADBE Scale").valueAtTime(t, false);
+    var ro = tr.property("ADBE Rotate Z").valueAtTime(t, false);
+    var rad = (ro * Math.PI) / 180;
+    var cs = Math.cos(rad);
+    var sn = Math.sin(rad);
+    var sx = sc[0] / 100;
+    var sy = sc[1] / 100;
+    var a = cs * sx;
+    var b = -sn * sy;
+    var d = sn * sx;
+    var e = cs * sy;
+    return [a, b, po[0] - (a * an[0] + b * an[1]), d, e, po[1] - (d * an[0] + e * an[1])];
+  }
+
+  function compose(m, n) {
+    return [
+      m[0] * n[0] + m[1] * n[3],
+      m[0] * n[1] + m[1] * n[4],
+      m[0] * n[2] + m[1] * n[5] + m[2],
+      m[3] * n[0] + m[4] * n[3],
+      m[3] * n[1] + m[4] * n[4],
+      m[3] * n[2] + m[4] * n[5] + m[5]
+    ];
+  }
+
+  // Null when any layer in the chain is 3D: its screen box depends on the camera.
+  function compMatrix(l, t) {
+    var m = null;
+    var cur = l;
+    for (var depth = 0; cur && depth < MAX_PARENT_DEPTH; depth++) {
+      if (cur.threeDLayer === true) return null;
+      var local = localMatrix(cur, t);
+      if (m === null) m = local;
+      else m = compose(local, m);
+      cur = cur.parent;
+    }
+    return m;
+  }
+
+  // Comp-space bounding boxes of a layer's content at given times, for the
+  // frame and safe-area check. Read-only: valueAtTime and sourceRectAtTime
+  // don't move the time indicator. args: { comp_id, layer, times }.
+  A.layerBoundsAt = function (args) {
+    var c = requireComp(args.comp_id);
+    var l = findLayer(c, args.layer);
+    var times = args.times || [];
+    var out = {
+      layer: { index: l.index, id: l.id, name: l.name },
+      kind: "av",
+      checkable: true,
+      reason: null,
+      samples: []
+    };
+    var reflectName = "";
+    try { reflectName = String(l.reflect.name); } catch (e0) {}
+    if (reflectName === "TextLayer") out.kind = "text";
+    else if (reflectName === "ShapeLayer") out.kind = "shape";
+    var skip = null;
+    if (reflectName === "CameraLayer" || reflectName === "LightLayer") skip = "cameras and lights have no picture";
+    try { if (!skip && l.nullLayer) skip = "null layers render nothing"; } catch (e1) {}
+    try { if (!skip && l.adjustmentLayer) skip = "adjustment layers cover the frame by design"; } catch (e2) {}
+    try { if (!skip && l.guideLayer) skip = "guide layers don't render"; } catch (e3) {}
+    try { if (!skip && l.hasVideo === false) skip = "no video"; } catch (e4) {}
+    if (skip) {
+      out.checkable = false;
+      out.reason = skip;
+      return out;
+    }
+    for (var i = 0; i < times.length && i < MAX_BOUND_TIMES; i++) {
+      var t = times[i];
+      var s = { time: t, visible: l.enabled && t >= l.inPoint && t < l.outPoint, rect: null };
+      var m = compMatrix(l, t);
+      if (m === null) {
+        out.checkable = false;
+        out.reason = "3D layer, or parented to one: its box depends on the camera";
+        return out;
+      }
+      var r = l.sourceRectAtTime(t, false);
+      var xs = [r.left, r.left + r.width];
+      var ys = [r.top, r.top + r.height];
+      var minX = 1e12;
+      var minY = 1e12;
+      var maxX = -1e12;
+      var maxY = -1e12;
+      for (var xi = 0; xi < 2; xi++) {
+        for (var yi = 0; yi < 2; yi++) {
+          var px = m[0] * xs[xi] + m[1] * ys[yi] + m[2];
+          var py = m[3] * xs[xi] + m[4] * ys[yi] + m[5];
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+        }
+      }
+      s.rect = [minX, minY, maxX, maxY];
+      out.samples.push(s);
+    }
+    return out;
   };
 })($.global);

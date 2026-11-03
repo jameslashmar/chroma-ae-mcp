@@ -274,19 +274,26 @@
     return out;
   }
 
-  function readPropertyKeyframes(p) {
+  // lo and hi (optional, seconds) pick keys before the cap, so a range past
+  // key 500 can still be read; truncated means more keys in range exist.
+  function readPropertyKeyframes(p, lo, hi) {
     var keys = [];
     var n = p.numKeys;
-    var limit = n;
-    if (limit > MAX_LIST) {
-      limit = MAX_LIST;
-    }
+    var truncated = false;
+    if (lo === undefined || lo === null) lo = -1e9;
+    if (hi === undefined || hi === null) hi = 1e9;
     // Spatial tangents let the server measure path length for curve easing.
     var spatial = false;
     try {
       spatial = p.isSpatial === true;
     } catch (eSp) {}
-    for (var k = 1; k <= limit; k++) {
+    for (var k = 1; k <= n; k++) {
+      var kt = p.keyTime(k);
+      if (kt < lo - 0.0005 || kt > hi + 0.0005) continue;
+      if (keys.length >= MAX_LIST) {
+        truncated = true;
+        break;
+      }
       var kv = null;
       try {
         kv = serialiseValue(p.keyValue(k));
@@ -309,7 +316,7 @@
       } catch (e5) {}
       var entry = {
         keyIndex: k,
-        time: p.keyTime(k),
+        time: kt,
         value: kv,
         inInterp: inIt,
         outInterp: outIt,
@@ -323,7 +330,13 @@
         try {
           entry.outTangent = serialiseValue(p.keyOutSpatialTangent(k));
         } catch (e7) {}
+        // Roving keys have no fixed time: AE spreads them for an even speed.
+        try { entry.roving = p.keyRoving(k) === true; } catch (e8) {}
+        try { entry.spatialContinuous = p.keySpatialContinuous(k) === true; } catch (e9) {}
+        try { entry.spatialAutoBezier = p.keySpatialAutoBezier(k) === true; } catch (e10) {}
       }
+      try { entry.temporalContinuous = p.keyTemporalContinuous(k) === true; } catch (e11) {}
+      try { entry.temporalAutoBezier = p.keyTemporalAutoBezier(k) === true; } catch (e12) {}
       keys.push(entry);
     }
     var out = {
@@ -333,7 +346,7 @@
       numKeys: n,
       keyframes: keys
     };
-    if (n > MAX_LIST) {
+    if (truncated) {
       out.truncated = true;
     }
     return out;
@@ -346,7 +359,7 @@
     if (p.propertyType !== PropertyType.PROPERTY) {
       fail("bad_args", "Path resolves to a group, not a property");
     }
-    var info = readPropertyKeyframes(p);
+    var info = readPropertyKeyframes(p, args.start, args.end);
     info.comp_id = c.id;
     info.layer_id = l.id;
     info.layer_index = l.index;
@@ -429,6 +442,28 @@
       );
     }
 
+    // Keys strictly between the first and last given key go roving, so a
+    // move eased at its ends keeps one smooth speed through them. AE allows
+    // roving on spatial properties only; refuse before anything changes.
+    var rove = [];
+    if (args.rove_between === true) {
+      var spatialProp = false;
+      try { spatialProp = p.isSpatial === true; } catch (eSpatial) {}
+      if (!spatialProp) {
+        fail("bad_args", "Roving works on spatial properties only (Position, Anchor Point); \"" + p.name + "\" is not one");
+      }
+      if (modeName === "hold") {
+        fail("bad_args", "rove_between can't be combined with hold: held keys have no speed for roving to even out");
+      }
+      var lo = keyIndices[0];
+      var hi = keyIndices[0];
+      for (var r = 1; r < keyIndices.length; r++) {
+        if (keyIndices[r] < lo) lo = keyIndices[r];
+        if (keyIndices[r] > hi) hi = keyIndices[r];
+      }
+      for (var m = lo + 1; m < hi; m++) rove.push(m);
+    }
+
     return A.withUndo("Chroma AE MCP: set_keyframe_ease " + args.path.join(" > "), function () {
       var usedDims = deriveEaseDimensions(p);
       for (var j = 0; j < keyIndices.length; j++) {
@@ -457,11 +492,21 @@
           p.setInterpolationTypeAtKey(idx, targetInterp, targetInterp);
         }
       }
+      // After the ends are eased, so AE retimes the roving keys against them.
+      // A key AE won't rove (it may throw, or ignore the call) is reported, not
+      // fatal: the eases above stay in this one undo group and the read-back
+      // flags any key that didn't rove.
+      var rovingFailed = [];
+      for (var q = 0; q < rove.length; q++) {
+        try { p.setRovingAtKey(rove[q], true); } catch (eRove) { rovingFailed.push(rove[q]); }
+      }
       return {
         comp_id: c.id,
         layer_id: l.id,
         path: args.path,
         keysUpdated: keyIndices,
+        roving: rove,
+        roving_failed: rovingFailed,
         numKeys: p.numKeys,
         easeDimensions: usedDims,
         mode: modeName
@@ -976,7 +1021,8 @@
         var io = new ImportOptions(files[j]);
         if (isSequence) {
           io.sequence = true;
-          io.forceAlphabetical = true;
+          // Numbered order with placeholders for gaps, as AE's Import dialog does by default.
+          io.forceAlphabetical = false;
         } else {
           io.sequence = false;
         }
@@ -1036,7 +1082,7 @@
 
     return A.withUndo("Chroma AE MCP: replace_footage", function () {
       if (isSequence) {
-        it.replaceWithSequence(f, true);
+        it.replaceWithSequence(f, false);
       } else {
         it.replace(f);
       }

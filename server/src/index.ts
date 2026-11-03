@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BridgeClient } from "./bridge.js";
+import { SERVER_VERSION } from "./mcp-rpc.js";
 import { QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
 import { convertFieldSchema, zodToJsonSchema } from "./schema.js";
@@ -45,7 +46,7 @@ export function createMcpServer(customCtx?: Partial<ToolContext>): {
   const server = new Server(
     {
       name: "chroma-ae-mcp",
-      version: "0.1.0",
+      version: SERVER_VERSION,
     },
     {
       capabilities: {

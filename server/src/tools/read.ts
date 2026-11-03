@@ -18,16 +18,31 @@ export const AeGetProjectSchema = z.object({
     .int()
     .min(1)
     .max(20)
-    .default(3)
     .optional()
-    .describe("Maximum folder traversal depth (default: 3)."),
+    .describe("Maximum folder traversal depth. Default 3 for the tree; 20 (every level) for a filtered, sorted or paged list."),
+  type: z
+    .enum(["comp", "footage", "solid", "folder", "placeholder"])
+    .optional()
+    .describe("Only items of this kind (a flat, paged list). Footage excludes solids and placeholders."),
+  name_contains: z.string().min(1).optional().describe("Only items whose name contains this (case-insensitive)."),
+  missing_only: z.boolean().optional().describe("Only footage whose file is missing (placeholders are not included; use type placeholder)."),
+  sort: z.enum(["tree", "name", "id"]).optional().describe("Order of a filtered or paged list. Default tree (the folder walk)."),
+  offset: z.number().int().min(0).optional().describe("Skip this many matches (paging; see next_offset)."),
+  limit: z.number().int().min(1).max(500).optional().describe("At most this many items (default and maximum 500)."),
 });
+
+const PagingFields = {
+  offset: z.number().int().min(0).optional().describe("Skip this many layers (paging; see next_offset)."),
+  limit: z.number().int().min(1).max(500).optional().describe("At most this many layers (default and maximum 500)."),
+};
 
 export const AeGetCompSchema = z.object({
   comp_id: z
     .number()
     .int()
     .describe("The CompItem ID to inspect."),
+  name_contains: z.string().min(1).optional().describe("Only layers whose name contains this (case-insensitive)."),
+  ...PagingFields,
 });
 
 export const AeGetLayerPropsSchema = z.object({
@@ -82,16 +97,25 @@ export const readTools: ToolDefinition<any>[] = [
   {
     name: "ae_get_project",
     description:
-      "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path. " +
+      "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path and missing: true when the file is gone (a placeholder has placeholder: true instead). " +
+      "For big projects, filter by kind, name or missing footage, sort, and page with offset/limit: the result then has total and next_offset (and walks every folder level unless depth is given). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeGetProjectSchema,
     handler: async (args, ctx) => {
-      const depth = args.depth ?? 3;
+      const sort = args.sort === "tree" ? undefined : args.sort;
+      // Same test as the host: any filter, sort or paging gives the flat list, which walks every level.
+      const flat = !!(args.type || args.name_contains || args.missing_only || sort || args.offset !== undefined || args.limit !== undefined);
       const res = await ctx.bridge.callHost(
         "getProject",
         {
           folder_id: args.folder_id,
-          depth,
+          depth: flat ? args.depth ?? 20 : args.depth ?? 3,
+          type: args.type,
+          name_contains: args.name_contains,
+          missing_only: args.missing_only,
+          sort,
+          offset: args.offset,
+          limit: args.limit,
         },
         {
           label: "ae_get_project",
@@ -106,12 +130,13 @@ export const readTools: ToolDefinition<any>[] = [
     name: "ae_get_comp",
     description:
       "Read composition settings, work area, and layers (index, name, id, type, in/out, parent, enabled, solo, locked, label, 3D, blending mode, track matte). " +
+      "Comps with more than 500 layers page with offset/limit (next_offset says where to continue); name_contains filters the layers. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeGetCompSchema,
     handler: async (args, ctx) => {
       const res = await ctx.bridge.callHost(
         "getComp",
-        { comp_id: args.comp_id },
+        { comp_id: args.comp_id, name_contains: args.name_contains, offset: args.offset, limit: args.limit },
         {
           label: `ae_get_comp(${args.comp_id})`,
           mutates: false,

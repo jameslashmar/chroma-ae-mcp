@@ -348,6 +348,8 @@ export interface PropertyKey {
   out_interp: string;
   in_ease?: Array<{ speed: number; influence: number }>;
   out_ease?: Array<{ speed: number; influence: number }>;
+  /** Roving: AE times the key for an even speed, often between frames. */
+  roving?: boolean;
 }
 
 /** What `sampleProperty` in motion.jsx returns. */
@@ -666,7 +668,15 @@ export function renderMotionGraph(s: PropertySamples, speeds: SpeedSample[], wid
  * siblings can share a name - see listAnimatedProperties in motion.jsx. */
 export type PropertyPath = Array<string | number>;
 
-export type FindingKind = "linear" | "abrupt_start" | "abrupt_stop" | "speed_jump" | "overshoot" | "subframe_key";
+export type FindingKind =
+  | "linear"
+  | "abrupt_start"
+  | "abrupt_stop"
+  | "speed_jump"
+  | "overshoot"
+  | "subframe_key"
+  | "cut_off"
+  | "outside_safe";
 export type FindingSeverity = "medium" | "low" | "info";
 
 export interface MotionFinding {
@@ -679,6 +689,10 @@ export interface MotionFinding {
   message: string;
   /** A ready-to-run ae_set_keyframe_ease call. Apply it only after the user agrees. */
   fix?: { tool: "ae_set_keyframe_ease"; args: Record<string, unknown> };
+  /** Frame and safe-area findings: the layer's box in comp pixels [left, top, right, bottom]. */
+  bounds?: [number, number, number, number];
+  /** Frame and safe-area findings: how far to move the layer, in comp pixels, to bring it inside. */
+  suggested_shift?: [number, number];
 }
 
 // Properties where constant-speed timing reads as mechanical. Elsewhere
@@ -752,7 +766,7 @@ export function reviewProperty(
     property: { name: s.property.name, path },
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
-  const fix = (keys: number[]) => ({
+  const fix = (keys: number[], extra: Record<string, unknown> = {}) => ({
     tool: "ae_set_keyframe_ease" as const,
     args: {
       comp_id: target.comp_id,
@@ -760,6 +774,7 @@ export function reviewProperty(
       path,
       keys,
       ease: easeArg,
+      ...extra,
       expect: { project_path: target.project_path, comp_id: target.comp_id },
     },
   });
@@ -788,11 +803,16 @@ export function reviewProperty(
     const from = segs[i].from_key;
     const to = segs[j].to_key;
     // Measured on AE 26.2.1: the keys in between keep their linear speed, so
-    // the eased move dips there (about 15% for one middle key).
-    const middle =
-      j > i
-        ? ` The key${j - i > 1 ? "s" : ""} in between keep${j - i > 1 ? "" : "s"} its linear speed, which leaves a slight dip there; making ${j - i > 1 ? "them" : "it"} roving in AE (Keyframe > Rove Across Time) gives one smooth curve.`
-        : "";
+    // the eased move dips there (about 15% for one middle key). Roving them
+    // gives one smooth curve; AE allows roving on spatial properties only.
+    const many = j - i > 1;
+    const rove = j > i && s.property.spatial;
+    let middle = "";
+    if (rove) {
+      middle = ` The fix also makes the key${many ? "s" : ""} in between roving, so the move keeps one smooth speed through ${many ? "them" : "it"} (AE retimes ${many ? "them" : "it"}).`;
+    } else if (j > i) {
+      middle = ` The key${many ? "s" : ""} in between keep${many ? "" : "s"} ${many ? "their" : "its"} linear speed, which leaves a slight dip there; ${s.property.name} isn't spatial, so AE can't rove ${many ? "them" : "it"}. Match the speeds there in the graph editor if the dip shows.`;
+    }
     findings.push({
       ...base,
       severity: motion ? "medium" : "low",
@@ -800,7 +820,7 @@ export function reviewProperty(
       keys: [from, to],
       time: segs[i].start,
       message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
-      fix: fix([from, to]),
+      fix: fix([from, to], rove ? { rove_between: true } : {}),
     });
     i = j;
   }
@@ -883,6 +903,7 @@ export function reviewProperty(
   // One finding per property, however many of its keys are off the frame grid.
   const fps = s.comp.fps > 0 ? s.comp.fps : 25;
   const offGrid = s.keys
+    .filter((k) => !k.roving)
     .map((k) => ({ index: k.index, time: k.time, frame: k.time * fps }))
     .filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
   if (offGrid.length > 0) {
@@ -913,6 +934,174 @@ export function sortFindings(findings: MotionFinding[]): MotionFinding[] {
   );
 }
 
+// ---------- frame and safe areas ----------
+
+/** What `layerBoundsAt` in motion.jsx returns. */
+export interface LayerBounds {
+  layer: { index: number; id: number; name: string };
+  kind: "av" | "text" | "shape";
+  checkable: boolean;
+  reason: string | null;
+  samples: Array<{ time: number; visible: boolean; rect: [number, number, number, number] | null }>;
+}
+
+export interface SafeAreas {
+  /** Share of the width and height left as margin, both sides together (AE's default 10%). */
+  action: number;
+  /** For text (AE's default 20%). */
+  title: number;
+}
+
+const TRANSFORM_MATCH_NAMES = new Set([
+  "ADBE Position",
+  "ADBE Position_0",
+  "ADBE Position_1",
+  "ADBE Anchor Point",
+  "ADBE Scale",
+  "ADBE Rotate Z",
+]);
+
+/**
+ * When a layer is at rest: inside a hold or a still stretch between keys,
+ * or after its last transform key (unless an expression keeps it moving),
+ * and no transform property is moving then. `ancestors` are the sampled
+ * properties of the layer's parents: layerBoundsAt composes their transforms,
+ * so a time while a parent still moves is not rest. At most 10, the latest kept.
+ */
+export function restTimes(
+  props: Array<{ samples: PropertySamples; analysis: MotionAnalysis }>,
+  fps: number,
+  ancestors: Array<{ samples: PropertySamples; analysis: MotionAnalysis }> = []
+): number[] {
+  const transform = props.filter((p) => TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName));
+  if (!transform.length) return [];
+  const candidates: number[] = [];
+  const moving: Array<[number, number]> = [];
+  for (const p of transform) {
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") candidates.push((g.start + g.end) / 2);
+      else moving.push([g.start, g.end]);
+    }
+    const keys = p.samples.keys;
+    if (keys.length && !p.samples.property.expression) candidates.push(keys[keys.length - 1].time);
+  }
+  // Where the whole chain has stopped: a parent's last key or still stretch
+  // after the layer's own last transform key, if no parent moves then.
+  let ownLast = -Infinity;
+  for (const p of transform) {
+    const k = p.samples.keys;
+    if (k.length) ownLast = Math.max(ownLast, k[k.length - 1].time);
+  }
+  for (const p of ancestors) {
+    if (!TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName)) continue;
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") {
+        const mid = (g.start + g.end) / 2;
+        if (mid > ownLast) candidates.push(mid);
+      } else {
+        moving.push([g.start, g.end]);
+      }
+    }
+    const k = p.samples.keys;
+    if (k.length && !p.samples.property.expression) {
+      const t = k[k.length - 1].time;
+      if (t > ownLast) candidates.push(t);
+    }
+  }
+  const eps = 0.5 / (fps > 0 ? fps : 25);
+  const still = candidates
+    .filter((t) => !moving.some(([a, b]) => t > a + eps && t < b - eps))
+    .sort((a, b) => a - b)
+    .filter((t, i, a) => i === 0 || t - a[i - 1] > 2 * eps);
+  return still.slice(-10).map((t) => r3(t));
+}
+
+const r1 = (x: number) => Math.round(x * 10) / 10;
+
+/** The move that brings `rect` inside `box` (centred on an axis where it can't fit). */
+export function shiftInto(rect: [number, number, number, number], box: [number, number, number, number]): [number, number] {
+  const axis = (lo: number, hi: number, blo: number, bhi: number) => {
+    if (hi - lo > bhi - blo) return (blo + bhi) / 2 - (lo + hi) / 2;
+    if (lo < blo) return blo - lo;
+    if (hi > bhi) return bhi - hi;
+    return 0;
+  };
+  return [r1(axis(rect[0], rect[2], box[0], box[2])), r1(axis(rect[1], rect[3], box[1], box[3]))];
+}
+
+function edgesPast(rect: [number, number, number, number], box: [number, number, number, number]): string[] {
+  const out: string[] = [];
+  if (rect[0] < box[0] - 0.5) out.push(`left by ${Math.round(box[0] - rect[0])} px`);
+  if (rect[2] > box[2] + 0.5) out.push(`right by ${Math.round(rect[2] - box[2])} px`);
+  if (rect[1] < box[1] - 0.5) out.push(`top by ${Math.round(box[1] - rect[1])} px`);
+  if (rect[3] > box[3] + 0.5) out.push(`bottom by ${Math.round(rect[3] - box[3])} px`);
+  return out;
+}
+
+/**
+ * Frame and safe-area findings for one layer at its rest times. Layers that
+ * fill most of the frame (backgrounds) and layers parked fully off-frame
+ * (an exit) are left alone; a partly cut-off layer at rest is low, a text
+ * layer past title safe is low, anything else past action safe is info.
+ */
+export function reviewBounds(b: LayerBounds, comp: { width: number; height: number }, safe: SafeAreas): MotionFinding[] {
+  if (!b.checkable) return [];
+  const W = comp.width;
+  const H = comp.height;
+  const frame: [number, number, number, number] = [0, 0, W, H];
+  const isText = b.kind === "text";
+  const share = isText ? safe.title : safe.action;
+  const safeBox: [number, number, number, number] = [(W * share) / 2, (H * share) / 2, W - (W * share) / 2, H - (H * share) / 2];
+  const base = { layer: b.layer, property: { name: "Transform", path: ["ADBE Transform Group"] as PropertyPath }, keys: [] as number[] };
+  let cut: MotionFinding | null = null;
+  let outside: MotionFinding | null = null;
+  let cutTimes = 0;
+  let outsideTimes = 0;
+  for (const s of b.samples) {
+    if (!s.visible || !s.rect) continue;
+    const [l, t, r, bt] = s.rect;
+    const area = (r - l) * (bt - t);
+    if (area <= 0 || area >= 0.8 * W * H) continue;
+    const iw = Math.max(0, Math.min(r, W) - Math.max(l, 0));
+    const ih = Math.max(0, Math.min(bt, H) - Math.max(t, 0));
+    const visible = (iw * ih) / area;
+    if (visible <= 0.001) continue;
+    const rect: [number, number, number, number] = [r1(l), r1(t), r1(r), r1(bt)];
+    if (visible < 0.98) {
+      cutTimes++;
+      cut ??= {
+        ...base,
+        severity: "low",
+        kind: "cut_off",
+        time: r3(s.time),
+        message:
+          `${b.layer.name} comes to rest partly outside the frame at ${r3(s.time)}s: ${Math.round((1 - visible) * 100)}% of it is cut off ` +
+          `(past the ${edgesPast(rect, frame).join(", ")}). Fine for a deliberate bleed; otherwise move it by the suggested shift.`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox),
+      };
+      continue;
+    }
+    const past = edgesPast(rect, safeBox);
+    if (past.length) {
+      outsideTimes++;
+      outside ??= {
+        ...base,
+        severity: isText ? "low" : "info",
+        kind: "outside_safe",
+        time: r3(s.time),
+        message:
+          `${b.layer.name} rests outside the ${isText ? "title" : "action"}-safe area (${Math.round(share * 100)}%) at ${r3(s.time)}s: past it on the ${past.join(", ")}. ` +
+          `${isText ? "Text there can be cropped on some screens." : "Fine for decoration; keep key content inside."}`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox),
+      };
+    }
+  }
+  const more = (f: MotionFinding | null, n: number) => (f && n > 1 ? { ...f, message: `${f.message} Seen at ${n} rest points.` } : f);
+  return [more(cut, cutTimes), more(outside, outsideTimes)].filter((f): f is MotionFinding => f !== null);
+}
+
 export const AeMotionReviewSchema = z.object({
   comp_id: z.number().int().describe("CompItem ID to review."),
   layers: z
@@ -931,6 +1120,12 @@ export const AeMotionReviewSchema = z.object({
     .max(200)
     .optional()
     .describe("Return at most this many findings, most severe first (default 50)."),
+  bounds: z
+    .boolean()
+    .optional()
+    .describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
+  action_safe: z.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
+  title_safe: z.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's."),
 });
 
 export type AeMotionReviewArgs = z.infer<typeof AeMotionReviewSchema>;
@@ -939,8 +1134,11 @@ interface AnimatedPropertyList {
   comp: { id: number; name: string; fps: number; width: number; height: number; workAreaStart: number; workAreaDuration: number };
   project_path: string;
   layers_scanned: number;
+  ancestors_scanned?: number;
+  ancestors_truncated?: boolean;
   properties: Array<{
-    layer: { index: number; id: number; name: string };
+    layer: { index: number; id: number; name: string; parents?: number[] };
+    ancestor_only?: boolean;
     path: PropertyPath;
     name: string;
     matchName: string;
@@ -1158,7 +1356,7 @@ export const motionTools: ToolDefinition<any>[] = [
         const list = listResp.result;
         const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
         // One evalScript per property, so AE's UI gets a breath between them.
-        const sampled: Array<{ path: PropertyPath; samples: PropertySamples }> = [];
+        const sampled: Array<{ path: PropertyPath; samples: PropertySamples; speeds: SpeedSample[]; analysis: MotionAnalysis; parents: number[]; ancestorOnly: boolean }> = [];
         for (let i = 0; i < list.properties.length; i++) {
           const p = list.properties[i];
           // Keys alone stop at the last key; an expression can keep moving
@@ -1171,18 +1369,49 @@ export const motionTools: ToolDefinition<any>[] = [
             mutates: false,
             toolName: "ae_motion_review",
           });
-          sampled.push({ path: p.path, samples: resp.result });
+          const speeds = sampleSpeeds(resp.result);
+          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
         }
-        return { list, sampled };
+        // Where each animated layer comes to rest, then its box there: one evalScript per layer.
+        const bounds: LayerBounds[] = [];
+        if (args.bounds !== false) {
+          const byLayer = new Map<number, typeof sampled>();
+          for (const s of sampled) byLayer.set(s.samples.layer.id, [...(byLayer.get(s.samples.layer.id) ?? []), s]);
+          for (const [layerId, props] of byLayer) {
+            if (props.every((s) => s.ancestorOnly)) continue;
+            // With the listing cut short, a parent missing here may be one whose motion was never
+            // sampled: don't judge where the layer rests on half the chain.
+            if (list.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
+              const l = props[0].samples.layer;
+              bounds.push({ layer: { index: l.index, id: l.id, name: l.name }, kind: "av", checkable: false, reason: "a parent's motion was not fully scanned (listing cut short)", samples: [] });
+              continue;
+            }
+            const ancestors = props[0].parents.flatMap((id) => byLayer.get(id) ?? []);
+            const times = restTimes(props, Number(list.comp.fps), ancestors);
+            if (!times.length) continue;
+            const resp = await ctx.bridge.evalRaw<LayerBounds>({
+              id: `${opId}_b${layerId}`,
+              script: buildJsxCall("layerBoundsAt", { comp_id: args.comp_id, layer: { id: layerId }, times }),
+              label: `${label} bounds ${props[0].samples.layer.name}`,
+              mutates: false,
+              toolName: "ae_motion_review",
+            });
+            bounds.push(resp.result);
+          }
+        }
+        return { list, sampled, bounds };
       });
 
       const target: ReviewTarget = { comp_id: args.comp_id, project_path: scanned.list.project_path };
       const taste = ctx.settings?.get().taste;
       let findings: MotionFinding[] = [];
-      for (const { path: propPath, samples } of scanned.sampled) {
-        const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target, taste));
+      for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
+        if (ancestorOnly) continue;
+        findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
       }
+      const safe: SafeAreas = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
+      for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
+      const unchecked = scanned.bounds.filter((b) => !b.checkable).map((b) => ({ layer: b.layer.name, reason: b.reason }));
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);
 
@@ -1198,13 +1427,16 @@ export const motionTools: ToolDefinition<any>[] = [
         comp: scanned.list.comp,
         project_path: scanned.list.project_path,
         layers_scanned: scanned.list.layers_scanned,
-        properties_scanned: scanned.sampled.length,
+        ...(scanned.list.ancestors_scanned ? { ancestors_scanned: scanned.list.ancestors_scanned } : {}),
+        properties_scanned: scanned.sampled.filter((s) => !s.ancestorOnly).length,
         properties_truncated: scanned.list.truncated,
+        ...(scanned.list.ancestors_truncated ? { ancestors_truncated: true } : {}),
         clean: counts.medium === 0 && counts.low === 0,
         counts,
         by_kind: byKind,
         findings: findings.slice(0, max),
         findings_truncated: findings.length > max,
+        ...(args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...(unchecked.length ? { bounds_unchecked: unchecked } : {}) } : {}),
         ...(taste &&
         (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot)
           ? {

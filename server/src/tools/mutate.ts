@@ -7,6 +7,7 @@ import { buildReceipt } from "../receipts.js";
 import { QueueWaitError } from "../queue.js";
 import { DEFAULT_SETTINGS } from "../settings.js";
 import { recordRunJsx } from "../skills.js";
+import { readAfterWrite } from "./read-back.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
@@ -350,20 +351,24 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_run_jsx",
           });
 
-          // Separate evalScript for read-back (reads in the same script as a write return stale values)
-          const afterSnap = await ctx.bridge.evalRaw({
-            id: `${opId}_after`,
-            script: buildJsxCall("snapshotForReceipt", {
-              comp_id: expect.comp_id,
-            }),
-            label: `${args.label} (after snapshot)`,
-            mutates: false,
-            toolName: "ae_run_jsx",
-          });
+          // Separate evalScript for read-back (reads in the same script as a write return stale values).
+          // The write is applied from here on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw({
+              id: `${opId}_after`,
+              script: buildJsxCall("snapshotForReceipt", {
+                comp_id: expect.comp_id,
+              }),
+              label: `${args.label} (after snapshot)`,
+              mutates: false,
+              toolName: "ae_run_jsx",
+            })
+          );
 
           const receipt = buildReceipt({
             before: beforeSnap.result,
-            after: afterSnap.result,
+            after: afterRead.value?.result ?? null,
+            customMismatches: afterRead.failure ? [afterRead.failure] : undefined,
           });
           recordRunJsx({ op_id: opId, label: args.label, code: args.code, mutates: true, at: new Date().toISOString() });
 
@@ -440,19 +445,32 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_set_property",
           });
 
-          // Separate evalScript for read-back
-          const afterSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("getLayerProps", {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-              depth: 1,
-            }),
-            label: `${label} (after)`,
-            mutates: false,
-            toolName: "ae_set_property",
-          });
+          // Separate evalScript for read-back. The write is applied from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("getLayerProps", {
+                comp_id: args.comp_id,
+                layer: args.layer,
+                path: args.path,
+                depth: 1,
+              }),
+              label: `${label} (after)`,
+              mutates: false,
+              toolName: "ae_set_property",
+            })
+          );
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
+              result: writeResp.result,
+              checkpoint,
+              receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+            };
+          }
+          const afterSnap = afterRead.value!;
 
           const expectedCheck: Record<string, unknown> = {};
           const actualCheck: Record<string, unknown> = {};
@@ -571,18 +589,40 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_save",
           });
 
-          // Separate read-back evalScript to verify project is saved (dirty === false)
-          const afterStatus = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("status", {}),
-            label: "ae_save (after status)",
-            mutates: false,
-            toolName: "ae_save",
-          });
-
-          const savedSize = fs.existsSync(actualProjectPath)
-            ? fs.statSync(actualProjectPath).size
-            : null;
+          // Separate read-back evalScript to verify project is saved (dirty === false).
+          // The save has happened, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("status", {}),
+              label: "ae_save (after status)",
+              mutates: false,
+              toolName: "ae_save",
+            })
+          );
+          let savedSize: number | null = null;
+          try {
+            savedSize = fs.existsSync(actualProjectPath) ? fs.statSync(actualProjectPath).size : null;
+          } catch {
+            savedSize = null;
+          }
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
+              project_path: actualProjectPath,
+              project_size: savedSize,
+              backup_path: backupPath,
+              backup_size: backupSize,
+              result: saveResp.result,
+              receipt: buildReceipt({
+                before: { project_path: actualProjectPath, size: beforeSize },
+                after: null,
+                customMismatches: [afterRead.failure],
+              }),
+            };
+          }
+          const afterStatus = afterRead.value!;
 
           const receipt = buildReceipt({
             before: {

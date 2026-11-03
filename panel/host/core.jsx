@@ -336,6 +336,8 @@
     try { s.blendingMode = String(l.blendingMode); } catch (e4) {}
     try { s.trackMatteType = String(l.trackMatteType); } catch (e5) {}
     try { if (l.source) s.sourceId = l.source.id; } catch (e6) {}
+    // AE 23+: the matte is a layer reference, not always the layer above.
+    try { if (l.trackMatteLayer) s.trackMatteLayer = l.trackMatteLayer.index; } catch (e7) {}
     return s;
   }
 
@@ -375,48 +377,154 @@
       s.width = it.width;
       s.height = it.height;
       s.duration = it.duration;
+      // footageMissing is also true for placeholders; keep them apart from lost files.
+      try {
+        if (it.footageMissing) {
+          if (itemKind(it) === "placeholder") s.placeholder = true;
+          else s.missing = true;
+        }
+      } catch (e3) {}
     }
     return s;
   }
 
+  // typeName is in AE's language, so filter by class.
+  function itemKind(it) {
+    if (it instanceof CompItem) return "comp";
+    if (it instanceof FolderItem) return "folder";
+    if (it instanceof FootageItem) {
+      try { if (it.mainSource instanceof SolidSource) return "solid"; } catch (e1) {}
+      try { if (it.mainSource instanceof PlaceholderSource) return "placeholder"; } catch (e2) {}
+      return "footage";
+    }
+    return "other";
+  }
+
+  // Paging: an offset and a limit (at most MAX_LIST) over the matching
+  // entries, with the total so the caller knows where the end is.
+  function page(list, args) {
+    var offset = 0;
+    var limit = MAX_LIST;
+    if (args && args.offset) offset = args.offset;
+    if (args && args.limit && args.limit < MAX_LIST) limit = args.limit;
+    var out = list.slice(offset, offset + limit);
+    var next = null;
+    if (offset + out.length < list.length) next = offset + out.length;
+    return { items: out, offset: offset, next_offset: next };
+  }
+
+  var MAX_VISIT = 20000;
+
   A.getProject = function (args) {
-    var depth = (args && args.depth) ? args.depth : 3;
+    // Any filter, sort or paging asks for the flat, paged list; offset 0 counts.
+    var filtered = args && (args.type || args.name_contains || args.missing_only || args.sort || (args.offset !== undefined && args.offset !== null) || args.limit);
+    var depth = 3;
+    if (args && args.depth) depth = args.depth;
+    else if (filtered) depth = 20;
     var root = app.project.rootFolder;
     if (args && args.folder_id !== undefined && args.folder_id !== null) {
       var f = app.project.itemByID(args.folder_id);
       if (!f || !(f instanceof FolderItem)) fail("not_found", "No FolderItem with id " + args.folder_id);
       root = f;
     }
-    var items = [];
-    var truncated = false;
-    function walk(folder, d) {
-      for (var i = 1; i <= folder.numItems; i++) {
-        if (items.length >= MAX_LIST) {
-          truncated = true;
+    if (!filtered) {
+      // The original shape: the tree walk, cut at MAX_LIST.
+      var items = [];
+      var truncated = false;
+      var walk = function (folder, d) {
+        for (var i = 1; i <= folder.numItems; i++) {
+          if (items.length >= MAX_LIST) {
+            truncated = true;
+            return;
+          }
+          var it = folder.item(i);
+          items.push(itemSummary(it));
+          if (it instanceof FolderItem && d > 1) walk(it, d - 1);
+        }
+      };
+      walk(root, depth);
+      var legacy = {
+        project_path: projectPath(),
+        numItems: app.project.numItems,
+        root_id: root.id,
+        items: items,
+        truncated: truncated
+      };
+      // The paged list is a different order, so offset 500 would not continue this page.
+      if (truncated) legacy.next = "Cut at " + MAX_LIST + ". Call again with offset:0 (and limit) for the full paged list; do not continue this page at offset " + MAX_LIST + ".";
+      return legacy;
+    }
+    var needle = null;
+    if (args.name_contains) needle = String(args.name_contains).toLowerCase();
+    var matched = [];
+    var visited = 0;
+    var stopped = false;
+    var walkAll = function (folder, d) {
+      for (var j = 1; j <= folder.numItems; j++) {
+        if (visited >= MAX_VISIT) {
+          stopped = true;
           return;
         }
-        var it = folder.item(i);
-        items.push(itemSummary(it));
-        if (it instanceof FolderItem && d > 1) walk(it, d - 1);
+        visited++;
+        var item = folder.item(j);
+        var ok = true;
+        if (args.type && itemKind(item) !== args.type) ok = false;
+        if (ok && needle !== null && String(item.name).toLowerCase().indexOf(needle) < 0) ok = false;
+        if (ok && args.missing_only === true) {
+          var missing = false;
+          try { missing = itemKind(item) === "footage" && item.footageMissing === true; } catch (eM) {}
+          if (!missing) ok = false;
+        }
+        if (ok) matched.push(item);
+        if (item instanceof FolderItem && d > 1) walkAll(item, d - 1);
       }
+    };
+    walkAll(root, depth);
+    if (args.sort === "name") {
+      matched.sort(function (a, b) {
+        var x = String(a.name).toLowerCase();
+        var y = String(b.name).toLowerCase();
+        if (x < y) return -1;
+        if (x > y) return 1;
+        return a.id - b.id;
+      });
+    } else if (args.sort === "id") {
+      matched.sort(function (a, b) { return a.id - b.id; });
     }
-    walk(root, depth);
+    var pg = page(matched, args);
+    var summaries = [];
+    for (var k = 0; k < pg.items.length; k++) {
+      var sum = itemSummary(pg.items[k]);
+      sum.kind = itemKind(pg.items[k]);
+      summaries.push(sum);
+    }
     return {
       project_path: projectPath(),
       numItems: app.project.numItems,
       root_id: root.id,
-      items: items,
-      truncated: truncated
+      total: matched.length,
+      offset: pg.offset,
+      next_offset: pg.next_offset,
+      items: summaries,
+      truncated: pg.next_offset !== null || stopped,
+      visit_limit_hit: stopped
     };
   };
 
   A.getComp = function (args) {
     var c = requireComp(args.comp_id);
+    var all = [];
+    var needle = null;
+    if (args.name_contains) needle = String(args.name_contains).toLowerCase();
+    for (var i = 1; i <= c.numLayers; i++) {
+      var l = c.layer(i);
+      if (needle !== null && String(l.name).toLowerCase().indexOf(needle) < 0) continue;
+      all.push(l);
+    }
+    var pg = page(all, args);
     var layers = [];
-    var n = c.numLayers;
-    if (n > MAX_LIST) n = MAX_LIST;
-    for (var i = 1; i <= n; i++) layers.push(layerSummary(c.layer(i)));
-    return {
+    for (var j = 0; j < pg.items.length; j++) layers.push(layerSummary(pg.items[j]));
+    var out = {
       id: c.id,
       name: c.name,
       width: c.width,
@@ -430,8 +538,14 @@
       bgColor: c.bgColor,
       numLayers: c.numLayers,
       layers: layers,
-      truncated: c.numLayers > MAX_LIST
+      truncated: pg.next_offset !== null
     };
+    if (needle !== null || args.offset || args.limit) {
+      out.matched = all.length;
+      out.offset = pg.offset;
+      out.next_offset = pg.next_offset;
+    }
+    return out;
   };
 
   A.getLayerProps = function (args) {

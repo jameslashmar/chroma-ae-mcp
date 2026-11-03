@@ -113,7 +113,9 @@ const callStatus = (id: number) => ({
   params: { name: "ae_status", arguments: {} },
 });
 
-describe("panel/tools/stdio-relay.cjs", () => {
+// Each test spawns the relay as a child process; under a full parallel run that
+// takes longer than vitest's 5 s default.
+describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
   it("forwards each message with the token from the data dir and caches the tool list", async () => {
     const { dir, dataDir } = home("tok-123");
     const panel = await fakePanel((body) => {

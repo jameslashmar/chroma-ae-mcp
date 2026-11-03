@@ -27,6 +27,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { checkAfterWrite, readAfterWrite } from "../read-back.js";
 
 // ---------- data ----------
 
@@ -505,16 +506,40 @@ export const dataTools: ToolDefinition<any>[] = [
             toolName: "ae_build_from_data",
           });
           const built = write.result;
-          // Separate evalScripts for the read-back.
-          const after = await projectSnapshot("after");
-          const read = await ctx.bridge.evalRaw<{ comps: ReadComp[] }>({
-            id: `${opId}_read`,
-            script: buildJsxCall("readDataBuild", { comp_ids: built.comps.map((c) => c.comp_id), mapping: built.mapping }),
-            label: "ae_build_from_data (read back)",
-            mutates: false,
-            toolName: "ae_build_from_data",
-          });
-          const { mismatches, off_frame } = checkBuild(prepared, args.mapping, read.result.comps);
+          // Separate evalScripts for the read-back. The comps are built from
+          // here on, so a failed read or check is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () => projectSnapshot("after"));
+          const readBack = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<{ comps: ReadComp[] }>({
+              id: `${opId}_read`,
+              script: buildJsxCall("readDataBuild", { comp_ids: built.comps.map((c) => c.comp_id), mapping: built.mapping }),
+              label: "ae_build_from_data (read back)",
+              mutates: false,
+              toolName: "ae_build_from_data",
+            })
+          );
+          type Checked = ReturnType<typeof checkBuild>;
+          // The value checks only need readDataBuild; a failed project snapshot is reported beside them.
+          // off_frame is null (not checked) rather than [] (nothing off the frame) when the check couldn't run.
+          let off_frame: Checked["off_frame"] | null = null;
+          const mismatches: Checked["mismatches"] = [];
+          if (afterRead.failure) mismatches.push(afterRead.failure);
+          if (readBack.failure) mismatches.push(readBack.failure);
+          else {
+            const checked = checkAfterWrite<Checked | null>(
+              opId,
+              () => checkBuild(prepared, args.mapping, readBack.value!.result.comps),
+              (failure) => {
+                mismatches.push(failure);
+                return null;
+              }
+            );
+            if (checked) {
+              mismatches.push(...checked.mismatches);
+              off_frame = checked.off_frame;
+            }
+          }
+          const after = afterRead.value;
           return {
             ok: true,
             op_id: opId,
@@ -524,7 +549,7 @@ export const dataTools: ToolDefinition<any>[] = [
             skipped,
             off_frame,
             checkpoint,
-            receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches }),
+            receipt: buildReceipt({ before: before.result, after: after?.result ?? null, customMismatches: mismatches }),
           };
         });
       } catch (err) {

@@ -12,6 +12,7 @@ import {
   ExpectSchema,
   type ToolDefinition,
 } from "./common.js";
+import { readAfterWrite } from "./read-back.js";
 import { writeScaledCopy } from "./ext/png-utils.js";
 import { autoCheckpoint, verifyTargetGuard } from "./mutate.js";
 
@@ -310,14 +311,17 @@ export const renderTools: ToolDefinition<any>[] = [
               toolName: "ae_render_queue_add",
             });
 
-            // Separate read-back evalScript
-            const afterRq = await ctx.bridge.evalRaw<Record<string, unknown>>({
-              id: `${opId}_after`,
-              script: buildJsxCall("rqStatus", {}),
-              label: "ae_render_queue_add (after rqStatus)",
-              mutates: false,
-              toolName: "ae_render_queue_add",
-            });
+            // Separate read-back evalScript. The item is added from here on,
+            // so a failed read is reported, never thrown.
+            const afterRead = await readAfterWrite(opId, () =>
+              ctx.bridge.evalRaw<Record<string, unknown>>({
+                id: `${opId}_after`,
+                script: buildJsxCall("rqStatus", {}),
+                label: "ae_render_queue_add (after rqStatus)",
+                mutates: false,
+                toolName: "ae_render_queue_add",
+              })
+            );
 
             const rqIndex =
               typeof addResp.result?.index === "number"
@@ -326,26 +330,29 @@ export const renderTools: ToolDefinition<any>[] = [
                 ? addResp.result.rq_index
                 : undefined;
 
-            const afterItems = Array.isArray(afterRq.result?.items)
-              ? (afterRq.result.items as Array<Record<string, unknown>>)
+            const afterResult = afterRead.value?.result ?? null;
+            const afterItems = Array.isArray(afterResult?.items)
+              ? (afterResult.items as Array<Record<string, unknown>>)
               : [];
 
-            const receipt = buildReceipt({
-              before: beforeRq.result,
-              after: afterRq.result,
-              expected:
-                rqIndex !== undefined
-                  ? { rq_item_present: true }
-                  : undefined,
-              actualForExpected:
-                rqIndex !== undefined
-                  ? {
-                      rq_item_present:
-                        afterItems.length >= rqIndex ||
-                        afterItems.some((item) => item.index === rqIndex),
-                    }
-                  : undefined,
-            });
+            const receipt = afterRead.failure
+              ? buildReceipt({ before: beforeRq.result, after: null, customMismatches: [afterRead.failure] })
+              : buildReceipt({
+                  before: beforeRq.result,
+                  after: afterResult,
+                  expected:
+                    rqIndex !== undefined
+                      ? { rq_item_present: true }
+                      : undefined,
+                  actualForExpected:
+                    rqIndex !== undefined
+                      ? {
+                          rq_item_present:
+                            afterItems.length >= rqIndex ||
+                            afterItems.some((item) => item.index === rqIndex),
+                        }
+                      : undefined,
+                });
 
             return {
               op_id: opId,

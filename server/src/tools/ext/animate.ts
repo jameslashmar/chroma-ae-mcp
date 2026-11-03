@@ -25,6 +25,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite } from "../read-back.js";
 
 // ---------- 1. ae_set_keyframe_ease ----------
 
@@ -113,8 +114,24 @@ export const AeSetKeyframeEaseSchema = z.object({
       "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
     ),
   ease: KeyframeEaseInputSchema,
+  rove_between: z
+    .boolean()
+    .optional()
+    .describe(
+      "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. " +
+        "Spatial properties only (Position, Anchor Point); not with a curve or hold. Roving keys are left out of the ease check, since AE sets their ease."
+    ),
   expect: ExpectSchema,
 });
+
+/** Keys that should have gone roving but read back fixed in time. */
+export function rovingMismatches(roving: unknown, afterSnapshot: unknown): ReceiptMismatch[] {
+  const want = Array.isArray(roving) ? (roving as number[]) : [];
+  const keys = ((afterSnapshot as { keyframes?: Array<{ keyIndex: number; roving?: boolean }> } | null)?.keyframes ?? []);
+  return want
+    .filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true)
+    .map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+}
 
 export function clampInfluenceValue(influence: number): number {
   if (influence < 0.1) return 0.1;
@@ -125,7 +142,8 @@ export function clampInfluenceValue(influence: number): number {
 export function extractKeyframeEaseCheck(
   ease: KeyframeEaseInput,
   requestedKeys: number[] | undefined,
-  afterSnapshot: unknown
+  afterSnapshot: unknown,
+  skipKeys?: unknown
 ): { expected: unknown; actual: unknown } | null {
   if (!afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
     return null;
@@ -139,11 +157,14 @@ export function extractKeyframeEaseCheck(
     requestedKeys && requestedKeys.length > 0
       ? new Set(requestedKeys)
       : null;
-  const targeted = keySet
+  // Roving keys are left out: AE retimes and re-eases them, and rovingMismatches checks them.
+  const skip = new Set(Array.isArray(skipKeys) ? (skipKeys as number[]) : []);
+  const targeted = (keySet
     ? rawKeys.filter(
         (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
       )
-    : rawKeys;
+    : rawKeys
+  ).filter((kf) => !(typeof kf.keyIndex === "number" && skip.has(kf.keyIndex)));
 
   if (targeted.length === 0) {
     return null;
@@ -507,7 +528,7 @@ export const AeImportFootageSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "If true, import as an image sequence with ImportOptions.forceAlphabetical = true."
+      "If true, import as an image sequence, numbered frames in order with placeholders for missing ones (Force alphabetical order off, AE's default)."
     ),
   fps: z
     .number()
@@ -543,7 +564,7 @@ export const AeReplaceFootageSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "If true, use FootageItem.replaceWithSequence(file, true); otherwise use FootageItem.replace(file)."
+      "If true, use FootageItem.replaceWithSequence(file, false) (numbered order, gaps kept as placeholders); otherwise use FootageItem.replace(file)."
     ),
   expect: ExpectSchema,
 });
@@ -559,6 +580,12 @@ export const animateTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeSetKeyframeEaseSchema,
     handler: async (args, ctx) => {
+      if (args.rove_between && isCurveEase(args.ease)) {
+        return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+      }
+      if (args.rove_between && args.ease === "hold") {
+        return { ok: false, error: "bad_args", message: "rove_between can't be combined with hold: held keys have no speed for roving to even out." };
+      }
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
       const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
@@ -607,6 +634,7 @@ export const animateTools: ToolDefinition<any>[] = [
                   path: args.path,
                   keys: args.keys,
                   ease: args.ease,
+                  rove_between: args.rove_between,
                   expect: effectiveExpect,
                 }),
             label,
@@ -614,23 +642,44 @@ export const animateTools: ToolDefinition<any>[] = [
             toolName: "ae_set_keyframe_ease",
           });
 
-          // Separate evalScript for read-back
-          const afterSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("getKeyframeEase", {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-            }),
-            label: `${label} (after)`,
-            mutates: false,
-            toolName: "ae_set_keyframe_ease",
-          });
+          // Separate evalScript for read-back. The write is applied from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("getKeyframeEase", {
+                comp_id: args.comp_id,
+                layer: args.layer,
+                path: args.path,
+              }),
+              label: `${label} (after)`,
+              mutates: false,
+              toolName: "ae_set_keyframe_ease",
+            })
+          );
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
+              result: writeResp.result,
+              ...(curvePlan
+                ? {
+                    curve: args.ease,
+                    segments: curvePlan.segments,
+                    ...(curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}),
+                  }
+                : {}),
+              checkpoint,
+              receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+            };
+          }
+          const afterSnap = afterRead.value!;
 
           const easeCheck = extractKeyframeEaseCheck(
             args.ease,
             args.keys,
-            afterSnap.result
+            afterSnap.result,
+            writeResp.result?.roving
           );
 
           const receipt = buildReceipt({
@@ -640,7 +689,7 @@ export const animateTools: ToolDefinition<any>[] = [
             actualForExpected: easeCheck?.actual,
             customMismatches: curvePlan
               ? curveEaseMismatches(curvePlan.sides, afterSnap.result)
-              : undefined,
+              : rovingMismatches(writeResp.result?.roving, afterSnap.result),
           });
 
           return {
@@ -717,17 +766,30 @@ export const animateTools: ToolDefinition<any>[] = [
             toolName: "ae_set_text",
           });
 
-          // Separate evalScript for read-back
-          const afterSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("getTextDocument", {
-              comp_id: args.comp_id,
-              layer: args.layer,
-            }),
-            label: `${label} (after)`,
-            mutates: false,
-            toolName: "ae_set_text",
-          });
+          // Separate evalScript for read-back. The write is applied from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("getTextDocument", {
+                comp_id: args.comp_id,
+                layer: args.layer,
+              }),
+              label: `${label} (after)`,
+              mutates: false,
+              toolName: "ae_set_text",
+            })
+          );
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
+              result: writeResp.result,
+              checkpoint,
+              receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+            };
+          }
+          const afterSnap = afterRead.value!;
 
           const beforeObj = (beforeSnap.result ?? {}) as Record<string, unknown>;
           const beforeDoc =
@@ -812,7 +874,7 @@ export const animateTools: ToolDefinition<any>[] = [
   {
     name: "ae_import_footage",
     description:
-      "Import one or more footage files (or an image sequence with `ImportOptions.forceAlphabetical = true`) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. " +
+      "Import one or more footage files (or an image sequence, in numbered order with placeholders for missing frames) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeImportFootageSchema,
     handler: async (args, ctx) => {
@@ -856,16 +918,31 @@ export const animateTools: ToolDefinition<any>[] = [
             ? (writeResp.result.item_ids as number[])
             : [];
 
-          // Separate evalScript for read-back
-          const afterSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("getFootageItems", {
+          // Separate evalScript for read-back. The write is applied from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("getFootageItems", {
+                item_ids: itemIds,
+              }),
+              label: `${label} (after)`,
+              mutates: false,
+              toolName: "ae_import_footage",
+            })
+          );
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
               item_ids: itemIds,
-            }),
-            label: `${label} (after)`,
-            mutates: false,
-            toolName: "ae_import_footage",
-          });
+              items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+              result: writeResp.result,
+              checkpoint,
+              receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+            };
+          }
+          const afterSnap = afterRead.value!;
 
           const afterIds: number[] = Array.isArray(afterSnap.result?.item_ids)
             ? (afterSnap.result.item_ids as number[])
@@ -950,16 +1027,30 @@ export const animateTools: ToolDefinition<any>[] = [
             toolName: "ae_replace_footage",
           });
 
-          // Separate evalScript for read-back
-          const afterSnap = await ctx.bridge.evalRaw<Record<string, unknown>>({
-            id: `${opId}_after`,
-            script: buildJsxCall("getFootageItem", {
+          // Separate evalScript for read-back. The write is applied from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () =>
+            ctx.bridge.evalRaw<Record<string, unknown>>({
+              id: `${opId}_after`,
+              script: buildJsxCall("getFootageItem", {
+                item_id: args.item_id,
+              }),
+              label: `${label} (after)`,
+              mutates: false,
+              toolName: "ae_replace_footage",
+            })
+          );
+          if (afterRead.failure) {
+            return {
+              op_id: opId,
+              applied: true as const,
               item_id: args.item_id,
-            }),
-            label: `${label} (after)`,
-            mutates: false,
-            toolName: "ae_replace_footage",
-          });
+              result: writeResp.result,
+              checkpoint,
+              receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+            };
+          }
+          const afterSnap = afterRead.value!;
 
           const beforeObj = (beforeSnap.result ?? {}) as Record<string, unknown>;
           const writeObj = (writeResp.result ?? {}) as Record<string, unknown>;

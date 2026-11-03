@@ -1,3 +1,102 @@
+# Handover: 0.4, roadmap P2 and P3, 2026-11-03 to 2026-11-04
+
+Emre asked for every remaining P2 item and the P3 items that stay inside After Effects, in the recommended order, then decided against a live After Effects test. A multi-agent code review and its fixes stood in for it. This section covers:
+- what was built;
+- how it was checked, and what has **not** been checked;
+- the AE behaviours the code relies on that nobody has measured.
+
+Everything is on the local branch `feat/roadmap-0.4`, off `main` at `6f72ea6` (0.3.0). It has not been pushed to this repo.
+
+## Where it is
+
+| Commit | What | Tools added |
+|---|---|---|
+| `878e1ff` | Tests: the stdio relay tests get 20 s (they timed out under a full parallel run) | – |
+| `7221e49` | Layers | `ae_create_layer`, `ae_precompose`, `ae_set_track_matte` |
+| `d4ed954` | Audio and markers | `ae_audio_analyze`, `ae_cue_keys`, `ae_get_markers`, `ae_add_markers`, `ae_remove_markers` |
+| `5b90e95` | Animation | `ae_get_keyframes`, `ae_remove_keyframes`; `rove_between` on `ae_set_keyframe_ease`; roving fixes and rest bounds in `ae_motion_review` |
+| `c1132de` | Reads | `ae_comp_tree`, `ae_fonts`; filters and paging on `ae_get_project` and `ae_get_comp` |
+| `ca14892` | Production | `ae_shape`, `ae_get_essential_graphics`, `ae_set_essential_graphics`, `ae_render_templates`, `ae_version_footage`, `ae_batch_set` |
+| `33e2549` | P3 | `ae_mask`, `ae_text_animator`, `ae_align`, `ae_purge_unused`, `ae_export_mogrt`, `ae_house_style_check` |
+| `e7d11b2` | Render check and docs | `ae_verify_render` |
+| `b03eaac` | The server's version numbers follow `VERSION` (they read 0.1.0, 0.2.0 and 0.2.1); `test/version.test.ts` keeps them together | – |
+| `285c693` | The review's fixes, and the same read-back fix for the 0.3 tools | – |
+| (last) | These docs | – |
+
+Tools: 55 → 80. Unit tests: 258 → 610 (50 files).
+
+**Shared pieces:**
+- `server/src/tools/ext/write-runner.ts`: the guarded write as one function (guard, checkpoint, before read, write, separate after read, receipt). All new write tools use it.
+- `server/src/tools/read-back.ts`: once a write's evalScript has returned, the tool must not throw. A failed read-back, or a failed check of it, becomes a `read_back` mismatch saying the write was applied and not to resend. The 0.4 tools get this through write-runner, and the 0.3 write tools now use it too (see below).
+- `server/test/support/fake-ae.ts`: a small simulated AE DOM. `host-jsx*.test.ts`, the `fix-*.test.ts` files and `review-followup.test.ts` run `panel/host/ext/*.jsx` under `node:vm` against it. It follows AE where the host code depends on it, and it is not AE.
+- Pure modules with their own tests: `audio.ts` (decoding and analysis), `transcript.ts`, `versions.ts`, `style.ts`.
+
+## How it was checked
+
+- `npm run build`, `npm test` (610 passing), `node scripts/lint-jsx.mjs` (21 files, 0 issues), `npm run bundle`, and `scripts/check-bundle.cjs` (80 tools over the in-panel MCP) on Node 22 and on AE's Node 17.7.2. All green.
+- **Code review** (the user's pattern: Sonnet finds, Opus verifies):
+  - 17 Sonnet finders covered 10 areas, each with a host lens and a server lens. Separate finders took the audio DSP, the fake DOM's fidelity and the smoke test's sequence.
+  - Two Opus verifiers per finding tried to refute it, one by tracing the code and one by checking the AE, Node and ES3 premise.
+  - Result: 106 findings, 91 confirmed, 9 refuted, 2 depending on live AE, 1 disputed (decided by the lead).
+  - Sonnet agents fixed them in 8 disjoint file groups, and Opus checked each group's diff. A repair round fixed what the checks found.
+  - A final Opus pass over the result found 17 more, the worst being a write that still threw after it was applied. The lead fixed those.
+  - 223 + 23 + 10 agents in all.
+- **What the review changed in the 0.3 tools:** the same unguarded read-back was in ae_run_jsx, ae_set_property, ae_save, ae_set_keyframe_ease, ae_set_text, ae_import_footage, ae_replace_footage, the effect tools, ae_render_queue_add, ae_import_assets, ae_build_from_data, ae_reframe, ae_skill_run, ae_checkpoint_revert, ae_track_point and ae_key_greenscreen. All of them now report a failed read-back instead of throwing after the change is made. Image sequences are imported and replaced with Force alphabetical order off (numbered order, placeholders for gaps, AE's default), as `ae_import_assets` already did.
+- **Not run in After Effects.** Emre decided a live test is not needed. The smoke test (`qa/smoke-mcp.mjs`) still has a step for every new tool (99 checks, up from 54), for whenever someone runs it.
+
+## AE behaviours relied on but not measured
+
+The code is written to work either way where it could be, but these are guesses until AE answers them:
+1. **Track mattes:** whether `setTrackMatte` turns the matte's video off by itself. The tool turns it off either way.
+2. **`ae_audio_analyze`:**
+   - that AE 26 ships an output-module template named exactly `AIFF 48kHz` (`ae_render_templates` says);
+   - that aerender keeps the `.aif` extension;
+   - that `-s`/`-e` count from the comp's display start frame (the tool adds it).
+3. **Markers:**
+   - whether marker times come back within 1.5 ms of what was written;
+   - whether a layer marker's duration is stored in layer or comp seconds (the tool scales it by the stretch, like the time).
+4. **Match names nobody has used here yet:**
+   - text animators (`ADBE Text Position 3D`, `ADBE Text Scale 3D`, `ADBE Text Fill Color`, `ADBE Text Range Type2`, `ADBE Text Range Shape`, `ADBE Text Levels Max Ease`);
+   - masks (`ADBE Mask Offset` for expansion);
+   - precomp overrides (`ADBE Layer Overrides`).
+5. **Text animators:** whether a scripted `addProperty("ADBE Text Animator")` comes with its own Range Selector. The tool adds one and edits the first, so a default one would leave an unused second.
+6. **Essential Graphics:**
+   - `addToMotionGraphicsTemplateAs` and `setMotionGraphicsControllerName` on AE 26;
+   - the value types of overrides (text overrides as a TextDocument).
+7. **`ae_export_mogrt`:** the `exportAsMotionGraphicsTemplate(overwrite, path)` signature, and whether AE raises a dialog. If it does, the call times out and names the dialog. Read it with `ae_dialogs`; never suppress it.
+8. **Roving:** which keys AE refuses to rove. `setRovingAtKey` failures are collected and reported, not assumed.
+9. **Rest bounds and `ae_align`:** `sourceRectAtTime` on solids and footage, and the sign of rotation in the box maths.
+10. **`ae_fonts`:** `app.fonts.missingOrSubstitutedFonts` and `fontObject.isSubstitute` on AE 26.
+11. **`ae_verify_render`:** an imported image sequence's default frame rate (the tool conforms it to the comp's), and the frame count from `duration * frameRate`.
+12. **`ae_render_templates` with `allow_temp`:** it adds and removes a render-queue item. Check that this leaves only an undo step and a changed flag.
+
+If someone runs the smoke test, fix what fails. Add the measured behaviour to `docs/BUILDERS.md`, and put the facts an agent needs into the tool descriptions.
+
+## Not done, and why
+
+- **A live AE run:** Emre's call.
+- **Deadline submission and the Premiere round trip:** both leave After Effects, which is out of scope (Emre's rule: everything through AE itself). `ae_export_mogrt` covers the template side of a Premiere handoff.
+- **VO transcription:** `ae_add_markers` places what a transcript says (SRT, VTT, ElevenLabs, Whisper). Producing the transcript stays outside, as VoxMark does today.
+- **Render verification uses AE, not ffprobe** (no outside tools): `ae_verify_render` imports the render back and removes it again. That is two undo steps and a changed project, as its result says.
+- **Left for when a job needs them:**
+  - typed tools to parent, reorder, duplicate and delete layers (`ae_run_jsx` does these today);
+  - single-layer snapshots;
+  - matching a reference frame;
+  - audio levels and fades;
+  - a project JSON export;
+  - several AE instances;
+  - failure recovery by id.
+- **Failure paths with no direct test:** `ae_skill_run`, `ae_track_point` and `ae_key_greenscreen`. Their guards are small and type-checked.
+
+## Suggested next steps
+
+1. Push the branch to the private copy and open a PR there, so GitHub's CI runs both jobs on a clean Windows machine (Node 20, and AE's Node 17.7.2).
+2. Decide whether to release 0.4.0 untested in AE, or after a smoke run.
+3. If releasing: bump `VERSION`, `server/package.json`, `server/package-lock.json` and `SERVER_VERSION` together; then run `scripts/package.ps1`, tag and create the release.
+4. On a Mac: the macOS popup reading still open from 0.3.
+
+---
+
 # Handover: AE control and roadmap P2, 2026-10-29 to 2026-10-30
 
 This picks up where the work stands after two sessions with Emre on the Windows PC:

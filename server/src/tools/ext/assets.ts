@@ -28,6 +28,7 @@ import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite } from "../read-back.js";
 
 export const SETTLE_MS = 2000;
 /** Sequences are renders in progress: wait longer after the newest frame. */
@@ -123,18 +124,22 @@ export async function importAssetFiles(
         mutates: true,
         toolName,
       });
-      // Separate evalScript for the read-back.
-      const after = await readBin("after");
-      const inBin = new Set((after.result?.items ?? []).map((i) => (i.path ? normPath(i.path) : "")));
-      const mismatches: ReceiptMismatch[] = write.result.imported
-        .filter((i) => !inBin.has(normPath(i.path)))
-        .map((i) => ({ path: `bin.${i.name}`, expected: i.path, actual: undefined, message: `${i.name} is not in ${bin} after the import` }));
+      // Separate evalScript for the read-back. The import is applied from
+      // here on, so a failed read is reported, never thrown.
+      const afterRead = await readAfterWrite(opId, () => readBin("after"));
+      const after = afterRead.value?.result ?? null;
+      const inBin = new Set((after?.items ?? []).map((i) => (i.path ? normPath(i.path) : "")));
+      const mismatches: ReceiptMismatch[] = afterRead.failure
+        ? [afterRead.failure]
+        : write.result.imported
+            .filter((i) => !inBin.has(normPath(i.path)))
+            .map((i) => ({ path: `bin.${i.name}`, expected: i.path, actual: undefined, message: `${i.name} is not in ${bin} after the import` }));
       return {
         op_id: opId,
         imported: write.result.imported,
         failed: write.result.failed,
         checkpoint,
-        receipt: buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches }),
+        receipt: buildReceipt({ before: before.result, after, customMismatches: mismatches }),
       };
     });
   } catch (err) {
