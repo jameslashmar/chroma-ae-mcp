@@ -210,6 +210,10 @@
     return runs;
   }
 
+  function isNum(v) {
+    return typeof v === "number" && isFinite(v);
+  }
+
   function clampSize(v) {
     if (v < MIN_SIZE) return MIN_SIZE;
     if (v > MAX_SIZE) return MAX_SIZE;
@@ -237,18 +241,21 @@
 
   function liveState(layer) {
     var sp = scaleExpressionProp(layer);
-    var st = { installed: false, error: null, foreign: false };
+    // ours: the marker is there, switched on or not. installed: ours and switched on.
+    var st = { installed: false, ours: false, enabled: false, error: null, foreign: false };
     if (!sp) return st;
     try {
-      if (sp.expressionEnabled === true) {
-        var exprText = String(sp.expression);
-        if (exprText.indexOf(LIVE_MARKER) === 0) {
-          st.installed = true;
-        } else if (exprText !== "") {
-          st.foreign = true;
-        }
+      // Read the text whether or not the expression is switched on: a disabled
+      // expression of the user's is still theirs.
+      var exprText = String(sp.expression);
+      if (exprText.indexOf(LIVE_MARKER) === 0) {
+        st.ours = true;
+      } else if (exprText !== "") {
+        st.foreign = true;
       }
     } catch (e1) {}
+    try { st.enabled = sp.expressionEnabled === true; } catch (eEn) {}
+    st.installed = st.ours && st.enabled;
     try {
       if (st.installed && sp.expressionError) st.error = String(sp.expressionError);
     } catch (e2) {}
@@ -274,6 +281,7 @@
       index: layer.index,
       name: layer.name,
       text_length: text.length,
+      range_length: rangeLength(text),
       numKeys: prop.numKeys,
       expression: false,
       locked: false
@@ -334,6 +342,11 @@
     var rect = layer.sourceRectAtTime(time, false);
     e.bounds = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     e.live_fit = liveState(layer);
+    // Scale as evaluated at the time (percent): the safe area is on screen, the bounds are before Scale.
+    try {
+      var scv = scaleExpressionProp(layer).valueAtTime(time, false);
+      if (isNum(scv[0]) && isNum(scv[1])) e.scale = [Number(scv[0]), Number(scv[1])];
+    } catch (eSc) {}
     return e;
   }
 
@@ -403,6 +416,7 @@
     }
     var scaleLeading = args.scale_leading !== false;
     var plan = [];
+    var skipped = [];
     var seen = {};
     var i;
     // Everything that can fail is checked here, before anything is written.
@@ -433,6 +447,11 @@
         endMode = rangeEndMode(doc);
         runs = sizeRuns(doc, endMode);
         if (runs && runs.length > 1) mode = "runs";
+        // A uniform write would flatten per-range sizes it could not read.
+        if (!runs && rangeLength(String(doc.text)) > 0) {
+          skipped.push({ id: layer.id, name: layer.name, reason: "its sizes could not be read character by character (text over " + MAX_SCAN_CHARS + " characters, or a read failed); fitting it would overwrite per-range sizes" });
+          continue;
+        }
       }
       var lead = 0;
       try { lead = Number(doc.leading); } catch (eL) {}
@@ -446,9 +465,16 @@
         newLead = Math.round(newLead * 100) / 100;
       }
       var steps = [];
+      var clamped = 0;
       if (mode === "runs") {
         for (var r = 0; r < runs.length; r++) {
-          steps.push({ start: runs[r].start, end: runs[r].end, size: clampSize(runs[r].size * it.factor) });
+          var rsz = clampSize(runs[r].size * it.factor);
+          var rsz0 = rsz;
+          // The caller's limits apply to every run; a run is never moved the wrong way to reach one.
+          if (it.factor < 1 && isNum(it.min_size)) rsz = Math.max(rsz, Math.min(it.min_size, runs[r].size));
+          if (it.factor > 1 && isNum(it.max_size)) rsz = Math.min(rsz, Math.max(it.max_size, runs[r].size));
+          if (rsz !== rsz0) clamped++;
+          steps.push({ start: runs[r].start, end: runs[r].end, size: rsz });
         }
       }
       plan.push({
@@ -459,11 +485,15 @@
         from: current,
         to: clampSize(current * it.factor),
         steps: steps,
+        clamped: clamped,
         leadFrom: lead,
         leadTo: newLead,
         autoLead: autoLead
       });
     }
+
+    // Nothing left to write: no undo group for an empty call.
+    if (plan.length === 0) return { comp_id: comp.id, layers: [], skipped: skipped, no_op: true };
 
     return A.withUndo(args.label || "Fit text", function () {
       var done = [];
@@ -502,10 +532,11 @@
           leading_to: p.leadTo,
           auto_leading: p.autoLead,
           runs: p.steps.length,
+          runs_clamped: p.clamped,
           justification_reasserted: reasserted
         });
       }
-      return { comp_id: comp.id, layers: done };
+      return { comp_id: comp.id, layers: done, skipped: skipped };
     });
   };
 
@@ -543,11 +574,11 @@
       requireTextProp(layer);
       var sp = scaleExpressionProp(layer);
       if (!sp) fail("bad_args", "Layer \"" + layer.name + "\" has no Scale property");
-      var ours = liveState(layer).installed;
+      var ours = liveState(layer).ours;
       // A locked layer can't change: removing only counts where there is an expression of ours to remove.
       if (layer.locked === true && (!remove || ours)) fail("bad_args", "Layer \"" + layer.name + "\" is locked; unlock it first");
       var existing = "";
-      try { existing = sp.expressionEnabled === true ? String(sp.expression) : ""; } catch (eE) {}
+      try { existing = String(sp.expression); } catch (eE) {}
       if (!remove) {
         if (!sp.canSetExpression) fail("bad_args", "The Scale of \"" + layer.name + "\" can't take an expression");
         if (existing !== "" && !ours) fail("bad_args", "The Scale of \"" + layer.name + "\" already has an expression that is not this tool's; remove it first");
@@ -570,6 +601,8 @@
           }
         } else {
           t.prop.expression = text;
+          // Assigning the same text again can leave a switched-off expression off.
+          try { t.prop.expressionEnabled = true; } catch (eEnb) {}
           done.push({ id: t.layer.id, name: t.layer.name, expression: true });
         }
       }
@@ -580,7 +613,7 @@
   // ---------- backdrop ----------
 
   function exprString(s) {
-    return "\"" + String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/[\r\n]+/g, " ") + "\"";
+    return "\"" + String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\r/g, "\\r").replace(/\n/g, "\\n") + "\"";
   }
 
   function backdropLayer(comp, textLayer, id) {
@@ -613,6 +646,17 @@
     if (name === undefined || name === null) name = text.name + " Box";
     if (typeof name !== "string" || name.length < 1 || name.length > 200) fail("bad_args", "name must be 1 to 200 characters");
 
+    // The expression finds the text layer by name: a name another layer shares would follow the wrong one.
+    for (var li = 1; li <= comp.numLayers; li++) {
+      var other = comp.layer(li);
+      if (other.id !== text.id && other.name === text.name) {
+        fail("bad_args", "Another layer is also named \"" + text.name + "\"; the backdrop finds the text by name. Rename one of them first.");
+      }
+    }
+    if (name === text.name) fail("bad_args", "The backdrop can't share the text layer's name \"" + name + "\"; the expression finds the text by name");
+    // Pinning the name needs the layer to be writable.
+    if (text.locked === true) fail("bad_args", "Layer \"" + text.name + "\" is locked; unlock it first (its name is pinned so the backdrop keeps following it)");
+
     var ref = "var L = thisComp.layer(" + exprString(text.name) + ");\nvar r = L.sourceRectAtTime(time, false);\n";
     // Both come from the four corners of the text's bounds in comp space, so
     // Scale, rotation and a parent are all in the box.
@@ -632,14 +676,20 @@
         shape.property("ADBE Transform Group").property("ADBE Position").setValue([0, 0]);
         var contents = shape.property("ADBE Root Vectors Group");
         var group = contents.addProperty("ADBE Vector Group");
-        var inner = group.property("ADBE Vectors Group");
-        var rect = inner.addProperty("ADBE Vector Shape - Rect");
-        var fill = inner.addProperty("ADBE Vector Graphic - Fill");
-        rect.property("ADBE Vector Rect Size").expression = sizeExpr;
-        rect.property("ADBE Vector Rect Position").expression = posExpr;
-        rect.property("ADBE Vector Rect Roundness").setValue(radius);
-        fill.property("ADBE Vector Fill Color").setValue([color[0], color[1], color[2], 1]);
-        fill.property("ADBE Vector Fill Opacity").setValue(opacity);
+        // Adding a property invalidates references to its siblings: add both,
+        // then look each up again by match name every time it is used.
+        var vec = function () {
+          return shape.property("ADBE Root Vectors Group").property(1).property("ADBE Vectors Group");
+        };
+        group.property("ADBE Vectors Group").addProperty("ADBE Vector Shape - Rect");
+        vec().addProperty("ADBE Vector Graphic - Fill");
+        vec().property("ADBE Vector Shape - Rect").property("ADBE Vector Rect Size").expression = sizeExpr;
+        vec().property("ADBE Vector Shape - Rect").property("ADBE Vector Rect Position").expression = posExpr;
+        vec().property("ADBE Vector Shape - Rect").property("ADBE Vector Rect Roundness").setValue(radius);
+        vec().property("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([color[0], color[1], color[2], 1]);
+        vec().property("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Opacity").setValue(opacity);
+        // A text layer named after its text renames itself when the text is edited; pin the name the expression uses.
+        text.name = text.name;
         shape.moveAfter(text);
       } catch (ePost) {
         try { shape.remove(); } catch (eRm) {}
@@ -679,6 +729,7 @@
       } catch (eSc) {}
       try { out.text.rotation = Number(tf.property("ADBE Rotate Z").value); } catch (eRo) {}
     }
+    try { if (typeof text.isNameSet === "boolean") out.text.name_set = text.isNameSet; } catch (eNs) {}
     try { out.text.parented = !!text.parent; } catch (ePa) {}
     try { out.text.three_d = text.threeDLayer === true; } catch (e3d) {}
     var b = backdropLayer(comp, text, args.backdrop_id);

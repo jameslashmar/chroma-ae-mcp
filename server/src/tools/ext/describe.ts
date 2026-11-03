@@ -343,7 +343,8 @@ export interface Action {
 export function buildActions(raw: DescribeRaw): Action[] {
   const byIndex = new Map(raw.layers.map((l) => [l.index, l]));
   const actions: Action[] = [];
-  const sorted = [...raw.segments].sort((a, b) => a.start - b.start);
+  const eff = (s: { hold?: boolean; start: number; end: number }): number => (s.hold ? s.end : s.start);
+  const sorted = [...raw.segments].sort((a, b) => eff(a) - eff(b));
   const open = new Map<string, Action>();
   for (const seg0 of sorted) {
     const layer = byIndex.get(seg0.layer);
@@ -352,10 +353,13 @@ export function buildActions(raw: DescribeRaw): Action[] {
     const verb = verbFor(s);
     const key = `${s.layer}|${verb}`;
     const cur = open.get(key);
-    if (cur && s.start <= cur.end + MERGE_GAP) {
+    // A hold key only changes the value at the second key, so the action is that instant.
+    const aStart = s.hold ? s.end : s.start;
+    if (cur && aStart <= cur.end + MERGE_GAP) {
+      cur.start = Math.min(cur.start, aStart);
       cur.end = Math.max(cur.end, s.end);
     } else {
-      const a: Action = { layer: s.layer, name: layer.name, verb, start: s.start, end: s.end };
+      const a: Action = { layer: s.layer, name: layer.name, verb, start: aStart, end: s.end };
       open.set(key, a);
       actions.push(a);
     }
@@ -381,6 +385,12 @@ export interface Beat {
   actions: number;
 }
 
+const NAME_CLIP = 60;
+const clipName = (n: string): string => (n.length > NAME_CLIP ? `${n.slice(0, NAME_CLIP)}...` : n);
+const MAX_SUMMARY = 20000;
+/** Room for the Timeline beat lines; the concerns and notes after them must still fit. */
+const BEAT_TEXT_BUDGET = 14000;
+
 const quoteList = (names: string[]): string => {
   const q = names.map((n) => `"${n}"`);
   if (q.length <= 1) return q.join("");
@@ -391,7 +401,8 @@ function beatText(group: Action[]): string {
   const byVerb = new Map<string, string[]>();
   for (const a of group) {
     const names = byVerb.get(a.verb) ?? [];
-    if (!names.includes(a.name)) names.push(a.name);
+    const nm = clipName(a.name);
+    if (!names.includes(nm)) names.push(nm);
     byVerb.set(a.verb, names);
   }
   const parts: string[] = [];
@@ -460,7 +471,7 @@ export interface Concern {
 const ref = (l: DescribeLayer) => ({ index: l.index, name: l.name });
 
 function listNames(layers: DescribeLayer[], max = 6): string {
-  const shown = layers.slice(0, max).map((l) => `#${l.index} "${l.name}"`);
+  const shown = layers.slice(0, max).map((l) => `#${l.index} "${clipName(l.name)}"`);
   const more = layers.length - shown.length;
   return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
 }
@@ -487,7 +498,7 @@ export function findConcerns(raw: DescribeRaw): Concern[] {
   const reasons: string[] = [];
   if (!raw.range.complete) reasons.push("only part of the comp was read");
   if (raw.range.layers_over_cap) reasons.push("the comp is too big to cross-reference every layer");
-  if (raw.walk_truncated) reasons.push("the property scan hit its cap, so later expressions were not read");
+  if (raw.walk_truncated) reasons.push("the property scan was cut short (visit cap or very deeply nested groups), so some expressions were not read");
   if (raw.layers.some((l) => l.expressions.refs_truncated)) reasons.push("some expressions name more layers than were recorded");
   const complete = reasons.length === 0;
 
@@ -529,6 +540,7 @@ export interface Description {
   /** Long actions (most of the comp) kept out of the beats. */
   throughout: string[];
   throughout_truncated?: boolean;
+  summary_truncated?: boolean;
   expressions: Array<{ layer: number; name: string; count: number; props: string[]; refs: string[]; errors: number }>;
   precomps: Array<{ layer: number; name: string; comp_id: number; comp_name: string; comp_layers?: number }>;
   nesting: NestNode;
@@ -554,7 +566,7 @@ export function describeFromRaw(raw: DescribeRaw, maxBeats = 12): Description {
   const beats = allBeats.slice(0, MAX_BEATS);
   const longActions = actions.filter((a) => isLongAction(a, c.duration));
   const throughoutTruncated = longActions.length > MAX_THROUGHOUT;
-  const throughout = longActions.slice(0, MAX_THROUGHOUT).map((a) => `"${a.name}" ${a.verb} (${fmtTime(a.start)}-${fmtTime(a.end)} s)`);
+  const throughout = longActions.slice(0, MAX_THROUGHOUT).map((a) => `"${clipName(a.name)}" ${a.verb} (${fmtTime(a.start)}-${fmtTime(a.end)} s)`);
   const concerns = findConcerns(raw);
 
   const expressions = raw.layers
@@ -579,8 +591,16 @@ export function describeFromRaw(raw: DescribeRaw, maxBeats = 12): Description {
   }
   if (beats.length > 0) {
     lines.push("Timeline:");
-    for (const b of beats.slice(0, maxBeats)) lines.push(`  ${beatLine(b)}`);
-    if (beats.length > maxBeats) lines.push(`  ... ${beats.length - maxBeats} more beats (see beats).`);
+    let used = 0;
+    let shownBeats = 0;
+    for (const b of beats.slice(0, maxBeats)) {
+      const text = `  ${beatLine(b)}`;
+      if (shownBeats > 0 && used + text.length > BEAT_TEXT_BUDGET) break;
+      lines.push(text);
+      used += text.length + 1;
+      shownBeats++;
+    }
+    if (beats.length > shownBeats) lines.push(`  ... ${beats.length - shownBeats} more beats (see beats).`);
   } else if (raw.layers.length > 0 && throughout.length === 0) {
     lines.push("Timeline: no keyframed motion, sampled expression motion or layer entrances and exits found.");
   }
@@ -617,11 +637,17 @@ export function describeFromRaw(raw: DescribeRaw, maxBeats = 12): Description {
   if (raw.samples_truncated) notes.push("The sampling budget ran out; some overshoot and expression-motion checks were skipped.");
   if (beatsTruncated) notes.push(`More than ${MAX_BEATS} beats; the rest are left out.`);
   if (raw.segments_truncated) notes.push("Some keyframed motion was left out (per-layer or total segment cap), so the timeline may be incomplete.");
-  if (raw.walk_truncated) notes.push("The property scan hit its cap; later layers may be missing animation and expressions.");
+  if (raw.walk_truncated) notes.push("The property scan was cut short (visit cap or very deeply nested groups); some animation and expressions may be missing.");
   if (notes.length > 0) lines.push(...notes);
+  let summaryText = lines.join("\n");
+  let summaryTruncated = false;
+  if (summaryText.length > MAX_SUMMARY) {
+    summaryText = `${summaryText.slice(0, MAX_SUMMARY - 60)}\n... summary cut at the length limit.`;
+    summaryTruncated = true;
+  }
 
   return {
-    summary: lines.join("\n"),
+    summary: summaryText,
     format: { width: c.width, height: c.height, pixel_aspect: c.pixel_aspect, frame_rate: c.frame_rate, duration: c.duration, frames },
     roles,
     stack: runs,
@@ -630,6 +656,7 @@ export function describeFromRaw(raw: DescribeRaw, maxBeats = 12): Description {
     ...(beatsTruncated ? { beats_truncated: true } : {}),
     throughout,
     ...(throughoutTruncated ? { throughout_truncated: true } : {}),
+    ...(summaryTruncated ? { summary_truncated: true } : {}),
     expressions,
     precomps,
     nesting: raw.nesting,
@@ -774,7 +801,8 @@ export const describeTools: ToolDefinition<any>[] = [
           raw.samples_truncated === true ||
           desc.stack_truncated === true ||
           desc.beats_truncated === true ||
-          desc.throughout_truncated === true,
+          desc.throughout_truncated === true ||
+          desc.summary_truncated === true,
       };
       if (args.include_layers) {
         out.layers = raw.layers.map((l) => ({

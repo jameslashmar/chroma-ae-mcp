@@ -845,7 +845,7 @@
       var r = rangeAt(doc, mode, s, e);
       var got = readRangeStyle(r);
       var t = null;
-      try { t = normBreaks(r.text); } catch (eT) {}
+      try { t = boundString(normBreaks(r.text)); } catch (eT) {}
       out.push({ start: s, end: e, text: t, style: got.style, mixed: got.mixed });
     }
     return out;
@@ -1096,7 +1096,7 @@
           var rr = resolved[ri];
           var range = rangeAt(doc, mode, rr.start, rr.end);
           var rangeText = null;
-          try { rangeText = normBreaks(range.text); } catch (eRt) {}
+          try { rangeText = boundString(normBreaks(range.text)); } catch (eRt) {}
           writeRange(range, rr.style);
           rangeResults.push({ start: rr.start, end: rr.end, text: rangeText, style: rr.style });
         }

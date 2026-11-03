@@ -250,14 +250,17 @@
     }
     var clearsUndo = target === "undo";
     var clearsDisk = target === "all";
-    if (clearsUndo || clearsDisk) {
+    // ram (ALL_MEMORY_CACHES) and all may also drop Edit > Undo levels; that is
+    // unmeasured, so ram is gated like undo until a live run shows otherwise.
+    var mayClearUndo = target === "ram" || target === "all";
+    if (clearsUndo || clearsDisk || mayClearUndo) {
       // The undo history can't come back and the disk cache can take hours to
-      // rebuild, so both need a saved project and a yes the caller got from the user.
-      if (clearsUndo && args.confirm_undo_purge !== true) {
-        fail("bad_args", "Purging undo needs confirm_undo_purge: true, after the user said yes (it removes the whole Edit > Undo history).");
+      // rebuild, so these need a saved project and a yes the caller got from the user.
+      if ((clearsUndo || mayClearUndo) && args.confirm_undo_purge !== true) {
+        fail("bad_args", "Purging " + target + " needs confirm_undo_purge: true, after the user said yes (it " + (clearsUndo ? "removes" : "may remove") + " the whole Edit > Undo history). Use image or snapshot to keep it.");
       }
       if (clearsDisk && args.confirm_disk_cache_wipe !== true) {
-        fail("bad_args", "Purging all caches needs confirm_disk_cache_wipe: true, after the user said yes (since AE 24.3 it also wipes the disk cache). Use ram to keep it.");
+        fail("bad_args", "Purging all caches needs confirm_disk_cache_wipe: true, after the user said yes to both the disk cache wipe (since AE 24.3, hours to rebuild) and that the Edit > Undo history may be cleared. Use ram to keep the disk cache.");
       }
       if (projectPath() === "<unsaved>") {
         fail("bad_args", "The project has never been saved; ae_save it before purging " + target + ".");
@@ -288,9 +291,7 @@
     // change, so there is nothing for a group to record, and for undo, ram and
     // all the purge may empty the history the group would be closed around.
     app.purge(value);
-    // ram (ALL_MEMORY_CACHES) and all may also drop Edit > Undo levels; that is
-    // unmeasured, so the result says "unknown" instead of claiming it is intact.
-    var mayClearUndo = target === "ram" || target === "all";
+    // The result says "unknown" for ram and all instead of claiming undo is intact.
     var undoCleared = false;
     if (clearsUndo) {
       undoCleared = true;

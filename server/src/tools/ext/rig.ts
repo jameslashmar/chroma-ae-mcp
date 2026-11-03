@@ -414,14 +414,6 @@ export function renameMismatches(args: RenameArgs, beforeRaw: unknown, afterRaw:
   const stale = after.scans[0];
   const named = after.scans[1];
   const had = before?.scans[0];
-  if (after.scan_truncated) {
-    m.push({
-      path: "references",
-      expected: "a full scan",
-      actual: "capped",
-      message: "The reference scan was capped (500 layers or 20000 properties): references past the cap are not checked, so a clean receipt does not prove none are left. Search the rest by hand",
-    });
-  }
   if (stale && stale.count > 0) {
     for (const r of stale.references) {
       m.push({
@@ -568,7 +560,7 @@ export const RECIPES: RecipeInfo[] = [
       slider("start", "Start", 0, "The number at the layer's in point."),
       slider("end", "End", 1000, "The number reached after the duration."),
       slider("duration", "Duration", 2, "Seconds to count."),
-      slider("decimals", "Decimals", 0, "Decimal places."),
+      slider("decimals", "Decimals", 0, "Decimal places (0 to 20; higher values are clamped to 20)."),
     ],
     params: [
       { key: "separator", type: "string", default: ",", max: 3, describe: "Thousands separator ('' for none)." },
@@ -851,6 +843,15 @@ export const rigTools: ToolDefinition<any>[] = [
         },
         write: { host: "rigRename", args: { comp_id: args.comp_id, layer: args.layer, control: args.control, new_name: args.new_name, label: "Rename control" } },
         check: (before, after) => renameMismatches(args, before, after),
+        present: (_before, after, w) => {
+          const capped = (after as { scan_truncated?: boolean } | null | undefined)?.scan_truncated === true;
+          if (!capped) return w;
+          return {
+            ...w,
+            scan_truncated: true,
+            warning: "The reference scan was capped (500 layers or 20000 properties): references past the cap were not checked, so a clean receipt does not prove none are left. Search the rest by hand",
+          };
+        },
       }),
   },
   {

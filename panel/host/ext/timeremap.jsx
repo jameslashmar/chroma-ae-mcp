@@ -583,6 +583,34 @@
       // With remapping on, the remap keys own the timing.
       if ((wasEnabled && !disable) || enable) fail("bad_args", "stretch can't be changed while time remapping is on");
     }
+    // Work out the kept in point's new start time now, from values read before any
+    // write, so AE's +/-10800 s start time limit is checked before the undo group.
+    var inBefore = null;
+    var newStart = null;
+    var startBefore = null;
+    if (stretch !== null) {
+      inBefore = layer.inPoint;
+      var outBefore = layer.outPoint;
+      startBefore = layer.startTime;
+      var strBefore = layer.stretch;
+      if (plan.keep_in_point === true && strBefore !== 0) {
+        var offA;
+        var offB;
+        if (strBefore > 0) {
+          offA = (inBefore - startBefore) * 100 / strBefore;
+          offB = (outBefore - startBefore) * 100 / strBefore;
+        } else {
+          offA = (outBefore - startBefore) * 100 / strBefore;
+          offB = (inBefore - startBefore) * 100 / strBefore;
+        }
+        var offIn = offA;
+        if (stretch < 0) offIn = offB;
+        newStart = inBefore - stretch / 100 * offIn;
+        if (!isNum(newStart) || Math.abs(newStart) > 10800) {
+          fail("bad_args", "keeping the in point would put the start time at " + (Math.round(newStart * 1000) / 1000) + " s, outside +/-10800 s");
+        }
+      }
+    }
     var inPoint = null;
     var outPoint = null;
     if (plan.in_point !== undefined && plan.in_point !== null) {
@@ -620,14 +648,10 @@
         }
         if (setsExpression) prop.expression = plan.expression;
         if (stretch !== null) {
-          var inBefore = layer.inPoint;
           layer.stretch = stretch;
-          // Keep the in point where it was: how AE moves it with a stretch is
-          // not documented, so look and shift the start time by the drift.
-          if (plan.keep_in_point === true) {
-            var drift = inBefore - layer.inPoint;
-            if (Math.abs(drift) > 1e-6) layer.startTime = layer.startTime + drift;
-          }
+          // The start time was solved above from values read before the write
+          // (a read after it can be stale); set it outright.
+          if (newStart !== null && Math.abs(newStart - startBefore) > 1e-9) layer.startTime = newStart;
         }
         if (inPoint !== null) layer.inPoint = inPoint;
         if (outPoint !== null) layer.outPoint = outPoint;

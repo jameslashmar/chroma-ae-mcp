@@ -199,6 +199,8 @@ export interface CameraReadBack {
   active_camera_id: number | null;
   layers: BriefLayer[];
   truncated?: boolean;
+  /** Ids asked for beyond the host's cap, so never read. */
+  ids_dropped?: number;
 }
 
 /** What the host's cameraRig returns. */
@@ -283,7 +285,8 @@ export function cameraRigMismatches(args: RigArgs, beforeRaw: unknown, afterRaw:
   for (const s of w.spread) {
     const l = after.layers.find((x) => x.id === s.id);
     if (!l) {
-      m.push({ path: `spread.${s.name}`, expected: s.id, actual: undefined, message: `Layer "${s.name}" is not in the read-back` });
+      const capped = (after.ids_dropped ?? 0) > 0 ? " (the read-back dropped ids past its cap, so this layer could not be checked)" : "";
+      m.push({ path: `spread.${s.name}`, expected: s.id, actual: undefined, message: `Layer "${s.name}" is not in the read-back${capped}` });
       continue;
     }
     expectThat(m, l.three_d, `spread.${s.name}.three_d`, true, l.three_d, `Layer "${s.name}" is not 3D`);
@@ -355,7 +358,8 @@ export function analyseScene(read: SceneRead, cameraId?: number) {
       twoD++;
       continue;
     }
-    const chain = chainMatrix(l, byId);
+    // A layer's own Auto-Orient does not move its anchor; only its ancestors' flags make the chain unresolved.
+    const chain = chainMatrix({ ...l, auto_orient_active: false }, byId);
     if (!chain.matrix || !l.transform) {
       unresolved.push({ id: l.id, name: l.name, reason: chain.reason ?? "no transform" });
       continue;
@@ -378,7 +382,7 @@ export function analyseScene(read: SceneRead, cameraId?: number) {
       size_ratio: behind ? null : r3(model.zoom / depth),
       behind_camera: behind,
       center_in_frame: sx !== null && sy !== null && sx >= 0 && sx <= width && sy >= 0 && sy <= height,
-      rendered: l.visible && (!read.solo_active || l.solo === true),
+      rendered: l.visible && l.kind !== "null" && l.guide !== true && (!read.solo_active || l.solo === true),
     });
   }
   entries.sort((x, y) => x.depth - y.depth || x.index - y.index);

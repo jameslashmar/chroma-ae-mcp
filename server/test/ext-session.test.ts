@@ -393,6 +393,51 @@ describe("guarded write with session tracking", () => {
     expect(getSessionTracker()!.steps().map((s) => s.tool)).toEqual(["ae_create_layer", "ae_create_layer"]);
   });
 
+  it("logs every agent write per project: guarded ones, and unguarded ones the bridge hook sees, but not a no_op", async () => {
+    const dir = tmp();
+    let noop = false;
+    const { ctx } = fakeAe(
+      {
+        layerStack: () => stack(2),
+        createLayer: () => ({ index: 1, id: 11, name: "Ctrl", kind: "null", ...(noop ? { no_op: true } : {}) }),
+        sessionSnapshot: () => unsavedSnap(),
+        setText: () => ({ ok: true }),
+      },
+      dir
+    );
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    installSessionBridgeHook(ctx.bridge);
+    const start = new Date(Date.now() - 1000).toISOString();
+    await createTool.handler(createArgs(), ctx);
+    await ctx.bridge.callHost("setText" as never, {}, { label: "text", mutates: true, toolName: "ae_set_text" });
+    noop = true;
+    await createTool.handler(createArgs(), ctx);
+    const log = t.agentWritesSince("<unsaved>", start);
+    expect(log.map((w) => [w.tool, w.guarded])).toEqual([
+      ["ae_create_layer", true],
+      ["ae_set_text", false],
+    ]);
+    // Only the guarded, non-no_op write is an undo step.
+    expect(t.steps().map((s) => s.tool)).toEqual(["ae_create_layer"]);
+    expect(t.agentWritesSince("<unsaved>", new Date(Date.now() + 60_000).toISOString())).toEqual([]);
+  });
+
+  it("a write whose host returns no_op moves the baseline but adds no undo step", async () => {
+    const dir = tmp();
+    const { ctx, calls } = fakeAe(
+      {
+        layerStack: () => stack(2),
+        createLayer: () => ({ index: 1, id: 11, name: "Ctrl", kind: "null", no_op: true }),
+        sessionSnapshot: () => unsavedSnap(),
+      },
+      dir
+    );
+    installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    await createTool.handler(createArgs(), ctx);
+    expect(calls[calls.length - 1]).toBe("sessionSnapshot");
+    expect(getSessionTracker()!.steps()).toEqual([]);
+  });
+
   it("clears the record when the write fails with a known outcome, and never fails the write over bookkeeping", async () => {
     const dir = tmp();
     const { ctx } = fakeAe(
@@ -910,6 +955,32 @@ describe("undo reach after a reopen, and unsaved projects", () => {
     // A step made after the reopen is not affected.
     const later = step({ at: "2021-01-01T00:00:00.000Z", project_path: "C:/p/_mcp_backups/show.aep" });
     expect(undoReach(later, live(), SERVICE, { reopenedAt: "2020-06-01T00:00:00.000Z" }).reach).toBe("possibly_reachable");
+  });
+
+  it("an undo purge after a step proves it gone; a ram or all purge only warns", () => {
+    const same = live({ project_path: "C:/p/show.aep" });
+    const purged = undoReach(step(), same, SERVICE, { undoPurge: { purgedAt: "2020-06-01T00:00:00.000Z", maybePurgedAt: null } });
+    expect(purged).toMatchObject({ reach: "not_reachable" });
+    expect(purged.why).toContain("purged");
+    const maybe = undoReach(step(), same, SERVICE, { undoPurge: { purgedAt: null, maybePurgedAt: "2020-06-01T00:00:00.000Z" } });
+    expect(maybe.reach).toBe("possibly_reachable");
+    expect(maybe.why).toContain("may have cleared the undo history");
+    // A step made after either purge is not affected.
+    const later = step({ at: "2021-01-01T00:00:00.000Z" });
+    const both = { undoPurge: { purgedAt: "2020-06-01T00:00:00.000Z", maybePurgedAt: "2020-07-01T00:00:00.000Z" } };
+    const r = undoReach(later, same, SERVICE, both);
+    expect(r.reach).toBe("possibly_reachable");
+    expect(r.why).not.toContain("purge");
+  });
+
+  it("keeps the purge marks across a restart of the tracker", () => {
+    const dir = tmp();
+    const t = installSessionTracking({ dataDir: dir });
+    t.markUndoPurged("2020-06-01T00:00:00.000Z", true);
+    t.markUndoPurged("2020-07-01T00:00:00.000Z", false);
+    resetSessionTracking();
+    const again = installSessionTracking({ dataDir: dir });
+    expect(again.undoPurge()).toEqual({ purgedAt: "2020-06-01T00:00:00.000Z", maybePurgedAt: "2020-07-01T00:00:00.000Z" });
   });
 
   it("treats two unsaved projects with hardly any shared items as different projects", () => {

@@ -36,6 +36,8 @@ export interface TextMeasure {
   index: number;
   name: string;
   text_length: number;
+  /** The text without one trailing line break: what the host scans (absent on older hosts). */
+  range_length?: number;
   /** Source Text keys: a keyed text isn't fitted (the fit would have to repeat per key). */
   numKeys: number;
   /** Source Text has an expression that would override the written size. */
@@ -53,6 +55,8 @@ export interface TextMeasure {
   /** AE 24.6+. Undefined where the build lacks it. */
   boxOverflow?: boolean;
   fontSubstituted?: boolean;
+  /** Scale as evaluated at the measured time, percent. The bounds are before Scale. */
+  scale?: number[];
   /** More than one font size in the text (per-range sizes). */
   sizes_vary?: boolean;
   min_run_size?: number;
@@ -60,8 +64,8 @@ export interface TextMeasure {
   /** "full" read every character; "probe" compared the first and last only (the scan cap was reached). */
   sizes_scan?: "full" | "probe";
   bounds: Bounds;
-  /** foreign: Scale has an expression that is not this tool's. */
-  live_fit?: { installed: boolean; error: string | null; foreign?: boolean };
+  /** ours: Scale has this tool's expression, on or off; installed: ours and switched on; foreign: an expression that is not this tool's. */
+  live_fit?: { installed: boolean; ours?: boolean; enabled?: boolean; error: string | null; foreign?: boolean };
 }
 
 export interface MeasureResult {
@@ -80,6 +84,8 @@ export interface MeasureResult {
 
 export const MIN_FONT_SIZE = 0.1;
 export const MAX_FONT_SIZE = 1296;
+/** The host reads sizes character by character up to this many characters (fittext.jsx MAX_SCAN_CHARS). */
+export const MAX_SCAN_CHARS = 2000;
 /** The fraction of the comp each safe area covers. */
 export const SAFE_AREAS = { title: 0.8, action: 0.9 } as const;
 /** Point text is nearly linear: one correction after the first write; box text rewraps, so it gets the caller's cap. */
@@ -88,12 +94,25 @@ export const POINT_TEXT_PASS_CAP = 2;
 export interface Region {
   maxW?: number;
   maxH?: number;
+  /** The limits are on screen (comp pixels), so they are divided by the layer's Scale before comparing with its bounds. Position is not checked. */
+  onScreen?: boolean;
+}
+
+/** The region in the layer's own pixels (bounds are measured before Scale). */
+export function regionFor(m: { scale?: number[] }, r: Region): Region {
+  if (!r.onScreen || !Array.isArray(m.scale) || m.scale.length < 2) return r;
+  const sx = Math.abs(m.scale[0]) / 100;
+  const sy = Math.abs(m.scale[1]) / 100;
+  return {
+    maxW: r.maxW !== undefined && sx > 0 ? r.maxW / sx : r.maxW,
+    maxH: r.maxH !== undefined && sy > 0 ? r.maxH / sy : r.maxH,
+  };
 }
 
 export function regionOf(a: { max_width?: number; max_height?: number; safe_area?: "title" | "action" }, comp: { width: number; height: number }): Region {
   if (a.safe_area) {
     const f = SAFE_AREAS[a.safe_area];
-    return { maxW: comp.width * f, maxH: comp.height * f };
+    return { maxW: comp.width * f, maxH: comp.height * f, onScreen: true };
   }
   return { maxW: a.max_width, maxH: a.max_height };
 }
@@ -110,6 +129,8 @@ export interface FitOptions {
   minSize: number;
   maxSize: number;
   allowGrow: boolean;
+  /** false: the build has no character ranges, so the host never refuses a long text. */
+  rangesSupported?: boolean;
 }
 
 export type FitPlan =
@@ -136,27 +157,29 @@ export function planFit(m: TextMeasure, o: FitOptions): FitPlan {
   const b = m.bounds;
   if (!(b.width > 0) || !(b.height > 0)) return { status: "skip", reason: "the text has no measurable bounds (empty text?)" };
   if (m.locked === true) return { status: "skip", reason: "the layer is locked; unlock it to fit it" };
+  if (o.rangesSupported !== false && (m.range_length ?? m.text_length) > MAX_SCAN_CHARS) return { status: "skip", reason: `the text is over ${MAX_SCAN_CHARS} characters, so its per-range sizes can't be checked; fitting it could flatten them (on builds with character ranges)` };
+  const region = regionFor(m, o.region);
   const box = m.boxText === true;
   const overflow = m.boxOverflow === true;
-  const fits = fitsRegion(b, o.region) && !overflow;
+  const fits = fitsRegion(b, region) && !overflow;
 
   // Box text rewraps to fill its box, so its measured width stays near the box
   // width at any size and the bounds ratio would shrink it again and again.
   // If the box itself is bigger than the region, a smaller font can't fix that.
   const bs = box && Array.isArray(m.boxTextSize) && m.boxTextSize.length === 2 ? m.boxTextSize : null;
   if (box && !fits && bs) {
-    if (o.region.maxW !== undefined && bs[0] > o.region.maxW * 1.005 + 0.01) {
-      return { status: "limit", reason: `the box itself (${round2(bs[0])} wide) is wider than the region (${round2(o.region.maxW)}); resize the box, a smaller font cannot fix that` };
+    if (region.maxW !== undefined && bs[0] > region.maxW * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[0])} wide) is wider than the region (${round2(region.maxW)}); resize the box, a smaller font cannot fix that` };
     }
-    if (o.region.maxH !== undefined && bs[1] > o.region.maxH * 1.005 + 0.01) {
-      return { status: "limit", reason: `the box itself (${round2(bs[1])} high) is taller than the region (${round2(o.region.maxH)}); resize the box, a smaller font cannot fix that` };
+    if (region.maxH !== undefined && bs[1] > region.maxH * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[1])} high) is taller than the region (${round2(region.maxH)}); resize the box, a smaller font cannot fix that` };
     }
   }
 
   const ratios: number[] = [];
   // With a known box width the text already fits across; only the height steps it.
-  if (o.region.maxW !== undefined && !bs) ratios.push(o.region.maxW / b.width);
-  if (o.region.maxH !== undefined) ratios.push(o.region.maxH / b.height);
+  if (region.maxW !== undefined && !bs) ratios.push(region.maxW / b.width);
+  if (region.maxH !== undefined) ratios.push(region.maxH / b.height);
   let factor = ratios.length ? Math.min(...ratios) : Infinity;
 
   const grows = o.allowGrow && !box;
@@ -256,12 +279,15 @@ interface ApplyItem {
 }
 
 /** Receipt checks for one fit pass: the size, the leading, the text and the justification. */
-export function fitMismatches(items: ApplyItem[], scaleLeading: boolean, beforeRaw: unknown, afterRaw: unknown): ReceiptMismatch[] {
+export function fitMismatches(items: ApplyItem[], scaleLeading: boolean, beforeRaw: unknown, afterRaw: unknown, written?: { skipped?: Array<{ id: number }> }): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = beforeRaw as MeasureResult | null;
   const after = afterRaw as MeasureResult | null;
   if (!before || !after) return m;
+  const hostSkipped = new Set((written?.skipped ?? []).map((s) => s.id));
   for (const it of items) {
+    // A layer the host left out was not written: nothing to check.
+    if (hostSkipped.has(it.id)) continue;
     const was = before.layers.find((l) => l.id === it.id);
     const now = after.layers.find((l) => l.id === it.id);
     const tag = `layers[${it.name}]`;
@@ -284,6 +310,9 @@ export function fitMismatches(items: ApplyItem[], scaleLeading: boolean, beforeR
   return m;
 }
 
+/** Whether Scale has this tool's expression, on or off (older reads only have installed). */
+const isOurs = (l: TextMeasure) => l.live_fit?.ours ?? l.live_fit?.installed ?? false;
+
 export function liveMismatches(remove: boolean, afterRaw: unknown, ids: number[]): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const after = afterRaw as MeasureResult | null;
@@ -294,7 +323,9 @@ export function liveMismatches(remove: boolean, afterRaw: unknown, ids: number[]
       m.push({ path: `layers[${id}]`, expected: id, actual: undefined, message: "The layer is not in the read-back" });
       continue;
     }
-    expectThat(m, (now.live_fit?.installed ?? false) === !remove, `layers[${now.name}].live_fit`, !remove, now.live_fit?.installed ?? false, remove ? "The live-fit expression is still on" : "The live-fit expression is not on");
+    // Installing needs ours AND switched on; removing needs it gone, switched on or off.
+    const state = remove ? isOurs(now) : now.live_fit?.installed ?? false;
+    expectThat(m, state === !remove, `layers[${now.name}].live_fit`, !remove, state, remove ? "The live-fit expression is still there" : "The live-fit expression is not on");
     if (!remove && now.live_fit?.error) m.push({ path: `layers[${now.name}].live_fit.error`, expected: null, actual: now.live_fit.error, message: "The expression has an error" });
   }
   return m;
@@ -339,6 +370,8 @@ export interface BackdropRead {
     rotation?: number;
     parented?: boolean;
     three_d?: boolean;
+    /** Layer.isNameSet: the name is set explicitly, not taken from Source Text. */
+    name_set?: boolean;
   };
   backdrop?: { id: number; index: number; name: string; kind: string; size?: number[]; expression_error: string | null };
 }
@@ -354,6 +387,9 @@ export function backdropMismatches(args: BackdropArgs, afterRaw: unknown): Recei
   }
   expectThat(m, b.kind === "shape", "backdrop.kind", "shape", b.kind, "The box is not a shape layer");
   expectThat(m, b.index === after.text.index + 1, "backdrop.index", after.text.index + 1, b.index, "The box is not directly below the text");
+  if (typeof after.text.name_set === "boolean") {
+    expectThat(m, after.text.name_set, "text.name_set", true, after.text.name_set, "The text layer's name is not pinned, so editing the text renames it and breaks the box");
+  }
   if (b.expression_error) m.push({ path: "backdrop.expression_error", expected: null, actual: b.expression_error, message: "The size expression has an error" });
   const pad = args.padding ?? [24, 12];
   // The box is the text's bounds in comp space plus padding, so Scale counts.
@@ -375,7 +411,7 @@ export const fittextTools: ToolDefinition<any>[] = [
     name: "ae_measure_text",
     description:
       "Measure text layers without changing anything: bounds (sourceRectAtTime) at a time, font size, leading, justification, point or box text, box overflow (AE 24.6+), substituted font, whether the size varies per range, and whether a live-fit expression is on. " +
-      "With max_width/max_height or safe_area it also says whether each layer fits. Reading does not move the playhead or the selection. " +
+      "With max_width/max_height or safe_area it also says whether each layer fits (safe_area is on screen: the bounds are compared after the layer's evaluated Scale; position is not checked). Reading does not move the playhead or the selection. " +
       "Source Text that is keyed is measured at `time` only.",
     schema: AeMeasureTextSchema,
     handler: async (args: z.infer<typeof AeMeasureTextSchema>, ctx) => {
@@ -391,7 +427,7 @@ export const fittextTools: ToolDefinition<any>[] = [
       return {
         ...res,
         region: has ? region : undefined,
-        layers: res.layers.map((l) => (has ? { ...l, fits: fitsRegion(l.bounds, region) && l.boxOverflow !== true } : l)),
+        layers: res.layers.map((l) => (has ? { ...l, fits: fitsRegion(l.bounds, regionFor(l, region)) && l.boxOverflow !== true } : l)),
       };
     },
   },
@@ -403,6 +439,7 @@ export const fittextTools: ToolDefinition<any>[] = [
       "Box text rewraps as the size changes, so it steps down until the box no longer overflows (boxOverflow, AE 24.6+) or the region fits, within max_passes; if the box itself is larger than the region it is reported as limit (resize the box), not shrunk. Every pass is its own undo step, guarded by `expect`. " +
       "If a later pass fails, the earlier passes stay applied: the result carries their op_ids, checkpoints and receipts plus a pass_error, and the loop stops. Locked layers are skipped and reported. " +
       "Per-range sizes keep their proportions (each run is scaled, not overwritten), and a fixed leading scales with the size. Keyed Source Text and Source Text with an expression are skipped and reported. " +
+      "Per-range sizes are limited by min_size/max_size too, and a text whose sizes can't be read character by character (over 2000 characters) is refused rather than flattened. safe_area compares the bounds after the evaluated Scale and does not check position; the live expression ignores Scale. There is no option against breaking a word: a box narrower than its longest word will still break it, so widen the box. " +
       "mode 'live' instead puts an expression on Transform > Scale so the layer shrinks to fit as its text changes; 'unlive' removes it. dry_run plans without writing, in every mode (for live it lists the layers and the expression it would install). " +
       "Each layer ends as fits, limit (min or max size reached), skip (with the reason) or unfitted (passes ran out). " +
       AGENT_SAFETY_GUIDANCE,
@@ -426,7 +463,7 @@ export const fittextTools: ToolDefinition<any>[] = [
         const targets: TextMeasure[] = [];
         for (const l of first.layers) {
           if (remove) {
-            if (!l.live_fit?.installed) skipped.push({ id: l.id, name: l.name, reason: "no live fit from this tool is on" });
+            if (!isOurs(l)) skipped.push({ id: l.id, name: l.name, reason: "no live fit from this tool is on" });
             else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
             else targets.push(l);
           } else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
@@ -439,7 +476,7 @@ export const fittextTools: ToolDefinition<any>[] = [
             dry_run: true,
             mode,
             region,
-            would: targets.map((l) => ({ id: l.id, name: l.name, action: remove ? "remove" : l.live_fit?.installed ? "replace" : "install" })),
+            would: targets.map((l) => ({ id: l.id, name: l.name, action: remove ? "remove" : isOurs(l) ? "replace" : "install" })),
             expression: remove ? undefined : liveExpressionText(region.maxW, region.maxH),
             skipped,
           };
@@ -469,6 +506,7 @@ export const fittextTools: ToolDefinition<any>[] = [
         minSize: args.min_size ?? 6,
         maxSize: args.max_size ?? MAX_FONT_SIZE,
         allowGrow: args.allow_grow === true,
+        rangesSupported: first.ranges_supported,
       };
       const maxPasses = args.max_passes ?? 3;
       const scaleLeading = args.scale_leading !== false;
@@ -476,6 +514,8 @@ export const fittextTools: ToolDefinition<any>[] = [
       const used = new Map<number, number>();
       /** Layers whose bounds did not move with the last pass: more passes would only shrink them blindly. */
       const stalled = new Set<number>();
+      /** Layers the host would not write (their sizes could not be read): reported as skipped, never retried. */
+      const hostSkip = new Map<number, string>();
       let current = first.layers;
       let plans = current.map((l) => planFit(l, opts));
 
@@ -495,7 +535,7 @@ export const fittextTools: ToolDefinition<any>[] = [
         const items: ApplyItem[] = [];
         current.forEach((l, i) => {
           const p = plans[i];
-          if (p.status === "resize" && !stalled.has(l.id) && (used.get(l.id) ?? 0) < passCap(l, maxPasses)) {
+          if (p.status === "resize" && !stalled.has(l.id) && !hostSkip.has(l.id) && (used.get(l.id) ?? 0) < passCap(l, maxPasses)) {
             items.push({ id: l.id, name: l.name, factor: p.factor, from: p.from, to: p.to, expect_size: p.from });
           }
         });
@@ -513,12 +553,12 @@ export const fittextTools: ToolDefinition<any>[] = [
                 comp_id: args.comp_id,
                 time: first.time,
                 scale_leading: scaleLeading,
-                items: items.map((it) => ({ layer: { id: it.id }, factor: it.factor, expect_size: it.expect_size })),
+                items: items.map((it) => ({ layer: { id: it.id }, factor: it.factor, expect_size: it.expect_size, min_size: opts.minSize, max_size: opts.maxSize })),
                 label: "Fit text",
               },
             },
-            check: (before, after) => fitMismatches(items, scaleLeading, before, after),
-            present: (_b, after, w) => ({ measured: after, changes: w.layers }),
+            check: (before, after, w) => fitMismatches(items, scaleLeading, before, after, w as { skipped?: Array<{ id: number }> }),
+            present: (_b, after, w) => ({ measured: after, changes: w.layers, skipped: w.skipped, no_op: w.no_op === true }),
           });
         let out: Awaited<ReturnType<typeof run>>;
         if (pass === 1) {
@@ -540,8 +580,12 @@ export const fittextTools: ToolDefinition<any>[] = [
           }
         }
         const before = current;
-        for (const it of items) used.set(it.id, (used.get(it.id) ?? 0) + 1);
-        passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: (out as Record<string, unknown>).changes, receipt: out.receipt });
+        const wroteSkipped = ((out as Record<string, unknown>).skipped ?? []) as Array<{ id: number; reason?: string }>;
+        for (const sk of wroteSkipped) hostSkip.set(sk.id, sk.reason ?? "the host would not write it");
+        for (const it of items) if (!hostSkip.has(it.id)) used.set(it.id, (used.get(it.id) ?? 0) + 1);
+        // The host skipped every layer of this pass: nothing was written and no undo group opened.
+        const wroteNothing = (out as Record<string, unknown>).no_op === true;
+        passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: (out as Record<string, unknown>).changes, receipt: out.receipt, ...(wroteNothing ? { wrote_nothing: true } : {}) });
         const measured = (out as Record<string, unknown>).measured as MeasureResult | null | undefined;
         if (!measured) break;
         // Fold the new measurements into the current list and plan again.
@@ -564,7 +608,10 @@ export const fittextTools: ToolDefinition<any>[] = [
         const n = used.get(l.id) ?? 0;
         let status: FinalStatus["status"];
         let reason: string | undefined;
-        if (p.status === "resize") {
+        if (hostSkip.has(l.id)) {
+          status = "skip";
+          reason = hostSkip.get(l.id);
+        } else if (p.status === "resize") {
           status = "unfitted";
           if (stalled.has(l.id)) reason = "the text's bounds did not change with the font size; more passes would not help";
           else if (passError && n < passCap(l, maxPasses)) reason = `pass ${passError.pass} failed: ${passError.message}`;
@@ -578,7 +625,7 @@ export const fittextTools: ToolDefinition<any>[] = [
       const lastWithReceipt = [...passes].reverse().find((p) => p.receipt !== undefined);
       return {
         ok: true,
-        applied: passes.some((p) => p.op_id !== undefined),
+        applied: passes.some((p) => p.op_id !== undefined && p.wrote_nothing !== true),
         region,
         passes,
         layers: final,
@@ -594,7 +641,7 @@ export const fittextTools: ToolDefinition<any>[] = [
     description:
       "Put a rectangle behind a text layer that is always the text's size plus padding: a shape layer directly below it whose Rectangle Size and Position are expressions on the text's sourceRectAtTime, so it follows edits to the text. " +
       "One undo group guarded by `expect`; the read-back (a separate evalScript) checks the box sits directly below the text, its expression has no error and its evaluated size is the text's bounds plus padding. " +
-      "The expression finds the text layer by name, so renaming the text layer by script breaks it. The box is the bounding box of the text's bounds in comp space, so Scale, rotation and a parent are followed; the receipt checks the size only for an unrotated, unparented, 2D text layer (it takes Scale into account). " +
+      "The expression finds the text layer by name: the call is refused when another layer has the same name, and the text layer's name is pinned (it stops following its Source Text), so renaming it by script breaks the link. The box is the bounding box of the text's bounds in comp space, so Scale, rotation and a parent are followed; the receipt checks the size only for an unrotated, unparented, 2D text layer (it takes Scale into account). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeTextBackdropSchema,
     handler: async (args: BackdropArgs, ctx) =>

@@ -67,7 +67,7 @@ export interface RenderQueueProxy {
   key_found: boolean;
   truncated: boolean;
   error?: string;
-  items: Array<{ index: number; comp?: string; status?: string; proxy_use?: string; settings_unreadable?: boolean }>;
+  items: Array<{ index: number; comp?: string; status?: string; proxy_use?: string; settings_unreadable?: boolean; reach?: number[]; reach_complete?: boolean }>;
 }
 
 export interface InterpretRead {
@@ -196,10 +196,15 @@ export function renderQueueFindings(read: InterpretRead): Finding[] {
   if (!anyOn) return out;
   for (const q of rq.items) {
     if (!rendersWithProxies(q.proxy_use) || (q.status !== undefined && !WILL_RENDER.has(q.status.toLowerCase()))) continue;
+    const label = `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}"`;
+    // A partial walk still proves a hit; only a miss is uncertain.
+    const used = new Set(q.reach ?? []);
     // "Use Comp Proxies Only" ignores footage proxies.
-    if (compsOnly(q.proxy_use) && !anyCompOn) continue;
-    {
-      out.push({ code: "queue_uses_proxies", severity: "warn", message: `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}" while footage has its proxy on: it would render from proxies.` });
+    const hit = read.items.some((i) => i.use_proxy === true && i.proxy && used.has(i.id) && (!compsOnly(q.proxy_use) || i.kind === "comp"));
+    if (hit) {
+      out.push({ code: "queue_uses_proxies", severity: "warn", message: `${label} and its comp uses an item with its proxy on: it would render from proxies.` });
+    } else if ((!q.reach || q.reach_complete !== true) && (!compsOnly(q.proxy_use) || anyCompOn)) {
+      out.push({ code: "queue_uses_proxies", severity: "info", message: `${label} while footage has its proxy on: it may render from proxies (what the comp uses could not be fully read).` });
     }
   }
   return out;
@@ -412,7 +417,9 @@ export function proxyMismatches(args: ProxyArgs, beforeRaw: unknown, afterRaw: u
           expectThat(m, normPath(now.proxy.file) === normPath(args.file), `items[${id}].proxy.file`, args.file, now.proxy.file, "The proxy is another file");
         }
       }
-      if (args.use_proxy !== undefined) expectThat(m, now.use_proxy === args.use_proxy, `items[${id}].use_proxy`, args.use_proxy, now.use_proxy, "useProxy differs");
+      // AVItem.setProxy* switches useProxy on itself, so without use_proxy it must read true.
+      const wantUse = args.use_proxy !== undefined ? args.use_proxy : true;
+      expectThat(m, now.use_proxy === wantUse, `items[${id}].use_proxy`, wantUse, now.use_proxy, "useProxy differs");
     }
     // Switching useProxy never removes the proxy.
     if (was && (args.action === "use_on" || args.action === "use_off") && was.proxy && !now.proxy) {
@@ -432,7 +439,7 @@ export const interpretTools: ToolDefinition<any>[] = [
     description:
       "Audit how After Effects interprets the project's footage, without opening Interpret Footage: alpha mode (ignore, straight, premultiplied with its matte colour), alpha invert, field separation and order, pulldown, conform / native / display frame rate, loop, pixel aspect, and each item's proxy (file, solid, missing) and whether it is switched on. " +
       "Each item carries `findings` for the usual causes of edge fringing and stutter: alpha ignored on a clip that has alpha, 29.97 conformed to 30 (or 23.976 to 24), a stray loop, fields on UHD, a non-square pixel aspect on HD or UHD media, and proxies left on. " +
-      "With the render queue read (default), it also flags queued items whose 'Proxy Use' setting would render from proxies while footage has its proxy on. Fields a still or this AE build can't read are listed in `unreadable`. " +
+      "With the render queue read (default), it also flags queued items whose Proxy Use setting would render from proxies because the queued comp (through its precomps) uses an item with its proxy on; if what the comp uses can't be fully read (bounded walk), the finding is only info: it may render from proxies. Fields a still or this AE build can't read are listed in `unreadable`. " +
       "Lists 500 items at most (`truncated`); solids and placeholders are counted in `skipped`. Changes nothing in After Effects. Colour profiles per footage are not scriptable (only the project's working space is); `probe_colour` lists any colour-looking property names on the first source.",
     schema: AeGetFootageInterpretationSchema,
     handler: async (args: z.infer<typeof AeGetFootageInterpretationSchema>, ctx) => {
@@ -446,8 +453,16 @@ export const interpretTools: ToolDefinition<any>[] = [
       const shown = args.only_findings ? rows.filter((r) => r.findings.length > 0) : rows;
       const queueFindings = renderQueueFindings(read);
       const all = rows.flatMap((r) => r.findings).concat(queueFindings);
+      const rq = read.render_queue;
+      const render_queue = rq
+        ? {
+            ...rq,
+            items: (rq.items ?? []).map(({ reach, ...q }) => ({ ...q, reach_count: reach ? reach.length : undefined })),
+          }
+        : rq;
       return {
         ...read,
+        render_queue,
         items: shown,
         findings_total: all.length,
         warnings: all.filter((f) => f.severity === "warn").length,

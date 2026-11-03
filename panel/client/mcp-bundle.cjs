@@ -33,10 +33,10 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// node_modules/zod/v3/helpers/util.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/util.js
 var util, objectUtil, ZodParsedType, getParsedType;
 var init_util = __esm({
-  "node_modules/zod/v3/helpers/util.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/util.js"() {
     (function(util2) {
       util2.assertEqual = (_) => {
       };
@@ -170,10 +170,10 @@ var init_util = __esm({
   }
 });
 
-// node_modules/zod/v3/ZodError.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/ZodError.js
 var ZodIssueCode, quotelessJson, ZodError;
 var init_ZodError = __esm({
-  "node_modules/zod/v3/ZodError.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/ZodError.js"() {
     init_util();
     ZodIssueCode = util.arrayToEnum([
       "invalid_type",
@@ -294,10 +294,10 @@ var init_ZodError = __esm({
   }
 });
 
-// node_modules/zod/v3/locales/en.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/locales/en.js
 var errorMap, en_default;
 var init_en = __esm({
-  "node_modules/zod/v3/locales/en.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/locales/en.js"() {
     init_ZodError();
     init_util();
     errorMap = (issue, _ctx) => {
@@ -404,7 +404,7 @@ var init_en = __esm({
   }
 });
 
-// node_modules/zod/v3/errors.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/errors.js
 function setErrorMap(map) {
   overrideErrorMap = map;
 }
@@ -413,13 +413,13 @@ function getErrorMap() {
 }
 var overrideErrorMap;
 var init_errors = __esm({
-  "node_modules/zod/v3/errors.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/errors.js"() {
     init_en();
     overrideErrorMap = en_default;
   }
 });
 
-// node_modules/zod/v3/helpers/parseUtil.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/parseUtil.js
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
@@ -441,7 +441,7 @@ function addIssueToContext(ctx, issueData) {
 }
 var makeIssue, EMPTY_PATH, ParseStatus, INVALID, DIRTY, OK, isAborted, isDirty, isValid, isAsync;
 var init_parseUtil = __esm({
-  "node_modules/zod/v3/helpers/parseUtil.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/parseUtil.js"() {
     init_errors();
     init_en();
     makeIssue = (params) => {
@@ -536,16 +536,16 @@ var init_parseUtil = __esm({
   }
 });
 
-// node_modules/zod/v3/helpers/typeAliases.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/typeAliases.js
 var init_typeAliases = __esm({
-  "node_modules/zod/v3/helpers/typeAliases.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/typeAliases.js"() {
   }
 });
 
-// node_modules/zod/v3/helpers/errorUtil.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 var init_errorUtil = __esm({
-  "node_modules/zod/v3/helpers/errorUtil.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/helpers/errorUtil.js"() {
     (function(errorUtil2) {
       errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
       errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
@@ -553,7 +553,7 @@ var init_errorUtil = __esm({
   }
 });
 
-// node_modules/zod/v3/types.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/types.js
 function processCreateParams(params) {
   if (!params)
     return {};
@@ -747,7 +747,7 @@ function custom(check, _params = {}, fatal) {
 }
 var ParseInputLazyPath, handleResult, ZodType, cuidRegex, cuid2Regex, ulidRegex, uuidRegex, nanoidRegex, jwtRegex, durationRegex, emailRegex, _emojiRegex, emojiRegex, ipv4Regex, ipv4CidrRegex, ipv6Regex, ipv6CidrRegex, base64Regex, base64urlRegex, dateRegexSource, dateRegex, ZodString, ZodNumber, ZodBigInt, ZodBoolean, ZodDate, ZodSymbol, ZodUndefined, ZodNull, ZodAny, ZodUnknown, ZodNever, ZodVoid, ZodArray, ZodObject, ZodUnion, getDiscriminator, ZodDiscriminatedUnion, ZodIntersection, ZodTuple, ZodRecord, ZodMap, ZodSet, ZodFunction, ZodLazy, ZodLiteral, ZodEnum, ZodNativeEnum, ZodPromise, ZodEffects, ZodOptional, ZodNullable, ZodDefault, ZodCatch, ZodNaN, BRAND, ZodBranded, ZodPipeline, ZodReadonly, late, ZodFirstPartyTypeKind, instanceOfType, stringType, numberType, nanType, bigIntType, booleanType, dateType, symbolType, undefinedType, nullType, anyType, unknownType, neverType, voidType, arrayType, objectType, strictObjectType, unionType, discriminatedUnionType, intersectionType, tupleType, recordType, mapType, setType, functionType, lazyType, literalType, enumType, nativeEnumType, promiseType, effectsType, optionalType, nullableType, preprocessType, pipelineType, ostring, onumber, oboolean, coerce, NEVER;
 var init_types = __esm({
-  "node_modules/zod/v3/types.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/types.js"() {
     init_ZodError();
     init_errors();
     init_errorUtil();
@@ -4009,7 +4009,7 @@ var init_types = __esm({
   }
 });
 
-// node_modules/zod/v3/external.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -4121,7 +4121,7 @@ __export(external_exports, {
   void: () => voidType
 });
 var init_external = __esm({
-  "node_modules/zod/v3/external.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/v3/external.js"() {
     init_errors();
     init_parseUtil();
     init_typeAliases();
@@ -4131,9 +4131,9 @@ var init_external = __esm({
   }
 });
 
-// node_modules/zod/index.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/index.js
 var init_zod = __esm({
-  "node_modules/zod/index.js"() {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/zod/index.js"() {
     init_external();
     init_external();
   }
@@ -7029,7 +7029,15 @@ function undoReach(step2, live, serviceId, opts = {}) {
       why: "the project was closed and reopened after this step (a checkpoint revert or open); After Effects clears the undo history when a project closes"
     };
   }
+  const after = (at) => {
+    const ms = at ? Date.parse(at) : NaN;
+    return Number.isFinite(ms) && Number.isFinite(stepMs) && stepMs < ms;
+  };
+  if (after(opts.undoPurge?.purgedAt)) {
+    return { reach: "not_reachable", why: "the undo history was purged after this step (ae_memory_purge target undo)" };
+  }
   let prefix = "";
+  if (after(opts.undoPurge?.maybePurgedAt)) prefix = "a cache purge after this step (ae_memory_purge ram or all) may have cleared the undo history; ";
   if (step2.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step2.item_ids, live)) {
     return { reach: "not_reachable", why: "another unsaved project is open (its items hardly overlap the step's)" };
   }
@@ -7037,7 +7045,7 @@ function undoReach(step2, live, serviceId, opts = {}) {
     if (!looksLikeSaveAs(step2, live)) {
       return { reach: "not_reachable", why: `another project is open (the step was made in ${step2.project_path})` };
     }
-    prefix = `the project path changed (${step2.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
+    prefix += `the project path changed (${step2.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
   }
   if (step2.build && live.build && step2.build !== live.build) {
     return { reach: "not_reachable", why: "the After Effects build changed, so it was restarted or updated; AE keeps no undo history across a restart" };
@@ -7088,6 +7096,14 @@ function sanitizeState(saved) {
     out.interrupted = saved.interrupted.filter((x) => isPlainObject(x) && typeof x.op_id === "string" && typeof x.project_path === "string");
   }
   if (typeof saved.reopened_at === "string") out.reopened_at = saved.reopened_at;
+  if (typeof saved.undo_purged_at === "string") out.undo_purged_at = saved.undo_purged_at;
+  if (typeof saved.undo_maybe_purged_at === "string") out.undo_maybe_purged_at = saved.undo_maybe_purged_at;
+  if (isPlainObject(saved.agent_writes)) {
+    for (const [k, v] of Object.entries(saved.agent_writes)) {
+      if (!Array.isArray(v)) continue;
+      out.agent_writes[k] = v.filter((x) => isPlainObject(x) && typeof x.at === "string" && typeof x.op_id === "string" && typeof x.tool === "string");
+    }
+  }
   return out;
 }
 function writeJson(file, value) {
@@ -7129,6 +7145,9 @@ function installSessionTracking(opts) {
   } catch {
   }
   return t;
+}
+function getSessionTracker() {
+  return tracker;
 }
 async function readSnapshot(ctx, opId, phase, toolName, compIds) {
   const res = await ctx.bridge.evalRaw({
@@ -7192,6 +7211,12 @@ async function noteAfterWrite(ctx, info, opts = {}) {
     t.commitReported(info.opId);
   } catch {
   }
+  if (opts.addStep !== false) {
+    try {
+      t.noteAgentWrite(info.expect.project_path, { op_id: info.opId, tool: info.toolName, guarded: true });
+    } catch {
+    }
+  }
   try {
     const blocked = t.takeSkipAfter(info.opId);
     if (opts.skipRead || blocked) return;
@@ -7199,6 +7224,7 @@ async function noteAfterWrite(ctx, info, opts = {}) {
     const snap2 = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
     if (!snap2) return;
     t.record(snap2, { op_id: info.opId, tool: info.toolName });
+    if (opts.addStep === false) return;
     t.addStep({
       op_id: info.opId,
       tool: info.toolName,
@@ -7284,12 +7310,20 @@ function installSessionBridgeHook(bridge) {
       }
       if (opensProject) markReopenedSafely(t);
     }
+    let writtenTo = projectPath;
     if (!skipAfter) {
       try {
         const after = await readOpenProject(t, read("after"), []);
-        if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
+        if (after) {
+          t.record(after.snap, { op_id: p.id, tool: toolName });
+          writtenTo = after.snap.project_path;
+        }
       } catch {
       }
+    }
+    try {
+      if (writtenTo !== UNKNOWN_PROJECT) t.noteAgentWrite(writtenTo, { op_id: p.id, tool: toolName, guarded: false });
+    } catch {
     }
     return res;
   };
@@ -7327,7 +7361,7 @@ async function readSnapshotOrNull(read, ids) {
     return null;
   }
 }
-var crypto3, fs7, path8, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_PENDING_LINES, SNAPSHOT_TIMEOUT_MS, UNSAVED, UNKNOWN_PROJECT, MAX_INFLIGHT_AGE_MS, emptyState, isPlainObject, keyOf, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
+var crypto3, fs7, path8, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_PENDING_LINES, MAX_AGENT_WRITES, SNAPSHOT_TIMEOUT_MS, UNSAVED, UNKNOWN_PROJECT, MAX_INFLIGHT_AGE_MS, emptyState, isPlainObject, keyOf, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
 var init_session = __esm({
   "src/tools/ext/session.ts"() {
     "use strict";
@@ -7345,11 +7379,23 @@ var init_session = __esm({
     MAX_SHOWN_IDS = 100;
     MAX_STEP_ITEM_IDS = 100;
     MAX_PENDING_LINES = 10;
+    MAX_AGENT_WRITES = 200;
     SNAPSHOT_TIMEOUT_MS = 8e3;
     UNSAVED = "<unsaved>";
     UNKNOWN_PROJECT = "<unknown>";
     MAX_INFLIGHT_AGE_MS = SLOW_TIMEOUT_MS + 5 * 6e4;
-    emptyState = () => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [], reopened_at: null });
+    emptyState = () => ({
+      last_key: null,
+      snapshots: {},
+      touched: {},
+      steps: [],
+      op_projects: {},
+      interrupted: [],
+      reopened_at: null,
+      undo_purged_at: null,
+      undo_maybe_purged_at: null,
+      agent_writes: {}
+    });
     isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
     keyOf = (projectPath) => process.platform === "win32" ? projectPath.replace(/\\/g, "/").toLowerCase() : projectPath;
     SessionTracker = class {
@@ -7434,6 +7480,36 @@ var init_session = __esm({
       }
       reopenedAt() {
         return this.state.reopened_at;
+      }
+      /** ae_memory_purge cleared the undo history (certain: target undo) or may have (ram, all). */
+      markUndoPurged(at, certain) {
+        if (certain) this.state.undo_purged_at = at;
+        else this.state.undo_maybe_purged_at = at;
+        this.save();
+      }
+      undoPurge() {
+        return { purgedAt: this.state.undo_purged_at, maybePurgedAt: this.state.undo_maybe_purged_at };
+      }
+      /** Logs an agent write to a project: guarded writes from noteAfterWrite, the rest from the bridge hook. */
+      noteAgentWrite(projectPath, w) {
+        const key = keyOf(projectPath);
+        const list = this.state.agent_writes[key] ?? [];
+        list.push({ at: this.now().toISOString(), ...w });
+        delete this.state.agent_writes[key];
+        this.state.agent_writes[key] = list.slice(-MAX_AGENT_WRITES);
+        const keys = Object.keys(this.state.agent_writes);
+        for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) delete this.state.agent_writes[old];
+        this.save();
+      }
+      /**
+       * The agent's writes to a project after `since` (an ISO time; all kept ones
+       * when null), oldest first. Unlike steps() it includes writes that are not
+       * undo steps (imports, effects, text, keyframe ease, ...).
+       */
+      agentWritesSince(projectPath, since) {
+        const list = this.state.agent_writes[keyOf(projectPath)] ?? [];
+        const ms = since ? Date.parse(since) : NaN;
+        return Number.isFinite(ms) ? list.filter((w) => Date.parse(w.at) > ms) : list.slice();
       }
       save() {
         writeJson(this.statePath, this.state);
@@ -7674,7 +7750,7 @@ var init_session = __esm({
           });
           const interruptedOps = interrupted.filter((o) => !o.acknowledged);
           const acknowledgedOps = interrupted.filter((o) => o.acknowledged);
-          const steps = args.include_undo_steps === false ? void 0 : t.steps().slice(-(args.max_undo_steps ?? 10)).reverse().map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt() }) }));
+          const steps = args.include_undo_steps === false ? void 0 : t.steps().slice(-(args.max_undo_steps ?? 10)).reverse().map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt(), undoPurge: t.undoPurge() }) }));
           let jobsFile = t.rendersJobsFile;
           if (!jobsFile) {
             const { defaultAerenderJobsFilePath: defaultAerenderJobsFilePath2 } = await Promise.resolve().then(() => (init_aerender(), aerender_exports));
@@ -9701,7 +9777,8 @@ async function runGuardedWrite(ctx, spec) {
       script: buildJsxCall(call2.host, call2.args),
       label: `${spec.label} (${phase})`,
       mutates: false,
-      toolName: spec.toolName
+      toolName: spec.toolName,
+      timeoutMs: call2.timeoutMs
     });
     return res.result ?? null;
   };
@@ -9721,7 +9798,8 @@ async function runGuardedWrite(ctx, spec) {
           script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
           label: spec.label,
           mutates: true,
-          toolName: spec.toolName
+          toolName: spec.toolName,
+          timeoutMs: spec.write.timeoutMs
         });
       } finally {
         endInflight(opId);
@@ -9748,7 +9826,7 @@ async function runGuardedWrite(ctx, spec) {
         custom2 = [readBackFailure];
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure });
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true });
       return {
         op_id: opId,
         applied: true,
@@ -9857,6 +9935,7 @@ function captionsMismatches(args, removeStale, captions, afterRaw, written) {
         expectThat(m, Math.abs(entry.inPoint - t[0]) <= tol, `captions[${entry.number}].inPoint`, t[0], entry.inPoint, "Caption starts at another time");
         expectThat(m, Math.abs(entry.outPoint - t[1]) <= tol, `captions[${entry.number}].outPoint`, t[1], entry.outPoint, "Caption ends at another time");
       }
+      expectThat(m, entry.box_overflow !== true, `captions[${entry.number}].box_overflow`, false, entry.box_overflow, "The text is taller than its paragraph box, so lines are hidden");
       if (made.has(entry.name) && entry.justification !== void 0) {
         expectThat(m, entry.justification === wantJust, `captions[${entry.number}].justification`, wantJust, entry.justification, "Justification did not stick");
       }
@@ -9904,6 +9983,7 @@ function captionsMismatches(args, removeStale, captions, afterRaw, written) {
         }
       }
     }
+    expectThat(m, entry.box_overflow !== true, "caption.box_overflow", false, entry.box_overflow, "The text is taller than its paragraph box, so lines are hidden");
     if (entry.inPoint !== void 0 && timings.length) {
       expectThat(m, Math.abs(entry.inPoint - timings[0][0]) <= tol, "caption.inPoint", timings[0][0], entry.inPoint, "Layer starts at another time");
       expectThat(m, Math.abs(entry.outPoint - timings[timings.length - 1][1]) <= tol, "caption.outPoint", timings[timings.length - 1][1], entry.outPoint, "Layer ends at another time");
@@ -10284,14 +10364,6 @@ function renameMismatches(args, beforeRaw, afterRaw) {
   const stale = after.scans[0];
   const named = after.scans[1];
   const had = before?.scans[0];
-  if (after.scan_truncated) {
-    m.push({
-      path: "references",
-      expected: "a full scan",
-      actual: "capped",
-      message: "The reference scan was capped (500 layers or 20000 properties): references past the cap are not checked, so a clean receipt does not prove none are left. Search the rest by hand"
-    });
-  }
   if (stale && stale.count > 0) {
     for (const r of stale.references) {
       m.push({
@@ -10545,7 +10617,7 @@ var init_rig = __esm({
           slider("start", "Start", 0, "The number at the layer's in point."),
           slider("end", "End", 1e3, "The number reached after the duration."),
           slider("duration", "Duration", 2, "Seconds to count."),
-          slider("decimals", "Decimals", 0, "Decimal places.")
+          slider("decimals", "Decimals", 0, "Decimal places (0 to 20; higher values are clamped to 20).")
         ],
         params: [
           { key: "separator", type: "string", default: ",", max: 3, describe: "Thousands separator ('' for none)." },
@@ -10702,7 +10774,16 @@ var init_rig = __esm({
             });
           },
           write: { host: "rigRename", args: { comp_id: args.comp_id, layer: args.layer, control: args.control, new_name: args.new_name, label: "Rename control" } },
-          check: (before, after) => renameMismatches(args, before, after)
+          check: (before, after) => renameMismatches(args, before, after),
+          present: (_before, after, w) => {
+            const capped3 = after?.scan_truncated === true;
+            if (!capped3) return w;
+            return {
+              ...w,
+              scan_truncated: true,
+              warning: "The reference scan was capped (500 layers or 20000 properties): references past the cap were not checked, so a clean receipt does not prove none are left. Search the rest by hand"
+            };
+          }
         })
       },
       {
@@ -10787,10 +10868,19 @@ var init_rig = __esm({
 });
 
 // src/tools/ext/fittext.ts
+function regionFor(m, r) {
+  if (!r.onScreen || !Array.isArray(m.scale) || m.scale.length < 2) return r;
+  const sx = Math.abs(m.scale[0]) / 100;
+  const sy = Math.abs(m.scale[1]) / 100;
+  return {
+    maxW: r.maxW !== void 0 && sx > 0 ? r.maxW / sx : r.maxW,
+    maxH: r.maxH !== void 0 && sy > 0 ? r.maxH / sy : r.maxH
+  };
+}
 function regionOf(a, comp) {
   if (a.safe_area) {
     const f = SAFE_AREAS[a.safe_area];
-    return { maxW: comp.width * f, maxH: comp.height * f };
+    return { maxW: comp.width * f, maxH: comp.height * f, onScreen: true };
   }
   return { maxW: a.max_width, maxH: a.max_height };
 }
@@ -10807,21 +10897,23 @@ function planFit(m, o) {
   const b = m.bounds;
   if (!(b.width > 0) || !(b.height > 0)) return { status: "skip", reason: "the text has no measurable bounds (empty text?)" };
   if (m.locked === true) return { status: "skip", reason: "the layer is locked; unlock it to fit it" };
+  if (o.rangesSupported !== false && (m.range_length ?? m.text_length) > MAX_SCAN_CHARS) return { status: "skip", reason: `the text is over ${MAX_SCAN_CHARS} characters, so its per-range sizes can't be checked; fitting it could flatten them (on builds with character ranges)` };
+  const region = regionFor(m, o.region);
   const box = m.boxText === true;
   const overflow = m.boxOverflow === true;
-  const fits = fitsRegion(b, o.region) && !overflow;
+  const fits = fitsRegion(b, region) && !overflow;
   const bs = box && Array.isArray(m.boxTextSize) && m.boxTextSize.length === 2 ? m.boxTextSize : null;
   if (box && !fits && bs) {
-    if (o.region.maxW !== void 0 && bs[0] > o.region.maxW * 1.005 + 0.01) {
-      return { status: "limit", reason: `the box itself (${round2(bs[0])} wide) is wider than the region (${round2(o.region.maxW)}); resize the box, a smaller font cannot fix that` };
+    if (region.maxW !== void 0 && bs[0] > region.maxW * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[0])} wide) is wider than the region (${round2(region.maxW)}); resize the box, a smaller font cannot fix that` };
     }
-    if (o.region.maxH !== void 0 && bs[1] > o.region.maxH * 1.005 + 0.01) {
-      return { status: "limit", reason: `the box itself (${round2(bs[1])} high) is taller than the region (${round2(o.region.maxH)}); resize the box, a smaller font cannot fix that` };
+    if (region.maxH !== void 0 && bs[1] > region.maxH * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[1])} high) is taller than the region (${round2(region.maxH)}); resize the box, a smaller font cannot fix that` };
     }
   }
   const ratios = [];
-  if (o.region.maxW !== void 0 && !bs) ratios.push(o.region.maxW / b.width);
-  if (o.region.maxH !== void 0) ratios.push(o.region.maxH / b.height);
+  if (region.maxW !== void 0 && !bs) ratios.push(region.maxW / b.width);
+  if (region.maxH !== void 0) ratios.push(region.maxH / b.height);
   let factor = ratios.length ? Math.min(...ratios) : Infinity;
   const grows = o.allowGrow && !box;
   if (fits && (!grows || factor <= 1.005)) return { status: "fits" };
@@ -10840,12 +10932,14 @@ function planFit(m, o) {
 function passCap(m, maxPasses) {
   return m.boxText === true ? maxPasses : Math.min(POINT_TEXT_PASS_CAP, maxPasses);
 }
-function fitMismatches(items, scaleLeading, beforeRaw, afterRaw) {
+function fitMismatches(items, scaleLeading, beforeRaw, afterRaw, written) {
   const m = [];
   const before = beforeRaw;
   const after = afterRaw;
   if (!before || !after) return m;
+  const hostSkipped = new Set((written?.skipped ?? []).map((s) => s.id));
   for (const it of items) {
+    if (hostSkipped.has(it.id)) continue;
     const was = before.layers.find((l) => l.id === it.id);
     const now = after.layers.find((l) => l.id === it.id);
     const tag = `layers[${it.name}]`;
@@ -10877,7 +10971,8 @@ function liveMismatches(remove, afterRaw, ids) {
       m.push({ path: `layers[${id}]`, expected: id, actual: void 0, message: "The layer is not in the read-back" });
       continue;
     }
-    expectThat(m, (now.live_fit?.installed ?? false) === !remove, `layers[${now.name}].live_fit`, !remove, now.live_fit?.installed ?? false, remove ? "The live-fit expression is still on" : "The live-fit expression is not on");
+    const state = remove ? isOurs(now) : now.live_fit?.installed ?? false;
+    expectThat(m, state === !remove, `layers[${now.name}].live_fit`, !remove, state, remove ? "The live-fit expression is still there" : "The live-fit expression is not on");
     if (!remove && now.live_fit?.error) m.push({ path: `layers[${now.name}].live_fit.error`, expected: null, actual: now.live_fit.error, message: "The expression has an error" });
   }
   return m;
@@ -10903,6 +10998,9 @@ function backdropMismatches(args, afterRaw) {
   }
   expectThat(m, b.kind === "shape", "backdrop.kind", "shape", b.kind, "The box is not a shape layer");
   expectThat(m, b.index === after.text.index + 1, "backdrop.index", after.text.index + 1, b.index, "The box is not directly below the text");
+  if (typeof after.text.name_set === "boolean") {
+    expectThat(m, after.text.name_set, "text.name_set", true, after.text.name_set, "The text layer's name is not pinned, so editing the text renames it and breaks the box");
+  }
   if (b.expression_error) m.push({ path: "backdrop.expression_error", expected: null, actual: b.expression_error, message: "The size expression has an error" });
   const pad = args.padding ?? [24, 12];
   const t = after.text;
@@ -10915,7 +11013,7 @@ function backdropMismatches(args, afterRaw) {
   }
   return m;
 }
-var MIN_FONT_SIZE, MAX_FONT_SIZE, SAFE_AREAS, POINT_TEXT_PASS_CAP, round2, RegionFields, regionChosen, regionExclusive, AeMeasureTextSchema, AeFitTextSchema, AeTextBackdropSchema, selectorIds, near, fittextTools;
+var MIN_FONT_SIZE, MAX_FONT_SIZE, MAX_SCAN_CHARS, SAFE_AREAS, POINT_TEXT_PASS_CAP, round2, RegionFields, regionChosen, regionExclusive, AeMeasureTextSchema, AeFitTextSchema, AeTextBackdropSchema, selectorIds, near, isOurs, fittextTools;
 var init_fittext = __esm({
   "src/tools/ext/fittext.ts"() {
     "use strict";
@@ -10924,6 +11022,7 @@ var init_fittext = __esm({
     init_write_runner();
     MIN_FONT_SIZE = 0.1;
     MAX_FONT_SIZE = 1296;
+    MAX_SCAN_CHARS = 2e3;
     SAFE_AREAS = { title: 0.8, action: 0.9 };
     POINT_TEXT_PASS_CAP = 2;
     round2 = (n) => Math.round(n * 100) / 100;
@@ -10968,10 +11067,11 @@ var init_fittext = __esm({
     });
     selectorIds = (items) => items.map((i) => ({ id: i.id }));
     near = (a, b, abs) => typeof a === "number" && Math.abs(a - b) <= abs + Math.abs(b) * 1e-3;
+    isOurs = (l) => l.live_fit?.ours ?? l.live_fit?.installed ?? false;
     fittextTools = [
       {
         name: "ae_measure_text",
-        description: "Measure text layers without changing anything: bounds (sourceRectAtTime) at a time, font size, leading, justification, point or box text, box overflow (AE 24.6+), substituted font, whether the size varies per range, and whether a live-fit expression is on. With max_width/max_height or safe_area it also says whether each layer fits. Reading does not move the playhead or the selection. Source Text that is keyed is measured at `time` only.",
+        description: "Measure text layers without changing anything: bounds (sourceRectAtTime) at a time, font size, leading, justification, point or box text, box overflow (AE 24.6+), substituted font, whether the size varies per range, and whether a live-fit expression is on. With max_width/max_height or safe_area it also says whether each layer fits (safe_area is on screen: the bounds are compared after the layer's evaluated Scale; position is not checked). Reading does not move the playhead or the selection. Source Text that is keyed is measured at `time` only.",
         schema: AeMeasureTextSchema,
         handler: async (args, ctx) => {
           const res = await readHost(
@@ -10986,13 +11086,13 @@ var init_fittext = __esm({
           return {
             ...res,
             region: has ? region : void 0,
-            layers: res.layers.map((l) => has ? { ...l, fits: fitsRegion(l.bounds, region) && l.boxOverflow !== true } : l)
+            layers: res.layers.map((l) => has ? { ...l, fits: fitsRegion(l.bounds, regionFor(l, region)) && l.boxOverflow !== true } : l)
           };
         }
       },
       {
         name: "ae_fit_text",
-        description: "Fit titles into a box or the safe area: shrink (or, with allow_grow, grow) the font size until the measured bounds fit, for chosen text layers or every text layer in the comp, with a min and max size. Point text is measured once, the size computed from the ratio and written, then re-measured in a separate evalScript; one correction pass at most. Box text rewraps as the size changes, so it steps down until the box no longer overflows (boxOverflow, AE 24.6+) or the region fits, within max_passes; if the box itself is larger than the region it is reported as limit (resize the box), not shrunk. Every pass is its own undo step, guarded by `expect`. If a later pass fails, the earlier passes stay applied: the result carries their op_ids, checkpoints and receipts plus a pass_error, and the loop stops. Locked layers are skipped and reported. Per-range sizes keep their proportions (each run is scaled, not overwritten), and a fixed leading scales with the size. Keyed Source Text and Source Text with an expression are skipped and reported. mode 'live' instead puts an expression on Transform > Scale so the layer shrinks to fit as its text changes; 'unlive' removes it. dry_run plans without writing, in every mode (for live it lists the layers and the expression it would install). Each layer ends as fits, limit (min or max size reached), skip (with the reason) or unfitted (passes ran out). " + AGENT_SAFETY_GUIDANCE,
+        description: "Fit titles into a box or the safe area: shrink (or, with allow_grow, grow) the font size until the measured bounds fit, for chosen text layers or every text layer in the comp, with a min and max size. Point text is measured once, the size computed from the ratio and written, then re-measured in a separate evalScript; one correction pass at most. Box text rewraps as the size changes, so it steps down until the box no longer overflows (boxOverflow, AE 24.6+) or the region fits, within max_passes; if the box itself is larger than the region it is reported as limit (resize the box), not shrunk. Every pass is its own undo step, guarded by `expect`. If a later pass fails, the earlier passes stay applied: the result carries their op_ids, checkpoints and receipts plus a pass_error, and the loop stops. Locked layers are skipped and reported. Per-range sizes keep their proportions (each run is scaled, not overwritten), and a fixed leading scales with the size. Keyed Source Text and Source Text with an expression are skipped and reported. Per-range sizes are limited by min_size/max_size too, and a text whose sizes can't be read character by character (over 2000 characters) is refused rather than flattened. safe_area compares the bounds after the evaluated Scale and does not check position; the live expression ignores Scale. There is no option against breaking a word: a box narrower than its longest word will still break it, so widen the box. mode 'live' instead puts an expression on Transform > Scale so the layer shrinks to fit as its text changes; 'unlive' removes it. dry_run plans without writing, in every mode (for live it lists the layers and the expression it would install). Each layer ends as fits, limit (min or max size reached), skip (with the reason) or unfitted (passes ran out). " + AGENT_SAFETY_GUIDANCE,
         schema: AeFitTextSchema,
         handler: async (args, ctx) => {
           const mode = args.mode ?? "size";
@@ -11010,7 +11110,7 @@ var init_fittext = __esm({
             const targets = [];
             for (const l of first.layers) {
               if (remove) {
-                if (!l.live_fit?.installed) skipped.push({ id: l.id, name: l.name, reason: "no live fit from this tool is on" });
+                if (!isOurs(l)) skipped.push({ id: l.id, name: l.name, reason: "no live fit from this tool is on" });
                 else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
                 else targets.push(l);
               } else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
@@ -11023,7 +11123,7 @@ var init_fittext = __esm({
                 dry_run: true,
                 mode,
                 region,
-                would: targets.map((l) => ({ id: l.id, name: l.name, action: remove ? "remove" : l.live_fit?.installed ? "replace" : "install" })),
+                would: targets.map((l) => ({ id: l.id, name: l.name, action: remove ? "remove" : isOurs(l) ? "replace" : "install" })),
                 expression: remove ? void 0 : liveExpressionText(region.maxW, region.maxH),
                 skipped
               };
@@ -11051,13 +11151,15 @@ var init_fittext = __esm({
             region,
             minSize: args.min_size ?? 6,
             maxSize: args.max_size ?? MAX_FONT_SIZE,
-            allowGrow: args.allow_grow === true
+            allowGrow: args.allow_grow === true,
+            rangesSupported: first.ranges_supported
           };
           const maxPasses = args.max_passes ?? 3;
           const scaleLeading = args.scale_leading !== false;
           const startSize = new Map(first.layers.map((l) => [l.id, l.fontSize]));
           const used = /* @__PURE__ */ new Map();
           const stalled = /* @__PURE__ */ new Set();
+          const hostSkip = /* @__PURE__ */ new Map();
           let current = first.layers;
           let plans = current.map((l) => planFit(l, opts));
           if (args.dry_run) {
@@ -11075,7 +11177,7 @@ var init_fittext = __esm({
             const items = [];
             current.forEach((l, i) => {
               const p = plans[i];
-              if (p.status === "resize" && !stalled.has(l.id) && (used.get(l.id) ?? 0) < passCap(l, maxPasses)) {
+              if (p.status === "resize" && !stalled.has(l.id) && !hostSkip.has(l.id) && (used.get(l.id) ?? 0) < passCap(l, maxPasses)) {
                 items.push({ id: l.id, name: l.name, factor: p.factor, from: p.from, to: p.to, expect_size: p.from });
               }
             });
@@ -11092,12 +11194,12 @@ var init_fittext = __esm({
                   comp_id: args.comp_id,
                   time: first.time,
                   scale_leading: scaleLeading,
-                  items: items.map((it) => ({ layer: { id: it.id }, factor: it.factor, expect_size: it.expect_size })),
+                  items: items.map((it) => ({ layer: { id: it.id }, factor: it.factor, expect_size: it.expect_size, min_size: opts.minSize, max_size: opts.maxSize })),
                   label: "Fit text"
                 }
               },
-              check: (before2, after) => fitMismatches(items, scaleLeading, before2, after),
-              present: (_b, after, w) => ({ measured: after, changes: w.layers })
+              check: (before2, after, w) => fitMismatches(items, scaleLeading, before2, after, w),
+              present: (_b, after, w) => ({ measured: after, changes: w.layers, skipped: w.skipped, no_op: w.no_op === true })
             });
             let out;
             if (pass === 1) {
@@ -11117,8 +11219,11 @@ var init_fittext = __esm({
               }
             }
             const before = current;
-            for (const it of items) used.set(it.id, (used.get(it.id) ?? 0) + 1);
-            passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: out.changes, receipt: out.receipt });
+            const wroteSkipped = out.skipped ?? [];
+            for (const sk of wroteSkipped) hostSkip.set(sk.id, sk.reason ?? "the host would not write it");
+            for (const it of items) if (!hostSkip.has(it.id)) used.set(it.id, (used.get(it.id) ?? 0) + 1);
+            const wroteNothing = out.no_op === true;
+            passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: out.changes, receipt: out.receipt, ...wroteNothing ? { wrote_nothing: true } : {} });
             const measured = out.measured;
             if (!measured) break;
             current = current.map((l) => measured.layers.find((n) => n.id === l.id) ?? l);
@@ -11137,7 +11242,10 @@ var init_fittext = __esm({
             const n = used.get(l.id) ?? 0;
             let status;
             let reason;
-            if (p.status === "resize") {
+            if (hostSkip.has(l.id)) {
+              status = "skip";
+              reason = hostSkip.get(l.id);
+            } else if (p.status === "resize") {
               status = "unfitted";
               if (stalled.has(l.id)) reason = "the text's bounds did not change with the font size; more passes would not help";
               else if (passError && n < passCap(l, maxPasses)) reason = `pass ${passError.pass} failed: ${passError.message}`;
@@ -11151,7 +11259,7 @@ var init_fittext = __esm({
           const lastWithReceipt = [...passes].reverse().find((p) => p.receipt !== void 0);
           return {
             ok: true,
-            applied: passes.some((p) => p.op_id !== void 0),
+            applied: passes.some((p) => p.op_id !== void 0 && p.wrote_nothing !== true),
             region,
             passes,
             layers: final,
@@ -11164,7 +11272,7 @@ var init_fittext = __esm({
       },
       {
         name: "ae_text_backdrop",
-        description: "Put a rectangle behind a text layer that is always the text's size plus padding: a shape layer directly below it whose Rectangle Size and Position are expressions on the text's sourceRectAtTime, so it follows edits to the text. One undo group guarded by `expect`; the read-back (a separate evalScript) checks the box sits directly below the text, its expression has no error and its evaluated size is the text's bounds plus padding. The expression finds the text layer by name, so renaming the text layer by script breaks it. The box is the bounding box of the text's bounds in comp space, so Scale, rotation and a parent are followed; the receipt checks the size only for an unrotated, unparented, 2D text layer (it takes Scale into account). " + AGENT_SAFETY_GUIDANCE,
+        description: "Put a rectangle behind a text layer that is always the text's size plus padding: a shape layer directly below it whose Rectangle Size and Position are expressions on the text's sourceRectAtTime, so it follows edits to the text. One undo group guarded by `expect`; the read-back (a separate evalScript) checks the box sits directly below the text, its expression has no error and its evaluated size is the text's bounds plus padding. The expression finds the text layer by name: the call is refused when another layer has the same name, and the text layer's name is pinned (it stops following its Source Text), so renaming it by script breaks the link. The box is the bounding box of the text's bounds in comp space, so Scale, rotation and a parent are followed; the receipt checks the size only for an unrotated, unparented, 2D text layer (it takes Scale into account). " + AGENT_SAFETY_GUIDANCE,
         schema: AeTextBackdropSchema,
         handler: async (args, ctx) => runGuardedWrite(ctx, {
           toolName: "ae_text_backdrop",
@@ -11267,14 +11375,14 @@ function planStagger(args, read) {
   if (read.truncated) return bad3("More than 500 layers were given or selected; split them into batches.");
   const skipped = [];
   let layers = read.layers;
+  const lockedOnes = layers.filter((l) => l.locked === true);
+  if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
   if (args.mode !== "layers") {
     const prop = (l) => l.property;
     const missing = layers.filter((l) => !prop(l)?.found);
     if (missing.length) {
       return bad3(`${missing.length} layer(s) have no property ${args.property_path?.join(" > ")}: ${missing.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${missing.length > 5 ? ", ..." : ""}.`);
     }
-    const lockedOnes = layers.filter((l) => l.locked === true);
-    if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
     const sepLeaders = layers.filter((l) => prop(l)?.separationLeader);
     if (sepLeaders.length) return bad3(`"${sepLeaders[0].name}": that Position has separated dimensions; its keys are on X Position / Y Position (ADBE Position_0, ADBE Position_1).`);
     if (args.mode === "keys") {
@@ -11320,7 +11428,7 @@ function planStagger(args, read) {
       e.from = l.startTime;
       e.to = Number((l.startTime + offsets[i]).toFixed(9));
     } else {
-      const p = l.property;
+      const p = args.mode === "copy_keys" ? read.source?.property : l.property;
       e.num_keys = p?.numKeys;
       e.first_time = p?.times?.[0];
     }
@@ -11785,11 +11893,13 @@ function planTimeRemap(args, info) {
     }
     case "freeze": {
       let src;
+      let reportAt = info.in_point;
       if (args.source_time !== void 0) {
         src = args.source_time;
       } else {
         const at = args.at_time;
-        if (at < info.in_point - EPS || at >= info.out_point + EPS) {
+        reportAt = at;
+        if (at < info.in_point - EPS || at >= info.out_point - EPS) {
           return bad(`at_time ${at}s is outside the layer (${fix(info.in_point)}s to ${fix(info.out_point)}s).`);
         }
         const found = sourceTimeAt(info, at);
@@ -11798,7 +11908,7 @@ function planTimeRemap(args, info) {
       }
       const sfd = info.source.frame_duration;
       if (sfd > 0) src = fix(Math.floor(src / sfd + 1e-6) * sfd);
-      if (src < -EPS || src > maxSrc + EPS) return bad(tooFar("The frozen frame", src, info.in_point, info));
+      if (src < -EPS || src > maxSrc + EPS) return bad(tooFar("The frozen frame", src, reportAt, info));
       src = Math.min(Math.max(src, 0), maxSrc);
       const plan2 = basePlan("freeze", info);
       plan2.enable = !info.remap_enabled;
@@ -11864,7 +11974,7 @@ function planTimeRemap(args, info) {
           stretch: fix(stretch),
           keep_in_point: true,
           expect_remap_enabled: false,
-          notes: ["layer.stretch changed; the in point was kept by shifting the start time if AE moved it."]
+          notes: ["layer.stretch changed; the start time was moved so the in point stays put (checked in the read-back)."]
         }
       };
     }
@@ -12027,6 +12137,15 @@ function planRamp(args, info, cfd) {
       return bad(`A per_frame ramp over ${times.length} frames is more than ${MAX_PLAN_KEYS} keys; use method "bezier" or a shorter ramp.`);
     }
     plan2.per_frame = { times, values: times.map((t) => Math.min(Math.max(rampSourceAt(points, values, t), 0), dur)) };
+    const picks = Math.min(times.length, MAX_PLAN_SAMPLES);
+    const seen = /* @__PURE__ */ new Set();
+    for (let n = 0; n < picks; n++) {
+      const idx = picks === 1 ? 0 : Math.round(n * (times.length - 1) / (picks - 1));
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      plan2.sample_times.push(times[idx]);
+      plan2.expected_samples.push({ time: times[idx], value: plan2.per_frame.values[idx] });
+    }
     plan2.notes.push(`${times.length} linear keys, one per frame.`);
   }
   if (outside === "trim") {
@@ -12073,6 +12192,28 @@ function remapMismatches(plan2, beforeRaw, afterRaw) {
           });
         }
       }
+      for (let i = 0; i < n && shown < 5; i++) {
+        const e = plan2.keys[i].ease;
+        if (!e) continue;
+        const k = after.keys[i];
+        const sides = [
+          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0]],
+          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0]]
+        ];
+        for (const [nm, speed, infl, got] of sides) {
+          if (speed === void 0 && infl === void 0) continue;
+          const bad3 = !got || speed !== void 0 && !(Math.abs(got.speed - speed) <= 1e-3) || infl !== void 0 && !(Math.abs(got.influence - infl) <= 0.01);
+          if (bad3 && shown < 5) {
+            shown++;
+            m.push({
+              path: `keys[${i + 1}].ease`,
+              expected: { side: nm, speed, influence: infl },
+              actual: got ?? null,
+              message: "A remap key's ease differs from the plan (After Effects may have clamped or reset it)"
+            });
+          }
+        }
+      }
     }
   }
   const tol = Math.max(sfd * 0.25, 1e-3);
@@ -12087,7 +12228,7 @@ function remapMismatches(plan2, beforeRaw, afterRaw) {
         path: `samples@${e.time}`,
         expected: fix(e.value),
         actual: got.value,
-        message: "The Bezier ramp doesn't match the integrated speed curve (the ease speed unit may differ); redo it with method per_frame"
+        message: plan2.per_frame ? "A per_frame ramp key's sampled source time differs from the plan" : "The Bezier ramp doesn't match the integrated speed curve (the ease speed unit may differ); redo it with method per_frame"
       });
       break;
     }
@@ -12130,7 +12271,7 @@ function summarise2(info) {
     expression: info.expression
   };
 }
-var OPERATIONS, RampPointSchema, AeGetTimeRemapSchema, PARAMS, OPTIONAL_PARAMS, AeTimeRemapSchema, EPS, THIRD_INFLUENCE, MAX_PLAN_KEYS, bad, fix, snapTo, snapshotOf, hasExpression, short, tooFar, num2, infoOf, timeremapTools;
+var OPERATIONS, RampPointSchema, AeGetTimeRemapSchema, PARAMS, OPTIONAL_PARAMS, AeTimeRemapSchema, EPS, THIRD_INFLUENCE, MAX_PLAN_KEYS, MAX_PLAN_SAMPLES, bad, fix, snapTo, snapshotOf, hasExpression, short, tooFar, num2, infoOf, timeremapTools;
 var init_timeremap = __esm({
   "src/tools/ext/timeremap.ts"() {
     "use strict";
@@ -12198,6 +12339,7 @@ var init_timeremap = __esm({
     EPS = 1e-6;
     THIRD_INFLUENCE = 100 / 3;
     MAX_PLAN_KEYS = 3e3;
+    MAX_PLAN_SAMPLES = 100;
     bad = (message) => ({ ok: false, error: "bad_args", message });
     fix = (n) => Math.round(n * 1e9) / 1e9;
     snapTo = (t, step2) => fix(Math.round(t / step2) * step2);
@@ -12277,9 +12419,9 @@ var init_timeremap = __esm({
   }
 });
 
-// node_modules/pngjs/lib/chunkstream.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/chunkstream.js
 var require_chunkstream = __commonJS({
-  "node_modules/pngjs/lib/chunkstream.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/chunkstream.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -12415,9 +12557,9 @@ var require_chunkstream = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/interlace.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/interlace.js
 var require_interlace = __commonJS({
-  "node_modules/pngjs/lib/interlace.js"(exports2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/interlace.js"(exports2) {
     "use strict";
     var imagePasses = [
       {
@@ -12498,9 +12640,9 @@ var require_interlace = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/paeth-predictor.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/paeth-predictor.js
 var require_paeth_predictor = __commonJS({
-  "node_modules/pngjs/lib/paeth-predictor.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/paeth-predictor.js"(exports2, module2) {
     "use strict";
     module2.exports = function paethPredictor(left, above, upLeft) {
       let paeth = left + above - upLeft;
@@ -12518,9 +12660,9 @@ var require_paeth_predictor = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/filter-parse.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse.js
 var require_filter_parse = __commonJS({
-  "node_modules/pngjs/lib/filter-parse.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse.js"(exports2, module2) {
     "use strict";
     var interlaceUtils = require_interlace();
     var paethPredictor = require_paeth_predictor();
@@ -12659,9 +12801,9 @@ var require_filter_parse = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/filter-parse-async.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-async.js
 var require_filter_parse_async = __commonJS({
-  "node_modules/pngjs/lib/filter-parse-async.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var ChunkStream = require_chunkstream();
@@ -12685,9 +12827,9 @@ var require_filter_parse_async = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/constants.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/pngjs/lib/constants.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/constants.js"(exports2, module2) {
     "use strict";
     module2.exports = {
       PNG_SIGNATURE: [137, 80, 78, 71, 13, 10, 26, 10],
@@ -12720,9 +12862,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/crc.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/crc.js
 var require_crc = __commonJS({
-  "node_modules/pngjs/lib/crc.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/crc.js"(exports2, module2) {
     "use strict";
     var crcTable = [];
     (function() {
@@ -12760,9 +12902,9 @@ var require_crc = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/parser.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser.js
 var require_parser = __commonJS({
-  "node_modules/pngjs/lib/parser.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     var CrcCalculator = require_crc();
@@ -12981,9 +13123,9 @@ var require_parser = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/bitmapper.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitmapper.js
 var require_bitmapper = __commonJS({
-  "node_modules/pngjs/lib/bitmapper.js"(exports2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitmapper.js"(exports2) {
     "use strict";
     var interlaceUtils = require_interlace();
     var pixelBppMapper = [
@@ -13229,9 +13371,9 @@ var require_bitmapper = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/format-normaliser.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/format-normaliser.js
 var require_format_normaliser = __commonJS({
-  "node_modules/pngjs/lib/format-normaliser.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/format-normaliser.js"(exports2, module2) {
     "use strict";
     function dePalette(indata, outdata, width, height, palette) {
       let pxPos = 0;
@@ -13310,9 +13452,9 @@ var require_format_normaliser = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/parser-async.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-async.js
 var require_parser_async = __commonJS({
-  "node_modules/pngjs/lib/parser-async.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var zlib = require("zlib");
@@ -13440,9 +13582,9 @@ var require_parser_async = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/bitpacker.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitpacker.js
 var require_bitpacker = __commonJS({
-  "node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/bitpacker.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     module2.exports = function(dataIn, width, height, options) {
@@ -13590,9 +13732,9 @@ var require_bitpacker = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/filter-pack.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-pack.js
 var require_filter_pack = __commonJS({
-  "node_modules/pngjs/lib/filter-pack.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-pack.js"(exports2, module2) {
     "use strict";
     var paethPredictor = require_paeth_predictor();
     function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
@@ -13732,9 +13874,9 @@ var require_filter_pack = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/packer.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer.js
 var require_packer = __commonJS({
-  "node_modules/pngjs/lib/packer.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer.js"(exports2, module2) {
     "use strict";
     var constants3 = require_constants();
     var CrcStream = require_crc();
@@ -13832,9 +13974,9 @@ var require_packer = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/packer-async.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-async.js
 var require_packer_async = __commonJS({
-  "node_modules/pngjs/lib/packer-async.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-async.js"(exports2, module2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -13874,9 +14016,9 @@ var require_packer_async = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/sync-inflate.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-inflate.js
 var require_sync_inflate = __commonJS({
-  "node_modules/pngjs/lib/sync-inflate.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-inflate.js"(exports2, module2) {
     "use strict";
     var assert = require("assert").ok;
     var zlib = require("zlib");
@@ -14011,9 +14153,9 @@ var require_sync_inflate = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/sync-reader.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-reader.js
 var require_sync_reader = __commonJS({
-  "node_modules/pngjs/lib/sync-reader.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/sync-reader.js"(exports2, module2) {
     "use strict";
     var SyncReader = module2.exports = function(buffer) {
       this._buffer = buffer;
@@ -14049,9 +14191,9 @@ var require_sync_reader = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/filter-parse-sync.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-sync.js
 var require_filter_parse_sync = __commonJS({
-  "node_modules/pngjs/lib/filter-parse-sync.js"(exports2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/filter-parse-sync.js"(exports2) {
     "use strict";
     var SyncReader = require_sync_reader();
     var Filter = require_filter_parse();
@@ -14073,9 +14215,9 @@ var require_filter_parse_sync = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/parser-sync.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-sync.js
 var require_parser_sync = __commonJS({
-  "node_modules/pngjs/lib/parser-sync.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/parser-sync.js"(exports2, module2) {
     "use strict";
     var hasSyncZlib = true;
     var zlib = require("zlib");
@@ -14168,9 +14310,9 @@ var require_parser_sync = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/packer-sync.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-sync.js
 var require_packer_sync = __commonJS({
-  "node_modules/pngjs/lib/packer-sync.js"(exports2, module2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/packer-sync.js"(exports2, module2) {
     "use strict";
     var hasSyncZlib = true;
     var zlib = require("zlib");
@@ -14213,9 +14355,9 @@ var require_packer_sync = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/png-sync.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png-sync.js
 var require_png_sync = __commonJS({
-  "node_modules/pngjs/lib/png-sync.js"(exports2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png-sync.js"(exports2) {
     "use strict";
     var parse = require_parser_sync();
     var pack = require_packer_sync();
@@ -14228,9 +14370,9 @@ var require_png_sync = __commonJS({
   }
 });
 
-// node_modules/pngjs/lib/png.js
+// F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png.js
 var require_png = __commonJS({
-  "node_modules/pngjs/lib/png.js"(exports2) {
+  "F:/Dropbox/_claude_projects/chroma-ae-mcp/server/node_modules/pngjs/lib/png.js"(exports2) {
     "use strict";
     var util2 = require("util");
     var Stream = require("stream");
@@ -16215,7 +16357,8 @@ function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
   for (const s of w.spread) {
     const l = after.layers.find((x) => x.id === s.id);
     if (!l) {
-      m.push({ path: `spread.${s.name}`, expected: s.id, actual: void 0, message: `Layer "${s.name}" is not in the read-back` });
+      const capped3 = (after.ids_dropped ?? 0) > 0 ? " (the read-back dropped ids past its cap, so this layer could not be checked)" : "";
+      m.push({ path: `spread.${s.name}`, expected: s.id, actual: void 0, message: `Layer "${s.name}" is not in the read-back${capped3}` });
       continue;
     }
     expectThat(m, l.three_d, `spread.${s.name}.three_d`, true, l.three_d, `Layer "${s.name}" is not 3D`);
@@ -16242,7 +16385,7 @@ function analyseScene(read, cameraId) {
       twoD++;
       continue;
     }
-    const chain = chainMatrix(l, byId3);
+    const chain = chainMatrix({ ...l, auto_orient_active: false }, byId3);
     if (!chain.matrix || !l.transform) {
       unresolved.push({ id: l.id, name: l.name, reason: chain.reason ?? "no transform" });
       continue;
@@ -16265,7 +16408,7 @@ function analyseScene(read, cameraId) {
       size_ratio: behind2 ? null : r3(model.zoom / depth),
       behind_camera: behind2,
       center_in_frame: sx !== null && sy !== null && sx >= 0 && sx <= width && sy >= 0 && sy <= height,
-      rendered: l.visible && (!read.solo_active || l.solo === true)
+      rendered: l.visible && l.kind !== "null" && l.guide !== true && (!read.solo_active || l.solo === true)
     });
   }
   entries.sort((x, y) => x.depth - y.depth || x.index - y.index);
@@ -16507,7 +16650,7 @@ function proofVerdict(suspect, diff, error, scope = "frame") {
   }
   return {
     verdict: "not_confirmed",
-    explanation: `Undoing "${suspect}" in a copy changes no pixels ${where}, so it is not what hides the layer at this time (or the layer is covered by something else).`
+    explanation: `Undoing "${suspect}" in a copy changes no pixels ${where}, so undoing this cause alone does not make the layer show. Other causes may also hide it, or something else covers it (run ae_explain_layer to list them).`
   };
 }
 function proofMismatches(before, after, cleanupError, copyId) {
@@ -16523,7 +16666,7 @@ function proofMismatches(before, after, cleanupError, copyId) {
   const b = before;
   const a = after;
   if (b && a) {
-    expectThat(m, a.proof_comps === 0, "proof_comps", 0, a.proof_comps, "A temporary proof comp is still in the project");
+    expectThat(m, a.proof_comps === b.proof_comps, "proof_comps", b.proof_comps, a.proof_comps, "A temporary proof comp is still in the project");
     expectThat(m, a.num_items === b.num_items, "num_items", b.num_items, a.num_items, "The project's item count changed");
   }
   return m;
@@ -16559,7 +16702,7 @@ var init_explain = __esm({
       comp_id: external_exports.number().int().describe("The composition the layer is in."),
       layer: LayerSelectorSchema.describe("The layer that does not show."),
       suspect: external_exports.enum(SUSPECTS).describe(
-        "The cause to test, undone in a COPY of the comp: enabled (video switch on), solo (clear other layers' solo), opacity (a plain 0% to 100%), track_matte (remove it), masks (all to None), layers_above (switch off every layer above, to test 'covered'), adjustment_above (switch off adjustment layers above). Only the comp's top-level layers are changed: a duplicated comp shares its nested precomps with the original."
+        "The cause to test, undone in a COPY of the comp: enabled (video switch on), solo (solo the target in the copy too; the other layers keep their solo), opacity (a plain 0% to 100%), track_matte (remove it), masks (all to None), layers_above (switch off every layer above, to test 'covered'), adjustment_above (switch off adjustment layers above). Only the comp's top-level layers are changed: a duplicated comp shares its nested precomps with the original."
       ),
       time: external_exports.number().min(0).optional().describe("Comp time in seconds to render. Default: the comp's current time."),
       threshold: external_exports.number().min(0).max(1).optional().describe("A pixel counts as changed when a channel differs by more than this (0..1, default 0.02)."),
@@ -16644,6 +16787,7 @@ var init_explain = __esm({
           try {
             return await ctx.queue.run(label, async () => {
               ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, expect, opId);
               await ctx.bridge.evalRaw({
                 id: `${opId}_plan`,
                 script: buildJsxCall("explainProofPlan", { comp_id: args.comp_id, layer: args.layer, suspect: args.suspect, time: args.time }),
@@ -16651,7 +16795,6 @@ var init_explain = __esm({
                 mutates: false,
                 toolName
               });
-              const guard = await verifyTargetGuard(ctx, expect, opId);
               const checkpoint = await autoCheckpoint(ctx, guard, toolName);
               const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
               const sessionFields = await noteBeforeWrite(ctx, note);
@@ -17819,7 +17962,8 @@ function pluralVerb(verb) {
 function buildActions(raw) {
   const byIndex = new Map(raw.layers.map((l) => [l.index, l]));
   const actions = [];
-  const sorted = [...raw.segments].sort((a, b) => a.start - b.start);
+  const eff = (s) => s.hold ? s.end : s.start;
+  const sorted = [...raw.segments].sort((a, b) => eff(a) - eff(b));
   const open = /* @__PURE__ */ new Map();
   for (const seg0 of sorted) {
     const layer = byIndex.get(seg0.layer);
@@ -17828,10 +17972,12 @@ function buildActions(raw) {
     const verb = verbFor(s);
     const key = `${s.layer}|${verb}`;
     const cur = open.get(key);
-    if (cur && s.start <= cur.end + MERGE_GAP) {
+    const aStart = s.hold ? s.end : s.start;
+    if (cur && aStart <= cur.end + MERGE_GAP) {
+      cur.start = Math.min(cur.start, aStart);
       cur.end = Math.max(cur.end, s.end);
     } else {
-      const a = { layer: s.layer, name: layer.name, verb, start: s.start, end: s.end };
+      const a = { layer: s.layer, name: layer.name, verb, start: aStart, end: s.end };
       open.set(key, a);
       actions.push(a);
     }
@@ -17853,7 +17999,8 @@ function beatText(group) {
   const byVerb = /* @__PURE__ */ new Map();
   for (const a of group) {
     const names = byVerb.get(a.verb) ?? [];
-    if (!names.includes(a.name)) names.push(a.name);
+    const nm = clipName(a.name);
+    if (!names.includes(nm)) names.push(nm);
     byVerb.set(a.verb, names);
   }
   const parts = [];
@@ -17902,7 +18049,7 @@ function beatLine(b) {
   return `${span}: ${b.text}`;
 }
 function listNames(layers, max = 6) {
-  const shown = layers.slice(0, max).map((l) => `#${l.index} "${l.name}"`);
+  const shown = layers.slice(0, max).map((l) => `#${l.index} "${clipName(l.name)}"`);
   const more = layers.length - shown.length;
   return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
 }
@@ -17919,7 +18066,7 @@ function findConcerns(raw) {
   const reasons = [];
   if (!raw.range.complete) reasons.push("only part of the comp was read");
   if (raw.range.layers_over_cap) reasons.push("the comp is too big to cross-reference every layer");
-  if (raw.walk_truncated) reasons.push("the property scan hit its cap, so later expressions were not read");
+  if (raw.walk_truncated) reasons.push("the property scan was cut short (visit cap or very deeply nested groups), so some expressions were not read");
   if (raw.layers.some((l) => l.expressions.refs_truncated)) reasons.push("some expressions name more layers than were recorded");
   const complete = reasons.length === 0;
   const off = raw.layers.filter((l) => !l.enabled && !l.is_matte);
@@ -17956,7 +18103,7 @@ function describeFromRaw(raw, maxBeats = 12) {
   const beats = allBeats.slice(0, MAX_BEATS);
   const longActions = actions.filter((a) => isLongAction(a, c.duration));
   const throughoutTruncated = longActions.length > MAX_THROUGHOUT;
-  const throughout = longActions.slice(0, MAX_THROUGHOUT).map((a) => `"${a.name}" ${a.verb} (${fmtTime(a.start)}-${fmtTime(a.end)} s)`);
+  const throughout = longActions.slice(0, MAX_THROUGHOUT).map((a) => `"${clipName(a.name)}" ${a.verb} (${fmtTime(a.start)}-${fmtTime(a.end)} s)`);
   const concerns = findConcerns(raw);
   const expressions = raw.layers.filter((l) => l.expressions.count > 0).map((l) => ({ layer: l.index, name: l.name, count: l.expressions.count, props: l.expressions.props, refs: l.expressions.refs, errors: l.expressions.errors }));
   const precomps = raw.layers.filter((l) => l.role === "precomp" && l.source?.kind === "comp" && l.source.id !== void 0).map((l) => ({ layer: l.index, name: l.name, comp_id: l.source.id, comp_name: l.source.name ?? "", comp_layers: l.source.layers }));
@@ -17975,8 +18122,16 @@ function describeFromRaw(raw, maxBeats = 12) {
   }
   if (beats.length > 0) {
     lines.push("Timeline:");
-    for (const b of beats.slice(0, maxBeats)) lines.push(`  ${beatLine(b)}`);
-    if (beats.length > maxBeats) lines.push(`  ... ${beats.length - maxBeats} more beats (see beats).`);
+    let used = 0;
+    let shownBeats = 0;
+    for (const b of beats.slice(0, maxBeats)) {
+      const text = `  ${beatLine(b)}`;
+      if (shownBeats > 0 && used + text.length > BEAT_TEXT_BUDGET) break;
+      lines.push(text);
+      used += text.length + 1;
+      shownBeats++;
+    }
+    if (beats.length > shownBeats) lines.push(`  ... ${beats.length - shownBeats} more beats (see beats).`);
   } else if (raw.layers.length > 0 && throughout.length === 0) {
     lines.push("Timeline: no keyframed motion, sampled expression motion or layer entrances and exits found.");
   }
@@ -18013,10 +18168,17 @@ function describeFromRaw(raw, maxBeats = 12) {
   if (raw.samples_truncated) notes.push("The sampling budget ran out; some overshoot and expression-motion checks were skipped.");
   if (beatsTruncated) notes.push(`More than ${MAX_BEATS} beats; the rest are left out.`);
   if (raw.segments_truncated) notes.push("Some keyframed motion was left out (per-layer or total segment cap), so the timeline may be incomplete.");
-  if (raw.walk_truncated) notes.push("The property scan hit its cap; later layers may be missing animation and expressions.");
+  if (raw.walk_truncated) notes.push("The property scan was cut short (visit cap or very deeply nested groups); some animation and expressions may be missing.");
   if (notes.length > 0) lines.push(...notes);
+  let summaryText = lines.join("\n");
+  let summaryTruncated = false;
+  if (summaryText.length > MAX_SUMMARY) {
+    summaryText = `${summaryText.slice(0, MAX_SUMMARY - 60)}
+... summary cut at the length limit.`;
+    summaryTruncated = true;
+  }
   return {
-    summary: lines.join("\n"),
+    summary: summaryText,
     format: { width: c.width, height: c.height, pixel_aspect: c.pixel_aspect, frame_rate: c.frame_rate, duration: c.duration, frames },
     roles,
     stack: runs,
@@ -18025,6 +18187,7 @@ function describeFromRaw(raw, maxBeats = 12) {
     ...beatsTruncated ? { beats_truncated: true } : {},
     throughout,
     ...throughoutTruncated ? { throughout_truncated: true } : {},
+    ...summaryTruncated ? { summary_truncated: true } : {},
     expressions,
     precomps,
     nesting: raw.nesting,
@@ -18092,7 +18255,7 @@ function drawGantt(raw) {
   }
   return { png, info: { width, height, rows: layers.length, rows_truncated: raw.layers.length > layers.length } };
 }
-var crypto8, fs19, path18, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
+var crypto8, fs19, path18, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
 var init_describe = __esm({
   "src/tools/ext/describe.ts"() {
     "use strict";
@@ -18133,6 +18296,10 @@ var init_describe = __esm({
       "ADBE Orientation": "rotation",
       "ADBE Anchor Point": "anchor"
     };
+    NAME_CLIP = 60;
+    clipName = (n) => n.length > NAME_CLIP ? `${n.slice(0, NAME_CLIP)}...` : n;
+    MAX_SUMMARY = 2e4;
+    BEAT_TEXT_BUDGET = 14e3;
     quoteList = (names) => {
       const q = names.map((n) => `"${n}"`);
       if (q.length <= 1) return q.join("");
@@ -18175,7 +18342,7 @@ var init_describe = __esm({
             comp: raw.comp,
             range: raw.range,
             ...desc,
-            truncated: raw.segments_truncated || raw.walk_truncated || raw.markers.truncated || raw.nesting_truncated || raw.range.layers_over_cap || raw.samples_truncated === true || desc.stack_truncated === true || desc.beats_truncated === true || desc.throughout_truncated === true
+            truncated: raw.segments_truncated || raw.walk_truncated || raw.markers.truncated || raw.nesting_truncated || raw.range.layers_over_cap || raw.samples_truncated === true || desc.stack_truncated === true || desc.beats_truncated === true || desc.throughout_truncated === true || desc.summary_truncated === true
           };
           if (args.include_layers) {
             out.layers = raw.layers.map((l) => ({
@@ -19049,15 +19216,25 @@ async function scrubFile(args, ctx) {
     const problems2 = [];
     const notesOut2 = [];
     let timing2 = { frameDuration: imported2.frameDuration, duration: imported2.duration, frameRate: imported2.frameRate };
+    let importMissing = false;
     try {
       const st = (await call2("verify", "scrubState", { item_id: imported2.item_id, comp_id: imported2.comp_id }, false)).result;
       const itemFps = st.item?.frameRate;
       const itemDur = st.item?.duration;
       const compFps = st.comp?.frameRate;
       const compDur = st.comp?.duration;
+      if (!st.item || !st.comp) {
+        importMissing = true;
+        problems2.push({
+          path: "import",
+          expected: { item: imported2.item_id, comp: imported2.comp_id },
+          actual: { item: st.item?.id ?? null, comp: st.comp?.id ?? null },
+          message: "The imported render or its temporary comp was not found in a separate read after the import; nothing was sampled."
+        });
+      }
       if (typeof itemFps === "number" && typeof itemDur === "number" && itemFps > 0 && itemDur > 0) {
-        const off = typeof compFps === "number" && Math.abs(compFps - itemFps) > 1e-6 || typeof compDur === "number" && Math.abs(compDur - itemDur) > 0.5 / itemFps;
-        const importDiffers = Math.abs(itemFps - imported2.frameRate) > 1e-6 || Math.abs(itemDur - imported2.duration) > 0.5 / itemFps;
+        const off = typeof compFps === "number" && Math.abs(1 / compFps - 1 / itemFps) > 1e-6 || typeof compDur === "number" && Math.abs(compDur - itemDur) > 0.5 / itemFps;
+        const importDiffers = Math.abs(1 / itemFps - 1 / imported2.frameRate) > 1e-6 || Math.abs(itemDur - imported2.duration) > 0.5 / itemFps;
         if (importDiffers) timing2 = { frameRate: itemFps, frameDuration: 1 / itemFps, duration: itemDur };
         if (off || importDiffers) {
           notesOut2.push(
@@ -19074,7 +19251,7 @@ async function scrubFile(args, ctx) {
     try {
       range2 = resolveRange(args, { start: 0, end: timing2.duration, duration: timing2.duration });
       const frames = framesInRange(range2.start, range2.end, timing2.frameDuration);
-      if (frames >= 2) {
+      if (frames >= 2 && !importMissing) {
         plan3 = planSamples(frames, args.samples ?? 24);
         cap3 = await captureFrames(ctx, opId, imported2.comp_id, plan3, { start: range2.start, frameDuration: timing2.frameDuration, duration: timing2.duration }, framesDir);
       }
@@ -19196,7 +19373,7 @@ var init_scrub = __esm({
     };
     AeScrubCheckSchema = external_exports.object({
       comp_id: external_exports.number().int().optional().describe("Check this comp (read-only: nothing in the project changes). Give comp_id or path."),
-      path: external_exports.string().min(1).optional().describe(
+      path: external_exports.string().min(1).max(2e4).optional().describe(
         "Or check a finished render: the absolute path of a movie, or of one frame of an image sequence. AE imports it, a temporary comp is built to grab frames from, and both are removed again (needs `expect`)."
       ),
       sequence: external_exports.boolean().optional().describe("With path: import as an image sequence. Default: yes when numbered frames with the same pattern sit beside the file."),
@@ -19332,9 +19509,13 @@ function renderQueueFindings2(read) {
   if (!anyOn) return out;
   for (const q of rq.items) {
     if (!rendersWithProxies(q.proxy_use) || q.status !== void 0 && !WILL_RENDER.has(q.status.toLowerCase())) continue;
-    if (compsOnly(q.proxy_use) && !anyCompOn) continue;
-    {
-      out.push({ code: "queue_uses_proxies", severity: "warn", message: `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}" while footage has its proxy on: it would render from proxies.` });
+    const label = `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}"`;
+    const used = new Set(q.reach ?? []);
+    const hit = read.items.some((i) => i.use_proxy === true && i.proxy && used.has(i.id) && (!compsOnly(q.proxy_use) || i.kind === "comp"));
+    if (hit) {
+      out.push({ code: "queue_uses_proxies", severity: "warn", message: `${label} and its comp uses an item with its proxy on: it would render from proxies.` });
+    } else if ((!q.reach || q.reach_complete !== true) && (!compsOnly(q.proxy_use) || anyCompOn)) {
+      out.push({ code: "queue_uses_proxies", severity: "info", message: `${label} while footage has its proxy on: it may render from proxies (what the comp uses could not be fully read).` });
     }
   }
   return out;
@@ -19416,7 +19597,8 @@ function proxyMismatches(args, beforeRaw, afterRaw) {
           expectThat(m, normPath2(now.proxy.file) === normPath2(args.file), `items[${id}].proxy.file`, args.file, now.proxy.file, "The proxy is another file");
         }
       }
-      if (args.use_proxy !== void 0) expectThat(m, now.use_proxy === args.use_proxy, `items[${id}].use_proxy`, args.use_proxy, now.use_proxy, "useProxy differs");
+      const wantUse = args.use_proxy !== void 0 ? args.use_proxy : true;
+      expectThat(m, now.use_proxy === wantUse, `items[${id}].use_proxy`, wantUse, now.use_proxy, "useProxy differs");
     }
     if (was && (args.action === "use_on" || args.action === "use_off") && was.proxy && !now.proxy) {
       m.push({ path: `items[${id}].proxy`, expected: was.proxy, actual: now.proxy, message: "The proxy was removed though it was not asked for" });
@@ -19514,7 +19696,7 @@ var init_interpret = __esm({
     interpretTools = [
       {
         name: "ae_get_footage_interpretation",
-        description: "Audit how After Effects interprets the project's footage, without opening Interpret Footage: alpha mode (ignore, straight, premultiplied with its matte colour), alpha invert, field separation and order, pulldown, conform / native / display frame rate, loop, pixel aspect, and each item's proxy (file, solid, missing) and whether it is switched on. Each item carries `findings` for the usual causes of edge fringing and stutter: alpha ignored on a clip that has alpha, 29.97 conformed to 30 (or 23.976 to 24), a stray loop, fields on UHD, a non-square pixel aspect on HD or UHD media, and proxies left on. With the render queue read (default), it also flags queued items whose 'Proxy Use' setting would render from proxies while footage has its proxy on. Fields a still or this AE build can't read are listed in `unreadable`. Lists 500 items at most (`truncated`); solids and placeholders are counted in `skipped`. Changes nothing in After Effects. Colour profiles per footage are not scriptable (only the project's working space is); `probe_colour` lists any colour-looking property names on the first source.",
+        description: "Audit how After Effects interprets the project's footage, without opening Interpret Footage: alpha mode (ignore, straight, premultiplied with its matte colour), alpha invert, field separation and order, pulldown, conform / native / display frame rate, loop, pixel aspect, and each item's proxy (file, solid, missing) and whether it is switched on. Each item carries `findings` for the usual causes of edge fringing and stutter: alpha ignored on a clip that has alpha, 29.97 conformed to 30 (or 23.976 to 24), a stray loop, fields on UHD, a non-square pixel aspect on HD or UHD media, and proxies left on. With the render queue read (default), it also flags queued items whose Proxy Use setting would render from proxies because the queued comp (through its precomps) uses an item with its proxy on; if what the comp uses can't be fully read (bounded walk), the finding is only info: it may render from proxies. Fields a still or this AE build can't read are listed in `unreadable`. Lists 500 items at most (`truncated`); solids and placeholders are counted in `skipped`. Changes nothing in After Effects. Colour profiles per footage are not scriptable (only the project's working space is); `probe_colour` lists any colour-looking property names on the first source.",
         schema: AeGetFootageInterpretationSchema,
         handler: async (args, ctx) => {
           const res = await ctx.bridge.callHost(
@@ -19527,8 +19709,14 @@ var init_interpret = __esm({
           const shown = args.only_findings ? rows.filter((r) => r.findings.length > 0) : rows;
           const queueFindings = renderQueueFindings2(read);
           const all = rows.flatMap((r) => r.findings).concat(queueFindings);
+          const rq = read.render_queue;
+          const render_queue = rq ? {
+            ...rq,
+            items: (rq.items ?? []).map(({ reach, ...q }) => ({ ...q, reach_count: reach ? reach.length : void 0 }))
+          } : rq;
           return {
             ...read,
+            render_queue,
             items: shown,
             findings_total: all.length,
             warnings: all.filter((f) => f.severity === "warn").length,
@@ -20051,7 +20239,7 @@ var init_paths = __esm({
         "Write a key at this comp time instead of a value. Needed when the path already has keys; on a path without keys it adds the first key (add a second with another call to morph)."
       ),
       allow_vertex_count_change: external_exports.boolean().optional().describe("Allow a key whose vertex count differs from the path's other keys. That breaks the morph between keys, so it is off by default."),
-      allow_feather_loss: external_exports.boolean().optional().describe("Allow a vertex count change on a mask with feather points; AE can't keep them on the right segments, so they are cleared."),
+      allow_feather_loss: external_exports.boolean().optional().describe("Allow a write that changes the vertex count or order (reverse, resample, smooth, mirror with reverse_direction) on a mask with feather points; AE can't keep them on the right segments, so they are cleared."),
       dry_run: external_exports.boolean().optional().describe("Compute the new path and return it without writing anything (no guard, checkpoint or undo entry)."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
@@ -20146,7 +20334,7 @@ var init_paths = __esm({
     PATH_TOLERANCE = 0.01;
     LINE_JOIN = { miter: 1, round: 2, bevel: 3 };
     TRIM_TYPE = { simultaneously: 1, individually: 2 };
-    REPEATER_ORDER = { below: 1, above: 2 };
+    REPEATER_ORDER = { above: 1, below: 2 };
     KEY_TIME_TOLERANCE = 0.05;
     badArgs = (message) => ({ ok: false, error: "bad_args", message });
     readOpts = (toolName, label) => ({ label, mutates: false, toolName });
@@ -20169,7 +20357,7 @@ var init_paths = __esm({
       },
       {
         name: "ae_path_write",
-        description: "Write a path back into a mask or a free shape path (a Shape round trip), as a value or, with `time`, as a key. operation 'set' writes the given vertices and tangents; 'resample' (even arc-length spacing, by count or spacing), 'smooth' (chaikin or catmull_rom), 'mirror' (across x or y) and 'reverse' compute the new path here from the path as it is now. dry_run returns the computed path without writing. Refused before anything is written when: the path is keyframed and no `time` is given; an expression is on the path; a key would get another vertex count than the path's other keys (allow_vertex_count_change); a mask with feather points would change vertex count (allow_feather_loss); the path changed since it was read. Replacing an existing key keeps its interpolation and ease where AE allows (the result says if it was restored). In one undo group guarded by `expect`; the read-back (a separate evalScript) checks vertex count, closed flag, every vertex and tangent. " + AGENT_SAFETY_GUIDANCE,
+        description: "Write a path back into a mask or a free shape path (a Shape round trip), as a value or, with `time`, as a key. operation 'set' writes the given vertices and tangents; 'resample' (even arc-length spacing, by count or spacing), 'smooth' (chaikin or catmull_rom), 'mirror' (across x or y) and 'reverse' compute the new path here from the path as it is now. dry_run returns the computed path without writing. Refused before anything is written when: the path is keyframed and no `time` is given; an expression is on the path; a key would get another vertex count than the path's other keys (allow_vertex_count_change); a mask with feather points would change vertex count or order (allow_feather_loss); the path changed since it was read. Replacing an existing key keeps its interpolation and ease where AE allows (the result says if it was restored). In one undo group guarded by `expect`; the read-back (a separate evalScript) checks vertex count, closed flag, every vertex and tangent. " + AGENT_SAFETY_GUIDANCE,
         schema: AePathWriteSchema,
         handler: async (args, ctx) => {
           let current = null;
@@ -20210,6 +20398,7 @@ var init_paths = __esm({
                 allow_vertex_count_change: args.allow_vertex_count_change,
                 allow_feather_loss: args.allow_feather_loss,
                 operation: args.operation,
+                reorders: args.operation === "reverse" || args.operation === "mirror" && args.mirror?.reverse_direction === true ? true : void 0,
                 label: `Path ${args.operation}`
               }
             },
@@ -20320,13 +20509,158 @@ function purgeMismatches(args, beforeRaw, afterRaw, written) {
   if (args.only_above_mb === void 0) expectThat(m, written.purged === true, "purged", true, written.purged, "The host did not purge");
   return m;
 }
+function purgeWarnings(w) {
+  const warnings = [];
+  if (w.undo_history_cleared === true) {
+    warnings.push(
+      "The undo history is gone: Ctrl+Z cannot undo anything done before this purge. The saved .aep is the current state; only checkpoints taken earlier (ae_checkpoint list) hold earlier states. Tell the user."
+    );
+  } else if (w.purged === true && w.undo_history_may_be_cleared === true) {
+    warnings.push("This purge target may also have cleared the Edit > Undo history (not yet measured). Do not assume Ctrl+Z still works for earlier steps; tell the user.");
+  }
+  if (w.disk_cache_cleared === true) warnings.push("The disk cache was wiped; previews will re-render.");
+  if (w.purged === true && (w.target === "image" || w.target === "ram" || w.target === "all")) warnings.push("The RAM preview was dropped with the caches.");
+  return warnings;
+}
+function noteUndoPurged(w) {
+  if (w.purged !== true) return;
+  if (w.undo_history_cleared !== true && w.undo_history_may_be_cleared !== true) return;
+  try {
+    getSessionTracker()?.markUndoPurged((/* @__PURE__ */ new Date()).toISOString(), w.undo_history_cleared === true);
+  } catch {
+  }
+}
+async function moveBaseline(ctx, opId, toolName, label, expect, readBackOk) {
+  try {
+    const t = getSessionTracker();
+    if (!t) return;
+    const blocked = t.takeSkipAfter(opId);
+    if (!readBackOk || blocked) return;
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_session`,
+      script: buildJsxCall("sessionSnapshot", { comp_ids: t.compsToRead(expect.project_path, [expect.comp_id]) }),
+      label: `${label} (session after)`,
+      mutates: false,
+      toolName,
+      timeoutMs: SNAPSHOT_TIMEOUT_MS
+    });
+    const snap2 = res.result;
+    if (snap2 && typeof snap2 === "object" && typeof snap2.project_path === "string") t.record(snap2, { op_id: opId, tool: toolName });
+  } catch {
+  }
+}
+function presentPurge(beforeRaw, afterRaw, w, warnings) {
+  const b = readOf4(beforeRaw)?.memory_in_use_bytes ?? null;
+  const a = readOf4(afterRaw)?.memory_in_use_bytes ?? null;
+  return {
+    target: w.target,
+    purge_constant: w.purge_constant,
+    purged: w.purged,
+    skipped_reason: w.skipped_reason,
+    undo_history_cleared: w.undo_history_cleared,
+    undo_history_may_be_cleared: w.undo_history_may_be_cleared ?? false,
+    disk_cache_cleared: w.disk_cache_cleared,
+    memory_in_use_bytes: { before: b, after: a, freed: b !== null && a !== null ? b - a : null },
+    warnings
+  };
+}
+async function runPurge(args, ctx) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const toolName = "ae_memory_purge";
+  const label = `ae_memory_purge(${args.target})`;
+  const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
+  const readOnce = async (phase) => {
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_${phase}`,
+      script: buildJsxCall("memoryRead", {}),
+      label: `${label} (${phase})`,
+      mutates: false,
+      toolName
+    });
+    return res.result ?? null;
+  };
+  try {
+    return await ctx.queue.run(label, async () => {
+      ctx.quarantine.assertClear();
+      await verifyTargetGuard(ctx, expect, opId);
+      const checkpoint = { status: "skipped", reason: "A cache purge changes no project data, so it takes no checkpoint." };
+      const note = { opId, toolName, label, expect, checkpoint: null };
+      const sessionFields = await noteBeforeWrite(ctx, note);
+      const before = await readOnce("before");
+      beginInflight(note);
+      let write;
+      try {
+        write = await ctx.bridge.evalRaw({
+          id: opId,
+          script: buildJsxCall("memoryPurge", {
+            target: args.target,
+            only_above_mb: args.only_above_mb,
+            confirm_undo_purge: args.confirm_undo_purge,
+            confirm_disk_cache_wipe: args.confirm_disk_cache_wipe,
+            expect
+          }),
+          label,
+          mutates: true,
+          toolName
+        });
+      } finally {
+        endInflight(opId);
+      }
+      const written = write.result ?? {};
+      const warnings = purgeWarnings(written);
+      noteUndoPurged(written);
+      try {
+        const tracker2 = getSessionTracker();
+        tracker2?.commitReported(opId);
+      } catch {
+      }
+      let after = null;
+      let failure = null;
+      try {
+        after = await readOnce("after");
+      } catch (err) {
+        failure = readBackMismatch(opId, "the read-back failed", err);
+      }
+      await moveBaseline(ctx, opId, toolName, label, expect, failure === null);
+      let custom2;
+      let shown;
+      if (failure) {
+        custom2 = [failure];
+        shown = { ...written, warnings };
+      } else {
+        try {
+          custom2 = purgeMismatches(args, before, after, written);
+          shown = presentPurge(before, after, written, warnings);
+        } catch (err) {
+          custom2 = [readBackMismatch(opId, "checking the read-back failed", err)];
+          shown = { ...written, warnings };
+        }
+      }
+      const receipt = buildReceipt({ before, after, customMismatches: custom2 });
+      return { op_id: opId, applied: true, ...shown, checkpoint, receipt, ...sessionFields };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
 var os3, MB, readOf4, PURGE_TARGETS, PREF_FILES, PrefRequestSchema, AeMemoryStatusSchema, AeMemoryPurgeSchema, DEFAULT_MIN_FREE_MB, memoryTools;
 var init_memory = __esm({
   "src/tools/ext/memory.ts"() {
     "use strict";
     os3 = __toESM(require("node:os"), 1);
     init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
     init_common();
+    init_mutate();
+    init_read_back();
+    init_session();
     init_write_runner();
     MB = 1048576;
     readOf4 = (v) => v && typeof v === "object" ? v : null;
@@ -20355,16 +20689,16 @@ var init_memory = __esm({
     });
     AeMemoryPurgeSchema = external_exports.object({
       target: external_exports.enum(PURGE_TARGETS).describe(
-        "image: the image cache. snapshot: the snapshot cache. ram: every RAM cache (PurgeTarget.ALL_MEMORY_CACHES, AE 24.3+), disk cache kept. undo: the Edit > Undo history, which cannot be brought back. all: PurgeTarget.ALL_CACHES, RAM and the disk cache. ram and all may also clear the undo history (unmeasured); the result then says undo_history_may_be_cleared."
+        "image: the image cache. snapshot: the snapshot cache. ram: every RAM cache (PurgeTarget.ALL_MEMORY_CACHES, AE 24.3+), disk cache kept. undo: the Edit > Undo history, which cannot be brought back. all: PurgeTarget.ALL_CACHES, RAM and the disk cache. ram and all may also clear the undo history (unmeasured); the result then says undo_history_may_be_cleared, and ram is gated like undo."
       ),
       only_above_mb: external_exports.number().min(0).optional().describe("Purge only when app.memoryInUse is above this many megabytes; otherwise do nothing (purged: false). For a watchdog between the chunks of a long job."),
-      confirm_undo_purge: external_exports.boolean().optional().describe("Required true for target undo. Set it only after the user said yes (ask with ae_ask_user); the project must be saved first (ae_save)."),
-      confirm_disk_cache_wipe: external_exports.boolean().optional().describe("Required true for target all. Set it only after the user said yes; the disk cache can take hours to rebuild. Use ram to keep it."),
+      confirm_undo_purge: external_exports.boolean().optional().describe("Required true for target undo, ram and all (ram and all may also clear the undo history). Set it only after the user said yes (ask with ae_ask_user); the project must be saved first (ae_save)."),
+      confirm_disk_cache_wipe: external_exports.boolean().optional().describe("Required true for target all, together with confirm_undo_purge. Set it only after the user said yes; the disk cache can take hours to rebuild and the Edit > Undo history may be cleared too. Use ram to keep the disk cache."),
       expect: ExpectSchema
-    }).refine((v) => v.target !== "undo" || v.confirm_undo_purge === true, {
-      message: "Purging undo needs confirm_undo_purge: true, after the user said yes (it removes the whole undo history)."
+    }).refine((v) => v.target !== "undo" && v.target !== "ram" && v.target !== "all" || v.confirm_undo_purge === true, {
+      message: "Purging undo, ram or all needs confirm_undo_purge: true, after the user said yes (undo removes the whole undo history; ram and all may). Use image or snapshot to keep it."
     }).refine((v) => v.target !== "all" || v.confirm_disk_cache_wipe === true, {
-      message: "Purging all caches needs confirm_disk_cache_wipe: true, after the user said yes (it also wipes the disk cache)."
+      message: "Purging all caches needs confirm_disk_cache_wipe: true, after the user said yes (it also wipes the disk cache, and may clear the Edit > Undo history)."
     });
     DEFAULT_MIN_FREE_MB = 1024;
     memoryTools = [
@@ -20391,51 +20725,9 @@ var init_memory = __esm({
       },
       {
         name: "ae_memory_purge",
-        description: "Purge After Effects caches with app.purge, in a guarded write with memory read before and after (separate evalScripts). target image / snapshot free RAM caches only; ram = every memory cache (AE 24.3+; the disk cache stays). image and ram also drop the user's RAM preview. ram and all MAY also clear the Edit > Undo history (not yet measured): the result reports undo_history_cleared: null and undo_history_may_be_cleared: true, so tell the user Ctrl+Z may be gone, and save first when undo matters. target undo removes the whole Edit > Undo history: it needs a saved project (ae_save), confirm_undo_purge: true, and the user's yes through ae_ask_user first; afterwards Ctrl+Z cannot undo earlier steps, so tell the user. This tool takes no checkpoint (the saved .aep is the current state; only checkpoints taken earlier, see ae_checkpoint list, hold earlier states). target all also wipes the disk cache (hours to rebuild): confirm_disk_cache_wipe: true after the user's yes. only_above_mb makes it a watchdog: nothing is purged unless memory is above that. The receipt reports memory before and after; memory not dropping is not an error. " + AGENT_SAFETY_GUIDANCE,
+        description: "Purge After Effects caches with app.purge, in a guarded write with memory read before and after (separate evalScripts). target image / snapshot free RAM caches only; ram = every memory cache (AE 24.3+; the disk cache stays). image and ram also drop the user's RAM preview. ram and all MAY also clear the Edit > Undo history (not yet measured): the result reports undo_history_cleared: null and undo_history_may_be_cleared: true, so tell the user Ctrl+Z may be gone. So ram is gated like undo: a saved project with no unsaved changes (ae_save), confirm_undo_purge: true, and the user's yes through ae_ask_user first. Use image or snapshot to keep undo without asking. target undo removes the whole Edit > Undo history: the same gate; afterwards Ctrl+Z cannot undo earlier steps, so tell the user. A purge that cleared undo (target undo) is recorded, so ae_session_changes lists earlier steps as not_reachable; one that may have cleared it (ram, all) is recorded too, and those steps stay possibly_reachable with a warning. A purge itself is never listed as an undo step. This tool takes no automatic checkpoint (a purge changes no project data; the saved .aep is the current state, and only checkpoints taken earlier, see ae_checkpoint list, hold earlier states). target all also wipes the disk cache (hours to rebuild) and may clear undo, so it needs confirm_disk_cache_wipe: true and confirm_undo_purge: true after the user's yes to both, on a saved project. only_above_mb makes one call a watchdog: nothing is purged unless memory is above that. There is no automatic watchdog inside ae_batch_set; call this between chunks yourself (target image needs no confirm). The receipt reports memory before and after; memory not dropping is not an error. " + AGENT_SAFETY_GUIDANCE,
         schema: AeMemoryPurgeSchema,
-        handler: (args, ctx) => runGuardedWrite(ctx, {
-          toolName: "ae_memory_purge",
-          label: `ae_memory_purge(${args.target})`,
-          expect: args.expect,
-          read: () => ({ host: "memoryRead", args: {} }),
-          write: {
-            host: "memoryPurge",
-            args: {
-              target: args.target,
-              only_above_mb: args.only_above_mb,
-              confirm_undo_purge: args.confirm_undo_purge,
-              confirm_disk_cache_wipe: args.confirm_disk_cache_wipe
-            }
-          },
-          check: (before, after, w) => purgeMismatches(args, before, after, w),
-          present: (beforeRaw, afterRaw, w) => {
-            const before = readOf4(beforeRaw);
-            const after = readOf4(afterRaw);
-            const b = before?.memory_in_use_bytes ?? null;
-            const a = after?.memory_in_use_bytes ?? null;
-            const warnings = [];
-            if (w.undo_history_cleared === true) {
-              warnings.push(
-                "The undo history is gone: Ctrl+Z cannot undo anything done before this purge. The saved .aep is the current state; only checkpoints taken earlier (ae_checkpoint list) hold earlier states."
-              );
-            } else if (w.purged === true && w.undo_history_may_be_cleared === true) {
-              warnings.push("This purge target may also have cleared the Edit > Undo history (not yet measured). Do not assume Ctrl+Z still works for earlier steps.");
-            }
-            if (w.disk_cache_cleared === true) warnings.push("The disk cache was wiped; previews will re-render.");
-            if (w.purged === true && (w.target === "image" || w.target === "ram" || w.target === "all")) warnings.push("The RAM preview was dropped with the caches.");
-            return {
-              target: w.target,
-              purge_constant: w.purge_constant,
-              purged: w.purged,
-              skipped_reason: w.skipped_reason,
-              undo_history_cleared: w.undo_history_cleared,
-              undo_history_may_be_cleared: w.undo_history_may_be_cleared ?? false,
-              disk_cache_cleared: w.disk_cache_cleared,
-              memory_in_use_bytes: { before: b, after: a, freed: b !== null && a !== null ? b - a : null },
-              warnings
-            };
-          }
-        })
+        handler: (args, ctx) => runPurge(args, ctx)
       }
     ];
   }
@@ -20654,6 +20946,12 @@ function resolvedRanges(result) {
   if (!Array.isArray(list)) return [];
   return list.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
 }
+function coveredByFirstRange(key, ranges) {
+  let group = [key];
+  if (FILL_GROUP.includes(key)) group = FILL_GROUP;
+  else if (STROKE_GROUP.includes(key)) group = STROKE_GROUP;
+  return ranges.some((r) => r.start === 0 && group.some((g) => r.style[g] !== void 0));
+}
 function rangeExpectations(ranges) {
   const out = {};
   ranges.forEach((r, i) => {
@@ -20669,7 +20967,7 @@ function rangeActuals(ranges, afterRanges) {
   });
   return out;
 }
-var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, TextStyleSchema, RANGE_STYLE_KEYS, RangeStyleSchema, TextRangeSchema, AeSetTextSchema, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
+var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, TextStyleSchema, RANGE_STYLE_KEYS, RangeStyleSchema, TextRangeSchema, AeSetTextSchema, FILL_GROUP, STROKE_GROUP, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
 var init_animate = __esm({
   "src/tools/ext/animate.ts"() {
     "use strict";
@@ -20794,6 +21092,8 @@ var init_animate = __esm({
     }).refine((val) => val.text !== void 0 || hasAnyStyleField(val.style) || val.ranges !== void 0, {
       message: "ae_set_text requires at least `text`, one defined property in `style`, or `ranges`."
     });
+    FILL_GROUP = ["fillColor", "applyFill"];
+    STROKE_GROUP = ["strokeColor", "strokeWidth", "applyStroke"];
     AeImportFootageSchema = external_exports.object({
       paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).describe("Absolute file paths of footage files to import."),
       sequence: external_exports.boolean().optional().describe(
@@ -21031,7 +21331,7 @@ var init_animate = __esm({
                   "justification"
                 ];
                 for (const key of styleKeys) {
-                  if (args.style[key] !== void 0) {
+                  if (args.style[key] !== void 0 && !coveredByFirstRange(key, appliedRanges)) {
                     expectedCheck[key] = args.style[key];
                     actualCheck[key] = afterDoc[key];
                   }
@@ -21050,7 +21350,16 @@ var init_animate = __esm({
                 before: beforeSnap.result,
                 after: afterSnap.result,
                 expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
-                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0
+                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0,
+                // The host reads back every range or throws, so a short list is a wrong read-back.
+                customMismatches: unverifiedRanges > 0 ? [
+                  {
+                    path: "ranges",
+                    expected: appliedRanges.length,
+                    actual: readBackRanges.length,
+                    message: "The read-back returned fewer ranges than were written; the rest were not checked"
+                  }
+                ] : void 0
               });
               return {
                 op_id: opId,

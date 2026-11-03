@@ -132,6 +132,7 @@ export const AeScrubCheckSchema = z
     path: z
       .string()
       .min(1)
+      .max(20000)
       .optional()
       .describe(
         "Or check a finished render: the absolute path of a movie, or of one frame of an image sequence. AE imports it, a temporary comp is built to grab frames from, and both are removed again (needs `expect`)."
@@ -1174,15 +1175,25 @@ async function scrubFile(args: AeScrubCheckArgs, ctx: ToolContext) {
     const notesOut: string[] = [];
     let timing = { frameDuration: imported.frameDuration, duration: imported.duration, frameRate: imported.frameRate };
     // Read back in a separate evalScript: the import call took rate and length in the same script as the conform.
+    let importMissing = false;
     try {
       const st = (await call<ScrubState>("verify", "scrubState", { item_id: imported.item_id, comp_id: imported.comp_id }, false)).result;
       const itemFps = st.item?.frameRate;
       const itemDur = st.item?.duration;
       const compFps = st.comp?.frameRate;
       const compDur = st.comp?.duration;
+      if (!st.item || !st.comp) {
+        importMissing = true;
+        problems.push({
+          path: "import",
+          expected: { item: imported.item_id, comp: imported.comp_id },
+          actual: { item: st.item?.id ?? null, comp: st.comp?.id ?? null },
+          message: "The imported render or its temporary comp was not found in a separate read after the import; nothing was sampled.",
+        });
+      }
       if (typeof itemFps === "number" && typeof itemDur === "number" && itemFps > 0 && itemDur > 0) {
-        const off = (typeof compFps === "number" && Math.abs(compFps - itemFps) > 1e-6) || (typeof compDur === "number" && Math.abs(compDur - itemDur) > 0.5 / itemFps);
-        const importDiffers = Math.abs(itemFps - imported.frameRate) > 1e-6 || Math.abs(itemDur - imported.duration) > 0.5 / itemFps;
+        const off = (typeof compFps === "number" && Math.abs(1 / compFps - 1 / itemFps) > 1e-6) || (typeof compDur === "number" && Math.abs(compDur - itemDur) > 0.5 / itemFps);
+        const importDiffers = Math.abs(1 / itemFps - 1 / imported.frameRate) > 1e-6 || Math.abs(itemDur - imported.duration) > 0.5 / itemFps;
         // Sample with the item's own values when they differ from what the import call reported.
         if (importDiffers) timing = { frameRate: itemFps, frameDuration: 1 / itemFps, duration: itemDur };
         if (off || importDiffers) {
@@ -1200,7 +1211,7 @@ async function scrubFile(args: AeScrubCheckArgs, ctx: ToolContext) {
     try {
       range = resolveRange(args, { start: 0, end: timing.duration, duration: timing.duration });
       const frames = framesInRange(range.start, range.end, timing.frameDuration);
-      if (frames >= 2) {
+      if (frames >= 2 && !importMissing) {
         plan = planSamples(frames, args.samples ?? 24);
         cap = await captureFrames(ctx, opId, imported.comp_id, plan, { start: range.start, frameDuration: timing.frameDuration, duration: timing.duration }, framesDir);
       }

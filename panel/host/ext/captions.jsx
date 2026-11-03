@@ -266,7 +266,19 @@
     return info;
   }
 
-  function rectInfo(layer, t, safe, comp) {
+  // The padding a caption box was made with, read back from its Size expression ("r.width + 2 * padding"); 0 when unknown.
+  function boxPadding(boxLayer) {
+    if (!boxLayer) return 0;
+    try {
+      var rect = boxLayer.property("ADBE Root Vectors Group").property(1).property("ADBE Vectors Group").property("ADBE Vector Shape - Rect");
+      var ex = String(rect.property("ADBE Vector Rect Size").expression);
+      var mt = ex.match(/r\.width \+ ([0-9.]+)/);
+      if (mt) return Number(mt[1]) / 2;
+    } catch (e) {}
+    return 0;
+  }
+
+  function rectInfo(layer, t, safe, comp, boxLayer) {
     var out = {};
     try {
       var r = layer.sourceRectAtTime(t, false);
@@ -278,6 +290,15 @@
       var y0 = pos[1] + r.top - anc[1];
       var x1 = x0 + r.width;
       var y1 = y0 + r.height;
+      // The background box reaches padding px past the text: it is what the viewer sees against the safe area.
+      var bpad = boxPadding(boxLayer);
+      if (r.width > 0 && bpad > 0) {
+        x0 -= bpad;
+        y0 -= bpad;
+        x1 += bpad;
+        y1 += bpad;
+        out.box_padding = bpad;
+      }
       out.bounds = [x0, y0, x1, y1];
       if (r.width > 0) {
         out.outside_safe = x0 < safe.left - 0.5 || x1 > comp.width - safe.right + 0.5 || y0 < safe.top - 0.5 || y1 > safe.bottomY + 0.5;
@@ -290,7 +311,22 @@
     return out;
   }
 
-  function captionEntry(l, number, mode, safe, comp) {
+  // The height the hard line breaks alone need; does not rely on AE counting hidden lines in sourceRectAtTime.
+  function hardLinesHeight(doc, text) {
+    var n = String(text).split("\r").length;
+    var lead = null;
+    try {
+      if (doc.autoLeading === false && isNum(doc.leading)) lead = doc.leading;
+    } catch (e1) {}
+    if (lead === null) {
+      var fs = 0;
+      try { fs = Number(doc.fontSize); } catch (e2) {}
+      lead = fs * 1.2;
+    }
+    return n * lead;
+  }
+
+  function captionEntry(l, number, mode, safe, comp, boxLayer) {
     var entry = {
       number: number,
       name: l.name,
@@ -319,15 +355,33 @@
     if (mode === "single") {
       var keys = [];
       var worst = null;
+      var bts1 = null;
+      try {
+        if (doc.boxText === true) {
+          entry.box_text = true;
+          var b1 = doc.boxTextSize;
+          if (b1 && b1.length >= 2) {
+            bts1 = [b1[0], b1[1]];
+            entry.boxTextSize = bts1;
+          }
+        }
+      } catch (eB1) {}
       for (var k = 1; k <= src.numKeys && keys.length < MAX_LIST; k++) {
         var kd = src.keyValue(k);
         var t = src.keyTime(k);
         var item = { time: t, text: boundString(kd.text) };
         if (String(kd.text) !== "") {
-          var ri = rectInfo(l, t, safe, comp);
+          var ri = rectInfo(l, t, safe, comp, boxLayer);
           if (ri.rect) {
             item.width = ri.rect.width;
             item.outside_safe = ri.outside_safe;
+          }
+          if (bts1) {
+            var over = (ri.rect && ri.rect.height > bts1[1] + 1) || hardLinesHeight(kd, kd.text) > bts1[1] + 1;
+            if (over) {
+              item.box_overflow = true;
+              entry.box_overflow = true;
+            }
           }
         }
         keys.push(item);
@@ -344,8 +398,20 @@
       if (worst !== null) entry.first_outside_safe = worst;
     } else {
       var t0 = l.inPoint;
-      var ri2 = rectInfo(l, t0, safe, comp);
+      var ri2 = rectInfo(l, t0, safe, comp, boxLayer);
       entry.rect = ri2.rect;
+      // Paragraph text hides the lines that overflow its box.
+      try {
+        if (doc.boxText === true) {
+          var bts = doc.boxTextSize;
+          entry.box_text = true;
+          if (bts && bts.length >= 2) {
+            entry.boxTextSize = [bts[0], bts[1]];
+            if (ri2.rect && ri2.rect.height > bts[1] + 1) entry.box_overflow = true;
+            if (hardLinesHeight(doc, doc.text) > bts[1] + 1) entry.box_overflow = true;
+          }
+        }
+      } catch (eBt) {}
       entry.position = ri2.position;
       entry.outside_safe = ri2.outside_safe === true;
       if (ri2.rect_error) entry.rect_error = ri2.rect_error;
@@ -426,7 +492,7 @@
         out.truncated = true;
         break;
       }
-      out.captions.push(captionEntry(found.caps[numbers[i]], numbers[i], mode, safe, comp));
+      out.captions.push(captionEntry(found.caps[numbers[i]], numbers[i], mode, safe, comp, found.boxes[numbers[i]] || null));
     }
     var boxNumbers = [];
     for (var bk in found.boxes) {
@@ -468,7 +534,7 @@
   }
 
   // Times to whole frames, in order and without overlap, checked against the comp.
-  function normaliseCaptions(comp, caps, warnings) {
+  function normaliseCaptions(comp, caps, warnings, mode) {
     var fd = comp.frameDuration;
     var out = [];
     var i;
@@ -495,6 +561,24 @@
         for (var wi = 0; wi < c.words.length; wi++) {
           if (!c.words[wi] || !isNum(c.words[wi].start)) fail("bad_args", "caption " + (i + 1) + " word " + (wi + 1) + " needs a numeric start");
           out[i].words.push({ start: Math.round(c.words[wi].start / fd) * fd });
+        }
+      }
+    }
+    // One layer, one key per start time: a caption that rounds onto the previous caption's frame would replace its key.
+    // Move it one frame on (in order) and say so, rather than lose a caption.
+    if (mode === "single") {
+      for (i = 1; i < out.length; i++) {
+        // At or before the previous (already moved) start, while the raw starts are in order: a run of captions inside one frame steps on one frame each.
+        if (out[i].start <= out[i - 1].start + 1e-6 && caps[i].start >= caps[i - 1].start) {
+          out[i].start = out[i - 1].start + fd;
+          if (out[i].end <= out[i].start) out[i].end = out[i].start + fd;
+          if (out[i].start >= comp.duration) {
+            fail("bad_args", "caption " + (i + 1) + " shares a frame with caption " + i + " and would start past the comp's length (" + comp.duration + " s); merge the two captions");
+          }
+          for (var nw = 0; nw < out[i].words.length; nw++) {
+            if (out[i].words[nw].start < out[i].start) out[i].words[nw].start = out[i].start;
+          }
+          if (warnings) warnings.push("caption " + (i + 1) + " rounded onto the same frame as caption " + i + "; it was moved one frame later so neither key is lost");
         }
       }
     }
@@ -659,6 +743,46 @@
     return keys;
   }
 
+  // Writes a box's look (size and opacity expressions, roundness, fill) from the validated box args.
+  // Every property is looked up again from the layer; nothing is added here.
+  function styleBox(layer, textLayer, box) {
+    var tg = function () { return layer.property("ADBE Transform Group"); };
+    var contents = function () { return layer.property("ADBE Root Vectors Group").property(1).property("ADBE Vectors Group"); };
+    var ref = "var t = thisComp.layer(" + quoteJs(textLayer.name) + "); var r = t.sourceRectAtTime(time, false);\n";
+    var pad2 = box.padding * 2;
+    var rect = function () { return contents().property("ADBE Vector Shape - Rect"); };
+    rect().property("ADBE Vector Rect Size").expression = ref + "[r.width + " + pad2 + ", r.height + " + pad2 + "];";
+    rect().property("ADBE Vector Rect Position").expression = ref + "t.toComp([r.left + r.width / 2, r.top + r.height / 2]);";
+    rect().property("ADBE Vector Rect Roundness").setValue(box.roundness);
+    contents().property("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([box.color[0], box.color[1], box.color[2], 1]);
+    // An empty gap in a hold-keyed layer would leave a padded square behind: hide the box while the text is empty.
+    // sourceRectAtTime still answers outside the text layer's span: test the span too.
+    tg().property("ADBE Opacity").expression = ref + "var o = 0; if (r.width > 0 && time >= t.inPoint && time < t.outPoint) o = " + box.opacity + "; o;";
+  }
+
+  // Whether styleBox can rewrite this box without throwing; null when it can, else the reason.
+  function boxProblem(layer) {
+    var notBox = "is not a caption box made by this tool; remove it or use another name_prefix";
+    try {
+      var g = layer.property("ADBE Root Vectors Group").property(1);
+      var c = g ? g.property("ADBE Vectors Group") : null;
+      if (!c) return notBox;
+      var rect = c.property("ADBE Vector Shape - Rect");
+      var fill = c.property("ADBE Vector Graphic - Fill");
+      if (!rect || !fill) return notBox;
+      var sz = rect.property("ADBE Vector Rect Size");
+      var ps = rect.property("ADBE Vector Rect Position");
+      var rd = rect.property("ADBE Vector Rect Roundness");
+      var fc = fill.property("ADBE Vector Fill Color");
+      var op = layer.property("ADBE Transform Group").property("ADBE Opacity");
+      if (!sz || !ps || !rd || !fc || !op) return notBox;
+      if (rd.numKeys > 0 || fc.numKeys > 0) return "has keyframes on Roundness/Fill Color; remove them or leave restyle off";
+    } catch (e) {
+      return notBox;
+    }
+    return null;
+  }
+
   // A shape layer under the text whose rectangle follows the text's extents.
   function makeBox(comp, textLayer, name, box) {
     var layer = comp.layers.addShape();
@@ -672,16 +796,7 @@
     var contents = function () { return layer.property("ADBE Root Vectors Group").property(1).property("ADBE Vectors Group"); };
     contents().addProperty("ADBE Vector Shape - Rect");
     contents().addProperty("ADBE Vector Graphic - Fill");
-    var ref = "var t = thisComp.layer(" + quoteJs(textLayer.name) + "); var r = t.sourceRectAtTime(time, false);\n";
-    var pad2 = box.padding * 2;
-    var rect = function () { return contents().property("ADBE Vector Shape - Rect"); };
-    rect().property("ADBE Vector Rect Size").expression = ref + "[r.width + " + pad2 + ", r.height + " + pad2 + "];";
-    rect().property("ADBE Vector Rect Position").expression = ref + "t.toComp([r.left + r.width / 2, r.top + r.height / 2]);";
-    rect().property("ADBE Vector Rect Roundness").setValue(box.roundness);
-    contents().property("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([box.color[0], box.color[1], box.color[2], 1]);
-    // An empty gap in a hold-keyed layer would leave a padded square behind: hide the box while the text is empty.
-    // sourceRectAtTime still answers outside the text layer's span: test the span too.
-    tg().property("ADBE Opacity").expression = ref + "var o = 0; if (r.width > 0 && time >= t.inPoint && time < t.outPoint) o = " + box.opacity + "; o;";
+    styleBox(layer, textLayer, box);
     return layer;
   }
 
@@ -697,7 +812,7 @@
     var raw = args.captions;
     if (!raw || typeof raw.length !== "number" || raw.length < 1 || raw.length > MAX_CAPTIONS) fail("bad_args", "give 1.." + MAX_CAPTIONS + " captions");
     var warnings = [];
-    var caps = normaliseCaptions(comp, raw, warnings);
+    var caps = normaliseCaptions(comp, raw, warnings, mode);
 
     var hl = args.highlight;
     if (hl) {
@@ -746,6 +861,12 @@
     var position = layout.position || "bottom";
     if (position !== "bottom" && position !== "middle" && position !== "top") fail("bad_args", "layout.position must be bottom, middle or top");
     var safe = safeArea(comp, layout, args.default_margins);
+    // With a background box, the text is placed padding px inside the safe area so the box itself stays inside it.
+    var place = safe;
+    if (box) {
+      place = { left: safe.left + box.padding, right: safe.right + box.padding, topY: safe.topY + box.padding, bottomY: safe.bottomY - box.padding, width: safe.width - box.padding * 2 };
+      if (place.width < 1 || place.bottomY - place.topY < 1) fail("bad_args", "box.padding (" + box.padding + ") leaves no room inside the safe area; use a smaller padding or smaller margins");
+    }
     var restyle = args.restyle === true;
     var removeStale = args.remove_stale !== false;
 
@@ -767,10 +888,16 @@
         if (mode === "layers" && sourceTextProp(ex).numKeys > 0) {
           fail("bad_args", "Layer \"" + ex.name + "\" has Source Text keyframes; remove them or use another name_prefix");
         }
+        if (ex.locked === true) fail("bad_args", "Layer \"" + ex.name + "\" is locked; unlock it first");
         if (ex.startTime !== 0) warnings.push("\"" + ex.name + "\" starts at " + ex.startTime + " s, not 0: its keys are written in comp time");
       }
       var exBox = found.boxes[numberOf(i)];
       if (exBox && !isShapeLayer(exBox)) fail("bad_args", "Layer \"" + exBox.name + "\" has a box's name but is not a shape layer");
+      if (exBox && exBox.locked === true) fail("bad_args", "Layer \"" + exBox.name + "\" is locked; unlock it first");
+      if (exBox && box && restyle) {
+        var bProblem = boxProblem(exBox);
+        if (bProblem) fail("bad_args", "Layer \"" + exBox.name + "\" " + bProblem);
+      }
     }
     // Names pad to three digits and grow only when a number needs more ("Caption 501", "Caption 1000"),
     // so chunks of one transcript named in separate calls agree.
@@ -781,6 +908,9 @@
       for (i = 0; i < found.list.length; i++) {
         var f = found.list[i];
         if (f.number > lastNumber) stale.push(f.layer);
+      }
+      for (i = 0; i < stale.length; i++) {
+        if (stale[i].locked === true) fail("bad_args", "Layer \"" + stale[i].name + "\" is locked and would be removed as stale; unlock it first or set remove_stale to false");
       }
     }
 
@@ -796,11 +926,57 @@
       var madeLayers = [];
       var highlightKeyCount = 0;
       var boxCount = 0;
+      var boxKept = 0;
 
       try {
+        // The paragraph box this caption needs: wide as asked (or the safe width on a new/restyled layer), tall for its lines.
+        var wantSize = function (curW, fsz, nLines, fresh) {
+          var bw = null;
+          if (textBox && isNum(textBox.width)) bw = textBox.width;
+          if (bw === null) {
+            if (curW !== null && !fresh) bw = curW;
+            else bw = place.width;
+          }
+          var bh = fsz * 1.2 * nLines;
+          if (textBox && isNum(textBox.height)) bh = textBox.height;
+          return [bw, bh];
+        };
+        // An existing paragraph caption: a new text can have more lines than the old box holds, and AE hides the overflow.
+        var fitBox = function (d, nLines, fresh) {
+          var boxed = false;
+          try { boxed = d.boxText === true; } catch (eB) {}
+          if (!boxed) return null;
+          var curW = null;
+          try {
+            if (d.boxTextSize && isNum(d.boxTextSize[0])) curW = d.boxTextSize[0];
+          } catch (eW) {}
+          var curH = null;
+          try {
+            if (d.boxTextSize && isNum(d.boxTextSize[1])) curH = d.boxTextSize[1];
+          } catch (eH) {}
+          var sz = wantSize(curW, d.fontSize, nLines, fresh);
+          if (!(textBox && isNum(textBox.height))) {
+            // The height the lines need at the layer's own leading; a plain update never shrinks a box the user made taller.
+            var lead = d.fontSize * 1.2;
+            try {
+              if (d.autoLeading === false && isNum(d.leading)) lead = d.leading;
+            } catch (eL) {}
+            var needed = lead * nLines;
+            if (!fresh && curH !== null && curH > needed) needed = curH;
+            sz[1] = needed;
+          }
+          try {
+            d.boxTextSize = [sz[0], sz[1]];
+          } catch (eS) {
+            warnings.push("could not resize the paragraph box: " + A.formatError(eS) + "; lines past the box may be hidden");
+            return null;
+          }
+          return [sz[0], sz[1]];
+        };
         var applyOne = function (idx, capsOnLayer, nLines, existing, name, boxName, existingBox, srcCaps) {
           var layer = existing;
           var isNew = false;
+          var fitted = null;
           var first0 = capsOnLayer[0];
           var last0 = capsOnLayer[capsOnLayer.length - 1];
           var src;
@@ -808,11 +984,7 @@
           if (!layer) {
             isNew = true;
             if (textBox) {
-              var bw = textBox.width;
-              if (bw === undefined || bw === null) bw = safe.width;
-              var bh = textBox.height;
-              if (bh === undefined || bh === null) bh = st.fontSize * 1.2 * nLines;
-              layer = comp.layers.addBoxText([bw, bh], first0.text);
+              layer = comp.layers.addBoxText(wantSize(null, st.fontSize, nLines, true), first0.text);
             } else {
               layer = comp.layers.addText(first0.text);
             }
@@ -828,6 +1000,7 @@
             if (!isNew && src.numKeys > 0) doc = src.keyValue(1);
             else doc = src.value;
             if (isNew || restyle) styleDoc(doc, st, isNew);
+            if (!isNew) fitted = fitBox(doc, nLines, restyle);
             clearKeys(src);
             // A fresh static value first, so the keys below start from the layer's own style.
             doc.text = first0.text;
@@ -845,26 +1018,52 @@
             doc = src.value;
             doc.text = first0.text;
             if (isNew || restyle) styleDoc(doc, st, isNew);
+            if (!isNew) fitted = fitBox(doc, nLines, restyle);
             src.setValue(doc);
           }
           if (isNew || restyle) {
             var pos;
-            if (textBox) {
-              var bw2 = textBox.width;
-              if (bw2 === undefined || bw2 === null) bw2 = safe.width;
-              var bh2 = textBox.height;
-              if (bh2 === undefined || bh2 === null) bh2 = st.fontSize * 1.2 * nLines;
-              pos = boxPosition(comp, safe, bw2, bh2, st.justification, position);
+            // An existing point-text caption stays point text: placing it as a box would put its baseline a box height too high.
+            var placeAsBox = !!textBox;
+            if (placeAsBox && !isNew) {
+              var wasBoxed = false;
+              try { wasBoxed = doc.boxText === true; } catch (eWb) {}
+              if (!wasBoxed) {
+                placeAsBox = false;
+                warnings.push("\"" + layer.name + "\" is point text, so text_box does not apply to it; it was placed as point text (remove it to make it again as a box)");
+              }
+            }
+            if (placeAsBox) {
+              var sz2 = wantSize(null, st.fontSize, nLines, true);
+              var bw2 = sz2[0];
+              var bh2 = sz2[1];
+              if (!isNew && fitted) {
+                bw2 = fitted[0];
+                bh2 = fitted[1];
+              }
+              pos = boxPosition(comp, place, bw2, bh2, st.justification, position);
               // Position is where the box's origin sits, not necessarily its top-left corner: subtract boxTextPos when AE reports it.
+              var offset = false;
               try {
                 var cur = sourceTextProp(layer).value;
                 var btp = cur.boxTextPos;
                 if (cur.boxText !== false && btp && btp.length >= 2 && isNum(btp[0]) && isNum(btp[1])) {
                   pos = [pos[0] - btp[0], pos[1] - btp[1]];
+                  offset = true;
                 }
               } catch (eBtp) {}
+              // Without boxTextPos: when the layer's own extents are the box, the offset is where its top-left sits from the origin.
+              if (!offset) {
+                try {
+                  var rr = layer.sourceRectAtTime(layer.inPoint, false);
+                  var anc2 = layer.property("ADBE Transform Group").property("ADBE Anchor Point").value;
+                  if (Math.abs(rr.width - bw2) < 1 && Math.abs(rr.height - bh2) < 1) {
+                    pos = [pos[0] - (rr.left - anc2[0]), pos[1] - (rr.top - anc2[1])];
+                  }
+                } catch (eRr) {}
+              }
             } else {
-              pos = pointPosition(comp, safe, st.fontSize, nLines, st.justification, position);
+              pos = pointPosition(comp, place, st.fontSize, nLines, st.justification, position);
             }
             setPosition(layer, pos);
           }
@@ -889,6 +1088,9 @@
               created.push(boxName);
             } else {
               updated.push(bl.name);
+              // The box's look comes from the box options when the style is reset; otherwise it is kept.
+              if (restyle) styleBox(bl, layer, box);
+              else boxKept++;
             }
             setSpan(bl, first0.start, last0.end);
             boxCount++;
@@ -909,6 +1111,7 @@
             applyOne(i, [caps[i]], caps[i].lines.length, existingCaps[i], nm, nm + " Box", found.boxes[n] || null, null);
           }
         }
+        if (boxKept > 0) warnings.push(boxKept + " existing box" + (boxKept === 1 ? "" : "es") + " kept the earlier look (color, opacity, padding, roundness); pass restyle: true to apply the box options");
         // Stale layers go last, so a failure above leaves the old captions in place.
         for (i = 0; i < stale.length; i++) {
           removed.push(stale[i].name);

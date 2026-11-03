@@ -304,21 +304,30 @@ describe("interpretationFindings", () => {
     expect(codes({ id: 3, name: "Main", kind: "comp", use_proxy: true, proxy: { kind: "file" } })).toEqual(["proxy_in_use"]);
   });
 
-  it("flags queue items that would render with proxies only while a proxy is on", () => {
-    const read = (on: boolean, use: string, key = true): InterpretRead => ({
+  it("flags queue items that would render with proxies only while a proxied item is in the queued comp", () => {
+    const read = (on: boolean, use: string, key = true, reach: number[] | null = [7, 99], complete = true): InterpretRead => ({
       items: [clipInfo({ use_proxy: on, proxy: { kind: "file" } })],
-      render_queue: { key_found: key, truncated: false, items: [{ index: 1, comp: "Main", status: "queued", proxy_use: use }] },
+      render_queue: { key_found: key, truncated: false, items: [{ index: 1, comp: "Main", status: "queued", proxy_use: use, reach: reach ?? undefined, reach_complete: complete }] },
     });
-    expect(renderQueueFindings(read(true, "Use All Proxies")).map((f) => f.code)).toEqual(["queue_uses_proxies"]);
-    expect(renderQueueFindings(read(true, "Use No Proxies"))).toEqual([]);
-    expect(renderQueueFindings(read(false, "Use All Proxies"))).toEqual([]);
+    const sev = (r: InterpretRead) => renderQueueFindings(r).map((f) => `${f.code}:${f.severity}`);
+    expect(sev(read(true, "Use All Proxies"))).toEqual(["queue_uses_proxies:warn"]);
+    expect(sev(read(true, "Use No Proxies"))).toEqual([]);
+    expect(sev(read(false, "Use All Proxies"))).toEqual([]);
     expect(renderQueueFindings(read(true, "x", false)).map((f) => f.code)).toEqual(["proxy_use_unreadable"]);
+    // Proxied footage that the queued comp does not reach is no finding.
+    expect(sev(read(true, "Use All Proxies", true, [99, 100]))).toEqual([]);
+    // When what the comp uses is unknown, it is only "may".
+    expect(sev(read(true, "Use All Proxies", true, [99], false))).toEqual(["queue_uses_proxies:info"]);
+    expect(sev(read(true, "Use All Proxies", true, null, false))).toEqual(["queue_uses_proxies:info"]);
+    expect(renderQueueFindings(read(true, "Use All Proxies", true, [99], false))[0].message).toMatch(/may render from proxies/);
+    // A partial walk that already reached a proxied item is a certain hit.
+    expect(sev(read(true, "Use All Proxies", true, [7], false))).toEqual(["queue_uses_proxies:warn"]);
   });
 
   it("ignores queue items that will not render, and footage proxies under Comp Proxies Only", () => {
     const base = (status: string, use: string, kind = "file"): InterpretRead => ({
       items: [{ ...clipInfo({ use_proxy: true, proxy: { kind: "file" } }), kind }],
-      render_queue: { key_found: true, truncated: false, items: [{ index: 1, comp: "Main", status, proxy_use: use }] },
+      render_queue: { key_found: true, truncated: false, items: [{ index: 1, comp: "Main", status, proxy_use: use, reach: [7], reach_complete: true }] },
     });
     expect(renderQueueFindings(base("unqueued", "Use All Proxies"))).toEqual([]);
     expect(renderQueueFindings(base("needs_output", "Use All Proxies"))).toEqual([]);
@@ -379,6 +388,9 @@ describe("proxyMismatches", () => {
     const on = AeFootageProxySchema.parse({ item_ids: [7], action: "use_on", expect: expectArg });
     expect(proxyMismatches(on, read(), read(clipInfo({ use_proxy: true, proxy: { kind: "file" } })))).toEqual([]);
     expect(proxyMismatches(on, read(), read(clipInfo({ use_proxy: false, proxy: { kind: "file" } }))).map((m) => m.path)).toEqual(["items[7].use_proxy"]);
+    const setNoUse = AeFootageProxySchema.parse({ item_ids: [7], action: "set_file", file: "C:/Proxy/a.mov", expect: expectArg });
+    expect(proxyMismatches(setNoUse, read(), read(clipInfo({ use_proxy: true, proxy: { kind: "file", file: "C:/Proxy/a.mov" } })))).toEqual([]);
+    expect(proxyMismatches(setNoUse, read(), read(clipInfo({ use_proxy: false, proxy: { kind: "file", file: "C:/Proxy/a.mov" } }))).map((m) => m.path)).toEqual(["items[7].use_proxy"]);
     const clear = AeFootageProxySchema.parse({ item_ids: [7], action: "clear", expect: expectArg });
     expect(proxyMismatches(clear, read(), read(clipInfo({ proxy: { kind: "file" } }))).map((m) => m.path)).toEqual(["items[7].proxy"]);
     const set = AeFootageProxySchema.parse({ item_ids: [7], action: "set_file", file: "C:\\Proxy\\a.mov", use_proxy: true, expect: expectArg });
@@ -436,6 +448,39 @@ describe("interpret.jsx: interpretRead", () => {
     expect(out.items[1]).toEqual({ id: 9999, error: "not_found" });
     expect(out.render_queue).toMatchObject({ key_found: true, items: [{ index: 1, comp: "Main", status: "queued", proxy_use: "Use All Proxies" }] });
     expect(undo.begun).toBe(0);
+  });
+
+  it("gives each queue item the ids its comp reaches through precomps, and none from other comps", () => {
+    const { project, item, A } = scene();
+    const other = project.addFootage("other.mov", 10, 10, new FakeSource());
+    const inner: any = project.addComp("Inner");
+    const outer: any = project.addComp("Outer");
+    const unrelated: any = project.addComp("Unrelated");
+    const lay = (comp: any, source: any) => comp.stack.push({ source });
+    lay(inner, item);
+    lay(outer, inner);
+    lay(outer, null);
+    lay(unrelated, other);
+    (project.renderQueue.items as any).push({ comp: outer, status: RQItemStatus.QUEUED, getSettings: () => ({ "Proxy Use": "Use All Proxies" }) });
+    const out = A.interpretRead({ include_render_queue: true });
+    const q = out.render_queue.items[0];
+    expect(q.reach_complete).toBe(true);
+    expect([...q.reach].sort()).toEqual([outer.id, inner.id, item.id].sort());
+    expect(q.reach).not.toContain(other.id);
+  });
+
+  it("bounds the walk and says it is incomplete", () => {
+    const { project, item, A } = scene();
+    const big: any = project.addComp("Big");
+    for (let i = 0; i < 4900; i++) big.stack.push({ source: item });
+    (project.renderQueue.items as any).push({ comp: big, status: RQItemStatus.QUEUED, getSettings: () => ({ "Proxy Use": "Use All Proxies" }) });
+    expect(A.interpretRead({ item_ids: [item.id] }).render_queue.items[0].reach_complete).toBe(true);
+    const many: any = project.addComp("Many");
+    for (let i = 0; i < 600; i++) many.stack.push({ source: project.addFootage(`m${i}.mov`, 10, 10, new FakeSource()) });
+    (project.renderQueue.items as any).push({ comp: many, status: RQItemStatus.QUEUED, getSettings: () => ({ "Proxy Use": "Use All Proxies" }) });
+    const q = A.interpretRead({ item_ids: [item.id] }).render_queue.items[1];
+    expect(q.reach_complete).toBe(false);
+    expect(q.reach.length).toBeLessThanOrEqual(500);
   });
 
   it("lists comps only when they carry a proxy, and says when the Proxy Use key is unreadable", () => {
@@ -647,6 +692,27 @@ describe("interpret.jsx: interpretProxy", () => {
     expect(undo.begun).toBe(0);
   });
 
+  it("names the ids already cleared when a clear fails partway", () => {
+    const { project, item, A } = scene();
+    const second = new ProxyFootage("b.mov", 10, 10, new FakeSource());
+    second.project = project;
+    project.all.push(second);
+    item.setProxy({ fsName: "C:/a.mov" });
+    second.setProxy({ fsName: "C:/b.mov" });
+    second.setProxyToNone = () => {
+      throw new Error("AE refused");
+    };
+    let err: any;
+    try {
+      A.interpretProxy({ item_ids: [item.id, second.id], action: "clear", expect: GUARD });
+    } catch (e) {
+      err = e;
+    }
+    expect(err.message).toMatch(/AE refused.*already changed.*ids .*Ctrl\+Z/);
+    expect(err.message).toContain(String(item.id));
+    expect(err.__actual).toEqual({ changed_ids: [item.id] });
+  });
+
   it("switches back the items already done when one fails", () => {
     const { project, item, A, undo } = scene();
     const second = new ProxyFootage("b.mov", 10, 10, new FakeSource());
@@ -739,5 +805,23 @@ describe("interpret tools", () => {
     const filtered: any = await tool("ae_get_footage_interpretation").handler(AeGetFootageInterpretationSchema.parse({ only_findings: true }), only.ctx);
     expect(filtered.items.map((i: { id: number }) => i.id)).toEqual([2]);
     expect(filtered.findings_total).toBe(2);
+  });
+
+  it("ae_get_footage_interpretation strips reach ids from the queue items but still computes findings from them", async () => {
+    const read = {
+      items: [clipInfo({ id: 7, name: "p.mov", use_proxy: true, proxy: { kind: "file" } })],
+      render_queue: {
+        key_found: true,
+        truncated: false,
+        items: [{ index: 1, comp: "Main", status: "queued", proxy_use: "Use All Proxies", reach: [3, 7, 9], reach_complete: true }],
+      },
+    };
+    const f = fakeAe({ interpretRead: [read] });
+    const out: any = await tool("ae_get_footage_interpretation").handler(AeGetFootageInterpretationSchema.parse({}), f.ctx);
+    const q = out.render_queue.items[0];
+    expect(q.reach).toBeUndefined();
+    expect(q.reach_count).toBe(3);
+    expect(q.reach_complete).toBe(true);
+    expect(out.render_queue_findings.map((x: { code: string; severity: string }) => `${x.code}:${x.severity}`)).toEqual(["queue_uses_proxies:warn"]);
   });
 });

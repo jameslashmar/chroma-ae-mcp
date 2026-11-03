@@ -262,6 +262,25 @@ describe("planStagger", () => {
     expect(planStagger(parseStagger({ mode: "copy_keys", property_path: path, source: { id: 10 }, step: 0.5, replace_existing: true }), readOf([target(2)], { source: src })).ok).toBe(true);
     expect(planStagger(args, readOf([target(0, 10)], { source: src }))).toMatchObject({ ok: false });
   });
+
+  it("copy_keys plans the source's key count and first time, not the target's own", () => {
+    const path = ["ADBE Transform Group", "ADBE Opacity"];
+    const src = SL(1, 10, "Src", { property: { found: true, numKeys: 2, times: [0.5, 1] } });
+    const keyless = SL(2, 11, "T", { property: { found: true, numKeys: 0 } });
+    const keyed = SL(3, 12, "U", { property: { found: true, numKeys: 4, times: [9] } });
+    const r = planStagger(parseStagger({ mode: "copy_keys", property_path: path, source: { id: 10 }, step: 0.5, replace_existing: true }), readOf([keyless, keyed], { source: src }));
+    expect(r.ok && r.plan.entries.map((e) => [e.num_keys, e.first_time])).toEqual([
+      [2, 0.5],
+      [2, 0.5],
+    ]);
+    // first_key_to in the summary is first_time + offset: the source's first key plus the offset.
+    expect(r.ok && r.plan.entries.map((e) => Number((e.first_time! + e.offset).toFixed(9)))).toEqual(r.ok ? r.plan.entries.map((e) => Number((0.5 + e.offset).toFixed(9))) : []);
+  });
+
+  it("refuses locked layers in layers mode too", () => {
+    const r = planStagger(parseStagger({ step: 0.2 }), readOf([SL(1, 10, "A", { locked: true }), SL(2, 11, "B")]));
+    expect(r).toMatchObject({ ok: false, message: expect.stringMatching(/locked/) });
+  });
 });
 
 describe("planLayout", () => {
@@ -726,6 +745,48 @@ describe("stagger.jsx: staggerApply (keys)", () => {
     ).toThrow(/same time/);
   });
 
+  it("says so when the rollback could not put the keys back", () => {
+    const { comp, A } = scene(2);
+    const [l1, l2] = [comp.layer(1)!, comp.layer(2)!];
+    const p1 = keyedPosition(l1, 1);
+    const p2 = keyedPosition(l2, 1);
+    void p2;
+    const orig = p1.setValueAtTime.bind(p1);
+    let failing = false;
+    // The first layer is written fine, then the second fails; restoring the first is refused.
+    const p2b = prop(l2, "Position");
+    const o2 = p2b.setValueAtTime.bind(p2b);
+    p2b.setValueAtTime = (t: number, v: unknown) => {
+      if (Math.abs(t - 2.52) < 1e-6) {
+        failing = true;
+        throw new Error("AE said no");
+      }
+      o2(t, v);
+    };
+    p1.setValueAtTime = (t: number, v: unknown) => {
+      if (failing) throw new Error("restore refused");
+      orig(t, v);
+    };
+    let message = "";
+    try {
+      A.staggerApply({
+        comp_id: comp.id,
+        mode: "keys",
+        property_path: POS,
+        targets: [
+          { id: l1.id, offset: 1, num_keys: 3, first_time: 1 },
+          { id: l2.id, offset: 0.52, num_keys: 3, first_time: 1 },
+        ],
+        expect: GUARD,
+      });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/AE said no/);
+    expect(message).toMatch(/rollback was incomplete/);
+    expect(message).toMatch(/restore refused/);
+  });
+
   it("collects what a setter refuses as warnings and still rebuilds the keys", () => {
     const { comp, A } = scene(1);
     const l = comp.layer(1)!;
@@ -911,6 +972,43 @@ describe("stagger.jsx: layout", () => {
     expect(() => run([{ id: a.id, position: [1, "x"] }])).toThrow(/must be \[x, y\]/);
     expect(prop(a, "Position").staticValue).toEqual([320, 180, 0]);
     expect(fromJson(A.staggerLayoutRead({ comp_id: comp.id, layers: [{ id: b.id }, { id: c.id }] })).layers.map((l: { state: string }) => l.state)).toEqual(["keyed", "expression"]);
+  });
+
+  it("puts the Positions back when a later write fails, and says so when a restore is refused", () => {
+    const run = (refuseRestore: boolean) => {
+      const { comp, A } = scene(2);
+      const [a, b] = [comp.layer(1)!, comp.layer(2)!];
+      const pa = prop(a, "Position") as any;
+      const pb = prop(b, "Position") as any;
+      const origA = pa.setValue.bind(pa);
+      let calls = 0;
+      pa.setValue = (v: unknown) => {
+        calls++;
+        if (refuseRestore && calls > 1) throw new Error("locked again");
+        return origA(v);
+      };
+      pb.setValue = () => {
+        throw new Error("second write refused");
+      };
+      let msg = "";
+      try {
+        A.staggerLayoutApply({
+          comp_id: comp.id,
+          targets: [{ id: a.id, position: [100, 50] }, { id: b.id, position: [200, 50] }],
+          expect: GUARD,
+        });
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      return { msg, pa };
+    };
+    const ok = run(false);
+    expect(ok.msg).toMatch(/second write refused/);
+    expect(ok.msg).not.toMatch(/ReferenceError|not defined/);
+    expect(ok.pa.staticValue).toEqual([320, 180, 0]);
+    const bad = run(true);
+    expect(bad.msg).toMatch(/second write refused/);
+    expect(bad.msg).toMatch(/rollback was incomplete/);
   });
 
   it("sets a separated Position through its X and Y", () => {

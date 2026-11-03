@@ -224,6 +224,7 @@ const EPS = 1e-6;
 export const THIRD_INFLUENCE = 100 / 3;
 /** The host writes at most this many keys. */
 export const MAX_PLAN_KEYS = 3000;
+const MAX_PLAN_SAMPLES = 100;
 
 const bad = (message: string): PlanResult => ({ ok: false, error: "bad_args", message });
 const fix = (n: number) => Math.round(n * 1e9) / 1e9;
@@ -446,11 +447,14 @@ export function planTimeRemap(args: TimeRemapArgs, info: RemapInfo): PlanResult 
     }
     case "freeze": {
       let src: number;
+      let reportAt = info.in_point;
       if (args.source_time !== undefined) {
         src = args.source_time;
       } else {
         const at = args.at_time as number;
-        if (at < info.in_point - EPS || at >= info.out_point + EPS) {
+        reportAt = at;
+        // The last frame the layer shows starts one comp frame before the out point.
+        if (at < info.in_point - EPS || at >= info.out_point - EPS) {
           return bad(`at_time ${at}s is outside the layer (${fix(info.in_point)}s to ${fix(info.out_point)}s).`);
         }
         const found = sourceTimeAt(info, at);
@@ -460,7 +464,7 @@ export function planTimeRemap(args: TimeRemapArgs, info: RemapInfo): PlanResult 
       const sfd = info.source.frame_duration;
       // AE shows the source frame that contains the time, so floor to the frame start.
       if (sfd > 0) src = fix(Math.floor(src / sfd + 1e-6) * sfd);
-      if (src < -EPS || src > maxSrc + EPS) return bad(tooFar("The frozen frame", src, info.in_point, info));
+      if (src < -EPS || src > maxSrc + EPS) return bad(tooFar("The frozen frame", src, reportAt, info));
       src = Math.min(Math.max(src, 0), maxSrc);
       const plan = basePlan("freeze", info);
       plan.enable = !info.remap_enabled;
@@ -530,7 +534,7 @@ export function planTimeRemap(args: TimeRemapArgs, info: RemapInfo): PlanResult 
           stretch: fix(stretch),
           keep_in_point: true,
           expect_remap_enabled: false,
-          notes: ["layer.stretch changed; the in point was kept by shifting the start time if AE moved it."],
+          notes: ["layer.stretch changed; the start time was moved so the in point stays put (checked in the read-back)."],
         },
       };
     }
@@ -705,6 +709,16 @@ function planRamp(args: TimeRemapArgs, info: RemapInfo, cfd: number): PlanResult
       return bad(`A per_frame ramp over ${times.length} frames is more than ${MAX_PLAN_KEYS} keys; use method "bezier" or a shorter ramp.`);
     }
     plan.per_frame = { times, values: times.map((t) => Math.min(Math.max(rampSourceAt(points, values, t), 0), dur)) };
+    // The key read-back is capped, so check up to 100 evenly spaced keys by sampling, the last one included.
+    const picks = Math.min(times.length, MAX_PLAN_SAMPLES);
+    const seen = new Set<number>();
+    for (let n = 0; n < picks; n++) {
+      const idx = picks === 1 ? 0 : Math.round((n * (times.length - 1)) / (picks - 1));
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      plan.sample_times.push(times[idx]);
+      plan.expected_samples.push({ time: times[idx], value: plan.per_frame.values[idx] });
+    }
     plan.notes.push(`${times.length} linear keys, one per frame.`);
   }
   if (outside === "trim") {
@@ -763,6 +777,31 @@ export function remapMismatches(plan: RemapPlan, beforeRaw: unknown, afterRaw: u
           });
         }
       }
+      for (let i = 0; i < n && shown < 5; i++) {
+        const e = plan.keys[i].ease;
+        if (!e) continue;
+        const k = after.keys[i];
+        const sides: Array<[string, number | undefined, number | undefined, RemapEase | undefined]> = [
+          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0]],
+          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0]],
+        ];
+        for (const [nm, speed, infl, got] of sides) {
+          if (speed === undefined && infl === undefined) continue;
+          const bad =
+            !got ||
+            (speed !== undefined && !(Math.abs(got.speed - speed) <= 1e-3)) ||
+            (infl !== undefined && !(Math.abs(got.influence - infl) <= 0.01));
+          if (bad && shown < 5) {
+            shown++;
+            m.push({
+              path: `keys[${i + 1}].ease`,
+              expected: { side: nm, speed, influence: infl },
+              actual: got ?? null,
+              message: "A remap key's ease differs from the plan (After Effects may have clamped or reset it)",
+            });
+          }
+        }
+      }
     }
   }
 
@@ -779,7 +818,9 @@ export function remapMismatches(plan: RemapPlan, beforeRaw: unknown, afterRaw: u
         path: `samples@${e.time}`,
         expected: fix(e.value),
         actual: got.value,
-        message: "The Bezier ramp doesn't match the integrated speed curve (the ease speed unit may differ); redo it with method per_frame",
+        message: plan.per_frame
+          ? "A per_frame ramp key's sampled source time differs from the plan"
+          : "The Bezier ramp doesn't match the integrated speed curve (the ease speed unit may differ); redo it with method per_frame",
       });
       break;
     }

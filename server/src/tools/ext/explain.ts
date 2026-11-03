@@ -73,7 +73,7 @@ export const AeExplainLayerProofSchema = z.object({
   suspect: z
     .enum(SUSPECTS)
     .describe(
-      "The cause to test, undone in a COPY of the comp: enabled (video switch on), solo (clear other layers' solo), opacity (a plain 0% to 100%), " +
+      "The cause to test, undone in a COPY of the comp: enabled (video switch on), solo (solo the target in the copy too; the other layers keep their solo), opacity (a plain 0% to 100%), " +
         "track_matte (remove it), masks (all to None), layers_above (switch off every layer above, to test 'covered'), adjustment_above (switch off adjustment layers above). " +
         "Only the comp's top-level layers are changed: a duplicated comp shares its nested precomps with the original."
     ),
@@ -285,7 +285,7 @@ export function proofVerdict(
   }
   return {
     verdict: "not_confirmed",
-    explanation: `Undoing "${suspect}" in a copy changes no pixels ${where}, so it is not what hides the layer at this time (or the layer is covered by something else).`,
+    explanation: `Undoing "${suspect}" in a copy changes no pixels ${where}, so undoing this cause alone does not make the layer show. Other causes may also hide it, or something else covers it (run ae_explain_layer to list them).`,
   };
 }
 
@@ -314,7 +314,7 @@ export function proofMismatches(
   const b = before as ProofState | null;
   const a = after as ProofState | null;
   if (b && a) {
-    expectThat(m, a.proof_comps === 0, "proof_comps", 0, a.proof_comps, "A temporary proof comp is still in the project");
+    expectThat(m, a.proof_comps === b.proof_comps, "proof_comps", b.proof_comps, a.proof_comps, "A temporary proof comp is still in the project");
     expectThat(m, a.num_items === b.num_items, "num_items", b.num_items, a.num_items, "The project's item count changed");
   }
   return m;
@@ -382,6 +382,8 @@ export const explainTools: ToolDefinition<any>[] = [
       try {
         return await ctx.queue.run(label, async () => {
           ctx.quarantine.assertClear();
+          // Guard first, so a wrong project is refused before anything about its comps is read.
+          const guard = await verifyTargetGuard(ctx, expect, opId);
           // Read-only: an inapplicable suspect is refused here, before any checkpoint.
           await ctx.bridge.evalRaw({
             id: `${opId}_plan`,
@@ -390,7 +392,6 @@ export const explainTools: ToolDefinition<any>[] = [
             mutates: false,
             toolName,
           });
-          const guard = await verifyTargetGuard(ctx, expect, opId);
           const checkpoint = await autoCheckpoint(ctx, guard, toolName);
           const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
           const sessionFields = await noteBeforeWrite(ctx, note);

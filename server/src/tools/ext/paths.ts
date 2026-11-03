@@ -368,7 +368,7 @@ export const AePathWriteSchema = z
       "Write a key at this comp time instead of a value. Needed when the path already has keys; on a path without keys it adds the first key (add a second with another call to morph)."
     ),
     allow_vertex_count_change: z.boolean().optional().describe("Allow a key whose vertex count differs from the path's other keys. That breaks the morph between keys, so it is off by default."),
-    allow_feather_loss: z.boolean().optional().describe("Allow a vertex count change on a mask with feather points; AE can't keep them on the right segments, so they are cleared."),
+    allow_feather_loss: z.boolean().optional().describe("Allow a write that changes the vertex count or order (reverse, resample, smooth, mirror with reverse_direction) on a mask with feather points; AE can't keep them on the right segments, so they are cleared."),
     dry_run: z.boolean().optional().describe("Compute the new path and return it without writing anything (no guard, checkpoint or undo entry)."),
     expect: ExpectSchema,
   })
@@ -578,7 +578,7 @@ export function applyPathOperation(args: z.infer<typeof AePathWriteSchema>, curr
 
 const LINE_JOIN: Record<string, number> = { miter: 1, round: 2, bevel: 3 };
 const TRIM_TYPE: Record<string, number> = { simultaneously: 1, individually: 2 };
-const REPEATER_ORDER: Record<string, number> = { below: 1, above: 2 };
+const REPEATER_ORDER: Record<string, number> = { above: 1, below: 2 };
 /** Tolerance in seconds for key times (AE snaps them to frames). */
 const KEY_TIME_TOLERANCE = 0.05;
 
@@ -814,7 +814,7 @@ export const pathsTools: ToolDefinition<any>[] = [
       "Write a path back into a mask or a free shape path (a Shape round trip), as a value or, with `time`, as a key. operation 'set' writes the given vertices and tangents; " +
       "'resample' (even arc-length spacing, by count or spacing), 'smooth' (chaikin or catmull_rom), 'mirror' (across x or y) and 'reverse' compute the new path here from the path as it is now. " +
       "dry_run returns the computed path without writing. Refused before anything is written when: the path is keyframed and no `time` is given; an expression is on the path; a key would get another vertex count than the path's other keys (allow_vertex_count_change); " +
-      "a mask with feather points would change vertex count (allow_feather_loss); the path changed since it was read. Replacing an existing key keeps its interpolation and ease where AE allows (the result says if it was restored). " +
+      "a mask with feather points would change vertex count or order (allow_feather_loss); the path changed since it was read. Replacing an existing key keeps its interpolation and ease where AE allows (the result says if it was restored). " +
       "In one undo group guarded by `expect`; the read-back (a separate evalScript) checks vertex count, closed flag, every vertex and tangent. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AePathWriteSchema,
@@ -857,6 +857,7 @@ export const pathsTools: ToolDefinition<any>[] = [
             allow_vertex_count_change: args.allow_vertex_count_change,
             allow_feather_loss: args.allow_feather_loss,
             operation: args.operation,
+            reorders: args.operation === "reverse" || (args.operation === "mirror" && args.mirror?.reverse_direction === true) ? true : undefined,
             label: `Path ${args.operation}`,
           },
         },

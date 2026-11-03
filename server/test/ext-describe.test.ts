@@ -426,6 +426,88 @@ describe("describe.jsx", () => {
     expect(verbFor(r.segments[0])).toBe("appears");
   });
 
+  it("reads an apostrophe layer name and says so when the property tree is deeper than the walk", () => {
+    const { project, comp } = scene();
+    const { A } = loadHost(project, ["describe.jsx"]);
+    const l = comp.layers.addSolid([1, 1, 1], "Logo", 100, 100, 1, 4);
+    l.transform("Position").expression = String.raw`thisComp.layer("Bob's Logo").position + thisComp.layer('say "hi"').position`;
+    l.transform("Position").expressionEnabled = true;
+    let r = A.describeRead({ comp_id: comp.id });
+    expect(r.layers[0].expressions.refs).toEqual(["Bob's Logo", 'say "hi"']);
+    expect(r.walk_truncated).toBe(false);
+    let inner = new FakeGroup("Leaf", "ADBE Vector Group", [new FakeProperty("Opacity", "ADBE Vector Group Opacity", PropertyValueType.OneD, 100)]);
+    for (let i = 0; i < 20; i++) inner = new FakeGroup("G" + i, "ADBE Vector Group", [inner]);
+    (l.group as FakeGroup).props.push(inner);
+    r = A.describeRead({ comp_id: comp.id });
+    expect(r.walk_truncated).toBe(true);
+  });
+
+  it("puts a hold step at the second key, not across the gap", () => {
+    const a = buildActions(raw([L(1, "X")], [S(1, "Opacity", 0, 2, [0], [100], { hold: true })]));
+    expect(a[0]).toMatchObject({ verb: "appears", start: 2, end: 2 });
+    const d = describeFromRaw(raw([L(1, "X")], [S(1, "Opacity", 0, 2, [0], [100], { hold: true })]));
+    expect(d.throughout).toEqual([]);
+    expect(d.beats[0]).toMatchObject({ start: 2, end: 2 });
+  });
+
+  it("keeps a linear segment that starts before a same-verb hold step on one layer", () => {
+    const a = buildActions(raw([L(1, "X")], [
+      S(1, "Path", 0, 4, [0], [1], { hold: true, kind: "shape" }),
+      S(1, "Path", 1, 2, [0], [1], { kind: "shape" }),
+    ]));
+    const same = a.filter((x) => x.layer === 1 && x.verb === a[0].verb);
+    expect(a.length).toBe(2);
+    expect(same.length).toBe(2);
+    expect(a.map((x) => x.start).sort((p, q) => p - q)).toEqual([1, 4]);
+  });
+
+  it("clips long names and caps the summary", () => {
+    const long = "N".repeat(200);
+    const ls = Array.from({ length: 50 }, (_, i) => L(i + 1, long + i));
+    const segs = ls.map((l) => S(l.index, "Opacity", l.index * 0.5, l.index * 0.5 + 0.2, [0], [100]));
+    const d = describeFromRaw(raw(ls, segs), 50);
+    expect(d.beats[0].text.length).toBeLessThan(600);
+    expect(d.summary.length).toBeLessThanOrEqual(20000);
+    const huge = describeFromRaw(raw(ls, segs, { comp: { ...raw(ls).comp, duration: 100 } } as any), 50);
+    expect(huge.summary.length).toBeLessThanOrEqual(20000);
+  });
+
+  it("flags a summary cut at the length limit", () => {
+    const base = raw([L(1, "A")]);
+    const d = describeFromRaw({ ...base, comp: { ...base.comp, name: "N".repeat(30000) } } as any);
+    expect(d.summary.length).toBeLessThanOrEqual(20000);
+    expect(d.summary_truncated).toBe(true);
+    expect(d.summary.endsWith("summary cut at the length limit.")).toBe(true);
+  });
+
+  it("keeps concerns and notes when many long beats are shown", () => {
+    const long = "N".repeat(150);
+    const ls = Array.from({ length: 50 }, (_, i) => L(i + 1, long + i));
+    const segs = ls.map((l) => S(l.index, "Opacity", l.index * 2, l.index * 2 + 0.2, [0], [100]));
+    const base = raw(ls, segs, { comp: { ...raw(ls).comp, duration: 200 }, walk_truncated: true } as any);
+    const d = describeFromRaw(base, 50);
+    expect(d.summary).toContain("The property scan was cut short");
+    expect(d.summary.length).toBeLessThanOrEqual(20000);
+  });
+
+  it("cuts the beat list at the budget and says how many beats were left out", () => {
+    const long = "N".repeat(80);
+    const ls = Array.from({ length: 12 }, (_, i) => L(i + 1, long + i));
+    const segs: any[] = [];
+    for (let b = 0; b < 50; b++) {
+      const t = b * 2;
+      for (const l of ls) {
+        for (const p of ["Opacity", "Scale", "Position", "Rotation"]) segs.push(S(l.index, p, t, t + 0.2, [0], [100]));
+      }
+    }
+    const base = raw(ls, segs, { comp: { ...raw(ls).comp, duration: 200 }, walk_truncated: true } as any);
+    const d = describeFromRaw(base, 50);
+    expect(d.summary).toContain("more beats (see beats).");
+    expect(d.summary).toContain("The property scan was cut short");
+    expect(d.summary_truncated).toBeUndefined();
+    expect(d.summary.length).toBeLessThanOrEqual(20000);
+  });
+
   it("pages layers, keeping parent and matte flags from the whole comp", () => {
     const { project, comp } = scene();
     const { A } = loadHost(project, ["describe.jsx"]);
@@ -603,7 +685,7 @@ describe("review fixes", () => {
     it("does not judge when the property scan was cut short", () => {
       const r = raw([L(1, "Ghost", { enabled: false })], [], { walk_truncated: true });
       expect(unusedOf(r)).toBeUndefined();
-      expect(findConcerns(r).find((k) => k.kind === "switched_off")!.message).toContain("property scan hit its cap");
+      expect(findConcerns(r).find((k) => k.kind === "switched_off")!.message).toContain("property scan was cut short");
     });
 
     it("does not judge when a layer's expression refs were cut", () => {

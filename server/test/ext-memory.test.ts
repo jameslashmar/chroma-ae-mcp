@@ -13,9 +13,10 @@ import {
   preflightWarnings,
   purgeMismatches,
   readServerMemory,
-  shouldPurgeBetweenChunks,
+  purgeWarnings,
   type MemoryRead,
 } from "../src/tools/ext/memory.js";
+import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
 import { FakeProject, GUARD, loadHost } from "./support/fake-ae.js";
 
 const tmpDirs: string[] = [];
@@ -73,12 +74,15 @@ describe("schemas", () => {
 
   it("purge needs expect, a known target, and the confirm flag for undo and all", () => {
     expect(AeMemoryPurgeSchema.safeParse({ target: "ram" }).success).toBe(false);
-    expect(AeMemoryPurgeSchema.safeParse({ target: "ram", expect: expectArg }).success).toBe(true);
+    expect(AeMemoryPurgeSchema.safeParse({ target: "image", expect: expectArg }).success).toBe(true);
+    expect(AeMemoryPurgeSchema.safeParse({ target: "ram", expect: expectArg }).success).toBe(false);
+    expect(AeMemoryPurgeSchema.safeParse({ target: "ram", confirm_undo_purge: true, expect: expectArg }).success).toBe(true);
     expect(AeMemoryPurgeSchema.safeParse({ target: "gpu", expect: expectArg }).success).toBe(false);
     expect(AeMemoryPurgeSchema.safeParse({ target: "undo", expect: expectArg }).success).toBe(false);
     expect(AeMemoryPurgeSchema.safeParse({ target: "undo", confirm_undo_purge: true, expect: expectArg }).success).toBe(true);
     expect(AeMemoryPurgeSchema.safeParse({ target: "all", confirm_undo_purge: true, expect: expectArg }).success).toBe(false);
-    expect(AeMemoryPurgeSchema.safeParse({ target: "all", confirm_disk_cache_wipe: true, expect: expectArg }).success).toBe(true);
+    expect(AeMemoryPurgeSchema.safeParse({ target: "all", confirm_disk_cache_wipe: true, expect: expectArg }).success).toBe(false);
+    expect(AeMemoryPurgeSchema.safeParse({ target: "all", confirm_undo_purge: true, confirm_disk_cache_wipe: true, expect: expectArg }).success).toBe(true);
   });
 
   it("exports the two tools, with the safety guidance on the write", () => {
@@ -103,10 +107,12 @@ describe("pure logic", () => {
     expect(w.warnings[0]).toContain("no app.memoryInUse");
   });
 
-  it("purges between chunks only above the threshold and never without a reading", () => {
-    expect(shouldPurgeBetweenChunks(5000 * MB, 4000)).toBe(true);
-    expect(shouldPurgeBetweenChunks(3000 * MB, 4000)).toBe(false);
-    expect(shouldPurgeBetweenChunks(null, 4000)).toBe(false);
+  it("builds the undo, disk cache and RAM preview warnings from the write's own result", () => {
+    expect(purgeWarnings({ target: "undo", purged: true, undo_history_cleared: true })[0]).toContain("Ctrl+Z");
+    expect(purgeWarnings({ target: "ram", purged: true, undo_history_cleared: null, undo_history_may_be_cleared: true }).join(" ")).toContain("may also have cleared");
+    expect(purgeWarnings({ target: "all", purged: true, disk_cache_cleared: true, undo_history_may_be_cleared: true }).join(" ")).toContain("disk cache");
+    expect(purgeWarnings({ target: "snapshot", purged: true, undo_history_cleared: false })).toEqual([]);
+    expect(purgeWarnings({ target: "ram", purged: false, undo_history_may_be_cleared: false })).toEqual([]);
   });
 
   it("reads the server's own memory and the system's", () => {
@@ -116,7 +122,7 @@ describe("pure logic", () => {
   });
 
   it("flags a changed project and a purge the host did not do", () => {
-    const args = AeMemoryPurgeSchema.parse({ target: "ram", expect: expectArg });
+    const args = AeMemoryPurgeSchema.parse({ target: "ram", confirm_undo_purge: true, expect: expectArg });
     expect(purgeMismatches(args, read(1), read(1), { target: "ram", purged: true })).toEqual([]);
     expect(purgeMismatches(args, read(1), read(1, { project_path: "C:/x.aep", dirty: true }), { target: "ram", purged: false }).map((m) => m.path)).toEqual([
       "project_path",
@@ -145,9 +151,11 @@ describe("tools with a fake bridge", () => {
       memoryRead: [read(6000 * MB), read(2000 * MB)],
       memoryPurge: [{ target: "ram", purge_constant: "ALL_MEMORY_CACHES", purged: true, skipped_reason: null, undo_history_cleared: false, disk_cache_cleared: false }],
     });
-    const args = AeMemoryPurgeSchema.parse({ target: "ram", expect: expectArg });
+    const args = AeMemoryPurgeSchema.parse({ target: "ram", confirm_undo_purge: true, expect: expectArg });
     const out = (await tool("ae_memory_purge").handler(args, ctx)) as any;
     expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "memoryRead", "memoryPurge", "memoryRead"]);
+    expect(out.checkpoint.status).toBe("skipped");
+    expect(out.checkpoint.reason).toContain("no checkpoint");
     expect(calls[2].script).toContain('"expect"');
     expect(out.receipt.matches).toBe(true);
     expect(out.memory_in_use_bytes).toEqual({ before: 6000 * MB, after: 2000 * MB, freed: 4000 * MB });
@@ -164,6 +172,75 @@ describe("tools with a fake bridge", () => {
     expect(out.undo_history_cleared).toBe(true);
     expect(out.warnings[0]).toContain("Ctrl+Z");
     expect(out.receipt.matches).toBe(true);
+  });
+
+  it("a failed read-back still carries the undo warning from the write's own result", async () => {
+    const { ctx } = fakeAe({
+      memoryRead: [read(1000 * MB)],
+      memoryPurge: [{ target: "undo", purge_constant: "UNDO_CACHES", purged: true, skipped_reason: null, undo_history_cleared: true, disk_cache_cleared: false }],
+    });
+    const args = AeMemoryPurgeSchema.parse({ target: "undo", confirm_undo_purge: true, expect: expectArg });
+    const out = (await tool("ae_memory_purge").handler(args, ctx)) as any;
+    expect(out.receipt.matches).toBe(false);
+    expect(out.undo_history_cleared).toBe(true);
+    expect(out.warnings.some((w: string) => w.includes("Ctrl+Z"))).toBe(true);
+  });
+
+  it("a purge adds no undo step, moves the baseline once, and records a purge that cleared or may have cleared undo", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-memory-s-"));
+    tmpDirs.push(dir);
+    const tracker = installSessionTracking({ dataDir: dir });
+    try {
+      const snap = {
+        project_path: "<unsaved>", dirty: false, revision: null, num_items: 0, item_ids: [], items_truncated: false,
+        active_item: null, ae_version: "26.2.1", build: null, render_queue: null, comps: [],
+      };
+      tracker.record(snap as any, { op_id: null, tool: "seed" });
+      const baselineBefore = tracker.steps().length;
+      const { ctx, calls } = fakeAe({
+        memoryRead: [read(1000 * MB), read(1000 * MB), read(1000 * MB), read(1000 * MB), read(1000 * MB), read(1000 * MB)],
+        sessionSnapshot: [snap, snap, snap, snap, snap],
+        memoryPurge: [
+          { target: "image", purge_constant: "IMAGE_CACHES", purged: true, skipped_reason: null, undo_history_cleared: false, undo_history_may_be_cleared: false, disk_cache_cleared: false },
+          { target: "undo", purge_constant: "UNDO_CACHES", purged: true, skipped_reason: null, undo_history_cleared: true, undo_history_may_be_cleared: false, disk_cache_cleared: false },
+          { target: "ram", purge_constant: "ALL_MEMORY_CACHES", purged: true, skipped_reason: null, undo_history_cleared: null, undo_history_may_be_cleared: true, disk_cache_cleared: false },
+        ],
+      });
+      const out1 = (await tool("ae_memory_purge").handler(AeMemoryPurgeSchema.parse({ target: "image", expect: expectArg }), ctx)) as any;
+      const base1 = tracker.lastBaseline();
+      expect(base1?.op_id).toBe(out1.op_id);
+      expect(base1?.tool).toBe("ae_memory_purge");
+      expect(calls.filter((c) => c.fn === "sessionSnapshot").length).toBe(2); // before the write, and the baseline move after it
+      expect(tracker.steps().length).toBe(baselineBefore);
+      expect(tracker.steps()).toEqual([]);
+      expect(tracker.undoPurge()).toEqual({ purgedAt: null, maybePurgedAt: null });
+      await tool("ae_memory_purge").handler(AeMemoryPurgeSchema.parse({ target: "undo", confirm_undo_purge: true, expect: expectArg }), ctx);
+      expect(tracker.steps()).toEqual([]);
+      expect(tracker.undoPurge().purgedAt).not.toBeNull();
+      expect(tracker.undoPurge().maybePurgedAt).toBeNull();
+      expect(tracker.reopenedAt()).toBeNull();
+    } finally {
+      resetSessionTracking();
+    }
+  });
+
+  it("a ram purge that may have cleared undo is recorded too", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-memory-s-"));
+    tmpDirs.push(dir);
+    const tracker = installSessionTracking({ dataDir: dir });
+    try {
+      const { ctx } = fakeAe({
+        memoryRead: [read(1000 * MB), read(1000 * MB)],
+        memoryPurge: [{ target: "ram", purge_constant: "ALL_MEMORY_CACHES", purged: true, skipped_reason: null, undo_history_cleared: null, undo_history_may_be_cleared: true, disk_cache_cleared: false }],
+      });
+      await tool("ae_memory_purge").handler(AeMemoryPurgeSchema.parse({ target: "ram", confirm_undo_purge: true, expect: expectArg }), ctx);
+      expect(tracker.steps()).toEqual([]);
+      expect(tracker.undoPurge().maybePurgedAt).not.toBeNull();
+      expect(tracker.undoPurge().purgedAt).toBeNull();
+      expect(tracker.reopenedAt()).toBeNull();
+    } finally {
+      resetSessionTracking();
+    }
   });
 
   it("a failed read-back goes into the receipt instead of throwing", async () => {
@@ -246,12 +323,12 @@ describe("memory.jsx", () => {
   });
 
   it("purges RAM caches without an undo group and says undo may be cleared", () => {
-    const { A, undo, purged } = host();
-    const r = A.memoryPurge({ target: "ram", expect: GUARD });
+    const { A, undo, purged } = host({ saved: true });
+    const r = A.memoryPurge({ target: "ram", confirm_undo_purge: true, expect: SAVED });
     expect(r).toMatchObject({ purged: true, purge_constant: "ALL_MEMORY_CACHES", undo_history_cleared: null, undo_history_may_be_cleared: true, disk_cache_cleared: false });
     expect(purged).toEqual([5]);
     expect(undo.begun).toBe(0);
-    const img = A.memoryPurge({ target: "image", expect: GUARD });
+    const img = A.memoryPurge({ target: "image", expect: SAVED });
     expect(img).toMatchObject({ undo_history_cleared: false, undo_history_may_be_cleared: false });
     expect(undo.begun).toBe(0);
   });
@@ -277,9 +354,23 @@ describe("memory.jsx", () => {
     expect(() => A.memoryRead({ prefs: [{ section: "S", key: "K", pref_file: "bogus" }] })).toThrow(/pref_file must be/);
   });
 
+  it("gates ram like undo: a confirm flag, a saved project and no unsaved changes", () => {
+    const { A, project, purged } = host({ saved: true });
+    expect(() => A.memoryPurge({ target: "ram", expect: SAVED })).toThrow(/confirm_undo_purge/);
+    expect(() => A.memoryPurge({ target: "ram", only_above_mb: 1, confirm_undo_purge: false, expect: SAVED })).toThrow(/confirm_undo_purge/);
+    project.dirty = true;
+    expect(() => A.memoryPurge({ target: "ram", confirm_undo_purge: true, expect: SAVED })).toThrow(/unsaved changes/);
+    expect(purged).toEqual([]);
+    const fresh = host();
+    expect(() => fresh.A.memoryPurge({ target: "ram", confirm_undo_purge: true, expect: GUARD })).toThrow(/never been saved/);
+    expect(fresh.purged).toEqual([]);
+    // snapshot keeps needing nothing.
+    expect(fresh.A.memoryPurge({ target: "snapshot", expect: GUARD })).toMatchObject({ purged: true });
+  });
+
   it("refuses ram on an AE without ALL_MEMORY_CACHES before purging", () => {
-    const { A, purged, undo } = host({ withRam: false });
-    expect(() => A.memoryPurge({ target: "ram", expect: GUARD })).toThrow(/AE 24\.3\+/);
+    const { A, purged, undo } = host({ withRam: false, saved: true });
+    expect(() => A.memoryPurge({ target: "ram", confirm_undo_purge: true, expect: SAVED })).toThrow(/AE 24\.3\+/);
     expect(purged).toEqual([]);
     expect(undo.begun).toBe(0);
   });
@@ -308,14 +399,15 @@ describe("memory.jsx", () => {
   it("refuses undo and all on a project that was never saved", () => {
     const { A, purged } = host();
     expect(() => A.memoryPurge({ target: "undo", confirm_undo_purge: true, expect: GUARD })).toThrow(/never been saved/);
-    expect(() => A.memoryPurge({ target: "all", confirm_disk_cache_wipe: true, expect: GUARD })).toThrow(/never been saved/);
+    expect(() => A.memoryPurge({ target: "all", confirm_undo_purge: true, confirm_disk_cache_wipe: true, expect: GUARD })).toThrow(/never been saved/);
     expect(purged).toEqual([]);
   });
 
   it("wipes all caches only with its own confirm flag", () => {
     const { A, purged } = host({ saved: true });
     expect(() => A.memoryPurge({ target: "all", confirm_undo_purge: true, expect: SAVED })).toThrow(/confirm_disk_cache_wipe/);
-    const r = A.memoryPurge({ target: "all", confirm_disk_cache_wipe: true, expect: SAVED });
+    expect(() => A.memoryPurge({ target: "all", confirm_disk_cache_wipe: true, expect: SAVED })).toThrow(/confirm_undo_purge/);
+    const r = A.memoryPurge({ target: "all", confirm_undo_purge: true, confirm_disk_cache_wipe: true, expect: SAVED });
     expect(r).toMatchObject({ purged: true, disk_cache_cleared: true, undo_history_cleared: null });
     expect(purged).toEqual([4]);
   });

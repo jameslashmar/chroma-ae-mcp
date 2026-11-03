@@ -337,6 +337,20 @@ describe("ae_path_write flow", () => {
     expect(out.path.vertexCount).toBe(8);
   });
 
+  it("sends reorders only for a mirror that reverses direction", async () => {
+    const run = async (mirror: Record<string, unknown>) => {
+      const { ctx, calls } = fakeAe({
+        pathsRead: [readout(SQUARE), readout(SQUARE), readout(SQUARE)],
+        pathsApply: [{ kind: "shape", wrote: "value", previous_vertex_count: 4, vertex_count: 4, closed: true }],
+      });
+      const args = AePathWriteSchema.parse({ comp_id: 1, target: shapeTarget, operation: "mirror", mirror, expect: expectArg });
+      await tool("ae_path_write").handler(args, ctx);
+      return calls[3].script;
+    };
+    expect(await run({ axis: "x", reverse_direction: true })).toContain('"reorders":true');
+    expect(await run({ axis: "x" })).not.toContain('"reorders"');
+  });
+
   it("puts a wrong read-back in the receipt instead of throwing", async () => {
     const { ctx } = fakeAe({
       pathsRead: [readout(SQUARE), readout(SQUARE), readout(SQUARE)],
@@ -432,6 +446,24 @@ describe("operatorMismatches", () => {
     const w = { added: [{ index: 3, name: "Offset Paths 1", matchName: "ADBE Vector Filter - Offset" }] };
     expect(operatorMismatches(args, before, after([item]), w)).toEqual([]);
     expect(operatorMismatches(args, before, after([{ ...item, line_join: 1 }]), w).map((m) => m.path)).toEqual(["items[3].line_join"]);
+  });
+
+  it("compares the Repeater order with the value the host writes", () => {
+    const rep = (order: number) => ({
+      index: 3,
+      name: "Repeater 1",
+      matchName: "ADBE Vector Filter - Repeater",
+      kind: "repeater",
+      copies: 3,
+      order,
+      transform: [],
+    });
+    const w = { added: [{ index: 3, name: "Repeater 1", matchName: "ADBE Vector Filter - Repeater" }] };
+    const above = AePathOperatorSchema.parse({ ...op, operator: "repeater", repeater: { copies: 3, order: "above" } });
+    const below = AePathOperatorSchema.parse({ ...op, operator: "repeater", repeater: { copies: 3, order: "below" } });
+    expect(operatorMismatches(above, before, after([rep(1)]), w)).toEqual([]);
+    expect(operatorMismatches(below, before, after([rep(2)]), w)).toEqual([]);
+    expect(operatorMismatches(above, before, after([rep(2)]), w).map((m) => m.path)).toEqual(["items[3].order"]);
   });
 
   it("checks both Repeaters of a grid", () => {
@@ -676,6 +708,19 @@ describe("paths.jsx: reading", () => {
     expect(r.time).toBe(2);
   });
 
+  it("reads an unkeyed path at the requested time, not the comp time", () => {
+    const { project, comp, layer, pathProp } = scene();
+    const orig = pathProp.valueAtTime;
+    const asked: number[] = [];
+    (pathProp as any).valueAtTime = function (t: number, pre: boolean) {
+      asked.push(t);
+      return orig.call(this, t, pre);
+    };
+    const { A } = loadHost(project, ["paths.jsx"]);
+    A.pathsRead({ comp_id: comp.id, target: shapeRef(layer), time: 3 });
+    expect(asked).toContain(3);
+  });
+
   it("lists a group's operators with their keys", () => {
     const { project, comp, layer } = scene();
     const { A } = loadHost(project, ["paths.jsx"]);
@@ -787,6 +832,19 @@ describe("paths.jsx: writing a path", () => {
     A.pathsApply({ comp_id: comp.id, target, path: rev, operation: "mirror", expect: GUARD });
     expect((maskProp.value as any).featherRadii).toEqual([5]);
     A.pathsApply({ comp_id: comp.id, target, path: rev, operation: "reverse", allow_feather_loss: true, expect: GUARD });
+    expect((maskProp.value as any).featherRadii).toBeUndefined();
+  });
+
+  it("treats a mirror that reverses the vertex order as reordering the feather", () => {
+    const { project, comp, plate, maskProp } = scene();
+    (maskProp.value as any).featherSegLocs = [0];
+    (maskProp.value as any).featherRadii = [5];
+    const { A } = loadHost(project, ["paths.jsx"]);
+    const target = maskRef(plate);
+    const rev = { ...SQUARE, vertices: [[0, 90], [90, 90], [90, 0], [0, 0]] };
+    expect(() => A.pathsApply({ comp_id: comp.id, target, path: rev, operation: "mirror", reorders: true, expect: GUARD })).toThrow(/feather points/);
+    expect((maskProp.value as any).featherRadii).toEqual([5]);
+    A.pathsApply({ comp_id: comp.id, target, path: rev, operation: "mirror", reorders: true, allow_feather_loss: true, expect: GUARD });
     expect((maskProp.value as any).featherRadii).toBeUndefined();
   });
 

@@ -287,6 +287,19 @@ describe("cameraRigMismatches", () => {
     expect(paths).not.toContain("numLayers");
   });
 
+  it("flags a layer count that grew by less than the camera and controller", () => {
+    const after = readBack(1, [camInfo({ zoom: 1866.667, expressions: { position: "x" } })], [brief({ id: 51, name: "C" })]);
+    const w = written({ preset: "dolly", controller: { id: 51, index: 1, name: "C" } });
+    expect(cameraRigMismatches(args, readBack(0), after, w).map((m) => m.path)).toContain("numLayers");
+  });
+
+  it("explains a spread layer missing from a capped read-back", () => {
+    const a = AeCameraRigSchema.parse({ comp_id: 1, spread: { layers: [{ name: "Hero" }], near: 0, far: 0 }, expect: expectArg });
+    const after = { ...readBack(2, [camInfo({ zoom: 2666.667 })]), ids_dropped: 3 };
+    const mm = cameraRigMismatches(a, readBack(1), after, written({ spread: [{ id: 7, name: "Hero", z: 0, scale_factor: 1 }] }));
+    expect(mm.find((m) => m.path === "spread.Hero")?.message).toMatch(/cap/);
+  });
+
   it("checks depth of field, the focus expression and spread depth", () => {
     const a = AeCameraRigSchema.parse({ comp_id: 1, focus: { layer: { name: "Hero" }, aperture: 30 }, spread: { layers: [{ name: "Hero" }], near: 0, far: 100 }, expect: expectArg });
     const cam = camInfo({ aperture: 0 });
@@ -425,6 +438,25 @@ describe("analyseScene", () => {
     const l = sceneLayer(1, "L", {}, [960, 540, 0]);
     expect(analyseScene(sceneRead([a, b, l], { active_camera_id: 10 })).layers_by_depth[0].depth).toBe(1000);
     expect(analyseScene(sceneRead([a, b, l], { active_camera_id: 10 }), 11).layers_by_depth[0].depth).toBe(3000);
+  });
+
+  it("does not flag 3D nulls or guide layers as off-frame or behind the camera", () => {
+    const nul = sceneLayer(1, "Rig", { kind: "null" }, [960, 540, -5000]);
+    const guide = sceneLayer(2, "Guide", { guide: true }, [960, 540, -5000]);
+    const out = analyseScene(sceneRead([nul, guide]));
+    expect(out.layers_by_depth).toHaveLength(2);
+    expect(out.behind_camera).toEqual([]);
+    expect(out.outside_frame).toEqual([]);
+  });
+
+  it("lists the child of an auto-oriented parent as unresolved, but not an auto-oriented layer itself", () => {
+    const parent = sceneLayer(1, "Path", { kind: "null", auto_orient_active: true }, [960, 540, 600]);
+    const child = sceneLayer(2, "Child", { parent_id: 1 }, [0, 0, 400]);
+    const own = sceneLayer(3, "Own", { auto_orient_active: true }, [960, 540, 0]);
+    const out = analyseScene(sceneRead([parent, child, own]));
+    expect(out.warnings.join(" ")).toMatch(/"Child" skipped: .*Auto-Orient/);
+    expect(out.warnings.join(" ")).not.toMatch(/"Own" skipped/);
+    expect(out.layers_by_depth.map((l) => l.name)).toContain("Own");
   });
 
   it("says when the list was capped", () => {
@@ -710,6 +742,14 @@ describe("camera.jsx cameraRig", () => {
     expect(() => A.cameraRig({ comp_id: comp.id, spread: { layers: [{ name: "Existing" }], near: 0, far: 0 }, expect: GUARD })).toThrow(/camera layer/);
   });
 
+  it("refuses to spread a parented layer before the undo group", () => {
+    const { comp, A, undo, plane } = rigScene();
+    const kid = plane("Kid");
+    kid.parent = plane("Boss");
+    expect(() => A.cameraRig({ comp_id: comp.id, spread: { layers: [{ name: "Kid" }], near: 0, far: 0 }, expect: GUARD })).toThrow(/has a parent/);
+    expect(undo.begun).toBe(0);
+  });
+
   it("warns that a second camera is now the active one", () => {
     const { comp, A } = rigScene();
     A.cameraRig({ comp_id: comp.id, name: "First", expect: GUARD });
@@ -787,6 +827,35 @@ describe("camera.jsx reads", () => {
     const ids = [w.camera.id, w.controller.id, ...w.spread.map((s: { id: number }) => s.id)];
     const after = JSON.parse(JSON.stringify(A.cameraRead({ comp_id: comp.id, ids })));
     expect(cameraRigMismatches(args, before, after, w)).toEqual([]);
+  });
+
+  it("cameraRead returns every spread layer of a 200-layer spread, and the receipt passes", () => {
+    const { comp, A, plane } = rigScene();
+    const names: Array<{ name: string }> = [];
+    for (let i = 0; i < 200; i++) {
+      plane(`P${i}`);
+      names.push({ name: `P${i}` });
+    }
+    const args = AeCameraRigSchema.parse({ comp_id: comp.id, spread: { layers: names, near: 0, far: 1000 }, expect: expectArg });
+    const before = JSON.parse(JSON.stringify(A.cameraRead({ comp_id: comp.id })));
+    const w = JSON.parse(JSON.stringify(A.cameraRig({ ...args, expect: GUARD })));
+    const ids = [w.camera.id, ...(w.controller ? [w.controller.id] : []), ...w.spread.map((s: { id: number }) => s.id)];
+    const after = JSON.parse(JSON.stringify(A.cameraRead({ comp_id: comp.id, ids })));
+    expect(after.layers.length).toBeGreaterThanOrEqual(201);
+    expect(after.ids_dropped).toBe(0);
+    expect(cameraRigMismatches(args, before, after, w)).toEqual([]);
+  });
+
+  it("cameraSceneRead flags Auto-Orient on non-camera layers", () => {
+    const { comp, A, plane } = rigScene();
+    const a = plane("Oriented");
+    plane("Plain");
+    (a as any).autoOrient = AutoOrientType.ALONG_PATH;
+    (comp.layer("Plain") as any).autoOrient = AutoOrientType.NO_AUTO_ORIENT;
+    const read = JSON.parse(JSON.stringify(A.cameraSceneRead({ comp_id: comp.id })));
+    const flag = (n: string) => read.layers.find((l: { name: string }) => l.name === n).auto_orient_active;
+    expect(flag("Oriented")).toBe(true);
+    expect(flag("Plain")).toBe(false);
   });
 
   it("cameraSceneRead leaves the comp's time alone and reports each layer's transform and the camera's focus state", () => {

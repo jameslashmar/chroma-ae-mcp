@@ -326,14 +326,14 @@ export function planStagger(args: StaggerArgs, read: StaggerRead): PlanResult {
   if (read.truncated) return bad("More than 500 layers were given or selected; split them into batches.");
   const skipped: Plan["skipped"] = [];
   let layers = read.layers;
+  const lockedOnes = layers.filter((l) => l.locked === true);
+  if (lockedOnes.length) return bad(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
   if (args.mode !== "layers") {
     const prop = (l: StaggerLayer) => l.property;
     const missing = layers.filter((l) => !prop(l)?.found);
     if (missing.length) {
       return bad(`${missing.length} layer(s) have no property ${args.property_path?.join(" > ")}: ${missing.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${missing.length > 5 ? ", ..." : ""}.`);
     }
-    const lockedOnes = layers.filter((l) => l.locked === true);
-    if (lockedOnes.length) return bad(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
     const sepLeaders = layers.filter((l) => prop(l)?.separationLeader);
     if (sepLeaders.length) return bad(`"${sepLeaders[0].name}": that Position has separated dimensions; its keys are on X Position / Y Position (ADBE Position_0, ADBE Position_1).`);
     if (args.mode === "keys") {
@@ -381,7 +381,8 @@ export function planStagger(args: StaggerArgs, read: StaggerRead): PlanResult {
       e.from = l.startTime;
       e.to = Number((l.startTime + offsets[i]).toFixed(9));
     } else {
-      const p = l.property;
+      // In copy_keys the keys that land are the source's; the target's own keys are only replaced.
+      const p = args.mode === "copy_keys" ? read.source?.property : l.property;
       e.num_keys = p?.numKeys;
       e.first_time = p?.times?.[0];
     }

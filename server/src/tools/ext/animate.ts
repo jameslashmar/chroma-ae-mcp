@@ -587,6 +587,17 @@ export function resolvedRanges(result: unknown): AppliedRange[] {
   return list.filter((r): r is AppliedRange => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
 }
 
+const FILL_GROUP = ["fillColor", "applyFill"];
+const STROKE_GROUP = ["strokeColor", "strokeWidth", "applyStroke"];
+
+/** True when an applied range that starts at character 0 sets this whole-document key (fill and stroke keys count as a group). */
+export function coveredByFirstRange(key: string, ranges: AppliedRange[]): boolean {
+  let group = [key];
+  if (FILL_GROUP.includes(key)) group = FILL_GROUP;
+  else if (STROKE_GROUP.includes(key)) group = STROKE_GROUP;
+  return ranges.some((r) => r.start === 0 && group.some((g) => (r.style as Record<string, unknown>)[g] !== undefined));
+}
+
 /** `ranges[i].field` → the value the range was given. */
 export function rangeExpectations(ranges: AppliedRange[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -924,8 +935,10 @@ export const animateTools: ToolDefinition<any>[] = [
               "applyStroke",
               "justification",
             ];
+            // afterDoc reads the first character; a range starting at 0 that sets the
+            // same field (or its fill/stroke group) is verified by its own read-back.
             for (const key of styleKeys) {
-              if (args.style[key] !== undefined) {
+              if (args.style[key] !== undefined && !coveredByFirstRange(key as string, appliedRanges)) {
                 expectedCheck[key] = args.style[key];
                 actualCheck[key] = afterDoc[key];
               }
@@ -933,7 +946,7 @@ export const animateTools: ToolDefinition<any>[] = [
           }
 
           // Only the ranges the read-back returned are compared; a shorter list is
-          // reported as unverified, never as a mismatch.
+          // also a receipt mismatch (below) and counted as unverified.
           const readBackRanges = Array.isArray(afterObj.ranges) ? (afterObj.ranges as unknown[]) : [];
           const verifiedRanges = appliedRanges.slice(0, readBackRanges.length);
           const unverifiedRanges = appliedRanges.length - verifiedRanges.length;
@@ -957,6 +970,18 @@ export const animateTools: ToolDefinition<any>[] = [
               Object.keys(expectedCheck).length > 0 ? expectedCheck : undefined,
             actualForExpected:
               Object.keys(expectedCheck).length > 0 ? actualCheck : undefined,
+            // The host reads back every range or throws, so a short list is a wrong read-back.
+            customMismatches:
+              unverifiedRanges > 0
+                ? [
+                    {
+                      path: "ranges",
+                      expected: appliedRanges.length,
+                      actual: readBackRanges.length,
+                      message: "The read-back returned fewer ranges than were written; the rest were not checked",
+                    },
+                  ]
+                : undefined,
           });
 
           return {

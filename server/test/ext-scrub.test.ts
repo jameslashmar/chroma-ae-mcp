@@ -648,11 +648,24 @@ describe("ae_scrub_check on a render file", () => {
     return file;
   }
 
-  function flow(state: { item: unknown; comp: unknown } = { item: null, comp: null }, remove: unknown = { removed_comp: 8, removed_item: 7, item_kept: false }) {
+  const present = {
+    item: { id: 7, name: "render.mov", frameRate: 10, duration: 1 },
+    comp: { id: 8, name: "x", numLayers: 1, frameRate: 10, duration: 1 },
+  };
+
+  // Before the removal a separate read finds the item and the comp; after it, nothing (unless `state` says otherwise).
+  function flow(state?: { item: unknown; comp: unknown }, remove: unknown = { removed_comp: 8, removed_item: 7, item_kept: false }) {
+    let removed = false;
     return (fn: string) => {
       if (fn === "scrubImport") return imported;
-      if (fn === "scrubRemove") return remove;
-      if (fn === "scrubState") return state;
+      if (fn === "scrubRemove") {
+        removed = true;
+        return remove;
+      }
+      if (fn === "scrubState") {
+        if (state) return state;
+        return removed ? { item: null, comp: null } : present;
+      }
       return new Error(`Unexpected ${fn}`);
     };
   }
@@ -703,7 +716,12 @@ describe("ae_scrub_check on a render file", () => {
 
   it("reports what is left in the project when the removal can't be confirmed", async () => {
     const file = movie();
-    const { ctx } = fakeAe(flow({ item: { id: 7, name: "render.mov" }, comp: null }), (k) => frameData(k));
+    let removed = false;
+    const { ctx } = fakeAe((fn) => {
+      if (fn === "scrubRemove") removed = true;
+      if (fn === "scrubState" && removed) return { item: { id: 7, name: "render.mov" }, comp: null };
+      return flow()(fn);
+    }, (k) => frameData(k));
     const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
     expect(res).toMatchObject({ ok: true, imported_state: "left", left_in_project: { item_id: 7, comp_id: 8 } });
     expect(res.problems[0].message).toMatch(/still in the project/);
@@ -713,7 +731,7 @@ describe("ae_scrub_check on a render file", () => {
     const file = movie();
     const { ctx, calls } = fakeAe((fn) => {
       if (fn === "scrubImport") return imported;
-      if (fn === "scrubState") return { item: null, comp: null };
+      if (fn === "scrubState") return present;
       if (fn === "scrubRemove") return new Error("AE refused");
       return new Error(`Unexpected ${fn}`);
     }, (k) => frameData(k));
@@ -729,7 +747,7 @@ describe("ae_scrub_check on a render file", () => {
     const { ctx, calls } = fakeAe((fn) => {
       if (fn === "scrubImport") return imported;
       if (fn === "scrubRemove") return { removed_comp: 8, removed_item: null, item_kept: true };
-      if (fn === "scrubState") return calls.includes("scrubRemove") ? { item: { id: 7, name: "render.mov" }, comp: null } : { item: null, comp: null };
+      if (fn === "scrubState") return calls.includes("scrubRemove") ? { item: { id: 7, name: "render.mov" }, comp: null } : present;
       return new Error("Unexpected " + fn);
     }, (k) => frameData(k));
     const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
@@ -757,6 +775,49 @@ describe("ae_scrub_check on a render file", () => {
     expect(res.notes.join(" ")).toMatch(/differs from a separate read/);
   }, 30_000);
 
+  it("reports a problem and samples nothing when the separate read finds no item or comp, but still removes", async () => {
+    const file = movie();
+    const { ctx, calls } = fakeAe(flow({ item: null, comp: null }), (k) => frameData(k));
+    const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
+    expect(res).toMatchObject({ ok: false, error: "sampling_failed", applied: true });
+    expect(res.problems.some((p: any) => p.path === "import")).toBe(true);
+    expect(calls).not.toContain("snapshotFrame");
+    expect(calls).toContain("scrubRemove");
+  }, 30_000);
+
+  it("flags a 29.97 import call against a 30 fps separate read", async () => {
+    const file = movie();
+    const { ctx, calls } = fakeAe((fn) => {
+      if (fn === "scrubImport") return { ...imported, frameRate: 29.97, frameDuration: 1 / 29.97, duration: 1 };
+      if (fn === "scrubState") {
+        return calls.includes("scrubRemove")
+          ? { item: null, comp: null }
+          : { item: { id: 7, name: "render.mov", frameRate: 30, duration: 1 }, comp: { id: 8, name: "x", numLayers: 1, frameRate: 30, duration: 1 } };
+      }
+      if (fn === "scrubRemove") return { removed_comp: 8, removed_item: 7, item_kept: false };
+      return new Error("Unexpected " + fn);
+    }, (k) => frameData(k));
+    const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
+    expect(res.range.frame_duration).toBeCloseTo(1 / 30, 9);
+    expect(res.notes.join(" ")).toMatch(/differs from a separate read/);
+  }, 30_000);
+
+  it("does not flag NTSC float rates as a difference from the import call", async () => {
+    const file = movie();
+    const { ctx } = fakeAe((fn) => {
+      if (fn === "scrubImport") return { ...imported, frameRate: 29.97, frameDuration: 1 / 29.97, duration: 1 };
+      if (fn === "scrubState") return { item: { id: 7, name: "r", frameRate: 29.9700298, duration: 1 }, comp: { id: 8, name: "x", numLayers: 1, frameRate: 29.9700012, duration: 1 } };
+      if (fn === "scrubRemove") return { removed_comp: 8, removed_item: 7, item_kept: false };
+      return new Error("Unexpected " + fn);
+    }, (k) => frameData(k));
+    const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
+    expect((res.notes ?? []).join(" ")).not.toMatch(/differs from a separate read/);
+  }, 30_000);
+
+  it("bounds the path length", () => {
+    expect(() => AeScrubCheckSchema.parse({ path: "C:/" + "a".repeat(20001) })).toThrow();
+  });
+
   it("ignores sequence:true on a movie: no gap check, imported as a movie", async () => {
     const dir = tempDir("chroma-scrub-numbered-movie-");
     for (const n of ["render_001.mov", "render_004.mov"]) fs.writeFileSync(path.join(dir, n), "x");
@@ -780,7 +841,7 @@ describe("ae_scrub_check on a render file", () => {
         if (fn === "scrubImport") return { ok: true, result: imported, durationMs: 1 };
         if (fn === "snapshotFrame") return { ok: false, error: { kind: "host_error", message: "no frame" }, durationMs: 1 } as any;
         if (fn === "scrubRemove") return { ok: true, result: {}, durationMs: 1 };
-        return { ok: true, result: { item: null, comp: null }, durationMs: 1 };
+        return { ok: true, result: calls.includes("scrubRemove") ? { item: null, comp: null } : present, durationMs: 1 };
       },
       queue,
       quarantine,
@@ -878,6 +939,20 @@ describe("scrub.jsx in the simulated AE", () => {
     expect(undo).toMatchObject({ begun: 2, ended: 2 });
     expect(A.scrubState({ item_id: imp.item_id, comp_id: imp.comp_id })).toEqual({ item: null, comp: null });
     expect(project.numItems).toBe(0);
+  });
+
+  it("removes the item even when usedIn still lists the removed temporary comp", () => {
+    const project = withItems(new FakeProject());
+    const { A } = loadHost(project, ["scrub.jsx"]);
+    const file = path.join(tempDir("chroma-scrub-jsx-stale-"), "out_64x36_25fps_50f.mov");
+    fs.writeFileSync(file, "x");
+    const imp = A.scrubImport({ path: file, expect: GUARD });
+    const item = project.itemByID(imp.item_id) as any;
+    const tempComp = project.itemByID(imp.comp_id) as any;
+    // a stale read: usedIn keeps naming the comp after it is removed
+    Object.defineProperty(item, "usedIn", { get: () => [tempComp] });
+    const gone = A.scrubRemove({ item_id: imp.item_id, comp_id: imp.comp_id, expect: GUARD });
+    expect(gone).toEqual({ removed_comp: imp.comp_id, removed_item: imp.item_id, item_kept: false });
   });
 
   it("imports a sequence with numbered order, and conforms its frame rate", () => {

@@ -490,7 +490,7 @@ describe("remapMismatches", () => {
     const plan = planOf({ operation: "ramp", method: "bezier", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] });
     const good = plan.expected_samples.map((s) => ({ time: s.time, value: s.value }));
     const on = (samples: typeof good) =>
-      info({ remap_enabled: true, num_keys: 3, keys: plan.keys!.map((k, i) => key(i + 1, k.time, k.value, { in_interp: "bezier", out_interp: "bezier" })), samples });
+      info({ remap_enabled: true, num_keys: 3, keys: plan.keys!.map((k, i) => key(i + 1, k.time, k.value, { in_interp: "bezier", out_interp: "bezier", in_ease: [{ speed: k.ease!.in_speed, influence: k.ease!.in_influence }], out_ease: [{ speed: k.ease!.out_speed, influence: k.ease!.out_influence }] })), samples });
     expect(remapMismatches(plan, INFO, on(good))).toEqual([]);
     const off = good.map((s, i) => (i === 1 ? { ...s, value: s.value * 100 } : s));
     const m = remapMismatches(plan, INFO, on(off));
@@ -508,6 +508,48 @@ describe("remapMismatches", () => {
     const looped = (over: Partial<RemapInfo>) => info({ ...ENABLED, expression: 'loopOut("cycle")', out_point: 10, ...over });
     expect(remapMismatches(loop, ENABLED, looped({}))).toEqual([]);
     expect(remapMismatches(loop, ENABLED, looped({ out_point: 4, expression: "" })).map((m) => m.path)).toEqual(["out_point", "expression"]);
+  });
+
+  it("checks a per_frame ramp past the 500 keys the read returns, by sampling", () => {
+    const long = planOf({ operation: "ramp", points: [{ time: 0, speed: 100 }, { time: 40, speed: 100 }] }, info({ comp_duration: 60, out_point: 60, source: { ...INFO.source!, duration: 100 } }));
+    expect(long.per_frame!.times.length).toBeGreaterThan(500);
+    expect(long.expected_samples.length).toBeLessThanOrEqual(100);
+    expect(long.sample_times[long.sample_times.length - 1]).toBe(long.per_frame!.times[long.per_frame!.times.length - 1]);
+    const good = long.expected_samples.map((e) => ({ time: e.time, value: e.value }));
+    const keys = long.per_frame!.times.slice(0, 500).map((t, i) => key(i + 1, t, long.per_frame!.values[i]));
+    const on = (samples: typeof good) => info({ remap_enabled: true, num_keys: long.per_frame!.times.length, keys, samples });
+    expect(remapMismatches(long, INFO, on(good))).toEqual([]);
+    const bad = good.map((g, i) => (i === good.length - 1 ? { ...g, value: g.value + 1 } : g));
+    const m = remapMismatches(long, INFO, on(bad));
+    expect(m).toHaveLength(1);
+    expect(m[0].message).toContain("per_frame");
+  });
+
+  it("flags a Bezier key whose ease After Effects dropped or changed", () => {
+    const plan = planOf({ operation: "ramp", method: "bezier", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] });
+    const good = plan.expected_samples.map((s) => ({ time: s.time, value: s.value }));
+    const keysWith = (ease: (i: number) => Record<string, unknown>) =>
+      plan.keys!.map((k, i) => key(i + 1, k.time, k.value, { in_interp: "bezier", out_interp: "bezier", ...ease(i) }));
+    const on = (keys: ReturnType<typeof keysWith>) => info({ remap_enabled: true, num_keys: 3, keys, samples: good });
+    const exact = (i: number) => ({
+      in_ease: [{ speed: plan.keys![i].ease!.in_speed, influence: plan.keys![i].ease!.in_influence }],
+      out_ease: [{ speed: plan.keys![i].ease!.out_speed, influence: plan.keys![i].ease!.out_influence }],
+    });
+    expect(remapMismatches(plan, INFO, on(keysWith(exact)))).toEqual([]);
+    const reset = remapMismatches(plan, INFO, on(keysWith((i) => (i === 1 ? { in_ease: [{ speed: 0, influence: 16.67 }], out_ease: exact(i).out_ease } : exact(i)))));
+    expect(reset.map((x) => x.path)).toEqual(["keys[2].ease"]);
+    const dropped = remapMismatches(plan, INFO, on(keysWith((i) => (i === 0 ? {} : exact(i)))));
+    expect(dropped.map((x) => x.path)).toEqual(["keys[1].ease", "keys[1].ease"]);
+  });
+
+  it("refuses to freeze at the layer's out point and reports the requested time", () => {
+    const r = planTimeRemap(parse({ operation: "freeze", at_time: 4 }), INFO);
+    expect(r.ok).toBe(false);
+    const r2 = planTimeRemap(parse({ operation: "freeze", at_time: 3.96 }), INFO);
+    expect(r2.ok).toBe(true);
+    const far = planTimeRemap(parse({ operation: "freeze", at_time: 3.5 }), info({ source: { ...INFO.source!, duration: 1 } }));
+    expect(far.ok).toBe(false);
+    if (!far.ok) expect(far.message).toContain("comp time 3.5s");
   });
 
   it("does nothing without a read-back", () => {
@@ -674,21 +716,26 @@ describe("timeremap.jsx", () => {
     expect(s.undo).toEqual({ begun: 2, ended: 2 });
   });
 
-  it("changes the speed with layer.stretch and keeps the in point where AE moved it", () => {
+  it("changes the speed with layer.stretch and keeps the in point without reading it back inside the write", () => {
     const s = scene();
     let stretch = 100;
-    Object.defineProperty(s.layer, "stretch", {
-      get: () => stretch,
-      set: (v: number) => {
-        stretch = v;
-        s.layer.inPoint = 0.5;
-      },
-    });
+    // A stale buffer: the stretch write changes nothing that can be read in the same script.
+    Object.defineProperty(s.layer, "stretch", { get: () => stretch, set: (v: number) => (stretch = v) });
     s.layer.startTime = 0.25;
     s.run({ operation: "speed", speed_percent: 200 }).apply();
     expect(s.layer.stretch).toBe(50);
-    expect(s.layer.startTime).toBeCloseTo(0.25 - 0.5, 9);
+    // in 0 = start + 100/100 * a  =>  a = -0.25;  new start = 0 - 0.5 * -0.25
+    expect(s.layer.startTime).toBeCloseTo(0.125, 9);
     expect(s.layer.timeRemapEnabled).toBe(false);
+  });
+
+  it("refuses a slow speed whose kept in point would put the start time out of range, before writing", () => {
+    const s = scene({ compSeconds: 200, layerOut: 130 });
+    s.layer.inPoint = 111;
+    const planned = s.run({ operation: "speed", speed_percent: 1.0102 });
+    expect(() => planned.apply()).toThrow(/outside \+\/-10800/);
+    expect(s.layer.stretch).toBe(100);
+    expect(s.undo.begun).toBe(0);
   });
 
   it("writes a per-frame ramp with exact values", () => {

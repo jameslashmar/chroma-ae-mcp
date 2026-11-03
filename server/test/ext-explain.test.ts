@@ -141,6 +141,9 @@ describe("proof logic", () => {
     expect(proofMismatches(before, { ...before }, null, 9)).toEqual([]);
     const m = proofMismatches(before, { num_items: 5, comps: 3, proof_comps: 1 }, "gone wrong", 9);
     expect(m.map((x) => x.path)).toEqual(["temp_comp", "proof_comps", "num_items"]);
+    // Left over from an earlier proof and unchanged: not this run's fault.
+    const old = { num_items: 5, comps: 3, proof_comps: 1 };
+    expect(proofMismatches(old, { ...old }, null, 9)).toEqual([]);
     expect(m[0].message).toContain("chroma-explain-proof");
   });
 });
@@ -228,7 +231,7 @@ function proofAe(
         states++;
         if (states === 2 && opts.failAfter) throw new Error("read failed");
         const items = states === 1 ? 4 : (opts.afterItems ?? 4);
-        return { ok: true, result: { num_items: items, comps: 2, proof_comps: 0 }, durationMs: 1 };
+        return { ok: true, result: { num_items: items, comps: 2, proof_comps: (opts as any).leftOver ?? 0 }, durationMs: 1 };
       }
       if (fn === "explainProofBegin") {
         if (opts.failBegin) throw new Error("Nothing to toggle for suspect enabled");
@@ -268,7 +271,7 @@ describe("ae_explain_layer_proof flow", () => {
   it("guards, duplicates, renders both, removes the copy, and reads back separately", async () => {
     const { ctx, calls } = proofAe();
     const out = (await tool("ae_explain_layer_proof").handler(args(), ctx)) as Record<string, any>;
-    expect(calls).toEqual(["explainProofPlan", "checkGuard", "explainProofState", "explainProofBegin", "snapshotFrame", "snapshotFrame", "explainProofEnd", "explainProofState"]);
+    expect(calls).toEqual(["checkGuard", "explainProofPlan", "explainProofState", "explainProofBegin", "snapshotFrame", "snapshotFrame", "explainProofEnd", "explainProofState"]);
     expect(out.applied).toBe(true);
     expect(out.verdict).toBe("confirmed");
     expect(out.proof).toMatchObject({ suspect: "enabled", copy_removed: true, layers_changed: 1, time: 1.5 });
@@ -302,13 +305,19 @@ describe("ae_explain_layer_proof flow", () => {
   it("rejects when the host refuses, with no render and no removal", async () => {
     const { ctx, calls } = proofAe({ failBegin: true });
     await expect(tool("ae_explain_layer_proof").handler(args(), ctx)).rejects.toThrow(/Nothing to toggle/);
-    expect(calls).toEqual(["explainProofPlan", "checkGuard", "explainProofState", "explainProofBegin"]);
+    expect(calls).toEqual(["checkGuard", "explainProofPlan", "explainProofState", "explainProofBegin"]);
   });
 
-  it("refuses an inapplicable suspect before the guard, a checkpoint or any write", async () => {
+  it("refuses an inapplicable suspect after the guard but before a checkpoint or any write", async () => {
     const { ctx, calls } = proofAe({ failPlan: true });
     await expect(tool("ae_explain_layer_proof").handler(args(), ctx)).rejects.toThrow(/Nothing to toggle/);
-    expect(calls).toEqual(["explainProofPlan"]);
+    expect(calls).toEqual(["checkGuard", "explainProofPlan"]);
+  });
+
+  it("does not flag a correct write because an older proof comp is still in the project", async () => {
+    const { ctx } = proofAe({ leftOver: 1 } as any);
+    const out = (await tool("ae_explain_layer_proof").handler(args(), ctx)) as Record<string, any>;
+    expect(out.receipt.matches).toBe(true);
   });
 
   it("keeps the cleanup failure in the receipt when the read-back also fails", async () => {
@@ -385,7 +394,7 @@ function load(project: FakeProject, extra: Record<string, unknown> = {}) {
   host.G.BlendingMode = hidden({ NORMAL: 100, MULTIPLY: 101, STENCIL_ALPHA: 102, SILHOUETE_ALPHA: 103 });
   host.G.MaskMode = hidden(MaskMode);
   host.G.TrackMatteType = hidden(TrackMatteType);
-  host.G.AutoOrientType = { NO_AUTO_ORIENT: 200, CAMERA_OR_POINT_OF_INTEREST: 201 };
+  host.G.AutoOrientType = { NO_AUTO_ORIENT: 200, CAMERA_OR_POINT_OF_INTEREST: 201, ALONG_PATH: 202 };
   Object.assign(host.G, extra);
   return host;
 }
@@ -635,6 +644,39 @@ describe("explain.jsx: ae_explain_layer", () => {
     r = explain(A, comp, a);
     expect(idsOf(r)).not.toContain("behind_camera");
     expect(r.unchecked?.join(" ")).toContain("view direction is not worked out");
+  });
+
+  it("does not work out the view of a camera that auto-orients along its path", () => {
+    const { project, comp } = scene();
+    const a = solid(comp, "A");
+    a.threeDLayer = true;
+    a.transform("Position").setValue([320, 180, -1500]);
+    const cam = comp.layers.addCamera("Cam") as FakeLayer;
+    cam.threeDLayer = true;
+    (cam as any).autoOrient = 202;
+    cam.transform("Position").setValue([320, 180, -1000]);
+    (comp as any).activeCamera = cam;
+    const { A } = load(project);
+    const r = explain(A, comp, a);
+    expect(idsOf(r)).not.toContain("behind_camera");
+    expect(r.unchecked?.join(" ")).toContain("along its path");
+  });
+
+  it("does not count an adjustment layer as rendering", () => {
+    const { project, comp } = scene();
+    solid(comp, "BG");
+    const adj = solid(comp, "Adj");
+    adj.adjustmentLayer = true;
+    const { A } = load(project);
+    const at = explain(A, comp, null, { point: [320, 180] }).at_point!;
+    expect(at.candidates!.map((c) => [c.name, c.renders])).toEqual([["Adj", false], ["BG", true]]);
+    expect(at.topmost_rendering).toBe(2);
+    const inner = project.addComp("Inner", 640, 360, 2);
+    const pl = comp.layers.add(inner) as FakeLayer;
+    pl.transform("Anchor Point").setValue([320, 180, 0]);
+    const ia = solid(inner, "InnerAdj");
+    ia.adjustmentLayer = true;
+    expect(sev(explain(A, comp, pl), "precomp_nothing_active")).toBe("likely");
   });
 
   it("does not depend on enumerating AE's enum objects", () => {

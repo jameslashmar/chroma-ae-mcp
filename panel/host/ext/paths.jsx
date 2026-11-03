@@ -336,11 +336,8 @@
   }
 
   function readValue(prop, comp, time) {
-    if (prop.numKeys > 0) {
-      var t = time;
-      if (!has(t)) t = comp.time;
-      return prop.valueAtTime(t, false);
-    }
+    if (has(time)) return prop.valueAtTime(time, false);
+    if (prop.numKeys > 0) return prop.valueAtTime(comp.time, false);
     return prop.value;
   }
 
@@ -593,6 +590,8 @@
     // (reverse, resample, smooth) can keep the count and still move the segments.
     var op = args.operation;
     var keepsOrder = !has(op) || op === "set" || op === "mirror";
+    // A mirror with reverse_direction also reverses the vertex order.
+    if (args.reorders === true) keepsOrder = false;
     var featherN = featherPoints(current);
     if (featherN > 0 && !countChanges && !keepsOrder && args.allow_feather_loss !== true) {
       fail("bad_args", "The mask has " + featherN + " feather points that belong to its current segments; '" + op + "' changes which segment is which. Pass allow_feather_loss to clear them");

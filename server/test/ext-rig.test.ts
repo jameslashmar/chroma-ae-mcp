@@ -555,6 +555,33 @@ describe("rig tools with a scripted bridge", () => {
     expect(out.receipt.matches).toBe(true);
   });
 
+  it("ae_rig_rename: a capped scan keeps the receipt clean but adds scan_truncated and a warning", async () => {
+    const mk = (truncated: boolean) => fakeAe({
+      rigState: [
+        { props: [], controls: [{ found: true, name: "Old", kind: "slider" }], scans: [{ found: true, name: "Old", count: 0, references: [], truncated: false }], scan_truncated: truncated },
+        {
+          props: [],
+          controls: [{ found: true, name: "New", kind: "slider" }],
+          scans: [
+            { found: true, name: "Old", count: 0, references: [], truncated: false },
+            { found: true, name: "New", count: 0, references: [], truncated: false },
+          ],
+          scan_truncated: truncated,
+        },
+      ],
+      rigRename: [{ layer: { index: 2, id: 7, name: "Controls" }, old_name: "Old", new_name: "New", references_before: 0, autofix: "not needed", scan_truncated: truncated }],
+    });
+    const args = AeRigRenameSchema.parse({ comp_id: 1, layer: { name: "Controls" }, control: "Old", new_name: "New", expect: expectArg });
+    type Out = { receipt: { matches: boolean }; scan_truncated?: boolean; warning?: string };
+    const capped = (await tool("ae_rig_rename").handler(args, mk(true).ctx)) as Out;
+    expect(capped.receipt.matches).toBe(true);
+    expect(capped.scan_truncated).toBe(true);
+    expect(capped.warning).toContain("capped");
+    const plain = (await tool("ae_rig_rename").handler(args, mk(false).ctx)) as Out;
+    expect(plain.receipt.matches).toBe(true);
+    expect(plain.warning).toBeUndefined();
+  });
+
   it("ae_rig_unlink and ae_expr_recipe follow the same flow", async () => {
     const u = fakeAe({
       rigState: [{ props: [{ found: true, expression: "x" }], controls: [], scans: [] }, { props: [{ found: true, expression: "" }], controls: [], scans: [] }],
@@ -1267,6 +1294,9 @@ describe("rig.jsx: recipes", () => {
     expect(evalExpr(out.expression, { ...controls, "Count Start": 0, "Count End": -2500, "Count Decimals": 0 }, { time: 2 })).toBe('$-2,500 "pts"');
     const plain = go(s, "count_up", { name_prefix: "N", replace: true, params: { separator: "", easing: "ease" } }, "Hello", textPath, );
     expect(plain.expression).toContain("ease(k, 0, 1, 0, 1)");
+    // A Decimals slider past 20 is clamped, so toFixed never throws.
+    expect(evalExpr(out.expression, { ...controls, "Count Decimals": 99 }, { time: 2 })).toBe(evalExpr(out.expression, { ...controls, "Count Decimals": 20 }, { time: 2 }));
+    expect(out.expression).toContain("Math.min(20,");
     expect(evalExpr(plain.expression, { "N Start": 0, "N End": 12345, "N Duration": 2, "N Decimals": 0 }, { time: 2 })).toBe("12345");
   });
 
@@ -1423,7 +1453,7 @@ describe("rig.jsx and rig.ts: review fixes", () => {
     expect(m).toEqual([]);
   });
 
-  it("a capped reference scan is a mismatch, and a comp over 500 layers sets it", () => {
+  it("a capped reference scan is not a mismatch, and a comp over 500 layers sets it", () => {
     const s = scene();
     for (let i = 0; i < 500; i++) s.comp.layers.addNull(4);
     run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Speed", kind: "slider" }] });
@@ -1431,7 +1461,7 @@ describe("rig.jsx and rig.ts: review fixes", () => {
     expect(state.scan_truncated).toBe(true);
     const args = { comp_id: 1, layer: { name: "Controls" }, control: "Speed", new_name: "Gain", expect: expectArg } as never;
     const after = { props: [], controls: [{ found: true, name: "Gain", kind: "slider" }], scans: [{ found: true, name: "Speed", count: 0, references: [], truncated: false }], scan_truncated: true };
-    expect(renameMismatches(args, undefined, after).map((x) => x.path)).toEqual(["references"]);
+    expect(renameMismatches(args, undefined, after)).toEqual([]);
     const list = run(s, "rigList", {});
     expect(list.scan_truncated).toBe(true);
     expect(list.warning).toContain("capped");
@@ -1458,6 +1488,75 @@ describe("rig.jsx and rig.ts: review fixes", () => {
     // Box's own Speed: only the unprefixed one. Controls has no Speed control, but the text still names its layer.
     expect(scan("Box").count).toBe(1);
     expect(scan("Controls").count).toBe(1);
+  });
+
+  it("an unprefixed effect() next to the holder's layer name is the layer's own control", () => {
+    const s = scene();
+    run(s, "rigAddControls", { layer: { name: "Box" }, controls: [{ name: "Speed", kind: "slider" }] });
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Gain", kind: "slider" }] });
+    propOf(s.box, ...OPACITY).expression = 'effect("Speed")(1) + thisComp.layer("Controls").effect("Gain")(1)';
+    const scan = (layer: string, name: string) => run(s, "rigState", { scans: [{ layer: { name: layer }, name }] }).scans[0];
+    // Renaming Controls' Speed must not count Box's own effect("Speed").
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Speed", kind: "slider" }] });
+    expect(scan("Controls", "Speed").count).toBe(0);
+    expect(scan("Box", "Speed").count).toBe(1);
+    expect(scan("Controls", "Gain").count).toBe(1);
+    // Through a variable it still reaches the holder.
+    propOf(s.box, ...ROT).expression = 'var c = thisComp.layer("Controls"); c.effect("Speed")(1)';
+    expect(scan("Controls", "Speed").count).toBe(1);
+    propOf(s.box, ...ROT).expression = 'thisLayer.effect("Speed")(1) + thisComp.layer("Controls").index';
+    expect(scan("Controls", "Speed").count).toBe(0);
+  });
+
+  it("link, unlink and recipe refuse a locked layer or separated Position before the undo group", () => {
+    const s = scene();
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Speed", kind: "slider" }] });
+    s.undo.begun = 0;
+    s.undo.ended = 0;
+    const target = { layer: { name: "Box" }, path: OPACITY };
+    const linkArgs = { links: [{ ...target, control: { layer: { name: "Controls" }, name: "Speed" } }] };
+    // A locked layer with no expression is a no-op for unlink: skipped, not refused.
+    (s.box as { locked: boolean }).locked = true;
+    const noop = run(s, "rigUnlink", { targets: [target] }) as { skipped: Array<{ reason?: string }>; unlinked: unknown[] };
+    expect(noop.skipped).toHaveLength(1);
+    expect(noop.skipped[0].reason).toContain("no expression");
+    expect(noop.unlinked).toHaveLength(0);
+    (s.box as { locked: boolean }).locked = false;
+    propOf(s.box, ...OPACITY).expression = 'thisLayer.effect("Speed")(1)';
+    s.undo.begun = 0;
+    s.undo.ended = 0;
+    (s.box as { locked: boolean }).locked = true;
+    expect(fails(s, "rigLink", linkArgs).message).toContain("locked");
+    expect(fails(s, "rigUnlink", { targets: [target] }).message).toContain("locked");
+    expect(fails(s, "rigRecipe", { recipe: "wiggle", layer: { name: "Box" }, path: OPACITY }).message).toContain("locked");
+    expect(fails(s, "rigAddControls", { layer: { name: "Box" }, controls: [{ name: "Z", kind: "slider" }] }).message).toContain("locked");
+    (s.box as { locked: boolean }).locked = false;
+    // A locked controller: refused only when the recipe has a control to create.
+    const ctlLayer = s.ctl as unknown as { locked: boolean };
+    ctlLayer.locked = true;
+    const rArgs = (controls: unknown[]) => ({
+      recipe: "wiggle", layer: { name: "Box" }, controller: { name: "Controls" }, path: OPACITY, replace: true, controls,
+    });
+    const both = [{ key: "frequency", name: "Speed", kind: "slider" }, { key: "amount", name: "Amt", kind: "slider" }];
+    expect(fails(s, "rigRecipe", rArgs(both)).message).toContain("locked");
+    expect(fails(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" }).message).toContain("locked");
+    expect(s.undo).toEqual({ begun: 0, ended: 0 });
+    ctlLayer.locked = false;
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Amt", kind: "slider" }] });
+    s.undo.begun = 0;
+    s.undo.ended = 0;
+    ctlLayer.locked = true;
+    expect(() => run(s, "rigRecipe", rArgs(both))).not.toThrow();
+    ctlLayer.locked = false;
+    s.undo.begun = 0;
+    s.undo.ended = 0;
+    (propOf(s.box, ...POS) as unknown as { dimensionsSeparated: boolean }).dimensionsSeparated = true;
+    const posLink = { links: [{ layer: { name: "Box" }, path: POS, control: { layer: { name: "Controls" }, name: "Speed" } }] };
+    expect(fails(s, "rigLink", posLink).message).toContain("separated");
+    (propOf(s.box, ...POS) as unknown as { expression: string }).expression = "[0, 0]";
+    expect(fails(s, "rigUnlink", { targets: [{ layer: { name: "Box" }, path: POS }] }).message).toContain("separated");
+    expect(fails(s, "rigRecipe", { recipe: "wiggle", layer: { name: "Box" }, path: POS }).message).toContain("separated");
+    expect(s.undo).toEqual({ begun: 0, ended: 0 });
   });
 
   it("lists at most 500 references in total and says so", () => {

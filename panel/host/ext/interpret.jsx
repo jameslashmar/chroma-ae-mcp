@@ -28,6 +28,8 @@
 
   var MAX_ITEMS = 500;
   var MAX_QUEUE = 100;
+  var MAX_REACH = 500;
+  var MAX_WALK = 5000;
   var MAX_STR = 20000;
 
   var ALPHA_NAMES = ["ignore", "straight", "premultiplied"];
@@ -290,6 +292,39 @@
     return out;
   }
 
+  // The ids of the comp and of every item its layers use, through precomps.
+  // Read-only and bounded: stops after MAX_WALK layers or MAX_REACH ids and
+  // then says it is not complete.
+  function reachOf(rootComp) {
+    var ids = [];
+    var seen = {};
+    var stack = [rootComp];
+    var layersSeen = 0;
+    var complete = true;
+    seen[rootComp.id] = true;
+    ids.push(rootComp.id);
+    while (stack.length > 0) {
+      var comp = stack.pop();
+      var nl = 0;
+      try { nl = comp.numLayers; } catch (e0) { complete = false; continue; }
+      for (var j = 1; j <= nl; j++) {
+        if (layersSeen >= MAX_WALK) { complete = false; break; }
+        layersSeen++;
+        var src = null;
+        try { src = comp.layer(j).source; } catch (e1) { complete = false; continue; }
+        if (!src) continue;
+        var sid = null;
+        try { sid = src.id; } catch (e2) { complete = false; continue; }
+        if (seen[sid] === true) continue;
+        if (ids.length >= MAX_REACH) { complete = false; break; }
+        seen[sid] = true;
+        ids.push(sid);
+        if (isCompItem(src)) stack.push(src);
+      }
+    }
+    return { ids: ids, complete: complete };
+  }
+
   // What the render queue's render settings say about proxies, for each queued
   // item. The key name ("Proxy Use") is the documented one; if this AE build
   // doesn't answer to it the result says so rather than guessing.
@@ -306,6 +341,12 @@
         var r = rq.item(i);
         var e = { index: i };
         try { e.comp = clip(r.comp.name, 200); } catch (e0) {}
+        e.reach_complete = false;
+        try {
+          var rc = reachOf(r.comp);
+          e.reach = rc.ids;
+          e.reach_complete = rc.complete;
+        } catch (eR0) {}
         try { e.status = enumName(RQItemStatus, RQ_STATUS_KEYS, r.status); } catch (e1) {}
         try {
           var st = r.getSettings(GetSettingsFormat.STRING);
@@ -763,10 +804,17 @@
         }
       } catch (e) {
         // Switch the items already done back (a set or clear can't be undone from here).
+        var changed = [];
         for (var r = 0; r < done.length; r++) {
           if (action === "use_on" || action === "use_off") {
             try { done[r].item.useProxy = done[r].was_use; } catch (eR) {}
+          } else {
+            try { changed.push(done[r].item.id); } catch (eC) {}
           }
+        }
+        if (changed.length > 0) {
+          try { e.message = String(e.message) + " (already changed and left as is: ids " + changed.join(", ") + "; Ctrl+Z undoes them)"; } catch (eM) {}
+          try { e.__actual = { changed_ids: changed }; } catch (eA) {}
         }
         throw e;
       }

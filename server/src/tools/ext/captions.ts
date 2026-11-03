@@ -245,6 +245,10 @@ export interface ReadCaption {
   position?: number[];
   outside_safe?: boolean;
   rect_error?: string;
+  /** Paragraph (box) text: the box size, and whether the text is taller than the box (lines are hidden). */
+  box_text?: boolean;
+  boxTextSize?: number[];
+  box_overflow?: boolean;
 }
 
 export interface CaptionsRead {
@@ -322,6 +326,7 @@ export function captionsMismatches(
         expectThat(m, Math.abs(entry.inPoint - t[0]) <= tol, `captions[${entry.number}].inPoint`, t[0], entry.inPoint, "Caption starts at another time");
         expectThat(m, Math.abs(entry.outPoint - t[1]) <= tol, `captions[${entry.number}].outPoint`, t[1], entry.outPoint, "Caption ends at another time");
       }
+      expectThat(m, entry.box_overflow !== true, `captions[${entry.number}].box_overflow`, false, entry.box_overflow, "The text is taller than its paragraph box, so lines are hidden");
       if (made.has(entry.name) && entry.justification !== undefined) {
         expectThat(m, entry.justification === wantJust, `captions[${entry.number}].justification`, wantJust, entry.justification, "Justification did not stick");
       }
@@ -372,6 +377,7 @@ export function captionsMismatches(
         }
       }
     }
+    expectThat(m, entry.box_overflow !== true, "caption.box_overflow", false, entry.box_overflow, "The text is taller than its paragraph box, so lines are hidden");
     if (entry.inPoint !== undefined && timings.length) {
       expectThat(m, Math.abs(entry.inPoint - timings[0][0]) <= tol, "caption.inPoint", timings[0][0], entry.inPoint, "Layer starts at another time");
       expectThat(m, Math.abs(entry.outPoint - timings[timings.length - 1][1]) <= tol, "caption.outPoint", timings[timings.length - 1][1], entry.outPoint, "Layer ends at another time");

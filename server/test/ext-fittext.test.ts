@@ -6,7 +6,7 @@ import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AeSetTextSchema, animateTools, rangeActuals, rangeExpectations, resolvedRanges, TextRangeSchema } from "../src/tools/ext/animate.js";
+import { AeSetTextSchema, animateTools, coveredByFirstRange, rangeActuals, rangeExpectations, resolvedRanges, TextRangeSchema } from "../src/tools/ext/animate.js";
 import {
   AeFitTextSchema,
   AeMeasureTextSchema,
@@ -19,6 +19,7 @@ import {
   liveMismatches,
   passCap,
   planFit,
+  regionFor,
   regionOf,
   type MeasureResult,
   type TextMeasure,
@@ -129,8 +130,8 @@ describe("fit text: schemas", () => {
 
 describe("fit text: pure logic", () => {
   it("regionOf turns the safe areas into 80% and 90% of the comp", () => {
-    expect(regionOf({ safe_area: "title" }, { width: 1920, height: 1080 })).toEqual({ maxW: 1536, maxH: 864 });
-    expect(regionOf({ safe_area: "action" }, { width: 1000, height: 500 })).toEqual({ maxW: 900, maxH: 450 });
+    expect(regionOf({ safe_area: "title" }, { width: 1920, height: 1080 })).toEqual({ maxW: 1536, maxH: 864, onScreen: true });
+    expect(regionOf({ safe_area: "action" }, { width: 1000, height: 500 })).toEqual({ maxW: 900, maxH: 450, onScreen: true });
     expect(regionOf({ max_width: 300 }, { width: 1920, height: 1080 })).toEqual({ maxW: 300, maxH: undefined });
   });
 
@@ -249,6 +250,9 @@ describe("fit text: pure logic", () => {
     const on = measured([M({ live_fit: { installed: true, error: null } })]);
     expect(liveMismatches(false, on, [5])).toEqual([]);
     expect(liveMismatches(true, on, [5])).toHaveLength(1);
+    const offOurs = measured([M({ live_fit: { installed: false, ours: true, enabled: false, error: null } })]);
+    expect(liveMismatches(false, offOurs, [5])).toHaveLength(1);
+    expect(liveMismatches(true, offOurs, [5])).toHaveLength(1);
     expect(liveMismatches(false, measured([M({ live_fit: { installed: true, error: "bad" } })]), [5])[0].path).toContain("error");
     const args = AeTextBackdropSchema.parse({ comp_id: 1, layer: { name: "Title" }, padding: [10, 5], expect: expectArg });
     const read = (over: object) => ({
@@ -257,6 +261,9 @@ describe("fit text: pure logic", () => {
     });
     expect(backdropMismatches(args, read({}))).toEqual([]);
     expect(backdropMismatches(args, read({ index: 1 }))[0].path).toBe("backdrop.index");
+    const named = (name_set: boolean) => ({ ...read({}), text: { id: 5, index: 2, name: "Title", bounds: bounds(300, 100), name_set } });
+    expect(backdropMismatches(args, named(true))).toEqual([]);
+    expect(backdropMismatches(args, named(false))[0].path).toBe("text.name_set");
     expect(backdropMismatches(args, read({ size: [300, 100] }))[0].path).toBe("backdrop.size");
     expect(backdropMismatches(args, read({ expression_error: "x" }))[0].path).toBe("backdrop.expression_error");
     expect(backdropMismatches(args, { text: read({}).text })[0].path).toBe("backdrop");
@@ -291,6 +298,38 @@ describe("fit text: tool flows with a fake bridge", () => {
     expect(out.receipt.matches).toBe(true);
     expect(out.all_fit).toBe(true);
     expect(out.layers[0]).toMatchObject({ name: "Title", status: "fits", from_size: 100, to_size: 72.58, passes: 1 });
+  });
+
+  it("ae_fit_text folds a layer the host left out into status skip and does not retry it", async () => {
+    const { ctx, calls } = fakeAe({
+      fittextMeasure: [measured([M()]), measured([M()]), measured([M()])],
+      fittextApply: [{ comp_id: 1, layers: [], skipped: [{ id: 5, name: "Title", reason: "its sizes could not be read character by character" }], no_op: true }],
+    });
+    const out: any = await tool("ae_fit_text").handler(fitArgs(), ctx);
+    expect(calls.filter((c) => c.fn === "fittextApply")).toHaveLength(1);
+    expect(out.receipt.matches).toBe(true);
+    expect(out.layers[0]).toMatchObject({ name: "Title", status: "skip", reason: expect.stringContaining("character by character") });
+    expect(out.all_fit).toBe(false);
+    // Nothing was written, so nothing is reported as applied.
+    expect(out.applied).toBe(false);
+    expect(out.passes[0].wrote_nothing).toBe(true);
+  });
+
+  it("planFit skips text over the scan limit, and ae_fit_text still fits the short title", async () => {
+    expect(planFit(M({ text_length: 2100 }), OPTS)).toMatchObject({ status: "skip", reason: expect.stringContaining("over 2000 characters") });
+    expect(planFit(M({ text_length: 2000 }), OPTS).status).not.toBe("skip");
+    // One trailing line break is not scanned: 2001 characters ending in one are 2000 to scan.
+    expect(planFit(M({ text_length: 2001, range_length: 2000 }), OPTS).status).not.toBe("skip");
+    // Without character ranges the host never refuses, so the server does not either.
+    expect(planFit(M({ text_length: 2100 }), { ...OPTS, rangesSupported: false }).status).not.toBe("skip");
+    const long = M({ id: 6, name: "Long", text_length: 2100 });
+    const { ctx } = fakeAe({
+      fittextMeasure: [measured([M(), long]), measured([M(), long]), measured([M({ fontSize: 72.58, bounds: bounds(399, 87) }), long])],
+      fittextApply: [{ comp_id: 1, layers: [{ id: 5, name: "Title", from_size: 100, to_size: 72.58 }] }],
+    });
+    const out: any = await tool("ae_fit_text").handler(fitArgs(), ctx);
+    expect(out.layers.find((l: any) => l.name === "Title")).toMatchObject({ status: "fits", to_size: 72.58 });
+    expect(out.layers.find((l: any) => l.name === "Long")).toMatchObject({ status: "skip", reason: expect.stringContaining("over 2000 characters") });
   });
 
   it("writes one correction when point text is not quite linear, then stops", async () => {
@@ -887,7 +926,7 @@ describe("fittext.jsx under the fake AE", () => {
     expect(scale.expression).toContain("100 / r.height");
     expect(scale.expression).toContain("value * s");
     scale.expressionEnabled = true;
-    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].live_fit).toEqual({ installed: true, error: null, foreign: false });
+    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].live_fit).toEqual({ installed: true, ours: true, enabled: true, error: null, foreign: false });
     call({ max_width: 300 });
     expect(scale.expression).not.toContain("r.height");
     expect(call({ remove: true }).layers[0]).toMatchObject({ removed: true });
@@ -929,6 +968,8 @@ describe("fittext.jsx under the fake AE", () => {
     const read = A.fittextBackdropRead({ comp_id: comp.id, layer: { id: t.id }, backdrop_id: out.backdrop.id });
     expect(read.backdrop).toMatchObject({ id: out.backdrop.id, index: 2, kind: "shape", expression_error: null });
     expect(read.text.bounds.width).toBe(250);
+    // A build without isNameSet reports nothing, not false.
+    expect(read.text.name_set).toBeUndefined();
     expect(A.fittextBackdropRead({ comp_id: comp.id, layer: { id: t.id } }).backdrop).toBeUndefined();
   });
 
@@ -1169,7 +1210,7 @@ describe("animate.jsx setText ranges: review fixes", () => {
     expect(cut.matches_truncated).toBe(true);
   });
 
-  it("the tool compares only the ranges the read-back returned and reports the rest as unverified", async () => {
+  it("the tool compares only the ranges the read-back returned and fails the receipt for the rest", async () => {
     const setText = animateTools.find((t) => t.name === "ae_set_text")!;
     const doc = { text: "ab ab ab", justification: "left" };
     const written = [0, 3, 6].map((s) => ({ start: s, end: s + 2, text: "ab", style: { fauxBold: true } }));
@@ -1180,7 +1221,156 @@ describe("animate.jsx setText ranges: review fixes", () => {
     });
     const args = AeSetTextSchema.parse({ comp_id: 1, layer: { name: "T" }, ranges: [{ match: "ab", style: { fauxBold: true } }], expect: expectArg });
     const out: any = await setText.handler(args, ctx);
-    expect(out.receipt.matches).toBe(true);
+    expect(out.receipt.matches).toBe(false);
+    expect(out.receipt.mismatches).toEqual(expect.arrayContaining([expect.objectContaining({ path: "ranges", expected: 3, actual: 2 })]));
     expect(out.unverified_ranges).toBe(1);
+  });
+});
+
+describe("fittext and setText: second review fixes", () => {
+  it("safe_area is compared on screen: the region is divided by the evaluated Scale", () => {
+    const m = M({ scale: [200, 200], bounds: bounds(800, 50) });
+    expect(regionFor(m, { maxW: 1536, maxH: 864, onScreen: true })).toEqual({ maxW: 768, maxH: 432 });
+    expect(regionFor(m, { maxW: 400 })).toEqual({ maxW: 400 });
+    // 800 wide before Scale is 1600 on screen: outside a 1536 title area, inside it at 100%.
+    const plan = planFit(m, { region: { maxW: 1536, maxH: 864, onScreen: true }, minSize: 6, maxSize: 1296, allowGrow: false });
+    expect(plan.status).toBe("resize");
+    const plain = planFit(M({ bounds: bounds(800, 50) }), { region: { maxW: 1536, maxH: 864, onScreen: true }, minSize: 6, maxSize: 1296, allowGrow: false });
+    expect(plain.status).toBe("fits");
+  });
+
+  it("fittextMeasure reports the evaluated Scale", () => {
+    const { comp, A } = scene();
+    const t = textLayer(comp, "T", "HELLO", { size: 50 });
+    const scale = (t.property("ADBE Transform Group") as any).property("ADBE Scale") as FakeProperty;
+    scale.setValue([150, 150]);
+    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].scale).toEqual([150, 150]);
+  });
+
+  it("a disabled Scale expression of the user's is foreign, and live fit refuses to overwrite it", () => {
+    const { comp, A, undo } = scene();
+    const t = textLayer(comp, "T", "HELLO", { size: 50 });
+    const scale = (t.property("ADBE Transform Group") as any).property("ADBE Scale") as FakeProperty;
+    scale.expression = "wiggle(1, 5)";
+    scale.expressionEnabled = false;
+    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].live_fit).toMatchObject({ installed: false, foreign: true });
+    expect(() => A.fittextLive({ comp_id: comp.id, layers: [{ id: t.id }], expect: GUARD, max_width: 300 })).toThrow(/already has an expression/);
+    expect(scale.expression).toBe("wiggle(1, 5)");
+    expect(undo.begun).toBe(0);
+  });
+
+  it("fittextApply refuses a text whose per-range sizes can't be scanned instead of flattening them", () => {
+    const { comp, A, undo } = scene();
+    const t = textLayer(comp, "Long", "x".repeat(2100), { size: 10 });
+    docOf(t).chars[2000].fontSize = 30;
+    const out = A.fittextApply({ comp_id: comp.id, items: [{ layer: { id: t.id }, factor: 0.5 }], expect: GUARD });
+    expect(out.layers).toEqual([]);
+    expect(out.skipped).toEqual([expect.objectContaining({ id: t.id, reason: expect.stringContaining("character by character") })]);
+    expect(docOf(t).chars[2000].fontSize).toBe(30);
+    expect(undo.begun).toBe(0);
+    // Beside a readable layer, only the unreadable one is left out.
+    const ok = textLayer(comp, "Short", "HI", { size: 20 });
+    const both = A.fittextApply({ comp_id: comp.id, items: [{ layer: { id: t.id }, factor: 0.5 }, { layer: { id: ok.id }, factor: 0.5 }], expect: GUARD });
+    expect(both.layers).toHaveLength(1);
+    expect(both.skipped).toHaveLength(1);
+    expect(docOf(ok).fontSize).toBe(10);
+    expect(docOf(t).chars[0].fontSize).toBe(10);
+  });
+
+  it("fittextLive re-enables a switched-off expression of ours, and the read tells ours from on", () => {
+    const { comp, A } = scene();
+    const t = textLayer(comp, "T", "HELLO", { size: 50 });
+    const scale = (t.property("ADBE Transform Group") as any).property("ADBE Scale") as FakeProperty;
+    const call = () => A.fittextLive({ comp_id: comp.id, layers: [{ id: t.id }], expect: GUARD, max_width: 300 });
+    call();
+    scale.expressionEnabled = false;
+    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].live_fit).toMatchObject({ ours: true, enabled: false, installed: false, foreign: false });
+    call();
+    expect(scale.expressionEnabled).toBe(true);
+    const after = A.fittextMeasure({ comp_id: comp.id });
+    expect(liveMismatches(false, after, [t.id])).toEqual([]);
+    // If it stayed off, the receipt fails; and unlive still sees it as ours.
+    scale.expressionEnabled = false;
+    expect(liveMismatches(false, A.fittextMeasure({ comp_id: comp.id }), [t.id])).toHaveLength(1);
+    expect(liveMismatches(true, A.fittextMeasure({ comp_id: comp.id }), [t.id])).toHaveLength(1);
+    A.fittextLive({ comp_id: comp.id, layers: [{ id: t.id }], expect: GUARD, remove: true });
+    expect(scale.expression).toBe("");
+  });
+
+  it("fittextApply counts the runs raised to min_size", () => {
+    const { comp, A } = scene();
+    const t = textLayer(comp, "Mixed", "ABCD", { size: 50 });
+    docOf(t).chars[2].fontSize = 12;
+    docOf(t).chars[3].fontSize = 12;
+    const out = A.fittextApply({ comp_id: comp.id, items: [{ layer: { id: t.id }, factor: 0.5, min_size: 10 }], expect: GUARD });
+    expect(out.layers[0]).toMatchObject({ runs: 2, runs_clamped: 1 });
+  });
+
+  it("fittextBackdrop escapes line breaks in the layer name instead of changing the name", () => {
+    const { comp, A } = scene();
+    const t = textLayer(comp, "Two\nLines", "HELLO");
+    const out = A.fittextBackdrop({ comp_id: comp.id, layer: { id: t.id }, padding: [1, 1], color: [0, 0, 0], opacity: 100, corner_radius: 0, expect: GUARD });
+    const b = comp.layer(out.backdrop.index) as any;
+    const rect = b.property("ADBE Root Vectors Group").property("ADBE Vector Group").property("ADBE Vectors Group").property("ADBE Vector Shape - Rect");
+    expect(rect.property("ADBE Vector Rect Size").expression).toContain('thisComp.layer("Two\\nLines")');
+  });
+
+  it("fittextApply keeps every run inside min_size when shrinking", () => {
+    const { comp, A } = scene();
+    const t = textLayer(comp, "Mixed", "ABCD", { size: 50 });
+    docOf(t).chars[2].fontSize = 12;
+    docOf(t).chars[3].fontSize = 12;
+    A.fittextApply({ comp_id: comp.id, items: [{ layer: { id: t.id }, factor: 0.5, min_size: 10 }], expect: GUARD });
+    expect(docOf(t).chars.map((c) => c.fontSize)).toEqual([25, 25, 10, 10]);
+  });
+
+  it("fittextBackdrop refuses a name another layer shares, pins the text name, and refuses a locked text", () => {
+    const { comp, A, undo } = scene();
+    const t = textLayer(comp, "Title", "HELLO");
+    const ok = { comp_id: comp.id, layer: { id: t.id }, padding: [1, 1], color: [0, 0, 0], opacity: 100, corner_radius: 0, expect: GUARD };
+    textLayer(comp, "Title", "OTHER");
+    comp.layer(1)!.name = "Title";
+    expect(() => A.fittextBackdrop({ ...ok, layer: { id: t.id } })).toThrow(/also named/);
+    expect(undo.begun).toBe(0);
+    const solo = scene();
+    const s = textLayer(solo.comp, "Solo", "HI");
+    const base = { comp_id: solo.comp.id, layer: { id: s.id }, padding: [1, 1], color: [0, 0, 0], opacity: 100, corner_radius: 0, expect: GUARD };
+    expect(() => solo.A.fittextBackdrop({ ...base, name: "Solo" })).toThrow(/share the text layer's name/);
+    s.locked = true;
+    expect(() => solo.A.fittextBackdrop(base)).toThrow(/locked/);
+    expect(solo.comp.numLayers).toBe(1);
+    s.locked = false;
+    const out = solo.A.fittextBackdrop(base);
+    expect(out.text).toMatchObject({ name: "Solo" });
+  });
+
+  it("ae_set_text does not compare a whole-document key that a range starting at 0 also sets", () => {
+    expect(coveredByFirstRange("fontSize", [{ start: 0, end: 2, style: { fontSize: 80 } }])).toBe(true);
+    expect(coveredByFirstRange("fontSize", [{ start: 1, end: 2, style: { fontSize: 80 } }])).toBe(false);
+    expect(coveredByFirstRange("fillColor", [{ start: 0, end: 2, style: { applyFill: true } }])).toBe(true);
+    expect(coveredByFirstRange("tracking", [{ start: 0, end: 2, style: { fontSize: 80 } }])).toBe(false);
+  });
+
+  it("the tool leaves such a key out of the receipt check", async () => {
+    const setText = animateTools.find((t) => t.name === "ae_set_text")!;
+    const before = { text: "abc", fontSize: 40, justification: "left" };
+    const after = { text: "abc", fontSize: 80, justification: "left" };
+    const written = [{ start: 0, end: 2, text: "ab", style: { fontSize: 80 } }];
+    const { ctx } = fakeAe({
+      getTextDocument: [{ document: before }, { document: after, ranges: written.map((r) => ({ ...r, mixed: [] })) }],
+      setText: [{ ranges: written }],
+    });
+    const args = AeSetTextSchema.parse({ comp_id: 1, layer: { name: "T" }, style: { fontSize: 40 }, ranges: [{ start: 0, end: 2, style: { fontSize: 80 } }], expect: expectArg });
+    const out: any = await setText.handler(args, ctx);
+    expect(out.receipt.matches).toBe(true);
+  });
+
+  it("range text is bounded in readRanges and in the setText result", () => {
+    const { comp, A } = scene();
+    const l = textLayer(comp, "T", "a".repeat(25000), { size: 10 });
+    const out = A.setText({ comp_id: comp.id, layer: { id: l.id }, expect: GUARD, ranges: [{ start: 0, end: 25000, style: { fauxBold: true } }] });
+    expect(out.ranges[0].text.length).toBeLessThan(20100);
+    const back = A.getTextDocument({ comp_id: comp.id, layer: { id: l.id }, ranges: [{ start: 0, end: 25000 }] });
+    expect(back.ranges[0].text.length).toBeLessThan(20100);
   });
 });

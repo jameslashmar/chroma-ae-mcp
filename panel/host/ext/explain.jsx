@@ -349,6 +349,7 @@
     var kind = layerKind(l);
     if (kind === "camera" || kind === "light") out.push(kind + " layers render no picture");
     if (kind === "null") out.push("null layers render nothing");
+    if (kind === "adjustment") out.push("adjustment layer (draws nothing itself)");
     if (kind === "audio" || l.hasVideo === false) out.push("no video");
     if (l.enabled === false) out.push("video switch off");
     if (scan && scan.soloAny && l.solo !== true) out.push("another layer is soloed");
@@ -459,6 +460,11 @@
     var poi = prop(tr, "ADBE Point of Interest");
     var twoNode = false;
     if (typeof AutoOrientType !== "undefined") {
+      try {
+        if (AutoOrientType.ALONG_PATH !== undefined && cam.autoOrient === AutoOrientType.ALONG_PATH) {
+          return { ok: false, reason: "the camera auto-orients along its path, so its view direction is not worked out" };
+        }
+      } catch (eA) {}
       try {
         twoNode = cam.autoOrient === AutoOrientType.CAMERA_OR_POINT_OF_INTEREST;
       } catch (e) {}

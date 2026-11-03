@@ -549,7 +549,9 @@ describe("captions.jsx: layers mode", () => {
     // The fake's box layer reports its size as the layer rect.
     expect(l.rect.width).toBe(800);
     expect(l.rect.height).toBeCloseTo(72, 6);
-    expect(pos(l)).toEqual([140, 1536 - 72]);
+    // The origin is not the box's top-left in the fake (its rect is centred on it): the host reads the offset from the extents.
+    const p = pos(l);
+    expect([p[0] + l.rect.left, p[1] + l.rect.top]).toEqual([140, 1536 - 72]);
   });
 
   it("updates by name: text and timing change, the user's position stays, stale layers go", () => {
@@ -947,5 +949,220 @@ describe("captions.jsx: review fixes", () => {
     const out = apply(A, comp, { mode: "single", captions: [cap(1, 2, ["Again"])] });
     expect(out.updated).toEqual(["Caption"]);
     expect((p.keys[0].value as TextDocument).fontSize).toBe(90);
+  });
+});
+
+// ---------- wave 2 review fixes ----------
+
+const kindOf = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as { __kind?: string }).__kind;
+  }
+  return "no error";
+};
+const BOX = { color: [0, 0, 0], opacity: 60, padding: 24, roundness: 0 };
+const boxExpr = (box: FakeLayer, name: string) =>
+  ((((box.property("ADBE Root Vectors Group") as FakeGroup).property(1) as FakeGroup).property("ADBE Vectors Group") as FakeGroup).property("ADBE Vector Shape - Rect") as FakeGroup).property(name) as FakeProperty;
+
+/** AE paragraph text: a document that reports boxText and a size. */
+function asParagraph(comp: FakeComp) {
+  const real = comp.layers.addBoxText;
+  comp.layers.addBoxText = (size: number[], text: string) => {
+    const l = real(size, text);
+    const d = srcProp(l).value as TextDocument & { boxText?: boolean; boxTextSize?: number[] };
+    d.boxText = true;
+    d.boxTextSize = [size[0], size[1]];
+    srcProp(l).setValue(d);
+    return l;
+  };
+}
+
+describe("captions.jsx: locked layers are refused before the undo group", () => {
+  it("refuses a locked caption, box or stale layer and changes nothing", () => {
+    const { comp, A, undo } = scene();
+    apply(A, comp, { box: BOX });
+    const begun = undo.begun;
+    const before = names(comp).join("|");
+    const text = comp.layer("Caption 001")!;
+    text.locked = true;
+    expect(kindOf(() => apply(A, comp, { box: BOX, captions: [cap(1, 2, ["Edited"]), cap(3, 4, ["Two"])] }))).toBe("bad_args");
+    text.locked = false;
+    const box = comp.layer("Caption 001 Box")!;
+    box.locked = true;
+    expect(kindOf(() => apply(A, comp, { captions: [cap(1, 2, ["Edited"]), cap(3, 4, ["Two"])] }))).toBe("bad_args");
+    box.locked = false;
+    const stale = comp.layer("Caption 002")!;
+    stale.locked = true;
+    expect(kindOf(() => apply(A, comp, { captions: [cap(1, 2, ["Edited"])] }))).toBe("bad_args");
+    expect(undo.begun).toBe(begun);
+    expect(names(comp).join("|")).toBe(before);
+    expect(doc(comp.layer("Caption 001")!).text).toBe("Hello there");
+    // Keeping stale layers needs no unlock of them.
+    expect(kindOf(() => apply(A, comp, { captions: [cap(1, 2, ["Edited"])], remove_stale: false }))).toBe("no error");
+  });
+});
+
+describe("captions.jsx: paragraph box follows the line count", () => {
+  it("grows the box of an existing caption that gets more lines", () => {
+    const { comp, A } = scene();
+    asParagraph(comp);
+    apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60, text_box: { width: 800 } } });
+    const l = comp.layer("Caption 001")!;
+    expect((doc(l) as any).boxTextSize).toEqual([800, 72]);
+    apply(A, comp, { captions: [cap(1, 2, ["Now", "three", "lines"])], style: { font_size: 60 } });
+    const size = (doc(comp.layer("Caption 001")!) as any).boxTextSize as number[];
+    expect(size[0]).toBe(800);
+    expect(size[1]).toBeCloseTo(60 * 1.2 * 3, 6);
+  });
+
+  it("the read flags text taller than its box", () => {
+    const { comp, A } = scene();
+    asParagraph(comp);
+    apply(A, comp, { captions: [cap(1, 2, ["A"])], style: { font_size: 60, text_box: { width: 800 } } });
+    const l = comp.layer("Caption 001")!;
+    l.rect = { left: 0, top: 0, width: 800, height: 200 };
+    const read = A.captionsRead({ comp_id: comp.id, name_prefix: "Caption", mode: "layers", default_margins: DEFAULT_MARGINS });
+    expect(read.captions[0].box_overflow).toBe(true);
+    expect(read.captions[0].boxTextSize).toEqual([800, 72]);
+    const args = { mode: "layers" as const, first_number: undefined, highlight: undefined, box: undefined, style: undefined };
+    const caps: Caption[] = [{ start: 1, end: 2, lines: ["A"], words: [] }] as unknown as Caption[];
+    const mm = captionsMismatches(args, true, caps, read, { timings: [[1, 2]] });
+    expect(mm.some((x) => x.path.endsWith("box_overflow"))).toBe(true);
+  });
+});
+
+describe("captions.jsx: the background box", () => {
+  it("applies new box options to an existing box with restyle, and says it kept the look without", () => {
+    const { comp, A } = scene();
+    apply(A, comp, { box: BOX });
+    const kept = apply(A, comp, { box: { ...BOX, opacity: 90, padding: 10 } });
+    const box = comp.layer("Caption 001 Box")!;
+    expect(box.transform("Opacity").expression).toContain("o = 60");
+    expect(kept.warnings.join(" ")).toMatch(/kept the earlier look/);
+    apply(A, comp, { box: { ...BOX, opacity: 90, padding: 10, roundness: 5 }, restyle: true });
+    expect(box.transform("Opacity").expression).toContain("o = 90");
+    expect(boxExpr(box, "ADBE Vector Rect Size").expression).toContain("r.width + 20");
+    expect(boxExpr(box, "ADBE Vector Rect Roundness").staticValue).toBe(5);
+  });
+
+  it("places the text so the box, not just the text, sits inside the safe area", () => {
+    const { comp, A } = scene();
+    apply(A, comp, { box: BOX });
+    expect(pos(comp.layer("Caption 001")!)[1]).toBeCloseTo(1536 - 24 - 65 * 0.25, 6);
+    const left = scene();
+    apply(left.A, left.comp, { box: BOX, style: { justification: "left" } });
+    expect(pos(left.comp.layer("Caption 001")!)[0]).toBeCloseTo(64.8 + 24, 6);
+  });
+
+  it("refuses a padding that leaves no room", () => {
+    const { comp, A } = scene();
+    expect(kindOf(() => apply(A, comp, { box: { ...BOX, padding: 600 } }))).toBe("bad_args");
+    expect(comp.numLayers).toBe(0);
+  });
+
+  it("the read counts the box padding against the safe area", () => {
+    const { comp, A } = scene();
+    apply(A, comp, { captions: [cap(1, 2, ["A"])], box: BOX });
+    const text = comp.layer("Caption 001")!;
+    text.rect = { left: -100, top: -50, width: 200, height: 50 };
+    text.transform("Position").setValue([540, 1520]);
+    const read = () => A.captionsRead({ comp_id: comp.id, name_prefix: "Caption", mode: "layers", default_margins: DEFAULT_MARGINS });
+    // Text bottom at 1520 is inside (bottom 1536); the box's 24 px padding takes it to 1544.
+    expect(read().captions[0].outside_safe).toBe(true);
+    text.transform("Position").setValue([540, 1500]);
+    expect(read().captions[0].outside_safe).toBe(false);
+  });
+});
+
+describe("captions.jsx: single mode, captions on the same frame", () => {
+  it("moves a caption that rounds onto the previous one's frame one frame on and says so", () => {
+    const { comp, A } = scene();
+    const out = apply(A, comp, { mode: "single", captions: [cap(1, 1.5, ["Yes"]), cap(1.01, 2, ["No way"]), cap(3, 4, ["Later"])] });
+    const times = srcProp(comp.layer("Caption")!).keys.map((k) => Math.round(k.time * 1e6) / 1e6);
+    expect(times.slice(0, 2)).toEqual([1, 1.04]);
+    expect(out.warnings.join(" ")).toMatch(/same frame as caption 1/);
+    expect(out.timings[1][0]).toBeCloseTo(1.04, 6);
+  });
+
+  it("steps three captions inside one frame on one frame each instead of refusing them", () => {
+    const { comp, A } = scene();
+    apply(A, comp, { mode: "single", captions: [cap(1, 1.005, ["A"]), cap(1.005, 1.01, ["B"]), cap(1.01, 2, ["C"])] });
+    const times = srcProp(comp.layer("Caption")!).keys.map((k) => Math.round(k.time * 1e6) / 1e6);
+    expect(times.slice(0, 3)).toEqual([1, 1.04, 1.08]);
+  });
+
+  it("still refuses captions that are really out of order", () => {
+    const { comp, A } = scene();
+    expect(kindOf(() => apply(A, comp, { mode: "single", captions: [cap(2, 3, ["A"]), cap(1, 1.5, ["B"])] }))).toBe("bad_args");
+  });
+});
+
+describe("captions.jsx: box restyle and paragraph height guards", () => {
+  it("refuses restyle when an existing box has keyframes on its fill, before any undo group", () => {
+    const { comp, A, undo } = scene();
+    apply(A, comp, { box: BOX });
+    const box = comp.layer("Caption 001 Box")!;
+    const contents = ((box.property("ADBE Root Vectors Group") as FakeGroup).property(1) as FakeGroup).property("ADBE Vectors Group") as FakeGroup;
+    const fill = (contents.property("ADBE Vector Graphic - Fill") as FakeGroup).property("ADBE Vector Fill Color") as FakeProperty;
+    fill.setValueAtTime(0, [1, 0, 0, 1]);
+    const begun = undo.begun;
+    expect(kindOf(() => apply(A, comp, { box: BOX, restyle: true }))).toBe("bad_args");
+    expect(undo.begun).toBe(begun);
+    // Without restyle the box look is not touched, so the keys do not matter.
+    expect(kindOf(() => apply(A, comp, { box: BOX }))).toBe("no error");
+  });
+
+  it("flags single-mode text taller than its paragraph box", () => {
+    const { comp, A } = scene();
+    asParagraph(comp);
+    apply(A, comp, { mode: "single", captions: [cap(1, 2, ["A"]), cap(3, 4, ["B", "C"])], style: { font_size: 60, text_box: { width: 800, height: 72 } } });
+    const l = comp.layer("Caption")!;
+    const read = A.captionsRead({ comp_id: comp.id, name_prefix: "Caption", mode: "single", default_margins: DEFAULT_MARGINS });
+    expect(read.captions[0].boxTextSize).toEqual([800, 72]);
+    expect(read.captions[0].box_overflow).toBe(true);
+    const args = { mode: "single" as const, first_number: undefined, highlight: undefined, box: undefined, style: undefined };
+    const caps = [{ start: 1, end: 2, lines: ["A"], words: [] }] as unknown as Caption[];
+    const mm = captionsMismatches(args, true, caps, read, { timings: [[1, 2]] });
+    expect(mm.some((x) => x.path.endsWith("box_overflow"))).toBe(true);
+    expect(l).toBeTruthy();
+  });
+
+  it("a plain update never shrinks a paragraph box the user made taller", () => {
+    const { comp, A } = scene();
+    asParagraph(comp);
+    apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60, text_box: { width: 800 } } });
+    const l = comp.layer("Caption 001")!;
+    const d = doc(l) as any;
+    d.boxTextSize = [800, 400];
+    srcProp(l).setValue(d);
+    apply(A, comp, { captions: [cap(1, 2, ["Still one"])], style: { font_size: 60 } });
+    expect((doc(comp.layer("Caption 001")!) as any).boxTextSize[1]).toBe(400);
+  });
+
+  it("restyle places the box by the height it wrote when the layer has its own leading", () => {
+    const { comp, A } = scene();
+    asParagraph(comp);
+    apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60, text_box: { width: 800 } } });
+    const l = comp.layer("Caption 001")!;
+    const d = doc(l) as any;
+    d.autoLeading = false;
+    d.leading = 100;
+    srcProp(l).setValue(d);
+    apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60, text_box: { width: 800 } }, restyle: true });
+    const after = comp.layer("Caption 001")!;
+    expect((doc(after) as any).boxTextSize).toEqual([800, 100]);
+    // Same bottom as the 72px box (top 1464 + 72 = 1536): the 100px box starts at 1436.
+    expect(pos(after)).toEqual([140, 1436]);
+  });
+
+  it("restyle with text_box keeps an existing point-text caption placed as point text, and says so", () => {
+    const { comp, A } = scene();
+    apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60 } });
+    const pointPos = pos(comp.layer("Caption 001")!);
+    const out = apply(A, comp, { captions: [cap(1, 2, ["One line"])], style: { font_size: 60, text_box: { width: 800 } }, restyle: true });
+    expect(pos(comp.layer("Caption 001")!)).toEqual(pointPos);
+    expect(out.warnings.some((w: string) => w.includes("is point text"))).toBe(true);
   });
 });

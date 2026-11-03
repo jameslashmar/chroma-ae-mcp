@@ -24,6 +24,8 @@ import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite } from "./s
 export interface HostCall {
   host: string;
   args: Record<string, unknown>;
+  /** The evalScript timeout; leave it out for the default (host.ts DEFAULT_TIMEOUT_MS). */
+  timeoutMs?: number;
 }
 
 export type Written = Record<string, unknown>;
@@ -63,6 +65,7 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       label: `${spec.label} (${phase})`,
       mutates: false,
       toolName: spec.toolName,
+      timeoutMs: call.timeoutMs,
     });
     return res.result ?? null;
   };
@@ -86,6 +89,7 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
           label: spec.label,
           mutates: true,
           toolName: spec.toolName,
+          timeoutMs: spec.write.timeoutMs,
         });
       } finally {
         endInflight(opId);
@@ -118,7 +122,8 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom });
       // A failed read-back means AE is likely stuck: no session snapshot behind it.
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure });
+      // A host that changed nothing returns no_op: true and opened no undo group.
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true });
       return {
         op_id: opId,
         applied: true as const,

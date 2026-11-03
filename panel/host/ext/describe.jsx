@@ -22,7 +22,7 @@
   var MAX_LAYERS = 500;
   var DEFAULT_PAGE = 200;
   var MAX_VISITED = 40000;
-  var MAX_DEPTH = 8;
+  var MAX_DEPTH = 16;
   var MAX_SEGMENTS = 1500;
   var SEGMENTS_PER_LAYER = 60;
   var MAX_SAMPLES = 4000;
@@ -173,7 +173,7 @@
   // not complete (cap reached, text cut, too many matches), so the server
   // does not judge "unused" from it. Names are clipped like layer names (200).
   function addRefs(text, expr) {
-    var re = /layer\(\s*["']([^"']+)["']\s*\)/g;
+    var re = /layer\(\s*(?:"([^"]*)"|'([^']*)')\s*\)/g;
     var m;
     var guard = 0;
     var s = text;
@@ -187,7 +187,10 @@
         break;
       }
       guard++;
-      var name = clip(m[1], 200);
+      var rawName = m[1];
+      if (rawName === undefined || rawName === null || rawName === "") rawName = m[2];
+      if (rawName === undefined || rawName === null) rawName = "";
+      var name = clip(rawName, 200);
       var seen = false;
       for (var i = 0; i < expr.refs.length; i++) {
         if (expr.refs[i] === name) seen = true;
@@ -384,12 +387,15 @@
     }
 
     function walk(group, depth, names, matches) {
-      if (depth > MAX_DEPTH) return;
       var n = 0;
       try {
         n = group.numProperties;
       } catch (e0) {
         n = 0;
+      }
+      if (depth > MAX_DEPTH) {
+        if (n > 0) ctx.walk_truncated = true;
+        return;
       }
       for (var i = 1; i <= n; i++) {
         if (ctx.visited >= MAX_VISITED) {

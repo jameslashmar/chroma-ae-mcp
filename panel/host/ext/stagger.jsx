@@ -32,6 +32,14 @@
   var MAX_WARNINGS = 20;
   var TIME_LIMIT = 10800;
 
+  // A rollback that could not finish leaves AE changed; say so in the error instead of reading like a clean refusal.
+  function appendRestoreFailures(err, failures) {
+    if (!failures.length) return;
+    try {
+      err.message = err.message + " (the rollback was incomplete, so After Effects was left changed: " + failures.join("; ") + "; inspect before retrying)";
+    } catch (eMsg) {}
+  }
+
   function fail(kind, message, extra) {
     var e = new Error(message);
     e.__kind = kind;
@@ -526,6 +534,7 @@
       var done = [];
       var warnings = [];
       var result = [];
+      var restoreFailed = [];
       try {
         for (var j = 0; j < jobs.length; j++) {
           var job = jobs[j];
@@ -554,8 +563,11 @@
           try {
             done[r].layer.startTime = done[r].from;
             done[r].layer.outPoint = done[r].out;
-          } catch (eRs) {}
+          } catch (eRs) {
+            restoreFailed.push("\"" + done[r].layer.name + "\" could not be moved back: " + eRs.message);
+          }
         }
+        appendRestoreFailures(ePost, restoreFailed);
         throw ePost;
       }
       return { mode: "layers", trim: trim, layers: result, warnings: warnings };
@@ -645,6 +657,7 @@
       var done = [];
       var warnings = [];
       var result = [];
+      var restoreFailed = [];
       try {
         for (var j = 0; j < jobs.length; j++) {
           var jb = jobs[j];
@@ -665,8 +678,11 @@
           try {
             writeKeys(done[r].prop, done[r].original, 0, [], done[r].label);
             if (done[r].hasOrigValue === true && done[r].original.length === 0) done[r].prop.setValue(done[r].origValue);
-          } catch (eRs) {}
+          } catch (eRs) {
+            restoreFailed.push("the original keys of " + done[r].label + " could not be put back: " + eRs.message);
+          }
         }
+        appendRestoreFailures(ePost, restoreFailed);
         throw ePost;
       }
       return { mode: args.mode, layers: result, warnings: warnings };
@@ -776,6 +792,7 @@
     return A.withUndo(args.label || "Stagger layout", function () {
       var done = [];
       var result = [];
+      var restoreFailed = [];
       try {
         for (var j = 0; j < jobs.length; j++) {
           var job = jobs[j];
@@ -797,8 +814,11 @@
             } else {
               done[r].ps.prop.setValue(done[r].from);
             }
-          } catch (eRs) {}
+          } catch (eRs) {
+            restoreFailed.push("the Position of \"" + done[r].layer.name + "\" could not be put back: " + eRs.message);
+          }
         }
+        appendRestoreFailures(ePost, restoreFailed);
         throw ePost;
       }
       return { layers: result };

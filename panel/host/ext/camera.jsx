@@ -25,7 +25,8 @@
 
   var MAX_LAYERS = 500;
   var MAX_CAMERAS = 50;
-  var MAX_INCLUDE = 50;
+  // Room for the camera, the controller and every spread layer.
+  var MAX_INCLUDE = 202;
   var MAX_EFFECTS = 20;
   var MAX_SPREAD = 200;
   var MAX_EXPR = 2000;
@@ -376,6 +377,8 @@
     if (!isNum(t)) t = 0;
     var activeId = activeCameraId(comp, t);
     var ids = wantedIds(args.ids);
+    var idsDropped = 0;
+    if (args.ids && typeof args.ids.length === "number" && args.ids.length > ids.length) idsDropped = args.ids.length - ids.length;
     var cameras = [];
     var layers = [];
     var n = comp.numLayers;
@@ -401,6 +404,7 @@
       active_camera_id: activeId,
       comp_active_camera_id: compActive,
       layers: layers,
+      ids_dropped: idsDropped,
       truncated: truncated
     };
   };
@@ -499,6 +503,15 @@
         try {
           o.three_d = l.threeDLayer === true;
         } catch (e3) {}
+      }
+      // Auto-Orient is not modelled by the Node maths; flag it so chains through it are refused.
+      o.auto_orient_active = false;
+      if (kind !== "camera") {
+        try {
+          if (typeof AutoOrientType !== "undefined" && typeof l.autoOrient === "number") {
+            o.auto_orient_active = l.autoOrient !== AutoOrientType.NO_AUTO_ORIENT;
+          }
+        } catch (eao) {}
       }
       try {
         if (l.parent) o.parent_id = l.parent.id;
@@ -729,6 +742,11 @@
         locked = l.locked === true;
       } catch (e0) {}
       if (locked) fail("bad_args", "Layer \"" + l.name + "\" is locked");
+      var hasParent = false;
+      try {
+        hasParent = !!l.parent;
+      } catch (eP) {}
+      if (hasParent) fail("bad_args", "Layer \"" + l.name + "\" has a parent, so its Z would be in the parent's space; unparent it first");
       var tr = child(l, "ADBE Transform Group");
       var pos = child(tr, "ADBE Position");
       var sc = child(tr, "ADBE Scale");

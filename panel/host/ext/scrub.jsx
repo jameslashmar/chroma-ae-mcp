@@ -144,6 +144,8 @@
       out.layer_edges.push({ time: round6(l.inPoint), edge: "in", layer: clip(l.name, 80) });
       if (out.layer_edges.length < MAX_LIST) {
         out.layer_edges.push({ time: round6(l.outPoint), edge: "out", layer: clip(l.name, 80) });
+      } else {
+        out.layer_edges_truncated = true;
       }
     }
     return out;
@@ -283,6 +285,16 @@
       }
       if (!ours) fail("bad_args", "Comp " + args.comp_id + " is not the temporary comp this tool built; leaving it alone");
     }
+    // Count the item's other users before anything is removed: a read after comp.remove() in the same script can be stale.
+    var used = 0;
+    if (item) {
+      try {
+        var ua = item.usedIn;
+        for (var ui = 0; ui < ua.length; ui++) {
+          if (!comp || ua[ui].id !== comp.id) used++;
+        }
+      } catch (eU) {}
+    }
     return A.withUndo(args.label || "Scrub check: remove", function () {
       var out = { removed_comp: null, removed_item: null, item_kept: false };
       if (comp) {
@@ -290,10 +302,6 @@
         comp.remove();
       }
       if (item) {
-        var used = 0;
-        try {
-          used = item.usedIn.length;
-        } catch (eU) {}
         if (used > 0) {
           out.item_kept = true;
         } else {

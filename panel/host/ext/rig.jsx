@@ -200,6 +200,12 @@
     return par;
   }
 
+  function assertUnlocked(layer) {
+    var locked = false;
+    try { locked = layer.locked === true; } catch (e) { locked = false; }
+    if (locked) fail("bad_args", "Layer \"" + layer.name + "\" is locked; unlock it first");
+  }
+
   function requireParade(layer) {
     var par = parade(layer);
     if (!par) fail("bad_args", "Layer \"" + layer.name + "\" can't hold effects (cameras and lights can't)");
@@ -421,6 +427,15 @@
     return spots;
   }
 
+  // True when the spot is reached through a variable, as in c.effect(...) after
+  // var c = thisComp.layer("X"). A bare effect( or thisLayer.effect( names the
+  // expression's own layer, so it never reaches another layer's control.
+  function viaVariable(text, pos) {
+    var m = /([A-Za-z_$][\w$]*)\s*\.\s*$/.exec(text.substring(0, pos));
+    if (!m) return false;
+    return m[1] !== "thisLayer";
+  }
+
   function refersTo(entry, holder, name) {
     var spots = effectSpots(entry.text, name);
     if (spots.length === 0) return false;
@@ -432,7 +447,7 @@
         if (lname === holder.name) return true;
       } else if (onHolder) {
         return true;
-      } else if (mentionsLayer(entry.text, holder.name)) {
+      } else if (viaVariable(entry.text, spots[i]) && mentionsLayer(entry.text, holder.name)) {
         return true;
       }
     }
@@ -770,7 +785,10 @@
     var specs = [];
     var taken = {};
     var par = null;
-    if (layer) par = requireParade(layer);
+    if (layer) {
+      assertUnlocked(layer);
+      par = requireParade(layer);
+    }
     for (var i = 0; i < sels.length; i++) {
       var spec = normaliseSpec(comp, sels[i]);
       if (taken["n:" + spec.name]) fail("bad_args", "Control name \"" + spec.name + "\" is given twice");
@@ -932,6 +950,13 @@
     if (!ok) fail("bad_args", "Property " + path.join(" > ") + " on \"" + layer.name + "\" can't take an expression");
   }
 
+  function requireWritableTarget(p, layer) {
+    assertUnlocked(layer);
+    var separated = false;
+    try { separated = p.dimensionsSeparated === true; } catch (eSep) { separated = false; }
+    if (separated) fail("bad_args", "\"" + layer.name + "\": that Position has separated dimensions; use X Position / Y Position (ADBE Position_0, ADBE Position_1)");
+  }
+
   A.rigLink = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
@@ -945,6 +970,7 @@
       var layer = findLayer(comp, link.layer);
       var rp = resolveProp(layer, link.path);
       requireExpressionTarget(rp.prop, layer, link.path);
+      requireWritableTarget(rp.prop, layer);
       var key = layer.id + "|" + rp.matchPath.join("/");
       if (seen[key]) fail("bad_args", "Property " + link.path.join(" > ") + " on \"" + layer.name + "\" is linked twice in this call");
       seen[key] = true;
@@ -1025,6 +1051,8 @@
         entry.skip = "has no expression";
       } else if (targets[i].control_name !== undefined && targets[i].control_name !== null && !mentionsEffect(prev, targets[i].control_name)) {
         entry.skip = "its expression does not name the control \"" + targets[i].control_name + "\"";
+      } else {
+        requireWritableTarget(rp.prop, layer);
       }
       plan.push(entry);
     }
@@ -1053,6 +1081,7 @@
     checkName(args.new_name, "New name");
     if (args.control === args.new_name) fail("bad_args", "The new name is the current name");
     var ctl = findControl(layer, args.control);
+    assertUnlocked(layer);
     var par = requireParade(layer);
     if (effectsNamed(par, args.new_name).length > 0) fail("bad_args", "Layer \"" + layer.name + "\" already has an effect named \"" + args.new_name + "\"");
     var layerId = layer.id;
@@ -1287,7 +1316,7 @@
           "var s0 = " + c.ref("start") + ";",
           "var s1 = " + c.ref("end") + ";",
           "var dur = Math.max(" + c.ref("duration") + ", 0.001);",
-          "var dec = Math.max(0, Math.round(" + c.ref("decimals") + "));",
+          "var dec = Math.min(20, Math.max(0, Math.round(" + c.ref("decimals") + ")));",
           "var k = Math.min(Math.max((time - inPoint) / dur, 0), 1);"
         ];
         if (easing === "ease") lines.push("k = ease(k, 0, 1, 0, 1);");
@@ -1363,6 +1392,7 @@
     var layer = findLayer(comp, args.layer);
     var rp = resolveProp(layer, args.path);
     requireExpressionTarget(rp.prop, layer, args.path);
+    requireWritableTarget(rp.prop, layer);
     var dims = dimOf(rp.prop);
     if (recipe.dims[dims] !== 1) {
       var ok = [];
@@ -1402,6 +1432,7 @@
       }
       byKey[specs[i].key] = spec.name;
     }
+    if (make.length > 0) assertUnlocked(controller);
     var warnings = [];
     var ctx = {
       dims: dims,

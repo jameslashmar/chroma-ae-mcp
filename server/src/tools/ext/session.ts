@@ -124,6 +124,7 @@ const MAX_INTERRUPTED = 20;
 const MAX_SHOWN_IDS = 100;
 const MAX_STEP_ITEM_IDS = 100;
 const MAX_PENDING_LINES = 10;
+const MAX_AGENT_WRITES = 200;
 /** A snapshot read inside a write only stops waiting after this long (never aborts the evalScript): a stuck AE must not hold the queue for the 120 s default. */
 export const SNAPSHOT_TIMEOUT_MS = 8_000;
 const UNSAVED = "<unsaved>";
@@ -348,7 +349,7 @@ export function undoReach(
   step: UndoStep,
   live: SessionSnapshot,
   serviceId: string,
-  opts: { reopenedAt?: string | null } = {}
+  opts: { reopenedAt?: string | null; undoPurge?: UndoPurge } = {}
 ): { reach: UndoReach; why: string } {
   // A project the server itself closed and reopened (checkpoint revert, open) lost its undo history, whatever path or ids it has now.
   const reopenedMs = opts.reopenedAt ? Date.parse(opts.reopenedAt) : NaN;
@@ -359,7 +360,16 @@ export function undoReach(
       why: "the project was closed and reopened after this step (a checkpoint revert or open); After Effects clears the undo history when a project closes",
     };
   }
+  const after = (at: string | null | undefined): boolean => {
+    const ms = at ? Date.parse(at) : NaN;
+    return Number.isFinite(ms) && Number.isFinite(stepMs) && stepMs < ms;
+  };
+  if (after(opts.undoPurge?.purgedAt)) {
+    return { reach: "not_reachable", why: "the undo history was purged after this step (ae_memory_purge target undo)" };
+  }
   let prefix = "";
+  // A ram or all purge may have cleared it too (not measured): say so, without claiming it is gone.
+  if (after(opts.undoPurge?.maybePurgedAt)) prefix = "a cache purge after this step (ae_memory_purge ram or all) may have cleared the undo history; ";
   if (step.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step.item_ids, live)) {
     return { reach: "not_reachable", why: "another unsaved project is open (its items hardly overlap the step's)" };
   }
@@ -367,7 +377,7 @@ export function undoReach(
     if (!looksLikeSaveAs(step, live)) {
       return { reach: "not_reachable", why: `another project is open (the step was made in ${step.project_path})` };
     }
-    prefix = `the project path changed (${step.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
+    prefix += `the project path changed (${step.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
   }
   if (step.build && live.build && step.build !== live.build) {
     return { reach: "not_reachable", why: "the After Effects build changed, so it was restarted or updated; AE keeps no undo history across a restart" };
@@ -408,9 +418,39 @@ interface StateFile {
   interrupted: InterruptedOp[];
   /** When a tool last closed and reopened a project: undo steps before it are gone. */
   reopened_at: string | null;
+  /** The last ae_memory_purge that cleared the undo history (target undo). */
+  undo_purged_at: string | null;
+  /** The last one that may have cleared it (ram, all: not measured). */
+  undo_maybe_purged_at: string | null;
+  /** Every agent write per project, guarded or not; undo steps cover only guarded ones. */
+  agent_writes: Record<string, AgentWrite[]>;
 }
 
-const emptyState = (): StateFile => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [], reopened_at: null });
+export interface AgentWrite {
+  at: string;
+  op_id: string;
+  tool: string;
+  /** False for a write the bridge hook saw (no receipt, no undo step). */
+  guarded: boolean;
+}
+
+export interface UndoPurge {
+  purgedAt?: string | null;
+  maybePurgedAt?: string | null;
+}
+
+const emptyState = (): StateFile => ({
+  last_key: null,
+  snapshots: {},
+  touched: {},
+  steps: [],
+  op_projects: {},
+  interrupted: [],
+  reopened_at: null,
+  undo_purged_at: null,
+  undo_maybe_purged_at: null,
+  agent_writes: {},
+});
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -439,6 +479,14 @@ function sanitizeState(saved: unknown): StateFile {
     out.interrupted = saved.interrupted.filter((x): x is InterruptedOp => isPlainObject(x) && typeof x.op_id === "string" && typeof x.project_path === "string");
   }
   if (typeof saved.reopened_at === "string") out.reopened_at = saved.reopened_at;
+  if (typeof saved.undo_purged_at === "string") out.undo_purged_at = saved.undo_purged_at;
+  if (typeof saved.undo_maybe_purged_at === "string") out.undo_maybe_purged_at = saved.undo_maybe_purged_at;
+  if (isPlainObject(saved.agent_writes)) {
+    for (const [k, v] of Object.entries(saved.agent_writes)) {
+      if (!Array.isArray(v)) continue;
+      out.agent_writes[k] = v.filter((x): x is AgentWrite => isPlainObject(x) && typeof x.at === "string" && typeof x.op_id === "string" && typeof x.tool === "string");
+    }
+  }
   return out;
 }
 
@@ -576,6 +624,40 @@ export class SessionTracker {
 
   reopenedAt(): string | null {
     return this.state.reopened_at;
+  }
+
+  /** ae_memory_purge cleared the undo history (certain: target undo) or may have (ram, all). */
+  markUndoPurged(at: string, certain: boolean): void {
+    if (certain) this.state.undo_purged_at = at;
+    else this.state.undo_maybe_purged_at = at;
+    this.save();
+  }
+
+  undoPurge(): UndoPurge {
+    return { purgedAt: this.state.undo_purged_at, maybePurgedAt: this.state.undo_maybe_purged_at };
+  }
+
+  /** Logs an agent write to a project: guarded writes from noteAfterWrite, the rest from the bridge hook. */
+  noteAgentWrite(projectPath: string, w: { op_id: string; tool: string; guarded: boolean }): void {
+    const key = keyOf(projectPath);
+    const list = this.state.agent_writes[key] ?? [];
+    list.push({ at: this.now().toISOString(), ...w });
+    delete this.state.agent_writes[key]; // re-insert last: keeps insertion order as recency
+    this.state.agent_writes[key] = list.slice(-MAX_AGENT_WRITES);
+    const keys = Object.keys(this.state.agent_writes);
+    for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) delete this.state.agent_writes[old];
+    this.save();
+  }
+
+  /**
+   * The agent's writes to a project after `since` (an ISO time; all kept ones
+   * when null), oldest first. Unlike steps() it includes writes that are not
+   * undo steps (imports, effects, text, keyframe ease, ...).
+   */
+  agentWritesSince(projectPath: string, since: string | null): AgentWrite[] {
+    const list = this.state.agent_writes[keyOf(projectPath)] ?? [];
+    const ms = since ? Date.parse(since) : NaN;
+    return Number.isFinite(ms) ? list.filter((w) => Date.parse(w.at) > ms) : list.slice();
   }
 
   private save(): void {
@@ -870,9 +952,10 @@ export function endInflight(opId: string): void {
 
 /**
  * After an applied write (and its read-back), inside the queue lease: the
- * new baseline and the undo step. Never throws.
+ * new baseline and the undo step (none when `addStep` is false: the write
+ * changed nothing, so it opened no undo group). Never throws.
  */
-export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean } = {}): Promise<void> {
+export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean; addStep?: boolean } = {}): Promise<void> {
   if (!tracker) return;
   const t = tracker;
   try {
@@ -880,6 +963,13 @@ export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { 
     t.commitReported(info.opId);
   } catch {
     // see above
+  }
+  if (opts.addStep !== false) {
+    try {
+      t.noteAgentWrite(info.expect.project_path, { op_id: info.opId, tool: info.toolName, guarded: true });
+    } catch {
+      // see above
+    }
   }
   try {
     // A failed read-back or a before-snapshot that failed means AE is likely stuck: no more reads behind it.
@@ -889,6 +979,7 @@ export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { 
     const snap = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
     if (!snap) return;
     t.record(snap, { op_id: info.opId, tool: info.toolName });
+    if (opts.addStep === false) return;
     t.addStep({
       op_id: info.opId,
       tool: info.toolName,
@@ -1011,13 +1102,23 @@ export function installSessionBridgeHook(bridge: HostTransport): () => void {
       }
       if (opensProject) markReopenedSafely(t);
     }
+    let writtenTo = projectPath;
     if (!skipAfter) {
       try {
         const after = await readOpenProject(t, read("after"), []);
-        if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
+        if (after) {
+          t.record(after.snap, { op_id: p.id, tool: toolName });
+          writtenTo = after.snap.project_path;
+        }
       } catch {
         // see above
       }
+    }
+    try {
+      // A write that threw may still have changed something; only a returned one is logged, like a guarded write.
+      if (writtenTo !== UNKNOWN_PROJECT) t.noteAgentWrite(writtenTo, { op_id: p.id, tool: toolName, guarded: false });
+    } catch {
+      // see above
     }
     return res;
   }) as EvalRaw;
@@ -1216,7 +1317,7 @@ export const sessionTools: ToolDefinition<any>[] = [
               .steps()
               .slice(-(args.max_undo_steps ?? 10))
               .reverse()
-              .map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt() }) }));
+              .map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt(), undoPurge: t.undoPurge() }) }));
 
       let jobsFile = t.rendersJobsFile;
       if (!jobsFile) {
