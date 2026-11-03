@@ -194,6 +194,21 @@ describe("mcp-rpc and panel-entry", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it("logs one line per tool call for the panel", async () => {
+    const { ctx } = makeTestContext((script) => {
+      if (script.startsWith("__chromaAe.getComp(")) return { id: 10, name: "Hero Comp" };
+      throw new Error("comp 99 not found");
+    });
+    const lines: string[] = [];
+    ctx.log = (level, msg) => lines.push(`${level} ${msg}`);
+
+    await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "ae_get_comp", arguments: { comp_id: 10 } } }, ctx);
+    await handleRpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "no_such_tool", arguments: {} } }, ctx);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^ok tool ae_get_comp ok \(\d+ms\)$/);
+  });
+
   it("handles tools/call with valid args and returns isError on bad args", async () => {
     const { ctx, calls } = makeTestContext((script) => {
       if (script.startsWith("__chromaAe.getComp(")) {

@@ -276,6 +276,8 @@ export async function autoCheckpoint(
     for (let n = 2; fs.existsSync(target); n++) target = path.join(dir, `${stem}-${n}${ext}`);
     await fs.promises.copyFile(projectPath, target, fs.constants.COPYFILE_EXCL);
     rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    // The panel counts these lines for its Checkpoints tile (panel/client/common.js).
+    ctx.log?.("ok", `Checkpoint saved before ${toolName}: ${path.basename(target)}`);
     return { status: "created", path: target, ...unsaved };
   } catch (err) {
     return {

@@ -7,40 +7,10 @@
 </head>
 <body>
   <header class="header">
-    <div class="title-row">
-      <span class="title">Chroma AE MCP</span>
-      <span id="status-badge" class="badge">starting</span>
-    </div>
-    <div class="meta-grid">
-      <div class="meta-item">
-        <span class="meta-label">Listen</span>
-        <span id="port-value" class="meta-value">127.0.0.1:7790</span>
-      </div>
-      <div class="meta-item">
-        <span class="meta-label">Host</span>
-        <span id="ae-version" class="meta-value">AE —</span>
-      </div>
-      <div class="meta-item">
-        <span class="meta-label">In-Flight</span>
-        <span id="inflight-label" class="meta-value">idle</span>
-      </div>
-      <div class="meta-item">
-        <span class="meta-label">Queue</span>
-        <span id="queue-depth" class="meta-value">0</span>
-      </div>
-    </div>
-    <div class="setup-box">
-      <div id="setup-command" class="setup-command">claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp --header "Authorization: Bearer ••••••••"</div>
-      <div class="setup-actions">
-        <button id="copy-setup-btn" class="btn btn-primary" type="button">Copy setup command</button>
-        <button id="regen-token-btn" class="btn" type="button">Regenerate token</button>
-        <button id="diagnostics-btn" class="btn" type="button" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
-      </div>
-      <div class="register-row">
-        <span class="register-label">Register with</span>
-        <div id="register-clients" class="register-clients"></div>
-      </div>
-    </div>
+    <h1 class="title">This session</h1>
+    <span id="status-badge" class="badge" title="">
+      <span class="badge-dot" aria-hidden="true"></span><span id="status-text">Starting</span><span id="ae-version" class="badge-host"></span>
+    </span>
   </header>
 
   <section id="ask" class="ask" hidden>
@@ -67,9 +37,56 @@
     </div>
   </section>
 
-  <main class="log-container">
-    <div id="log" class="log" role="log" aria-live="polite"></div>
-  </main>
+  <div id="top" class="top">
+    <div class="tiles tiles-3">
+      <div class="tile"><div class="tile-label">Tool calls</div><div id="stat-calls" class="tile-value">0</div></div>
+      <div class="tile"><div class="tile-label">Queued</div><div id="queue-depth" class="tile-value">0</div></div>
+      <div class="tile" id="tile-errors"><div class="tile-label">Errors</div><div id="stat-errors" class="tile-value">0</div></div>
+    </div>
+    <div class="tiles tiles-2">
+      <div class="tile"><div class="tile-label">Median reply</div><div class="tile-value"><span id="stat-median">–</span><span class="tile-unit"> ms</span></div></div>
+      <div class="tile"><div class="tile-label">Checkpoints</div><div id="stat-checkpoints" class="tile-value">0</div></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-head"><span>Reply time, last 20 calls</span><span id="chart-max"></span></div>
+      <div id="chart" class="chart" role="img" aria-label="No tool calls yet"></div>
+      <div id="chart-note" class="chart-note">No tool calls yet.</div>
+    </div>
+
+    <div class="register">
+      <span class="register-label">Register with</span>
+      <div id="register-clients" class="register-clients"></div>
+      <button id="copy-setup-btn" class="btn btn-primary btn-wide" type="button">Copy setup command</button>
+      <div class="minor-actions">
+        <button id="regen-token-btn" class="btn-link" type="button" title="Make a new Bearer token">New token</button>
+        <button id="diagnostics-btn" class="btn-link" type="button" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
+        <span id="inflight-label" class="inflight" title="The call After Effects is running now"></span>
+      </div>
+    </div>
+  </div>
+
+  <section id="log-section" class="log-section">
+    <div class="log-bar">
+      <button id="log-toggle" class="log-toggle" type="button" aria-expanded="false" aria-controls="log-body">
+        <svg class="chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 1 7.5 5 2.5 9z" fill="currentColor"></path></svg>
+        Log<span id="log-count" class="log-count">0</span>
+      </button>
+      <button id="log-full" class="log-expand" type="button" aria-pressed="false" aria-label="Fill the panel" title="Fill the panel">
+        <svg class="icon-expand" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg>
+        <svg class="icon-collapse" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"></path></svg>
+      </button>
+    </div>
+    <div id="log-body" class="log-body" hidden>
+      <div id="log-entries" class="log-entries">
+        <div class="log-empty">Nothing yet. Tool calls from Claude show up here.</div>
+      </div>
+      <details class="raw-log">
+        <summary><svg class="chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 1 7.5 5 2.5 9z" fill="currentColor"></path></svg>Raw log<span id="raw-count" class="log-count"></span></summary>
+        <div id="log" class="log" role="log" aria-live="polite"></div>
+      </details>
+    </div>
+  </section>
 
   <script src="./common.js"></script>
   <script src="./panel.js"></script>

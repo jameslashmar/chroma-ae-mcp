@@ -1,6 +1,8 @@
 // panel/client/panel.js — Chroma AE MCP UI-only CEP panel.
 // Polls GET /health on the background service, tails <stateDir>/service.log,
-// and provides Copy setup command + Regenerate token controls. Never starts a server.
+// shows session tiles, a reply-time chart and a Log built from the service's
+// "tool ..." lines, and provides Copy setup command + Regenerate token controls.
+// Never starts a server.
 
 (function () {
   "use strict";
@@ -16,10 +18,12 @@
   var POLL_INTERVAL_MS = 1000;
   var HTTP_TIMEOUT_MS = 3000;
   var MAX_LOG_LINES = common.MAX_LOG_LINES || 200;
-  var INITIAL_TAIL_BYTES = 64 * 1024; // Read last 64 KB on initial tail load
+  var INITIAL_TAIL_BYTES = 256 * 1024; // Read last 256 KB on initial tail load (enough for a session's tiles)
+  var LOG_VIEW_KEY = "chroma-ae-mcp.logView";
 
   // ---------- DOM references & UI helpers ----------
   var $badge = typeof document !== "undefined" ? document.getElementById("status-badge") : null;
+  var $statusText = typeof document !== "undefined" ? document.getElementById("status-text") : null;
   var $port = typeof document !== "undefined" ? document.getElementById("port-value") : null;
   var $ae = typeof document !== "undefined" ? document.getElementById("ae-version") : null;
   var $inflight = typeof document !== "undefined" ? document.getElementById("inflight-label") : null;
@@ -36,7 +40,7 @@
 
   function setBadge(text, stateClass) {
     if (!$badge) return;
-    $badge.textContent = text;
+    if ($statusText) $statusText.textContent = text;
     $badge.className = "badge" + (stateClass ? " " + stateClass : "");
   }
 
@@ -49,7 +53,7 @@
     while ($log.childNodes.length > MAX_LOG_LINES) {
       $log.removeChild($log.firstChild);
     }
-    $log.scrollTop = $log.scrollHeight;
+    if ($rawCount) $rawCount.textContent = String($log.childNodes.length);
   }
 
   function logUi(level, msg) {
@@ -87,6 +91,7 @@
   function renderLogLine(rawLine) {
     var trimmed = String(rawLine || "").replace(/\r$/, "");
     if (!trimmed) return;
+    if (stats.ingest(trimmed)) statsDirty = true;
     var parsed = common.parseLogLine(trimmed);
     appendLogRow(parsed.level, parsed.text);
   }
@@ -150,6 +155,157 @@
         }
       }
     } catch (e) {}
+  }
+
+  // ---------- Session tiles, reply-time chart and Log ----------
+  var stats = common.createSessionStats(MAX_LOG_LINES);
+  var statsDirty = false;
+
+  function el(id) {
+    return typeof document !== "undefined" ? document.getElementById(id) : null;
+  }
+
+  var $statCalls = el("stat-calls");
+  var $statErrors = el("stat-errors");
+  var $tileErrors = el("tile-errors");
+  var $statMedian = el("stat-median");
+  var $statCheckpoints = el("stat-checkpoints");
+  var $chart = el("chart");
+  var $chartMax = el("chart-max");
+  var $chartNote = el("chart-note");
+  var $logEntries = el("log-entries");
+  var $logCount = el("log-count");
+  var $rawCount = el("raw-count");
+  var $logToggle = el("log-toggle");
+  var $logFull = el("log-full");
+  var $logBody = el("log-body");
+
+  // "26.0.0x45" -> "26.0"
+  function shortVersion(v) {
+    var m = /^(\d+\.\d+)/.exec(String(v || ""));
+    return m ? m[1] : String(v || "");
+  }
+
+  function renderChart(snap) {
+    if (!$chart) return;
+    while ($chart.firstChild) $chart.removeChild($chart.firstChild);
+    var ms = snap.recentMs;
+    if (!ms.length) {
+      $chart.setAttribute("aria-label", "No tool calls yet");
+      if ($chartMax) $chartMax.textContent = "";
+      if ($chartNote) $chartNote.textContent = "No tool calls yet.";
+      return;
+    }
+    var max = Math.max.apply(null, ms);
+    var maxAt = ms.lastIndexOf(max);
+    for (var i = 0; i < ms.length; i++) {
+      var bar = document.createElement("div");
+      bar.className = "chart-bar" + (i === maxAt ? " max" : "");
+      bar.style.height = Math.max(4, Math.round((ms[i] / (max || 1)) * 100)) + "%";
+      bar.title = ms[i] + " ms";
+      $chart.appendChild(bar);
+    }
+    $chart.setAttribute("aria-label", "Reply times of the last " + ms.length + " tool calls, median " + snap.medianMs + " ms, slowest " + max + " ms");
+    if ($chartMax) $chartMax.textContent = "max " + max + " ms";
+    if ($chartNote) $chartNote.textContent = snap.slowest ? "Slowest: " + snap.slowest : "";
+  }
+
+  function entryNode(e) {
+    var row = document.createElement("div");
+    var failed = e.kind === "tool" && !e.ok;
+    row.className = "entry" + (e.kind === "checkpoint" ? " checkpoint" : "") + (failed ? " failed" : "");
+    var rail = document.createElement("div");
+    rail.className = "entry-rail";
+    var dot = document.createElement("span");
+    dot.className = "entry-dot";
+    var line = document.createElement("span");
+    line.className = "entry-line";
+    rail.appendChild(dot);
+    rail.appendChild(line);
+    var text = document.createElement("div");
+    text.className = "entry-text";
+    var title = document.createElement("div");
+    title.className = "entry-title";
+    var meta = document.createElement("div");
+    meta.className = "entry-meta";
+    if (e.kind === "checkpoint") {
+      title.textContent = "Checkpoint saved";
+      meta.textContent = e.time.substring(0, 5) + " · before " + e.tool;
+      meta.title = e.file;
+    } else {
+      title.textContent = e.tool;
+      meta.textContent = e.time.substring(0, 5) + " · " + (e.ok ? e.ms + " ms" : "failed: " + e.error);
+    }
+    text.appendChild(title);
+    text.appendChild(meta);
+    row.appendChild(rail);
+    row.appendChild(text);
+    return row;
+  }
+
+  function renderStats() {
+    statsDirty = false;
+    var snap = stats.snapshot();
+    if ($statCalls) $statCalls.textContent = String(snap.calls);
+    if ($statErrors) $statErrors.textContent = String(snap.errors);
+    if ($tileErrors) $tileErrors.classList.toggle("has-errors", snap.errors > 0);
+    if ($statMedian) $statMedian.textContent = snap.medianMs === null ? "–" : String(snap.medianMs);
+    if ($statCheckpoints) $statCheckpoints.textContent = String(snap.checkpoints);
+    renderChart(snap);
+    if ($logCount) $logCount.textContent = String(snap.entries.length);
+    if (!$logEntries) return;
+    while ($logEntries.firstChild) $logEntries.removeChild($logEntries.firstChild);
+    if (!snap.entries.length) {
+      var empty = document.createElement("div");
+      empty.className = "log-empty";
+      empty.textContent = "Nothing yet. Tool calls from Claude show up here.";
+      $logEntries.appendChild(empty);
+      return;
+    }
+    // Newest first.
+    for (var i = snap.entries.length - 1; i >= 0; i--) {
+      $logEntries.appendChild(entryNode(snap.entries[i]));
+    }
+  }
+
+  // The Log is "closed", "open" (below the tiles) or "full" (fills the panel).
+  var logView = "closed";
+
+  function readLogView() {
+    try {
+      var v = window.localStorage.getItem(LOG_VIEW_KEY);
+      if (v === "open" || v === "full" || v === "closed") return v;
+    } catch (e) {}
+    return "closed";
+  }
+
+  function setLogView(v) {
+    logView = v;
+    try { window.localStorage.setItem(LOG_VIEW_KEY, v); } catch (e) {}
+    var open = v !== "closed";
+    var full = v === "full";
+    document.body.classList.toggle("log-open", open);
+    document.body.classList.toggle("log-full", full);
+    if ($logBody) $logBody.hidden = !open;
+    if ($logToggle) $logToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if ($logFull) {
+      $logFull.setAttribute("aria-pressed", full ? "true" : "false");
+      $logFull.setAttribute("aria-label", full ? "Exit full panel" : "Fill the panel");
+      $logFull.title = full ? "Exit full panel" : "Fill the panel";
+    }
+  }
+
+  function bindLogView() {
+    if (typeof document === "undefined" || !$logToggle) return;
+    setLogView(readLogView());
+    $logToggle.addEventListener("click", function () {
+      setLogView(logView === "closed" ? "open" : "closed");
+    });
+    if ($logFull) {
+      $logFull.addEventListener("click", function () {
+        setLogView(logView === "full" ? "open" : "full");
+      });
+    }
   }
 
   // ---------- HTTP client to service ----------
@@ -233,14 +389,14 @@
       healthInFlight = false;
 
       if (err || statusCode !== 200 || !body || body.ok !== true) {
-        setBadge("offline", "err");
-        if ($inflight) $inflight.textContent = "idle";
+        setBadge("Offline", "err");
+        if ($inflight) $inflight.textContent = "";
         if ($queueDepth) $queueDepth.textContent = "0";
         return;
       }
 
       if (body.aeVersion && body.aeVersion !== "unknown" && $ae) {
-        $ae.textContent = "AE " + body.aeVersion;
+        $ae.textContent = "AE " + shortVersion(body.aeVersion);
       }
 
       if ($inflight) {
@@ -248,9 +404,10 @@
           var lbl = body.inFlight.label
             ? body.inFlight.label + " (" + body.inFlight.id + ")"
             : String(body.inFlight.id || "busy");
-          $inflight.textContent = lbl;
+          $inflight.textContent = "Running " + lbl;
+          $inflight.title = "After Effects is running " + lbl;
         } else {
-          $inflight.textContent = "idle";
+          $inflight.textContent = "";
         }
       }
 
@@ -261,9 +418,9 @@
       }
 
       if (body.busy || body.inFlight) {
-        setBadge("busy", "busy");
+        setBadge("Working", "busy");
       } else {
-        setBadge("ready", "ok");
+        setBadge("Connected", "ok");
       }
     });
   }
@@ -344,8 +501,9 @@
       var chip = document.createElement("button");
       chip.type = "button";
       chip.className = "register-chip" + (c.registered ? " on" : "");
-      chip.textContent = c.label;
-      chip.title = c.registered ? "Registered. Click to remove." : "Click to register chroma-ae with " + c.label + ".";
+      chip.textContent = String(c.label).replace(/^Claude\s+/, "");
+      chip.setAttribute("aria-pressed", c.registered ? "true" : "false");
+      chip.title = c.registered ? c.label + " is registered. Click to remove." : "Click to register chroma-ae with " + c.label + ".";
       chip.addEventListener("click", function () {
         toggleRegistration(c, chip);
       });
@@ -803,6 +961,7 @@
   function tick() {
     refreshTokenFromDisk();
     pollServiceLog();
+    if (statsDirty) renderStats();
     pollHealth();
     pollAsks();
   }
@@ -821,15 +980,16 @@
   }
 
   function boot() {
-    setBadge("starting", "");
-    if ($port) $port.textContent = "127.0.0.1:" + boundPort;
+    setBadge("Starting", "");
+    if ($badge) $badge.title = "Listening on 127.0.0.1:" + boundPort;
 
     if (host) {
       var env = host.getHostEnvironment();
       if (env && env.appVersion && $ae) {
-        $ae.textContent = "AE " + String(env.appVersion);
+        $ae.textContent = "AE " + shortVersion(env.appVersion);
       }
     }
+    bindLogView();
 
     refreshTokenFromDisk();
     updateSetupUi();

@@ -81,6 +81,8 @@ export interface ToolContext {
   dataDir?: string;
   /** The panel service's own state (versions, eval queue, log paths), for ae_diagnostics. */
   serviceInfo?: () => Record<string, unknown>;
+  /** The panel service's log (service.log). The panel counts some of its lines, e.g. "Checkpoint saved". */
+  log?: (level: string, msg: string) => void;
 }
 
 export function dataDirOf(ctx: ToolContext): string {

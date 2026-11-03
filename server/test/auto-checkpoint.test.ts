@@ -61,6 +61,18 @@ describe("SettingsStore", () => {
 });
 
 describe("autoCheckpoint", () => {
+  it("logs one 'Checkpoint saved' line per copy, which the panel counts", async () => {
+    const { aep, ctx } = project();
+    const lines: string[] = [];
+    ctx.log = (level, msg) => lines.push(`${level} ${msg}`);
+    const guard = { project_path: aep, dirty: false };
+
+    await autoCheckpoint(ctx, guard, "ae_set_text");
+    await autoCheckpoint(ctx, guard, "ae_set_text"); // reused: same save, no new copy
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^ok Checkpoint saved before ae_set_text: Shot 010_\d{8}-\d{6}_auto-ae_set_text\.aep$/);
+  });
+
   it("copies the saved project once per save, and again after the next save", async () => {
     const { aep, ctx, checkpointDir } = project();
     const guard = { project_path: aep, dirty: false };

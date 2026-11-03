@@ -112,6 +112,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo,
+    log: opts.log,
   };
 
   const log = opts.log;

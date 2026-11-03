@@ -371,8 +371,100 @@
     return line;
   }
 
+  // ---------- Session stats for the panel's tiles, chart and Log ----------
+  // Built from service.log lines written by the MCP server (server/src/mcp-rpc.ts
+  // and server/src/tools/mutate.ts):
+  //   [hh:mm:ss] [OK] tool <name> ok (<ms>ms)
+  //   [hh:mm:ss] [ERR] tool <name> failed (<ms>ms): <why>
+  //   [hh:mm:ss] [OK] Checkpoint saved before <tool>: <file>
+  // A session starts at the service's "Listening on" line.
+  var TOOL_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(OK|ERR)\]\s+tool\s+(\S+)\s+(ok|failed)\s+\((\d+)ms\)(?::\s*(.*))?$/;
+  var CHECKPOINT_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[OK\]\s+Checkpoint saved before\s+(\S+):\s*(.*)$/;
+  var SESSION_START_LINE = /^\[\d{2}:\d{2}:\d{2}\]\s+\[OK\]\s+Listening on /;
+
+  function parseToolLine(rawLine) {
+    var line = String(rawLine || "").replace(/\r$/, "");
+    var m = TOOL_LINE.exec(line);
+    if (m) {
+      return { kind: "tool", time: m[1], tool: m[3], ok: m[4] === "ok", ms: parseInt(m[5], 10), error: m[6] || "" };
+    }
+    m = CHECKPOINT_LINE.exec(line);
+    if (m) {
+      return { kind: "checkpoint", time: m[1], tool: m[2], file: m[3] };
+    }
+    if (SESSION_START_LINE.test(line)) {
+      return { kind: "session" };
+    }
+    return null;
+  }
+
+  function median(values) {
+    if (!values.length) return null;
+    var sorted = values.slice().sort(function (a, b) { return a - b; });
+    var mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2) return sorted[mid];
+    return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  }
+
+  // maxEntries bounds the Log; the counters cover the whole session.
+  function createSessionStats(maxEntries) {
+    var limit = typeof maxEntries === "number" && maxEntries > 0 ? maxEntries : MAX_LOG_LINES;
+    var s = { calls: 0, errors: 0, checkpoints: 0, recent: [], entries: [] };
+
+    function reset() {
+      s.calls = 0;
+      s.errors = 0;
+      s.checkpoints = 0;
+      s.recent = [];
+      s.entries = [];
+    }
+
+    function ingest(rawLine) {
+      var p = parseToolLine(rawLine);
+      if (!p) return null;
+      if (p.kind === "session") {
+        reset();
+        return p;
+      }
+      if (p.kind === "tool") {
+        s.calls += 1;
+        if (!p.ok) s.errors += 1;
+        s.recent.push(p);
+        if (s.recent.length > 20) s.recent.shift();
+      } else {
+        s.checkpoints += 1;
+      }
+      s.entries.push(p);
+      if (s.entries.length > limit) s.entries.shift();
+      return p;
+    }
+
+    function snapshot() {
+      // The chart and its "Slowest" line cover the last 20 tool calls.
+      var slowest = null;
+      var recentMs = [];
+      for (var i = 0; i < s.recent.length; i++) {
+        recentMs.push(s.recent[i].ms);
+        if (!slowest || s.recent[i].ms > slowest.ms) slowest = s.recent[i];
+      }
+      return {
+        calls: s.calls,
+        errors: s.errors,
+        checkpoints: s.checkpoints,
+        medianMs: median(recentMs),
+        recentMs: recentMs,
+        slowest: slowest ? slowest.tool : null,
+        entries: s.entries.slice()
+      };
+    }
+
+    return { ingest: ingest, snapshot: snapshot, reset: reset };
+  }
+
   var api = {
     PANEL_VERSION: PANEL_VERSION,
+    parseToolLine: parseToolLine,
+    createSessionStats: createSessionStats,
     DEFAULT_PORT: DEFAULT_PORT,
     LOG_MAX_BYTES: LOG_MAX_BYTES,
     MAX_LOG_LINES: MAX_LOG_LINES,

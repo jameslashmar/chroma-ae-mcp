@@ -7375,6 +7375,7 @@ async function autoCheckpoint(ctx, guard, toolName) {
     for (let n = 2; fs5.existsSync(target); n++) target = path6.join(dir, `${stem}-${n}${ext2}`);
     await fs5.promises.copyFile(projectPath, target, fs5.constants.COPYFILE_EXCL);
     rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
+    ctx.log?.("ok", `Checkpoint saved before ${toolName}: ${path6.basename(target)}`);
     return { status: "created", path: target, ...unsaved };
   } catch (err) {
     return {
@@ -18679,7 +18680,7 @@ var SUPPORTED_PROTOCOL_VERSIONS = [
 ];
 var DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 var SERVER_NAME = "chroma-ae-mcp";
-var SERVER_VERSION = "0.3.0";
+var SERVER_VERSION = "0.4.0";
 function makeErrorResponse(id, code, message, data) {
   const error = { code, message };
   if (data !== void 0) {
@@ -18799,14 +18800,18 @@ async function handleSingleRpc(message, ctx) {
           )
         };
       }
+      const started = Date.now();
       try {
         const output = await tool.handler(parsed.data, ctx);
+        ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
         return {
           jsonrpc: "2.0",
           id,
           result: formatToolResponse(output)
         };
       } catch (err) {
+        const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
+        ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
         return {
           jsonrpc: "2.0",
           id,
@@ -19090,7 +19095,8 @@ function createPanelMcp(opts) {
     settings: new SettingsStore(path27.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
-    serviceInfo: opts.serviceInfo
+    serviceInfo: opts.serviceInfo,
+    log: opts.log
   };
   const log = opts.log;
   const assetWatcher = new AssetWatcher(ctx, { log });

@@ -23,7 +23,7 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [
 export const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 export const SERVER_NAME = "chroma-ae-mcp";
 // Kept equal to the repo's VERSION file (test/version.test.ts checks).
-export const SERVER_VERSION = "0.3.0";
+export const SERVER_VERSION = "0.4.0";
 
 export type JsonRpcId = string | number | null;
 
@@ -203,14 +203,20 @@ async function handleSingleRpc(
         };
       }
 
+      // One line per tool call in the service log. The panel's tiles, reply-time
+      // chart and Log are built from these lines (panel/client/common.js, parseToolLine).
+      const started = Date.now();
       try {
         const output = await tool.handler(parsed.data, ctx);
+        ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
         return {
           jsonrpc: "2.0",
           id,
           result: formatToolResponse(output),
         };
       } catch (err) {
+        const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
+        ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
         return {
           jsonrpc: "2.0",
           id,
