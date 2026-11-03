@@ -113,8 +113,24 @@ export const AeSetKeyframeEaseSchema = z.object({
       "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
     ),
   ease: KeyframeEaseInputSchema,
+  rove_between: z
+    .boolean()
+    .optional()
+    .describe(
+      "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. " +
+        "Spatial properties only (Position, Anchor Point); not with a curve."
+    ),
   expect: ExpectSchema,
 });
+
+/** Keys that should have gone roving but read back fixed in time. */
+export function rovingMismatches(roving: unknown, afterSnapshot: unknown): ReceiptMismatch[] {
+  const want = Array.isArray(roving) ? (roving as number[]) : [];
+  const keys = ((afterSnapshot as { keyframes?: Array<{ keyIndex: number; roving?: boolean }> } | null)?.keyframes ?? []);
+  return want
+    .filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true)
+    .map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+}
 
 export function clampInfluenceValue(influence: number): number {
   if (influence < 0.1) return 0.1;
@@ -559,6 +575,9 @@ export const animateTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeSetKeyframeEaseSchema,
     handler: async (args, ctx) => {
+      if (args.rove_between && isCurveEase(args.ease)) {
+        return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+      }
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
       const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
@@ -607,6 +626,7 @@ export const animateTools: ToolDefinition<any>[] = [
                   path: args.path,
                   keys: args.keys,
                   ease: args.ease,
+                  rove_between: args.rove_between,
                   expect: effectiveExpect,
                 }),
             label,
@@ -640,7 +660,7 @@ export const animateTools: ToolDefinition<any>[] = [
             actualForExpected: easeCheck?.actual,
             customMismatches: curvePlan
               ? curveEaseMismatches(curvePlan.sides, afterSnap.result)
-              : undefined,
+              : rovingMismatches(writeResp.result?.roving, afterSnap.result),
           });
 
           return {

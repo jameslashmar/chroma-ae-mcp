@@ -1,0 +1,168 @@
+// panel/host/ext/keyframes.jsx
+//
+// Host functions for the keyframe tools:
+// - removeKeys (guarded write): all of a property's keys, a list of them, or
+//   those in a time range. With every key gone, the property keeps the value
+//   it had at one moment (AE's stopwatch uses the current time).
+// ae_get_keyframes reads through getKeyframeEase (animate.jsx), and the
+// read-backs through keysSnapshot (audio.jsx).
+//
+// Rules:
+// - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
+// - All mutations check the target guard first and wrap changes in A.withUndo.
+// - Before and after reads run in separate evalScript calls from the server.
+
+(function (G) {
+  var A = G.__chromaAe;
+  if (!A) {
+    return;
+  }
+
+  function fail(kind, message, extra) {
+    var e = new Error(message);
+    e.__kind = kind;
+    if (extra) {
+      if (extra.actual !== undefined) e.__actual = extra.actual;
+      if (extra.expected !== undefined) e.__expected = extra.expected;
+    }
+    throw e;
+  }
+
+  function assertGuard(expect) {
+    if (!expect || expect.project_path === undefined) {
+      fail("guard", "Mutation refused: no expect.project_path given.");
+    }
+    var g = A.checkGuard({ expect: expect });
+    if (!g.ok) {
+      fail(
+        "guard",
+        "Target guard refused mutation: the open project or comp does not match expect. Stop and re-read state.",
+        {
+          expected: expect,
+          actual: { project_path: g.project_path, comp_id: g.comp_id, comp_is_valid: g.comp_is_valid }
+        }
+      );
+    }
+  }
+
+  function requireComp(id) {
+    var item = null;
+    try {
+      item = app.project.itemByID(id);
+    } catch (e) {
+      item = null;
+    }
+    if (!item || !(item instanceof CompItem)) fail("not_found", "No CompItem with id " + id);
+    return item;
+  }
+
+  function findLayer(comp, sel) {
+    var i;
+    if (!sel) fail("bad_args", "layer selector missing");
+    if (sel.id !== undefined && sel.id !== null) {
+      for (i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).id === sel.id) return comp.layer(i);
+      }
+      fail("not_found", "No layer with id " + sel.id + " in comp " + comp.id);
+    }
+    if (sel.index !== undefined && sel.index !== null) {
+      if (sel.index < 1 || sel.index > comp.numLayers) fail("not_found", "Layer index " + sel.index + " out of range");
+      return comp.layer(sel.index);
+    }
+    if (sel.name !== undefined && sel.name !== null) {
+      var count = 0;
+      var found = null;
+      for (i = 1; i <= comp.numLayers; i++) {
+        if (comp.layer(i).name === sel.name) {
+          count++;
+          if (!found) found = comp.layer(i);
+        }
+      }
+      if (count === 0) fail("not_found", "No layer named \"" + sel.name + "\"");
+      if (count > 1) fail("bad_args", count + " layers are named \"" + sel.name + "\"; select by id or index");
+      return found;
+    }
+    fail("bad_args", "layer selector needs id, index or name");
+    return null;
+  }
+
+  function resolvePath(layer, path) {
+    var p = layer;
+    for (var i = 0; i < path.length; i++) {
+      var next = null;
+      try {
+        next = p.property(path[i]);
+      } catch (e) {
+        next = null;
+      }
+      if (!next) fail("not_found", "Property path not found at \"" + path[i] + "\" (" + path.join(" > ") + ")");
+      p = next;
+    }
+    if (p.propertyType !== PropertyType.PROPERTY) fail("bad_args", "\"" + path.join(" > ") + "\" is a group, not a property");
+    return p;
+  }
+
+  function plain(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") return v;
+    if (v instanceof Array) {
+      var out = [];
+      for (var i = 0; i < v.length; i++) out.push(plain(v[i]));
+      return out;
+    }
+    return String(v);
+  }
+
+  A.removeKeys = function (args) {
+    assertGuard(args.expect);
+    var comp = requireComp(args.comp_id);
+    var layer = findLayer(comp, args.layer);
+    var prop = resolvePath(layer, args.path);
+    var want = {};
+    var hasList = false;
+    if (args.keys) {
+      for (var w = 0; w < args.keys.length; w++) {
+        if (args.keys[w] < 1 || args.keys[w] > prop.numKeys) fail("bad_args", "Key " + args.keys[w] + " out of range (1.." + prop.numKeys + ")");
+        want[args.keys[w]] = true;
+        hasList = true;
+      }
+    }
+    var picked = [];
+    for (var i = 1; i <= prop.numKeys; i++) {
+      var t = prop.keyTime(i);
+      var match = args.all === true;
+      if (!match && hasList && want[i]) match = true;
+      if (!match && !hasList && (args.start !== undefined || args.end !== undefined)) {
+        match = true;
+        if (args.start !== undefined && args.start !== null && t < args.start - 0.0005) match = false;
+        if (args.end !== undefined && args.end !== null && t > args.end + 0.0005) match = false;
+      }
+      if (match) picked.push(i);
+    }
+    // The value to keep once every key is gone, read before anything changes.
+    var keepAll = picked.length > 0 && picked.length === prop.numKeys;
+    var keepValue = null;
+    var keepAt = null;
+    if (keepAll && prop.propertyValueType !== PropertyValueType.CUSTOM_VALUE) {
+      keepAt = comp.time;
+      if (args.static_value_at !== undefined && args.static_value_at !== null) keepAt = args.static_value_at;
+      try { keepValue = prop.valueAtTime(keepAt, true); } catch (eKeep) { keepValue = null; }
+    }
+    return A.withUndo(args.label || "Remove keyframes", function () {
+      var removed = [];
+      for (var k = picked.length - 1; k >= 0; k--) {
+        var idx = picked[k];
+        removed.push({ index: idx, time: prop.keyTime(idx), value: plain(prop.keyValue(idx)) });
+        prop.removeKey(idx);
+      }
+      removed.reverse();
+      var out = { removed: removed, numKeys: prop.numKeys, property: prop.name };
+      if (keepAll && keepValue !== null && prop.numKeys === 0) {
+        prop.setValue(keepValue);
+        out.static_value = plain(keepValue);
+        out.static_value_at = keepAt;
+      }
+      return out;
+    });
+  };
+})($.global);

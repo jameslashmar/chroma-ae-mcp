@@ -323,7 +323,13 @@
         try {
           entry.outTangent = serialiseValue(p.keyOutSpatialTangent(k));
         } catch (e7) {}
+        // Roving keys have no fixed time: AE spreads them for an even speed.
+        try { entry.roving = p.keyRoving(k) === true; } catch (e8) {}
+        try { entry.spatialContinuous = p.keySpatialContinuous(k) === true; } catch (e9) {}
+        try { entry.spatialAutoBezier = p.keySpatialAutoBezier(k) === true; } catch (e10) {}
       }
+      try { entry.temporalContinuous = p.keyTemporalContinuous(k) === true; } catch (e11) {}
+      try { entry.temporalAutoBezier = p.keyTemporalAutoBezier(k) === true; } catch (e12) {}
       keys.push(entry);
     }
     var out = {
@@ -429,6 +435,25 @@
       );
     }
 
+    // Keys strictly between the first and last given key go roving, so a
+    // move eased at its ends keeps one smooth speed through them. AE allows
+    // roving on spatial properties only; refuse before anything changes.
+    var rove = [];
+    if (args.rove_between === true) {
+      var spatialProp = false;
+      try { spatialProp = p.isSpatial === true; } catch (eSpatial) {}
+      if (!spatialProp) {
+        fail("bad_args", "Roving works on spatial properties only (Position, Anchor Point); \"" + p.name + "\" is not one");
+      }
+      var lo = keyIndices[0];
+      var hi = keyIndices[0];
+      for (var r = 1; r < keyIndices.length; r++) {
+        if (keyIndices[r] < lo) lo = keyIndices[r];
+        if (keyIndices[r] > hi) hi = keyIndices[r];
+      }
+      for (var m = lo + 1; m < hi; m++) rove.push(m);
+    }
+
     return A.withUndo("Chroma AE MCP: set_keyframe_ease " + args.path.join(" > "), function () {
       var usedDims = deriveEaseDimensions(p);
       for (var j = 0; j < keyIndices.length; j++) {
@@ -457,11 +482,14 @@
           p.setInterpolationTypeAtKey(idx, targetInterp, targetInterp);
         }
       }
+      // After the ends are eased, so AE retimes the roving keys against them.
+      for (var q = 0; q < rove.length; q++) p.setRovingAtKey(rove[q], true);
       return {
         comp_id: c.id,
         layer_id: l.id,
         path: args.path,
         keysUpdated: keyIndices,
+        roving: rove,
         numKeys: p.numKeys,
         easeDimensions: usedDims,
         mode: modeName

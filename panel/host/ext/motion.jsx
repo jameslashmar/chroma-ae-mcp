@@ -177,6 +177,8 @@
       };
       try { key.in_ease = easeList(p.keyInTemporalEase(k)); } catch (e1) {}
       try { key.out_ease = easeList(p.keyOutTemporalEase(k)); } catch (e2) {}
+      // AE places roving keys wherever the speed comes out even, often between frames.
+      try { if (p.keyRoving(k) === true) key.roving = true; } catch (e2b) {}
       keys.push(key);
     }
 
@@ -295,5 +297,118 @@
       properties: found,
       truncated: truncated
     };
+  };
+
+  // ---------- layer bounds ----------
+
+  var MAX_BOUND_TIMES = 20;
+  var MAX_PARENT_DEPTH = 20;
+
+  // The 2D transform of a layer at time t, as [a, b, c, d, e, f] mapping
+  // layer (x, y) to parent (a*x + b*y + c, d*x + e*y + f):
+  // position * rotation * scale * (-anchor). Positive rotation is clockwise
+  // on screen, which this gives with y pointing down.
+  function localMatrix(l, t) {
+    var tr = l.property("ADBE Transform Group");
+    var an = tr.property("ADBE Anchor Point").valueAtTime(t, false);
+    var po = tr.property("ADBE Position").valueAtTime(t, false);
+    var sc = tr.property("ADBE Scale").valueAtTime(t, false);
+    var ro = tr.property("ADBE Rotate Z").valueAtTime(t, false);
+    var rad = (ro * Math.PI) / 180;
+    var cs = Math.cos(rad);
+    var sn = Math.sin(rad);
+    var sx = sc[0] / 100;
+    var sy = sc[1] / 100;
+    var a = cs * sx;
+    var b = -sn * sy;
+    var d = sn * sx;
+    var e = cs * sy;
+    return [a, b, po[0] - (a * an[0] + b * an[1]), d, e, po[1] - (d * an[0] + e * an[1])];
+  }
+
+  function compose(m, n) {
+    return [
+      m[0] * n[0] + m[1] * n[3],
+      m[0] * n[1] + m[1] * n[4],
+      m[0] * n[2] + m[1] * n[5] + m[2],
+      m[3] * n[0] + m[4] * n[3],
+      m[3] * n[1] + m[4] * n[4],
+      m[3] * n[2] + m[4] * n[5] + m[5]
+    ];
+  }
+
+  // Null when any layer in the chain is 3D: its screen box depends on the camera.
+  function compMatrix(l, t) {
+    var m = null;
+    var cur = l;
+    for (var depth = 0; cur && depth < MAX_PARENT_DEPTH; depth++) {
+      if (cur.threeDLayer === true) return null;
+      var local = localMatrix(cur, t);
+      if (m === null) m = local;
+      else m = compose(local, m);
+      cur = cur.parent;
+    }
+    return m;
+  }
+
+  // Comp-space bounding boxes of a layer's content at given times, for the
+  // frame and safe-area check. Read-only: valueAtTime and sourceRectAtTime
+  // don't move the time indicator. args: { comp_id, layer, times }.
+  A.layerBoundsAt = function (args) {
+    var c = requireComp(args.comp_id);
+    var l = findLayer(c, args.layer);
+    var times = args.times || [];
+    var out = {
+      layer: { index: l.index, id: l.id, name: l.name },
+      kind: "av",
+      checkable: true,
+      reason: null,
+      samples: []
+    };
+    var reflectName = "";
+    try { reflectName = String(l.reflect.name); } catch (e0) {}
+    if (reflectName === "TextLayer") out.kind = "text";
+    else if (reflectName === "ShapeLayer") out.kind = "shape";
+    var skip = null;
+    if (reflectName === "CameraLayer" || reflectName === "LightLayer") skip = "cameras and lights have no picture";
+    try { if (!skip && l.nullLayer) skip = "null layers render nothing"; } catch (e1) {}
+    try { if (!skip && l.adjustmentLayer) skip = "adjustment layers cover the frame by design"; } catch (e2) {}
+    try { if (!skip && l.guideLayer) skip = "guide layers don't render"; } catch (e3) {}
+    try { if (!skip && l.hasVideo === false) skip = "no video"; } catch (e4) {}
+    if (skip) {
+      out.checkable = false;
+      out.reason = skip;
+      return out;
+    }
+    for (var i = 0; i < times.length && i < MAX_BOUND_TIMES; i++) {
+      var t = times[i];
+      var s = { time: t, visible: l.enabled && t >= l.inPoint && t < l.outPoint, rect: null };
+      var m = compMatrix(l, t);
+      if (m === null) {
+        out.checkable = false;
+        out.reason = "3D layer, or parented to one: its box depends on the camera";
+        return out;
+      }
+      var r = l.sourceRectAtTime(t, false);
+      var xs = [r.left, r.left + r.width];
+      var ys = [r.top, r.top + r.height];
+      var minX = 1e12;
+      var minY = 1e12;
+      var maxX = -1e12;
+      var maxY = -1e12;
+      for (var xi = 0; xi < 2; xi++) {
+        for (var yi = 0; yi < 2; yi++) {
+          var px = m[0] * xs[xi] + m[1] * ys[yi] + m[2];
+          var py = m[3] * xs[xi] + m[4] * ys[yi] + m[5];
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+        }
+      }
+      s.rect = [minX, minY, maxX, maxY];
+      out.samples.push(s);
+    }
+    return out;
   };
 })($.global);

@@ -381,6 +381,47 @@ async function main() {
   r = await call("ae_cue_keys", { comp_id: LC, layer: { name: "Ctrl" }, path: ["ADBE Transform Group", "ADBE Scale"], times: [0.5, 1, 1.5, 2], peak: [120, 120], expect });
   check("ae_cue_keys", r.applied && r.receipt?.matches === true && r.keys_set >= 8, `${r.keys_set} keys, base ${JSON.stringify(r.base)}; ${(r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
 
+  // ---------- 0.4: keyframes, roving, rest bounds ----------
+  const SCALE = ["ADBE Transform Group", "ADBE Scale"];
+  const POS = ["ADBE Transform Group", "ADBE Position"];
+  r = await call("ae_get_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE });
+  check("ae_get_keyframes", r.numKeys >= 8 && r.keys?.[1]?.in?.name === "easy ease", `${r.numKeys} keys; key 2 in: ${r.keys?.[1]?.in?.name}`);
+  r = await call("ae_remove_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE, start: 1.4, expect });
+  check("ae_remove_keyframes (range)", r.applied && r.receipt?.matches === true && r.removed?.length >= 3, `${r.removed?.length} removed, ${r.numKeys} left`);
+  r = await call("ae_remove_keyframes", { comp_id: LC, layer: { name: "Ctrl" }, path: SCALE, all: true, static_value_at: 0, expect });
+  check("ae_remove_keyframes (all)", r.applied && r.receipt?.matches === true && r.numKeys === 0, `kept ${JSON.stringify(r.static_value)}`);
+
+  // A linear move through a middle key: the review's fix eases the ends and roves the middle.
+  await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Mover", color: [1, 0.5, 0], width: 80, height: 80, expect });
+  await call("ae_set_property", {
+    comp_id: LC,
+    layer: { name: "Mover" },
+    path: POS,
+    keyframes: [
+      { time: 0, value: [100, 180], interp: "linear" },
+      { time: 1, value: [320, 180], interp: "linear" },
+      { time: 2, value: [540, 180], interp: "linear" },
+    ],
+    expect,
+  });
+  r = await call("ae_motion_review", { comp_id: LC });
+  const moverLinear = (r.findings ?? []).find((f) => f.kind === "linear" && f.layer?.name === "Mover");
+  check("ae_motion_review (roving fix)", moverLinear?.fix?.args?.rove_between === true, String(moverLinear?.message ?? JSON.stringify(r.by_kind)));
+  if (moverLinear?.fix) {
+    r = await call("ae_set_keyframe_ease", moverLinear.fix.args);
+    check("ae_set_keyframe_ease (rove_between)", r.applied && r.receipt?.matches === true && JSON.stringify(r.result?.roving) === "[2]", `roving ${JSON.stringify(r.result?.roving)}`);
+  }
+  r = await call("ae_motion_review", { comp_id: LC });
+  const moverLeft = (r.findings ?? []).filter((f) => f.layer?.name === "Mover" && f.severity === "medium");
+  check("ae_motion_review (after roving)", r.ok && moverLeft.length === 0, `${moverLeft.length} medium on Mover`);
+
+  // A box that comes to rest half past the right edge.
+  await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Edge", color: [0.2, 1, 0.4], width: 100, height: 100, expect });
+  await call("ae_set_property", { comp_id: LC, layer: { name: "Edge" }, path: POS, keyframes: [{ time: 0, value: [320, 300] }, { time: 1, value: [640, 300] }], expect });
+  r = await call("ae_motion_review", { comp_id: LC });
+  const edgeCut = (r.findings ?? []).find((f) => f.kind === "cut_off" && f.layer?.name === "Edge");
+  check("ae_motion_review (rest bounds)", Boolean(edgeCut) && edgeCut.suggested_shift?.[0] < 0, String(edgeCut?.message ?? JSON.stringify(r.bounds_unchecked ?? r.by_kind)));
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
 

@@ -12,6 +12,7 @@ import { effectsTools } from "./effects.js";
 import { exploreTools } from "./explore.js";
 import { framesTools } from "./frames.js";
 import { keyTools } from "./key.js";
+import { keyframesTools } from "./keyframes.js";
 import { layersTools } from "./layers.js";
 import { markersTools } from "./markers.js";
 import { motionTools } from "./motion.js";
@@ -44,4 +45,5 @@ export const extTools: ToolDefinition<any>[] = [
   ...layersTools,
   ...markersTools,
   ...audioTools,
+  ...keyframesTools,
 ];

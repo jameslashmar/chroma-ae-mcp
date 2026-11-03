@@ -509,6 +509,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_add_markers",
   "ae_remove_markers",
   "ae_cue_keys",
+  "ae_remove_keyframes",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

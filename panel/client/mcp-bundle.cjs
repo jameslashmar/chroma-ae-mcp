@@ -9223,8 +9223,16 @@ var AeSetKeyframeEaseSchema = external_exports.object({
     "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
   ),
   ease: KeyframeEaseInputSchema,
+  rove_between: external_exports.boolean().optional().describe(
+    "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. Spatial properties only (Position, Anchor Point); not with a curve."
+  ),
   expect: ExpectSchema
 });
+function rovingMismatches(roving, afterSnapshot) {
+  const want = Array.isArray(roving) ? roving : [];
+  const keys = afterSnapshot?.keyframes ?? [];
+  return want.filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true).map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+}
 function clampInfluenceValue(influence) {
   if (influence < 0.1) return 0.1;
   if (influence > 100) return 100;
@@ -9484,6 +9492,9 @@ var animateTools = [
     description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. " + AGENT_SAFETY_GUIDANCE,
     schema: AeSetKeyframeEaseSchema,
     handler: async (args, ctx) => {
+      if (args.rove_between && isCurveEase(args.ease)) {
+        return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+      }
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
       const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
@@ -9522,6 +9533,7 @@ var animateTools = [
               path: args.path,
               keys: args.keys,
               ease: args.ease,
+              rove_between: args.rove_between,
               expect: effectiveExpect
             }),
             label,
@@ -9549,7 +9561,7 @@ var animateTools = [
             after: afterSnap.result,
             expected: easeCheck?.expected,
             actualForExpected: easeCheck?.actual,
-            customMismatches: curvePlan ? curveEaseMismatches(curvePlan.sides, afterSnap.result) : void 0
+            customMismatches: curvePlan ? curveEaseMismatches(curvePlan.sides, afterSnap.result) : rovingMismatches(writeResp.result?.roving, afterSnap.result)
           });
           return {
             op_id: opId,
@@ -13044,6 +13056,133 @@ var keyTools = [
   }
 ];
 
+// src/tools/ext/keyframes.ts
+var PathSchema = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe("Property path from the layer, by match names or names (e.g. ['ADBE Transform Group', 'ADBE Position']); a 1-based index for a sibling in an indexed group.");
+var AeGetKeyframesSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  path: PathSchema,
+  start: external_exports.number().optional().describe("Only keys at or after this time (comp seconds)."),
+  end: external_exports.number().optional().describe("Only keys at or before this time.")
+});
+var AeRemoveKeyframesSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  path: PathSchema,
+  all: external_exports.boolean().optional().describe("Remove every key."),
+  keys: external_exports.array(external_exports.number().int().positive()).max(500).optional().describe("1-based key indexes to remove."),
+  start: external_exports.number().optional().describe("Remove keys at or after this time (comp seconds)."),
+  end: external_exports.number().optional().describe("Remove keys at or before this time."),
+  static_value_at: external_exports.number().optional().describe("When every key goes: keep the value the property had at this time. Default the comp's current time, as AE's stopwatch does."),
+  dry_run: external_exports.boolean().optional().describe("List the keys that would go without touching AE."),
+  expect: ExpectSchema
+}).refine((v) => v.all === true || (v.keys?.length ?? 0) > 0 || v.start !== void 0 || v.end !== void 0, {
+  message: "Say which keys: all, keys, or start/end."
+});
+function easeSideName(interp, ease) {
+  if (interp === "linear") return "linear";
+  if (interp === "hold") return "hold";
+  if (interp !== "bezier" || !ease || !ease.length) return interp ?? "unknown";
+  const easy = ease.every((e) => Math.abs(e.speed) < 1e-6 && Math.abs(e.influence - 100 / 3) < 0.05);
+  return easy ? "easy ease" : "bezier";
+}
+function describeKey(k) {
+  return {
+    index: k.keyIndex,
+    time: k.time,
+    value: k.value,
+    in: { interpolation: k.inInterp, name: easeSideName(k.inInterp, k.easeIn), ease: k.easeIn },
+    out: { interpolation: k.outInterp, name: easeSideName(k.outInterp, k.easeOut), ease: k.easeOut },
+    ...k.roving !== void 0 ? { roving: k.roving } : {},
+    ...k.inTangent ? { in_tangent: k.inTangent, out_tangent: k.outTangent } : {}
+  };
+}
+function selectKeys(keys, args) {
+  return keys.filter((k) => {
+    if (args.all) return true;
+    if (args.keys?.length) return args.keys.includes(k.index);
+    return (args.start === void 0 || k.time >= args.start - 5e-4) && (args.end === void 0 || k.time <= args.end + 5e-4);
+  });
+}
+function removeKeysMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  const removed = written.removed ?? [];
+  const want = before.numKeys - removed.length;
+  expectThat(m, after.numKeys === want, "numKeys", want, after.numKeys, "Key count did not drop by the number removed");
+  for (const r of removed) {
+    if (after.keys.some((k) => Math.abs(k.time - r.time) < 5e-4)) {
+      m.push({ path: `keys@${r.time}`, expected: "removed", actual: "present", message: `A key at ${r.time}s is still there` });
+    }
+  }
+  if (written.static_value !== void 0 && after.numKeys === 0) compareValues(written.static_value, after.value, "value", m);
+  return m;
+}
+var keyframesTools = [
+  {
+    name: "ae_get_keyframes",
+    description: "Read a property's keyframes: time, value, in and out interpolation, temporal ease per side (speed, influence; named 'easy ease', 'linear', 'hold' or 'bezier'), spatial tangents, roving and auto-bezier flags. Read-only; at most 500 keys.",
+    schema: AeGetKeyframesSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "getKeyframeEase",
+        { comp_id: args.comp_id, layer: args.layer, path: args.path },
+        { label: "ae_get_keyframes", mutates: false, toolName: "ae_get_keyframes" }
+      );
+      const r = res.result;
+      const inRange = (t) => (args.start === void 0 || t >= args.start - 5e-4) && (args.end === void 0 || t <= args.end + 5e-4);
+      const keys = r.keyframes.filter((k) => inRange(k.time)).map(describeKey);
+      return { property: { name: r.name, matchName: r.matchName, spatial: r.isSpatial }, numKeys: r.numKeys, keys, truncated: r.truncated === true };
+    }
+  },
+  {
+    name: "ae_remove_keyframes",
+    description: "Remove a property's keyframes in one undo group guarded by `expect`: all of them, some by index, or those in a time range. When every key goes, the property keeps the value it had at static_value_at (default: the comp's current time, as AE's stopwatch does). dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count, that the keys are gone, and the kept value. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeRemoveKeyframesSchema,
+    handler: async (args, ctx) => {
+      const snapshot = { host: "keysSnapshot", args: { comp_id: args.comp_id, layer: args.layer, path: args.path } };
+      if (args.dry_run) {
+        const res = await ctx.bridge.callHost(snapshot.host, snapshot.args, {
+          label: "ae_remove_keyframes (dry run)",
+          mutates: false,
+          toolName: "ae_remove_keyframes"
+        });
+        const would = selectKeys(res.result.keys, args);
+        return { ok: true, dry_run: true, count: would.length, keys: would, all_keys: would.length === res.result.numKeys };
+      }
+      return runGuardedWrite(ctx, {
+        toolName: "ae_remove_keyframes",
+        label: `ae_remove_keyframes(${args.path.join(".")})`,
+        expect: args.expect,
+        compId: args.comp_id,
+        read: () => snapshot,
+        write: {
+          host: "removeKeys",
+          args: {
+            comp_id: args.comp_id,
+            layer: args.layer,
+            path: args.path,
+            all: args.all,
+            keys: args.keys,
+            start: args.start,
+            end: args.end,
+            static_value_at: args.static_value_at,
+            label: "Remove keyframes"
+          }
+        },
+        check: removeKeysMismatches,
+        present: (_before, after, w) => ({
+          removed: w.removed,
+          numKeys: after?.numKeys,
+          ...w.static_value !== void 0 ? { static_value: w.static_value, static_value_at: w.static_value_at } : {}
+        })
+      });
+    }
+  }
+];
+
 // src/tools/ext/layers.ts
 var stackOf = (v) => v && typeof v === "object" ? v : null;
 var byId = (stack, id) => stack?.layers.find((l) => l.id === id);
@@ -14127,7 +14266,7 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
     property: { name: s.property.name, path: path25 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
-  const fix = (keys) => ({
+  const fix = (keys, extra = {}) => ({
     tool: "ae_set_keyframe_ease",
     args: {
       comp_id: target.comp_id,
@@ -14135,6 +14274,7 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
       path: path25,
       keys,
       ease: easeArg,
+      ...extra,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
     }
   });
@@ -14152,7 +14292,14 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
     }
     const from = segs[i].from_key;
     const to = segs[j].to_key;
-    const middle = j > i ? ` The key${j - i > 1 ? "s" : ""} in between keep${j - i > 1 ? "" : "s"} its linear speed, which leaves a slight dip there; making ${j - i > 1 ? "them" : "it"} roving in AE (Keyframe > Rove Across Time) gives one smooth curve.` : "";
+    const many = j - i > 1;
+    const rove = j > i && s.property.spatial;
+    let middle = "";
+    if (rove) {
+      middle = ` The fix also makes the key${many ? "s" : ""} in between roving, so the move keeps one smooth speed through ${many ? "them" : "it"} (AE retimes ${many ? "them" : "it"}).`;
+    } else if (j > i) {
+      middle = ` The key${many ? "s" : ""} in between keep${many ? "" : "s"} ${many ? "their" : "its"} linear speed, which leaves a slight dip there; ${s.property.name} isn't spatial, so AE can't rove ${many ? "them" : "it"}. Match the speeds there in the graph editor if the dip shows.`;
+    }
     findings.push({
       ...base,
       severity: motion ? "medium" : "low",
@@ -14160,7 +14307,7 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
       keys: [from, to],
       time: segs[i].start,
       message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
-      fix: fix([from, to])
+      fix: fix([from, to], rove ? { rove_between: true } : {})
     });
     i = j;
   }
@@ -14228,7 +14375,7 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
     });
   }
   const fps = s.comp.fps > 0 ? s.comp.fps : 25;
-  const offGrid = s.keys.map((k) => ({ index: k.index, time: k.time, frame: k.time * fps })).filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
+  const offGrid = s.keys.filter((k) => !k.roving).map((k) => ({ index: k.index, time: k.time, frame: k.time * fps })).filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
   if (offGrid.length > 0) {
     const list = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
     const many = offGrid.length > 1;
@@ -14248,11 +14395,110 @@ function sortFindings(findings) {
     (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || a.layer.index - b.layer.index || a.time - b.time
   );
 }
+var TRANSFORM_MATCH_NAMES = /* @__PURE__ */ new Set([
+  "ADBE Position",
+  "ADBE Position_0",
+  "ADBE Position_1",
+  "ADBE Anchor Point",
+  "ADBE Scale",
+  "ADBE Rotate Z"
+]);
+function restTimes(props, fps) {
+  const transform = props.filter((p) => TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName));
+  if (!transform.length) return [];
+  const candidates = [];
+  const moving = [];
+  for (const p of transform) {
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") candidates.push((g.start + g.end) / 2);
+      else moving.push([g.start, g.end]);
+    }
+    const keys = p.samples.keys;
+    if (keys.length && !p.samples.property.expression) candidates.push(keys[keys.length - 1].time);
+  }
+  const eps = 0.5 / (fps > 0 ? fps : 25);
+  const still = candidates.filter((t) => !moving.some(([a, b]) => t > a + eps && t < b - eps)).sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] > 2 * eps);
+  return still.slice(-10).map((t) => r3(t));
+}
+var r1 = (x) => Math.round(x * 10) / 10;
+function shiftInto(rect, box) {
+  const axis = (lo, hi, blo, bhi) => {
+    if (hi - lo > bhi - blo) return (blo + bhi) / 2 - (lo + hi) / 2;
+    if (lo < blo) return blo - lo;
+    if (hi > bhi) return bhi - hi;
+    return 0;
+  };
+  return [r1(axis(rect[0], rect[2], box[0], box[2])), r1(axis(rect[1], rect[3], box[1], box[3]))];
+}
+function edgesPast(rect, box) {
+  const out = [];
+  if (rect[0] < box[0] - 0.5) out.push(`left by ${Math.round(box[0] - rect[0])} px`);
+  if (rect[2] > box[2] + 0.5) out.push(`right by ${Math.round(rect[2] - box[2])} px`);
+  if (rect[1] < box[1] - 0.5) out.push(`top by ${Math.round(box[1] - rect[1])} px`);
+  if (rect[3] > box[3] + 0.5) out.push(`bottom by ${Math.round(rect[3] - box[3])} px`);
+  return out;
+}
+function reviewBounds(b, comp, safe) {
+  if (!b.checkable) return [];
+  const W = comp.width;
+  const H = comp.height;
+  const frame = [0, 0, W, H];
+  const isText = b.kind === "text";
+  const share = isText ? safe.title : safe.action;
+  const safeBox = [W * share / 2, H * share / 2, W - W * share / 2, H - H * share / 2];
+  const base = { layer: b.layer, property: { name: "Transform", path: ["ADBE Transform Group"] }, keys: [] };
+  let cut = null;
+  let outside = null;
+  let cutTimes = 0;
+  let outsideTimes = 0;
+  for (const s of b.samples) {
+    if (!s.visible || !s.rect) continue;
+    const [l, t, r, bt] = s.rect;
+    const area = (r - l) * (bt - t);
+    if (area <= 0 || area >= 0.8 * W * H) continue;
+    const iw = Math.max(0, Math.min(r, W) - Math.max(l, 0));
+    const ih = Math.max(0, Math.min(bt, H) - Math.max(t, 0));
+    const visible = iw * ih / area;
+    if (visible <= 1e-3) continue;
+    const rect = [r1(l), r1(t), r1(r), r1(bt)];
+    if (visible < 0.98) {
+      cutTimes++;
+      cut ??= {
+        ...base,
+        severity: "low",
+        kind: "cut_off",
+        time: r3(s.time),
+        message: `${b.layer.name} comes to rest partly outside the frame at ${r3(s.time)}s: ${Math.round((1 - visible) * 100)}% of it is cut off (past the ${edgesPast(rect, frame).join(", ")}). Fine for a deliberate bleed; otherwise move it by the suggested shift.`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox)
+      };
+      continue;
+    }
+    const past = edgesPast(rect, safeBox);
+    if (past.length) {
+      outsideTimes++;
+      outside ??= {
+        ...base,
+        severity: isText ? "low" : "info",
+        kind: "outside_safe",
+        time: r3(s.time),
+        message: `${b.layer.name} rests outside the ${isText ? "title" : "action"}-safe area (${Math.round(share * 100)}%) at ${r3(s.time)}s: past it on the ${past.join(", ")}. ${isText ? "Text there can be cropped on some screens." : "Fine for decoration; keep key content inside."}`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox)
+      };
+    }
+  }
+  const more = (f, n) => f && n > 1 ? { ...f, message: `${f.message} Seen at ${n} rest points.` } : f;
+  return [more(cut, cutTimes), more(outside, outsideTimes)].filter((f) => f !== null);
+}
 var AeMotionReviewSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("CompItem ID to review."),
   layers: external_exports.array(LayerSelectorSchema).max(50).optional().describe("Only review these layers. Default: every layer in the comp."),
   include_info: external_exports.boolean().optional().describe("Include info findings (overshoot past keyframe values). Default true."),
-  max_findings: external_exports.number().int().min(1).max(200).optional().describe("Return at most this many findings, most severe first (default 50).")
+  max_findings: external_exports.number().int().min(1).max(200).optional().describe("Return at most this many findings, most severe first (default 50)."),
+  bounds: external_exports.boolean().optional().describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed."),
+  action_safe: external_exports.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
+  title_safe: external_exports.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's.")
 });
 async function runQueued(ctx, label, opId, fn) {
   try {
@@ -14442,17 +14688,37 @@ var motionTools = [
             mutates: false,
             toolName: "ae_motion_review"
           });
-          sampled.push({ path: p.path, samples: resp.result });
+          const speeds = sampleSpeeds(resp.result);
+          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds) });
         }
-        return { list, sampled };
+        const bounds = [];
+        if (args.bounds !== false) {
+          const byLayer = /* @__PURE__ */ new Map();
+          for (const s of sampled) byLayer.set(s.samples.layer.id, [...byLayer.get(s.samples.layer.id) ?? [], s]);
+          for (const [layerId, props] of byLayer) {
+            const times = restTimes(props, Number(list.comp.fps));
+            if (!times.length) continue;
+            const resp = await ctx.bridge.evalRaw({
+              id: `${opId}_b${layerId}`,
+              script: buildJsxCall("layerBoundsAt", { comp_id: args.comp_id, layer: { id: layerId }, times }),
+              label: `${label} bounds ${props[0].samples.layer.name}`,
+              mutates: false,
+              toolName: "ae_motion_review"
+            });
+            bounds.push(resp.result);
+          }
+        }
+        return { list, sampled, bounds };
       });
       const target = { comp_id: args.comp_id, project_path: scanned.list.project_path };
       const taste = ctx.settings?.get().taste;
       let findings = [];
-      for (const { path: propPath, samples } of scanned.sampled) {
-        const speeds = sampleSpeeds(samples);
-        findings.push(...reviewProperty(samples, analyzeMotion(samples, speeds), speeds, propPath, target, taste));
+      for (const { path: propPath, samples, speeds, analysis } of scanned.sampled) {
+        findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
       }
+      const safe = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
+      for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
+      const unchecked = scanned.bounds.filter((b) => !b.checkable).map((b) => ({ layer: b.layer.name, reason: b.reason }));
       if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
       findings = sortFindings(findings);
       const counts = { medium: 0, low: 0, info: 0 };
@@ -14474,6 +14740,7 @@ var motionTools = [
         by_kind: byKind,
         findings: findings.slice(0, max),
         findings_truncated: findings.length > max,
+        ...args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...unchecked.length ? { bounds_unchecked: unchecked } : {} } : {},
         ...taste && (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot) ? {
           taste: {
             preferred_ease: taste.preferred_ease,
@@ -15045,7 +15312,8 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_set_track_matte",
   "ae_add_markers",
   "ae_remove_markers",
-  "ae_cue_keys"
+  "ae_cue_keys",
+  "ae_remove_keyframes"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -16366,7 +16634,8 @@ var extTools = [
   ...keyTools,
   ...layersTools,
   ...markersTools,
-  ...audioTools
+  ...audioTools,
+  ...keyframesTools
 ];
 
 // src/tools/quarantine.ts
