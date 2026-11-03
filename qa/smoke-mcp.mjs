@@ -74,6 +74,37 @@ async function call(name, args = {}) {
   return parsed;
 }
 
+const CLICKS_WAV = path.join(MEDIA, "clicks.wav");
+
+/** A 48 kHz 16-bit mono WAV of short noise bursts on every beat at `bpm`, starting a quarter beat in. */
+function clickWav(bpm, seconds) {
+  const sr = 48000;
+  const n = Math.round(seconds * sr);
+  const data = Buffer.alloc(n * 2);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 31 - 1);
+  for (let t = (60 / bpm) / 4; t < seconds; t += 60 / bpm) {
+    const start = Math.round(t * sr);
+    for (let i = 0; i < 0.03 * sr && start + i < n; i++) {
+      data.writeInt16LE(Math.round(rnd() * 0.8 * Math.exp(-i / (0.006 * sr)) * 32767), (start + i) * 2);
+    }
+  }
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0, "latin1");
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write("WAVEfmt ", 8, "latin1");
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(sr, 24);
+  head.writeUInt32LE(sr * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write("data", 36, "latin1");
+  head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
 const results = [];
 function check(tool, ok, note = "") {
   results.push({ tool, ok: Boolean(ok), note });
@@ -98,6 +129,7 @@ async function main() {
   fs.mkdirSync(MEDIA, { recursive: true });
   fs.writeFileSync(path.join(MEDIA, "a.png"), Buffer.from(RED_PNG, "base64"));
   fs.writeFileSync(path.join(MEDIA, "b.png"), Buffer.from(BLUE_PNG, "base64"));
+  fs.writeFileSync(CLICKS_WAV, clickWav(120, 4));
 
   const settings = await call("ae_auto_checkpoint");
   const autoOn = settings.auto_checkpoint?.enabled === true;
@@ -127,12 +159,16 @@ async function main() {
       'var sk = app.project.items.addComp("Skill target", 320, 180, 1, 1, 25);',
       // An empty comp for the 0.4 layer, audio and animation tools, so they leave the Smoke comp alone.
       'var lc = app.project.items.addComp("Layers", 640, 360, 1, 3, 25);',
-      "return { comp_id: c.id, skill_comp_id: sk.id, layers_comp_id: lc.id };",
+      // The 120 BPM click track in a comp of its own, for ae_audio_analyze.
+      `var wav = app.project.importFile(new ImportOptions(new File(${JSON.stringify(CLICKS_WAV.replace(/\\/g, "/"))})));`,
+      'var au = app.project.items.addComp("Audio", 320, 180, 1, 4, 25); au.layers.add(wav);',
+      "return { comp_id: c.id, skill_comp_id: sk.id, layers_comp_id: lc.id, audio_comp_id: au.id };",
     ].join("\n"),
   });
   const COMP = scene.result?.comp_id;
   const SKILL_COMP = scene.result?.skill_comp_id;
   const LAYERS_COMP = scene.result?.layers_comp_id;
+  const AUDIO_COMP = scene.result?.audio_comp_id;
   if (typeof COMP !== "number") throw new Error("Could not build the smoke scene: " + JSON.stringify(scene));
 
   let r = await call("ae_run_jsx", {
@@ -328,8 +364,35 @@ async function main() {
     `${r.new_comp?.name}: ${(r.new_comp?.layers ?? []).map((l) => l.name).join(", ")}`
   );
 
+  // ---------- 0.4: markers and cue keys ----------
+  r = await call("ae_add_markers", { comp_id: LC, markers: [{ time: 0.5, comment: "one" }, { time: 1, comment: "two", label: 3 }], expect });
+  check("ae_add_markers", r.applied && r.receipt?.matches === true && r.added === 2 && r.checkpoint?.status === want("reused"), `${r.numMarkers} markers`);
+  r = await call("ae_add_markers", {
+    comp_id: LC,
+    layer: { name: "Ctrl" },
+    transcript: { text: "1\n00:00:00,500 --> 00:00:01,000\nANNA: Hello.\n\n2\n00:00:01,200 --> 00:00:02,000\nBEN: Hi there.\n" },
+    expect,
+  });
+  check("ae_add_markers (transcript)", r.applied && r.receipt?.matches === true && r.added === 2 && r.relative_to === "layer", `${r.numMarkers} on Ctrl`);
+  r = await call("ae_get_markers", { comp_id: LC });
+  check("ae_get_markers", r.numMarkers === 2 && r.markers?.[1]?.comment === "two" && r.markers?.[1]?.label === 3, JSON.stringify(r.markers?.map((m) => [m.time, m.comment])));
+  r = await call("ae_remove_markers", { comp_id: LC, comment_contains: "one", expect });
+  check("ae_remove_markers", r.applied && r.receipt?.matches === true && r.removed?.length === 1 && r.numMarkers === 1, `${r.numMarkers} left`);
+  r = await call("ae_cue_keys", { comp_id: LC, layer: { name: "Ctrl" }, path: ["ADBE Transform Group", "ADBE Scale"], times: [0.5, 1, 1.5, 2], peak: [120, 120], expect });
+  check("ae_cue_keys", r.applied && r.receipt?.matches === true && r.keys_set >= 8, `${r.keys_set} keys, base ${JSON.stringify(r.base)}; ${(r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
+
+  // The project is saved and clean now, which aerender needs. Nothing here writes.
+  r = await call("ae_audio_analyze", { comp_id: AUDIO_COMP, expect, wait_seconds: 120 });
+  check(
+    "ae_audio_analyze (aerender)",
+    r.ok && r.state === "done" && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3,
+    `${r.state ?? r.error}: ${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets, ${r.beats?.length} beats ${r.message ?? ""}`
+  );
+  r = await call("ae_audio_analyze", { audio_path: CLICKS_WAV });
+  check("ae_audio_analyze (file)", r.ok && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3 && r.onsets?.length === 8, `${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets`);
 
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 90, expect });
   check("ae_set_property (after save)", r.applied && r.checkpoint?.status === want("created") && !r.checkpoint?.unsaved_changes_not_included, cpNote(r));

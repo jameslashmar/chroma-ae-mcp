@@ -506,6 +506,9 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_create_layer",
   "ae_precompose",
   "ae_set_track_matte",
+  "ae_add_markers",
+  "ae_remove_markers",
+  "ae_cue_keys",
 ];
 
 export const AeCheckpointRevertSchema = z.object({
