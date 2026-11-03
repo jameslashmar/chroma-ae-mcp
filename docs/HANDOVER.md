@@ -91,9 +91,16 @@ If someone runs the smoke test, fix what fails. Add the measured behaviour to `d
 ## Suggested next steps
 
 1. Push the branch to the private copy and open a PR there, so GitHub's CI runs both jobs on a clean Windows machine (Node 20, and AE's Node 17.7.2).
-2. Decide whether to release 0.4.0 untested in AE, or after a smoke run.
-3. If releasing: bump `VERSION`, `server/package.json`, `server/package-lock.json` and `SERVER_VERSION` together; then run `scripts/package.ps1`, tag and create the release.
-4. On a Mac: the macOS popup reading still open from 0.3.
+2. ~~Decide whether to release 0.4.0 untested in AE.~~ Released as v0.4.0 on 2026-11-03 without a live AE run, together with the new panel (below). Run the smoke test (`qa/ci-live.mjs`) and open the panel in AE 26 next.
+3. On a Mac: the macOS popup reading still open from 0.3.
+
+## The 0.4.0 panel (2026-11-03)
+
+Built from the panel design canvas (designs #21 to #24): session tiles (tool calls, queued, errors, median reply, checkpoints), a chart of the last 20 reply times, Register with as a four-way control, a full-width Copy setup command, and a Log that is closed, open below the tiles, or fills the panel (the corner-arrows button; the choice is kept in `localStorage`).
+
+- **Where the numbers come from.** The server now writes one service-log line per MCP tool call (`tool <name> ok (<ms>ms)` or `tool <name> failed (<ms>ms): <why>`, in `mcp-rpc.ts`) and one per automatic checkpoint (`Checkpoint saved before <tool>: <file>`, in `tools/mutate.ts`, through the new `ctx.log`). `panel/client/common.js` (`parseToolLine`, `createSessionStats`) turns them into the tiles and the Log; a session starts at the service's `Listening on` line. Tested in `server/test/panel-stats.test.ts`.
+- **Left out of the designs:** per-entry Undo (nothing on the server can undo one call's change; checkpoints and AE's own Undo still work) and plain-English descriptions of each call (the Log shows the tool name). New token and Save diagnostics stay, as small links under Copy setup command.
+- **Not yet seen in AE.** The README screenshots are the real `index.html` and `style.css` rendered in headless Chrome with sample data.
 
 ---
 
