@@ -435,6 +435,21 @@
 
   // ---------- write ----------
 
+  // AE 26.5's form takes a GuideOptions object made with new GuideOptions() (attribute
+  // `orientation`); a plain object stands in where the class does not exist.
+  function guideOptions(orientation, position) {
+    var o = null;
+    try {
+      if (typeof GuideOptions !== "undefined") o = new GuideOptions();
+    } catch (eG) {
+      o = null;
+    }
+    if (!o) o = {};
+    if (orientation !== null && orientation !== undefined) o.orientation = orientation;
+    o.position = position;
+    return o;
+  }
+
   function addGuide(comp, step) {
     try {
       comp.addGuide(step.orientation_type, step.position);
@@ -442,7 +457,7 @@
     } catch (eLegacy) {
       // AE 26.5 added a GuideOptions form; try it before giving up.
       try {
-        comp.addGuide({ orientationType: step.orientation_type, position: step.position });
+        comp.addGuide(guideOptions(step.orientation_type, step.position));
         return "options";
       } catch (eOptions) {
         throw eLegacy;
@@ -457,7 +472,7 @@
     } catch (eLegacy) {
       // From 26.5 the arguments come the other way round, with GuideOptions.
       try {
-        comp.setGuide(step.index, { position: step.position });
+        comp.setGuide(step.index, guideOptions(null, step.position));
         return "options";
       } catch (eOptions) {
         throw eLegacy;

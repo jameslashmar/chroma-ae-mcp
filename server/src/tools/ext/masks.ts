@@ -223,7 +223,7 @@ export const masksTools: ToolDefinition<any>[] = [
     name: "ae_mask",
     description:
       "Add, change and remove a layer's masks in one undo group guarded by `expect`: a rectangle or ellipse in a box, or a free path with tangents; mode (add, subtract, intersect, lighten, darken, difference, none), inversion, feather, opacity and expansion. " +
-      "The read-back (a separate evalScript) checks the count and each mask's mode, inversion, feather, opacity, expansion and box (for a path: the box of its points, the vertex count and closed; tangents are not read back). Animate a mask path with ae_set_property on ['ADBE Mask Parade', <mask>, 'ADBE Mask Shape']. " +
+      "The read-back (a separate evalScript) checks the count and each mask's mode, inversion, feather, opacity, expansion and box (for a path: the box of its points, the vertex count and closed; tangents are not read back). To animate a mask path, write keys with ae_path_write and its `time` (ae_set_property does not turn vertex lists into a Shape). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeMaskSchema,
     handler: (args: z.infer<typeof AeMaskSchema>, ctx) =>

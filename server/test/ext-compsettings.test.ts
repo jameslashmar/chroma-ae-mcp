@@ -281,7 +281,9 @@ function richScene(opts: { guideApi?: "legacy" | "options" | "none" } = {}) {
     c.addGuide = (a: any, b?: any) => {
       if (typeof a === "object") {
         if (mode === "legacy") throw new Error("legacy only");
-        guides.push({ orientationType: a.orientationType, positionType: 0, position: a.position });
+        // AE 26.5's GuideOptions carries `orientation`, not `orientationType`.
+        if (a.orientationType !== undefined || typeof a.orientation !== "number") throw new Error("bad GuideOptions");
+        guides.push({ orientationType: a.orientation, positionType: 0, position: a.position });
       } else {
         if (mode === "options") throw new Error("options only");
         guides.push({ orientationType: a, positionType: 0, position: b });
