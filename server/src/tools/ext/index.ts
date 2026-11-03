@@ -1,4 +1,16 @@
 import type { ToolDefinition } from "../common.js";
+import { captionsTools } from "./captions.js";
+import { rigTools } from "./rig.js";
+import { fittextTools } from "./fittext.js";
+import { staggerTools } from "./stagger.js";
+import { timeremapTools } from "./timeremap.js";
+import { cameraTools } from "./camera.js";
+import { explainTools } from "./explain.js";
+import { describeTools } from "./describe.js";
+import { scrubTools } from "./scrub.js";
+import { interpretTools } from "./interpret.js";
+import { pathsTools } from "./paths.js";
+import { memoryTools } from "./memory.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { annotateTools } from "./annotate.js";
@@ -70,4 +82,16 @@ export const extTools: ToolDefinition<any>[] = [
   ...compsettingsTools,
   ...preflightTools,
   ...sessionTools,
+  ...captionsTools,
+  ...rigTools,
+  ...fittextTools,
+  ...staggerTools,
+  ...timeremapTools,
+  ...cameraTools,
+  ...explainTools,
+  ...describeTools,
+  ...scrubTools,
+  ...interpretTools,
+  ...pathsTools,
+  ...memoryTools,
 ];

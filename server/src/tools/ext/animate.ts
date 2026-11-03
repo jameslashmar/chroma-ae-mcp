@@ -500,6 +500,54 @@ function hasAnyStyleField(style: TextStyleInput | undefined): boolean {
   );
 }
 
+/** The style fields a character range takes (TextDocument.characterRange, AE 24.3+). */
+export const RANGE_STYLE_KEYS = [
+  "font",
+  "fontSize",
+  "tracking",
+  "baselineShift",
+  "fillColor",
+  "strokeColor",
+  "strokeWidth",
+  "applyFill",
+  "applyStroke",
+  "fauxBold",
+  "fauxItalic",
+] as const;
+
+export const RangeStyleSchema = z
+  .object({
+    font: z.string().min(1).optional().describe("PostScript font name for the range."),
+    fontSize: z.number().min(0.1).max(1296).optional().describe("Font size in pixels for the range."),
+    tracking: z.number().optional().describe("Tracking for the range."),
+    baselineShift: z.number().optional().describe("Baseline shift in pixels for the range (positive raises)."),
+    fillColor: RgbColorSchema.optional().describe("Fill colour [r, g, b] in 0..1 (also turns the fill on)."),
+    strokeColor: RgbColorSchema.optional().describe("Stroke colour [r, g, b] in 0..1 (also turns the stroke on)."),
+    strokeWidth: z.number().min(0).optional().describe("Stroke width in pixels for the range."),
+    applyFill: z.boolean().optional().describe("Turn the fill on or off for the range."),
+    applyStroke: z.boolean().optional().describe("Turn the stroke on or off for the range."),
+    fauxBold: z.boolean().optional().describe("Faux bold for the range."),
+    fauxItalic: z.boolean().optional().describe("Faux italic for the range."),
+  })
+  .refine((s) => RANGE_STYLE_KEYS.some((k) => s[k] !== undefined), { message: "A range's style needs at least one field." });
+
+export type RangeStyleInput = z.infer<typeof RangeStyleSchema>;
+
+export const TextRangeSchema = z
+  .object({
+    match: z.string().min(1).max(200).optional().describe("Style this text wherever it occurs (case-sensitive), instead of start/end."),
+    occurrence: z.enum(["first", "all"]).optional().describe("With match: the first occurrence or all of them (default all, at most 200)."),
+    start: z.number().int().min(0).optional().describe("First character, 0-based."),
+    end: z.number().int().min(1).optional().describe("One past the last character. Default: the end of the text."),
+    style: RangeStyleSchema,
+  })
+  .refine((r) => (r.match !== undefined) !== (r.start !== undefined), { message: "A range takes `match`, or `start` (with `end`), not both." })
+  .refine((r) => r.end === undefined || r.start !== undefined, { message: "`end` goes with `start`." })
+  .refine((r) => r.start === undefined || r.end === undefined || r.end > r.start, { message: "`end` must be above `start`." })
+  .refine((r) => r.occurrence === undefined || r.match !== undefined, { message: "`occurrence` goes with `match`." });
+
+export type TextRangeInput = z.infer<typeof TextRangeSchema>;
+
 export const AeSetTextSchema = z
   .object({
     comp_id: z.number().int().describe("Target CompItem ID."),
@@ -509,12 +557,58 @@ export const AeSetTextSchema = z
       .optional()
       .describe("New text string to set on the TextLayer's Source Text."),
     style: TextStyleSchema.optional(),
+    ranges: z
+      .array(TextRangeSchema)
+      .min(1)
+      .max(50)
+      .optional()
+      .describe(
+        "Per-word or per-character styling, applied after `text` and `style`: each range is `match` (a word) or `start`/`end`, with a `style` of font, fontSize, tracking, baselineShift, fillColor, strokeColor, strokeWidth, applyFill, applyStroke, fauxBold, fauxItalic. " +
+          "Needs AE 24.3+ (TextDocument.characterRange); refused before anything is written on older AE. Ranges that overlap and set the same field are refused; values are checked before the write. Read back range by range; a range whose values read back as mixed is reported as a mismatch."
+      ),
     expect: ExpectSchema,
   })
-  .refine((val) => val.text !== undefined || hasAnyStyleField(val.style), {
+  .refine((val) => val.text !== undefined || hasAnyStyleField(val.style) || val.ranges !== undefined, {
     message:
-      "ae_set_text requires at least `text` or one defined property in `style`.",
+      "ae_set_text requires at least `text`, one defined property in `style`, or `ranges`.",
   });
+
+/** A range the host styled: offsets (a `match` is resolved there) and the fields it set. */
+export interface AppliedRange {
+  start: number;
+  end: number;
+  text?: string;
+  style: Partial<RangeStyleInput>;
+}
+
+export function resolvedRanges(result: unknown): AppliedRange[] {
+  const list = (result as { ranges?: unknown } | null | undefined)?.ranges;
+  if (!Array.isArray(list)) return [];
+  return list.filter((r): r is AppliedRange => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
+}
+
+/** `ranges[i].field` → the value the range was given. */
+export function rangeExpectations(ranges: AppliedRange[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== undefined) out[`ranges[${i}].${k}`] = r.style[k];
+  });
+  return out;
+}
+
+/**
+ * The same keys from the read-back. A field that read back mixed (undefined in
+ * AE) stays undefined here, so it shows up as a mismatch and is never taken
+ * for 0 or false.
+ */
+export function rangeActuals(ranges: AppliedRange[], afterRanges: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const list = Array.isArray(afterRanges) ? (afterRanges as Array<{ style?: Record<string, unknown> }>) : [];
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== undefined) out[`ranges[${i}].${k}`] = list[i]?.style?.[k];
+  });
+  return out;
+}
 
 // ---------- 3. ae_import_footage ----------
 
@@ -723,6 +817,7 @@ export const animateTools: ToolDefinition<any>[] = [
     name: "ae_set_text",
     description:
       "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. " +
+      "`ranges` styles single words or characters ('make NOW bold and red': `{ match: 'NOW', style: { fauxBold: true, fillColor: [1, 0, 0] } }`) on AE 24.3+, each range read back separately. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeSetTextSchema,
     handler: async (args, ctx) => {
@@ -759,12 +854,16 @@ export const animateTools: ToolDefinition<any>[] = [
               layer: args.layer,
               text: args.text,
               style: args.style,
+              ranges: args.ranges,
               expect: effectiveExpect,
             }),
             label,
             mutates: true,
             toolName: "ae_set_text",
           });
+
+          // The ranges the host styled (a `match` becomes offsets there), to read back one by one.
+          const appliedRanges = resolvedRanges(writeResp.result);
 
           // Separate evalScript for read-back. The write is applied from here
           // on, so a failed read is reported, never thrown.
@@ -774,6 +873,7 @@ export const animateTools: ToolDefinition<any>[] = [
               script: buildJsxCall("getTextDocument", {
                 comp_id: args.comp_id,
                 layer: args.layer,
+                ...(appliedRanges.length > 0 ? { ranges: appliedRanges.map((r) => ({ start: r.start, end: r.end })) } : {}),
               }),
               label: `${label} (after)`,
               mutates: false,
@@ -832,6 +932,14 @@ export const animateTools: ToolDefinition<any>[] = [
             }
           }
 
+          // Only the ranges the read-back returned are compared; a shorter list is
+          // reported as unverified, never as a mismatch.
+          const readBackRanges = Array.isArray(afterObj.ranges) ? (afterObj.ranges as unknown[]) : [];
+          const verifiedRanges = appliedRanges.slice(0, readBackRanges.length);
+          const unverifiedRanges = appliedRanges.length - verifiedRanges.length;
+          Object.assign(expectedCheck, rangeExpectations(verifiedRanges));
+          Object.assign(actualCheck, rangeActuals(verifiedRanges, afterObj.ranges));
+
           // If justification was not explicitly changed, verify the round-trip preserved existing justification
           if (
             expectedCheck.justification === undefined &&
@@ -857,6 +965,7 @@ export const animateTools: ToolDefinition<any>[] = [
             result: writeResp.result,
             checkpoint,
             receipt,
+            ...(unverifiedRanges > 0 ? { unverified_ranges: unverifiedRanges } : {}),
           };
         });
       } catch (err) {

@@ -445,8 +445,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path32, errorMaps, issueData } = params;
-      const fullPath = [...path32, ...issueData.path || []];
+      const { data, path: path35, errorMaps, issueData } = params;
+      const fullPath = [...path35, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -754,11 +754,11 @@ var init_types = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path32, key) {
+      constructor(parent, value, path35, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path32;
+        this._path = path35;
         this._key = key;
       }
       get path() {
@@ -5322,7 +5322,7 @@ function resolveRoots(s) {
   if (explicit) {
     finals = new Set(ids);
   } else {
-    const queued3 = project2.render_queue.items.filter((it) => it.render && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
+    const queued3 = project2.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && it.comp_id !== null && s.comps.has(it.comp_id));
     if (o.scope === "delivery" && queued3.length > 0) {
       ids = queued3.map((it) => it.comp_id);
       finals = new Set(ids);
@@ -5516,7 +5516,7 @@ function renderQueueFindings(s) {
   const out = [];
   if (!p) return out;
   const explicit = Boolean(s.opts.comp_ids && s.opts.comp_ids.length || s.opts.comp_names && s.opts.comp_names.length);
-  const items = s.opts.check_queue_outputs === false ? [] : p.render_queue.items.filter((it) => it.render && it.status !== "done" && (!explicit || it.comp_id !== null && s.roots.includes(it.comp_id)));
+  const items = s.opts.check_queue_outputs === false ? [] : p.render_queue.items.filter((it) => (it.render || it.status === "needs_output") && it.status !== "done" && (!explicit || it.comp_id !== null && s.roots.includes(it.comp_id)));
   for (const it of items) {
     const where = { rq_index: it.index, ...it.comp_id !== null ? { comp_id: it.comp_id } : {}, ...it.comp_name ? { comp: it.comp_name } : {} };
     if (it.status === "needs_output" || it.outputs.length === 0 || it.outputs.every((o) => o.file === null)) {
@@ -5592,7 +5592,7 @@ function footageFindings(s) {
         fix: used ? { tool: "ae_replace_footage", hint: `Point item ${f.id} at the real file.` } : { tool: "ae_purge_unused", hint: "Remove unused items." }
       });
     }
-    if (f.proxy && (used || f.used_n === 0)) {
+    if (f.proxy && used) {
       if (f.proxy.use) {
         out.push({
           severity: "warning",
@@ -6042,7 +6042,7 @@ function normaliseOptions(args, planned_output) {
   };
 }
 async function runPreflightGate(ctx, o) {
-  const opts = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names }, o.planned_output), check_queue_outputs: false };
+  const opts = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names, force_eval: true }, o.planned_output), check_queue_outputs: false };
   const state = newScanState(opts);
   const call2 = makeScanCall(ctx, o.opId, o.toolName);
   const { complete } = await runScan(state, call2, { maxSlices: 300, deadline: Date.now() + 6e4 });
@@ -6055,6 +6055,7 @@ async function runPreflightGate(ctx, o) {
     blockers: findings.filter((f) => f.severity === "blocker").slice(0, 20),
     warnings: findings.filter((f) => f.severity === "warning").slice(0, 20),
     comps_checked: state.seen.size,
+    expressions: `forced evaluation of the root comps' expressions, then expressionError (${state.forced_evals} forced${state.force_capped > 0 ? `, ${state.force_capped} only read the cheap way (cap)` : ""})`,
     ...complete ? {} : { note: "The preflight did not finish within its limits; run ae_preflight to read the rest." }
   };
   return { blocked: counts.blocker > 0, summary: summary2 };
@@ -6236,10 +6237,10 @@ function resolveAerenderPath(options) {
   }
   if (platform === "darwin") {
     if (afterFxPath) {
-      const norm = afterFxPath.replace(/\\/g, "/");
-      const appIdx = norm.toLowerCase().indexOf(".app");
+      const norm2 = afterFxPath.replace(/\\/g, "/");
+      const appIdx = norm2.toLowerCase().indexOf(".app");
       if (appIdx !== -1) {
-        const appBundlePath = norm.slice(0, appIdx + 4);
+        const appBundlePath = norm2.slice(0, appIdx + 4);
         const parentDir = path7.posix.dirname(appBundlePath);
         const candidate2 = path7.posix.join(parentDir, "aerender");
         if (exists(candidate2)) {
@@ -6247,7 +6248,7 @@ function resolveAerenderPath(options) {
         }
         return candidate2;
       }
-      const dir = path7.posix.dirname(norm);
+      const dir = path7.posix.dirname(norm2);
       const candidate = path7.posix.join(dir, "aerender");
       if (exists(candidate)) {
         return candidate;
@@ -6264,8 +6265,8 @@ function resolveAerenderPath(options) {
     return MACOS_FALLBACK_AERENDER;
   }
   if (afterFxPath) {
-    const norm = afterFxPath.replace(/\\/g, "/");
-    const dir = norm.toLowerCase().endsWith(".exe") ? path7.posix.dirname(norm) : norm.replace(/\/+$/, "");
+    const norm2 = afterFxPath.replace(/\\/g, "/");
+    const dir = norm2.toLowerCase().endsWith(".exe") ? path7.posix.dirname(norm2) : norm2.replace(/\/+$/, "");
     const candidate = `${dir}/aerender.exe`;
     if (exists(candidate)) {
       return candidate;
@@ -6898,6 +6899,12 @@ var init_aerender = __esm({
 });
 
 // src/tools/ext/session.ts
+function unsavedItemsDiffer(prevIds, live, prevTruncated = false) {
+  if (!prevIds || prevIds.length === 0 || prevTruncated || live.items_truncated) return false;
+  const now = new Set(live.item_ids);
+  const kept = prevIds.filter((id) => now.has(id)).length;
+  return kept < Math.ceil(prevIds.length * 0.5);
+}
 function sameList(a, b) {
   if (a.length !== b.length) return false;
   const x = [...a].sort((p, q) => p - q);
@@ -6944,7 +6951,8 @@ function describeComp(c) {
   return `${label}: ${parts.join(", ")}`;
 }
 function diffSnapshots(prev, live, serviceId) {
-  const swapped = !pathsMatchForGuard(prev.project_path, live.project_path);
+  const bothUnsaved = prev.project_path === UNSAVED && live.project_path === UNSAVED;
+  const swapped = !pathsMatchForGuard(prev.project_path, live.project_path) || bothUnsaved && unsavedItemsDiffer(prev.item_ids, live, prev.items_truncated);
   const restarted = prev.service_id !== serviceId;
   const buildChanged = !!prev.build && !!live.build && prev.build !== live.build;
   const reopened = !swapped && prev.revision !== null && live.revision !== null && live.revision < prev.revision;
@@ -7012,8 +7020,19 @@ function diffSnapshots(prev, live, serviceId) {
   diff.user_changed = lines.length ? `Since the last write: ${lines.join("; ")}.` : null;
   return diff;
 }
-function undoReach(step2, live, serviceId) {
+function undoReach(step2, live, serviceId, opts = {}) {
+  const reopenedMs = opts.reopenedAt ? Date.parse(opts.reopenedAt) : NaN;
+  const stepMs = Date.parse(step2.at);
+  if (Number.isFinite(reopenedMs) && Number.isFinite(stepMs) && stepMs < reopenedMs) {
+    return {
+      reach: "not_reachable",
+      why: "the project was closed and reopened after this step (a checkpoint revert or open); After Effects clears the undo history when a project closes"
+    };
+  }
   let prefix = "";
+  if (step2.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step2.item_ids, live)) {
+    return { reach: "not_reachable", why: "another unsaved project is open (its items hardly overlap the step's)" };
+  }
   if (!pathsMatchForGuard(step2.project_path, live.project_path)) {
     if (!looksLikeSaveAs(step2, live)) {
       return { reach: "not_reachable", why: `another project is open (the step was made in ${step2.project_path})` };
@@ -7045,6 +7064,32 @@ function looksLikeSaveAs(step2, live) {
   const countClose = Math.abs(live.num_items - step2.num_items) <= Math.max(1, Math.round(step2.num_items * 0.1));
   return countClose && kept >= Math.ceil(ids.length * 0.9);
 }
+function sanitizeState(saved) {
+  const out = emptyState();
+  if (!isPlainObject(saved)) return out;
+  if (isPlainObject(saved.snapshots)) {
+    for (const [k, v] of Object.entries(saved.snapshots)) {
+      if (isPlainObject(v) && typeof v.project_path === "string" && Array.isArray(v.item_ids) && Array.isArray(v.comps)) {
+        out.snapshots[k] = v;
+      }
+    }
+  }
+  if (typeof saved.last_key === "string" && out.snapshots[saved.last_key]) out.last_key = saved.last_key;
+  if (isPlainObject(saved.touched)) {
+    for (const [k, v] of Object.entries(saved.touched)) if (Array.isArray(v)) out.touched[k] = v.filter((x) => typeof x === "number");
+  }
+  if (Array.isArray(saved.steps)) {
+    out.steps = saved.steps.filter((x) => isPlainObject(x) && typeof x.op_id === "string" && typeof x.at === "string");
+  }
+  if (isPlainObject(saved.op_projects)) {
+    for (const [k, v] of Object.entries(saved.op_projects)) if (typeof v === "string") out.op_projects[k] = v;
+  }
+  if (Array.isArray(saved.interrupted)) {
+    out.interrupted = saved.interrupted.filter((x) => isPlainObject(x) && typeof x.op_id === "string" && typeof x.project_path === "string");
+  }
+  if (typeof saved.reopened_at === "string") out.reopened_at = saved.reopened_at;
+  return out;
+}
 function writeJson(file, value) {
   try {
     fs7.mkdirSync(path8.dirname(file), { recursive: true });
@@ -7070,7 +7115,7 @@ function pidAlive(pid) {
   }
 }
 function installSessionTracking(opts) {
-  tracker = new SessionTracker({
+  const t = new SessionTracker({
     dataDir: opts.dataDir,
     now: opts.now,
     isPidAlive: opts.isPidAlive,
@@ -7078,8 +7123,12 @@ function installSessionTracking(opts) {
     rendersJobsFile: opts.rendersJobsFile,
     maxInflightAgeMs: opts.maxInflightAgeMs
   });
-  tracker.recoverInterrupted(opts.quarantine);
-  return tracker;
+  tracker = t;
+  try {
+    t.recoverInterrupted(opts.quarantine);
+  } catch {
+  }
+  return t;
 }
 async function readSnapshot(ctx, opId, phase, toolName, compIds) {
   const res = await ctx.bridge.evalRaw({
@@ -7087,24 +7136,30 @@ async function readSnapshot(ctx, opId, phase, toolName, compIds) {
     script: buildJsxCall("sessionSnapshot", { comp_ids: compIds }),
     label: `${toolName} (session ${phase})`,
     mutates: false,
-    toolName
+    toolName,
+    timeoutMs: SNAPSHOT_TIMEOUT_MS
   });
-  const snap = res.result;
-  return snap && typeof snap === "object" && typeof snap.project_path === "string" ? snap : null;
+  const snap2 = res.result;
+  return snap2 && typeof snap2 === "object" && typeof snap2.project_path === "string" ? snap2 : null;
 }
 async function noteBeforeWrite(ctx, info) {
   if (!tracker) return {};
+  const t = tracker;
   try {
-    const pending = tracker.pendingUserChanged;
-    tracker.pendingUserChanged = null;
+    const taken = t.takePendingFor(info.opId);
+    const lines = [...taken.lines];
     let found = null;
-    const prev = tracker.baselineFor(info.expect.project_path) ?? tracker.lastBaseline();
+    const prev = t.baselineFor(info.expect.project_path) ?? t.lastBaseline();
     if (prev) {
-      const live = await readSnapshot(ctx, info.opId, "before", info.toolName, tracker.compsToRead(info.expect.project_path, [info.expect.comp_id]));
-      if (live) found = diffSnapshots(prev, live, tracker.serviceId).user_changed;
+      try {
+        const live = await readSnapshot(ctx, info.opId, "before", info.toolName, t.compsToRead(info.expect.project_path, [info.expect.comp_id]));
+        if (live) found = diffSnapshots(prev, live, t.serviceId).user_changed;
+      } catch {
+        t.markSkipAfter(info.opId);
+      }
     }
-    const lines = [pending, found].filter((x) => !!x);
-    return lines.length ? { user_changed: lines.join(" ") } : {};
+    if (found && !lines.some((l) => l.includes(found))) lines.push(found);
+    return lines.length ? { user_changed: lines.join(" ") + taken.note } : {};
   } catch {
     return {};
   }
@@ -7130,39 +7185,52 @@ function endInflight(opId) {
   } catch {
   }
 }
-async function noteAfterWrite(ctx, info) {
+async function noteAfterWrite(ctx, info, opts = {}) {
   if (!tracker) return;
+  const t = tracker;
   try {
-    const compIds = tracker.compsToRead(info.expect.project_path, [info.expect.comp_id]);
-    const snap = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
-    if (!snap) return;
-    tracker.record(snap, { op_id: info.opId, tool: info.toolName });
-    tracker.addStep({
+    t.commitReported(info.opId);
+  } catch {
+  }
+  try {
+    const blocked = t.takeSkipAfter(info.opId);
+    if (opts.skipRead || blocked) return;
+    const compIds = t.compsToRead(info.expect.project_path, [info.expect.comp_id]);
+    const snap2 = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
+    if (!snap2) return;
+    t.record(snap2, { op_id: info.opId, tool: info.toolName });
+    t.addStep({
       op_id: info.opId,
       tool: info.toolName,
       label: info.label,
       at: (/* @__PURE__ */ new Date()).toISOString(),
-      project_path: snap.project_path,
-      service_id: tracker.serviceId,
-      revision_after: snap.revision,
+      project_path: snap2.project_path,
+      service_id: t.serviceId,
+      revision_after: snap2.revision,
       checkpoint: info.checkpoint ?? null,
-      build: snap.build,
-      item_ids: snap.item_ids.slice(0, MAX_STEP_ITEM_IDS),
-      num_items: snap.num_items
+      build: snap2.build,
+      item_ids: snap2.item_ids.slice(0, MAX_STEP_ITEM_IDS),
+      num_items: snap2.num_items
     });
   } catch {
   }
 }
 async function readOpenProject(t, read, extra) {
   const first = t.compsToReadDetailed(null, extra);
-  const snap = await read(first.ids);
-  if (!snap) return null;
-  if (!t.isLastProject(snap.project_path) && t.touchedComps(snap.project_path).length > 0) {
-    const second = t.compsToReadDetailed(snap.project_path, extra);
+  const snap2 = await read(first.ids);
+  if (!snap2) return null;
+  if (!t.isLastProject(snap2.project_path) && t.touchedComps(snap2.project_path).length > 0) {
+    const second = t.compsToReadDetailed(snap2.project_path, extra);
     const again = await read(second.ids);
     if (again) return { snap: again, dropped: second.dropped };
   }
-  return { snap, dropped: first.dropped };
+  return { snap: snap2, dropped: first.dropped };
+}
+function markReopenedSafely(t) {
+  try {
+    t.markReopened();
+  } catch {
+  }
 }
 function installSessionBridgeHook(bridge) {
   const target = bridge;
@@ -7171,20 +7239,36 @@ function installSessionBridgeHook(bridge) {
   const original = target.evalRaw.bind(bridge);
   const hooked = async (p) => {
     const t = tracker;
-    if (!t || p.mutates !== true || t.isInflight(p.id)) return original(p);
+    if (!t || p.mutates !== true) return original(p);
+    const opensProject = typeof p.script === "string" && p.script.includes("openProject(");
+    if (t.isInflight(p.id)) {
+      try {
+        return await original(p);
+      } finally {
+        if (opensProject) markReopenedSafely(t);
+      }
+    }
     const toolName = p.toolName ?? "unknown";
     const raw = { bridge: { evalRaw: original } };
     const read = (phase) => (ids) => readSnapshot(raw, p.id, phase, toolName, ids);
-    let projectPath = t.lastBaseline()?.project_path ?? "<unknown>";
+    let projectPath = UNKNOWN_PROJECT;
+    let skipAfter = false;
     try {
       const prev = t.lastBaseline();
       if (prev) {
-        const live = await readOpenProject(t, read("before"), []);
-        if (live) {
-          projectPath = live.snap.project_path;
-          const base = t.baselineFor(live.snap.project_path) ?? prev;
-          const line = diffSnapshots(base, live.snap, t.serviceId).user_changed;
-          if (line && !(t.pendingUserChanged ?? "").includes(line)) t.pendingUserChanged = [t.pendingUserChanged, line].filter(Boolean).join(" ");
+        projectPath = prev.project_path;
+        try {
+          const live = await readOpenProject(t, read("before"), []);
+          if (live) {
+            projectPath = live.snap.project_path;
+            const base = t.baselineFor(live.snap.project_path) ?? prev;
+            const line = diffSnapshots(base, live.snap, t.serviceId).user_changed;
+            if (line) t.addPending(line);
+          } else {
+            skipAfter = true;
+          }
+        } catch {
+          skipAfter = true;
         }
       }
       t.begin({ op_id: p.id, tool: toolName, label: p.label, project_path: projectPath, comp_id: null, last_known_hash: null });
@@ -7198,11 +7282,14 @@ function installSessionBridgeHook(bridge) {
         t.end(p.id);
       } catch {
       }
+      if (opensProject) markReopenedSafely(t);
     }
-    try {
-      const after = await readOpenProject(t, read("after"), []);
-      if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
-    } catch {
+    if (!skipAfter) {
+      try {
+        const after = await readOpenProject(t, read("after"), []);
+        if (after) t.record(after.snap, { op_id: p.id, tool: toolName });
+      } catch {
+      }
     }
     return res;
   };
@@ -7240,7 +7327,7 @@ async function readSnapshotOrNull(read, ids) {
     return null;
   }
 }
-var crypto3, fs7, path8, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_INFLIGHT_AGE_MS, emptyState, keyOf, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
+var crypto3, fs7, path8, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_PENDING_LINES, SNAPSHOT_TIMEOUT_MS, UNSAVED, UNKNOWN_PROJECT, MAX_INFLIGHT_AGE_MS, emptyState, isPlainObject, keyOf, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
 var init_session = __esm({
   "src/tools/ext/session.ts"() {
     "use strict";
@@ -7250,7 +7337,6 @@ var init_session = __esm({
     init_zod();
     init_host();
     init_jsx();
-    init_common();
     MAX_SNAPSHOTS = 10;
     MAX_STEPS = 200;
     MAX_TOUCHED = 20;
@@ -7258,14 +7344,24 @@ var init_session = __esm({
     MAX_INTERRUPTED = 20;
     MAX_SHOWN_IDS = 100;
     MAX_STEP_ITEM_IDS = 100;
+    MAX_PENDING_LINES = 10;
+    SNAPSHOT_TIMEOUT_MS = 8e3;
+    UNSAVED = "<unsaved>";
+    UNKNOWN_PROJECT = "<unknown>";
     MAX_INFLIGHT_AGE_MS = SLOW_TIMEOUT_MS + 5 * 6e4;
-    emptyState = () => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [] });
+    emptyState = () => ({ last_key: null, snapshots: {}, touched: {}, steps: [], op_projects: {}, interrupted: [], reopened_at: null });
+    isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
     keyOf = (projectPath) => process.platform === "win32" ? projectPath.replace(/\\/g, "/").toLowerCase() : projectPath;
     SessionTracker = class {
       /** Op ids whose write-ahead record this process holds right now (guarded writes and the bridge hook share it). */
       active = /* @__PURE__ */ new Set();
-      /** What the user changed before an unguarded write; the next guarded write reports it, so the baseline update cannot swallow it. */
-      pendingUserChanged = null;
+      /** What the user changed before an unguarded write; a guarded write reports it, so the baseline update cannot swallow it. */
+      pendingLines = [];
+      pendingDropped = 0;
+      /** The pending lines each write's receipt carries; they leave pending only once the write is done (commitReported). */
+      reported = /* @__PURE__ */ new Map();
+      /** Writes whose before-snapshot failed or timed out: AE is likely blocked, so their after-snapshot is skipped. */
+      skipAfter = /* @__PURE__ */ new Set();
       rendersJobsFile;
       maxInflightAgeMs;
       serviceId = crypto3.randomBytes(6).toString("hex");
@@ -7285,8 +7381,59 @@ var init_session = __esm({
         this.pid = opts.pid ?? process.pid;
         this.rendersJobsFile = opts.rendersJobsFile ?? null;
         this.maxInflightAgeMs = opts.maxInflightAgeMs ?? MAX_INFLIGHT_AGE_MS;
-        const saved = readJson(this.statePath);
-        this.state = { ...emptyState(), ...saved && typeof saved === "object" ? saved : {} };
+        this.state = sanitizeState(readJson(this.statePath));
+      }
+      get pendingUserChanged() {
+        if (this.pendingLines.length === 0) return null;
+        const note = this.pendingDropped > 0 ? ` (${this.pendingDropped} earlier change line(s) dropped)` : "";
+        return this.pendingLines.join(" ") + note;
+      }
+      /** Null clears; a string replaces the lines with that one. */
+      set pendingUserChanged(value) {
+        this.pendingLines = value ? [value] : [];
+        this.pendingDropped = 0;
+      }
+      /** Adds a line unless pending has it already; keeps the last MAX_PENDING_LINES. */
+      addPending(line) {
+        if (this.pendingLines.some((l) => l.includes(line))) return;
+        this.pendingLines.push(line);
+        while (this.pendingLines.length > MAX_PENDING_LINES) {
+          this.pendingLines.shift();
+          this.pendingDropped++;
+        }
+      }
+      /** The pending lines a receipt is about to carry; they stay pending until commitReported. */
+      takePendingFor(opId) {
+        const lines = [...this.pendingLines];
+        const dropped = lines.length > 0 ? this.pendingDropped : 0;
+        this.reported.set(opId, { lines, dropped });
+        for (const old of [...this.reported.keys()].slice(0, Math.max(0, this.reported.size - 50))) this.reported.delete(old);
+        return { lines, note: dropped > 0 ? ` (${dropped} earlier change line(s) dropped)` : "" };
+      }
+      /** The write's result is being returned: the pending lines it carried have been reported. */
+      commitReported(opId) {
+        const rep = this.reported.get(opId);
+        this.reported.delete(opId);
+        if (!rep) return;
+        const lines = rep.lines;
+        this.pendingDropped = Math.max(0, this.pendingDropped - rep.dropped);
+        this.pendingLines = this.pendingLines.filter((l) => !lines.includes(l));
+        if (this.pendingLines.length === 0) this.pendingDropped = 0;
+      }
+      markSkipAfter(opId) {
+        this.skipAfter.add(opId);
+        for (const old of [...this.skipAfter].slice(0, Math.max(0, this.skipAfter.size - 50))) this.skipAfter.delete(old);
+      }
+      takeSkipAfter(opId) {
+        return this.skipAfter.delete(opId);
+      }
+      /** A tool closed and reopened a project (checkpoint revert, open): earlier undo steps are gone. */
+      markReopened() {
+        this.state.reopened_at = this.now().toISOString();
+        this.save();
+      }
+      reopenedAt() {
+        return this.state.reopened_at;
       }
       save() {
         writeJson(this.statePath, this.state);
@@ -7323,16 +7470,19 @@ var init_session = __esm({
         return this.active.has(opId);
       }
       /** Stores a snapshot as the new baseline for its project. */
-      record(snap, meta) {
-        const stored = { ...snap, taken_at: this.now().toISOString(), op_id: meta.op_id, tool: meta.tool, service_id: this.serviceId };
-        const key = keyOf(snap.project_path);
+      record(snap2, meta) {
+        const stored = { ...snap2, taken_at: this.now().toISOString(), op_id: meta.op_id, tool: meta.tool, service_id: this.serviceId };
+        const key = keyOf(snap2.project_path);
         delete this.state.snapshots[key];
         this.state.snapshots[key] = stored;
         this.state.last_key = key;
         const keys = Object.keys(this.state.snapshots);
-        for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) delete this.state.snapshots[old];
+        for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) {
+          delete this.state.snapshots[old];
+          delete this.state.touched[old];
+        }
         const touched = new Set(this.state.touched[key] ?? []);
-        for (const c of snap.comps) if (!c.missing) touched.add(c.id);
+        for (const c of snap2.comps) if (!c.missing) touched.add(c.id);
         this.state.touched[key] = [...touched].slice(-MAX_TOUCHED);
         this.save();
         return stored;
@@ -7361,7 +7511,7 @@ var init_session = __esm({
         const record = { ...op, pid: this.pid, service_id: this.serviceId, started_at: this.now().toISOString() };
         writeJson(this.inflightPath, { ops: [...this.readInflight().filter((o) => o.op_id !== op.op_id), record] });
         this.active.add(op.op_id);
-        this.state.op_projects[op.op_id] = op.project_path;
+        if (op.project_path !== UNKNOWN_PROJECT) this.state.op_projects[op.op_id] = op.project_path;
         const ids = Object.keys(this.state.op_projects);
         for (const old of ids.slice(0, Math.max(0, ids.length - MAX_OP_PROJECTS))) delete this.state.op_projects[old];
         this.save();
@@ -7397,7 +7547,8 @@ var init_session = __esm({
             keep.push(op);
             continue;
           }
-          const reason = `After Effects or its panel service went down while this write was in flight (project ${op.project_path}); whether it was applied is unknown. Do not retry it: inspect the project (ae_comp_diff against the last checkpoint, ae_checkpoint_list), then ae_acknowledge.`;
+          const where = op.project_path === UNKNOWN_PROJECT ? "" : ` (project ${op.project_path})`;
+          const reason = `After Effects or its panel service went down while this write was in flight${where}; whether it was applied is unknown. Do not retry it: inspect the project (ae_comp_diff against the last checkpoint, ae_checkpoint_list), then ae_acknowledge.`;
           let quarantined = false;
           if (quarantine) {
             try {
@@ -7447,7 +7598,37 @@ var init_session = __esm({
         description: "What changed in After Effects since the agent's last write, and what a restart left unfinished. Compares the live project against the snapshot kept after each of the agent's writes: another project open, items added or removed, the active item, and for each touched comp the layer count, a hash of the layer stack, the selection and the work area. Also lists writes that were in flight when AE or the panel service went down (their outcome is unknown: quarantined, never retried; each shows whether its comp's layer stack differs from the last snapshot; inspect, then ae_acknowledge; acknowledged ones move to acknowledged_interrupted_ops), quarantined ops that belong to a project that is not open, 'running' aerender jobs whose process is gone, and the agent's recent undo steps with whether Ctrl+Z can still reach them. Guarded writes carry the same comparison as a short user_changed line on their receipt. Read-only: nothing in After Effects is changed (not time, selection or the active item). Honest limits: AE has no API that reads the undo stack, so a step is 'not_reachable' only when provably gone (another project, a new AE build, a revision that went back) and otherwise 'possibly_reachable'; a revert to an identical saved state looks like no change. Writes by tools that do not go through the guarded write path are only covered when the server installed the session bridge hook (installSessionBridgeHook); without it, user_changed may include changes made by the agent's own non-guarded tools (imports, effects, text, footage, save, render queue). Prefer the checkpoint (ae_checkpoint_list, ae_checkpoint_revert) over telling the user to press Ctrl+Z. Before the first write after a start there is no baseline; pass rebase:true to start one.",
         schema: AeSessionChangesSchema,
         handler: async (args, ctx) => {
-          const t = tracker ?? installSessionTracking({ dataDir: dataDirOf(ctx), quarantine: ctx.quarantine });
+          const t = tracker;
+          if (!t) {
+            const res = await ctx.bridge.callHost(
+              "sessionSnapshot",
+              { comp_ids: args.comp_ids ?? [] },
+              { label: "ae_session_changes", mutates: false, toolName: "ae_session_changes" }
+            );
+            const snapNow = res.result;
+            return {
+              tracking_enabled: false,
+              live: snapNow ? {
+                project_path: snapNow.project_path,
+                dirty: snapNow.dirty,
+                revision: snapNow.revision,
+                num_items: snapNow.num_items,
+                active_item: snapNow.active_item,
+                ae_version: snapNow.ae_version,
+                build: snapNow.build,
+                render_queue: snapNow.render_queue,
+                comps: snapNow.comps
+              } : null,
+              baseline: null,
+              changes: null,
+              undo_steps: [],
+              interrupted_ops: [],
+              quarantine: ctx.quarantine.list(),
+              notes: [
+                "Session tracking is off in this server (no baseline, no undo steps, no write-ahead records), so nothing is compared. The live state above is all this tool can give."
+              ]
+            };
+          }
           const last = t.lastBaseline();
           const extra = args.comp_ids ?? [];
           const readIds = async (ids) => {
@@ -7475,7 +7656,7 @@ var init_session = __esm({
           const projectSwitched = !!last && !pathsMatchForGuard(last.project_path, live.project_path);
           const quarantine = ctx.quarantine.list().map((e) => {
             const project2 = t.projectOfOp(e.op_id);
-            return { ...e, project_path: project2, stale: project2 !== null && !pathsMatchForGuard(project2, live.project_path) };
+            return { ...e, project_path: project2, stale: project2 !== null && project2 !== UNKNOWN_PROJECT && !pathsMatchForGuard(project2, live.project_path) };
           });
           const interrupted = t.interrupted().map((o) => {
             const acknowledged = o.quarantined !== false && !ctx.quarantine.get(o.op_id);
@@ -7493,7 +7674,7 @@ var init_session = __esm({
           });
           const interruptedOps = interrupted.filter((o) => !o.acknowledged);
           const acknowledgedOps = interrupted.filter((o) => o.acknowledged);
-          const steps = args.include_undo_steps === false ? void 0 : t.steps().slice(-(args.max_undo_steps ?? 10)).reverse().map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId) }));
+          const steps = args.include_undo_steps === false ? void 0 : t.steps().slice(-(args.max_undo_steps ?? 10)).reverse().map(({ item_ids, ...s }) => ({ ...s, ...undoReach({ ...s, item_ids }, live, t.serviceId, { reopenedAt: t.reopenedAt() }) }));
           let jobsFile = t.rendersJobsFile;
           if (!jobsFile) {
             const { defaultAerenderJobsFilePath: defaultAerenderJobsFilePath2 } = await Promise.resolve().then(() => (init_aerender(), aerender_exports));
@@ -7518,6 +7699,7 @@ var init_session = __esm({
             t.pendingUserChanged = null;
           }
           return {
+            tracking_enabled: true,
             live: {
               project_path: live.project_path,
               dirty: live.dirty,
@@ -7797,7 +7979,7 @@ var init_mutate = __esm({
                 customMismatches: afterRead.failure ? [afterRead.failure] : void 0
               });
               recordRunJsx({ op_id: opId, label: args.label, code: args.code, mutates: true, at: (/* @__PURE__ */ new Date()).toISOString() });
-              await noteAfterWrite(ctx, note);
+              await noteAfterWrite(ctx, note, { skipRead: !!afterRead.failure });
               return {
                 op_id: opId,
                 applied: true,
@@ -7887,7 +8069,7 @@ var init_mutate = __esm({
                 })
               );
               if (afterRead.failure) {
-                await noteAfterWrite(ctx, note);
+                await noteAfterWrite(ctx, note, { skipRead: true });
                 return {
                   op_id: opId,
                   applied: true,
@@ -8907,217 +9089,464 @@ var init_diagnostics = __esm({
   }
 });
 
-// src/tools/ext/animate.ts
-function rovingMismatches(roving, afterSnapshot) {
-  const want = Array.isArray(roving) ? roving : [];
-  const keys = afterSnapshot?.keyframes ?? [];
-  return want.filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true).map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+// src/transcript.ts
+function parseTimecode(s) {
+  const t = s.trim().replace(",", ".");
+  const parts = t.split(":");
+  if (parts.length > 3 || parts.some((p) => p === "" || !/^\d+(\.\d+)?$/.test(p))) {
+    throw new TranscriptError(`Bad timecode "${s}"`);
+  }
+  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
 }
-function clampInfluenceValue(influence) {
-  if (influence < 0.1) return 0.1;
-  if (influence > 100) return 100;
-  return influence;
-}
-function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot, skipKeys) {
-  if (!afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
-    return null;
-  }
-  const afterObj = afterSnapshot;
-  if (!Array.isArray(afterObj.keyframes)) {
-    return null;
-  }
-  const rawKeys = afterObj.keyframes;
-  const keySet = requestedKeys && requestedKeys.length > 0 ? new Set(requestedKeys) : null;
-  const skip = new Set(Array.isArray(skipKeys) ? skipKeys : []);
-  const targeted = (keySet ? rawKeys.filter(
-    (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
-  ) : rawKeys).filter((kf) => !(typeof kf.keyIndex === "number" && skip.has(kf.keyIndex)));
-  if (targeted.length === 0) {
-    return null;
-  }
-  if (ease === "hold" || ease === "linear") {
-    const expectedInterp = ease;
-    return {
-      expected: {
-        keyframes: targeted.map((kf) => ({
-          keyIndex: kf.keyIndex,
-          inInterp: expectedInterp,
-          outInterp: expectedInterp
-        }))
-      },
-      actual: {
-        keyframes: targeted.map((kf) => ({
-          keyIndex: kf.keyIndex,
-          inInterp: kf.inInterp,
-          outInterp: kf.outInterp
-        }))
-      }
-    };
-  }
-  const targetIn = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
-    speed: ease.in.speed,
-    influence: clampInfluenceValue(ease.in.influence)
-  };
-  const targetOut = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
-    speed: ease.out.speed,
-    influence: clampInfluenceValue(ease.out.influence)
-  };
-  return {
-    expected: {
-      keyframes: targeted.map((kf) => {
-        const dims = Array.isArray(kf.easeIn) && kf.easeIn.length > 0 ? kf.easeIn.length : 1;
-        return {
-          keyIndex: kf.keyIndex,
-          inInterp: "bezier",
-          outInterp: "bezier",
-          easeIn: Array.from({ length: dims }, () => ({ ...targetIn })),
-          easeOut: Array.from({ length: dims }, () => ({ ...targetOut }))
-        };
-      })
-    },
-    actual: {
-      keyframes: targeted.map((kf) => ({
-        keyIndex: kf.keyIndex,
-        inInterp: kf.inInterp,
-        outInterp: kf.outInterp,
-        easeIn: kf.easeIn,
-        easeOut: kf.easeOut
-      }))
+function parseCueBlocks(text, isVtt) {
+  const out = [];
+  const candidates = [];
+  let untagged = 0;
+  const blocks = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.split("\n").filter((l) => l.trim() !== "");
+    const arrow = lines.findIndex((l) => l.includes("-->"));
+    if (arrow < 0) continue;
+    const [a, rest] = lines[arrow].split("-->");
+    const b = rest.trim().split(/\s+/)[0];
+    const body = lines.slice(arrow + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+    if (!body) continue;
+    let speaker;
+    const voice = isVtt ? /<v(?:\.[^ >]+)?\s+([^>]+)>/.exec(lines.slice(arrow + 1).join("\n")) : null;
+    if (voice) speaker = voice[1].trim();
+    const seg = { text: body, start: parseTimecode(a), end: parseTimecode(b), ...speaker ? { speaker } : {} };
+    if (!voice) {
+      untagged++;
+      const m = SPEAKER_PREFIX.exec(body);
+      if (m) candidates.push({ seg, name: m[1].trim(), rest: m[2].trim() });
     }
-  };
-}
-function isCurveEase(ease) {
-  return typeof ease === "object" && ease !== null && "curve" in ease;
-}
-function asVector(v) {
-  if (typeof v === "number") return [v];
-  if (Array.isArray(v) && v.every((n) => typeof n === "number")) return v;
-  return null;
-}
-function pathLength(from, outTangent, inTangent, to) {
-  const dims = Math.min(from.length, to.length);
-  const p1 = from.slice(0, dims).map((v, d) => v + (outTangent?.[d] ?? 0));
-  const p2 = to.slice(0, dims).map((v, d) => v + (inTangent?.[d] ?? 0));
-  const steps = 200;
-  let length = 0;
-  let prev = from.slice(0, dims);
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const u = 1 - t;
-    const point = from.slice(0, dims).map(
-      (v, d) => u * u * u * v + 3 * u * u * t * p1[d] + 3 * u * t * t * p2[d] + t * t * t * to[d]
-    );
-    length += Math.hypot(...point.map((v, d) => v - prev[d]));
-    prev = point;
+    out.push(seg);
   }
-  return length;
-}
-function curveToSides(snapshot, keys, curve) {
-  const snap = snapshot;
-  if (!snap || !Array.isArray(snap.keyframes)) {
-    throw new Error("Could not read the property's keyframes");
-  }
-  const byIndex = new Map(snap.keyframes.map((k) => [k.keyIndex, k]));
-  const selected = (keys && keys.length > 0 ? [...new Set(keys)] : snap.keyframes.map((k) => k.keyIndex)).sort(
-    (a, b) => a - b
-  );
-  const segments = [];
-  for (let i = 0; i + 1 < selected.length; i++) {
-    if (selected[i + 1] === selected[i] + 1) segments.push([selected[i], selected[i + 1]]);
-  }
-  if (segments.length === 0) {
-    throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
-  }
-  const x1 = Math.min(1, Math.max(MIN_HANDLE2, curve[0]));
-  const x2 = Math.min(1 - MIN_HANDLE2, Math.max(0, curve[2]));
-  const y1 = curve[1];
-  const y2 = curve[3];
-  const warnings = [];
-  const sides = /* @__PURE__ */ new Map();
-  const sideFor = (key) => {
-    let s = sides.get(key);
-    if (!s) {
-      s = { key };
-      sides.set(key, s);
+  const counts = /* @__PURE__ */ new Map();
+  for (const c of candidates) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+  const mostlyPrefixed = candidates.length * 2 > untagged;
+  for (const c of candidates) {
+    if (isAllCaps(c.name) || mostlyPrefixed && (counts.get(c.name) ?? 0) >= 2) {
+      c.seg.speaker = c.name;
+      c.seg.text = c.rest;
     }
-    return s;
-  };
-  for (const [ai, bi] of segments) {
-    const a = byIndex.get(ai);
-    const b = byIndex.get(bi);
-    if (!a || !b) {
-      throw new Error(`Keyframe ${a ? bi : ai} was not read (the property has too many keys)`);
-    }
-    const duration = b.time - a.time;
-    if (!(duration > 0)) throw new Error(`Keys ${ai} and ${bi} share a time`);
-    const from = asVector(a.value);
-    const to = asVector(b.value);
-    if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
-    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
-    let distances;
-    if (snap.isSpatial) {
-      distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
-    } else if (dims === 1) {
-      distances = [to[0] - from[0]];
-    } else {
-      distances = Array.from({ length: dims }, (_, d) => (to[d] ?? 0) - (from[d] ?? 0));
-    }
-    const speeds = (factor) => distances.map((dist) => {
-      const speed = factor * dist / duration;
-      if (snap.isSpatial && speed < 0) {
-        warnings.push(`Keys ${ai}-${bi}: a spatial speed can't go negative, so the anticipation was dropped.`);
-        return 0;
-      }
-      return speed === 0 ? 0 : speed;
+  }
+  return out;
+}
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
+}
+function wordsFrom(list) {
+  const words = [];
+  for (const w of list) {
+    if (!w || typeof w !== "object") continue;
+    const o = w;
+    if (o.type !== void 0 && o.type !== "word") continue;
+    const text = String(o.text ?? o.word ?? "").trim();
+    const start = num(o.start);
+    const end = num(o.end);
+    if (!text || start === void 0 || end === void 0) continue;
+    const speaker = o.speaker_id ?? o.speaker;
+    words.push({ text, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
+  }
+  return words;
+}
+function segmentWords(words, gap = 0.8) {
+  const out = [];
+  let cur = [];
+  const flush = () => {
+    if (!cur.length) return;
+    out.push({
+      text: cur.map((w) => w.text).join(" "),
+      start: cur[0].start,
+      end: cur[cur.length - 1].end,
+      ...cur[0].speaker !== void 0 ? { speaker: cur[0].speaker } : {},
+      words: cur
     });
-    const outSpeeds = speeds(y1 / x1);
-    const inSpeeds = speeds((1 - y2) / (1 - x2));
-    sideFor(ai).out = outSpeeds.map((speed) => ({ speed, influence: x1 * 100 }));
-    sideFor(bi).in = inSpeeds.map((speed) => ({ speed, influence: (1 - x2) * 100 }));
-  }
-  return {
-    sides: [...sides.values()].sort((p, q) => p.key - q.key),
-    segments,
-    warnings: [...new Set(warnings)]
+    cur = [];
   };
+  for (const w of words) {
+    const prev = cur[cur.length - 1];
+    if (prev && (w.speaker !== prev.speaker || w.start - prev.end > gap)) flush();
+    cur.push(w);
+  }
+  flush();
+  return out;
 }
-function easeMatches(expected, actual) {
-  if (!actual) return false;
-  const speedTol = Math.max(1e-3, Math.abs(expected.speed) * 1e-3);
-  return Math.abs(expected.speed - actual.speed) <= speedTol && Math.abs(clampInfluenceValue(expected.influence) - actual.influence) <= 0.01;
+function parseJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new TranscriptError(`Transcript is not valid JSON: ${err.message}`);
+  }
+  const obj = data;
+  if (Array.isArray(data)) {
+    const segs = [];
+    for (const s of data) {
+      const o = s;
+      const start = num(o?.start);
+      const end = num(o?.end);
+      const t = String(o?.text ?? o?.word ?? "").trim();
+      if (t && start !== void 0 && end !== void 0) {
+        const speaker = o.speaker ?? o.speaker_id;
+        segs.push({ text: t, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
+      }
+    }
+    return segs;
+  }
+  if (Array.isArray(obj?.segments)) {
+    return obj.segments.flatMap((s) => {
+      const o = s;
+      const start = num(o?.start);
+      const end = num(o?.end);
+      if (start === void 0 || end === void 0) return [];
+      const words = Array.isArray(o.words) ? wordsFrom(o.words) : void 0;
+      const speaker = o.speaker ?? o.speaker_id;
+      return [
+        {
+          text: String(o.text ?? "").trim(),
+          start,
+          end,
+          ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {},
+          ...words && words.length ? { words } : {}
+        }
+      ];
+    });
+  }
+  if (Array.isArray(obj?.words)) return segmentWords(wordsFrom(obj.words));
+  throw new TranscriptError("JSON transcript needs `words`, `segments`, or an array of {text, start, end}");
 }
-function curveEaseMismatches(sides, afterSnapshot) {
-  const snap = afterSnapshot;
-  const mismatches = [];
-  const byIndex = new Map((snap?.keyframes ?? []).map((k) => [k.keyIndex, k]));
-  for (const side of sides) {
-    const kf = byIndex.get(side.key);
-    for (const which of ["in", "out"]) {
-      const expected = side[which];
-      if (!expected) continue;
-      const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
-      const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path32 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
-      const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
-      if (!ok) {
-        mismatches.push({
-          path: path32,
-          expected: { interp: "bezier", ease: expected },
-          actual: { interp, ease: actualList },
-          message: `Expected ${path32} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
-        });
+function detectFormat(text, hint) {
+  const h = (hint ?? "").toLowerCase();
+  if (h.endsWith("srt")) return "srt";
+  if (h.endsWith("vtt")) return "vtt";
+  if (h.endsWith("json")) return "json";
+  const t = text.trimStart();
+  if (t.startsWith("{") || t.startsWith("[")) return "json";
+  if (t.startsWith("WEBVTT")) return "vtt";
+  return "srt";
+}
+function parseTranscript(text, format) {
+  const f = format ?? detectFormat(text);
+  const segs = f === "json" ? parseJson(text) : parseCueBlocks(text, f === "vtt");
+  if (!segs.length) throw new TranscriptError(`No timed lines found in the ${f.toUpperCase()} transcript`);
+  return segs.sort((a, b) => a.start - b.start);
+}
+function sentencesOf(seg) {
+  if (seg.words && seg.words.length) {
+    const out = [];
+    let cur = [];
+    for (const w of seg.words) {
+      cur.push(w);
+      if (/[.!?…]["')\]]?$/.test(w.text)) {
+        out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: w.end, speaker: seg.speaker });
+        cur = [];
+      }
+    }
+    if (cur.length) out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: cur[cur.length - 1].end, speaker: seg.speaker });
+    return out;
+  }
+  const parts = seg.text.match(/[^.!?…]+[.!?…]+["')\]]?|[^.!?…]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [seg.text];
+  const total = parts.reduce((n, p) => n + p.length, 0) || 1;
+  const span = seg.end - seg.start;
+  let t = seg.start;
+  return parts.map((p) => {
+    const d = span * p.length / total;
+    const s = { text: p, start: t, end: t + d, speaker: seg.speaker };
+    t += d;
+    return s;
+  });
+}
+function wordsOf(seg) {
+  if (seg.words && seg.words.length) return seg.words.map((w) => ({ text: w.text, start: w.start, end: w.end, speaker: w.speaker ?? seg.speaker }));
+  const words = seg.text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((n, w) => n + w.length, 0) || 1;
+  const span = seg.end - seg.start;
+  let t = seg.start;
+  return words.map((w) => {
+    const d = span * w.length / total;
+    const s = { text: w, start: t, end: t + d, speaker: seg.speaker };
+    t += d;
+    return s;
+  });
+}
+function transcriptCues(segments, opts = {}) {
+  const unit = opts.unit ?? "segment";
+  const pieces = segments.flatMap((s) => {
+    if (unit === "word") return wordsOf(s);
+    if (unit === "sentence") return sentencesOf(s);
+    return [s];
+  });
+  const speakers = [];
+  const maxChars = opts.max_chars ?? 2e3;
+  return pieces.map((p) => {
+    const cue = {
+      time: round3(p.start + (opts.offset ?? 0)),
+      duration: round3(Math.max(0, p.end - p.start)),
+      comment: p.text.length > maxChars ? p.text.slice(0, maxChars) + "\u2026" : p.text
+    };
+    if (p.speaker !== void 0) {
+      cue.speaker = p.speaker;
+      if (opts.speaker_labels !== false) {
+        let i = speakers.indexOf(p.speaker);
+        if (i < 0) i = speakers.push(p.speaker) - 1;
+        cue.label = i % 16 + 1;
+      }
+    }
+    return cue;
+  });
+}
+function timedWords(seg) {
+  const estimated = !(seg.words && seg.words.length);
+  const raw = wordsOf(seg).map((w) => ({
+    text: w.text,
+    start: w.start,
+    end: w.end,
+    ...w.speaker !== void 0 ? { speaker: w.speaker } : {}
+  }));
+  const out = [];
+  for (const w of raw) {
+    const parts = w.text.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) {
+      if (parts.length === 1) out.push({ ...w, text: parts[0] });
+      continue;
+    }
+    const total = parts.reduce((n, p) => n + p.length, 0) || 1;
+    let t = w.start;
+    for (const p of parts) {
+      const d = (w.end - w.start) * p.length / total;
+      out.push({ ...w, text: p, start: t, end: t + d });
+      t += d;
+    }
+  }
+  return { words: out, estimated };
+}
+function greedyLineCount(lengths, maxChars) {
+  let lines = 0;
+  let len = 0;
+  for (const n of lengths) {
+    if (lines === 0) {
+      lines = 1;
+      len = n;
+    } else if (len + 1 + n <= maxChars) {
+      len += 1 + n;
+    } else {
+      lines++;
+      len = n;
+    }
+  }
+  return lines;
+}
+function greedyLines(words, maxChars) {
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if (!cur) cur = w;
+    else if (cur.length + 1 + w.length <= maxChars) cur += " " + w;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function breakLines(words, maxChars) {
+  if (!words.length) return [];
+  const lens = words.map((w) => w.length);
+  const n = greedyLineCount(lens, maxChars);
+  if (n <= 1) return [words.join(" ")];
+  const lineLen = (i, j2) => lens.slice(i, j2).reduce((a, b) => a + b, 0) + (j2 - i - 1);
+  const cost = (i, j2) => {
+    const len = lineLen(i, j2);
+    if (len > maxChars) return j2 - i === 1 ? (len - maxChars) ** 2 : Infinity;
+    return (maxChars - len) ** 2;
+  };
+  const best = Array.from({ length: n + 1 }, () => new Array(words.length + 1).fill(Infinity));
+  const from = Array.from({ length: n + 1 }, () => new Array(words.length + 1).fill(0));
+  best[0][0] = 0;
+  for (let k = 1; k <= n; k++) {
+    for (let j2 = k; j2 <= words.length; j2++) {
+      for (let i = k - 1; i < j2; i++) {
+        const c = best[k - 1][i] + cost(i, j2);
+        if (c < best[k][j2]) {
+          best[k][j2] = c;
+          from[k][j2] = i;
+        }
       }
     }
   }
-  return mismatches;
+  if (!Number.isFinite(best[n][words.length])) return greedyLines(words, maxChars);
+  const lines = [];
+  let j = words.length;
+  for (let k = n; k >= 1; k--) {
+    const i = from[k][j];
+    lines.unshift(words.slice(i, j).join(" "));
+    j = i;
+  }
+  return lines;
 }
-function hasAnyStyleField(style) {
-  if (!style) return false;
-  return style.font !== void 0 || style.fontSize !== void 0 || style.tracking !== void 0 || style.leading !== void 0 || style.fillColor !== void 0 || style.strokeColor !== void 0 || style.strokeWidth !== void 0 || style.applyFill !== void 0 || style.applyStroke !== void 0 || style.justification !== void 0;
+function buildCaptions(segments, opts = {}) {
+  const maxChars = opts.max_chars_per_line ?? 32;
+  const maxLines = opts.max_lines ?? 2;
+  const minDur = opts.min_duration ?? 1;
+  const maxDur = opts.max_duration ?? 6;
+  const linger = opts.linger ?? 0.25;
+  const pause = opts.pause_break ?? 0.7;
+  const offset = opts.offset ?? 0;
+  const fps = opts.frame_rate;
+  const frame = fps ? 1 / fps : 1e-3;
+  const warnings = [];
+  let estimated = false;
+  const all = [];
+  const cueStarts = /* @__PURE__ */ new Set();
+  for (const seg of segments) {
+    const t = timedWords(seg);
+    if (t.estimated && t.words.length) {
+      estimated = true;
+      cueStarts.add(t.words[0]);
+    }
+    all.push(...t.words);
+  }
+  if (!all.length) throw new TranscriptError("The transcript has no words to caption");
+  const groups = [];
+  let cur = [];
+  const chars = (ws) => ws.reduce((n, w) => n + w.text.length, 0) + Math.max(0, ws.length - 1);
+  for (const w of all) {
+    const prev = cur[cur.length - 1];
+    let split = false;
+    if (prev) {
+      const next = [...cur, w];
+      if (w.speaker !== prev.speaker || cueStarts.has(w)) split = true;
+      else if (w.start - prev.end > pause) split = true;
+      else if (w.end - cur[0].start > maxDur) split = true;
+      else if (greedyLineCount(next.map((x) => x.text.length), maxChars) > maxLines) split = true;
+      else if (SENTENCE_END.test(prev.text) && chars(cur) >= maxChars * 0.4) split = true;
+    }
+    if (split) {
+      groups.push(cur);
+      cur = [];
+    }
+    cur.push(w);
+  }
+  if (cur.length) groups.push(cur);
+  const captions = groups.map((g, i) => {
+    const nextStart = i + 1 < groups.length ? groups[i + 1][0].start : Infinity;
+    const lastEnd = g[g.length - 1].end;
+    let end = Math.max(lastEnd + linger, g[0].start + minDur);
+    end = Math.min(end, nextStart);
+    if (end < lastEnd) end = Math.min(lastEnd, nextStart);
+    const cap2 = {
+      start: g[0].start + offset,
+      end: end + offset,
+      lines: breakLines(
+        g.map((w) => w.text),
+        maxChars
+      ),
+      words: g.map((w) => ({ text: w.text, start: w.start + offset, end: w.end + offset }))
+    };
+    if (g[0].speaker !== void 0) cap2.speaker = g[0].speaker;
+    return cap2;
+  });
+  for (let i = 0; i < captions.length; i++) {
+    const c = captions[i];
+    c.start = snap(c.start, fps);
+    c.end = snap(c.end, fps);
+    if (i > 0 && c.start < captions[i - 1].end) captions[i - 1].end = Math.max(captions[i - 1].start + frame, c.start);
+    if (c.end < c.start + frame) c.end = snap(c.start + frame, fps);
+    let t = c.start;
+    for (const w of c.words) {
+      w.start = Math.max(snap(w.start, fps), t);
+      w.end = Math.max(snap(w.end, fps), w.start);
+      t = w.start + (fps ? frame : 0);
+    }
+    const lastStart = c.words[c.words.length - 1].start;
+    if (c.end <= lastStart) c.end = snap(lastStart + frame, fps);
+  }
+  for (let i = 0; i + 1 < captions.length; i++) {
+    if (captions[i].end > captions[i + 1].start) captions[i].end = Math.max(captions[i].start + frame, captions[i + 1].start);
+  }
+  if (estimated) {
+    warnings.push("Some word times are estimates (SRT and VTT carry line times only): the word highlight follows character share, not the voice. A JSON transcript with word times is exact.");
+  }
+  const fast = captions.filter((c) => c.lines.join(" ").length / Math.max(c.end - c.start, 1e-3) > 21).length;
+  if (fast) warnings.push(`${fast} caption${fast === 1 ? " is" : "s are"} faster than 21 characters per second; raise max_lines or max_chars_per_line, or lower max_duration.`);
+  const wide = captions.filter((c) => c.lines.some((l) => l.length > maxChars)).length;
+  if (wide) warnings.push(`${wide} caption${wide === 1 ? " has" : "s have"} a single word longer than max_chars_per_line.`);
+  return { captions, estimated_word_times: estimated, warnings };
 }
-var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, TextStyleSchema, AeSetTextSchema, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
-var init_animate = __esm({
-  "src/tools/ext/animate.ts"() {
+var TranscriptError, round3, SPEAKER_PREFIX, isAllCaps, SENTENCE_END, snap;
+var init_transcript = __esm({
+  "src/transcript.ts"() {
+    "use strict";
+    TranscriptError = class extends Error {
+    };
+    round3 = (x) => Math.round(x * 1e3) / 1e3;
+    SPEAKER_PREFIX = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s;
+    isAllCaps = (name) => /[A-Z]/.test(name) && name === name.toUpperCase();
+    SENTENCE_END = /[.!?…]["')\]]?$/;
+    snap = (t, fps) => fps ? Math.round(t * fps) / fps : round3(t);
+  }
+});
+
+// src/tools/ext/reframe.ts
+function parseAspect(aspect) {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)\s*$/i.exec(aspect);
+  if (!m) return void 0;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  return w > 0 && h > 0 ? w / h : void 0;
+}
+function even(n) {
+  return Math.max(4, Math.round(n / 2) * 2);
+}
+function sizeForAspect(srcW, srcH, ratio) {
+  const short2 = Math.min(srcW, srcH);
+  if (ratio >= 1) return { width: even(short2 * ratio), height: even(short2) };
+  return { width: even(short2), height: even(short2 / ratio) };
+}
+function aspectName(w, h) {
+  const r = w / h;
+  return Object.keys(DEFAULT_MARGINS).find((k) => Math.abs(parseAspect(k) - r) / r < 0.01);
+}
+function marginsFor(w, h, override) {
+  const base = DEFAULT_MARGINS[aspectName(w, h) ?? ""] ?? FALLBACK_MARGINS;
+  return { ...base, ...override ?? {} };
+}
+function planTargets(args, srcW, srcH, srcName) {
+  const problems = [];
+  const targets = args.targets.map((t) => {
+    const ratio = parseAspect(t.aspect);
+    let size;
+    if (t.width && t.height) {
+      size = { width: t.width, height: t.height };
+    } else if (ratio === void 0) {
+      problems.push(`"${t.aspect}" is not an aspect like 9:16`);
+      size = { width: srcW, height: srcH };
+    } else if (t.width) {
+      size = { width: t.width, height: even(t.width / ratio) };
+    } else if (t.height) {
+      size = { width: even(t.height * ratio), height: t.height };
+    } else {
+      size = sizeForAspect(srcW, srcH, ratio);
+    }
+    if (size.width < MIN_SIZE || size.height < MIN_SIZE || size.width > MAX_SIZE || size.height > MAX_SIZE) {
+      problems.push(`"${t.aspect}" gives ${size.width}x${size.height}; a comp must be ${MIN_SIZE} to ${MAX_SIZE} pixels on each side (give width and height)`);
+    }
+    return {
+      aspect: t.aspect,
+      name: t.name ?? `${srcName} ${size.width}x${size.height}`,
+      width: size.width,
+      height: size.height,
+      margins: marginsFor(size.width, size.height, t.margins)
+    };
+  });
+  return { targets, problems };
+}
+var DEFAULT_MARGINS, FALLBACK_MARGINS, MIN_SIZE, MAX_SIZE, MarginsSchema, AeReframeSchema, reframeTools;
+var init_reframe = __esm({
+  "src/tools/ext/reframe.ts"() {
     "use strict";
     init_zod();
     init_host();
@@ -9127,549 +9556,2721 @@ var init_animate = __esm({
     init_common();
     init_mutate();
     init_read_back();
-    KeyframeEaseEndSchema = external_exports.object({
-      speed: external_exports.number().describe(
-        "Temporal ease speed (units per second; typically 0 for smooth ease)."
-      ),
-      influence: external_exports.number().min(0).max(100).describe(
-        "Temporal ease influence percentage (0.1 to 100; values below 0.1 are clamped to 0.1 in After Effects)."
-      )
+    DEFAULT_MARGINS = {
+      "16:9": { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 },
+      "1:1": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
+      "4:5": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
+      "9:16": { top: 0.12, bottom: 0.2, left: 0.06, right: 0.06 }
+    };
+    FALLBACK_MARGINS = { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 };
+    MIN_SIZE = 4;
+    MAX_SIZE = 3e4;
+    MarginsSchema = external_exports.object({
+      top: external_exports.number().min(0).max(0.45).optional(),
+      bottom: external_exports.number().min(0).max(0.45).optional(),
+      left: external_exports.number().min(0).max(0.45).optional(),
+      right: external_exports.number().min(0).max(0.45).optional()
+    }).describe("Safe margins as fractions of the frame, e.g. { bottom: 0.25 } for a platform with a tall caption area.");
+    AeReframeSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The approved comp to reframe."),
+      targets: external_exports.array(
+        external_exports.object({
+          aspect: external_exports.string().min(3).describe("'16:9', '1:1', '4:5', '9:16', or any 'w:h'."),
+          width: external_exports.number().int().min(4).max(3e4).optional().describe("Exact size instead of keeping the source's short side."),
+          height: external_exports.number().int().min(4).max(3e4).optional(),
+          name: external_exports.string().min(1).max(200).optional().describe("Default '<comp> <w>x<h>'."),
+          margins: MarginsSchema.optional()
+        })
+      ).min(1).max(6),
+      source_margins: MarginsSchema.optional().describe("The source comp's safe margins, if not the defaults for its aspect."),
+      shrink: external_exports.boolean().optional().describe("Shrink a pinned layer that no longer fits the safe area. Default true."),
+      guide: external_exports.boolean().optional().describe("Add a guide layer (not rendered) outlining the safe area. Default true."),
+      expect: ExpectSchema
     });
-    KeyframeEasePairSchema = external_exports.object({
-      in: KeyframeEaseEndSchema.describe(
-        "Incoming temporal ease {speed, influence}."
-      ),
-      out: KeyframeEaseEndSchema.describe(
-        "Outgoing temporal ease {speed, influence}."
-      )
+    reframeTools = [
+      {
+        name: "ae_reframe",
+        description: "Social cut-downs: copy a comp to other aspects (16:9, 1:1, 4:5, 9:16, or any w:h; the source's short side is kept, so 1920x1080 gives 1080x1920) and re-lay out its top-level layers. Backgrounds (footage, solids, adjustment and shape layers covering the frame) are scaled to cover the new frame. Everything else, controller nulls included, is pinned to the nearest edge or centre of the safe area, keeping its margin, and shrunk if it no longer fits; keys move with it; children follow their parent. 3D layers, cameras and lights move with the frame's centre. Precomps are treated like any other layer (shrunk to fit), so reframe inside them if they need their own layout. Default safe margins: 5% on 16:9, 6% on 1:1 and 4:5, and on 9:16 12% top, 20% bottom, 6% sides for platform UI; override with `margins` (a brief's platform numbers win). A guide layer outlines the safe area. One undo group for every size, guarded by `expect`, with an auto checkpoint. The layout is read back in a separate evalScript: `outside_safe` lists layers still past the safe area. Look at each new comp (ae_contact_sheet) before calling it done. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeReframeSchema,
+        handler: async (args, ctx) => {
+          const src = await ctx.bridge.evalRaw({
+            id: `${ctx.bridge.newOpId()}_reframe_src`,
+            script: buildJsxCall("getComp", { comp_id: args.comp_id }),
+            label: "ae_reframe (source)",
+            mutates: false,
+            toolName: "ae_reframe"
+          });
+          const { width: srcW, height: srcH, name: srcName } = src.result;
+          const { targets, problems } = planTargets(args, srcW, srcH, srcName);
+          if (problems.length > 0) return { ok: false, error: "bad_args", problems };
+          ctx.quarantine.assertClear();
+          const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+          const opId = ctx.bridge.newOpId();
+          const projectSnapshot = (suffix) => ctx.bridge.evalRaw({
+            id: `${opId}_${suffix}`,
+            script: buildJsxCall("snapshotForReceipt", {}),
+            label: `ae_reframe (${suffix} snapshot)`,
+            mutates: false,
+            toolName: "ae_reframe"
+          });
+          try {
+            return await ctx.queue.run("ae_reframe", async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_reframe");
+              const before = await projectSnapshot("before");
+              const write = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("reframeComp", {
+                  expect,
+                  comp_id: args.comp_id,
+                  targets,
+                  source_margins: marginsFor(srcW, srcH, args.source_margins),
+                  shrink: args.shrink !== false,
+                  guide: args.guide !== false
+                }),
+                label: `ae_reframe(${targets.map((t) => t.aspect).join(", ")})`,
+                mutates: true,
+                toolName: "ae_reframe"
+              });
+              const made = write.result.comps;
+              const afterRead = await readAfterWrite(opId, () => projectSnapshot("after"));
+              const reportRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_report`,
+                  script: buildJsxCall("reframeReport", { comps: made.map((m) => ({ comp_id: m.comp_id, safe: m.safe })) }),
+                  label: "ae_reframe (read back)",
+                  mutates: false,
+                  toolName: "ae_reframe"
+                })
+              );
+              const after = afterRead.value;
+              const reportComps = reportRead.value?.result?.comps ?? [];
+              const mismatches = [];
+              const readFailure = afterRead.failure ?? reportRead.failure;
+              if (readFailure) mismatches.push(readFailure);
+              reportComps.forEach((r, i) => {
+                const t = targets[i];
+                if (r.width !== t.width || r.height !== t.height) {
+                  mismatches.push({ path: `${t.name}.size`, expected: [t.width, t.height], actual: [r.width, r.height], message: `${t.name} is not ${t.width}x${t.height}` });
+                }
+              });
+              return {
+                ok: true,
+                op_id: opId,
+                applied: true,
+                source: write.result.source,
+                comps: made.map((m, i) => ({
+                  ...m,
+                  aspect: targets[i].aspect,
+                  margins: targets[i].margins,
+                  // null: the layout couldn't be read back, so it is unchecked (not clean).
+                  outside_safe: reportRead.failure ? null : reportComps[i]?.outside_safe ?? []
+                })),
+                next: "Check each new comp with ae_contact_sheet; nudge anything in outside_safe with ae_set_property.",
+                checkpoint,
+                receipt: buildReceipt({ before: before.result, after: after?.result ?? null, customMismatches: mismatches })
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+            }
+            throw err;
+          }
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/write-runner.ts
+async function runGuardedWrite(ctx, spec) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const expect = {
+    project_path: spec.expect.project_path,
+    comp_id: spec.expect.comp_id ?? spec.compId
+  };
+  const read = async (phase, written, before) => {
+    const call2 = spec.read?.(phase, written, before);
+    if (!call2) return null;
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_${phase}`,
+      script: buildJsxCall(call2.host, call2.args),
+      label: `${spec.label} (${phase})`,
+      mutates: false,
+      toolName: spec.toolName
     });
-    KeyframeEasePresetSchema = external_exports.enum([
-      "easy_ease",
-      "linear",
-      "hold"
-    ]);
-    MIN_HANDLE2 = 1e-3;
-    EASE_CURVE_ARRAY_SCHEMA = external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= MIN_HANDLE2 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE2, {
-      message: `curve x1 must be within ${MIN_HANDLE2}..1 and x2 within 0..${1 - MIN_HANDLE2}`
-    }).describe(
-      "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
+    return res.result ?? null;
+  };
+  try {
+    return await ctx.queue.run(spec.label, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, expect, opId);
+      const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
+      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
+      const sessionFields = await noteBeforeWrite(ctx, note);
+      const before = await read("before");
+      beginInflight(note);
+      let write;
+      try {
+        write = await ctx.bridge.evalRaw({
+          id: opId,
+          script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
+          label: spec.label,
+          mutates: true,
+          toolName: spec.toolName
+        });
+      } finally {
+        endInflight(opId);
+      }
+      const written = write.result ?? {};
+      let after = null;
+      let readBackFailure = null;
+      try {
+        after = await read("after", written, before);
+      } catch (err) {
+        readBackFailure = readBackMismatch(opId, "the read-back failed", err);
+      }
+      let custom2 = [];
+      let shown = written;
+      if (!readBackFailure) {
+        try {
+          custom2 = spec.check?.(before, after, written) ?? [];
+          shown = spec.present?.(before, after, written) ?? written;
+        } catch (err) {
+          custom2 = [readBackMismatch(opId, "checking the read-back failed", err)];
+          shown = written;
+        }
+      } else {
+        custom2 = [readBackFailure];
+      }
+      const receipt = buildReceipt({ before, after, customMismatches: custom2 });
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure });
+      return {
+        op_id: opId,
+        applied: true,
+        ...shown,
+        checkpoint,
+        receipt,
+        ...sessionFields
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+function expectThat(mismatches, ok, path35, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path35, expected, actual, message });
+}
+var init_write_runner = __esm({
+  "src/tools/ext/write-runner.ts"() {
+    "use strict";
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_mutate();
+    init_read_back();
+    init_session();
+  }
+});
+
+// src/tools/ext/captions.ts
+function segmentsFromTranscript(t) {
+  let text = t.text;
+  if (t.path !== void 0) {
+    if (!path13.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    let stat;
+    try {
+      stat = fs12.statSync(t.path);
+    } catch {
+      throw new TranscriptError(`No transcript at ${t.path}`);
+    }
+    if (stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
+    text = fs12.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+  }
+  const segs = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
+  const from = t.from_s ?? 0;
+  const to = t.to_s ?? Infinity;
+  const kept = segs.filter((s) => s.start >= from && s.start < to);
+  if (!kept.length) throw new TranscriptError(`No transcript segment starts between ${from} s and ${to} s`);
+  return kept;
+}
+function planCaptions(args) {
+  const plan2 = buildCaptions(segmentsFromTranscript(args.transcript), {
+    max_chars_per_line: args.max_chars_per_line,
+    max_lines: args.max_lines,
+    min_duration: args.min_duration,
+    max_duration: args.max_duration,
+    linger: args.linger,
+    pause_break: args.pause_break,
+    offset: args.transcript.offset,
+    frame_rate: args.frame_rate
+  });
+  const early = plan2.captions.findIndex((c) => !(c.start >= 0));
+  if (early >= 0) throw new TranscriptError(`Caption ${early + 1} would start before 0 s (at ${plan2.captions[early].start} s); use a smaller negative offset or trim the transcript`);
+  if (plan2.captions.length > MAX_CAPTIONS) {
+    throw new TranscriptError(
+      `${plan2.captions.length} captions; at most ${MAX_CAPTIONS} per call. Caption the transcript in parts with from_s/to_s and first_number.`
     );
-    KeyframeEaseCurveSchema = external_exports.object({
-      curve: EASE_CURVE_ARRAY_SCHEMA
+  }
+  return plan2;
+}
+function expectedSingleKeys(captions, timings) {
+  const keys = [];
+  captions.forEach((c, i) => {
+    const [start, end] = timings[i] ?? [c.start, c.end];
+    keys.push({ time: start, text: c.lines.join("\r") });
+    const next = timings[i + 1];
+    if (!next || next[0] > end + 1e-6) keys.push({ time: end, text: "" });
+  });
+  return keys;
+}
+function captionsMismatches(args, removeStale, captions, afterRaw, written) {
+  const m = [];
+  const after = readOf(afterRaw);
+  if (!after) return m;
+  const mode = args.mode ?? "layers";
+  const first = args.first_number ?? 1;
+  const timings = written.timings ?? [];
+  const tol = after.frameDuration * 1.01 + 1e-6;
+  const made = new Set(written.created ?? []);
+  const wantJust = args.style?.justification ?? "center";
+  const capped3 = after.truncated || after.total_captions > after.captions.length;
+  if (mode === "layers") {
+    captions.forEach((c, i) => {
+      const entry = after.captions.find((e) => e.number === first + i);
+      if (!entry) {
+        if (!capped3) m.push({ path: `captions[${first + i}]`, expected: c.lines.join("\n"), actual: void 0, message: "The caption layer is not in the read-back" });
+        return;
+      }
+      const want = c.lines.join("\n");
+      expectThat(m, entry.text !== void 0 && norm(entry.text) === want, `captions[${entry.number}].text`, want, entry.text === void 0 ? void 0 : norm(entry.text), "Caption text differs");
+      const t = timings[i];
+      if (t) {
+        expectThat(m, Math.abs(entry.inPoint - t[0]) <= tol, `captions[${entry.number}].inPoint`, t[0], entry.inPoint, "Caption starts at another time");
+        expectThat(m, Math.abs(entry.outPoint - t[1]) <= tol, `captions[${entry.number}].outPoint`, t[1], entry.outPoint, "Caption ends at another time");
+      }
+      if (made.has(entry.name) && entry.justification !== void 0) {
+        expectThat(m, entry.justification === wantJust, `captions[${entry.number}].justification`, wantJust, entry.justification, "Justification did not stick");
+      }
     });
-    KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema]).describe(
-      'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment\'s first key and the in ease of its last, from that segment\'s duration and distance, and leaves every other side alone.'
+    if (removeStale && !capped3) {
+      const last = first + captions.length - 1;
+      const left = after.captions.filter((e) => e.number > last).map((e) => e.name);
+      if (after.beyond_count !== void 0) {
+        expectThat(m, left.length === 0 && after.beyond_count === 0, "stale", [], left.length ? left : `${after.beyond_count} caption layer(s)`, "Caption layers past the new captions are still there");
+      } else {
+        expectThat(m, left.length === 0, "stale", [], left, "Caption layers past the new captions are still there");
+      }
+    }
+    if (args.highlight && !capped3) {
+      const keyed = after.captions.filter((e) => e.number >= first && e.number < first + captions.length).reduce((n, e) => n + (e.highlight?.start_keys ?? 0), 0);
+      expectThat(m, written.highlight_keys === void 0 || keyed === written.highlight_keys, "highlight.keys", written.highlight_keys, keyed, "The highlight's word keys differ from what was written");
+      const bare = after.captions.filter((e) => e.number >= first && e.number < first + captions.length && !e.highlight?.present).map((e) => e.name);
+      expectThat(m, bare.length === 0, "highlight.present", [], bare, "Caption layers without the highlight animator");
+    }
+    if (!args.highlight && !capped3) {
+      const kept = after.captions.filter((e) => e.number >= first && e.number < first + captions.length && e.highlight?.present).map((e) => e.name);
+      expectThat(m, kept.length === 0, "highlight.stale", [], kept, "Caption layers still carry a Caption Highlight animator from an earlier run");
+    }
+    if (args.box && !capped3) {
+      const have = new Set(after.boxes.map((b) => b.number));
+      const missing = captions.map((_c, i) => first + i).filter((n) => !have.has(n));
+      expectThat(m, missing.length === 0 || after.truncated, "boxes", [], missing, "Caption boxes missing");
+    }
+  } else {
+    const entry = after.captions[0];
+    if (!entry) {
+      m.push({ path: "caption", expected: "one hold-keyed layer", actual: void 0, message: "The caption layer is not in the read-back" });
+      return m;
+    }
+    const want = expectedSingleKeys(captions, timings.length === captions.length ? timings : captions.map((c) => [c.start, c.end]));
+    if (!entry.truncated_keys) {
+      expectThat(m, entry.numKeys === want.length, "caption.numKeys", want.length, entry.numKeys, "Source Text key count differs");
+      const got = entry.keys ?? [];
+      for (let i = 0; i < Math.min(want.length, got.length); i++) {
+        const okText = norm(got[i].text) === norm(want[i].text);
+        const okTime = Math.abs(got[i].time - want[i].time) <= tol;
+        if (!okText || !okTime) {
+          m.push({ path: `caption.keys[${i}]`, expected: want[i], actual: got[i], message: "A Source Text key differs" });
+          break;
+        }
+      }
+    }
+    if (entry.inPoint !== void 0 && timings.length) {
+      expectThat(m, Math.abs(entry.inPoint - timings[0][0]) <= tol, "caption.inPoint", timings[0][0], entry.inPoint, "Layer starts at another time");
+      expectThat(m, Math.abs(entry.outPoint - timings[timings.length - 1][1]) <= tol, "caption.outPoint", timings[timings.length - 1][1], entry.outPoint, "Layer ends at another time");
+    }
+    if (args.highlight) {
+      expectThat(m, entry.highlight?.present === true, "highlight.present", true, entry.highlight?.present, "The highlight animator is missing");
+      expectThat(m, written.highlight_keys === void 0 || entry.highlight?.start_keys === written.highlight_keys, "highlight.keys", written.highlight_keys, entry.highlight?.start_keys, "The highlight's word keys differ from what was written");
+    }
+    if (args.box) expectThat(m, after.boxes.length >= 1, "boxes", 1, after.boxes.length, "The caption box is missing");
+  }
+  for (const b of after.boxes) {
+    if (b.expression_errors.length) m.push({ path: `boxes[${b.number}].expression`, expected: "no expression error", actual: b.expression_errors, message: `The box "${b.name}" has an expression error` });
+  }
+  return m;
+}
+var fs12, path13, MAX_TRANSCRIPT_BYTES, MAX_CAPTIONS, Color, CaptionTranscriptSchema, BreakFields, MarginsSchema2, StyleSchema, LayoutSchema, HighlightSchema, BoxSchema, NameFields, AeCaptionsPlanSchema, AeCaptionsSchema, AeCaptionsReadSchema, previewOf, readOf, norm, readArgsFor, badTranscript, captionsTools;
+var init_captions = __esm({
+  "src/tools/ext/captions.ts"() {
+    "use strict";
+    fs12 = __toESM(require("node:fs"), 1);
+    path13 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_transcript();
+    init_common();
+    init_reframe();
+    init_write_runner();
+    MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
+    MAX_CAPTIONS = 500;
+    Color = external_exports.array(external_exports.number().min(0).max(1)).length(3);
+    CaptionTranscriptSchema = external_exports.object({
+      path: external_exports.string().min(1).optional().describe("Absolute path of a .srt, .vtt or .json transcript."),
+      text: external_exports.string().max(MAX_TRANSCRIPT_BYTES).optional().describe("The transcript itself, instead of a path."),
+      format: external_exports.enum(["srt", "vtt", "json"]).optional().describe("Default: from the file extension or the content."),
+      offset: external_exports.number().finite().optional().describe("Seconds added to every transcript time (the captions must not start before 0)."),
+      from_s: external_exports.number().min(0).optional().describe("Only the transcript segments that start at or after this many seconds (before offset). For a long transcript in several calls."),
+      to_s: external_exports.number().min(0).optional().describe("Only the transcript segments that start before this many seconds (before offset).")
+    }).refine((t) => t.path === void 0 !== (t.text === void 0), { message: "Give the transcript's path or its text, not both." });
+    BreakFields = {
+      max_chars_per_line: external_exports.number().int().min(8).max(80).optional().describe("Characters per line, default 32 (about 20 suits 9:16). Counted, not measured: a proportional font can run wider, which ae_captions_read reports."),
+      max_lines: external_exports.number().int().min(1).max(4).optional().describe("Lines per caption, default 2. A caption is split when its words would need more."),
+      min_duration: external_exports.number().min(0.1).max(5).optional().describe("Seconds a caption stays up at least (up to the next caption), default 1."),
+      max_duration: external_exports.number().min(1).max(15).optional().describe("A caption is split when it would run longer than this, default 6."),
+      linger: external_exports.number().min(0).max(2).optional().describe("Seconds a caption stays after its last word (up to the next caption), default 0.25."),
+      pause_break: external_exports.number().min(0.1).max(5).optional().describe("A pause between words longer than this starts a new caption, default 0.7.")
+    };
+    MarginsSchema2 = external_exports.object({
+      top: external_exports.number().min(0).max(0.45).optional(),
+      bottom: external_exports.number().min(0).max(0.45).optional(),
+      left: external_exports.number().min(0).max(0.45).optional(),
+      right: external_exports.number().min(0).max(0.45).optional()
+    }).describe("Safe-area margins as fractions of the frame. Default: ae_reframe's for the comp's aspect (9:16 keeps the bottom 20% free for the platform's own UI).");
+    StyleSchema = external_exports.object({
+      font: external_exports.string().min(1).max(200).optional().describe("PostScript font name, as ae_fonts lists it. A name AE doesn't have is substituted silently; the read-back says so."),
+      font_size: external_exports.number().min(1).max(1296).optional().describe("Pixels. Default 6% of the comp's short side."),
+      fill_color: Color.optional().describe("[r, g, b] in 0..1. Default white."),
+      stroke_color: Color.optional().describe("Turns the stroke on."),
+      stroke_width: external_exports.number().min(0).max(200).optional().describe("Default font size / 12 when a stroke colour is given."),
+      justification: external_exports.enum(["left", "center", "right"]).optional().describe("Default center."),
+      text_box: external_exports.object({
+        width: external_exports.number().positive().max(3e4).optional().describe("Default the safe-area width."),
+        height: external_exports.number().positive().max(3e4).optional().describe("Default font size x 1.2 x the caption's lines.")
+      }).optional().describe("Make paragraph (box) text of this size instead of point text. The box is placed in the safe area from its top-left corner.")
+    }).describe("Text style for new caption layers (and existing ones with restyle).");
+    LayoutSchema = external_exports.object({
+      position: external_exports.enum(["bottom", "middle", "top"]).optional().describe("Where in the safe area the captions sit. Default bottom (above the bottom margin)."),
+      margins: MarginsSchema2.optional()
+    }).describe("Where the captions go.");
+    HighlightSchema = external_exports.object({ color: Color.describe("Fill colour of the word being spoken, [r, g, b] in 0..1.") }).describe(
+      "Highlight the spoken word: a text animator 'Caption Highlight' with a Fill Color and a range selector (Index units, Based On Words) whose Start/End are hold-keyed per word. With SRT or VTT the word times are estimated from character share; JSON with word times is exact."
     );
-    AeSetKeyframeEaseSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("Target CompItem ID."),
-      layer: LayerSelectorSchema,
-      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
-        "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
+    BoxSchema = external_exports.object({
+      color: Color.optional().describe("Default black."),
+      opacity: external_exports.number().min(0).max(100).optional().describe("Percent, default 60."),
+      padding: external_exports.number().min(0).max(1e3).optional().describe("Pixels round the text, default 24."),
+      roundness: external_exports.number().min(0).max(1e3).optional().describe("Corner radius in pixels, default 0.")
+    }).describe("A background shape layer under each caption (or under the one layer) whose rectangle follows the text's extents through a sourceRectAtTime expression.");
+    NameFields = {
+      mode: external_exports.enum(["layers", "single"]).optional().describe(
+        "'layers' (default): one text layer per caption, named '<name_prefix> 001', in and out at the caption's times. 'single': one layer '<name_prefix>' whose Source Text is hold-keyed per caption (text shifts to the tallest caption's height)."
       ),
-      keys: external_exports.array(external_exports.number().int().positive()).optional().describe(
-        "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
-      ),
-      ease: KeyframeEaseInputSchema,
-      rove_between: external_exports.boolean().optional().describe(
-        "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. Spatial properties only (Position, Anchor Point); not with a curve or hold. Roving keys are left out of the ease check, since AE sets their ease."
-      ),
-      expect: ExpectSchema
+      name_prefix: external_exports.string().min(1).max(100).optional().describe("Layer name prefix, default 'Caption'. Re-running with the same prefix updates those layers instead of adding new ones."),
+      first_number: external_exports.number().int().min(1).max(1e5).optional().describe("Number of the first caption (layers mode), default 1. Use it to caption a long transcript in several calls with from_s/to_s.")
+    };
+    AeCaptionsPlanSchema = external_exports.object({
+      transcript: CaptionTranscriptSchema,
+      ...BreakFields,
+      frame_rate: external_exports.number().positive().max(240).optional().describe("Round the times to whole frames of this rate (ae_captions rounds to the comp's own).")
     });
-    TextJustificationSchema = external_exports.enum(["left", "center", "right"]);
-    RgbColorSchema = external_exports.array(external_exports.number().min(0).max(1)).length(3).describe("RGB color array [r, g, b] with components in 0..1.");
-    TextStyleSchema = external_exports.object({
-      font: external_exports.string().min(1).optional().describe("PostScript font name (e.g. 'Inter-Bold' or 'ArialMT')."),
-      fontSize: external_exports.number().positive().optional().describe("Font size in pixels."),
-      tracking: external_exports.number().optional().describe("Character tracking value."),
-      leading: external_exports.number().optional().describe("Line leading in pixels."),
-      fillColor: RgbColorSchema.optional().describe(
-        "Fill color [r, g, b] in 0..1."
-      ),
-      strokeColor: RgbColorSchema.optional().describe(
-        "Stroke color [r, g, b] in 0..1."
-      ),
-      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels."),
-      applyFill: external_exports.boolean().optional().describe("Whether fill is enabled on the text layer."),
-      applyStroke: external_exports.boolean().optional().describe("Whether stroke is enabled on the text layer."),
-      justification: TextJustificationSchema.optional().describe(
-        "Paragraph justification: 'left', 'center', or 'right'."
-      )
-    }).describe("Optional TextDocument styling properties to update.");
-    AeSetTextSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("Target CompItem ID."),
-      layer: LayerSelectorSchema,
-      text: external_exports.string().optional().describe("New text string to set on the TextLayer's Source Text."),
-      style: TextStyleSchema.optional(),
+    AeCaptionsSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      transcript: CaptionTranscriptSchema,
+      ...NameFields,
+      ...BreakFields,
+      style: StyleSchema.optional(),
+      layout: LayoutSchema.optional(),
+      highlight: HighlightSchema.optional(),
+      box: BoxSchema.optional(),
+      remove_stale: external_exports.boolean().optional().describe("Remove caption layers with this prefix whose number is past the new captions (an edited transcript with fewer lines); numbers below first_number are never removed. Default true when first_number is 1, else false."),
+      restyle: external_exports.boolean().optional().describe("Apply style and layout to captions that already exist too. Default false: existing layers keep their style, position and any effects, and only text and timing change."),
       expect: ExpectSchema
-    }).refine((val) => val.text !== void 0 || hasAnyStyleField(val.style), {
-      message: "ae_set_text requires at least `text` or one defined property in `style`."
+    }).refine((v) => v.mode !== "single" || v.first_number === void 0 || v.first_number === 1, { message: "first_number applies to layers mode only." });
+    AeCaptionsReadSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      mode: external_exports.enum(["layers", "single"]).optional().describe("Which kind of captions to look for (default layers)."),
+      name_prefix: external_exports.string().min(1).max(100).optional().describe("Default 'Caption'."),
+      layout: LayoutSchema.optional().describe("The margins to judge the safe area by; the same as given to ae_captions."),
+      from_number: external_exports.number().int().min(1).optional().describe("Layers mode: list only captions numbered from this one (to page past 500 captions)."),
+      to_number: external_exports.number().int().min(1).optional().describe("Layers mode: list only captions numbered up to this one. beyond_count says how many are numbered above it.")
+    }).refine((v) => v.from_number === void 0 || v.to_number === void 0 || v.to_number >= v.from_number, { message: "to_number must not be below from_number." });
+    previewOf = (c, n) => ({
+      n,
+      start: c.start,
+      end: c.end,
+      text: c.lines.join("\n"),
+      words: c.words.length,
+      ...c.speaker !== void 0 ? { speaker: c.speaker } : {}
     });
-    AeImportFootageSchema = external_exports.object({
-      paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).describe("Absolute file paths of footage files to import."),
-      sequence: external_exports.boolean().optional().describe(
-        "If true, import as an image sequence, numbered frames in order with placeholders for missing ones (Force alphabetical order off, AE's default)."
-      ),
-      fps: external_exports.number().positive().optional().describe(
-        "Optional frame rate (conformFrameRate) to assign to imported footage items."
-      ),
-      target_folder_id: external_exports.number().int().optional().describe(
-        "Optional FolderItem ID in the project to place the imported items into."
-      ),
-      expect: ExpectSchema
+    readOf = (v) => v && typeof v === "object" ? v : null;
+    norm = (s) => s.replace(/\r\n?|\n/g, "\n");
+    readArgsFor = (args) => ({
+      comp_id: args.comp_id,
+      mode: args.mode ?? "layers",
+      name_prefix: args.name_prefix ?? "Caption",
+      layout: args.layout ? { margins: args.layout.margins } : void 0,
+      default_margins: DEFAULT_MARGINS,
+      from_number: args.from_number,
+      to_number: args.to_number
     });
-    AeReplaceFootageSchema = external_exports.object({
-      item_id: external_exports.number().int().describe("Project FootageItem ID to replace."),
-      path: external_exports.string().min(1).describe(
-        "Absolute file path to the replacement footage file (or first frame of a sequence)."
-      ),
-      sequence: external_exports.boolean().optional().describe(
-        "If true, use FootageItem.replaceWithSequence(file, false) (numbered order, gaps kept as placeholders); otherwise use FootageItem.replace(file)."
-      ),
-      expect: ExpectSchema
-    });
-    animateTools = [
+    badTranscript = (err) => {
+      if (err instanceof TranscriptError) return { ok: false, error: "bad_transcript", message: err.message };
+      throw err;
+    };
+    captionsTools = [
       {
-        name: "ae_set_keyframe_ease",
-        description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeSetKeyframeEaseSchema,
+        name: "ae_captions_plan",
+        description: "Plan captions from a transcript (SRT, WebVTT, ElevenLabs speech-to-text JSON with words, Whisper-style JSON) without touching After Effects: words are grouped into captions at speaker changes, pauses and sentence ends within the line, line-count and duration limits, balanced across lines, held for a minimum time and rounded to whole frames (give frame_rate). Returns every caption (times, lines, word count) and warnings: estimated word times (SRT/VTT), captions faster than 21 characters per second, words longer than a line. Changes nothing.",
+        schema: AeCaptionsPlanSchema,
+        handler: async (args) => {
+          try {
+            const plan2 = planCaptions(args);
+            return {
+              count: plan2.captions.length,
+              estimated_word_times: plan2.estimated_word_times,
+              warnings: plan2.warnings,
+              captions: plan2.captions.map((c, i) => previewOf(c, i + 1))
+            };
+          } catch (err) {
+            return badTranscript(err);
+          }
+        }
+      },
+      {
+        name: "ae_captions",
+        description: "Turn a transcript (SRT, WebVTT, ElevenLabs or Whisper JSON) into caption layers in a comp, in one undo group guarded by `expect`. Node groups the words into captions, breaks lines (max_chars_per_line, max_lines), and sets frame-rounded times; the captions sit in the safe area (ae_reframe's margins: 9:16 stays above the bottom UI margin). mode 'layers' makes one text layer per caption ('Caption 001'...), mode 'single' one layer with hold-keyed Source Text. highlight colours the spoken word (a text animator keyed per word; SRT/VTT word times are estimates). box adds a background shape that follows the text through sourceRectAtTime. Re-running with the same name_prefix updates the captions by name: text and timing change, your style, position and effects stay (restyle: true resets style and position), and layers past the new count are removed. Font names are not checked: use ae_fonts. Layers are made at the top of the stack. At most 500 captions per call (use from_s/to_s and first_number to continue). The read-back (a separate evalScript) checks text, timing, justification, highlight keys, stale layers and box expressions, and measures each caption's extents: `outside_safe` lists captions that run outside the safe area (re-run with a smaller max_chars_per_line or font_size). Check the result with ae_frame or ae_contact_sheet. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeCaptionsSchema,
         handler: async (args, ctx) => {
-          if (args.rove_between && isCurveEase(args.ease)) {
-            return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+          let plan2;
+          try {
+            plan2 = planCaptions(args);
+          } catch (err) {
+            return badTranscript(err);
           }
-          if (args.rove_between && args.ease === "hold") {
-            return { ok: false, error: "bad_args", message: "rove_between can't be combined with hold: held keys have no speed for roving to even out." };
+          const mode = args.mode ?? "layers";
+          const prefix = args.name_prefix ?? "Caption";
+          const first = args.first_number ?? 1;
+          const removeStale = args.remove_stale ?? first === 1;
+          const captions = plan2.captions;
+          const readArgs = readArgsFor({
+            comp_id: args.comp_id,
+            mode,
+            name_prefix: prefix,
+            layout: args.layout,
+            ...mode === "layers" ? { from_number: first, to_number: first + captions.length - 1 } : {}
+          });
+          const res = await runGuardedWrite(ctx, {
+            toolName: "ae_captions",
+            label: `ae_captions(${captions.length} ${mode})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: () => ({ host: "captionsRead", args: readArgs }),
+            write: {
+              host: "captionsApply",
+              args: {
+                comp_id: args.comp_id,
+                mode,
+                name_prefix: prefix,
+                first_number: first,
+                captions: captions.map((c) => ({
+                  start: c.start,
+                  end: c.end,
+                  lines: c.lines,
+                  ...args.highlight ? { words: c.words.map((w) => ({ start: w.start })) } : {}
+                })),
+                style: args.style,
+                layout: args.layout,
+                default_margins: DEFAULT_MARGINS,
+                highlight: args.highlight,
+                box: args.box ? { color: args.box.color ?? [0, 0, 0], opacity: args.box.opacity ?? 60, padding: args.box.padding ?? 24, roundness: args.box.roundness ?? 0 } : void 0,
+                remove_stale: removeStale,
+                restyle: args.restyle === true,
+                label: `Captions (${captions.length})`
+              }
+            },
+            check: (_before, after, w) => captionsMismatches(args, removeStale, captions, after, w),
+            present: (_before, after, w) => {
+              const read = readOf(after);
+              const outside = (read?.captions ?? []).filter((e) => e.outside_safe === true || e.first_outside_safe !== void 0).map((e) => ({ name: e.name, ...e.rect ? { width: e.rect.width } : {}, ...e.first_outside_safe !== void 0 ? { first_at: e.first_outside_safe } : {} }));
+              const substituted = (read?.captions ?? []).filter((e) => e.font_substituted).map((e) => e.name);
+              const warnings = [...plan2.warnings, ...w.warnings ?? []];
+              if (outside.length) warnings.push(`${outside.length} caption${outside.length === 1 ? " runs" : "s run"} outside the safe area; re-run with a smaller max_chars_per_line or font_size.`);
+              if (substituted.length) warnings.push("The font is substituted (not installed under that name); check ae_fonts.");
+              return {
+                comp_id: args.comp_id,
+                mode,
+                name_prefix: prefix,
+                count: captions.length,
+                created: w.created,
+                updated: w.updated,
+                removed: w.removed,
+                highlight_keys: w.highlight_keys,
+                boxes: w.boxes,
+                font_size: w.font_size,
+                safe: w.safe,
+                estimated_word_times: plan2.estimated_word_times,
+                outside_safe: outside,
+                warnings,
+                preview: captions.slice(0, 10).map((c, i) => previewOf(c, first + i))
+              };
+            }
+          });
+          const shown = res;
+          if (shown.estimated_word_times === void 0) {
+            const hostWarnings = Array.isArray(shown.warnings) ? shown.warnings : [];
+            return { ...res, estimated_word_times: plan2.estimated_word_times, warnings: [...plan2.warnings, ...hostWarnings] };
           }
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
-          const effectiveExpect = {
-            project_path: args.expect.project_path,
-            comp_id: args.expect.comp_id ?? args.comp_id
+          return res;
+        }
+      },
+      {
+        name: "ae_captions_read",
+        description: "Read the caption layers a name_prefix finds in a comp (layers mode: '<prefix> 001'...; single mode: the one hold-keyed layer): text, in and out, font, size, justification, highlight animator and its key counts, each caption's text extents (sourceRectAtTime) against the safe area with `outside_safe`, and the background boxes' expression errors. Up to 500 captions (total_captions and truncated say more exist). Changes nothing in After Effects.",
+        schema: AeCaptionsReadSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost("captionsRead", readArgsFor(args), {
+            label: `ae_captions_read(${args.comp_id})`,
+            mutates: false,
+            toolName: "ae_captions_read"
+          });
+          return res.result;
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/rig.ts
+function controlSpecProblem(spec) {
+  const { kind, value, items } = spec;
+  const has = value !== void 0 && value !== null;
+  const finite = (v) => typeof v === "number" && Number.isFinite(v);
+  if (kind !== "dropdown" && items !== void 0) return `items apply to dropdown controls only (${spec.name}).`;
+  if (kind !== "layer" && spec.layer !== void 0) return `layer applies to layer controls only (${spec.name}).`;
+  if (kind === "slider" || kind === "angle") {
+    const lim = kind === "slider" ? MAX_SLIDER : MAX_ANGLE;
+    if (has && (!finite(value) || Math.abs(value) > lim)) return `${spec.name}: the value must be a number within +-${lim}.`;
+  } else if (kind === "checkbox") {
+    if (has && typeof value !== "boolean" && value !== 0 && value !== 1) return `${spec.name}: the value must be true or false.`;
+  } else if (kind === "color") {
+    if (has) {
+      if (!Array.isArray(value) || value.length !== 3 && value.length !== 4) return `${spec.name}: a colour is [r, g, b] or [r, g, b, a].`;
+      if (!value.every((n) => finite(n) && n >= 0 && n <= 1)) return `${spec.name}: colour values are numbers in 0..1.`;
+    }
+  } else if (kind === "point" || kind === "point3d") {
+    const want = kind === "point" ? 2 : 3;
+    if (has && (!Array.isArray(value) || value.length !== want || !value.every(finite))) return `${spec.name}: the value must be ${want} finite numbers.`;
+  } else if (kind === "layer") {
+    if (has) return `${spec.name}: a layer control takes a layer selector, not a value.`;
+  } else if (kind === "dropdown") {
+    if (!items || items.length === 0) return `${spec.name}: a dropdown needs items.`;
+    const real = items.filter((i) => i !== "(-");
+    if (new Set(real).size !== real.length) return `${spec.name}: dropdown items must be unique.`;
+    if (items.some((i) => i.includes("\\"))) return `${spec.name}: dropdown items can't hold a backslash.`;
+    if (has) {
+      if (!finite(value) || !Number.isInteger(value) || value < 1 || value > items.length) return `${spec.name}: the value must be an item number from 1 to ${items.length}.`;
+      if (items[value - 1] === "(-") return `${spec.name}: the value points at a separator.`;
+    }
+  }
+  return null;
+}
+function expectedControlValue(spec) {
+  const v = spec.value;
+  if (v === void 0) return void 0;
+  if (spec.kind === "checkbox") return v === true || v === 1 ? 1 : 0;
+  if (spec.kind === "color" && Array.isArray(v)) return [v[0], v[1], v[2], v.length === 4 ? v[3] : 1];
+  return v;
+}
+function valuesMatch(expected, actual) {
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length < expected.length) return false;
+    return expected.every((e, i) => typeof actual[i] === "number" && close(e, actual[i]));
+  }
+  if (typeof actual === "boolean") return close(expected, actual ? 1 : 0);
+  return typeof actual === "number" && close(expected, actual);
+}
+function expressionMismatches(m, label, expected, state, afterCapped = false) {
+  if (!state || !state.found) {
+    if (!afterCapped) m.push({ path: `${label}`, expected, actual: void 0, message: state?.message ?? "The property is not in the read-back" });
+    return;
+  }
+  expectThat(m, typeof state.expression === "string" && sameText(state.expression, expected), `${label}.expression`, expected, state.expression, "The expression read back differs from the one set");
+  expectThat(m, state.enabled !== false, `${label}.expressionEnabled`, true, state.enabled, "The expression is switched off");
+  if (state.error) m.push({ path: `${label}.expressionError`, expected: null, actual: state.error, message: `AE reports an expression error: ${state.error}` });
+}
+function controlMismatches(m, label, spec, state, checkValue = true, targetLayerId) {
+  if (!state || !state.found) {
+    m.push({ path: label, expected: spec.name, actual: void 0, message: state?.message ?? `Control "${spec.name}" is not in the read-back` });
+    return;
+  }
+  expectThat(m, state.kind === spec.kind, `${label}.kind`, spec.kind, state.kind, "The control is of another kind");
+  expectThat(m, state.match_name === CONTROL_MATCH_NAMES[spec.kind], `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
+  if (!checkValue) return;
+  const want = expectedControlValue(spec);
+  if (want !== void 0) expectThat(m, valuesMatch(want, state.value), `${label}.value`, want, state.value, "The control's value differs");
+  if (spec.kind === "dropdown" && spec.items && Array.isArray(state.items)) {
+    const want2 = state.items_truncated ? spec.items.slice(0, state.items.length) : spec.items;
+    expectThat(m, JSON.stringify(state.items) === JSON.stringify(want2), `${label}.items`, want2, state.items, "The dropdown items differ");
+  }
+  if (spec.kind === "layer" && spec.layer) {
+    const wantId = targetLayerId ?? spec.layer.id;
+    if (wantId !== void 0 && wantId !== null) {
+      expectThat(m, state.layer_target?.id === wantId, `${label}.layer`, wantId, state.layer_target?.id, "The Layer Control points at another layer than the one asked for");
+    }
+  }
+}
+function addControlsMismatches(args, afterRaw, written) {
+  const m = [];
+  const after = stateOf(afterRaw);
+  if (!after) return m;
+  args.controls.forEach((spec, i) => {
+    const made = written?.controls?.find((c) => c.name === spec.name);
+    controlMismatches(m, `controls[${i}]`, spec, after.controls[i], true, made?.target_layer_id);
+  });
+  return m;
+}
+function linkMismatches(written, afterRaw) {
+  const m = [];
+  const after = stateOf(afterRaw);
+  if (!after) return m;
+  (written.links ?? []).forEach((l, i) => expressionMismatches(m, `links[${i}]`, l.expression, after.props[i]));
+  return m;
+}
+function unlinkMismatches(written, afterRaw) {
+  const m = [];
+  const after = stateOf(afterRaw);
+  if (!after) return m;
+  (written.unlinked ?? []).forEach((u, i) => {
+    const s = after.props[i];
+    if (!s || !s.found) {
+      m.push({ path: `unlinked[${i}]`, expected: "a property", actual: void 0, message: s?.message ?? "The property is not in the read-back" });
+      return;
+    }
+    expectThat(m, (s.expression ?? "") === "", `unlinked[${i}].expression`, "", s.expression, "The property still has an expression");
+  });
+  return m;
+}
+function renameMismatches(args, beforeRaw, afterRaw) {
+  const m = [];
+  const before = stateOf(beforeRaw);
+  const after = stateOf(afterRaw);
+  if (!after) return m;
+  const now = after.controls[0];
+  if (!now || !now.found) {
+    m.push({ path: "control", expected: args.new_name, actual: void 0, message: `No control named "${args.new_name}" in the read-back` });
+  } else {
+    const was = before?.controls[0];
+    if (was?.found) expectThat(m, now.kind === was.kind, "control.kind", was.kind, now.kind, "The control's kind changed");
+  }
+  const stale = after.scans[0];
+  const named = after.scans[1];
+  const had = before?.scans[0];
+  if (after.scan_truncated) {
+    m.push({
+      path: "references",
+      expected: "a full scan",
+      actual: "capped",
+      message: "The reference scan was capped (500 layers or 20000 properties): references past the cap are not checked, so a clean receipt does not prove none are left. Search the rest by hand"
+    });
+  }
+  if (stale && stale.count > 0) {
+    for (const r of stale.references) {
+      m.push({
+        path: `${r.layer_name} > ${r.path}`,
+        expected: `effect("${args.new_name}")`,
+        actual: r.expression,
+        message: `This expression still names the old control "${args.control}". AE did not update it and autoFixExpressions did not either (it only repairs expressions that error); edit it by hand`
+      });
+    }
+    if (stale.truncated) m.push({ path: "references", expected: 0, actual: stale.count, message: `${stale.count} expressions still name the old control (first ${stale.references.length} listed)` });
+  }
+  if (had && named && had.found && !had.truncated && !named.truncated && !stale?.truncated) {
+    expectThat(m, named.count >= had.count, "references", had.count, named.count, "Fewer expressions name the control now than before the rename");
+  }
+  if (named) {
+    const key = (r) => `${r.layer_id}|${r.match_path.join("/")}`;
+    const wasBroken = new Set((had?.references ?? []).filter((r) => r.error).map(key));
+    const known = new Set((had?.references ?? []).map(key));
+    for (const r of named.references) {
+      if (had?.truncated && !known.has(key(r))) continue;
+      if (r.error && !wasBroken.has(key(r))) {
+        m.push({ path: `${r.layer_name} > ${r.path}`, expected: null, actual: r.error, message: `AE reports an expression error after the rename: ${r.error}` });
+      }
+    }
+  }
+  return m;
+}
+function recipeControlName(prefix, label) {
+  return label ? `${prefix} ${label}` : prefix;
+}
+function resolveRecipeParams(recipe, given) {
+  const g = given ?? {};
+  const known = new Set(recipe.params.map((p) => p.key));
+  for (const k of Object.keys(g)) {
+    if (!known.has(k)) return { ok: false, message: `Recipe ${recipe.name} has no parameter "${k}" (it takes: ${recipe.params.map((p) => p.key).join(", ") || "none"}).` };
+  }
+  const out = {};
+  for (const p of recipe.params) {
+    let v = g[p.key];
+    if (v === void 0) {
+      if (p.required) return { ok: false, message: `Recipe ${recipe.name} needs the parameter "${p.key}": ${p.describe}` };
+      v = p.default;
+    }
+    if (v === void 0) continue;
+    if (p.type === "enum") {
+      if (typeof v !== "string" || !p.options?.includes(v)) return { ok: false, message: `${p.key} must be one of: ${p.options?.join(", ")}.` };
+    } else if (p.type === "int") {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) return { ok: false, message: `${p.key} must be a whole number, 0 or more.` };
+    } else if (p.type === "string") {
+      if (typeof v !== "string" || v.length > (p.max ?? 50)) return { ok: false, message: `${p.key} must be text of at most ${p.max ?? 50} characters.` };
+    } else {
+      const ok = typeof v === "number" && Number.isFinite(v) || Array.isArray(v) && v.length >= 2 && v.length <= 3 && v.every((n) => typeof n === "number" && Number.isFinite(n));
+      if (!ok) return { ok: false, message: `${p.key} must be a number, or 2 or 3 numbers for a 2D or 3D property.` };
+    }
+    out[p.key] = v;
+  }
+  return { ok: true, params: out };
+}
+function planRecipeControls(recipe, prefix, values) {
+  const v = values ?? {};
+  const keys = new Set(recipe.controls.map((c) => c.key));
+  for (const k of Object.keys(v)) {
+    if (!keys.has(k)) return { ok: false, message: `Recipe ${recipe.name} has no control "${k}" (controls: ${[...keys].join(", ") || "none"}).` };
+  }
+  const p = prefix ?? recipe.label;
+  const controls = [];
+  for (const c of recipe.controls) {
+    const value = v[c.key] ?? c.value;
+    const name = recipeControlName(p, c.label);
+    const problem = controlSpecProblem({ name, kind: c.kind, value });
+    if (problem) return { ok: false, message: problem };
+    if (!SAFE_NAME.test(name) || name.length > 200) return { ok: false, message: `The control name "${name}" is not usable (1 to 200 characters, no quote, backslash or line break).` };
+    controls.push({ key: c.key, name, kind: c.kind, value });
+  }
+  return { ok: true, controls };
+}
+function recipeMismatches(planned, written, afterRaw) {
+  const m = [];
+  const after = stateOf(afterRaw);
+  if (!after) return m;
+  expressionMismatches(m, "target", written.expression ?? "", after.props[0]);
+  const created = new Set(written.controls_created ?? []);
+  planned.forEach((c, i) => {
+    const spec = { name: c.name, kind: c.kind, value: c.value };
+    controlMismatches(m, `controls[${i}]`, spec, after.controls[i], created.has(c.name));
+  });
+  return m;
+}
+var CONTROL_KINDS, CONTROL_MATCH_NAMES, MAX_SLIDER, MAX_ANGLE, SAFE_NAME, ControlName, PathSchema, ControlSpecSchema, close, stateOf, stateRead, sameText, AeRigAddControlsSchema, RemapSchema, LinkSpecSchema, AeRigLinkSchema, AeRigUnlinkSchema, AeRigRenameSchema, AeRigListSchema, slider, RECIPES, RECIPE_NAMES, recipeByName, AeExprRecipeSchema, ADD_DESC, LINK_DESC, sel, rigTools;
+var init_rig = __esm({
+  "src/tools/ext/rig.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_write_runner();
+    CONTROL_KINDS = ["slider", "angle", "checkbox", "color", "point", "point3d", "layer", "dropdown"];
+    CONTROL_MATCH_NAMES = {
+      slider: "ADBE Slider Control",
+      angle: "ADBE Angle Control",
+      checkbox: "ADBE Checkbox Control",
+      color: "ADBE Color Control",
+      point: "ADBE Point Control",
+      point3d: "ADBE Point3D Control",
+      layer: "ADBE Layer Control",
+      dropdown: "ADBE Dropdown Control"
+    };
+    MAX_SLIDER = 1e6;
+    MAX_ANGLE = 1e9;
+    SAFE_NAME = /^[^"\\\r\n\t]+$/;
+    ControlName = external_exports.string().min(1).max(200).regex(SAFE_NAME, "A control name can't hold a quote, backslash or line break (expressions name it in double quotes).");
+    PathSchema = external_exports.array(external_exports.string().min(1)).min(1).max(20).describe("Property path from the layer root, by name or match name (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Position']).");
+    ControlSpecSchema = external_exports.object({
+      name: ControlName.describe("The effect's name. Expressions find the control by it; it must be unique on its layer."),
+      kind: external_exports.enum(CONTROL_KINDS).describe("slider, angle (degrees), checkbox, color, point (2D), point3d, layer (a layer picker) or dropdown."),
+      value: external_exports.union([external_exports.number(), external_exports.boolean(), external_exports.array(external_exports.number()).min(2).max(4)]).optional().describe(
+        "Starting value: a number (slider, angle), true/false (checkbox), [r, g, b] or [r, g, b, a] in 0..1 (color), [x, y] (point), [x, y, z] (point3d), or the 1-based item number (dropdown). Left alone when omitted."
+      ),
+      items: external_exports.array(external_exports.string().min(1).max(200)).min(1).max(100).optional().describe("Dropdown items: unique, no backslash; '(-' makes a separator. AE 17.0.1+."),
+      layer: LayerSelectorSchema.optional().describe("Layer control: the layer to pick. Omit for none.")
+    }).superRefine((spec, ctx) => {
+      const problem = controlSpecProblem(spec);
+      if (problem) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: problem });
+    });
+    close = (a, b, tol = 1e-3) => Math.abs(a - b) <= tol;
+    stateOf = (v) => v && typeof v === "object" ? v : null;
+    stateRead = (compId, q) => ({ host: "rigState", args: { comp_id: compId, ...q } });
+    sameText = (a, b) => a.replace(/\r\n?|\n/g, "\n") === b.replace(/\r\n?|\n/g, "\n");
+    AeRigAddControlsSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("The layer that holds the controls: usually a controller null."),
+      create_if_missing: external_exports.boolean().optional().describe("With the layer given by name: make a null with that name when no layer has it (named, at the top). Default false."),
+      controls: external_exports.array(ControlSpecSchema).min(1).max(50).describe("The controls to add, in order."),
+      expect: ExpectSchema
+    }).refine((v) => new Set(v.controls.map((c) => c.name)).size === v.controls.length, { message: "Control names must be unique." }).refine((v) => v.create_if_missing !== true || v.layer.name !== void 0, { message: "create_if_missing needs the layer given by name." });
+    RemapSchema = external_exports.object({
+      in_min: external_exports.number().finite(),
+      in_max: external_exports.number().finite(),
+      out_min: external_exports.number().finite(),
+      out_max: external_exports.number().finite(),
+      clamp: external_exports.boolean().optional().describe("Default true: linear() clamps to the output range. False continues the line past it.")
+    }).refine((r) => r.in_min !== r.in_max, { message: "in_min and in_max must differ." }).describe("Map the control's range onto another with linear().");
+    LinkSpecSchema = external_exports.object({
+      layer: LayerSelectorSchema.describe("The layer that owns the property."),
+      path: PathSchema,
+      control: external_exports.object({
+        name: ControlName,
+        layer: LayerSelectorSchema.optional().describe("The layer that holds the control. Default: the property's own layer.")
+      }).describe("The control to read."),
+      remap: RemapSchema.optional().describe("Slider, angle, checkbox and dropdown controls only."),
+      multiplier: external_exports.number().finite().optional().describe("Multiplied in after the remap. Slider, angle, checkbox, dropdown, point and 3D point controls."),
+      axis: external_exports.number().int().min(0).max(2).optional().describe("A scalar control on a 2D or 3D property: drive only this component (0 = x) and leave the others as they are. Default: every component.")
+    });
+    AeRigLinkSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      links: external_exports.array(LinkSpecSchema).min(1).max(100),
+      replace: external_exports.boolean().optional().describe("Overwrite a property's existing expression. Default false: the tool refuses before changing anything."),
+      expect: ExpectSchema
+    });
+    AeRigUnlinkSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      targets: external_exports.array(
+        external_exports.object({
+          layer: LayerSelectorSchema,
+          path: PathSchema,
+          control_name: ControlName.optional().describe("Only clear the expression when it names this control; otherwise it is skipped and reported.")
+        })
+      ).min(1).max(100),
+      expect: ExpectSchema
+    });
+    AeRigRenameSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("The layer that holds the control."),
+      control: ControlName.describe("The control's current name."),
+      new_name: ControlName,
+      expect: ExpectSchema
+    });
+    AeRigListSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.optional().describe("Only this layer's controls. Default: every layer (the first 500)."),
+      include_references: external_exports.boolean().optional().describe("Default true: for each control, the expressions that name it (a text search, with their expressionError).")
+    });
+    slider = (key, label, value, describe) => ({ key, label, kind: "slider", value, describe });
+    RECIPES = [
+      {
+        name: "wiggle",
+        label: "Wiggle",
+        summary: "wiggle() with its frequency and amount on controls. On colours the amount is divided by 100.",
+        dims: ["1d", "2d", "3d", "color"],
+        controls: [slider("frequency", "Frequency", 2, "Wiggles per second."), slider("amount", "Amount", 20, "How far, in the property's units.")],
+        params: []
+      },
+      {
+        name: "overshoot",
+        label: "Overshoot",
+        summary: "A damped sine after the last keyframe it passed: the keys settle with a springy overshoot.",
+        dims: ["1d", "2d", "3d", "color"],
+        controls: [
+          slider("amplitude", "Amplitude", 0.1, "Overshoot size, as a fraction of the speed into the key."),
+          slider("frequency", "Frequency", 2, "Oscillations per second."),
+          slider("decay", "Decay", 8, "How fast it dies away.")
+        ],
+        params: []
+      },
+      {
+        name: "bounce",
+        label: "Bounce",
+        summary: "A ball-style bounce after the last keyframe passed, losing energy on each bounce. Not for colours.",
+        dims: ["1d", "2d", "3d"],
+        controls: [
+          slider("elasticity", "Elasticity", 0.7, "Energy kept per bounce, 0 to 0.99."),
+          slider("gravity", "Gravity", 5e3, "Pull, in units per second squared."),
+          slider("max_bounces", "Max Bounces", 9, "Bounces before it comes to rest.")
+        ],
+        params: []
+      },
+      {
+        name: "loop",
+        label: "Loop",
+        summary: "loopOut or loopIn of a chosen type. No controls. Needs two or more keyframes to do anything.",
+        dims: ["1d", "2d", "3d", "color"],
+        controls: [],
+        params: [
+          { key: "loop_type", type: "enum", options: ["cycle", "pingpong", "offset", "continue"], default: "cycle", describe: "The loop type." },
+          { key: "direction", type: "enum", options: ["out", "in"], default: "out", describe: "loopOut (after the last key) or loopIn (before the first)." },
+          { key: "keyframes", type: "int", default: 0, describe: "Keyframes in the loop; 0 for all." }
+        ]
+      },
+      {
+        name: "follow_delay",
+        label: "Follow",
+        summary: "The same property of another layer, delayed in time (a trailing follower). Needs `source`.",
+        dims: ["1d", "2d", "3d", "color"],
+        needs_source: true,
+        controls: [slider("delay", "Delay", 0.1, "Seconds behind the source.")],
+        params: []
+      },
+      {
+        name: "auto_fade",
+        label: "Fade",
+        summary: "Fade in from the layer's in point and out to its out point (meant for Opacity).",
+        dims: ["1d"],
+        controls: [slider("fade_in", "In", 0.5, "Seconds to fade in."), slider("fade_out", "Out", 0.5, "Seconds to fade out.")],
+        params: []
+      },
+      {
+        name: "count_up",
+        label: "Count",
+        summary: "Source Text counting from a start to an end number, with thousands separators, decimals, a prefix and a suffix.",
+        dims: ["text"],
+        controls: [
+          slider("start", "Start", 0, "The number at the layer's in point."),
+          slider("end", "End", 1e3, "The number reached after the duration."),
+          slider("duration", "Duration", 2, "Seconds to count."),
+          slider("decimals", "Decimals", 0, "Decimal places.")
+        ],
+        params: [
+          { key: "separator", type: "string", default: ",", max: 3, describe: "Thousands separator ('' for none)." },
+          { key: "prefix", type: "string", default: "", max: 50, describe: "Text before the number." },
+          { key: "suffix", type: "string", default: "", max: 50, describe: "Text after the number." },
+          { key: "easing", type: "enum", options: ["linear", "ease"], default: "linear", describe: "How the count moves." }
+        ]
+      },
+      {
+        name: "master_scale",
+        label: "Master Scale",
+        summary: "The property's own value times a percentage slider (100 = unchanged). Works on Scale, or any number.",
+        dims: ["1d", "2d", "3d"],
+        controls: [slider("amount", "", 100, "Percent of the property's value.")],
+        params: []
+      },
+      {
+        name: "tint_color",
+        label: "Tint",
+        summary: "Mix the property's colour toward a colour control by a percentage slider.",
+        dims: ["color"],
+        controls: [
+          { key: "color", label: "Color", kind: "color", value: [1, 0, 0, 1], describe: "The colour to mix in." },
+          slider("amount", "Amount", 100, "0 keeps the property's colour, 100 is the control's.")
+        ],
+        params: []
+      },
+      {
+        name: "ease_between",
+        label: "Ease",
+        summary: "Ease the property from one value to another as a 0 to 100 progress slider moves. `from` and `to` are numbers matching the property's dimensions.",
+        dims: ["1d", "2d", "3d"],
+        controls: [slider("progress", "Progress", 0, "0 is `from`, 100 is `to`.")],
+        params: [
+          { key: "from", type: "number_or_list", required: true, describe: "The value at progress 0: a number, or a list for 2D and 3D properties." },
+          { key: "to", type: "number_or_list", required: true, describe: "The value at progress 100." }
+        ]
+      },
+      {
+        name: "follow_text",
+        label: "Text Box",
+        summary: "A shape's Size that hugs a text layer's text, plus padding. Needs `source` (the text layer).",
+        dims: ["2d"],
+        needs_source: true,
+        controls: [slider("padding", "Padding", 20, "Pixels added on every side.")],
+        params: []
+      },
+      {
+        name: "follow_text_position",
+        label: "Text Anchor",
+        summary: "A Position that sits at the centre of a text layer's text (in comp space). Needs `source`. No controls.",
+        dims: ["2d", "3d"],
+        needs_source: true,
+        controls: [],
+        params: []
+      }
+    ];
+    RECIPE_NAMES = RECIPES.map((r) => r.name);
+    recipeByName = (name) => RECIPES.find((r) => r.name === name);
+    AeExprRecipeSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("The layer that owns the property."),
+      path: PathSchema,
+      recipe: external_exports.enum(RECIPE_NAMES).describe("A recipe from ae_expr_recipes."),
+      params: external_exports.record(external_exports.string(), external_exports.union([external_exports.string(), external_exports.number(), external_exports.array(external_exports.number())])).optional().describe("The recipe's parameters (see ae_expr_recipes); defaults fill the rest."),
+      controller: LayerSelectorSchema.optional().describe("The layer that holds the controls. Default: the property's own layer."),
+      source: LayerSelectorSchema.optional().describe("The layer the recipe follows (follow_delay, follow_text, follow_text_position)."),
+      name_prefix: ControlName.optional().describe("Control names are '<prefix> <label>'. Default: the recipe's own, e.g. 'Wiggle'. Controls already on the controller with the same name and kind are reused."),
+      values: external_exports.record(external_exports.string(), external_exports.union([external_exports.number(), external_exports.array(external_exports.number())])).optional().describe("Starting values for new controls, by control key (e.g. {frequency: 4})."),
+      replace: external_exports.boolean().optional().describe("Overwrite the property's existing expression. Default false."),
+      expect: ExpectSchema
+    });
+    ADD_DESC = "Add named Expression Controls (slider, angle, checkbox, color, point, point3d, layer, dropdown) to a layer, with starting values, in one undo group guarded by `expect`. With create_if_missing and the layer given by name, a null of that name is made when no layer has it. A dropdown's items are set after the effect is added (AE 17.0.1+). Names must be unique on the layer and hold no quote or backslash. Everything is validated before AE is touched, and a failure part-way takes back what the call added. The read-back (a separate evalScript) checks each control exists with its kind, value and dropdown items (items read back on AE 26+ only). ";
+    LINK_DESC = "Link properties to Expression Controls with a generated expression, in one undo group guarded by `expect`. The expression reads the control as effect(\"Name\")(1) (thisComp.layer(\"Holder\").effect(...) from another layer): the parameter's display name is translated by AE's language, so it is never used. The variant follows the property's value type: a slider/angle/checkbox/dropdown drives a 1D property directly, or every (or one, with `axis`) component of a 2D/3D one; a colour control drives colours; a point drives 2D (3D keeps z) and a 3D point drives 3D (2D drops z). `remap` maps the range with linear() and `multiplier` scales it. Refuses a property that already has an expression unless replace is true, and a pairing that makes no sense. Same-comp links only; layers are found by name, so the holder's name must be unique. The read-back (a separate evalScript) forces each expression to evaluate and checks the text, that it is on, and that expressionError is empty. ";
+    sel = (s) => s;
+    rigTools = [
+      {
+        name: "ae_rig_add_controls",
+        description: ADD_DESC + AGENT_SAFETY_GUIDANCE,
+        schema: AeRigAddControlsSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_rig_add_controls",
+          label: `ae_rig_add_controls(${args.controls.length})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => {
+            if (phase === "before") return stateRead(args.comp_id, { controls: args.controls.map((c) => ({ layer: sel(args.layer), name: c.name })) });
+            const id = w?.layer?.id;
+            if (id === void 0) return null;
+            return stateRead(args.comp_id, { controls: args.controls.map((c) => ({ layer: { id }, name: c.name })) });
+          },
+          write: {
+            host: "rigAddControls",
+            args: { comp_id: args.comp_id, layer: args.layer, create_if_missing: args.create_if_missing, controls: args.controls, label: "Add expression controls" }
+          },
+          check: (_before, after, w) => addControlsMismatches(args, after, w)
+        })
+      },
+      {
+        name: "ae_rig_link",
+        description: LINK_DESC + AGENT_SAFETY_GUIDANCE,
+        schema: AeRigLinkSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_rig_link",
+          label: `ae_rig_link(${args.links.length})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => {
+            if (phase === "before") return stateRead(args.comp_id, { props: args.links.map((l) => ({ layer: sel(l.layer), path: l.path })) });
+            return stateRead(args.comp_id, { props: (w?.links ?? []).map((l) => ({ layer: { id: l.layer_id }, path: l.path })) });
+          },
+          write: { host: "rigLink", args: { comp_id: args.comp_id, links: args.links, replace: args.replace, label: "Link properties to controls" } },
+          check: (_before, after, w) => linkMismatches(w, after)
+        })
+      },
+      {
+        name: "ae_rig_unlink",
+        description: "Clear the expression of linked properties (the property goes back to its own stored value or keyframes), in one undo group guarded by `expect`. With control_name a property is cleared only if its expression names that control; the rest are skipped and listed. The read-back (a separate evalScript) checks each cleared property has no expression. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeRigUnlinkSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_rig_unlink",
+          label: `ae_rig_unlink(${args.targets.length})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => {
+            if (phase === "before") return stateRead(args.comp_id, { props: args.targets.map((t) => ({ layer: sel(t.layer), path: t.path })) });
+            return stateRead(args.comp_id, { props: (w?.unlinked ?? []).map((u) => ({ layer: { id: u.layer_id }, path: u.path })) });
+          },
+          write: { host: "rigUnlink", args: { comp_id: args.comp_id, targets: args.targets, label: "Unlink properties" } },
+          check: (_before, after, w) => unlinkMismatches(w, after)
+        })
+      },
+      {
+        name: "ae_rig_rename",
+        description: 'Rename an Expression Control without breaking the expressions that name it, in one undo group guarded by `expect`. Order: set the effect\'s name; force the expressions that still name the old one to evaluate; then Project.autoFixExpressions on effect("Old") -> effect("New") (it repairs only expressions that error, and is project-wide). AE may already update references on its own; the tool does not assume either. The read-back (a separate evalScript) searches every expression in the comp: any that still names the old control, or that errors now, is a receipt mismatch you must fix by hand (AE can skip locked layers and references inside conditionals). ' + AGENT_SAFETY_GUIDANCE,
+        schema: AeRigRenameSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_rig_rename",
+          label: `ae_rig_rename("${args.control}" -> "${args.new_name}")`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => {
+            if (phase === "before") {
+              return stateRead(args.comp_id, { controls: [{ layer: args.layer, name: args.control }], scans: [{ layer: args.layer, name: args.control }] });
+            }
+            const id = w?.layer?.id;
+            if (id === void 0) return null;
+            return stateRead(args.comp_id, {
+              controls: [{ layer: { id }, name: args.new_name }],
+              scans: [
+                { layer: { id }, name: args.control },
+                { layer: { id }, name: args.new_name }
+              ]
+            });
+          },
+          write: { host: "rigRename", args: { comp_id: args.comp_id, layer: args.layer, control: args.control, new_name: args.new_name, label: "Rename control" } },
+          check: (before, after) => renameMismatches(args, before, after)
+        })
+      },
+      {
+        name: "ae_rig_list",
+        description: 'List every Expression Control in a comp (or on one layer): layer, name, kind, value (dropdown items on AE 26+), and the expressions that reference it with their expressionError. The references come from a text search for effect("Name") (and layer("Holder") across layers); expressions that reach a control through a variable or a layer index are not found. Changes nothing in AE: expressions are forced to evaluate with valueAtTime, which moves no time. Lists stop at 500 (truncated: true).',
+        schema: AeRigListSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost("rigList", { comp_id: args.comp_id, layer: args.layer, include_references: args.include_references }, {
+            label: `ae_rig_list(${args.comp_id})`,
+            mutates: false,
+            toolName: "ae_rig_list"
+          });
+          return res.result;
+        }
+      },
+      {
+        name: "ae_expr_recipes",
+        description: "List the expression recipes ae_expr_recipe can apply: wiggle, overshoot, bounce, loop, follow_delay, auto_fade, count_up, master_scale, tint_color, ease_between, follow_text, follow_text_position. For each: what it does, the property types it fits (1d, 2d, 3d, color, text), the controls it creates with their default values, and its parameters. Does not talk to After Effects.",
+        schema: external_exports.object({ recipe: external_exports.enum(RECIPE_NAMES).optional().describe("Only this recipe.") }),
+        handler: async (args) => {
+          const list = RECIPES.filter((r) => !args.recipe || r.name === args.recipe).map((r) => ({
+            ...r,
+            control_names: r.controls.map((c) => ({ key: c.key, name: recipeControlName(r.label, c.label) }))
+          }));
+          return { recipes: list, note: "Control names use the recipe's label as the prefix unless name_prefix is given." };
+        }
+      },
+      {
+        name: "ae_expr_recipe",
+        description: "Apply a curated expression recipe to a property, with the Expression Controls it needs, in one undo group guarded by `expect`. See ae_expr_recipes for the list. The host picks the variant from the property's value type (1D, 2D, 3D, colour, text), refuses a property the recipe doesn't fit, and reports the project's expression engine; the expressions use only syntax both engines accept. Controls are named '<name_prefix> <label>' on `controller` (default the property's own layer); one with the same name and kind is reused, so several properties can share a rig. Refuses a property that already has an expression unless replace is true. Nothing is created if any check fails, and a failure part-way takes back what the call added. The read-back (a separate evalScript) forces the expression to evaluate and checks its text, that it is on, that expressionError is empty, and the new controls' values. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeExprRecipeSchema,
+        handler: async (args, ctx) => {
+          const info = recipeByName(args.recipe);
+          if (!info) return { ok: false, error: "bad_args", message: `Unknown recipe "${args.recipe}".` };
+          const params = resolveRecipeParams(info, args.params);
+          if (!params.ok) return { ok: false, error: "bad_args", message: params.message };
+          const plan2 = planRecipeControls(info, args.name_prefix, args.values);
+          if (!plan2.ok) return { ok: false, error: "bad_args", message: plan2.message };
+          if (info.needs_source && !args.source) return { ok: false, error: "bad_args", message: `Recipe ${info.name} needs \`source\`: the layer it follows.` };
+          if (!info.needs_source && args.source) return { ok: false, error: "bad_args", message: `Recipe ${info.name} doesn't use \`source\`.` };
+          const holder = args.controller ?? args.layer;
+          return runGuardedWrite(ctx, {
+            toolName: "ae_expr_recipe",
+            label: `ae_expr_recipe(${args.recipe})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: (phase, w) => {
+              if (phase === "before") {
+                return stateRead(args.comp_id, {
+                  props: [{ layer: args.layer, path: args.path }],
+                  controls: plan2.controls.map((c) => ({ layer: holder, name: c.name }))
+                });
+              }
+              const t = w?.target;
+              if (!t) return null;
+              return stateRead(args.comp_id, {
+                props: [{ layer: { id: t.layer_id }, path: t.path }],
+                controls: (w?.controls ?? []).map((c) => ({ layer: { id: c.layer_id }, name: c.name }))
+              });
+            },
+            write: {
+              host: "rigRecipe",
+              args: {
+                comp_id: args.comp_id,
+                layer: args.layer,
+                path: args.path,
+                recipe: args.recipe,
+                params: params.params,
+                controller: args.controller,
+                source: args.source,
+                controls: plan2.controls.map((c) => ({ key: c.key, name: c.name, kind: c.kind, value: c.value })),
+                replace: args.replace,
+                label: `Expression recipe: ${args.recipe}`
+              }
+            },
+            check: (_before, after, w) => recipeMismatches(plan2.controls, w, after)
+          });
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/fittext.ts
+function regionOf(a, comp) {
+  if (a.safe_area) {
+    const f = SAFE_AREAS[a.safe_area];
+    return { maxW: comp.width * f, maxH: comp.height * f };
+  }
+  return { maxW: a.max_width, maxH: a.max_height };
+}
+function fitsRegion(b, r) {
+  if (r.maxW !== void 0 && b.width > r.maxW * 1.005 + 0.01) return false;
+  if (r.maxH !== void 0 && b.height > r.maxH * 1.005 + 0.01) return false;
+  return true;
+}
+function planFit(m, o) {
+  if (m.expression) return { status: "skip", reason: "Source Text has an expression, which would override a written size" };
+  if (m.numKeys > 0) return { status: "skip", reason: "Source Text is keyed; a fit would have to repeat per keyframe" };
+  const size = m.fontSize;
+  if (typeof size !== "number" || !(size > 0)) return { status: "skip", reason: "the font size could not be read" };
+  const b = m.bounds;
+  if (!(b.width > 0) || !(b.height > 0)) return { status: "skip", reason: "the text has no measurable bounds (empty text?)" };
+  if (m.locked === true) return { status: "skip", reason: "the layer is locked; unlock it to fit it" };
+  const box = m.boxText === true;
+  const overflow = m.boxOverflow === true;
+  const fits = fitsRegion(b, o.region) && !overflow;
+  const bs = box && Array.isArray(m.boxTextSize) && m.boxTextSize.length === 2 ? m.boxTextSize : null;
+  if (box && !fits && bs) {
+    if (o.region.maxW !== void 0 && bs[0] > o.region.maxW * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[0])} wide) is wider than the region (${round2(o.region.maxW)}); resize the box, a smaller font cannot fix that` };
+    }
+    if (o.region.maxH !== void 0 && bs[1] > o.region.maxH * 1.005 + 0.01) {
+      return { status: "limit", reason: `the box itself (${round2(bs[1])} high) is taller than the region (${round2(o.region.maxH)}); resize the box, a smaller font cannot fix that` };
+    }
+  }
+  const ratios = [];
+  if (o.region.maxW !== void 0 && !bs) ratios.push(o.region.maxW / b.width);
+  if (o.region.maxH !== void 0) ratios.push(o.region.maxH / b.height);
+  let factor = ratios.length ? Math.min(...ratios) : Infinity;
+  const grows = o.allowGrow && !box;
+  if (fits && (!grows || factor <= 1.005)) return { status: "fits" };
+  if (overflow) factor = Math.min(factor, 0.95);
+  if (!grows) factor = Math.min(factor, 1);
+  if (!Number.isFinite(factor)) return { status: "fits" };
+  if (factor < 1) factor *= 0.998;
+  const ceiling = grows ? o.maxSize : Math.min(o.maxSize, size);
+  const to = Math.floor(Math.min(Math.max(size * factor, o.minSize, MIN_FONT_SIZE), ceiling, MAX_FONT_SIZE) * 100) / 100;
+  if (Math.abs(to - size) <= size * 2e-3 + 5e-3) {
+    const atMin = size * factor < o.minSize;
+    return { status: "limit", reason: atMin ? `already at the minimum size (${o.minSize})` : "already at the largest allowed size" };
+  }
+  return { status: "resize", factor: to / size, from: size, to: round2(to) };
+}
+function passCap(m, maxPasses) {
+  return m.boxText === true ? maxPasses : Math.min(POINT_TEXT_PASS_CAP, maxPasses);
+}
+function fitMismatches(items, scaleLeading, beforeRaw, afterRaw) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  for (const it of items) {
+    const was = before.layers.find((l) => l.id === it.id);
+    const now = after.layers.find((l) => l.id === it.id);
+    const tag = `layers[${it.name}]`;
+    if (!now) {
+      m.push({ path: tag, expected: it.id, actual: void 0, message: "The layer is not in the read-back" });
+      continue;
+    }
+    expectThat(m, near(now.fontSize, it.to, 0.02), `${tag}.fontSize`, it.to, now.fontSize, "Font size differs from the one written");
+    if (was) {
+      expectThat(m, now.text_length === was.text_length, `${tag}.text_length`, was.text_length, now.text_length, "The text changed");
+      if (was.justification !== void 0 && now.justification !== void 0) {
+        expectThat(m, now.justification === was.justification, `${tag}.justification`, was.justification, now.justification, "Justification changed (the TextDocument round trip can drop it)");
+      }
+      if (scaleLeading && was.autoLeading !== true && typeof was.leading === "number" && was.leading > 0) {
+        const want = Math.min(was.leading * it.factor, 5e3);
+        expectThat(m, near(now.leading, want, 0.5), `${tag}.leading`, want, now.leading, "Leading was not scaled with the size");
+      }
+    }
+  }
+  return m;
+}
+function liveMismatches(remove, afterRaw, ids) {
+  const m = [];
+  const after = afterRaw;
+  if (!after) return m;
+  for (const id of ids) {
+    const now = after.layers.find((l) => l.id === id);
+    if (!now) {
+      m.push({ path: `layers[${id}]`, expected: id, actual: void 0, message: "The layer is not in the read-back" });
+      continue;
+    }
+    expectThat(m, (now.live_fit?.installed ?? false) === !remove, `layers[${now.name}].live_fit`, !remove, now.live_fit?.installed ?? false, remove ? "The live-fit expression is still on" : "The live-fit expression is not on");
+    if (!remove && now.live_fit?.error) m.push({ path: `layers[${now.name}].live_fit.error`, expected: null, actual: now.live_fit.error, message: "The expression has an error" });
+  }
+  return m;
+}
+function readHost(ctx, host, args, toolName, label) {
+  return ctx.bridge.callHost(host, args, { label, mutates: false, toolName }).then((r) => r.result);
+}
+function liveExpressionText(maxW, maxH) {
+  const lines = ["// chroma-fit-text live", "var r = thisLayer.sourceRectAtTime(time, false);", "var s = 1;"];
+  if (typeof maxW === "number") lines.push(`if (r.width > 0) s = Math.min(s, ${maxW} / r.width);`);
+  if (typeof maxH === "number") lines.push(`if (r.height > 0) s = Math.min(s, ${maxH} / r.height);`);
+  lines.push("value * s;");
+  return lines.join("\n");
+}
+function backdropMismatches(args, afterRaw) {
+  const m = [];
+  const after = afterRaw;
+  if (!after) return m;
+  const b = after.backdrop;
+  if (!b) {
+    m.push({ path: "backdrop", expected: "a shape layer", actual: void 0, message: "The box layer is not in the read-back" });
+    return m;
+  }
+  expectThat(m, b.kind === "shape", "backdrop.kind", "shape", b.kind, "The box is not a shape layer");
+  expectThat(m, b.index === after.text.index + 1, "backdrop.index", after.text.index + 1, b.index, "The box is not directly below the text");
+  if (b.expression_error) m.push({ path: "backdrop.expression_error", expected: null, actual: b.expression_error, message: "The size expression has an error" });
+  const pad = args.padding ?? [24, 12];
+  const t = after.text;
+  const plain = (t.rotation === void 0 || Math.abs(t.rotation) < 1e-4) && t.parented !== true && t.three_d !== true;
+  const sx = Math.abs(t.scale?.[0] ?? 100) / 100;
+  const sy = Math.abs(t.scale?.[1] ?? 100) / 100;
+  const want = [t.bounds.width * sx + 2 * pad[0], t.bounds.height * sy + 2 * pad[1]];
+  if (b.size && !b.expression_error && plain) {
+    expectThat(m, near(b.size[0], want[0], 1) && near(b.size[1], want[1], 1), "backdrop.size", want, b.size, "The box is not the text's size (at its Scale) plus padding");
+  }
+  return m;
+}
+var MIN_FONT_SIZE, MAX_FONT_SIZE, SAFE_AREAS, POINT_TEXT_PASS_CAP, round2, RegionFields, regionChosen, regionExclusive, AeMeasureTextSchema, AeFitTextSchema, AeTextBackdropSchema, selectorIds, near, fittextTools;
+var init_fittext = __esm({
+  "src/tools/ext/fittext.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_write_runner();
+    MIN_FONT_SIZE = 0.1;
+    MAX_FONT_SIZE = 1296;
+    SAFE_AREAS = { title: 0.8, action: 0.9 };
+    POINT_TEXT_PASS_CAP = 2;
+    round2 = (n) => Math.round(n * 100) / 100;
+    RegionFields = {
+      max_width: external_exports.number().positive().max(1e5).optional().describe("Largest width the text may measure, in the layer's own pixels (before Scale)."),
+      max_height: external_exports.number().positive().max(1e5).optional().describe("Largest height the text may measure, in the layer's own pixels (before Scale)."),
+      safe_area: external_exports.enum(["title", "action"]).optional().describe("Instead of max_width/max_height: the comp's title-safe (80%) or action-safe (90%) area.")
+    };
+    regionChosen = (v) => v.safe_area !== void 0 || v.max_width !== void 0 || v.max_height !== void 0;
+    regionExclusive = (v) => v.safe_area === void 0 || v.max_width === void 0 && v.max_height === void 0;
+    AeMeasureTextSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layers: external_exports.array(LayerSelectorSchema).min(1).max(100).optional().describe("Text layers to measure. Default: every text layer in the comp (first 500)."),
+      time: external_exports.number().min(0).optional().describe("Comp time in seconds to measure at (sourceRectAtTime). Default the comp's current time. Reading never moves the playhead."),
+      ...RegionFields
+    }).refine(regionExclusive, { message: "Give safe_area or max_width/max_height, not both." });
+    AeFitTextSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layers: external_exports.array(LayerSelectorSchema).min(1).max(100).optional().describe("Text layers to fit. Default: every text layer in the comp."),
+      mode: external_exports.enum(["size", "live", "unlive"]).optional().describe(
+        "'size' (default) writes a font size and verifies it. 'live' installs an expression on Transform > Scale that shrinks the layer to fit as its text changes (it only shrinks, never above 100%). 'unlive' removes that expression (only one this tool installed)."
+      ),
+      ...RegionFields,
+      min_size: external_exports.number().min(MIN_FONT_SIZE).max(MAX_FONT_SIZE).optional().describe("Never go below this font size (default 6). A layer that still does not fit is reported, not shrunk further."),
+      max_size: external_exports.number().min(MIN_FONT_SIZE).max(MAX_FONT_SIZE).optional().describe("Never go above this font size (default: the current size, or 1296 with allow_grow)."),
+      allow_grow: external_exports.boolean().optional().describe("Also grow point text that is smaller than the region. Default false: shrink only. Box text is never grown."),
+      scale_leading: external_exports.boolean().optional().describe("Scale a fixed leading by the same factor (default true; auto leading follows by itself). Without it multi-line height is not linear in size."),
+      max_passes: external_exports.number().int().min(1).max(4).optional().describe("Most writes per layer (default 3). Point text gets at most 2 (the write and one correction); box text rewraps, so it may need more. Each pass is one undo step."),
+      dry_run: external_exports.boolean().optional().describe("Measure and plan only; write nothing."),
+      time: external_exports.number().min(0).optional().describe("Comp time in seconds to measure at. Default the comp's current time."),
+      expect: ExpectSchema
+    }).refine((v) => v.mode === "unlive" || regionChosen(v), { message: "Give safe_area, or max_width and/or max_height." }).refine(regionExclusive, { message: "Give safe_area or max_width/max_height, not both." }).refine((v) => v.min_size === void 0 || v.max_size === void 0 || v.min_size <= v.max_size, { message: "min_size is above max_size." });
+    AeTextBackdropSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("The text layer to put the box behind."),
+      padding: external_exports.array(external_exports.number().min(0).max(5e3)).length(2).optional().describe("Padding [x, y] in pixels around the text on each side. Default [24, 12]."),
+      color: external_exports.array(external_exports.number().min(0).max(1)).length(3).optional().describe("Fill colour [r, g, b] in 0..1. Default black."),
+      opacity: external_exports.number().min(0).max(100).optional().describe("Fill opacity in percent. Default 100."),
+      corner_radius: external_exports.number().min(0).max(5e3).optional().describe("Rounded corners in pixels. Default 0."),
+      name: external_exports.string().min(1).max(200).optional().describe("Name of the shape layer. Default '<text layer> Box'."),
+      expect: ExpectSchema
+    });
+    selectorIds = (items) => items.map((i) => ({ id: i.id }));
+    near = (a, b, abs) => typeof a === "number" && Math.abs(a - b) <= abs + Math.abs(b) * 1e-3;
+    fittextTools = [
+      {
+        name: "ae_measure_text",
+        description: "Measure text layers without changing anything: bounds (sourceRectAtTime) at a time, font size, leading, justification, point or box text, box overflow (AE 24.6+), substituted font, whether the size varies per range, and whether a live-fit expression is on. With max_width/max_height or safe_area it also says whether each layer fits. Reading does not move the playhead or the selection. Source Text that is keyed is measured at `time` only.",
+        schema: AeMeasureTextSchema,
+        handler: async (args, ctx) => {
+          const res = await readHost(
+            ctx,
+            "fittextMeasure",
+            { comp_id: args.comp_id, layers: args.layers, time: args.time },
+            "ae_measure_text",
+            `ae_measure_text(comp ${args.comp_id})`
+          );
+          const region = regionOf(args, res.comp);
+          const has = region.maxW !== void 0 || region.maxH !== void 0;
+          return {
+            ...res,
+            region: has ? region : void 0,
+            layers: res.layers.map((l) => has ? { ...l, fits: fitsRegion(l.bounds, region) && l.boxOverflow !== true } : l)
           };
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getKeyframeEase", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_set_keyframe_ease"
-              });
-              const curvePlan = isCurveEase(args.ease) ? curveToSides(beforeSnap.result, args.keys, args.ease.curve) : null;
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: curvePlan ? buildJsxCall("setKeyframeEaseSides", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path,
-                  sides: curvePlan.sides,
-                  expect: effectiveExpect
-                }) : buildJsxCall("setKeyframeEase", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path,
-                  keys: args.keys,
-                  ease: args.ease,
-                  rove_between: args.rove_between,
-                  expect: effectiveExpect
-                }),
-                label,
-                mutates: true,
-                toolName: "ae_set_keyframe_ease"
-              });
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getKeyframeEase", {
-                    comp_id: args.comp_id,
-                    layer: args.layer,
-                    path: args.path
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_set_keyframe_ease"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  result: writeResp.result,
-                  ...curvePlan ? {
-                    curve: args.ease,
-                    segments: curvePlan.segments,
-                    ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
-                  } : {},
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const easeCheck = extractKeyframeEaseCheck(
-                args.ease,
-                args.keys,
-                afterSnap.result,
-                writeResp.result?.roving
-              );
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: easeCheck?.expected,
-                actualForExpected: easeCheck?.actual,
-                customMismatches: curvePlan ? curveEaseMismatches(curvePlan.sides, afterSnap.result) : rovingMismatches(writeResp.result?.roving, afterSnap.result)
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                result: writeResp.result,
-                ...curvePlan ? {
-                  curve: args.ease,
-                  segments: curvePlan.segments,
-                  ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
-                } : {},
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
-          }
         }
       },
       {
-        name: "ae_set_text",
-        description: "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeSetTextSchema,
+        name: "ae_fit_text",
+        description: "Fit titles into a box or the safe area: shrink (or, with allow_grow, grow) the font size until the measured bounds fit, for chosen text layers or every text layer in the comp, with a min and max size. Point text is measured once, the size computed from the ratio and written, then re-measured in a separate evalScript; one correction pass at most. Box text rewraps as the size changes, so it steps down until the box no longer overflows (boxOverflow, AE 24.6+) or the region fits, within max_passes; if the box itself is larger than the region it is reported as limit (resize the box), not shrunk. Every pass is its own undo step, guarded by `expect`. If a later pass fails, the earlier passes stay applied: the result carries their op_ids, checkpoints and receipts plus a pass_error, and the loop stops. Locked layers are skipped and reported. Per-range sizes keep their proportions (each run is scaled, not overwritten), and a fixed leading scales with the size. Keyed Source Text and Source Text with an expression are skipped and reported. mode 'live' instead puts an expression on Transform > Scale so the layer shrinks to fit as its text changes; 'unlive' removes it. dry_run plans without writing, in every mode (for live it lists the layers and the expression it would install). Each layer ends as fits, limit (min or max size reached), skip (with the reason) or unfitted (passes ran out). " + AGENT_SAFETY_GUIDANCE,
+        schema: AeFitTextSchema,
         handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_set_text(comp ${args.comp_id})`;
-          const effectiveExpect = {
-            project_path: args.expect.project_path,
-            comp_id: args.expect.comp_id ?? args.comp_id
+          const mode = args.mode ?? "size";
+          const measureArgs = { comp_id: args.comp_id, layers: args.layers, time: args.time, sizes: false };
+          const first = await readHost(ctx, "fittextMeasure", measureArgs, "ae_fit_text", `ae_fit_text(comp ${args.comp_id}) measure`);
+          if (first.layers.length === 0) {
+            const why = first.skipped && first.skipped.length > 0 ? ` Skipped: ${first.skipped.map((s) => `${s.name} (${s.reason})`).join(", ")}.` : "";
+            return { ok: false, error: "bad_args", message: `No text layers to fit.${why}`, skipped: first.skipped };
+          }
+          const region = regionOf(args, first.comp);
+          const readArgs = (ids) => ({ comp_id: args.comp_id, layers: selectorIds(ids), time: first.time, sizes: false });
+          if (mode !== "size") {
+            const remove = mode === "unlive";
+            const skipped = [...first.skipped ?? []];
+            const targets = [];
+            for (const l of first.layers) {
+              if (remove) {
+                if (!l.live_fit?.installed) skipped.push({ id: l.id, name: l.name, reason: "no live fit from this tool is on" });
+                else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
+                else targets.push(l);
+              } else if (l.locked === true) skipped.push({ id: l.id, name: l.name, reason: "the layer is locked" });
+              else if (l.live_fit?.foreign === true) skipped.push({ id: l.id, name: l.name, reason: "Scale already has an expression that is not this tool's" });
+              else targets.push(l);
+            }
+            if (args.dry_run) {
+              return {
+                ok: true,
+                dry_run: true,
+                mode,
+                region,
+                would: targets.map((l) => ({ id: l.id, name: l.name, action: remove ? "remove" : l.live_fit?.installed ? "replace" : "install" })),
+                expression: remove ? void 0 : liveExpressionText(region.maxW, region.maxH),
+                skipped
+              };
+            }
+            if (targets.length === 0) {
+              return { ok: true, applied: false, mode, message: "Nothing to change.", skipped };
+            }
+            const ids = targets.map((l) => l.id);
+            const out = await runGuardedWrite(ctx, {
+              toolName: "ae_fit_text",
+              label: `ae_fit_text(${mode})`,
+              expect: args.expect,
+              compId: args.comp_id,
+              read: () => ({ host: "fittextMeasure", args: readArgs(targets) }),
+              write: {
+                host: "fittextLive",
+                args: { comp_id: args.comp_id, layers: selectorIds(targets), max_width: region.maxW, max_height: region.maxH, remove, label: remove ? "Remove live fit" : "Live fit text" }
+              },
+              check: (_b, after) => liveMismatches(remove, after, ids),
+              present: (_b, _a, w) => ({ mode, layers: w.layers, skipped })
+            });
+            return out;
+          }
+          const opts = {
+            region,
+            minSize: args.min_size ?? 6,
+            maxSize: args.max_size ?? MAX_FONT_SIZE,
+            allowGrow: args.allow_grow === true
           };
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getTextDocument", {
-                  comp_id: args.comp_id,
-                  layer: args.layer
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_set_text"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("setText", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  text: args.text,
-                  style: args.style,
-                  expect: effectiveExpect
-                }),
-                label,
-                mutates: true,
-                toolName: "ae_set_text"
-              });
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getTextDocument", {
-                    comp_id: args.comp_id,
-                    layer: args.layer
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_set_text"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const beforeObj = beforeSnap.result ?? {};
-              const beforeDoc = beforeObj.document && typeof beforeObj.document === "object" ? beforeObj.document : beforeObj;
-              const afterObj = afterSnap.result ?? {};
-              const afterDoc = afterObj.document && typeof afterObj.document === "object" ? afterObj.document : afterObj;
-              const expectedCheck = {};
-              const actualCheck = {};
-              if (args.text !== void 0) {
-                expectedCheck.text = args.text;
-                actualCheck.text = afterDoc.text;
-              }
-              if (args.style) {
-                const styleKeys = [
-                  "font",
-                  "fontSize",
-                  "tracking",
-                  "leading",
-                  "fillColor",
-                  "strokeColor",
-                  "strokeWidth",
-                  "applyFill",
-                  "applyStroke",
-                  "justification"
-                ];
-                for (const key of styleKeys) {
-                  if (args.style[key] !== void 0) {
-                    expectedCheck[key] = args.style[key];
-                    actualCheck[key] = afterDoc[key];
-                  }
-                }
-              }
-              if (expectedCheck.justification === void 0 && typeof beforeDoc.justification === "string" && typeof afterDoc.justification === "string") {
-                expectedCheck.justification = beforeDoc.justification;
-                actualCheck.justification = afterDoc.justification;
-              }
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
-                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                result: writeResp.result,
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
+          const maxPasses = args.max_passes ?? 3;
+          const scaleLeading = args.scale_leading !== false;
+          const startSize = new Map(first.layers.map((l) => [l.id, l.fontSize]));
+          const used = /* @__PURE__ */ new Map();
+          const stalled = /* @__PURE__ */ new Set();
+          let current = first.layers;
+          let plans = current.map((l) => planFit(l, opts));
+          if (args.dry_run) {
+            return {
+              ok: true,
+              dry_run: true,
+              region,
+              layers: current.map((l, i) => ({ id: l.id, name: l.name, font_size: l.fontSize, bounds: l.bounds, overflow: l.boxOverflow, plan: plans[i] })),
+              skipped: first.skipped
+            };
           }
+          const passes = [];
+          let passError;
+          for (let pass = 1; pass <= maxPasses; pass++) {
+            const items = [];
+            current.forEach((l, i) => {
+              const p = plans[i];
+              if (p.status === "resize" && !stalled.has(l.id) && (used.get(l.id) ?? 0) < passCap(l, maxPasses)) {
+                items.push({ id: l.id, name: l.name, factor: p.factor, from: p.from, to: p.to, expect_size: p.from });
+              }
+            });
+            if (items.length === 0) break;
+            const run = () => runGuardedWrite(ctx, {
+              toolName: "ae_fit_text",
+              label: `ae_fit_text(pass ${pass}, ${items.length} layer${items.length === 1 ? "" : "s"})`,
+              expect: args.expect,
+              compId: args.comp_id,
+              read: () => ({ host: "fittextMeasure", args: readArgs(items) }),
+              write: {
+                host: "fittextApply",
+                args: {
+                  comp_id: args.comp_id,
+                  time: first.time,
+                  scale_leading: scaleLeading,
+                  items: items.map((it) => ({ layer: { id: it.id }, factor: it.factor, expect_size: it.expect_size })),
+                  label: "Fit text"
+                }
+              },
+              check: (before2, after) => fitMismatches(items, scaleLeading, before2, after),
+              present: (_b, after, w) => ({ measured: after, changes: w.layers })
+            });
+            let out;
+            if (pass === 1) {
+              out = await run();
+            } else {
+              try {
+                out = await run();
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                passError = { pass, message };
+                passes.push({
+                  pass,
+                  error: message,
+                  note: `Pass ${pass} did not complete. The earlier passes are applied and kept; measure again before trying more.`
+                });
+                break;
+              }
+            }
+            const before = current;
+            for (const it of items) used.set(it.id, (used.get(it.id) ?? 0) + 1);
+            passes.push({ pass, op_id: out.op_id, checkpoint: out.checkpoint, changes: out.changes, receipt: out.receipt });
+            const measured = out.measured;
+            if (!measured) break;
+            current = current.map((l) => measured.layers.find((n) => n.id === l.id) ?? l);
+            for (const it of items) {
+              const was = before.find((l) => l.id === it.id);
+              const now = current.find((l) => l.id === it.id);
+              if (!was || !now) continue;
+              const same = (a, b) => Math.abs(a - b) <= Math.abs(a) * 5e-3 + 0.01;
+              if (same(was.bounds.width, now.bounds.width) && same(was.bounds.height, now.bounds.height) && now.boxOverflow !== true) stalled.add(it.id);
+            }
+            plans = current.map((l) => planFit(l, opts));
+            if (!out.receipt.matches) break;
+          }
+          const final = current.map((l, i) => {
+            const p = plans[i];
+            const n = used.get(l.id) ?? 0;
+            let status;
+            let reason;
+            if (p.status === "resize") {
+              status = "unfitted";
+              if (stalled.has(l.id)) reason = "the text's bounds did not change with the font size; more passes would not help";
+              else if (passError && n < passCap(l, maxPasses)) reason = `pass ${passError.pass} failed: ${passError.message}`;
+              else reason = n >= passCap(l, maxPasses) ? `still outside the region after ${n} pass${n === 1 ? "" : "es"}` : "not written";
+            } else {
+              status = p.status;
+              reason = p.status === "fits" ? void 0 : p.reason;
+            }
+            return { id: l.id, name: l.name, status, reason, from_size: startSize.get(l.id), to_size: l.fontSize, passes: n, bounds: l.bounds, overflow: l.boxOverflow };
+          });
+          const lastWithReceipt = [...passes].reverse().find((p) => p.receipt !== void 0);
+          return {
+            ok: true,
+            applied: passes.some((p) => p.op_id !== void 0),
+            region,
+            passes,
+            layers: final,
+            receipt: lastWithReceipt?.receipt,
+            all_fit: !passError && final.every((f) => f.status === "fits"),
+            ...passError ? { pass_error: passError } : {},
+            skipped: first.skipped
+          };
         }
       },
       {
-        name: "ae_import_footage",
-        description: "Import one or more footage files (or an image sequence, in numbered order with placeholders for missing frames) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeImportFootageSchema,
-        handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_import_footage(${args.paths.length} file${args.paths.length === 1 ? "" : "s"})`;
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, args.expect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getFootageItems", {}),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_import_footage"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("importFootage", {
-                  paths: args.paths,
-                  sequence: Boolean(args.sequence),
-                  fps: args.fps,
-                  target_folder_id: args.target_folder_id,
-                  expect: args.expect
-                }),
-                label,
-                timeoutMs: SLOW_TIMEOUT_MS,
-                mutates: true,
-                toolName: "ae_import_footage"
-              });
-              const itemIds = Array.isArray(writeResp.result?.item_ids) ? writeResp.result.item_ids : [];
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getFootageItems", {
-                    item_ids: itemIds
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_import_footage"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  item_ids: itemIds,
-                  items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const afterIds = Array.isArray(afterSnap.result?.item_ids) ? afterSnap.result.item_ids : [];
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: {
-                  count: args.paths.length,
-                  item_ids: itemIds
-                },
-                actualForExpected: {
-                  count: afterIds.length,
-                  item_ids: afterIds
-                }
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                item_ids: itemIds,
-                items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
-                result: writeResp.result,
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
+        name: "ae_text_backdrop",
+        description: "Put a rectangle behind a text layer that is always the text's size plus padding: a shape layer directly below it whose Rectangle Size and Position are expressions on the text's sourceRectAtTime, so it follows edits to the text. One undo group guarded by `expect`; the read-back (a separate evalScript) checks the box sits directly below the text, its expression has no error and its evaluated size is the text's bounds plus padding. The expression finds the text layer by name, so renaming the text layer by script breaks it. The box is the bounding box of the text's bounds in comp space, so Scale, rotation and a parent are followed; the receipt checks the size only for an unrotated, unparented, 2D text layer (it takes Scale into account). " + AGENT_SAFETY_GUIDANCE,
+        schema: AeTextBackdropSchema,
+        handler: async (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_text_backdrop",
+          label: "ae_text_backdrop",
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => ({
+            host: "fittextBackdropRead",
+            args: { comp_id: args.comp_id, layer: args.layer, backdrop_id: phase === "after" ? w?.backdrop?.id : void 0 }
+          }),
+          write: {
+            host: "fittextBackdrop",
+            args: {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              padding: args.padding ?? [24, 12],
+              color: args.color ?? [0, 0, 0],
+              opacity: args.opacity ?? 100,
+              corner_radius: args.corner_radius ?? 0,
+              name: args.name,
+              label: "Text backdrop"
             }
-            throw err;
+          },
+          check: (_before, after) => backdropMismatches(args, after),
+          present: (_before, after, w) => ({ backdrop: after?.backdrop ?? w.backdrop, text: after?.text })
+        })
+      }
+    ];
+  }
+});
+
+// src/tools/ext/stagger.ts
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function orderRanks(n, order, seed = 1) {
+  const pos = Array.from({ length: n }, (_, i) => i);
+  if (order === "stack") return pos;
+  if (order === "reverse") return pos.map((i) => n - 1 - i);
+  if (order === "center_out" || order === "ends_in") {
+    const centre2 = (n - 1) / 2;
+    const out = pos.map((i) => Math.round(Math.abs(i - centre2) - (n % 2 === 0 ? 0.5 : 0)));
+    if (order === "center_out") return out;
+    const max = Math.max(...out);
+    return out.map((r) => max - r);
+  }
+  const rand = mulberry32(seed);
+  const perm = pos.slice();
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [perm[i], perm[j]] = [perm[j], perm[i]];
+  }
+  return perm;
+}
+function easeCurve(ease, t) {
+  if (ease === "ease_in") return t * t;
+  if (ease === "ease_out") return 1 - (1 - t) * (1 - t);
+  if (ease === "ease_in_out") return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+  return t;
+}
+function snapToFrame(t, frameDuration) {
+  if (!(frameDuration > 0)) return t;
+  return Number((Math.round(t / frameDuration) * frameDuration).toFixed(9));
+}
+function computeOffsets(n, o) {
+  const ranks = orderRanks(n, o.order, o.seed ?? 1);
+  const maxRank = Math.max(0, ...ranks);
+  const spread = o.total !== void 0 ? o.total : (o.step ?? 0) * maxRank;
+  const ease = o.ease ?? "linear";
+  return ranks.map((r) => {
+    const t = maxRank === 0 ? 0 : r / maxRank;
+    const raw = (o.delay ?? 0) + spread * easeCurve(ease, t);
+    return o.frameDuration ? snapToFrame(raw, o.frameDuration) : raw;
+  });
+}
+function gridPositions(n, columns, spacing, origin) {
+  const cols = Math.min(columns, n);
+  const rows = Math.ceil(n / cols);
+  return Array.from({ length: n }, (_, i) => [
+    origin[0] + (i % cols - (cols - 1) / 2) * spacing[0],
+    origin[1] + (Math.floor(i / cols) - (rows - 1) / 2) * spacing[1]
+  ]);
+}
+function radialPositions(n, centre2, radius, startAngle, sweep) {
+  return Array.from({ length: n }, (_, i) => {
+    const frac = Math.abs(sweep) >= 360 || n === 1 ? i / n : i / (n - 1);
+    const a = (startAngle + sweep * frac) * Math.PI / 180;
+    return [centre2[0] + radius * Math.sin(a), centre2[1] - radius * Math.cos(a)];
+  });
+}
+function planStagger(args, read) {
+  const bad3 = (message) => ({ ok: false, error: "bad_args", message });
+  if (read.truncated) return bad3("More than 500 layers were given or selected; split them into batches.");
+  const skipped = [];
+  let layers = read.layers;
+  if (args.mode !== "layers") {
+    const prop = (l) => l.property;
+    const missing = layers.filter((l) => !prop(l)?.found);
+    if (missing.length) {
+      return bad3(`${missing.length} layer(s) have no property ${args.property_path?.join(" > ")}: ${missing.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${missing.length > 5 ? ", ..." : ""}.`);
+    }
+    const lockedOnes = layers.filter((l) => l.locked === true);
+    if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
+    const sepLeaders = layers.filter((l) => prop(l)?.separationLeader);
+    if (sepLeaders.length) return bad3(`"${sepLeaders[0].name}": that Position has separated dimensions; its keys are on X Position / Y Position (ADBE Position_0, ADBE Position_1).`);
+    if (args.mode === "keys") {
+      const keyless = layers.filter((l) => !(prop(l)?.numKeys && prop(l).numKeys > 0));
+      if (keyless.length && !args.skip_missing) {
+        return bad3(
+          `${keyless.length} layer(s) have no keys on that property: ${keyless.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}${keyless.length > 5 ? ", ..." : ""}. Pass skip_missing to leave them out, or use mode copy_keys.`
+        );
+      }
+      for (const l of keyless) skipped.push({ id: l.id, name: l.name, reason: "no keys on the property" });
+      layers = layers.filter((l) => (prop(l)?.numKeys ?? 0) > 0);
+      const total = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
+      if (total > MAX_KEYS_TOTAL) return bad3(`${total} keys would be rebuilt; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+    }
+    if (args.mode === "copy_keys") {
+      const src = read.source;
+      if (!src?.property?.found || !(src.property.numKeys && src.property.numKeys > 0)) return bad3("The source layer has no keys on that property.");
+      if (layers.some((l) => l.id === src.id)) return bad3("The source layer can't also be a target.");
+      if (src.property.separationLeader) return bad3("That Position has separated dimensions; copy X Position / Y Position instead.");
+      if (!args.replace_existing) {
+        const has = layers.filter((l) => (prop(l)?.numKeys ?? 0) > 0);
+        if (has.length) return bad3(`${has.length} target layer(s) already have keys on that property (${has.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}); pass replace_existing to overwrite them.`);
+      }
+      const existing = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
+      const total = (src.property.numKeys ?? 0) * layers.length + existing;
+      if (total > MAX_KEYS_TOTAL) return bad3(`${total} keys would be written; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+    }
+  }
+  if (layers.length === 0) return bad3("No layers left to stagger.");
+  const frameDuration = read.frameDuration;
+  const offsets = computeOffsets(layers.length, {
+    order: args.order,
+    seed: args.seed,
+    step: args.step,
+    total: args.total,
+    ease: args.ease,
+    delay: args.delay,
+    frameDuration: args.snap_to_frames ? frameDuration : void 0
+  });
+  const entries = layers.map((l, i) => {
+    const e = { id: l.id, index: l.index, name: l.name, offset: offsets[i] };
+    if (args.mode === "layers") {
+      e.from = l.startTime;
+      e.to = Number((l.startTime + offsets[i]).toFixed(9));
+    } else {
+      const p = l.property;
+      e.num_keys = p?.numKeys;
+      e.first_time = p?.times?.[0];
+    }
+    return e;
+  });
+  return { ok: true, plan: { entries, skipped, frameDuration } };
+}
+function planLayout(args, read) {
+  const bad3 = (message) => ({ ok: false, error: "bad_args", message });
+  if (read.truncated) return bad3("More than 500 layers were given or selected; split them into batches.");
+  const layers = read.layers;
+  const lockedOnes = layers.filter((l) => l.locked === true);
+  if (lockedOnes.length) return bad3(`"${lockedOnes[0].name}" is locked${lockedOnes.length > 1 ? ` (and ${lockedOnes.length - 1} more)` : ""}; unlock it first.`);
+  const stuck = layers.filter((l) => l.state !== "static");
+  if (stuck.length) {
+    const why = (l) => l.state === "keyed" ? "has Position keyframes" : l.state === "expression" ? "has a Position expression" : "has no Position";
+    return bad3(`${stuck.length} layer(s) can't be placed: ${stuck.slice(0, 5).map((l) => `"${l.name}" ${why(l)}`).join("; ")}.`);
+  }
+  const origin = args.origin ?? [read.width / 2, read.height / 2];
+  const cells = args.pattern === "grid" ? gridPositions(layers.length, args.columns ?? 1, args.spacing ?? [0, 0], origin) : radialPositions(layers.length, origin, args.radius ?? 0, args.start_angle, args.sweep);
+  const ranks = orderRanks(layers.length, args.order, args.seed);
+  const entries = layers.map((l, i) => {
+    const cell = cells[ranks[i]];
+    return { id: l.id, index: l.index, name: l.name, position: [Number(cell[0].toFixed(4)), Number(cell[1].toFixed(4))], from: l.position };
+  });
+  const warnings = [];
+  const parented = layers.filter((l) => l.parent !== null);
+  if (parented.length) warnings.push(`${parented.length} layer(s) have a parent; Position is in the parent's space, so they land relative to it.`);
+  return { ok: true, entries, warnings };
+}
+function closeEnough(a, b, abs = 1e-4) {
+  if (typeof a === "number" && typeof b === "number") return numClose(a, b, abs);
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => closeEnough(x, b[i], abs));
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k) => closeEnough(a[k], b[k], abs));
+  }
+  return a === b;
+}
+function compareKeys(before, after, dt, timeTol, where) {
+  const m = [];
+  if (before.length !== after.length) {
+    m.push({ path: `${where}.numKeys`, expected: before.length, actual: after.length, message: "The key count differs" });
+    return m;
+  }
+  for (let i = 0; i < before.length; i++) {
+    const b = before[i];
+    const a = after[i];
+    const at = `${where}.keys[${i + 1}]`;
+    const roving = b.roving === true || a.roving === true;
+    if (!roving) expectThat(m, Math.abs(a.time - (b.time + dt)) <= timeTol + TIME_TOL, `${at}.time`, b.time + dt, a.time, "Key time differs");
+    expectThat(m, closeEnough(b.value, a.value), `${at}.value`, b.value, a.value, "Key value differs");
+    const same = (field, msg) => {
+      if (b[field] === void 0) return;
+      expectThat(m, closeEnough(b[field], a[field]), `${at}.${field}`, b[field], a[field], msg);
+    };
+    same("inInterp", "In interpolation differs");
+    same("outInterp", "Out interpolation differs");
+    if (b.easeIn && b.inInterp === "bezier") expectThat(m, easeClose(b.easeIn, a.easeIn), `${at}.easeIn`, b.easeIn, a.easeIn, "In ease differs");
+    if (b.easeOut && b.outInterp === "bezier") expectThat(m, easeClose(b.easeOut, a.easeOut), `${at}.easeOut`, b.easeOut, a.easeOut, "Out ease differs");
+    same("temporalContinuous", "Temporal continuity differs");
+    same("temporalAutoBezier", "Temporal auto-bezier differs");
+    same("spatialContinuous", "Spatial continuity differs");
+    same("spatialAutoBezier", "Spatial auto-bezier differs");
+    same("roving", "Roving differs");
+    same("label", "Key label differs");
+    if (!roving) {
+      same("tangentIn", "In spatial tangent differs");
+      same("tangentOut", "Out spatial tangent differs");
+    }
+    if (m.length >= MAX_MISMATCHES) {
+      m.push({ path: where, expected: void 0, actual: void 0, message: `More than ${MAX_MISMATCHES} differences; the rest are not listed` });
+      return m;
+    }
+  }
+  return m;
+}
+function layersMismatches(args, plan2, beforeRaw, afterRaw) {
+  const m = [];
+  const before = readOf2(beforeRaw);
+  const after = readOf2(afterRaw);
+  if (!before || !after) return m;
+  const tol = after.frameDuration * 0.5 + TIME_TOL;
+  const trim = args.trim ?? "keep_duration";
+  for (const e of plan2.entries) {
+    const b = layerOf(before, e.id);
+    const a = layerOf(after, e.id);
+    if (!a) {
+      m.push({ path: `layers[${e.id}]`, expected: e.name, actual: void 0, message: "The layer is not in the read-back" });
+      continue;
+    }
+    expectThat(m, Math.abs(a.startTime - e.to) <= tol, `layers[${e.index}].startTime`, e.to, a.startTime, `"${e.name}" start time differs`);
+    if (!b) continue;
+    if (trim === "keep_duration") {
+      const want = b.outPoint + (e.to - b.startTime);
+      expectThat(m, Math.abs(a.outPoint - want) <= tol, `layers[${e.index}].outPoint`, want, a.outPoint, `"${e.name}" out point did not follow its start`);
+    } else if (trim === "keep_out") {
+      expectThat(m, Math.abs(a.outPoint - b.outPoint) <= tol, `layers[${e.index}].outPoint`, b.outPoint, a.outPoint, `"${e.name}" out point moved (a layer can't run past its source)`);
+    } else {
+      expectThat(m, Math.abs(a.outPoint - after.duration) <= tol, `layers[${e.index}].outPoint`, after.duration, a.outPoint, `"${e.name}" out point is not at the comp's end (a layer can't run past its source)`);
+    }
+  }
+  return m;
+}
+function keysMismatches(args, plan2, beforeRaw, afterRaw) {
+  const m = [];
+  const before = readOf2(beforeRaw);
+  const after = readOf2(afterRaw);
+  if (!before || !after) return m;
+  const tol = after.frameDuration * 0.5;
+  const copy = args.mode === "copy_keys";
+  const srcBefore = before.source?.property?.keys;
+  if (copy) {
+    const srcAfter = after.source?.property?.keys;
+    if (!srcBefore || !srcAfter) m.push({ path: "source", expected: "keys", actual: void 0, message: "The source's keys could not be read back" });
+    else m.push(...compareKeys(srcBefore, srcAfter, 0, tol, "source"));
+  }
+  for (const e of plan2.entries) {
+    const a = layerOf(after, e.id);
+    const b = layerOf(before, e.id);
+    const where = `layers[${e.index}]`;
+    const afterKeys = a?.property?.keys;
+    const beforeKeys = copy ? srcBefore : b?.property?.keys;
+    if (!afterKeys || !beforeKeys) {
+      if (a?.property?.truncated || b?.property?.truncated) continue;
+      m.push({ path: where, expected: "keys", actual: afterKeys ? void 0 : "no keys", message: `"${e.name}": the keys could not be read back` });
+      continue;
+    }
+    for (const x of compareKeys(beforeKeys, afterKeys, e.offset, tol, where)) m.push({ ...x, message: `"${e.name}": ${x.message}` });
+    if (m.length >= MAX_MISMATCHES) break;
+  }
+  return m;
+}
+function layoutMismatches(entries, afterRaw) {
+  const m = [];
+  const after = readOf2(afterRaw);
+  if (!after) return m;
+  for (const e of entries) {
+    const a = after.layers.find((l) => l.id === e.id);
+    if (!a?.position) {
+      m.push({ path: `layers[${e.index}].position`, expected: e.position, actual: void 0, message: `"${e.name}": Position could not be read back` });
+      continue;
+    }
+    expectThat(m, Math.abs(a.position[0] - e.position[0]) <= 0.05 && Math.abs(a.position[1] - e.position[1]) <= 0.05, `layers[${e.index}].position`, e.position, a.position.slice(0, 2), `"${e.name}" is not at the planned position`);
+    if (e.from && e.from.length > 2 && a.position.length > 2) expectThat(m, numClose(a.position[2], e.from[2], 0.01), `layers[${e.index}].position[2]`, e.from[2], a.position[2], `"${e.name}": Z changed`);
+  }
+  return m;
+}
+async function planRead(ctx, host, args, toolName, label) {
+  const res = await ctx.bridge.callHost(host, args, { label, mutates: false, toolName });
+  return res.result;
+}
+function summarise(plan2, mode) {
+  return plan2.entries.map(
+    (e) => mode === "layers" ? { id: e.id, index: e.index, name: e.name, offset: e.offset, from: e.from, to: e.to } : { id: e.id, index: e.index, name: e.name, offset: e.offset, num_keys: e.num_keys, first_key_from: e.first_time, first_key_to: e.first_time === void 0 ? void 0 : Number((e.first_time + e.offset).toFixed(9)) }
+  );
+}
+var ORDERS, EASES, readOf2, PropertyPath, LayersField, AeStaggerSchema, AeStaggerLayoutSchema, MAX_KEYS_TOTAL, TIME_TOL, MAX_MISMATCHES, numClose, easeClose, layerOf, selection, idSelectors, staggerTools;
+var init_stagger = __esm({
+  "src/tools/ext/stagger.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_mutate();
+    init_write_runner();
+    ORDERS = ["stack", "reverse", "center_out", "ends_in", "random"];
+    EASES = ["linear", "ease_in", "ease_out", "ease_in_out"];
+    readOf2 = (v) => v && typeof v === "object" ? v : null;
+    PropertyPath = external_exports.array(external_exports.string().min(1)).min(1).max(12).describe("Property path from the layer: names or match names, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity'].");
+    LayersField = external_exports.array(LayerSelectorSchema).min(1).max(500).optional().describe("The layers in sequence order (the first goes first). Omit to use the layers selected in the comp, top to bottom. Each layer counts once.");
+    AeStaggerSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      mode: external_exports.enum(["layers", "keys", "copy_keys"]).default("layers").describe(
+        "layers: move each layer in time (its keys, markers and in/out go with it). keys: shift the keys of one property on each layer, leaving the layer where it is. copy_keys: copy a property's keys from `source` onto the layers, each with its own time offset."
+      ),
+      layers: LayersField,
+      property_path: PropertyPath.optional().describe("keys and copy_keys: the property whose keys move or are copied."),
+      source: LayerSelectorSchema.optional().describe("copy_keys: the layer to copy the keys from. It is not changed and can't be one of the targets."),
+      replace_existing: external_exports.boolean().optional().describe("copy_keys: overwrite keys a target already has on that property. Default false: a target with keys is refused."),
+      skip_missing: external_exports.boolean().optional().describe("keys: skip layers that have no keys on the property, instead of refusing. Skipped layers are listed and don't take a slot in the sequence."),
+      order: external_exports.enum(ORDERS).default("stack").describe("Who goes first: stack (the given order), reverse, center_out (the middle first), ends_in (the ends first) or random (seeded, see `seed`)."),
+      step: external_exports.number().min(0).max(3600).optional().describe("Seconds between neighbouring places in the sequence. Give `step` or `total`."),
+      total: external_exports.number().min(0).max(3600).optional().describe("Seconds from the first to the last place. Give `step` or `total`."),
+      ease: external_exports.enum(EASES).default("linear").describe("Shapes the spread: linear is an even step; ease_in starts slow and speeds up, ease_out the reverse."),
+      seed: external_exports.number().int().min(0).max(4294967295).default(1).describe("Seed for order 'random'. The same seed gives the same order."),
+      delay: external_exports.number().min(-3600).max(3600).optional().describe("Seconds added to every layer, so the sequence starts later (or earlier). Default 0."),
+      snap_to_frames: external_exports.boolean().default(true).describe("Round each offset to a whole number of frames (default true)."),
+      trim: external_exports.enum(["keep_duration", "keep_out", "to_comp_end"]).optional().describe(
+        "layers mode, what happens to the out point: keep_duration (default; each layer keeps its length, so its out point follows), keep_out (the out point stays where it was, so a later layer gets shorter; a video layer can't be made longer than its source), to_comp_end (every out point goes to the comp's end)."
+      ),
+      dry_run: external_exports.boolean().optional().describe("Return the planned times without touching AE."),
+      expect: ExpectSchema
+    }).refine((v) => v.step === void 0 !== (v.total === void 0), { message: "Give exactly one of step and total." }).refine((v) => v.mode === "layers" || v.property_path !== void 0, { message: "keys and copy_keys need property_path." }).refine((v) => v.mode === "layers" || v.trim === void 0, { message: "trim applies to layers mode only." }).refine((v) => v.mode === "copy_keys" === (v.source !== void 0), { message: "source is for copy_keys, and copy_keys needs it." }).refine((v) => v.mode === "copy_keys" || v.replace_existing === void 0, { message: "replace_existing applies to copy_keys only." }).refine((v) => v.mode === "keys" || v.skip_missing === void 0, { message: "skip_missing applies to keys mode only." });
+    AeStaggerLayoutSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      pattern: external_exports.enum(["grid", "radial"]).describe("grid: rows and columns centred on `origin`; radial: points on a circle."),
+      layers: LayersField,
+      order: external_exports.enum(["stack", "reverse", "random"]).default("stack").describe("Which layer takes which place (grid cells fill left to right, top to bottom; radial places run clockwise)."),
+      seed: external_exports.number().int().min(0).max(4294967295).default(1).describe("Seed for order 'random'."),
+      columns: external_exports.number().int().min(1).max(500).optional().describe("grid: cells per row."),
+      spacing: external_exports.tuple([external_exports.number(), external_exports.number()]).optional().describe("grid: [x, y] distance between cell centres in pixels."),
+      origin: external_exports.tuple([external_exports.number(), external_exports.number()]).optional().describe("The centre of the grid or circle in the layers' own coordinates (the comp's, for an unparented layer). Default the comp's centre."),
+      radius: external_exports.number().positive().max(1e5).optional().describe("radial: circle radius in pixels."),
+      start_angle: external_exports.number().min(-360).max(360).default(0).describe("radial: angle of the first place in degrees, 0 at 12 o'clock, clockwise."),
+      sweep: external_exports.number().min(-360).max(360).default(360).describe("radial: degrees to spread the places over. 360 is the full circle."),
+      dry_run: external_exports.boolean().optional().describe("Return the planned positions without touching AE."),
+      expect: ExpectSchema
+    }).refine((v) => v.pattern !== "grid" || v.columns !== void 0 && v.spacing !== void 0, { message: "grid needs columns and spacing." }).refine((v) => v.pattern !== "radial" || v.radius !== void 0, { message: "radial needs radius." }).refine((v) => v.pattern === "grid" || v.columns === void 0 && v.spacing === void 0, { message: "columns and spacing apply to grid only." }).refine((v) => v.pattern === "radial" || v.radius === void 0, { message: "radius applies to radial only." });
+    MAX_KEYS_TOTAL = 1e3;
+    TIME_TOL = 1e-6;
+    MAX_MISMATCHES = 40;
+    numClose = (a, b, abs, rel = 1e-5) => Math.abs(a - b) <= abs + rel * Math.max(Math.abs(a), Math.abs(b));
+    easeClose = (a, b) => !!a && !!b && a.length === b.length && a.every((e, i) => numClose(e.speed, b[i].speed, 1e-3, 1e-3) && numClose(e.influence, b[i].influence, 0.01, 1e-3));
+    layerOf = (read, id) => read?.layers.find((l) => l.id === id);
+    selection = (layers) => layers ? { layers } : {};
+    idSelectors = (entries) => entries.map((e) => ({ id: e.id }));
+    staggerTools = [
+      {
+        name: "ae_stagger",
+        description: "Stagger layers or keys in time, in one undo group guarded by `expect`. mode 'layers' moves each layer (its keys and markers go along) by an offset; 'keys' shifts one property's keys on each layer, leaving the layer put; 'copy_keys' copies a property's keys from a source layer onto the layers, each shifted. Offsets follow a pattern: `step` (seconds between neighbours) or `total` (first to last), an `ease` curve, and an `order` (stack, reverse, center_out, ends_in, or random with a `seed` so the result repeats). Offsets are rounded to whole frames. `dry_run` returns the planned times without touching AE. `trim` (layers mode) says what the out point does. AE has no call that moves a key, so keys mode removes and re-adds every key of the property; the host restores the original keys if anything fails, and the read-back (a separate evalScript) compares each key's time, value, interpolation, ease, tangents, continuity, auto-bezier, roving and label. Roving keys' times belong to AE and are not asserted. Key times are comp time. At most 1000 keys per call; the layers must not have moved since the plan. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeStaggerSchema,
+        handler: async (args, ctx) => {
+          const keyMode = args.mode !== "layers";
+          const selectionArgs = {
+            comp_id: args.comp_id,
+            ...selection(args.layers),
+            ...keyMode ? { property_path: args.property_path, detail: "times", source: args.source } : {}
+          };
+          if (!args.dry_run) {
+            ctx.quarantine.assertClear();
+            await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
           }
+          const read = await planRead(ctx, "staggerRead", selectionArgs, "ae_stagger", `ae_stagger (${args.dry_run ? "dry run" : "plan"})`);
+          const planned = planStagger(args, read);
+          if (!planned.ok) return { ok: false, error: planned.error, message: planned.message };
+          const plan2 = planned.plan;
+          if (args.dry_run) {
+            return { ok: true, dry_run: true, mode: args.mode, order: args.order, frame_duration: plan2.frameDuration, layers: summarise(plan2, args.mode), skipped: plan2.skipped };
+          }
+          const ids = idSelectors(plan2.entries);
+          return runGuardedWrite(ctx, {
+            toolName: "ae_stagger",
+            label: `ae_stagger(${args.mode}, ${plan2.entries.length} layer${plan2.entries.length === 1 ? "" : "s"})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: () => ({
+              host: "staggerRead",
+              args: { comp_id: args.comp_id, layers: ids, ...keyMode ? { property_path: args.property_path, detail: "full", source: args.source } : {} }
+            }),
+            write: {
+              host: "staggerApply",
+              args: {
+                comp_id: args.comp_id,
+                mode: args.mode,
+                property_path: args.property_path,
+                source: args.source,
+                replace_existing: args.replace_existing,
+                trim: args.trim,
+                targets: plan2.entries.map((e) => ({ id: e.id, offset: e.offset, from: e.from, to: e.to, num_keys: e.num_keys, first_time: e.first_time })),
+                label: args.mode === "layers" ? "Stagger layers" : args.mode === "keys" ? "Stagger keys" : "Copy keys with offset"
+              }
+            },
+            check: (before, after) => args.mode === "layers" ? layersMismatches(args, plan2, before, after) : keysMismatches(args, plan2, before, after),
+            present: (_before, _after, w) => ({
+              mode: args.mode,
+              order: args.order,
+              frame_duration: plan2.frameDuration,
+              layers: summarise(plan2, args.mode),
+              skipped: plan2.skipped,
+              warnings: w.warnings ?? []
+            })
+          });
         }
       },
       {
-        name: "ae_replace_footage",
-        description: "Replace or relink an existing FootageItem using `FootageItem.replace` or `FootageItem.replaceWithSequence` within one undo group, guarded by `expect`, returning the before and after file paths, `footageMissing`, and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeReplaceFootageSchema,
+        name: "ae_stagger_layout",
+        description: "Lay layers out on a grid or a circle by setting their Position, in one undo group guarded by `expect`. The `order` (stack, reverse or a seeded random) picks which layer takes which place; Z and every other property stay. A layer with Position keyframes or an expression is refused, as is a separated Position that has either. Position is in the layer's parent space. `dry_run` returns the planned positions without touching AE. The read-back (a separate evalScript) checks each layer's X and Y. For an even row or column, use ae_align. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeStaggerLayoutSchema,
         handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_replace_footage(${args.item_id})`;
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, args.expect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getFootageItem", {
-                  item_id: args.item_id
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_replace_footage"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("replaceFootage", {
-                  item_id: args.item_id,
-                  path: args.path,
-                  sequence: Boolean(args.sequence),
-                  expect: args.expect
-                }),
-                label,
-                timeoutMs: SLOW_TIMEOUT_MS,
-                mutates: true,
-                toolName: "ae_replace_footage"
-              });
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getFootageItem", {
-                    item_id: args.item_id
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_replace_footage"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  item_id: args.item_id,
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const beforeObj = beforeSnap.result ?? {};
-              const writeObj = writeResp.result ?? {};
-              const afterObj = afterSnap.result ?? {};
-              const beforeFile = typeof beforeObj.file === "string" ? beforeObj.file : typeof writeObj.before_file === "string" ? writeObj.before_file : null;
-              const beforeMissing = typeof beforeObj.footageMissing === "boolean" ? beforeObj.footageMissing : typeof writeObj.before_footage_missing === "boolean" ? writeObj.before_footage_missing : false;
-              const afterFile = typeof afterObj.file === "string" ? afterObj.file : typeof writeObj.requested_path === "string" ? writeObj.requested_path : null;
-              const afterMissing = typeof afterObj.footageMissing === "boolean" ? afterObj.footageMissing : false;
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: {
-                  file: normalizeGuardPath(args.path),
-                  footageMissing: false
-                },
-                actualForExpected: {
-                  file: typeof afterFile === "string" ? normalizeGuardPath(afterFile) : null,
-                  footageMissing: afterMissing
-                }
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                item_id: args.item_id,
-                before_path: beforeFile,
-                after_path: afterFile,
-                before_file: beforeFile,
-                after_file: afterFile,
-                before_footage_missing: beforeMissing,
-                footageMissing: afterMissing,
-                result: writeResp.result,
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
+          if (!args.dry_run) {
+            ctx.quarantine.assertClear();
+            await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
           }
+          const read = await planRead(ctx, "staggerLayoutRead", { comp_id: args.comp_id, ...selection(args.layers) }, "ae_stagger_layout", `ae_stagger_layout (${args.dry_run ? "dry run" : "plan"})`);
+          const planned = planLayout(args, read);
+          if (!planned.ok) return { ok: false, error: planned.error, message: planned.message };
+          const view = planned.entries.map((e) => ({ id: e.id, index: e.index, name: e.name, from: e.from?.slice(0, 2), to: e.position }));
+          if (args.dry_run) return { ok: true, dry_run: true, pattern: args.pattern, layers: view, warnings: planned.warnings };
+          const ids = idSelectors(planned.entries);
+          return runGuardedWrite(ctx, {
+            toolName: "ae_stagger_layout",
+            label: `ae_stagger_layout(${args.pattern}, ${planned.entries.length} layer${planned.entries.length === 1 ? "" : "s"})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: () => ({ host: "staggerLayoutRead", args: { comp_id: args.comp_id, layers: ids } }),
+            write: {
+              host: "staggerLayoutApply",
+              args: { comp_id: args.comp_id, targets: planned.entries.map((e) => ({ id: e.id, position: e.position })), label: `Stagger layout (${args.pattern})` }
+            },
+            check: (_before, after) => layoutMismatches(planned.entries, after),
+            present: () => ({ pattern: args.pattern, layers: view, warnings: planned.warnings })
+          });
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/timeremap.ts
+function sourceTimeAt(info, t) {
+  if (info.remap_enabled) {
+    const s = info.samples.find((x) => Math.abs(x.time - t) < 1e-9);
+    if (s && typeof s.value === "number") return { value: s.value };
+    return { error: `The layer's remapped source time at ${t}s wasn't read.` };
+  }
+  if (Math.abs(info.stretch - 100) > 1e-9) {
+    return {
+      error: `The layer is stretched to ${info.stretch}% and time remapping is off. How stretch maps to source time isn't documented, so run operation "enable" first (After Effects' own remap keys then give the mapping), or reset the stretch to 100.`
+    };
+  }
+  return { value: t - info.start_time };
+}
+function sampleTimesFor(args, info) {
+  const fd = info.comp_frame_duration;
+  if (args.operation === "freeze" && args.at_time !== void 0) return [args.at_time];
+  if (args.operation === "ramp" && args.points && args.start_source_time === void 0 && fd > 0) {
+    return [snapTo(args.points[0].time, fd)];
+  }
+  return [];
+}
+function sourceLimits(info) {
+  const dur = info.source?.duration ?? 0;
+  const sfd = info.source?.frame_duration ?? info.comp_frame_duration;
+  return { dur, sfd, maxSrc: Math.max(0, dur - sfd) };
+}
+function integrateRamp(points, anchorIndex, anchorValue) {
+  const s = new Array(points.length).fill(0);
+  s[anchorIndex] = anchorValue;
+  for (let i = anchorIndex; i + 1 < points.length; i++) {
+    s[i + 1] = s[i] + (points[i].speed + points[i + 1].speed) / 2 * (points[i + 1].time - points[i].time);
+  }
+  for (let i = anchorIndex; i - 1 >= 0; i--) {
+    s[i - 1] = s[i] - (points[i - 1].speed + points[i].speed) / 2 * (points[i].time - points[i - 1].time);
+  }
+  return s;
+}
+function rampSourceAt(points, values, t) {
+  if (t <= points[0].time) return values[0];
+  const last = points.length - 1;
+  if (t >= points[last].time) return values[last];
+  for (let i = 0; i < last; i++) {
+    if (t <= points[i + 1].time) {
+      const T = points[i + 1].time - points[i].time;
+      const u = t - points[i].time;
+      return values[i] + points[i].speed * u + (points[i + 1].speed - points[i].speed) / (2 * T) * u * u;
+    }
+  }
+  return values[last];
+}
+function rampExtremes(points, values, tEnd = Infinity) {
+  let min = Infinity;
+  let max = -Infinity;
+  let minAt = points[0].time;
+  let maxAt = points[0].time;
+  const note = (v, at) => {
+    if (v < min) {
+      min = v;
+      minAt = at;
+    }
+    if (v > max) {
+      max = v;
+      maxAt = at;
+    }
+  };
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].time > tEnd) break;
+    note(values[i], points[i].time);
+    if (i + 1 < points.length) {
+      const a = points[i].speed;
+      const b = points[i + 1].speed;
+      if (a > 0 && b < 0 || a < 0 && b > 0) {
+        const T = points[i + 1].time - points[i].time;
+        const u = a / (a - b) * T;
+        if (points[i].time + u <= tEnd) note(rampSourceAt(points, values, points[i].time + u), points[i].time + u);
+      }
+    }
+  }
+  if (Number.isFinite(tEnd) && tEnd > points[0].time && tEnd < points[points.length - 1].time) note(rampSourceAt(points, values, tEnd), tEnd);
+  return { min, max, minAt, maxAt };
+}
+function easeOf(k, flip) {
+  const ie = k.in_interp === "bezier" ? k.in_ease?.[0] : void 0;
+  const oe = k.out_interp === "bezier" ? k.out_ease?.[0] : void 0;
+  if (!ie && !oe) return void 0;
+  const e = {};
+  const sign = flip ? -1 : 1;
+  const inSide = flip ? oe : ie;
+  const outSide = flip ? ie : oe;
+  if (inSide) {
+    e.in_speed = sign * inSide.speed;
+    e.in_influence = inSide.influence;
+  }
+  if (outSide) {
+    e.out_speed = sign * outSide.speed;
+    e.out_influence = outSide.influence;
+  }
+  return e;
+}
+function toPlanKey(k) {
+  const out = { time: k.time, value: k.value, in_interp: k.in_interp, out_interp: k.out_interp };
+  const ease = easeOf(k, false);
+  if (ease) out.ease = ease;
+  return out;
+}
+function toReversedKey(k, time, value) {
+  const out = { time, value, in_interp: k.out_interp, out_interp: k.in_interp };
+  const ease = easeOf(k, true);
+  if (ease) out.ease = ease;
+  return out;
+}
+function remapFingerprint(info) {
+  const r6 = (n) => Math.round(n * 1e6);
+  let text = String(info.num_keys) + "#";
+  for (const k of info.keys) text += r6(k.time) + ":" + r6(k.value) + "|";
+  text += "#" + (info.expression ?? "") + "#" + (info.source ? info.source.id + ":" + r6(info.source.duration) : "none");
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (h * 33 + text.charCodeAt(i)) % 4294967296;
+  return String(h);
+}
+function clearExpression(plan2, info) {
+  if (!hasExpression(info)) return;
+  plan2.expression = "";
+  plan2.notes.push(`Cleared the layer's existing Time Remap expression (${short(info.expression)}) so it doesn't act on the new keys.`);
+}
+function basePlan(operation, info) {
+  return {
+    operation,
+    snapshot: snapshotOf(info),
+    expect_remap_enabled: true,
+    sample_times: [],
+    expected_samples: [],
+    notes: []
+  };
+}
+function planTimeRemap(args, info) {
+  if (!info.eligible || !info.source) {
+    return bad(`"${info.layer.name}" can't be time remapped: ${info.ineligible_reason ?? "it has no usable source"}.`);
+  }
+  const cfd = info.comp_frame_duration;
+  if (!(cfd > 0)) return bad("The comp's frame duration couldn't be read.");
+  const { dur, maxSrc } = sourceLimits(info);
+  const lenFrames = (info.out_point - info.in_point) / cfd;
+  switch (args.operation) {
+    case "enable": {
+      if (info.remap_enabled) return bad("Time remapping is already on.");
+      return { ok: true, plan: { ...basePlan("enable", info), enable: true, notes: ["After Effects added its own keys; read them with ae_get_time_remap."] } };
+    }
+    case "disable": {
+      if (!info.remap_enabled) return bad("Time remapping is already off.");
+      return { ok: true, plan: { ...basePlan("disable", info), disable: true, expect_remap_enabled: false } };
+    }
+    case "freeze": {
+      let src;
+      if (args.source_time !== void 0) {
+        src = args.source_time;
+      } else {
+        const at = args.at_time;
+        if (at < info.in_point - EPS || at >= info.out_point + EPS) {
+          return bad(`at_time ${at}s is outside the layer (${fix(info.in_point)}s to ${fix(info.out_point)}s).`);
+        }
+        const found = sourceTimeAt(info, at);
+        if ("error" in found) return bad(found.error);
+        src = found.value;
+      }
+      const sfd = info.source.frame_duration;
+      if (sfd > 0) src = fix(Math.floor(src / sfd + 1e-6) * sfd);
+      if (src < -EPS || src > maxSrc + EPS) return bad(tooFar("The frozen frame", src, info.in_point, info));
+      src = Math.min(Math.max(src, 0), maxSrc);
+      const plan2 = basePlan("freeze", info);
+      plan2.enable = !info.remap_enabled;
+      clearExpression(plan2, info);
+      plan2.keys = [{ time: info.in_point, value: src, in_interp: "hold", out_interp: "hold" }];
+      plan2.notes.push(`Held the frame at ${fix(src)}s of the source for the whole layer.`);
+      return { ok: true, plan: plan2 };
+    }
+    case "reverse": {
+      const plan2 = basePlan("reverse", info);
+      plan2.enable = !info.remap_enabled;
+      if (info.remap_enabled) {
+        if (info.keys_truncated) return bad(`The layer has ${info.num_keys} remap keys; reverse reads at most ${info.keys.length} of them.`);
+        if (info.keys.length < 2) return bad("Reverse needs at least two Time Remap keys; a single key is a freeze.");
+        if (info.keys.some((k) => k.in_interp === "hold" || k.out_interp === "hold")) {
+          return bad("Reverse can't mirror Time Remap keys with hold interpolation (the hold would move to the wrong side of the key). Change them to linear first.");
+        }
+        const t0 = info.keys[0].time;
+        const t1 = info.keys[info.keys.length - 1].time;
+        let clamped = false;
+        plan2.keys = info.keys.slice().reverse().map((k) => {
+          let v = k.value;
+          if (v > maxSrc + EPS) {
+            v = maxSrc;
+            clamped = true;
+          }
+          return toReversedKey(k, fix(t0 + t1 - k.time), v);
+        });
+        clearExpression(plan2, info);
+        plan2.notes.push("Mirrored the remap keys in time: the last key becomes the first, with its sides and ease speeds swapped.");
+        if (clamped) plan2.notes.push(`A key at the source's full length (${fix(sourceLimits(info).dur)}s) shows nothing; it was pulled back to the last frame (${fix(maxSrc)}s).`);
+        return { ok: true, plan: plan2 };
+      }
+      if (lenFrames < 2) return bad("The layer is shorter than two frames; there is nothing to reverse.");
+      const lastShown = info.out_point - cfd;
+      const a = sourceTimeAt(info, info.in_point);
+      const b = sourceTimeAt(info, lastShown);
+      if ("error" in a) return bad(a.error);
+      if ("error" in b) return bad(b.error);
+      if (a.value < -EPS || b.value < -EPS || Math.max(a.value, b.value) > dur - EPS) {
+        return bad(tooFar("The layer's source range", Math.max(b.value, a.value), lastShown, info));
+      }
+      plan2.keys = [
+        { time: info.in_point, value: Math.min(Math.max(b.value, 0), dur), in_interp: "linear", out_interp: "linear" },
+        { time: lastShown, value: Math.min(Math.max(a.value, 0), dur), in_interp: "linear", out_interp: "linear" }
+      ];
+      plan2.notes.push("Two linear keys, from the layer's last frame back to its first.");
+      return { ok: true, plan: plan2 };
+    }
+    case "speed": {
+      if (info.remap_enabled) return bad("Time remapping is on, so layer.stretch can't change speed. Use operation ramp, or disable remapping first.");
+      const pct = args.speed_percent;
+      if (pct === 0) return bad("speed_percent can't be 0; use freeze.");
+      const stretch = 1e4 / pct;
+      if (Math.abs(stretch) < 1 || Math.abs(stretch) > 9900) {
+        return bad(`speed_percent ${pct} gives a stretch of ${fix(stretch)}%; After Effects allows 1 to 9900 percent (speed ${fix(1e4 / 9900)}% to 10000%).`);
+      }
+      if (Math.abs(stretch - info.stretch) < 1e-9) return bad(`The layer is already at ${pct}% speed.`);
+      return {
+        ok: true,
+        plan: {
+          ...basePlan("speed", info),
+          stretch: fix(stretch),
+          keep_in_point: true,
+          expect_remap_enabled: false,
+          notes: ["layer.stretch changed; the in point was kept by shifting the start time if AE moved it."]
+        }
+      };
+    }
+    case "ramp":
+      return planRamp(args, info, cfd);
+    case "hold_last_frame": {
+      const until = args.until ?? info.comp_duration;
+      const plan2 = basePlan("hold_last_frame", info);
+      plan2.enable = !info.remap_enabled;
+      if (until > info.out_point + EPS) plan2.out_point = until;
+      if (!info.remap_enabled) {
+        const a = sourceTimeAt(info, info.in_point);
+        if ("error" in a) return bad(a.error);
+        const tEnd = fix(info.start_time + maxSrc);
+        if (until <= tEnd + EPS) return bad(`The source doesn't run out before ${fix(until)}s: its last frame shows at ${tEnd}s. Pick a later until.`);
+        if (a.value < -EPS || a.value > maxSrc + EPS) return bad(tooFar("The layer's first frame", a.value, info.in_point, info));
+        const lead = fix(tEnd - info.in_point);
+        if (lead < cfd - EPS) {
+          plan2.keys = [{ time: info.in_point, value: maxSrc, in_interp: "hold", out_interp: "hold" }];
+        } else {
+          plan2.keys = [
+            { time: info.in_point, value: Math.max(a.value, 0), in_interp: "linear", out_interp: "linear" },
+            { time: tEnd, value: maxSrc, in_interp: "linear", out_interp: "linear" }
+          ];
+        }
+        plan2.notes.push(`The last source frame (${fix(maxSrc)}s) shows from ${tEnd}s and holds to ${fix(until)}s.`);
+        return { ok: true, plan: plan2 };
+      }
+      if (info.keys_truncated) return bad(`The layer has ${info.num_keys} remap keys; hold_last_frame reads at most ${info.keys.length} of them.`);
+      const lastKey = info.keys[info.keys.length - 1];
+      if (!lastKey) return bad("Time remapping is on but has no keys to hold; give it keys first.");
+      if (until <= lastKey.time + EPS && until <= info.out_point + EPS && !hasExpression(info)) {
+        return bad(`The last remap key is at ${fix(lastKey.time)}s and the layer already runs to ${fix(info.out_point)}s; nothing to hold.`);
+      }
+      clearExpression(plan2, info);
+      if (lastKey.value > maxSrc + EPS) {
+        plan2.keys = info.keys.map((k, i) => {
+          const pk = toPlanKey(k);
+          return i === info.keys.length - 1 ? { ...pk, value: maxSrc } : pk;
+        });
+        plan2.notes.push(`The last key sat at ${fix(lastKey.value)}s, past the last frame; moved to ${fix(maxSrc)}s.`);
+      }
+      if (plan2.keys === void 0 && plan2.out_point === void 0 && plan2.expression === void 0) {
+        return bad(`Nothing to change: the remap already holds its last key and the layer already runs to ${fix(info.out_point)}s. Pass until to extend it.`);
+      }
+      plan2.notes.push(`The remap holds the last key's value after ${fix(lastKey.time)}s.`);
+      return { ok: true, plan: plan2 };
+    }
+    case "loop": {
+      const plan2 = basePlan("loop", info);
+      plan2.enable = !info.remap_enabled;
+      plan2.expression = `loopOut("${args.loop_type ?? "cycle"}")`;
+      if (args.until !== void 0 && args.until > info.out_point + EPS) plan2.out_point = args.until;
+      if (hasExpression(info) && info.expression !== plan2.expression) {
+        plan2.notes.push(`Replaced the layer's existing Time Remap expression: ${short(info.expression)}`);
+      }
+      if (info.remap_enabled) {
+        if (info.num_keys < 2) return bad("loopOut needs at least two Time Remap keys to repeat.");
+      } else {
+        if (lenFrames < 2) return bad("The layer is shorter than two frames; there is nothing to loop.");
+        const lastShown = info.out_point - cfd;
+        const a = sourceTimeAt(info, info.in_point);
+        const b = sourceTimeAt(info, lastShown);
+        if ("error" in a) return bad(a.error);
+        if ("error" in b) return bad(b.error);
+        if (a.value < -EPS || b.value < -EPS || Math.max(a.value, b.value) > dur - EPS) {
+          return bad(tooFar("The layer's source range", Math.max(b.value, a.value), lastShown, info));
+        }
+        if (args.loop_type === "pingpong") {
+          plan2.keys = [
+            { time: info.in_point, value: Math.max(a.value, 0), in_interp: "linear", out_interp: "linear" },
+            { time: lastShown, value: Math.max(b.value, 0), in_interp: "linear", out_interp: "linear" }
+          ];
+        } else {
+          const end = fix(b.value + cfd);
+          if (end > dur + EPS) return bad(tooFar("The loop's end", end, info.out_point, info));
+          plan2.keys = [
+            { time: info.in_point, value: Math.max(a.value, 0), in_interp: "linear", out_interp: "linear" },
+            { time: info.out_point, value: Math.min(end, dur), in_interp: "linear", out_interp: "linear" }
+          ];
+          plan2.notes.push("Keys run from the in point to the out point, like AE's own, so each repeat is the whole clip.");
+        }
+      }
+      plan2.notes.push("Whether the seam repeats a frame wasn't measured in After Effects; check the loop point.");
+      if (plan2.out_point === void 0 && !args.until) plan2.notes.push("The loop only shows once the layer runs past its last key; pass until to extend the layer.");
+      return { ok: true, plan: plan2 };
+    }
+  }
+}
+function planRamp(args, info, cfd) {
+  const method = args.method ?? "per_frame";
+  const outside = args.outside ?? "extend";
+  const user = [];
+  for (const p of args.points ?? []) {
+    const t = snapTo(p.time, cfd);
+    if (t < info.in_point - cfd * 0.5 - EPS || t > info.out_point + EPS) {
+      return bad(`Ramp point at ${p.time}s is outside the layer (${fix(info.in_point)}s to ${fix(info.out_point)}s).`);
+    }
+    if (user.length && !(t > user[user.length - 1].time + cfd * 0.5)) {
+      return bad(`Ramp points must be at least one frame (${fix(cfd)}s) apart and ascending; ${p.time}s lands on ${t}s.`);
+    }
+    user.push({ time: t, speed: p.speed / 100 });
+  }
+  let start;
+  if (args.start_source_time !== void 0) {
+    start = args.start_source_time;
+  } else {
+    const found = sourceTimeAt(info, user[0].time);
+    if ("error" in found) return bad(found.error);
+    start = found.value;
+  }
+  const points = user.slice();
+  let anchor = 0;
+  if (outside === "extend") {
+    const lastShown = info.out_point - cfd;
+    if (user[0].time - info.in_point >= cfd - EPS) {
+      points.unshift({ time: info.in_point, speed: user[0].speed });
+      anchor = 1;
+    }
+    const tail = user[user.length - 1];
+    if (lastShown - tail.time >= cfd - EPS) points.push({ time: lastShown, speed: tail.speed });
+  }
+  const values = integrateRamp(points, anchor, start);
+  const range = rampExtremes(points, values, info.out_point - cfd + EPS);
+  const { dur } = sourceLimits(info);
+  const hint = outside === "extend" ? ' Lower the speeds, shorten the layer, or use outside "hold" or "trim".' : " Lower the speeds or end the ramp earlier.";
+  if (range.max > dur - EPS) return bad(tooFar("The ramp", range.max, range.maxAt, info) + hint);
+  if (range.min < -EPS) return bad(tooFar("The ramp", range.min, range.minAt, info) + hint);
+  if (method === "bezier") {
+    for (let i = 0; i < points.length; i++) {
+      if (values[i] > dur + EPS || values[i] < -EPS) return bad(tooFar("The ramp", values[i], points[i].time, info) + hint);
+    }
+  }
+  const plan2 = basePlan("ramp", info);
+  plan2.enable = !info.remap_enabled;
+  clearExpression(plan2, info);
+  const first = points[0].time;
+  const lastT = points[points.length - 1].time;
+  if (method === "bezier") {
+    plan2.keys = points.map((p, i) => ({
+      time: p.time,
+      value: Math.min(Math.max(values[i], 0), dur),
+      in_interp: "bezier",
+      out_interp: "bezier",
+      ease: { in_speed: p.speed, in_influence: THIRD_INFLUENCE, out_speed: p.speed, out_influence: THIRD_INFLUENCE }
+    }));
+    const times = [];
+    for (let i = 0; i < points.length; i++) {
+      times.push(points[i].time);
+      if (i + 1 < points.length) times.push(fix((points[i].time + points[i + 1].time) / 2));
+    }
+    plan2.sample_times = times;
+    plan2.expected_samples = times.map((t) => ({ time: t, value: rampSourceAt(points, values, t) }));
+    plan2.notes.push("Bezier keys assume the ease speed is source seconds per comp second; the read-back samples the curve against the integral.");
+  } else {
+    const times = [first];
+    for (let k = 1; first + k * cfd < lastT - cfd * 0.5 + EPS; k++) times.push(fix(first + k * cfd));
+    times.push(lastT);
+    if (times.length > MAX_PLAN_KEYS) {
+      return bad(`A per_frame ramp over ${times.length} frames is more than ${MAX_PLAN_KEYS} keys; use method "bezier" or a shorter ramp.`);
+    }
+    plan2.per_frame = { times, values: times.map((t) => Math.min(Math.max(rampSourceAt(points, values, t), 0), dur)) };
+    plan2.notes.push(`${times.length} linear keys, one per frame.`);
+  }
+  if (outside === "trim") {
+    plan2.in_point = Math.max(first, info.in_point);
+    plan2.out_point = Math.min(lastT + cfd, info.out_point);
+    plan2.notes.push("In and out points moved to the first and last ramp point.");
+  }
+  const spans = fix(values[values.length - 1] - values[0]);
+  plan2.notes.push(`Source time runs ${fix(values[0])}s to ${fix(values[values.length - 1])}s (${spans}s) over the ramp.`);
+  return { ok: true, plan: plan2 };
+}
+function remapMismatches(plan2, beforeRaw, afterRaw) {
+  const m = [];
+  const before = beforeRaw && typeof beforeRaw === "object" ? beforeRaw : null;
+  const after = afterRaw && typeof afterRaw === "object" ? afterRaw : null;
+  if (!after) return m;
+  const cfd = after.comp_frame_duration > 0 ? after.comp_frame_duration : 0.05;
+  const sfd = after.source?.frame_duration ?? cfd;
+  expectThat(m, after.remap_enabled === plan2.expect_remap_enabled, "remap_enabled", plan2.expect_remap_enabled, after.remap_enabled, "Time remapping is not in the expected state");
+  const wanted = plan2.keys ? plan2.keys.map((k) => ({ time: k.time, value: k.value })) : plan2.per_frame ? plan2.per_frame.times.map((t, i) => ({ time: t, value: plan2.per_frame.values[i] })) : null;
+  if (wanted) {
+    expectThat(m, after.num_keys === wanted.length, "num_keys", wanted.length, after.num_keys, "The layer has a different number of remap keys than planned");
+    const n = Math.min(wanted.length, after.keys.length);
+    let shown = 0;
+    for (let i = 0; i < n && shown < 5; i++) {
+      const k = after.keys[i];
+      const w = wanted[i];
+      if (Math.abs(k.time - w.time) > cfd * 0.51 + EPS || Math.abs(k.value - w.value) > 1e-3) {
+        shown++;
+        m.push({ path: `keys[${i + 1}]`, expected: w, actual: { time: k.time, value: k.value }, message: "A remap key differs from the plan" });
+      }
+    }
+    if (plan2.keys) {
+      for (let i = 0; i < n && shown < 5; i++) {
+        const k = after.keys[i];
+        const w = plan2.keys[i];
+        if (k.in_interp !== w.in_interp || k.out_interp !== w.out_interp) {
+          shown++;
+          m.push({
+            path: `keys[${i + 1}].interpolation`,
+            expected: [w.in_interp, w.out_interp],
+            actual: [k.in_interp, k.out_interp],
+            message: "A remap key's interpolation differs from the plan"
+          });
+        }
+      }
+    }
+  }
+  const tol = Math.max(sfd * 0.25, 1e-3);
+  for (const e of plan2.expected_samples) {
+    const got = after.samples.find((s) => Math.abs(s.time - e.time) < 1e-9);
+    if (!got || !num2(got.value)) {
+      m.push({ path: `samples@${e.time}`, expected: e.value, actual: got?.value ?? null, message: "The ramp couldn't be sampled in the read-back" });
+      break;
+    }
+    if (Math.abs(got.value - e.value) > tol) {
+      m.push({
+        path: `samples@${e.time}`,
+        expected: fix(e.value),
+        actual: got.value,
+        message: "The Bezier ramp doesn't match the integrated speed curve (the ease speed unit may differ); redo it with method per_frame"
+      });
+      break;
+    }
+  }
+  if (plan2.stretch !== void 0) {
+    expectThat(m, num2(after.stretch) && Math.abs(after.stretch - plan2.stretch) <= 1e-3, "stretch", plan2.stretch, after.stretch, "Stretch differs from the plan");
+    if (plan2.keep_in_point && before) {
+      expectThat(
+        m,
+        Math.abs(after.in_point - before.in_point) <= cfd * 1.01,
+        "in_point",
+        before.in_point,
+        after.in_point,
+        "The layer's in point moved with the stretch"
+      );
+    }
+  }
+  if (plan2.in_point !== void 0) {
+    expectThat(m, Math.abs(after.in_point - plan2.in_point) <= cfd * 1.01, "in_point", plan2.in_point, after.in_point, "In point differs from the plan");
+  }
+  if (plan2.out_point !== void 0) {
+    expectThat(m, Math.abs(after.out_point - plan2.out_point) <= cfd * 1.01, "out_point", plan2.out_point, after.out_point, "Out point differs from the plan (After Effects may cap it at the source)");
+  }
+  if (plan2.expression !== void 0) {
+    expectThat(m, after.expression === plan2.expression, "expression", plan2.expression, after.expression, "The Time Remap expression differs from the plan");
+  }
+  return m;
+}
+function summarise2(info) {
+  if (!info) return null;
+  return {
+    remap_enabled: info.remap_enabled,
+    in_point: info.in_point,
+    out_point: info.out_point,
+    start_time: info.start_time,
+    stretch: info.stretch,
+    layer_length: fix(info.out_point - info.in_point),
+    source_duration: info.source?.duration ?? null,
+    num_keys: info.num_keys,
+    expression: info.expression
+  };
+}
+var OPERATIONS, RampPointSchema, AeGetTimeRemapSchema, PARAMS, OPTIONAL_PARAMS, AeTimeRemapSchema, EPS, THIRD_INFLUENCE, MAX_PLAN_KEYS, bad, fix, snapTo, snapshotOf, hasExpression, short, tooFar, num2, infoOf, timeremapTools;
+var init_timeremap = __esm({
+  "src/tools/ext/timeremap.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_write_runner();
+    OPERATIONS = ["enable", "disable", "freeze", "reverse", "speed", "ramp", "hold_last_frame", "loop"];
+    RampPointSchema = external_exports.object({
+      time: external_exports.number().min(-10800).max(10800).describe("Comp time in seconds."),
+      speed: external_exports.number().min(-1e4).max(1e4).describe("Playback speed at that time, in percent: 100 = normal, 200 = double, 0 = still, negative = backwards.")
+    });
+    AeGetTimeRemapSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema,
+      sample_times: external_exports.array(external_exports.number()).max(100).optional().describe("Comp times (up to 100) at which to read the source time the layer shows (valueAtTime). Only while remapping is on.")
+    });
+    PARAMS = {
+      enable: [],
+      disable: [],
+      freeze: ["at_time", "source_time"],
+      reverse: [],
+      speed: ["speed_percent"],
+      ramp: ["points", "method", "outside", "start_source_time"],
+      hold_last_frame: ["until"],
+      loop: ["loop_type", "until"]
+    };
+    OPTIONAL_PARAMS = ["at_time", "source_time", "speed_percent", "points", "method", "outside", "start_source_time", "until", "loop_type"];
+    AeTimeRemapSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("A footage or precomp layer. Stills, solids, text, shapes, nulls, cameras and lights can't be time remapped."),
+      operation: external_exports.enum(OPERATIONS).describe(
+        "enable: switch Time Remap on (AE adds its own keys). disable: switch it off (its keys go). freeze: hold one frame for the whole layer (at_time or source_time). reverse: play the layer backwards. speed: constant speed through layer.stretch (speed_percent; not while remapping is on). ramp: a speed ramp through points of {time, speed}. hold_last_frame: keep the last source frame on screen until `until`. loop: loopOut on Time Remap (loop_type)."
+      ),
+      at_time: external_exports.number().optional().describe("freeze: the comp time of the frame to hold. Must lie inside the layer."),
+      source_time: external_exports.number().min(0).optional().describe("freeze: the frame to hold as seconds into the source, instead of at_time."),
+      speed_percent: external_exports.number().optional().describe("speed: 100 = normal, 200 = twice as fast, 50 = half; negative plays backwards. Becomes layer.stretch = 10000 / speed_percent, which AE limits to 1..9900 percent."),
+      points: external_exports.array(RampPointSchema).min(2).max(40).optional().describe("ramp: speed points in ascending comp time, inside the layer. Speed changes linearly between points; the source time is the integral."),
+      method: external_exports.enum(["per_frame", "bezier"]).optional().describe(
+        "ramp: per_frame (default) writes one linear key per comp frame, exact whatever the ease units are. bezier writes one key per point with Bezier ease (speed, 33.3% influence): smooth and tidy in the graph editor, and checked by sampling in the read-back."
+      ),
+      outside: external_exports.enum(["extend", "hold", "trim"]).optional().describe(
+        "ramp: what the layer does before the first point and after the last. extend (default) keeps the end speeds up to the layer's in and out. hold freezes the first and last frame. trim moves the layer's in and out points to the first and last point."
+      ),
+      start_source_time: external_exports.number().min(0).optional().describe("ramp: seconds into the source at the first point. Default: the frame the layer shows there now."),
+      until: external_exports.number().optional().describe("hold_last_frame and loop: extend the layer's out point to this comp time. Default for hold_last_frame: the comp's end."),
+      loop_type: external_exports.enum(["cycle", "pingpong"]).optional().describe("loop: loopOut type. Default cycle. (offset and continue run past the source, so they aren't offered.)"),
+      expect: ExpectSchema
+    }).superRefine((v, ctx) => {
+      const allowed = PARAMS[v.operation];
+      for (const key of OPTIONAL_PARAMS) {
+        if (v[key] !== void 0 && !allowed.includes(key)) {
+          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: `${key} doesn't apply to ${v.operation}.`, path: [key] });
+        }
+      }
+      if (v.operation === "freeze" && v.at_time === void 0 === (v.source_time === void 0)) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "freeze takes exactly one of at_time and source_time.", path: ["at_time"] });
+      }
+      if (v.operation === "speed" && v.speed_percent === void 0) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "speed needs speed_percent.", path: ["speed_percent"] });
+      }
+      if (v.operation === "ramp" && v.points === void 0) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "ramp needs points.", path: ["points"] });
+      }
+    });
+    EPS = 1e-6;
+    THIRD_INFLUENCE = 100 / 3;
+    MAX_PLAN_KEYS = 3e3;
+    bad = (message) => ({ ok: false, error: "bad_args", message });
+    fix = (n) => Math.round(n * 1e9) / 1e9;
+    snapTo = (t, step2) => fix(Math.round(t / step2) * step2);
+    snapshotOf = (info) => ({
+      in_point: info.in_point,
+      out_point: info.out_point,
+      start_time: info.start_time,
+      stretch: info.stretch,
+      remap_enabled: info.remap_enabled,
+      num_keys: info.num_keys,
+      fingerprint: remapFingerprint(info)
+    });
+    hasExpression = (info) => info.remap_enabled && typeof info.expression === "string" && info.expression.trim() !== "";
+    short = (s) => s.length > 120 ? s.slice(0, 120) + "..." : s;
+    tooFar = (what, value, at, info) => {
+      const { dur, maxSrc } = sourceLimits(info);
+      return value >= 0 ? `${what} would reach ${fix(value)}s into the source at comp time ${fix(at)}s, but the source ends at ${fix(dur)}s (its last frame starts at ${fix(maxSrc)}s).` : `${what} would go back to ${fix(value)}s into the source at comp time ${fix(at)}s, before the first frame.`;
+    };
+    num2 = (v) => typeof v === "number" && Number.isFinite(v);
+    infoOf = (v) => v && typeof v === "object" ? v : null;
+    timeremapTools = [
+      {
+        name: "ae_get_time_remap",
+        description: "Read a layer's time remapping: whether it is on, the in, out and start times, stretch, the source's length and frame duration, the Time Remap keys (time, source-time value, interpolation, ease) and expression, and the source time shown at the comp times in sample_times. Also says why a layer can't be remapped (stills, solids, text, shapes, nulls, cameras, lights). Changes nothing.",
+        schema: AeGetTimeRemapSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "timeremapRead",
+            { comp_id: args.comp_id, layer: args.layer, sample_times: args.sample_times },
+            { label: "ae_get_time_remap", mutates: false, toolName: "ae_get_time_remap" }
+          );
+          return { ok: true, ...res.result };
+        }
+      },
+      {
+        name: "ae_time_remap",
+        description: "Time operations on a footage or precomp layer, in one undo group guarded by `expect`: enable or disable Time Remap, freeze a frame, reverse, constant speed (layer.stretch), speed ramps from {time, speed} points, hold the last frame, and loopOut. Built from the DOM, since After Effects' Freeze Frame and Time-Reverse commands do nothing through CEP. A ramp's source time is integrated in Node and refused if it would run past the source's last frame or before its first; method per_frame (default) writes exact linear keys, method bezier writes one eased key per point and is checked by sampling. With remapping off and a stretch other than 100, run operation enable first. The read-back (a separate evalScript) compares the keys, sampled values, stretch, in and out points and expression with the plan, and the result gives the in, out, start, stretch and source length before and after. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeTimeRemapSchema,
+        handler: async (args, ctx) => {
+          const readInfo = async (times2) => (await ctx.bridge.callHost(
+            "timeremapRead",
+            { comp_id: args.comp_id, layer: args.layer, sample_times: times2 },
+            { label: `ae_time_remap (${args.operation}, plan)`, mutates: false, toolName: "ae_time_remap" }
+          )).result;
+          let info = await readInfo([]);
+          const times = sampleTimesFor(args, info);
+          if (info.remap_enabled && times.length) info = await readInfo(times);
+          const planned = planTimeRemap(args, info);
+          if (!planned.ok) return planned;
+          const plan2 = planned.plan;
+          const layerId = info.layer.id;
+          return runGuardedWrite(ctx, {
+            toolName: "ae_time_remap",
+            label: `ae_time_remap(${args.operation})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: () => ({ host: "timeremapRead", args: { comp_id: args.comp_id, layer: { id: layerId }, sample_times: plan2.sample_times } }),
+            write: { host: "timeremapApply", args: { comp_id: args.comp_id, layer_id: layerId, plan: plan2, label: `Time remap: ${args.operation}` } },
+            check: (before, after) => remapMismatches(plan2, before, after),
+            present: (before, after, w) => {
+              const a = infoOf(after);
+              return {
+                operation: args.operation,
+                layer: w.layer ?? info.layer,
+                before: summarise2(infoOf(before)),
+                after: summarise2(a),
+                keys: a?.keys,
+                keys_truncated: a?.keys_truncated,
+                enabled_here: w.enabled_here,
+                notes: plan2.notes
+              };
+            }
+          });
         }
       }
     ];
@@ -11108,21 +13709,21 @@ var require_filter_pack = __commonJS({
       let rawPos = 0;
       let pxPos = 0;
       let rawData = Buffer.alloc((byteWidth + 1) * height);
-      let sel = filterTypes[0];
+      let sel2 = filterTypes[0];
       for (let y = 0; y < height; y++) {
         if (filterTypes.length > 1) {
           let min = Infinity;
           for (let i = 0; i < filterTypes.length; i++) {
             let sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
             if (sum < min) {
-              sel = filterTypes[i];
+              sel2 = filterTypes[i];
               min = sum;
             }
           }
         }
-        rawData[rawPos] = sel;
+        rawData[rawPos] = sel2;
         rawPos++;
-        filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
+        filters[sel2](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
         rawPos += byteWidth;
         pxPos += byteWidth;
       }
@@ -11955,7 +14556,7 @@ function encodePng(img) {
   return import_pngjs.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs.PNG.sync.read(fs12.readFileSync(srcPath));
+  const src = import_pngjs.PNG.sync.read(fs13.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -11969,7 +14570,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs12.writeFileSync(dstPath, encodePng(out));
+  fs13.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 function cropImage(src, x, y, w, h) {
@@ -12059,11 +14660,11 @@ function drawLabel(dst, text, x, y, scale, fg, bg, pad = 2) {
   drawText(dst, text, x + pad, y + pad, scale, fg);
   return { x, y, w, h };
 }
-var fs12, import_pngjs, GLYPHS, GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_ADVANCE;
+var fs13, import_pngjs, GLYPHS, GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_ADVANCE;
 var init_png_utils = __esm({
   "src/tools/ext/png-utils.ts"() {
     "use strict";
-    fs12 = __toESM(require("node:fs"), 1);
+    fs13 = __toESM(require("node:fs"), 1);
     import_pngjs = __toESM(require_png(), 1);
     GLYPHS = {
       "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
@@ -12121,14 +14722,14 @@ var init_png_utils = __esm({
 
 // src/tools/render.ts
 function defaultFramesDir() {
-  return path13.join(defaultDataDir(), "frames");
+  return path14.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs13.existsSync(filePath)) {
+    if (!fs14.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs13.statSync(filePath);
+    const stat = fs14.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -12154,19 +14755,19 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs13.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs14.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
   };
 }
-var crypto4, fs13, path13, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, renderTools;
+var crypto4, fs14, path14, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, renderTools;
 var init_render = __esm({
   "src/tools/render.ts"() {
     "use strict";
     crypto4 = __toESM(require("node:crypto"), 1);
-    fs13 = __toESM(require("node:fs"), 1);
-    path13 = __toESM(require("node:path"), 1);
+    fs14 = __toESM(require("node:fs"), 1);
+    path14 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -12194,7 +14795,7 @@ var init_render = __esm({
       output_module_template: external_exports.string().optional().describe("Optional Output Module template name."),
       render_settings_template: external_exports.string().optional().describe("Optional Render Settings template name."),
       preflight: external_exports.boolean().optional().describe(
-        "Run the ae_preflight delivery check on this comp (and the comps it nests) first, and refuse to add it to the queue if it finds a blocker (missing footage or fonts, expressions in error, no output). Nothing is changed when it refuses. Default false."
+        "Run the ae_preflight delivery check on this comp (and the comps it nests) first, and refuse to add it to the queue if it finds a blocker (missing footage or fonts, expressions in error). A missing output folder is only a warning and does not refuse. Nothing is changed when it refuses. Default false."
       ),
       expect: ExpectSchema
     });
@@ -12207,14 +14808,14 @@ var init_render = __esm({
         handler: async (args, ctx) => {
           const scale = args.scale ?? 0.5;
           const framesDir = defaultFramesDir();
-          fs13.mkdirSync(framesDir, { recursive: true });
+          fs14.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           try {
             return await ctx.queue.run(
               `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
               async () => {
                 const uniqueSuffix1 = `${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
-                const pngPath1 = path13.join(
+                const pngPath1 = path14.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix1}.png`
                 );
@@ -12250,7 +14851,7 @@ var init_render = __esm({
                 }
                 const nudgedTime = Math.max(0, args.time + 1e-3);
                 const uniqueSuffix2 = `${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
-                const pngPath2 = path13.join(
+                const pngPath2 = path14.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix2}.png`
                 );
@@ -12422,10 +15023,10 @@ var init_render = __esm({
 
 // src/tools/ext/frames.ts
 function decodePngFile(filePath) {
-  if (!fs14.existsSync(filePath)) {
+  if (!fs15.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs14.readFileSync(filePath);
+  const buf = fs15.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -12596,7 +15197,7 @@ async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
   const suffix1 = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path14.join(
+  const pngPath1 = path15.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -12620,7 +15221,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path14.join(
+  const pngPath2 = path15.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -12646,13 +15247,13 @@ async function captureCompFrame(params) {
     `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.`
   );
 }
-var crypto5, fs14, path14, import_pngjs2, AeCompareFramesSchema, framesTools;
+var crypto5, fs15, path15, import_pngjs2, AeCompareFramesSchema, framesTools;
 var init_frames = __esm({
   "src/tools/ext/frames.ts"() {
     "use strict";
     crypto5 = __toESM(require("node:crypto"), 1);
-    fs14 = __toESM(require("node:fs"), 1);
-    path14 = __toESM(require("node:path"), 1);
+    fs15 = __toESM(require("node:fs"), 1);
+    path15 = __toESM(require("node:path"), 1);
     import_pngjs2 = __toESM(require_png(), 1);
     init_zod();
     init_host();
@@ -12732,7 +15333,7 @@ var init_frames = __esm({
           const framesDir = defaultFramesDir();
           const capturedItems = [];
           if (args.comp_id !== void 0 && args.times !== void 0) {
-            fs14.mkdirSync(framesDir, { recursive: true });
+            fs15.mkdirSync(framesDir, { recursive: true });
             const opId = ctx.bridge.newOpId();
             const compId = args.comp_id;
             const times = args.times;
@@ -12741,7 +15342,7 @@ var init_frames = __esm({
                 `ae_compare_frames(${compId}, ${times.length} frames)`,
                 async () => {
                   for (let i = 0; i < times.length; i++) {
-                    const snap = await captureCompFrame({
+                    const snap2 = await captureCompFrame({
                       ctx,
                       opId,
                       compId,
@@ -12749,7 +15350,7 @@ var init_frames = __esm({
                       frameIndex: i,
                       framesDir
                     });
-                    capturedItems.push({ path: snap.path, time: times[i] });
+                    capturedItems.push({ path: snap2.path, time: times[i] });
                   }
                 }
               );
@@ -12771,7 +15372,7 @@ var init_frames = __esm({
             );
           }
           if (shouldWriteDiff) {
-            fs14.mkdirSync(framesDir, { recursive: true });
+            fs15.mkdirSync(framesDir, { recursive: true });
           }
           const decodedPngs = [];
           const frameAnalyses = [];
@@ -12799,9 +15400,9 @@ var init_frames = __esm({
             let diffPngPath;
             if (shouldWriteDiff && cmp.diffPng) {
               const suffix = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-              diffPngPath = path14.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+              diffPngPath = path15.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
               const outBuf = import_pngjs2.PNG.sync.write(cmp.diffPng);
-              fs14.writeFileSync(diffPngPath, outBuf);
+              fs15.writeFileSync(diffPngPath, outBuf);
               diffPngPaths.push(diffPngPath);
             }
             pairs.push({
@@ -12928,19 +15529,19 @@ function transformPoint(m, p) {
   ];
 }
 function layerRotation(t) {
-  const ori = mat4Mul(rotationZ(num(t.orientation, 2, 0)), mat4Mul(rotationY(num(t.orientation, 1, 0)), rotationX(num(t.orientation, 0, 0))));
+  const ori = mat4Mul(rotationZ(num3(t.orientation, 2, 0)), mat4Mul(rotationY(num3(t.orientation, 1, 0)), rotationX(num3(t.orientation, 0, 0))));
   return mat4Mul(rotationZ(t.rotation_z), mat4Mul(rotationY(t.rotation_y), mat4Mul(rotationX(t.rotation_x), ori)));
 }
 function layerLocalMatrix(t, threeD) {
-  const ax = num(t.anchor, 0, 0);
-  const ay = num(t.anchor, 1, 0);
-  const az = threeD ? num(t.anchor, 2, 0) : 0;
-  const px = num(t.position, 0, 0);
-  const py = num(t.position, 1, 0);
-  const pz = threeD ? num(t.position, 2, 0) : 0;
-  const sx = num(t.scale, 0, 100) / 100;
-  const sy = num(t.scale, 1, 100) / 100;
-  const sz = threeD ? num(t.scale, 2, 100) / 100 : 1;
+  const ax = num3(t.anchor, 0, 0);
+  const ay = num3(t.anchor, 1, 0);
+  const az = threeD ? num3(t.anchor, 2, 0) : 0;
+  const px = num3(t.position, 0, 0);
+  const py = num3(t.position, 1, 0);
+  const pz = threeD ? num3(t.position, 2, 0) : 0;
+  const sx = num3(t.scale, 0, 100) / 100;
+  const sy = num3(t.scale, 1, 100) / 100;
+  const sz = threeD ? num3(t.scale, 2, 100) / 100 : 1;
   const rot = threeD ? layerRotation(t) : rotationZ(t.rotation_z);
   return mat4Mul(translation(px, py, pz), mat4Mul(rot, mat4Mul(scaling(sx, sy, sz), translation(-ax, -ay, -az))));
 }
@@ -12956,6 +15557,9 @@ function chainMatrix(layer, byId3) {
   while (cur) {
     if (nodes.length >= MAX_PARENT_DEPTH) return { matrix: null, reason: "parent chain is deeper than 20 layers", has3dAncestor };
     if (!cur.transform) return { matrix: null, reason: `layer ${cur.index} has no transform group`, has3dAncestor };
+    if (cur.auto_orient_active === true) {
+      return { matrix: null, reason: `layer ${cur.index} has Auto-Orient on, which is not modelled`, has3dAncestor };
+    }
     nodes.push(cur);
     if (cur !== layer && cur.three_d) has3dAncestor = true;
     if (cur.parent_id === null) break;
@@ -12964,9 +15568,18 @@ function chainMatrix(layer, byId3) {
   }
   let m = mat4Identity();
   for (let k = nodes.length - 1; k >= 0; k--) {
-    m = mat4Mul(m, layerLocalMatrix(nodes[k].transform, nodes[k].three_d));
+    m = mat4Mul(m, nodes[k].kind === "camera" ? cameraLocalMatrix(nodes[k]) : layerLocalMatrix(nodes[k].transform, nodes[k].three_d));
   }
   return { matrix: m, reason: null, has3dAncestor };
+}
+function cameraLocalMatrix(cam) {
+  const t = cam.transform;
+  const pos = [num3(t.position, 0, 0), num3(t.position, 1, 0), num3(t.position, 2, 0)];
+  let aim = mat4Identity();
+  if (cam.camera?.two_node && t.point_of_interest) {
+    aim = lookAtRotation(pos, [num3(t.point_of_interest, 0, 0), num3(t.point_of_interest, 1, 0), num3(t.point_of_interest, 2, 0)]);
+  }
+  return mat4Mul(translation(pos[0], pos[1], pos[2]), mat4Mul(aim, layerRotation(t)));
 }
 function defaultCamera(width, height, note) {
   const zoom = width * 50 / 36;
@@ -12988,7 +15601,12 @@ function lookAtRotation(from, to) {
 function cameraModel(read, byId3) {
   const { width, height } = read.comp;
   const cam = read.active_camera_id === null ? void 0 : byId3.get(read.active_camera_id);
-  if (!cam) return defaultCamera(width, height);
+  if (!cam) {
+    if (read.active_camera_id !== null) {
+      return defaultCamera(width, height, `the active camera (id ${read.active_camera_id}) is past the 500 layers read; the default camera was used`);
+    }
+    return defaultCamera(width, height);
+  }
   const t = cam.transform;
   if (!t) return defaultCamera(width, height, `camera "${cam.name}" has no transform group; the default camera was used`);
   let parent;
@@ -12999,12 +15617,7 @@ function cameraModel(read, byId3) {
     parent = p ? chainMatrix(p, byId3) : { matrix: null, reason: "its parent is not in the list read", has3dAncestor: false };
   }
   if (!parent.matrix) return defaultCamera(width, height, `camera "${cam.name}": ${parent.reason}; the default camera was used`);
-  const pos = [num(t.position, 0, 0), num(t.position, 1, 0), num(t.position, 2, 0)];
-  let aim = mat4Identity();
-  if (cam.camera?.two_node && t.point_of_interest) {
-    aim = lookAtRotation(pos, [num(t.point_of_interest, 0, 0), num(t.point_of_interest, 1, 0), num(t.point_of_interest, 2, 0)]);
-  }
-  const local = mat4Mul(translation(pos[0], pos[1], pos[2]), mat4Mul(aim, layerRotation(t)));
+  const local = cameraLocalMatrix(cam);
   const view = mat4Invert(mat4Mul(parent.matrix, local));
   if (!view) return defaultCamera(width, height, `camera "${cam.name}" has a singular transform; the default camera was used`);
   const zoomOk = typeof cam.camera?.zoom === "number" && cam.camera.zoom > 0;
@@ -13022,9 +15635,10 @@ function project(cam, comp, world) {
   if (p[2] <= 1e-6) return null;
   return [comp.width / 2 + p[0] / p[2] * cam.zoom, comp.height / 2 + p[1] / p[2] * cam.zoom];
 }
-function layerBox(layer, byId3, cam, comp) {
+function layerBox(layer, byId3, cam, comp, include3d = false) {
   if (layer.skip_reason) return { box: null, reason: layer.skip_reason };
   if (!layer.rect) return { box: null, reason: "no content rect" };
+  if (layer.three_d && !include3d) return { box: null, reason: NO_3D_REASON };
   const chain = chainMatrix(layer, byId3);
   if (!chain.matrix) return { box: null, reason: chain.reason };
   if (!layer.three_d && chain.has3dAncestor) {
@@ -13049,7 +15663,7 @@ function layerBox(layer, byId3, cam, comp) {
     }
   }
   const a = layer.transform.anchor;
-  const aw = transformPoint(chain.matrix, [num(a, 0, 0), num(a, 1, 0), layer.three_d ? num(a, 2, 0) : 0]);
+  const aw = transformPoint(chain.matrix, [num3(a, 0, 0), num3(a, 1, 0), layer.three_d ? num3(a, 2, 0) : 0]);
   let anchor;
   if (layer.three_d) anchor = project(cam, comp, aw);
   else anchor = [aw[0], aw[1]];
@@ -13088,12 +15702,12 @@ function missingLayerIds(read, picked, mode, ids) {
   }
   return out;
 }
-function buildIndex(read, picked) {
+function buildIndex(read, picked, include3d = false) {
   const byId3 = layerMap(read.layers);
   const cam = cameraModel(read, byId3);
   const comp = read.comp;
   return picked.map((l) => {
-    const { box, reason } = layerBox(l, byId3, cam, comp);
+    const { box, reason } = layerBox(l, byId3, cam, comp, include3d);
     const parent = l.parent_id === null ? null : byId3.get(l.parent_id)?.index ?? null;
     const offscreen = box ? box.bbox[2] <= 0 || box.bbox[3] <= 0 || box.bbox[0] >= comp.width || box.bbox[1] >= comp.height : false;
     return {
@@ -13309,13 +15923,13 @@ async function runQueued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto6, fs15, path15, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num, MAX_PARENT_DEPTH, r2, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
+var crypto6, fs16, path16, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num3, MAX_PARENT_DEPTH, NO_3D_REASON, r2, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
 var init_annotate = __esm({
   "src/tools/ext/annotate.ts"() {
     "use strict";
     crypto6 = __toESM(require("node:crypto"), 1);
-    fs15 = __toESM(require("node:fs"), 1);
-    path15 = __toESM(require("node:path"), 1);
+    fs16 = __toESM(require("node:fs"), 1);
+    path16 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -13341,6 +15955,9 @@ var init_annotate = __esm({
       safe_areas: external_exports.boolean().default(true).describe("Draw the action-safe and title-safe rectangles. Default true."),
       action_safe: external_exports.number().min(0).max(0.5).default(0.1).describe("Action-safe margin as a share of width and height, both sides together. Default 0.1 (AE's 5% per side)."),
       title_safe: external_exports.number().min(0).max(0.5).default(0.2).describe("Title-safe margin as a share of width and height, both sides together. Default 0.2 (AE's 10% per side)."),
+      include_3d: external_exports.boolean().default(false).describe(
+        "EXPERIMENTAL and UNMEASURED. Draw boxes for 3D layers by projecting them through the active camera (or AE's default camera). The projection maths has not been checked against a render: X/Y rotation signs and the rotation order are guesses, so a box can be wrong. Default false: 3D layers are listed with `box: null` and a reason."
+      ),
       include_extents: external_exports.boolean().default(false).describe(
         "Pass `includeExtents` to sourceRectAtTime: shape layers then include stroke and path extents. Default false."
       ),
@@ -13363,11 +15980,12 @@ var init_annotate = __esm({
       max_size: external_exports.number().int().min(200).max(4096).default(1600).describe("Longest edge of the output image in pixels. The frame is shrunk before drawing so the tags stay sharp. Default 1600.")
     });
     ROT_SIGN = { x: 1, y: 1, z: 1 };
-    num = (v, i, fill) => {
+    num3 = (v, i, fill) => {
       const x = v?.[i];
       return typeof x === "number" && Number.isFinite(x) ? x : fill;
     };
     MAX_PARENT_DEPTH = 20;
+    NO_3D_REASON = "3D: needs a live check of the projection";
     r2 = (v) => Math.round(v * 100) / 100;
     LAYER_COLORS = [
       [255, 64, 64, 255],
@@ -13397,11 +16015,11 @@ var init_annotate = __esm({
     annotateTools = [
       {
         name: TOOL,
-        description: "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers are projected through the camera by an estimate (`projection: '3d-estimated'`). Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " + AGENT_SAFETY_GUIDANCE,
+        description: "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera by an unmeasured, experimental estimate (`projection: '3d-estimated'`). Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " + AGENT_SAFETY_GUIDANCE,
         schema: AeAnnotateFrameSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs15.mkdirSync(framesDir, { recursive: true });
+          fs16.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const times = args.time_b === void 0 ? [args.time] : [args.time, args.time_b];
           const label = `${TOOL}(${args.comp_id} @ ${times.join("s, ")}s)`;
@@ -13422,7 +16040,7 @@ var init_annotate = __esm({
               });
               const read = res.result;
               if (args.zoom) checkZoom(read.comp, args.zoom);
-              const snap = await captureCompFrame({
+              const snap2 = await captureCompFrame({
                 ctx,
                 opId,
                 compId: args.comp_id,
@@ -13431,7 +16049,7 @@ var init_annotate = __esm({
                 framesDir,
                 toolName: TOOL
               });
-              got.push({ read, path: snap.path });
+              got.push({ read, path: snap2.path });
             }
             return got;
           });
@@ -13457,7 +16075,7 @@ var init_annotate = __esm({
             const img = decodePngFile(shot.path);
             const view = makeView(comp, img, args.zoom, budget);
             const picked = chooseLayers(shot.read.layers, args.layers, args.layer_ids);
-            const index = buildIndex(shot.read, picked);
+            const index = buildIndex(shot.read, picked, args.include_3d);
             const missing = missingLayerIds(shot.read, picked, args.layers, args.layer_ids);
             const base = renderBase(img, view, args.checkerboard);
             drawAnnotations(base, view, comp, index, draw);
@@ -13473,7 +16091,8 @@ var init_annotate = __esm({
             if (picked.length === 0) notes2.push(`No layers matched \`layers: ${args.layers}\`${args.layer_ids ? " and layer_ids" : ""}.`);
             if (index.some((e) => e.three_d && e.box)) {
               const cam = cameraModel(shot.read, layerMap(shot.read.layers));
-              notes2.push(cam.source === "layer" ? `3D layers use camera "${cam.name}".` : "3D layers use AE's default comp camera.");
+              if (cam.source === "layer") notes2.push(`3D layers use camera "${cam.name}".`);
+              else if (!cam.note) notes2.push("3D layers use AE's default comp camera.");
               if (cam.note) notes2.push(cam.note);
             }
             if (shot.read.truncated) notes2.push(`Only the first 500 of ${shot.read.total_layers} layers were read.`);
@@ -13493,11 +16112,11 @@ var init_annotate = __esm({
             });
           });
           const final = pair ? composePair(images[0], images[1], timeLabel("A", shots[0].read.time), timeLabel("B", shots[1].read.time)) : images[0];
-          const outPath = path15.join(
+          const outPath = path16.join(
             framesDir,
             `annotated_c${args.comp_id}_${Date.now()}_${crypto6.randomBytes(4).toString("hex")}.png`
           );
-          fs15.writeFileSync(outPath, encodePng(final));
+          fs16.writeFileSync(outPath, encodePng(final));
           const notes = [...ANNOTATE_NOTES];
           if (frames.some((f) => f.layers.some((e) => e.box?.projection === "3d-estimated"))) notes.push(NOTE_3D);
           return {
@@ -13527,12 +16146,5141 @@ var init_annotate = __esm({
   }
 });
 
+// src/tools/ext/camera.ts
+function zoomFromLens(compWidth, lens) {
+  const dflt = compWidth * DEFAULT_FOCAL_LENGTH / DEFAULT_FILM_SIZE;
+  if (!lens) return dflt;
+  if (lens.zoom !== void 0) return lens.zoom;
+  const film = lens.film_size ?? DEFAULT_FILM_SIZE;
+  let aov;
+  if (lens.angle_of_view !== void 0) aov = lens.angle_of_view * Math.PI / 180;
+  else if (lens.focal_length !== void 0) aov = 2 * Math.atan(film / (2 * lens.focal_length));
+  else return dflt;
+  return compWidth / 2 / Math.tan(aov / 2);
+}
+function angleOfViewFromZoom(compWidth, zoom) {
+  return 2 * Math.atan(compWidth / 2 / zoom) * 180 / Math.PI;
+}
+function expectSpan(m, path35, l, duration) {
+  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path35}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
+  if (typeof l.out_point === "number" && typeof duration === "number") {
+    expectThat(m, l.out_point >= duration - 0.05, `${path35}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
+  }
+}
+function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
+  const m = [];
+  const before = asRead(beforeRaw);
+  const after = asRead(afterRaw);
+  if (!after) return m;
+  const added = w.controller ? 2 : 1;
+  if (before) expectThat(m, after.comp.numLayers === before.comp.numLayers + added, "numLayers", before.comp.numLayers + added, after.comp.numLayers, "Layer count did not grow by the camera and controller");
+  const cam = after.cameras.find((c) => c.id === w.camera.id);
+  if (!cam) {
+    m.push({ path: "camera", expected: w.camera.id, actual: void 0, message: "The new camera is not in the read-back" });
+  } else {
+    expectThat(m, cam.name === w.camera.name, "camera.name", w.camera.name, cam.name, "Camera name differs");
+    expectSpan(m, "camera", cam, after.comp.duration);
+    expectThat(m, cam.two_node === (w.nodes === "two"), "camera.two_node", w.nodes === "two", cam.two_node, "Camera has the wrong number of nodes");
+    const wantZoom = zoomFromLens(after.comp.width, args.lens);
+    expectThat(m, near2(cam.zoom, wantZoom, Math.max(0.01, wantZoom * 1e-4)), "camera.zoom", wantZoom, cam.zoom, "Zoom differs from the lens asked for");
+    if (args.focus) {
+      expectThat(m, cam.dof === true, "camera.dof", true, cam.dof, "Depth of field is not on");
+      if (args.focus.layer) expectThat(m, typeof cam.expressions.focus_distance === "string", "camera.expressions.focus_distance", "an expression", cam.expressions.focus_distance, "Focus Distance has no expression");
+      if (args.focus.distance !== void 0) expectThat(m, near2(cam.focus_distance, args.focus.distance, 0.01), "camera.focus_distance", args.focus.distance, cam.focus_distance, "Focus distance differs");
+      if (args.focus.aperture !== void 0 && cam.aperture !== null) expectThat(m, near2(cam.aperture, args.focus.aperture, 0.01), "camera.aperture", args.focus.aperture, cam.aperture, "Aperture differs");
+      if (args.focus.blur_level !== void 0 && cam.blur_level !== null) expectThat(m, near2(cam.blur_level, args.focus.blur_level, 0.01), "camera.blur_level", args.focus.blur_level, cam.blur_level, "Blur level differs");
+    }
+    if (w.preset !== "static") expectThat(m, typeof cam.expressions.position === "string", "camera.expressions.position", "an expression", cam.expressions.position, "Position has no expression");
+    for (const e of cam.expression_errors) {
+      m.push({ path: `camera.expressions.${e.property}`, expected: "no error", actual: e.error, message: `The ${e.property} expression has an error` });
+    }
+  }
+  if (w.controller) {
+    const ctrl = after.layers.find((l) => l.id === w.controller.id);
+    if (!ctrl) {
+      m.push({ path: "controller", expected: w.controller.id, actual: void 0, message: "The controller is not in the read-back" });
+    } else {
+      expectSpan(m, "controller", ctrl, after.comp.duration);
+      for (const c of w.controls) {
+        const fx = ctrl.effects.find((e) => e.name === c.name);
+        if (!fx) m.push({ path: `controller.${c.name}`, expected: c.name, actual: void 0, message: `Control "${c.name}" is missing on the controller` });
+        else if (fx.num_keys === 0) expectThat(m, near2(fx.value, c.value, 0.01), `controller.${c.name}`, c.value, fx.value, `Control "${c.name}" has another value`);
+      }
+      if (w.motion) {
+        const fx = ctrl.effects.find((e) => e.name === w.motion.control);
+        expectThat(m, fx?.num_keys === 2, `controller.${w.motion.control}.num_keys`, 2, fx?.num_keys, "The move is not keyframed");
+      }
+    }
+  }
+  for (const s of w.spread) {
+    const l = after.layers.find((x) => x.id === s.id);
+    if (!l) {
+      m.push({ path: `spread.${s.name}`, expected: s.id, actual: void 0, message: `Layer "${s.name}" is not in the read-back` });
+      continue;
+    }
+    expectThat(m, l.three_d, `spread.${s.name}.three_d`, true, l.three_d, `Layer "${s.name}" is not 3D`);
+    expectThat(m, near2(l.position?.[2], s.z, 0.01), `spread.${s.name}.z`, s.z, l.position?.[2], `Layer "${s.name}" is at another depth`);
+  }
+  return m;
+}
+function analyseScene(read, cameraId) {
+  const warnings = [];
+  const notes = [];
+  const byId3 = layerMap(read.layers);
+  const wantId = cameraId ?? read.active_camera_id;
+  const model = cameraModel({ ...read, active_camera_id: wantId }, byId3);
+  if (model.note) warnings.push(model.note);
+  const camLayer = model.source === "layer" && wantId !== null ? byId3.get(wantId) : void 0;
+  if (model.source === "default") notes.push("No camera layer: depths are measured from AE's default comp camera.");
+  const { width, height } = read.comp;
+  const entries = [];
+  let twoD = 0;
+  const unresolved = [];
+  for (const l of read.layers) {
+    if (l.kind === "camera" || l.kind === "light") continue;
+    if (!l.three_d) {
+      twoD++;
+      continue;
+    }
+    const chain = chainMatrix(l, byId3);
+    if (!chain.matrix || !l.transform) {
+      unresolved.push({ id: l.id, name: l.name, reason: chain.reason ?? "no transform" });
+      continue;
+    }
+    const a = l.transform.anchor;
+    const world = transformPoint(chain.matrix, [a[0] ?? 0, a[1] ?? 0, a[2] ?? 0]);
+    const cs = transformPoint(model.view, world);
+    const depth = cs[2];
+    const behind2 = depth <= MIN_DEPTH;
+    const sx = behind2 ? null : width / 2 + cs[0] / depth * model.zoom;
+    const sy = behind2 ? null : height / 2 + cs[1] / depth * model.zoom;
+    entries.push({
+      index: l.index,
+      id: l.id,
+      name: l.name,
+      kind: l.kind,
+      world: world.map(r3),
+      depth: r3(depth),
+      screen: sx === null || sy === null ? null : [r3(sx), r3(sy)],
+      size_ratio: behind2 ? null : r3(model.zoom / depth),
+      behind_camera: behind2,
+      center_in_frame: sx !== null && sy !== null && sx >= 0 && sx <= width && sy >= 0 && sy <= height,
+      rendered: l.visible && (!read.solo_active || l.solo === true)
+    });
+  }
+  entries.sort((x, y) => x.depth - y.depth || x.index - y.index);
+  const behind = entries.filter((e) => e.rendered && e.behind_camera).map((e) => ({ id: e.id, name: e.name, depth: e.depth }));
+  const outside = entries.filter((e) => e.rendered && !e.behind_camera && !e.center_in_frame).map((e) => ({ id: e.id, name: e.name, screen: e.screen }));
+  const cameras = read.layers.filter((l) => l.kind === "camera");
+  const idle = cameras.filter((c) => c.enabled && c.id !== wantId && read.time >= c.in_point && read.time < c.out_point);
+  if (idle.length) warnings.push(`${idle.length} other enabled camera(s) at this time are not used: ${idle.map((c) => `"${c.name}"`).join(", ")}`);
+  const state = camLayer?.camera;
+  if (state?.dof && !state.focus_expression) {
+    warnings.push(
+      `Depth of field is on for "${camLayer.name}" with a fixed focus distance${typeof state.focus_distance === "number" ? ` of ${r3(state.focus_distance)} px` : ""}; nothing keeps a subject in focus. ae_camera_rig can tie it to a layer.`
+    );
+  }
+  if (camLayer && camLayer.parent_id !== null) notes.push("The camera is parented: its point of interest and rotation signs are unmeasured through a parent, so treat the depths as approximate.");
+  if (camLayer?.camera?.two_node) notes.push("X and Y rotation signs are unmeasured; a two-node camera that also has rotation values may be off.");
+  if (read.active_camera_beyond_list) warnings.push("The active camera is past the layers that were read, so depths are measured from AE's default camera instead.");
+  if (read.truncated) warnings.push(`The comp has ${read.total_layers} layers; only the first ${read.layers.length} were read.`);
+  for (const u of unresolved) warnings.push(`"${u.name}" skipped: ${u.reason}`);
+  return {
+    time: read.time,
+    comp: { id: read.comp.id, name: read.comp.name, width, height, renderer: read.comp.renderer ?? null },
+    camera: {
+      source: model.source,
+      id: camLayer?.id ?? null,
+      name: model.name ?? null,
+      zoom: r3(model.zoom),
+      angle_of_view: r3(angleOfViewFromZoom(width, model.zoom)),
+      two_node: camLayer?.camera?.two_node ?? null,
+      depth_of_field: state?.dof ?? null,
+      focus_distance: state?.focus_distance ?? null,
+      focus_follows_layer: state?.focus_expression ?? null
+    },
+    counts: { three_d: entries.length, two_d: twoD, cameras: cameras.length },
+    layers_by_depth: entries,
+    behind_camera: behind,
+    outside_frame: outside,
+    warnings,
+    notes,
+    truncated: read.truncated
+  };
+}
+var DEFAULT_FOCAL_LENGTH, DEFAULT_FILM_SIZE, PRESETS, LensSchema, MotionSchema, FocusSchema, SpreadSchema, AeCameraRigSchema, AeScene3dReportSchema, asRead, near2, r3, MIN_DEPTH, rigIds, cameraTools;
+var init_camera = __esm({
+  "src/tools/ext/camera.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_annotate();
+    init_write_runner();
+    DEFAULT_FOCAL_LENGTH = 50;
+    DEFAULT_FILM_SIZE = 36;
+    PRESETS = ["static", "push_in", "dolly", "orbit", "parallax"];
+    LensSchema = external_exports.object({
+      zoom: external_exports.number().positive().max(1e6).optional().describe("Camera Zoom in pixels, set as given."),
+      angle_of_view: external_exports.number().gt(0).lt(180).optional().describe("Horizontal angle of view in degrees. Zoom = (comp width / 2) / tan(angle / 2)."),
+      focal_length: external_exports.number().positive().max(1e4).optional().describe("Focal length in mm on the film size below (default 36 mm, AE's). 50 mm is AE's default camera."),
+      film_size: external_exports.number().positive().max(1e3).optional().describe("Film size in mm, only with focal_length. Default 36.")
+    }).refine((l) => [l.zoom, l.angle_of_view, l.focal_length].filter((v) => v !== void 0).length <= 1, {
+      message: "Give one of zoom, angle_of_view or focal_length."
+    }).refine((l) => l.film_size === void 0 || l.focal_length !== void 0, { message: "film_size applies with focal_length only." }).describe("The lens. Default: AE's 50 mm camera.");
+    MotionSchema = external_exports.object({
+      amount: external_exports.number().min(-1e6).max(1e6).describe("Where the preset's main control ends: Push in pixels toward the subject, Truck in pixels to the right, Orbit Angle in degrees (positive swings the camera right)."),
+      start_time: external_exports.number().min(0).optional().describe("Seconds in the comp where the move starts. Default 0."),
+      duration: external_exports.number().positive().optional().describe("Seconds the move takes. Default 2."),
+      ease: external_exports.boolean().optional().describe("Easy-ease both keyframes. Default true.")
+    }).describe("Keyframes the main control from 0 to `amount`. Leave it out to rig only; the controller's sliders stay free to animate.");
+    FocusSchema = external_exports.object({
+      layer: LayerSelectorSchema.optional().describe("Keep this layer in focus: Focus Distance gets an expression reading the layer's depth in camera space. Its name must be unique."),
+      distance: external_exports.number().min(0).optional().describe("A fixed focus distance in pixels instead of a layer."),
+      aperture: external_exports.number().min(0).optional().describe("Camera Aperture in pixels (smaller is deeper focus)."),
+      blur_level: external_exports.number().min(0).max(1e3).optional().describe("Camera Blur Level in percent.")
+    }).refine((f) => !(f.layer !== void 0 && f.distance !== void 0), { message: "Give a focus layer or a distance, not both." }).refine((f) => f.layer !== void 0 || f.distance !== void 0 || f.aperture !== void 0 || f.blur_level !== void 0, {
+      message: "focus needs at least one of layer, distance, aperture, blur_level."
+    }).describe("Turns depth of field on. Iris and highlight options differ per renderer and are left alone.");
+    SpreadSchema = external_exports.object({
+      layers: external_exports.array(LayerSelectorSchema).min(1).max(200).describe("Picture layers to make 3D, nearest first."),
+      near: external_exports.number().describe("Z in pixels of the first layer (0 is the comp plane; positive is away from the camera)."),
+      far: external_exports.number().describe("Z of the last layer. The others sit evenly between."),
+      keep_size: external_exports.boolean().optional().describe("Scale each layer by (distance + z) / distance so it looks the same size from the camera. Default true. Needs a Scale that is not keyframed.")
+    }).describe("Make layers 3D and place them at different depths. Their Position must not be keyframed or driven by an expression.");
+    AeCameraRigSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      name: external_exports.string().min(1).max(200).optional().describe("Camera name. Default 'Camera'."),
+      nodes: external_exports.enum(["one", "two"]).optional().describe("'two' (default) aims at a point of interest; 'one' has none and points along its own rotation."),
+      preset: external_exports.enum(PRESETS).optional().describe(
+        "static (default): a camera only. push_in: a controller null with Distance and Push sliders. dolly and parallax: Distance and Truck sliders (the camera slides sideways; parallax is for layers spread in depth). orbit: Distance, Orbit Angle and Tilt sliders, swinging the camera around the comp's centre (two nodes)."
+      ),
+      lens: LensSchema.optional(),
+      distance: external_exports.number().positive().max(1e6).optional().describe("Camera distance from the comp plane in pixels (the Distance slider). Default the lens's zoom, which frames the comp as it looks with no camera."),
+      controller_name: external_exports.string().min(1).max(200).optional().describe("Name of the controller null. Default '<camera name> Controller'. It must not match an existing layer."),
+      motion: MotionSchema.optional(),
+      focus: FocusSchema.optional(),
+      spread: SpreadSchema.optional(),
+      expect: ExpectSchema
+    }).refine((v) => v.preset !== "orbit" || v.nodes !== "one", { message: "The orbit preset aims at the point of interest, so it needs two nodes." }).refine((v) => v.motion === void 0 || v.preset !== void 0 && v.preset !== "static", { message: "motion needs a preset other than static." });
+    AeScene3dReportSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      time: external_exports.number().min(0).optional().describe("Seconds in the comp to read. Default the comp's current time (read, not moved)."),
+      camera: LayerSelectorSchema.optional().describe("Look through this camera layer instead of the front-most enabled one.")
+    });
+    asRead = (v) => v && typeof v === "object" ? v : null;
+    near2 = (a, b, tol) => typeof a === "number" && Math.abs(a - b) <= tol;
+    r3 = (n) => Math.round(n * 1e3) / 1e3;
+    MIN_DEPTH = 1e-6;
+    rigIds = (w) => {
+      const ids = [];
+      const rig = w;
+      ids.push(rig?.camera?.id, rig?.controller?.id);
+      for (const s of rig?.spread ?? []) ids.push(s.id);
+      return ids.filter((n) => typeof n === "number");
+    };
+    cameraTools = [
+      {
+        name: "ae_camera_rig",
+        description: "Build a camera in one undo group, guarded by `expect`: a one- or two-node camera with a lens (focal length, angle of view or zoom), and for push_in, dolly, orbit or parallax a controller null whose sliders (Distance, Push or Truck, Orbit Angle and Tilt) drive the camera's Position by expression, so the move can be tweaked from one place. `motion` keyframes the main slider. `focus` turns depth of field on and ties Focus Distance to a layer's depth in camera space. `spread` makes layers 3D at different depths, scaled to keep their size, for parallax. If a later step fails, everything this call made is taken back. The new camera goes on top, so it becomes the active one. The read-back (a separate evalScript) checks the camera, its lens, node type, depth of field, expression errors, the controller's sliders and keyframes, and the spread layers' depth. Use ae_scene_3d_report to see the result by depth. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeCameraRigSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_camera_rig",
+          label: `ae_camera_rig(${args.preset ?? "static"}${args.name ? ` "${args.name}"` : ""})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => ({ host: "cameraRead", args: { comp_id: args.comp_id, ids: phase === "after" ? rigIds(w) : [] } }),
+          write: {
+            host: "cameraRig",
+            args: {
+              comp_id: args.comp_id,
+              name: args.name,
+              nodes: args.nodes,
+              preset: args.preset,
+              lens: args.lens,
+              distance: args.distance,
+              controller_name: args.controller_name,
+              motion: args.motion,
+              focus: args.focus,
+              spread: args.spread,
+              label: "Camera rig"
+            }
+          },
+          check: (before, after, w) => cameraRigMismatches(args, before, after, w),
+          present: (_before, after, w) => {
+            const read = asRead(after);
+            return {
+              ...w,
+              camera: read?.cameras.find((c) => c.id === w.camera.id) ?? w.camera,
+              is_active_camera: read ? read.active_camera_id === w.camera.id : null,
+              controller_layer: read?.layers.find((l) => l.id === w.controller?.id) ?? w.controller
+            };
+          }
+        })
+      },
+      {
+        name: "ae_scene_3d_report",
+        description: "Read-only report on a comp's 3D scene at one time: the 3D layers sorted by depth along the camera's view axis (nearest first) with world position, where they land in the frame and how large they look, which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; X/Y rotation signs and a parented camera's point of interest are unmeasured, so rotated or parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeScene3dReportSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "cameraSceneRead",
+            { comp_id: args.comp_id, time: args.time },
+            { label: "ae_scene_3d_report", mutates: false, toolName: "ae_scene_3d_report" }
+          );
+          const read = res.result;
+          let cameraId;
+          if (args.camera) {
+            const sel2 = args.camera;
+            const cams = read.layers.filter((l) => l.kind === "camera");
+            const hit = sel2.id !== void 0 ? cams.find((l) => l.id === sel2.id) : sel2.index !== void 0 ? cams.find((l) => l.index === sel2.index) : cams.filter((l) => l.name === sel2.name).length === 1 ? cams.find((l) => l.name === sel2.name) : void 0;
+            if (!hit) {
+              return { ok: false, error: "not_found", message: "No single camera layer matches that selector in the first 500 layers." };
+            }
+            cameraId = hit.id;
+          }
+          return analyseScene(read, cameraId);
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/explain.ts
+function rankExplanation(raw) {
+  const list = Array.isArray(raw.findings) ? raw.findings : [];
+  const findings = list.map((f) => ({ ...f, fix: FIX_HINTS[f.id] })).sort((a, b) => (SEVERITY_RANK2[a.severity] ?? 9) - (SEVERITY_RANK2[b.severity] ?? 9) || a.order - b.order);
+  const counts = { blocks: 0, likely: 0, possible: 0, info: 0 };
+  for (const f of findings) if (f.severity in counts) counts[f.severity]++;
+  let verdict;
+  let headline;
+  if (raw.layer === void 0) {
+    verdict = "point_only";
+    const at = raw.at_point;
+    const top = at?.candidates?.find((c) => c.index === at.topmost_rendering);
+    headline = top ? `The topmost layer that renders at that point is ${top.index} (${top.name}).` : (at?.candidates?.length ?? 0) > 0 ? "Layers sit under that point, but none of them renders at this time." : "No 2D layer's box holds that point at this time.";
+  } else if (counts.blocks > 0) {
+    verdict = "hidden";
+    headline = `Hidden: ${findings[0].title}.`;
+  } else if (counts.likely > 0) {
+    verdict = "probably_hidden_or_wrong";
+    headline = `Probably the cause: ${findings[0].title}.`;
+  } else if (counts.possible > 0) {
+    verdict = "visible_with_possible_causes";
+    headline = `Nothing stops it from rendering; it may look wrong because: ${findings[0].title}.`;
+  } else {
+    verdict = "no_cause_found";
+    headline = "No cause found in the DOM. If it still does not show, confirm with ae_explain_layer_proof or look at the frame with ae_snapshot_frame.";
+  }
+  return { ...raw, verdict, headline, counts, findings };
+}
+function regionToPixels(region, compSize, frame) {
+  if (!region || region.length < 4 || !compSize || compSize.length < 2 || compSize[0] <= 0 || compSize[1] <= 0) return null;
+  const sx = frame.width / compSize[0];
+  const sy = frame.height / compSize[1];
+  const x0 = Math.max(0, Math.floor(region[0] * sx));
+  const y0 = Math.max(0, Math.floor(region[1] * sy));
+  const x1 = Math.min(frame.width, Math.ceil(region[2] * sx));
+  const y1 = Math.min(frame.height, Math.ceil(region[3] * sy));
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x0, y0, x1, y1 };
+}
+function cropFrame(png, r) {
+  const width = r.x1 - r.x0;
+  const height = r.y1 - r.y0;
+  const data = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const from = ((r.y0 + y) * png.width + r.x0) * 4;
+    Buffer.from(png.data.buffer, png.data.byteOffset + from, width * 4).copy(data, y * width * 4);
+  }
+  return { width, height, data };
+}
+function proofVerdict(suspect, diff, error, scope = "frame") {
+  if (!diff) {
+    return { verdict: "inconclusive", explanation: `The frames could not be compared${error ? ` (${error})` : ""}.` };
+  }
+  const where = scope === "layer_box" ? "inside the layer's box" : "in the frame";
+  if (diff.changed_pixels > 0) {
+    return {
+      verdict: "confirmed",
+      explanation: `Undoing "${suspect}" in a copy changes ${diff.pct_pixels_changed}% of the pixels ${where}, so it changes what shows${scope === "layer_box" ? " where the layer is" : ""}.`
+    };
+  }
+  return {
+    verdict: "not_confirmed",
+    explanation: `Undoing "${suspect}" in a copy changes no pixels ${where}, so it is not what hides the layer at this time (or the layer is covered by something else).`
+  };
+}
+function proofMismatches(before, after, cleanupError, copyId) {
+  const m = [];
+  if (cleanupError) {
+    m.push({
+      path: "temp_comp",
+      expected: "the temporary comp removed",
+      actual: copyId,
+      message: `The temporary comp (id ${copyId}) was not removed: ${cleanupError}. Delete it in the Project panel; its name starts with "chroma-explain-proof".`
+    });
+  }
+  const b = before;
+  const a = after;
+  if (b && a) {
+    expectThat(m, a.proof_comps === 0, "proof_comps", 0, a.proof_comps, "A temporary proof comp is still in the project");
+    expectThat(m, a.num_items === b.num_items, "num_items", b.num_items, a.num_items, "The project's item count changed");
+  }
+  return m;
+}
+var fs17, SUSPECTS, AeExplainLayerSchema, AeExplainLayerProofSchema, SEVERITY_RANK2, FIX_HINTS, BOX_SUSPECTS, errMessage, explainTools;
+var init_explain = __esm({
+  "src/tools/ext/explain.ts"() {
+    "use strict";
+    fs17 = __toESM(require("node:fs"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_common();
+    init_mutate();
+    init_read_back();
+    init_render();
+    init_frames();
+    init_session();
+    init_write_runner();
+    SUSPECTS = ["enabled", "solo", "opacity", "track_matte", "masks", "layers_above", "adjustment_above"];
+    AeExplainLayerSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The composition the layer (or the pixel) is in."),
+      layer: LayerSelectorSchema.optional().describe("The layer that does not show, or looks wrong. Give this, a point, or both."),
+      point: external_exports.array(external_exports.number()).length(2).optional().describe(
+        "A pixel [x, y] in comp pixels. Without a layer, lists the layers whose box holds it (top to bottom) and the first that renders. 3D layers are counted, not located, because their position depends on the camera."
+      ),
+      time: external_exports.number().min(0).optional().describe("Comp time in seconds to explain. Default: the comp's current time. Read without moving the time indicator."),
+      inside: external_exports.boolean().optional().describe("For a precomp layer, also check what is inside the nested comp at the time it plays (default true). The cause is often in there.")
+    }).refine((v) => v.layer !== void 0 || v.point !== void 0, { message: "Give a layer, a point, or both." });
+    AeExplainLayerProofSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The composition the layer is in."),
+      layer: LayerSelectorSchema.describe("The layer that does not show."),
+      suspect: external_exports.enum(SUSPECTS).describe(
+        "The cause to test, undone in a COPY of the comp: enabled (video switch on), solo (clear other layers' solo), opacity (a plain 0% to 100%), track_matte (remove it), masks (all to None), layers_above (switch off every layer above, to test 'covered'), adjustment_above (switch off adjustment layers above). Only the comp's top-level layers are changed: a duplicated comp shares its nested precomps with the original."
+      ),
+      time: external_exports.number().min(0).optional().describe("Comp time in seconds to render. Default: the comp's current time."),
+      threshold: external_exports.number().min(0).max(1).optional().describe("A pixel counts as changed when a channel differs by more than this (0..1, default 0.02)."),
+      expect: ExpectSchema
+    });
+    SEVERITY_RANK2 = { blocks: 0, likely: 1, possible: 2, info: 3 };
+    FIX_HINTS = {
+      no_picture: "Look at the layers this camera or light affects instead.",
+      null_layer: "Null layers never render; parent the layer you expect to see, or use a solid or shape layer.",
+      audio_only: "Use a layer with video.",
+      disabled: "Switch the layer's video (eyeball) on.",
+      outside_in_out: "Move the layer's in/out points or start time so the time falls inside them, or look at a time inside.",
+      solo_elsewhere: "Clear the solo on the other layers, or solo this one.",
+      opacity_zero: "Raise the layer's opacity (check keyframes and expressions on it).",
+      opacity_low: "Raise the layer's opacity.",
+      scale_zero: "Fix the Scale of the named layer (this layer or a parent).",
+      guide_layer: "Turn off Guide Layer if it should render.",
+      matte_empty: "Fix the matte layer (its in/out points and opacity), invert the matte, or remove it.",
+      track_matte: "Check what the matte layer covers, or remove the matte.",
+      blend_stencil: "Change the blend mode to Normal.",
+      blend_mode: "Set the blend mode to Normal to see the layer plainly.",
+      mask_empty: "Fix or delete the mask, or set it to None.",
+      mask_opacity_zero: "Raise the mask opacity.",
+      mask_inverted: "Un-invert the mask if the layer should show inside its shape.",
+      effects_switch_off: "Turn the layer's fx switch on.",
+      effect_disabled: "Switch the listed effects on.",
+      expression_error: "Fix the expression (see ae_validate_expressions) or disable it.",
+      footage_missing: "Relink the footage item.",
+      time_remap_out_of_range: "Fix the Time Remap keyframes so they stay inside the source's length.",
+      adjustment_above: "Disable or move the adjustment layer above, or limit it with a matte.",
+      stencil_above: "Change the blend mode of the layer above, or move this layer above it.",
+      covered_guess: "Move the covering layer, hide it, or confirm with ae_explain_layer_proof (suspect layers_above).",
+      no_extent: "Give the layer something to draw (text, shape contents or a sized source).",
+      off_canvas: "Move the layer into the frame (its Position or its parent's).",
+      behind_camera: "Move the layer or the camera so the layer is in front of the lens.",
+      precomp_time_outside: "Extend the nested comp, or change the precomp layer's start time or time remap.",
+      precomp_empty: "Add layers to the nested comp, or use another comp.",
+      precomp_nothing_active: "Open the nested comp: the listed layers are off, soloed away, or outside their in/out points at that time.",
+      precomp_missing_footage: "Relink the missing footage inside the nested comp."
+    };
+    BOX_SUSPECTS = ["layers_above", "adjustment_above"];
+    errMessage = (err) => err instanceof Error ? err.message : String(err);
+    explainTools = [
+      {
+        name: "ae_explain_layer",
+        description: "Answer 'why isn't this layer showing, or why does it look wrong' with a ranked, evidence-backed list of causes, in one read. Checks the layer at a time (default the comp's current time): video switch, in/out points, solo on other layers, its own opacity, a parent or itself scaled to 0, audio-only/null/guide, empty or inverted masks, track mattes (an empty matte hides it), blend mode and stencils above, effect switches, expression errors, missing footage, time remap past the source, 2D off-canvas or no extent, 3D behind the active camera, adjustment layers above, and (a guess) a plain opaque solid above. For a precomp layer it also checks inside the nested comp at the time it plays. With `point` [x, y] it lists the layers under that pixel and the first that renders. Each finding has a severity (blocks, likely, possible, info), evidence and a fix. `verdict` and `headline` summarise. Limits, stated in the result: AE passes no opacity from a parent, has no camera clipping plane, and shows no effect or plug-in failure beyond expressionError, so those are not checked; shy only affects the Timeline panel (info). Read-only: never moves the time indicator or changes selection, solo or the project. For pixel evidence use ae_explain_layer_proof. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeExplainLayerSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "explainLayer",
+            { comp_id: args.comp_id, layer: args.layer, point: args.point, time: args.time, inside: args.inside },
+            {
+              label: `ae_explain_layer(${args.comp_id})`,
+              mutates: false,
+              toolName: "ae_explain_layer"
+            }
+          );
+          return rankExplanation(res.result ?? {});
+        }
+      },
+      {
+        name: "ae_explain_layer_proof",
+        description: "Pixel proof for one suspected cause: duplicate the comp, undo the suspect in the COPY, render the original and the copy at the same time, diff them, and remove the copy. `confirmed` means undoing the suspect changes the picture; `not_confirmed` means it does not. It writes to the project: a temporary comp named 'chroma-explain-proof ...' appears in the Project panel for the length of the renders, in two undo groups (add the copy, remove the copy), with an automatic checkpoint first. The receipt checks the copy is gone and the item count is back. Only the comp's top-level layers are toggled in the copy, because a duplicated comp shares its nested precomps with the original. Refuses before the checkpoint and before anything is duplicated when the suspect does not apply (for example 'enabled' on a layer that is already on). 'solo' solos the target in the copy and leaves the other layers' solo; 'layers_above' leaves cameras, lights and track mattes on; 'layers_above' and 'adjustment_above' are judged only inside the layer's own box (inconclusive for 3D layers). Use ae_explain_layer first to pick the suspect. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeExplainLayerProofSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_explain_layer_proof(${args.suspect})`;
+          const toolName = "ae_explain_layer_proof";
+          const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
+          const framesDir = defaultFramesDir();
+          const read = async (phase) => {
+            const res = await ctx.bridge.evalRaw({
+              id: `${opId}_${phase}`,
+              script: buildJsxCall("explainProofState", {}),
+              label: `${label} (${phase})`,
+              mutates: false,
+              toolName
+            });
+            return res.result ?? null;
+          };
+          try {
+            return await ctx.queue.run(label, async () => {
+              ctx.quarantine.assertClear();
+              await ctx.bridge.evalRaw({
+                id: `${opId}_plan`,
+                script: buildJsxCall("explainProofPlan", { comp_id: args.comp_id, layer: args.layer, suspect: args.suspect, time: args.time }),
+                label: `${label} (plan)`,
+                mutates: false,
+                toolName
+              });
+              const guard = await verifyTargetGuard(ctx, expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, toolName);
+              const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+              const sessionFields = await noteBeforeWrite(ctx, note);
+              const before = await read("before");
+              fs17.mkdirSync(framesDir, { recursive: true });
+              beginInflight(note);
+              let begun;
+              try {
+                const begin = await ctx.bridge.evalRaw({
+                  id: opId,
+                  script: buildJsxCall("explainProofBegin", {
+                    comp_id: args.comp_id,
+                    layer: args.layer,
+                    suspect: args.suspect,
+                    time: args.time,
+                    expect
+                  }),
+                  label,
+                  mutates: true,
+                  toolName
+                });
+                begun = begin.result ?? {};
+              } catch (err) {
+                endInflight(opId);
+                throw err;
+              }
+              const copyId = begun.copy_id;
+              const time = typeof begun.time === "number" ? begun.time : args.time ?? 0;
+              let diff = null;
+              let frames = null;
+              let proofError;
+              let scope = "frame";
+              try {
+                if (typeof copyId !== "number") throw new Error("AE returned no id for the temporary comp, so nothing was rendered");
+                let a = await captureCompFrame({ ctx, opId, compId: args.comp_id, time, frameIndex: 0, framesDir, toolName });
+                let b = await captureCompFrame({ ctx, opId, compId: copyId, time, frameIndex: 1, framesDir, toolName });
+                if (a.time !== b.time) {
+                  const later = Math.max(a.time, b.time);
+                  if (a.time < later) a = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: later, frameIndex: 2, framesDir, toolName });
+                  else b = await captureCompFrame({ ctx, opId, compId: copyId, time: later, frameIndex: 3, framesDir, toolName });
+                  if (a.time !== b.time) throw new Error(`the original and the copy rendered at different times (${a.time}s and ${b.time}s)`);
+                }
+                frames = { original: a.path, copy: b.path };
+                let pa = decodePngFile(a.path);
+                let pb = decodePngFile(b.path);
+                if (BOX_SUSPECTS.includes(args.suspect)) {
+                  const box = regionToPixels(begun.region, begun.comp_size, pa);
+                  if (!box) {
+                    throw new Error("the target is 3D, off the canvas or its box can't be read, so the diff can't be limited to the layer");
+                  }
+                  pa = cropFrame(pa, box);
+                  pb = cropFrame(pb, box);
+                  scope = "layer_box";
+                }
+                const cmp = compareDecodedFrames(pa, pb, { threshold: args.threshold ?? 0.02 });
+                diff = {
+                  changed_pixels: cmp.changed_pixels,
+                  total_pixels: cmp.total_pixels,
+                  pct_pixels_changed: cmp.pct_pixels_changed,
+                  mean_abs_diff: cmp.mean_abs_diff,
+                  max_diff: cmp.max_diff,
+                  identical: cmp.identical
+                };
+              } catch (err) {
+                proofError = errMessage(err);
+              }
+              let cleanupError = null;
+              let removed = false;
+              try {
+                if (typeof copyId !== "number") {
+                  throw new Error("AE returned no id for the temporary comp, so it could not be removed by id");
+                }
+                const end = await ctx.bridge.evalRaw({
+                  id: `${opId}_remove`,
+                  script: buildJsxCall("explainProofEnd", { copy_id: copyId, expect }),
+                  label: `${label} (remove copy)`,
+                  mutates: true,
+                  toolName
+                });
+                removed = end.result?.removed === true;
+              } catch (err) {
+                cleanupError = errMessage(err);
+              } finally {
+                endInflight(opId);
+              }
+              const { value: after, failure } = await readAfterWrite(opId, () => read("after"));
+              const custom2 = [...failure ? [failure] : [], ...proofMismatches(before, failure ? null : after, cleanupError, copyId)];
+              const receipt = buildReceipt({ before, after, customMismatches: custom2 });
+              await noteAfterWrite(ctx, note, { skipRead: !!failure });
+              const verdict = proofVerdict(args.suspect, diff, proofError, scope);
+              return {
+                op_id: opId,
+                applied: true,
+                proof: {
+                  suspect: args.suspect,
+                  what: begun.what,
+                  layer_index: begun.layer_index,
+                  layers_changed: begun.layers_changed,
+                  time,
+                  copy_removed: removed,
+                  frames,
+                  diff,
+                  diff_scope: scope,
+                  ...proofError ? { error: proofError } : {}
+                },
+                verdict: verdict.verdict,
+                explanation: verdict.explanation,
+                checkpoint,
+                receipt,
+                ...sessionFields
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+            }
+            throw err;
+          }
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/motion.ts
+function contactSheetTimes(comp, opts) {
+  const fps = comp.fps > 0 ? comp.fps : 25;
+  if (opts.times !== void 0) {
+    return opts.times.map((t) => {
+      if (t > comp.duration) {
+        throw new Error(`Time ${t}s is past the comp's duration (${comp.duration}s).`);
+      }
+      return { time: t, frame: Math.round(t * fps) };
+    });
+  }
+  const start = opts.start ?? comp.workAreaStart;
+  const end = Math.min(opts.end ?? comp.workAreaStart + comp.workAreaDuration, comp.duration);
+  if (end <= start) {
+    throw new Error(`Empty range: start ${start}s, end ${end}s (comp duration ${comp.duration}s).`);
+  }
+  const firstFrame = Math.round(start * fps);
+  const lastFrame = Math.max(firstFrame, Math.ceil(end * fps - 1e-6) - 1);
+  const span = lastFrame - firstFrame;
+  if (span === 0) {
+    throw new Error(
+      `Range ${start}s to ${end}s covers only one frame at ${fps}fps; widen it to sample at least 2 frames.`
+    );
+  }
+  const count = Math.min(opts.count ?? 12, span + 1);
+  const frames = [];
+  for (let i = 0; i < count; i++) {
+    const f = count === 1 ? firstFrame : Math.round(firstFrame + i * span / (count - 1));
+    if (frames[frames.length - 1] !== f) frames.push(f);
+  }
+  return frames.map((frame) => ({ frame, time: frame / fps }));
+}
+function chooseColumns(n, tileWidth, tileHeight) {
+  const cols = Math.round(Math.sqrt(n * (16 / 9) * tileHeight / tileWidth));
+  return Math.max(1, Math.min(n, cols));
+}
+function labelMetrics(tileHeight, labels) {
+  const textScale = tileHeight >= 90 ? 2 : 1;
+  return { labelHeight: labels ? GLYPH_HEIGHT * textScale + 4 * textScale : 0, textScale };
+}
+function sheetLayout(n, compWidth, compHeight, tileSize, columns, labels = true) {
+  let tile = fitWithin(compWidth, compHeight, tileSize);
+  const cols = Math.max(1, Math.min(n, columns ?? chooseColumns(n, tile.width, tile.height)));
+  const rows = Math.ceil(n / cols);
+  const sheetW = (t) => cols * t.width + (cols + 1) * SHEET_GAP;
+  const sheetH = (t) => rows * (t.height + labelMetrics(t.height, labels).labelHeight) + (rows + 1) * SHEET_GAP;
+  let longest = Math.max(sheetW(tile), sheetH(tile));
+  for (let size = Math.max(tile.width, tile.height); longest > MAX_SHEET_EDGE && size > 16; ) {
+    size = Math.max(16, Math.floor(size * MAX_SHEET_EDGE / longest) - 1);
+    tile = fitWithin(compWidth, compHeight, size);
+    longest = Math.max(sheetW(tile), sheetH(tile));
+  }
+  const { labelHeight, textScale } = labelMetrics(tile.height, labels);
+  return {
+    tileWidth: tile.width,
+    tileHeight: tile.height,
+    labelHeight,
+    textScale,
+    columns: cols,
+    rows,
+    width: sheetW(tile),
+    height: sheetH(tile)
+  };
+}
+function buildContactSheet(tiles, layout) {
+  const sheet = createCanvas(layout.width, layout.height, SHEET_BG);
+  const pad = 2 * layout.textScale;
+  tiles.forEach((tile, i) => {
+    const col = i % layout.columns;
+    const row = Math.floor(i / layout.columns);
+    const x = SHEET_GAP + col * (layout.tileWidth + SHEET_GAP);
+    const y = SHEET_GAP + row * (layout.tileHeight + layout.labelHeight + SHEET_GAP);
+    const small = tile.image.width === layout.tileWidth && tile.image.height === layout.tileHeight ? tile.image : resizeArea(tile.image, layout.tileWidth, layout.tileHeight);
+    blit(sheet, flattenOnChecker(small, 8, 112, 88), x, y);
+    if (tile.label && layout.labelHeight > 0) {
+      fillRect(sheet, x, y + layout.tileHeight, layout.tileWidth, layout.labelHeight, [0, 0, 0, 255]);
+      drawText(sheet, tile.label, x + pad, y + layout.tileHeight + pad, layout.textScale, [255, 255, 255, 255]);
+    }
+    if (tile.flagged) {
+      strokeRect(sheet, x, y, layout.tileWidth, layout.tileHeight, 3, FLAG_COLOUR);
+    }
+  });
+  return sheet;
+}
+function frameLabel(sample) {
+  return `f${sample.frame} ${sample.time.toFixed(2)}s`;
+}
+function distanceBetween(a, b) {
+  let sum = 0;
+  for (let d = 0; d < Math.min(a.length, b.length); d++) sum += (b[d] - a[d]) ** 2;
+  return Math.sqrt(sum);
+}
+function sampleSpeeds(s) {
+  const jumps = s.keys.filter((_k, i) => i > 0 && s.keys[i - 1].out_interp === "hold").map((k) => k.time);
+  const out = [];
+  for (let i = 0; i + 1 < s.times.length; i++) {
+    const t0 = s.times[i];
+    const t1 = s.times[i + 1];
+    const isJump = jumps.some((t) => t > t0 + 1e-6 && t <= t1 + 1e-6);
+    out.push({
+      time: (t0 + t1) / 2,
+      speed: isJump || t1 <= t0 ? null : distanceBetween(s.values[i], s.values[i + 1]) / (t1 - t0)
+    });
+  }
+  return out;
+}
+function segmentProfile(startSpeed, endSpeed, peak, hold) {
+  if (hold) return "hold";
+  if (peak < 1e-6) return "static";
+  const s = startSpeed / peak;
+  const e = endSpeed / peak;
+  if (s > 0.8 && e > 0.8) return "constant";
+  if (s < 0.5 && e < 0.5) return "ease in-out";
+  if (s < 0.5 && e > 0.8) return "speeds up";
+  if (s > 0.8 && e < 0.5) return "slows down";
+  return "uneven";
+}
+function analyzeMotion(s, speeds) {
+  const dims = s.values[0]?.length ?? 0;
+  const min = [];
+  const max = [];
+  for (let d = 0; d < dims; d++) {
+    min.push(Math.min(...s.values.map((v) => v[d])));
+    max.push(Math.max(...s.values.map((v) => v[d])));
+  }
+  let peak = 0;
+  let peakTime = null;
+  let distance = 0;
+  let movingTime = 0;
+  speeds.forEach((sp, i) => {
+    if (sp.speed === null) return;
+    const dt = s.times[i + 1] - s.times[i];
+    distance += sp.speed * dt;
+    movingTime += dt;
+    if (sp.speed > peak) {
+      peak = sp.speed;
+      peakTime = sp.time;
+    }
+  });
+  const overshoot = [];
+  if (s.keys.length >= 2) {
+    for (let d = 0; d < dims; d++) {
+      const keyMin = Math.min(...s.keys.map((k) => k.value[d]));
+      const keyMax = Math.max(...s.keys.map((k) => k.value[d]));
+      const tol = Math.max(1e-3, (keyMax - keyMin) * 1e-3);
+      const below = keyMin - min[d] > tol ? keyMin - min[d] : 0;
+      const above = max[d] - keyMax > tol ? max[d] - keyMax : 0;
+      if (below > 0 || above > 0) {
+        overshoot.push({ dimension: d, below_keys_by: r32(below), above_keys_by: r32(above) });
+      }
+    }
+  }
+  const segments = [];
+  for (let k = 0; k + 1 < s.keys.length; k++) {
+    const a = s.keys[k];
+    const b = s.keys[k + 1];
+    const inside = [];
+    speeds.forEach((sp, i) => {
+      if (sp.speed === null || s.times[i] < a.time - 1e-6 || s.times[i + 1] > b.time + 1e-6) return;
+      inside.push({ speed: sp.speed, time: sp.time, dt: s.times[i + 1] - s.times[i] });
+    });
+    if (inside.length === 0) continue;
+    let segPeak = inside[0];
+    for (const p of inside) if (p.speed > segPeak.speed) segPeak = p;
+    const startSpeed = inside[0].speed;
+    const endSpeed = inside[inside.length - 1].speed;
+    segments.push({
+      from_key: a.index,
+      to_key: b.index,
+      start: r32(a.time),
+      end: r32(b.time),
+      distance: r32(inside.reduce((sum, p) => sum + p.speed * p.dt, 0)),
+      start_speed: r32(startSpeed),
+      end_speed: r32(endSpeed),
+      peak_speed: r32(segPeak.speed),
+      peak_at: segPeak.speed < 1e-6 ? null : Math.round((segPeak.time - a.time) / (b.time - a.time) * 100) / 100,
+      profile: segmentProfile(startSpeed, endSpeed, segPeak.speed, a.out_interp === "hold")
+    });
+  }
+  return {
+    speed: { peak: r32(peak), peak_time: peakTime === null ? null : r32(peakTime), mean: movingTime > 0 ? r32(distance / movingTime) : 0 },
+    distance: r32(distance),
+    value: {
+      start: (s.values[0] ?? []).map(r32),
+      end: (s.values[s.values.length - 1] ?? []).map(r32),
+      min: min.map(r32),
+      max: max.map(r32)
+    },
+    overshoot,
+    segments
+  };
+}
+function formatNumber(v) {
+  const a = Math.abs(v);
+  if (a >= 1e3) return v.toFixed(0);
+  if (a >= 100) return v.toFixed(1);
+  if (a >= 1) return v.toFixed(2);
+  return v.toFixed(3);
+}
+function renderMotionGraph(s, speeds, width, height) {
+  const scale = height >= 300 ? 2 : 1;
+  const glyphH = GLYPH_HEIGHT * scale;
+  const dims = s.values[0]?.length ?? 0;
+  let vmin = Infinity;
+  let vmax = -Infinity;
+  for (const v of s.values) {
+    for (const x of v) {
+      vmin = Math.min(vmin, x);
+      vmax = Math.max(vmax, x);
+    }
+  }
+  if (!Number.isFinite(vmin)) {
+    vmin = 0;
+    vmax = 1;
+  } else if (vmax - vmin < 1e-9) {
+    const pad = Math.max(1, Math.abs(vmin) * 0.1);
+    vmin -= pad;
+    vmax += pad;
+  }
+  let peak = 0;
+  for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
+  const speedMax = peak > 0 ? peak : 1;
+  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(speedMax), "0"];
+  const left = Math.max(...yLabels.map((l) => textWidth(l, scale))) + 4 * scale + 6;
+  const right = 4 * scale + 6;
+  const top = glyphH + 8;
+  const bottom = glyphH + 8;
+  const gap = glyphH + 8;
+  const plotW = Math.max(1, width - left - right);
+  const plotH = Math.max(1, Math.floor((height - top - bottom - gap) / 2));
+  const valueTop = top;
+  const speedTop = top + plotH + gap;
+  const span = s.end - s.start > 0 ? s.end - s.start : 1;
+  const xOf = (t) => left + Math.round((t - s.start) / span * (plotW - 1));
+  const yValue = (v) => valueTop + Math.round((1 - (v - vmin) / (vmax - vmin)) * (plotH - 1));
+  const ySpeed = (v) => speedTop + Math.round((1 - v / speedMax) * (plotH - 1));
+  const img = createCanvas(width, height, SHEET_BG);
+  for (const panelTop of [valueTop, speedTop]) {
+    fillRect(img, left, panelTop, plotW, plotH, PANEL_BG);
+    fillRect(img, left, panelTop + Math.floor(plotH / 2), plotW, 1, GRID_COLOUR);
+  }
+  const keysInRange = s.keys.filter((k) => k.time >= s.start - 1e-6 && k.time <= s.end + 1e-6);
+  let labelRight = -Infinity;
+  for (const k of keysInRange) {
+    const x = xOf(k.time);
+    fillRect(img, x, valueTop, 1, speedTop + plotH - valueTop, KEY_LINE);
+    const label = `#${k.index}`;
+    const w = textWidth(label, scale);
+    const lx = Math.min(Math.max(0, x - Math.floor(w / 2)), width - w);
+    if (lx > labelRight + 2 * scale) {
+      drawText(img, label, lx, top - glyphH - 4, scale, KEY_COLOUR);
+      labelRight = lx + w;
+    }
+  }
+  for (let d = 0; d < dims; d++) {
+    const colour = DIM_COLOURS[d % DIM_COLOURS.length];
+    for (let i = 0; i + 1 < s.times.length; i++) {
+      drawLine(img, xOf(s.times[i]), yValue(s.values[i][d]), xOf(s.times[i + 1]), yValue(s.values[i + 1][d]), 2, colour);
+    }
+  }
+  for (const k of keysInRange) {
+    for (let d = 0; d < Math.min(dims, k.value.length); d++) {
+      fillRect(img, xOf(k.time) - 2, yValue(k.value[d]) - 2, 5, 5, KEY_COLOUR);
+    }
+  }
+  for (let i = 0; i < speeds.length; i++) {
+    const sp = speeds[i].speed;
+    if (sp === null) continue;
+    const next = speeds[i + 1]?.speed ?? null;
+    const prev = speeds[i - 1]?.speed ?? null;
+    if (next !== null) {
+      drawLine(img, xOf(speeds[i].time), ySpeed(sp), xOf(speeds[i + 1].time), ySpeed(next), 2, SPEED_COLOUR);
+    } else if (prev === null) {
+      drawLine(img, xOf(s.times[i]), ySpeed(sp), xOf(s.times[i + 1]), ySpeed(sp), 2, SPEED_COLOUR);
+    }
+  }
+  const rightAlign = (text, x, y) => drawText(img, text, x - textWidth(text, scale), y, scale, AXIS_LABEL);
+  rightAlign(yLabels[0], left - 6, valueTop);
+  rightAlign(yLabels[1], left - 6, valueTop + plotH - glyphH);
+  rightAlign(yLabels[2], left - 6, speedTop);
+  rightAlign(yLabels[3], left - 6, speedTop + plotH - glyphH);
+  drawText(img, `${s.start.toFixed(2)}s`, left, height - bottom + 4, scale, AXIS_LABEL);
+  rightAlign(`${s.end.toFixed(2)}s`, left + plotW, height - bottom + 4);
+  return img;
+}
+function fixEase(taste) {
+  const c = taste?.preferred_ease;
+  if (!c || c.length !== 4) return { ease: "easy_ease", name: "Easy ease" };
+  const influence = (v) => Math.min(100, Math.max(0.1, Math.round(v * 1e3) / 10));
+  return {
+    ease: { in: { speed: 0, influence: influence(1 - c[2]) }, out: { speed: 0, influence: influence(c[0]) } },
+    name: "Your preferred ease"
+  };
+}
+function reviewProperty(s, analysis, speeds, path35, target, taste) {
+  const findings = [];
+  const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
+  const timingOk = !motion && taste?.allow_linear_non_motion === true;
+  const unit = s.property.spatial ? "px/s" : "/s";
+  const base = {
+    layer: s.layer,
+    property: { name: s.property.name, path: path35 }
+  };
+  const { ease: easeArg, name: easeName } = fixEase(taste);
+  const fix2 = (keys, extra = {}) => ({
+    tool: "ae_set_keyframe_ease",
+    args: {
+      comp_id: target.comp_id,
+      layer: { id: s.layer.id },
+      path: path35,
+      keys,
+      ease: easeArg,
+      ...extra,
+      expect: { project_path: target.project_path, comp_id: target.comp_id }
+    }
+  });
+  const segs = analysis.segments;
+  const propPeak = analysis.speed.peak;
+  const keepsMovingAfter = (time, speed) => {
+    const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
+    return next !== void 0 && next.speed > 0.3 * speed;
+  };
+  for (let i = 0; i < segs.length; i++) {
+    if (timingOk || segs[i].profile !== "constant") continue;
+    let j = i;
+    while (j + 1 < segs.length && segs[j + 1].profile === "constant" && Math.min(segs[j].peak_speed, segs[j + 1].peak_speed) / Math.max(segs[j].peak_speed, segs[j + 1].peak_speed) > 0.75) {
+      j++;
+    }
+    const from = segs[i].from_key;
+    const to = segs[j].to_key;
+    const many = j - i > 1;
+    const rove = j > i && s.property.spatial;
+    let middle = "";
+    if (rove) {
+      middle = ` The fix also makes the key${many ? "s" : ""} in between roving, so the move keeps one smooth speed through ${many ? "them" : "it"} (AE retimes ${many ? "them" : "it"}).`;
+    } else if (j > i) {
+      middle = ` The key${many ? "s" : ""} in between keep${many ? "" : "s"} ${many ? "their" : "its"} linear speed, which leaves a slight dip there; ${s.property.name} isn't spatial, so AE can't rove ${many ? "them" : "it"}. Match the speeds there in the graph editor if the dip shows.`;
+    }
+    findings.push({
+      ...base,
+      severity: motion ? "medium" : "low",
+      kind: "linear",
+      keys: [from, to],
+      time: segs[i].start,
+      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
+      fix: fix2([from, to], rove ? { rove_between: true } : {})
+    });
+    i = j;
+  }
+  for (let i = 0; i < segs.length; i++) {
+    const g = segs[i];
+    if (timingOk || !isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
+    const startsHere = i === 0 || !isMoving(segs[i - 1]) || segs[i - 1].to_key !== g.from_key;
+    const endsHere = i === segs.length - 1 || !isMoving(segs[i + 1]) || segs[i + 1].from_key !== g.to_key;
+    if (startsHere && g.start_speed / g.peak_speed > 0.5) {
+      findings.push({
+        ...base,
+        severity: motion ? "medium" : "low",
+        kind: "abrupt_start",
+        keys: [g.from_key],
+        time: g.start,
+        message: `${s.property.name} starts moving at ${Math.round(g.start_speed / g.peak_speed * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. ${easeName} on key ${g.from_key} eases it in.`,
+        fix: fix2([g.from_key])
+      });
+    }
+    if (endsHere && g.end_speed / g.peak_speed > 0.5 && !keepsMovingAfter(g.end, g.end_speed)) {
+      findings.push({
+        ...base,
+        severity: motion ? "medium" : "low",
+        kind: "abrupt_stop",
+        keys: [g.to_key],
+        time: g.end,
+        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round(g.end_speed / g.peak_speed * 100)}% of its top speed. ${easeName} on key ${g.to_key} lets it settle.`,
+        fix: fix2([g.to_key])
+      });
+    }
+  }
+  for (let i = 0; i + 1 < segs.length; i++) {
+    const a = segs[i];
+    const b = segs[i + 1];
+    if (!isMoving(a) || !isMoving(b) || a.to_key !== b.from_key) continue;
+    const hi = Math.max(a.end_speed, b.start_speed);
+    const lo = Math.min(a.end_speed, b.start_speed);
+    if (hi < 0.25 * propPeak || lo > 0.3 * hi) continue;
+    const nearlyStopped = lo < 0.1 * hi;
+    findings.push({
+      ...base,
+      severity: "medium",
+      kind: "speed_jump",
+      keys: [a.to_key],
+      time: a.end,
+      message: `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` + (nearlyStopped ? ` ${easeName} on key ${a.to_key} smooths the hand-over.` : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
+      ...nearlyStopped ? { fix: fix2([a.to_key]) } : {}
+    });
+  }
+  for (const o of analysis.overshoot) {
+    const d = o.dimension;
+    const past = o.above_keys_by >= o.below_keys_by;
+    let at = 0;
+    for (let i = 1; i < s.values.length; i++) {
+      if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
+    }
+    const unwanted = taste?.avoid_overshoot === true;
+    findings.push({
+      ...base,
+      severity: unwanted ? "low" : "info",
+      kind: "overshoot",
+      keys: [],
+      time: r32(s.times[at]),
+      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r32(s.times[at])}s. ` + (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.")
+    });
+  }
+  const fps = s.comp.fps > 0 ? s.comp.fps : 25;
+  const offGrid = s.keys.filter((k) => !k.roving).map((k) => ({ index: k.index, time: k.time, frame: k.time * fps })).filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
+  if (offGrid.length > 0) {
+    const list = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+    const many = offGrid.length > 1;
+    findings.push({
+      ...base,
+      severity: "low",
+      kind: "subframe_key",
+      keys: offGrid.map((k) => k.index),
+      time: r32(offGrid[0].time),
+      message: `${many ? "Keys" : "Key"} ${list(offGrid.map((k) => String(k.index)))} of ${s.property.name} ${many ? "sit" : "sits"} between frames (frame ${list(offGrid.map((k) => formatNumber(k.frame)))}), so no rendered frame lands on ${many ? "them" : "it"}. Move ${many ? "them" : "it"} to frame ${list(offGrid.map((k) => String(Math.round(k.frame))))}.`
+    });
+  }
+  return findings;
+}
+function sortFindings2(findings) {
+  return [...findings].sort(
+    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || a.layer.index - b.layer.index || a.time - b.time
+  );
+}
+function restTimes(props, fps, ancestors = []) {
+  const transform = props.filter((p) => TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName));
+  if (!transform.length) return [];
+  const candidates = [];
+  const moving = [];
+  for (const p of transform) {
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") candidates.push((g.start + g.end) / 2);
+      else moving.push([g.start, g.end]);
+    }
+    const keys = p.samples.keys;
+    if (keys.length && !p.samples.property.expression) candidates.push(keys[keys.length - 1].time);
+  }
+  let ownLast = -Infinity;
+  for (const p of transform) {
+    const k = p.samples.keys;
+    if (k.length) ownLast = Math.max(ownLast, k[k.length - 1].time);
+  }
+  for (const p of ancestors) {
+    if (!TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName)) continue;
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") {
+        const mid = (g.start + g.end) / 2;
+        if (mid > ownLast) candidates.push(mid);
+      } else {
+        moving.push([g.start, g.end]);
+      }
+    }
+    const k = p.samples.keys;
+    if (k.length && !p.samples.property.expression) {
+      const t = k[k.length - 1].time;
+      if (t > ownLast) candidates.push(t);
+    }
+  }
+  const eps = 0.5 / (fps > 0 ? fps : 25);
+  const still = candidates.filter((t) => !moving.some(([a, b]) => t > a + eps && t < b - eps)).sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] > 2 * eps);
+  return still.slice(-10).map((t) => r32(t));
+}
+function shiftInto(rect, box) {
+  const axis = (lo, hi, blo, bhi) => {
+    if (hi - lo > bhi - blo) return (blo + bhi) / 2 - (lo + hi) / 2;
+    if (lo < blo) return blo - lo;
+    if (hi > bhi) return bhi - hi;
+    return 0;
+  };
+  return [r12(axis(rect[0], rect[2], box[0], box[2])), r12(axis(rect[1], rect[3], box[1], box[3]))];
+}
+function edgesPast(rect, box) {
+  const out = [];
+  if (rect[0] < box[0] - 0.5) out.push(`left by ${Math.round(box[0] - rect[0])} px`);
+  if (rect[2] > box[2] + 0.5) out.push(`right by ${Math.round(rect[2] - box[2])} px`);
+  if (rect[1] < box[1] - 0.5) out.push(`top by ${Math.round(box[1] - rect[1])} px`);
+  if (rect[3] > box[3] + 0.5) out.push(`bottom by ${Math.round(rect[3] - box[3])} px`);
+  return out;
+}
+function reviewBounds(b, comp, safe) {
+  if (!b.checkable) return [];
+  const W = comp.width;
+  const H = comp.height;
+  const frame = [0, 0, W, H];
+  const isText = b.kind === "text";
+  const share = isText ? safe.title : safe.action;
+  const safeBox = [W * share / 2, H * share / 2, W - W * share / 2, H - H * share / 2];
+  const base = { layer: b.layer, property: { name: "Transform", path: ["ADBE Transform Group"] }, keys: [] };
+  let cut = null;
+  let outside = null;
+  let cutTimes = 0;
+  let outsideTimes = 0;
+  for (const s of b.samples) {
+    if (!s.visible || !s.rect) continue;
+    const [l, t, r, bt] = s.rect;
+    const area = (r - l) * (bt - t);
+    if (area <= 0 || area >= 0.8 * W * H) continue;
+    const iw = Math.max(0, Math.min(r, W) - Math.max(l, 0));
+    const ih = Math.max(0, Math.min(bt, H) - Math.max(t, 0));
+    const visible = iw * ih / area;
+    if (visible <= 1e-3) continue;
+    const rect = [r12(l), r12(t), r12(r), r12(bt)];
+    if (visible < 0.98) {
+      cutTimes++;
+      cut ??= {
+        ...base,
+        severity: "low",
+        kind: "cut_off",
+        time: r32(s.time),
+        message: `${b.layer.name} comes to rest partly outside the frame at ${r32(s.time)}s: ${Math.round((1 - visible) * 100)}% of it is cut off (past the ${edgesPast(rect, frame).join(", ")}). Fine for a deliberate bleed; otherwise move it by the suggested shift.`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox)
+      };
+      continue;
+    }
+    const past = edgesPast(rect, safeBox);
+    if (past.length) {
+      outsideTimes++;
+      outside ??= {
+        ...base,
+        severity: isText ? "low" : "info",
+        kind: "outside_safe",
+        time: r32(s.time),
+        message: `${b.layer.name} rests outside the ${isText ? "title" : "action"}-safe area (${Math.round(share * 100)}%) at ${r32(s.time)}s: past it on the ${past.join(", ")}. ${isText ? "Text there can be cropped on some screens." : "Fine for decoration; keep key content inside."}`,
+        bounds: rect,
+        suggested_shift: shiftInto(rect, safeBox)
+      };
+    }
+  }
+  const more = (f, n) => f && n > 1 ? { ...f, message: `${f.message} Seen at ${n} rest points.` } : f;
+  return [more(cut, cutTimes), more(outside, outsideTimes)].filter((f) => f !== null);
+}
+async function runQueued2(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+var crypto7, fs18, path17, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r32, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
+var init_motion = __esm({
+  "src/tools/ext/motion.ts"() {
+    "use strict";
+    crypto7 = __toESM(require("node:crypto"), 1);
+    fs18 = __toESM(require("node:fs"), 1);
+    path17 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_render();
+    init_frames();
+    init_png_utils();
+    MAX_SHEET_FRAMES = 24;
+    MAX_SHEET_EDGE = 2400;
+    SHEET_GAP = 6;
+    SHEET_BG = [24, 24, 24, 255];
+    FLAG_COLOUR = [230, 40, 40, 255];
+    AeContactSheetSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("CompItem ID to sample."),
+      times: external_exports.array(external_exports.number().min(0)).min(2).max(MAX_SHEET_FRAMES).optional().describe(
+        `Explicit comp times in seconds (2 to ${MAX_SHEET_FRAMES}). Mutually exclusive with start/end/count.`
+      ),
+      start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the work area start."),
+      end: external_exports.number().min(0).optional().describe("Range end in comp seconds (exclusive, like the work area end). Default: the work area end."),
+      count: external_exports.number().int().min(2).max(MAX_SHEET_FRAMES).optional().describe(
+        `How many frames to sample evenly across the range, first and last frame included (2 to ${MAX_SHEET_FRAMES}, default 12).`
+      ),
+      tile_size: external_exports.number().int().min(64).max(768).optional().describe(
+        `Long edge in pixels of each tile (default 320). Tiles shrink further if the sheet would exceed ${MAX_SHEET_EDGE} px.`
+      ),
+      columns: external_exports.number().int().min(1).max(12).optional().describe("Number of columns. Default: chosen so the sheet is roughly 16:9."),
+      labels: external_exports.boolean().optional().describe("Draw the frame number and time on each tile (default true).")
+    }).superRefine((val, ctx) => {
+      if (val.times !== void 0 && (val.start !== void 0 || val.end !== void 0 || val.count !== void 0)) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["times"],
+          message: "Give either `times`, or a range (`start`/`end`/`count`), not both."
+        });
+      }
+      if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["end"],
+          message: "`end` must be after `start`."
+        });
+      }
+    });
+    DIM_COLOURS = [
+      [235, 80, 80, 255],
+      [90, 200, 90, 255],
+      [90, 150, 255, 255],
+      [200, 200, 200, 255]
+    ];
+    SPEED_COLOUR = [240, 240, 240, 255];
+    KEY_COLOUR = [255, 200, 60, 255];
+    KEY_LINE = [255, 200, 60, 90];
+    PANEL_BG = [40, 40, 40, 255];
+    GRID_COLOUR = [62, 62, 62, 255];
+    AXIS_LABEL = [200, 200, 200, 255];
+    AeMotionGraphSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("CompItem ID that holds the layer."),
+      layer: LayerSelectorSchema,
+      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
+      ),
+      start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the first keyframe, or the work area start without keyframes."),
+      end: external_exports.number().min(0).optional().describe("Range end in comp seconds. Default: the last keyframe, or the work area end without keyframes."),
+      step: external_exports.number().positive().optional().describe("Seconds between samples. Default: one comp frame. Capped at 1000 samples by widening the step."),
+      width: external_exports.number().int().min(320).max(2048).optional().describe("Graph width in pixels (default 960)."),
+      height: external_exports.number().int().min(200).max(2048).optional().describe("Graph height in pixels (default 540)."),
+      include_samples: external_exports.boolean().optional().describe("Also return every sample as `sample_table` (default false; the graph and summary are usually enough).")
+    }).superRefine((val, ctx) => {
+      if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["end"],
+          message: "`end` must be after `start`."
+        });
+      }
+    });
+    r32 = (x) => Math.round(x * 1e3) / 1e3;
+    MOTION_MATCH_NAMES = /* @__PURE__ */ new Set([
+      "ADBE Position",
+      "ADBE Position_0",
+      "ADBE Position_1",
+      "ADBE Position_2",
+      "ADBE Anchor Point",
+      "ADBE Scale",
+      "ADBE Rotate Z",
+      "ADBE Rotate X",
+      "ADBE Rotate Y",
+      "ADBE Orientation"
+    ]);
+    SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
+    isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
+    TRANSFORM_MATCH_NAMES = /* @__PURE__ */ new Set([
+      "ADBE Position",
+      "ADBE Position_0",
+      "ADBE Position_1",
+      "ADBE Anchor Point",
+      "ADBE Scale",
+      "ADBE Rotate Z"
+    ]);
+    r12 = (x) => Math.round(x * 10) / 10;
+    AeMotionReviewSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("CompItem ID to review."),
+      layers: external_exports.array(LayerSelectorSchema).max(50).optional().describe("Only review these layers. Default: every layer in the comp."),
+      include_info: external_exports.boolean().optional().describe("Include info findings (overshoot past keyframe values). Default true."),
+      max_findings: external_exports.number().int().min(1).max(200).optional().describe("Return at most this many findings, most severe first (default 50)."),
+      bounds: external_exports.boolean().optional().describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
+      action_safe: external_exports.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
+      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's.")
+    });
+    motionTools = [
+      {
+        name: "ae_contact_sheet",
+        description: "READ-ONLY. Shows how a comp moves over time in ONE image: samples 2 to 24 frames (default 12, evenly across the work area, or a `start`/`end` range, or explicit `times`), renders each at full resolution with saveFrameToPng, shrinks them on the server and tiles them into a single PNG with frame/time labels. Transparency shows as a checkerboard; blank, black or fully transparent frames get a red border and are listed in `flagged_frames`. Look at the returned `path` to judge timing, spacing and composition across the shot; each tile's full-resolution PNG is in `frames[].path`. Every frame is a render, so heavy comps take a while: start with fewer frames. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeContactSheetSchema,
+        handler: async (args, ctx) => {
+          const framesDir = defaultFramesDir();
+          fs18.mkdirSync(framesDir, { recursive: true });
+          const opId = ctx.bridge.newOpId();
+          const captured = await runQueued2(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
+            const compResp = await ctx.bridge.evalRaw({
+              id: `${opId}_comp`,
+              script: buildJsxCall("getComp", { comp_id: args.comp_id }),
+              label: `ae_contact_sheet(${args.comp_id}) getComp`,
+              mutates: false,
+              toolName: "ae_contact_sheet"
+            });
+            const comp2 = compResp.result;
+            const samples = contactSheetTimes(
+              {
+                fps: Number(comp2.fps),
+                duration: Number(comp2.duration),
+                workAreaStart: Number(comp2.workAreaStart),
+                workAreaDuration: Number(comp2.workAreaDuration)
+              },
+              args
+            );
+            const shots2 = [];
+            for (let i = 0; i < samples.length; i++) {
+              const snap2 = await captureCompFrame({
+                ctx,
+                opId,
+                compId: args.comp_id,
+                time: samples[i].time,
+                frameIndex: i,
+                framesDir,
+                toolName: "ae_contact_sheet"
+              });
+              shots2.push({ ...samples[i], path: snap2.path });
+            }
+            return { comp: comp2, shots: shots2 };
+          });
+          const { comp, shots } = captured;
+          const showLabels = args.labels ?? true;
+          const layout = sheetLayout(
+            shots.length,
+            Number(comp.width),
+            Number(comp.height),
+            args.tile_size ?? 320,
+            args.columns,
+            showLabels
+          );
+          const tiles = [];
+          const frames = [];
+          shots.forEach((shot, index) => {
+            const full = decodePngFile(shot.path);
+            const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
+            tiles.push({
+              image: resizeArea(full, layout.tileWidth, layout.tileHeight),
+              label: showLabels ? frameLabel(shot) : void 0,
+              flagged: analysis.flags.length > 0
+            });
+            frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
+          });
+          const sheet = buildContactSheet(tiles, layout);
+          const sheetPath = path17.join(
+            framesDir,
+            `contact_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
+          );
+          fs18.writeFileSync(sheetPath, encodePng(sheet));
+          return {
+            ok: true,
+            path: sheetPath,
+            width: layout.width,
+            height: layout.height,
+            columns: layout.columns,
+            rows: layout.rows,
+            tile_width: layout.tileWidth,
+            tile_height: layout.tileHeight,
+            comp: {
+              id: comp.id,
+              name: comp.name,
+              width: comp.width,
+              height: comp.height,
+              fps: comp.fps,
+              duration: comp.duration
+            },
+            frames,
+            flagged_frames: frames.filter((f) => f.flags.length > 0).map((f) => ({ index: f.index, time: f.time, flags: f.flags }))
+          };
+        }
+      },
+      {
+        name: "ae_motion_graph",
+        description: "READ-ONLY. Graphs how one property changes over time, like AE's graph editor, in one PNG: the value per dimension on top (red, green, blue for X, Y, Z), the speed underneath, and keyframes as yellow lines labelled #1, #2... The property is sampled with expressions applied (one sample per frame by default, at most 1000), so the graph shows what the viewer sees. Also returns the numbers: peak and mean speed, the value range, `overshoot` past the keyframe values, and per pair of keyframes a `segments[].profile` (constant, ease in-out, speeds up, slows down, hold, static, uneven). Use it to check easing and timing, or to compare before and after an ease change. Speed is the change across all dimensions per second (px/s for position). The comp is never modified, not even its current time. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeMotionGraphSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "sampleProperty",
+            {
+              comp_id: args.comp_id,
+              layer: args.layer,
+              path: args.path,
+              start: args.start,
+              end: args.end,
+              step: args.step
+            },
+            { label: `ae_motion_graph(${args.comp_id})`, mutates: false, toolName: "ae_motion_graph" }
+          );
+          const samples = res.result;
+          const speeds = sampleSpeeds(samples);
+          const analysis = analyzeMotion(samples, speeds);
+          const width = args.width ?? 960;
+          const height = args.height ?? 540;
+          const framesDir = defaultFramesDir();
+          fs18.mkdirSync(framesDir, { recursive: true });
+          const graphPath = path17.join(
+            framesDir,
+            `graph_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
+          );
+          fs18.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+          return {
+            ok: true,
+            path: graphPath,
+            width,
+            height,
+            comp: samples.comp,
+            layer: samples.layer,
+            property: samples.property,
+            start: r32(samples.start),
+            end: r32(samples.end),
+            step: Math.round(samples.step * 1e6) / 1e6,
+            samples: samples.times.length,
+            speed: { unit: samples.property.spatial ? "px/s" : "units/s", ...analysis.speed },
+            distance: analysis.distance,
+            value: analysis.value,
+            overshoot: analysis.overshoot,
+            segments: analysis.segments,
+            keys: samples.keys.map((k) => ({ ...k, time: r32(k.time), value: k.value.map(r32) })),
+            ...args.include_samples ? {
+              // speed_after: speed from this sample to the next (null at the last sample and across a hold jump).
+              sample_table: samples.times.map((t, i) => ({
+                time: r32(t),
+                value: samples.values[i].map(r32),
+                speed_after: i < speeds.length && speeds[i].speed !== null ? r32(speeds[i].speed) : null
+              }))
+            } : {}
+          };
+        }
+      },
+      {
+        name: "ae_motion_review",
+        description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeMotionReviewSchema,
+        handler: async (args, ctx) => {
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_motion_review(${args.comp_id})`;
+          const scanned = await runQueued2(ctx, label, opId, async () => {
+            const listResp = await ctx.bridge.evalRaw({
+              id: `${opId}_list`,
+              script: buildJsxCall("listAnimatedProperties", { comp_id: args.comp_id, layers: args.layers }),
+              label: `${label} list`,
+              mutates: false,
+              toolName: "ae_motion_review"
+            });
+            const list = listResp.result;
+            const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
+            const sampled = [];
+            for (let i = 0; i < list.properties.length; i++) {
+              const p = list.properties[i];
+              const end = p.expression && workAreaEnd > p.last_key_time + 1e-6 ? workAreaEnd : void 0;
+              const resp = await ctx.bridge.evalRaw({
+                id: `${opId}_p${i}`,
+                script: buildJsxCall("sampleProperty", { comp_id: args.comp_id, layer: { id: p.layer.id }, path: p.path, end }),
+                label: `${label} ${p.layer.name} > ${p.name}`,
+                mutates: false,
+                toolName: "ae_motion_review"
+              });
+              const speeds = sampleSpeeds(resp.result);
+              sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
+            }
+            const bounds = [];
+            if (args.bounds !== false) {
+              const byLayer = /* @__PURE__ */ new Map();
+              for (const s of sampled) byLayer.set(s.samples.layer.id, [...byLayer.get(s.samples.layer.id) ?? [], s]);
+              for (const [layerId, props] of byLayer) {
+                if (props.every((s) => s.ancestorOnly)) continue;
+                if (list.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
+                  const l = props[0].samples.layer;
+                  bounds.push({ layer: { index: l.index, id: l.id, name: l.name }, kind: "av", checkable: false, reason: "a parent's motion was not fully scanned (listing cut short)", samples: [] });
+                  continue;
+                }
+                const ancestors = props[0].parents.flatMap((id) => byLayer.get(id) ?? []);
+                const times = restTimes(props, Number(list.comp.fps), ancestors);
+                if (!times.length) continue;
+                const resp = await ctx.bridge.evalRaw({
+                  id: `${opId}_b${layerId}`,
+                  script: buildJsxCall("layerBoundsAt", { comp_id: args.comp_id, layer: { id: layerId }, times }),
+                  label: `${label} bounds ${props[0].samples.layer.name}`,
+                  mutates: false,
+                  toolName: "ae_motion_review"
+                });
+                bounds.push(resp.result);
+              }
+            }
+            return { list, sampled, bounds };
+          });
+          const target = { comp_id: args.comp_id, project_path: scanned.list.project_path };
+          const taste = ctx.settings?.get().taste;
+          let findings = [];
+          for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
+            if (ancestorOnly) continue;
+            findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
+          }
+          const safe = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
+          for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
+          const unchecked = scanned.bounds.filter((b) => !b.checkable).map((b) => ({ layer: b.layer.name, reason: b.reason }));
+          if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
+          findings = sortFindings2(findings);
+          const counts = { medium: 0, low: 0, info: 0 };
+          const byKind = {};
+          for (const f of findings) {
+            counts[f.severity]++;
+            byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
+          }
+          const max = args.max_findings ?? 50;
+          return {
+            ok: true,
+            comp: scanned.list.comp,
+            project_path: scanned.list.project_path,
+            layers_scanned: scanned.list.layers_scanned,
+            ...scanned.list.ancestors_scanned ? { ancestors_scanned: scanned.list.ancestors_scanned } : {},
+            properties_scanned: scanned.sampled.filter((s) => !s.ancestorOnly).length,
+            properties_truncated: scanned.list.truncated,
+            ...scanned.list.ancestors_truncated ? { ancestors_truncated: true } : {},
+            clean: counts.medium === 0 && counts.low === 0,
+            counts,
+            by_kind: byKind,
+            findings: findings.slice(0, max),
+            findings_truncated: findings.length > max,
+            ...args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...unchecked.length ? { bounds_unchecked: unchecked } : {} } : {},
+            ...taste && (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot) ? {
+              taste: {
+                preferred_ease: taste.preferred_ease,
+                allow_linear_non_motion: taste.allow_linear_non_motion,
+                avoid_overshoot: taste.avoid_overshoot
+              }
+            } : {}
+          };
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/describe.ts
+function roleCounts(layers) {
+  const out = {};
+  for (const l of layers) out[l.role] = (out[l.role] ?? 0) + 1;
+  return out;
+}
+function countsText(counts) {
+  const keys = Object.keys(counts).sort((a, b) => {
+    const ia = ROLE_ORDER.indexOf(a);
+    const ib = ROLE_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  return keys.map((k) => `${counts[k]} ${k}`).join(", ");
+}
+function stackRuns(layers) {
+  const runs = [];
+  for (const l of layers) {
+    const last = runs[runs.length - 1];
+    if (last && last.role === l.role && l.index === last.to + 1) {
+      last.to = l.index;
+      last.count++;
+      if (last.names.length < 4) last.names.push(l.name);
+    } else {
+      runs.push({ role: l.role, from: l.index, to: l.index, count: 1, names: [l.name] });
+    }
+  }
+  return runs;
+}
+function propKind(seg) {
+  if (seg.match) return MATCH_KIND[seg.match] ?? "other";
+  const prop = seg.prop;
+  if (prop === "Opacity") return "opacity";
+  if (prop === "Scale") return "scale";
+  if (prop === "Position") return "position";
+  if (prop === "Anchor Point") return "anchor";
+  if (/rotation|orientation/i.test(prop)) return "rotation";
+  return "other";
+}
+function sampledVerb(seg) {
+  const k = propKind(seg);
+  if (seg.kind === "color") return "changes color (expression)";
+  if (k === "position" || k === "position_x" || k === "position_y") return "moves (expression)";
+  if (k === "scale") return "scales (expression)";
+  if (k === "rotation") return "rotates (expression)";
+  if (k === "opacity") return "changes opacity (expression)";
+  if (k === "anchor") return "shifts its anchor point (expression)";
+  return `animates ${seg.prop} (expression)`;
+}
+function verbFor(seg) {
+  if (seg.sampled) return sampledVerb(seg);
+  const prop = seg.prop;
+  const k = propKind(seg);
+  const from = seg.from ?? [];
+  const to = seg.to ?? [];
+  let verb;
+  const delta = (i) => (to[i] ?? 0) - (from[i] ?? 0);
+  if (seg.kind === "text") {
+    verb = "changes its text";
+  } else if (seg.kind === "shape") {
+    verb = "morphs its path";
+  } else if (seg.kind === "color") {
+    verb = "changes color";
+  } else if (k === "opacity" && seg.hold) {
+    verb = delta(0) > 0 ? "appears" : "disappears";
+  } else if (k === "opacity") {
+    verb = delta(0) > 0 ? "fades in" : "fades out";
+  } else if (seg.hold) {
+    verb = `steps ${prop}`;
+  } else if (k === "scale") {
+    const sum = delta(0) + (to.length > 1 ? delta(1) : 0);
+    verb = sum > 0 ? "scales up" : "scales down";
+  } else if (k === "position_x") {
+    verb = delta(0) > 0 ? "slides right" : "slides left";
+  } else if (k === "position_y") {
+    verb = delta(0) > 0 ? "moves down" : "moves up";
+  } else if (k === "position") {
+    const dx = delta(0);
+    const dy = delta(1);
+    if (Math.abs(dy) <= Math.abs(dx) * 0.2) {
+      verb = dx > 0 ? "slides right" : "slides left";
+    } else if (Math.abs(dx) <= Math.abs(dy) * 0.2) {
+      verb = dy > 0 ? "moves down" : "moves up";
+    } else {
+      verb = "moves";
+    }
+  } else if (k === "rotation") {
+    verb = "rotates";
+  } else if (k === "anchor") {
+    verb = "shifts its anchor point";
+  } else {
+    verb = `animates ${prop}`;
+  }
+  if (seg.overshoot && !seg.expression) verb += " with overshoot";
+  return verb;
+}
+function overshootFromSamples(seg) {
+  if (!seg.samples || seg.samples.length === 0 || !seg.from || !seg.to) return false;
+  const n = seg.samples.length;
+  const times = [seg.start];
+  for (let i = 1; i <= n; i++) times.push(seg.start + (seg.end - seg.start) * i / (n + 1));
+  times.push(seg.end);
+  const values = [seg.from, ...seg.samples, seg.to];
+  const key = (index, time, value) => ({ index, time, value, in_interp: "bezier", out_interp: seg.hold ? "hold" : "bezier" });
+  const s = { times, values, keys: [key(1, seg.start, seg.from), key(2, seg.end, seg.to)] };
+  try {
+    return analyzeMotion(s, sampleSpeeds(s)).overshoot.length > 0;
+  } catch {
+    return false;
+  }
+}
+function pluralVerb(verb) {
+  const sp = verb.indexOf(" ");
+  const first = sp < 0 ? verb : verb.slice(0, sp);
+  const rest = sp < 0 ? "" : verb.slice(sp);
+  if (first.endsWith("s") && first.length > 1) return first.slice(0, -1) + rest;
+  return verb;
+}
+function buildActions(raw) {
+  const byIndex = new Map(raw.layers.map((l) => [l.index, l]));
+  const actions = [];
+  const sorted = [...raw.segments].sort((a, b) => a.start - b.start);
+  const open = /* @__PURE__ */ new Map();
+  for (const seg0 of sorted) {
+    const layer = byIndex.get(seg0.layer);
+    if (!layer) continue;
+    const s = seg0.overshoot === void 0 && seg0.samples ? { ...seg0, overshoot: overshootFromSamples(seg0) } : seg0;
+    const verb = verbFor(s);
+    const key = `${s.layer}|${verb}`;
+    const cur = open.get(key);
+    if (cur && s.start <= cur.end + MERGE_GAP) {
+      cur.end = Math.max(cur.end, s.end);
+    } else {
+      const a = { layer: s.layer, name: layer.name, verb, start: s.start, end: s.end };
+      open.set(key, a);
+      actions.push(a);
+    }
+  }
+  const dur = raw.comp.duration;
+  for (const l of raw.layers) {
+    if (!l.enabled || !VISIBLE_ROLES.has(l.role)) continue;
+    const near5 = (t) => actions.some((a) => a.layer === l.index && (Math.abs(a.start - t) <= 0.1 || Math.abs(a.end - t) <= 0.1));
+    if (l.in_point > 0.05 && l.in_point < dur && !near5(l.in_point)) {
+      actions.push({ layer: l.index, name: l.name, verb: "enters", start: l.in_point, end: l.in_point });
+    }
+    if (l.out_point < dur - 0.05 && l.out_point > 0 && !near5(l.out_point)) {
+      actions.push({ layer: l.index, name: l.name, verb: "leaves", start: l.out_point, end: l.out_point });
+    }
+  }
+  return actions.sort((a, b) => a.start - b.start || a.layer - b.layer);
+}
+function beatText(group) {
+  const byVerb = /* @__PURE__ */ new Map();
+  for (const a of group) {
+    const names = byVerb.get(a.verb) ?? [];
+    if (!names.includes(a.name)) names.push(a.name);
+    byVerb.set(a.verb, names);
+  }
+  const parts = [];
+  let hidden = 0;
+  for (const [verb, names] of byVerb) {
+    if (parts.length >= 4) {
+      hidden += names.length;
+      continue;
+    }
+    const shown = names.slice(0, 3);
+    const more = names.length - shown.length;
+    let who = quoteList(shown);
+    if (more > 0) who = `${shown.map((n) => `"${n}"`).join(", ")} and ${more} more`;
+    parts.push(`${who} ${names.length === 1 ? verb : pluralVerb(verb)}`);
+  }
+  if (hidden > 0) parts.push(`${hidden} more`);
+  return parts.join("; ");
+}
+function isLongAction(a, compDuration) {
+  const len = a.end - a.start;
+  return len >= LONG_ACTION_MIN && len > LONG_ACTION_SHARE * compDuration;
+}
+function buildBeats(actions, compDuration = Number.POSITIVE_INFINITY) {
+  const groups = [];
+  let firstStart = 0;
+  let lastStart = 0;
+  for (const a of actions) {
+    if (isLongAction(a, compDuration)) continue;
+    if (groups.length > 0 && a.start - lastStart <= BEAT_JOIN_GAP && a.start - firstStart <= MAX_BEAT_SPAN) {
+      groups[groups.length - 1].push(a);
+      lastStart = a.start;
+    } else {
+      groups.push([a]);
+      firstStart = a.start;
+      lastStart = a.start;
+    }
+  }
+  return groups.map((g) => {
+    const start = Math.min(...g.map((a) => a.start));
+    const end = Math.max(...g.map((a) => a.end));
+    return { start, end, text: beatText(g), actions: g.length };
+  });
+}
+function beatLine(b) {
+  const span = b.end - b.start < 0.05 ? `${fmtTime(b.start)} s` : `${fmtTime(b.start)}-${fmtTime(b.end)} s`;
+  return `${span}: ${b.text}`;
+}
+function listNames(layers, max = 6) {
+  const shown = layers.slice(0, max).map((l) => `#${l.index} "${l.name}"`);
+  const more = layers.length - shown.length;
+  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
+}
+function findConcerns(raw) {
+  const out = [];
+  const fps = raw.comp.frame_rate || 25;
+  const dur = raw.comp.duration;
+  const add = (kind, severity, message, layers) => {
+    if (layers.length === 0) return;
+    out.push({ kind, severity, message: `${message}: ${listNames(layers)}`, layers: layers.slice(0, 20).map(ref) });
+  };
+  const referenced = /* @__PURE__ */ new Set();
+  for (const l of raw.layers) for (const n of l.expressions.refs) referenced.add(n);
+  const reasons = [];
+  if (!raw.range.complete) reasons.push("only part of the comp was read");
+  if (raw.range.layers_over_cap) reasons.push("the comp is too big to cross-reference every layer");
+  if (raw.walk_truncated) reasons.push("the property scan hit its cap, so later expressions were not read");
+  if (raw.layers.some((l) => l.expressions.refs_truncated)) reasons.push("some expressions name more layers than were recorded");
+  const complete = reasons.length === 0;
+  const off = raw.layers.filter((l) => !l.enabled && !l.is_matte);
+  const audible = off.filter((l) => l.audio === true);
+  const silent = off.filter((l) => l.audio !== true);
+  add("video_off_audio_on", "info", "Video switched off but audio on (still heard)", audible);
+  const isUsed = (l) => l.is_parent || l.is_referenced === true || referenced.has(l.name);
+  if (complete) {
+    add("unused_layers", "warn", 'Switched off, not a matte or parent, and nothing names them: no expression with layer("...") and no effect layer parameter (a heuristic)', silent.filter((l) => !isUsed(l)));
+    add("switched_off", "info", "Switched off but still used as a parent, named in an expression or picked by an effect", silent.filter(isUsed));
+  } else {
+    add("switched_off", "info", `Switched off (use is not judged: ${reasons.join("; ")})`, silent);
+  }
+  const solos = raw.layers.filter((l) => l.solo);
+  add("solo_active", "warn", "Solo is on, so the other layers do not render", solos);
+  const short2 = raw.layers.filter((l) => l.enabled && !["null", "camera", "light"].includes(l.role) && l.out_point - l.in_point < Math.max(3 / fps, 0.1) && l.out_point > l.in_point);
+  add("very_short", "warn", "Very short (under 3 frames or 0.1 s)", short2);
+  const outside = raw.layers.filter((l) => l.enabled && (l.out_point <= 0 || l.in_point >= dur));
+  add("outside_comp_time", "warn", `Never visible: their in/out lie outside 0-${fmtTime(dur)} s`, outside);
+  add("missing_footage", "warn", "Missing footage", raw.layers.filter((l) => l.source?.missing === true));
+  add("expression_errors", "warn", "Expression errors", raw.layers.filter((l) => l.expressions.errors > 0));
+  return out;
+}
+function describeFromRaw(raw, maxBeats = 12) {
+  const c = raw.comp;
+  const frames = Math.round(c.duration * c.frame_rate);
+  const roles = roleCounts(raw.layers);
+  let runs = stackRuns(raw.layers);
+  const stackTruncated = runs.length > MAX_STACK_RUNS;
+  if (stackTruncated) runs = runs.slice(0, MAX_STACK_RUNS);
+  const actions = buildActions(raw);
+  const allBeats = buildBeats(actions, c.duration);
+  const beatsTruncated = allBeats.length > MAX_BEATS;
+  const beats = allBeats.slice(0, MAX_BEATS);
+  const longActions = actions.filter((a) => isLongAction(a, c.duration));
+  const throughoutTruncated = longActions.length > MAX_THROUGHOUT;
+  const throughout = longActions.slice(0, MAX_THROUGHOUT).map((a) => `"${a.name}" ${a.verb} (${fmtTime(a.start)}-${fmtTime(a.end)} s)`);
+  const concerns = findConcerns(raw);
+  const expressions = raw.layers.filter((l) => l.expressions.count > 0).map((l) => ({ layer: l.index, name: l.name, count: l.expressions.count, props: l.expressions.props, refs: l.expressions.refs, errors: l.expressions.errors }));
+  const precomps = raw.layers.filter((l) => l.role === "precomp" && l.source?.kind === "comp" && l.source.id !== void 0).map((l) => ({ layer: l.index, name: l.name, comp_id: l.source.id, comp_name: l.source.name ?? "", comp_layers: l.source.layers }));
+  const layerMarkers = raw.layers.flatMap((l) => l.markers.map((m) => ({ layer: l.index, time: m.time, comment: m.comment })));
+  const lines = [];
+  const pa = c.pixel_aspect !== 1 ? `, pixel aspect ${c.pixel_aspect}` : "";
+  lines.push(`"${c.name}": ${c.width}x${c.height}${pa}, ${c.frame_rate} fps, ${fmtTime(c.duration)} s (${plural(frames, "frame")}), ${plural(c.num_layers, "layer")}.`);
+  if (raw.layers.length > 0) lines.push(`Layers${raw.range.complete ? "" : ` ${raw.range.from}-${raw.range.to}`}: ${countsText(roles)}.`);
+  if (runs.length > 0) {
+    const shown = runs.slice(0, 8).map((r) => {
+      const where = r.from === r.to ? `#${r.from}` : `#${r.from}-${r.to}`;
+      const names = r.names.slice(0, 3).map((n) => `"${n}"`).join(", ");
+      return `${where} ${r.role} (${names}${r.count > 3 ? ", ..." : ""})`;
+    });
+    lines.push(`Stack, top to bottom: ${shown.join("; ")}${runs.length > 8 ? `; and ${runs.length - 8} more runs` : ""}.`);
+  }
+  if (beats.length > 0) {
+    lines.push("Timeline:");
+    for (const b of beats.slice(0, maxBeats)) lines.push(`  ${beatLine(b)}`);
+    if (beats.length > maxBeats) lines.push(`  ... ${beats.length - maxBeats} more beats (see beats).`);
+  } else if (raw.layers.length > 0 && throughout.length === 0) {
+    lines.push("Timeline: no keyframed motion, sampled expression motion or layer entrances and exits found.");
+  }
+  if (throughout.length > 0) {
+    lines.push(`Throughout (long moves, not in the beats): ${throughout.slice(0, 5).join("; ")}${throughout.length > 5 ? `; and ${throughout.length - 5} more` : ""}.`);
+  }
+  if (expressions.length > 0) {
+    const total = expressions.reduce((s, e) => s + e.count, 0);
+    const names = expressions.slice(0, 5).map((e) => `"${e.name}" (${e.count})`).join(", ");
+    lines.push(`Expressions: ${plural(total, "property", "properties")} on ${plural(expressions.length, "layer")}: ${names}${expressions.length > 5 ? ", ..." : ""}. Expression-driven motion is sampled at a few times (not read from keys): it shows as "moves (expression)" and can miss quick changes.`);
+  }
+  if (precomps.length > 0) {
+    const names = precomps.slice(0, 5).map((p) => `"${p.name}" -> "${p.comp_name}"`).join(", ");
+    lines.push(`Precomps: ${precomps.length}: ${names}${precomps.length > 5 ? ", ..." : ""}.`);
+  }
+  const nested = (raw.nesting.children ?? []).filter((n) => (n.children ?? []).length > 0);
+  if (nested.length > 0) {
+    lines.push(`Nesting goes deeper in: ${nested.slice(0, 4).map((n) => `"${n.name}" (${(n.children ?? []).map((k) => `"${k.name}"`).slice(0, 3).join(", ")})`).join("; ")}.`);
+  }
+  if (raw.markers.count > 0 || layerMarkers.length > 0) {
+    const first = raw.markers.list.slice(0, 3).map((m) => `${fmtTime(m.time)} s${m.comment ? ` "${m.comment}"` : ""}`).join(", ");
+    const lm = layerMarkers.length > 0 ? `; ${plural(layerMarkers.length, "layer marker")}` : "";
+    lines.push(`Markers: ${plural(raw.markers.count, "comp marker")}${first ? ` (${first}${raw.markers.count > 3 ? ", ..." : ""})` : ""}${lm}.`);
+  }
+  if (concerns.length > 0) {
+    lines.push("Concerns:");
+    for (const k of concerns) lines.push(`  ${k.severity === "warn" ? "!" : "-"} ${k.message}`);
+  }
+  const notes = [];
+  if (!raw.range.complete) {
+    notes.push(`Only layers ${raw.range.from}-${raw.range.to} of ${c.num_layers} were read${raw.range.next_from_layer ? `; continue with from_layer ${raw.range.next_from_layer}` : ""}.`);
+  }
+  if (raw.range.layers_over_cap) notes.push("The comp has more than 2000 layers; parent and matte links are only known for the first 2000.");
+  if (raw.samples_truncated) notes.push("The sampling budget ran out; some overshoot and expression-motion checks were skipped.");
+  if (beatsTruncated) notes.push(`More than ${MAX_BEATS} beats; the rest are left out.`);
+  if (raw.segments_truncated) notes.push("Some keyframed motion was left out (per-layer or total segment cap), so the timeline may be incomplete.");
+  if (raw.walk_truncated) notes.push("The property scan hit its cap; later layers may be missing animation and expressions.");
+  if (notes.length > 0) lines.push(...notes);
+  return {
+    summary: lines.join("\n"),
+    format: { width: c.width, height: c.height, pixel_aspect: c.pixel_aspect, frame_rate: c.frame_rate, duration: c.duration, frames },
+    roles,
+    stack: runs,
+    ...stackTruncated ? { stack_truncated: true } : {},
+    beats,
+    ...beatsTruncated ? { beats_truncated: true } : {},
+    throughout,
+    ...throughoutTruncated ? { throughout_truncated: true } : {},
+    expressions,
+    precomps,
+    nesting: raw.nesting,
+    markers: { count: raw.markers.count, list: raw.markers.list, layer_markers: layerMarkers.slice(0, 200) },
+    concerns
+  };
+}
+function glyphSafe(s) {
+  return s.toUpperCase().replace(/[^A-Z0-9 .:\-#_/?]/g, " ");
+}
+function drawGantt(raw) {
+  const layers = raw.layers.slice(0, MAX_GANTT_ROWS);
+  const scale = layers.length <= 40 ? 2 : 1;
+  const rowH = scale === 2 ? 20 : 11;
+  const labelChars = scale === 2 ? 24 : 44;
+  const labelW = labelChars * 6 * scale + 8;
+  const chartW = 1100;
+  const headerH = 30;
+  const width = labelW + chartW + 20;
+  const height = headerH + layers.length * rowH + 10;
+  const dur = Math.max(raw.comp.duration, 1e-3);
+  const xOf = (t) => labelW + Math.round(Math.min(Math.max(t, 0), dur) / dur * chartW);
+  const png = createCanvas(width, height, [24, 24, 28, 255]);
+  const ink = [225, 225, 225, 255];
+  const dim = [110, 110, 120, 255];
+  const step2 = TICK_STEPS.find((s) => s >= dur / 10) ?? TICK_STEPS[TICK_STEPS.length - 1];
+  drawText(png, "SECONDS", 6, 4, 1, dim);
+  for (let t = 0; t <= dur + 1e-6; t += step2) {
+    const x = xOf(t);
+    fillRect(png, x, headerH - 8, 1, 8 + layers.length * rowH + 4, [60, 60, 68, 255]);
+    const label = String(Math.round(t * 100) / 100);
+    drawText(png, label, x + 3, 14, 1, ink);
+  }
+  const segByLayer = /* @__PURE__ */ new Map();
+  for (const s of raw.segments) {
+    const list = segByLayer.get(s.layer) ?? [];
+    list.push(s.start, s.end);
+    segByLayer.set(s.layer, list);
+  }
+  layers.forEach((l, i) => {
+    const y = headerH + i * rowH;
+    if (i % 2 === 1) fillRect(png, 0, y, width, rowH, [255, 255, 255, 10]);
+    drawText(png, glyphSafe(`${l.index} ${l.name}`).slice(0, labelChars), 6, y + Math.floor((rowH - 7 * scale) / 2), scale, l.enabled ? ink : dim);
+    const color = ROLE_COLORS[l.role] ?? [150, 150, 150, 255];
+    const x0 = xOf(l.in_point);
+    const x1 = Math.max(x0 + 2, xOf(l.out_point));
+    const barY = y + 2;
+    const barH = rowH - 4;
+    if (l.enabled) {
+      fillRect(png, x0, barY, x1 - x0, barH, color);
+    } else {
+      fillRect(png, x0, barY, x1 - x0, barH, [color[0], color[1], color[2], 70]);
+      strokeRect(png, x0, barY, x1 - x0, barH, 1, color);
+    }
+    const times = segByLayer.get(l.index) ?? [];
+    for (const t of times) {
+      const x = xOf(t);
+      if (x >= x0 && x <= x1) fillRect(png, x, barY, 1, barH, [20, 20, 24, 255]);
+    }
+    for (const m of l.markers) fillRect(png, xOf(m.time) - 1, y, 3, 3, [255, 235, 90, 255]);
+  });
+  for (const m of raw.markers.list) {
+    const x = xOf(m.time);
+    drawLine(png, x, headerH - 8, x, height - 6, 1, [235, 70, 70, 255]);
+  }
+  return { png, info: { width, height, rows: layers.length, rows_truncated: raw.layers.length > layers.length } };
+}
+var crypto8, fs19, path18, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
+var init_describe = __esm({
+  "src/tools/ext/describe.ts"() {
+    "use strict";
+    crypto8 = __toESM(require("node:crypto"), 1);
+    fs19 = __toESM(require("node:fs"), 1);
+    path18 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_render();
+    init_motion();
+    init_png_utils();
+    AeDescribeCompSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("The comp to describe."),
+      from_layer: external_exports.number().int().positive().optional().describe("First layer (1-based) of the page to read. Default 1. Use next_from_layer from a previous result to continue on a big comp."),
+      max_layers: external_exports.number().int().min(1).max(500).optional().describe("How many layers to read in this call (default 200, at most 500). Beats, expressions and concerns cover the layers read; 'unused layer' is only judged when the whole comp was read."),
+      max_beats: external_exports.number().int().min(1).max(50).optional().describe("How many beats of the timeline to put in the summary text (default 12). The beats array holds up to 50 (beats_truncated says if more were found)."),
+      include_layers: external_exports.boolean().optional().describe("Also return one compact row per layer (index, id, name, role, in/out, parent, matte, flags). Default false: the stack runs and the summary are usually enough and far smaller."),
+      gantt: external_exports.boolean().optional().describe("Also draw the timeline as a PNG Gantt chart (layer bars by role, keyframe ticks, comp markers in red) and return its path. Default false.")
+    });
+    r13 = (x) => Math.round(x * 10) / 10;
+    fmtTime = (t) => r13(t).toFixed(1);
+    plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+    ROLE_ORDER = ["text", "shape", "solid", "footage", "precomp", "adjustment", "null", "camera", "light", "audio"];
+    VISIBLE_ROLES = /* @__PURE__ */ new Set(["text", "shape", "solid", "footage", "precomp", "adjustment"]);
+    BEAT_JOIN_GAP = 0.3;
+    MAX_BEAT_SPAN = 1.5;
+    LONG_ACTION_MIN = 2;
+    LONG_ACTION_SHARE = 0.4;
+    MERGE_GAP = 0.25;
+    MATCH_KIND = {
+      "ADBE Opacity": "opacity",
+      "ADBE Scale": "scale",
+      "ADBE Position": "position",
+      "ADBE Position_0": "position_x",
+      "ADBE Position_1": "position_y",
+      "ADBE Rotate Z": "rotation",
+      "ADBE Rotate X": "rotation",
+      "ADBE Rotate Y": "rotation",
+      "ADBE Orientation": "rotation",
+      "ADBE Anchor Point": "anchor"
+    };
+    quoteList = (names) => {
+      const q = names.map((n) => `"${n}"`);
+      if (q.length <= 1) return q.join("");
+      return `${q.slice(0, -1).join(", ")} and ${q[q.length - 1]}`;
+    };
+    ref = (l) => ({ index: l.index, name: l.name });
+    MAX_STACK_RUNS = 40;
+    MAX_BEATS = 50;
+    MAX_THROUGHOUT = 20;
+    ROLE_COLORS = {
+      text: [90, 160, 235, 255],
+      shape: [120, 200, 120, 255],
+      solid: [190, 150, 90, 255],
+      footage: [170, 120, 200, 255],
+      precomp: [230, 130, 150, 255],
+      adjustment: [200, 200, 100, 255],
+      null: [150, 150, 150, 255],
+      camera: [100, 190, 190, 255],
+      light: [240, 190, 80, 255],
+      audio: [110, 140, 110, 255]
+    };
+    MAX_GANTT_ROWS = 150;
+    TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    describeTools = [
+      {
+        name: "ae_describe_comp",
+        description: `Read a plain-language map of a comp that takes ten seconds to read, before you edit it or to check you understood a file: format and length, the layers by role (text, shape, solid, footage, precomp, adjustment, null, camera, light, audio) and the stack as runs of a role, a beat-by-beat timeline built from keyframes (e.g. '0.5-2.0 s: "Logo" scales up with overshoot'), which layers carry expressions, which precomps nest where, the comp and layer markers, and open concerns (unused, very short, never visible, missing footage, expression errors, solo on). Roles come from layer flags and sources, not from AE's class names. Beats cluster keyframe segments by time and use simple wording rules: they are a reading aid, not AE's own data. Overshoot is found by sampling between keys (not for position paths) and judged with the same rule as ae_motion_review. Moves that run most of the comp are listed under 'throughout', not as beats. Expression-driven motion (wiggle, loopOut, rigs) is sampled at a few times and shows as 'moves (expression)'; quick changes between samples can be missed. 'Unused' is a definition made here (switched off with no audio, no matte, no parent, not picked by an effect's layer parameter, and no expression names it with layer("...")); it is only judged when the whole comp was read and every expression was scanned. Pages big comps (from_layer, max_layers up to 500). With gantt:true it also draws the timeline as a PNG and returns its path. Smaller than ae_get_comp + ae_comp_tree + ae_get_markers together; use those for exact values. Read-only: changes no time, selection or setting.`,
+        schema: AeDescribeCompSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "describeRead",
+            { comp_id: args.comp_id, from_layer: args.from_layer, max_layers: args.max_layers },
+            { label: `ae_describe_comp(${args.comp_id})`, mutates: false, toolName: "ae_describe_comp" }
+          );
+          const raw = res.result;
+          const desc = describeFromRaw(raw, args.max_beats ?? 12);
+          const out = {
+            ok: true,
+            read_only: true,
+            comp: raw.comp,
+            range: raw.range,
+            ...desc,
+            truncated: raw.segments_truncated || raw.walk_truncated || raw.markers.truncated || raw.nesting_truncated || raw.range.layers_over_cap || raw.samples_truncated === true || desc.stack_truncated === true || desc.beats_truncated === true || desc.throughout_truncated === true
+          };
+          if (args.include_layers) {
+            out.layers = raw.layers.map((l) => ({
+              index: l.index,
+              id: l.id,
+              name: l.name,
+              role: l.role,
+              enabled: l.enabled,
+              in: l.in_point,
+              out: l.out_point,
+              parent: l.parent,
+              matte: l.matte,
+              ...l.text !== void 0 ? { text: l.text } : {},
+              ...l.source ? { source: l.source } : {},
+              ...l.shy ? { shy: true } : {},
+              ...l.guide ? { guide: true } : {},
+              ...l.solo ? { solo: true } : {},
+              ...l.three_d ? { three_d: true } : {},
+              ...l.is_parent ? { is_parent: true } : {},
+              ...l.is_matte ? { is_matte: true } : {}
+            }));
+          }
+          if (args.gantt) {
+            try {
+              const { png, info } = drawGantt(raw);
+              const dir = defaultFramesDir();
+              fs19.mkdirSync(dir, { recursive: true });
+              const file = path18.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`);
+              fs19.writeFileSync(file, encodePng(png));
+              out.gantt = { path: file, ...info };
+              if (info.rows_truncated) out.truncated = true;
+            } catch (e) {
+              out.gantt_error = e instanceof Error ? e.message : String(e);
+            }
+          }
+          return out;
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/verify.ts
+function looksLikeSequence(file) {
+  if (!STILL.test(file)) return false;
+  const base = path19.basename(file);
+  if (!/[._-]\d{3,}\.[^.]+$/.test(base)) return false;
+  const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(base);
+  if (!m) return false;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${esc(m[1])}\\d{${m[2].length}}${esc(m[3])}$`, "i");
+  try {
+    return fs20.readdirSync(path19.dirname(file)).some((n) => n !== base && re.test(n));
+  } catch {
+    return false;
+  }
+}
+function firstFrameOf(output) {
+  if (!/\[#+\]/.test(output)) return fs20.existsSync(output) ? output : null;
+  const dir = path19.dirname(output);
+  const base = path19.basename(output);
+  const m = /^(.*)\[(#+)\](.*)$/.exec(base);
+  if (!m) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
+  try {
+    const frames = fs20.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
+    return frames.length ? path19.join(dir, frames[0]) : null;
+  } catch {
+    return null;
+  }
+}
+function renderChecks(r, c, jobFrames, sequence = false) {
+  const out = [];
+  if (!r.still) {
+    const compFrames = Math.round(c.duration * c.fps);
+    const workFrames = Math.round(c.work_area_duration * c.fps);
+    if (jobFrames !== void 0) {
+      out.push({ what: "frames", expected: jobFrames, actual: r.frames, ok: r.frames === jobFrames, note: "the job's frame range" });
+    } else {
+      const ok = r.frames === compFrames || r.frames === workFrames;
+      out.push({
+        what: "frames",
+        expected: compFrames === workFrames ? compFrames : [compFrames, workFrames],
+        actual: r.frames,
+        ok,
+        note: r.frames === workFrames && compFrames !== workFrames ? "matches the work area" : compFrames === workFrames ? void 0 : "the comp or its work area"
+      });
+    }
+    if (sequence) {
+      out.push({ what: "fps", expected: c.fps, actual: r.fps, ok: true, note: "an image sequence has no frame rate of its own; the frame count is what is checked" });
+    } else {
+      out.push({ what: "fps", expected: c.fps, actual: r.fps, ok: Math.abs(r.fps - c.fps) < 0.01 });
+    }
+  }
+  const sameSize = r.width === c.width && r.height === c.height;
+  const half = r.width * 2 === c.width && r.height * 2 === c.height;
+  out.push({ what: "size", expected: [c.width, c.height], actual: [r.width, r.height], ok: sameSize, ...half ? { note: "half resolution: check the render settings" } : {} });
+  if (c.has_audio) out.push({ what: "audio", expected: true, actual: r.has_audio, ok: r.has_audio, ...r.has_audio ? {} : { note: "the comp has sound; the output module may have audio off" } });
+  return out;
+}
+function createVerifyTools(options = {}) {
+  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
+  return [
+    {
+      name: "ae_verify_render",
+      description: "Check a finished render by importing it back into After Effects: its frame count, frame rate, size and audio are read by AE (any format AE can open, image sequences too) and compared with the comp, or with the aerender job's frame range when given a job_id. The imported item is removed again unless keep_imported; the import and removal are two undo steps and mark the project changed. Guarded by `expect`, with an automatic checkpoint. No outside tools (no ffprobe). " + AGENT_SAFETY_GUIDANCE,
+      schema: AeVerifyRenderSchema,
+      handler: async (args, ctx) => {
+        let file = args.path;
+        let compName;
+        let jobFrames;
+        let jobIsSequence = false;
+        if (args.job_id) {
+          const job = getJob(args.job_id);
+          if (!job) return { ok: false, error: "unknown_job", message: `No aerender job ${args.job_id}` };
+          if (job.state !== "succeeded") return { ok: false, error: "not_finished", message: `The job is ${job.state}${job.error ? `: ${job.error}` : ""}.` };
+          file = firstFrameOf(job.output_path) ?? void 0;
+          if (!file) return { ok: false, error: "no_output", message: `No render found at ${job.output_path}` };
+          compName = job.comp_name;
+          jobIsSequence = /\[#+\]/.test(job.output_path);
+          if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
+        }
+        if (!file || !path19.isAbsolute(file) || !fs20.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+        const stat = fs20.statSync(file);
+        if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
+        if (args.comp_id === void 0 && !compName) return { ok: false, error: "bad_args", message: "Give comp_id to compare with." };
+        const sequence = (args.sequence ?? (jobIsSequence || looksLikeSequence(file))) && STILL.test(file);
+        const jsxPath = file.replace(/\\/g, "/");
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const call2 = (suffix, fn, a, mutates) => ctx.bridge.evalRaw({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_verify_render (${suffix})`, mutates, toolName: "ae_verify_render" });
+        try {
+          return await ctx.queue.run("ae_verify_render", async () => {
+            ctx.quarantine.assertClear();
+            const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
+            const guard = await verifyTargetGuard(ctx, expect, opId);
+            const checkpoint = await autoCheckpoint(ctx, guard, "ae_verify_render");
+            const comp = (await call2("comp", "verifyCompInfo", { comp_id: args.comp_id, comp_name: compName }, false)).result;
+            const imported = (await call2("import", "verifyImport", { path: jsxPath, sequence, fps: sequence ? comp.fps : void 0, expect, label: "Verify render: import" }, true)).result;
+            const problems = [];
+            let render = null;
+            let readErr;
+            try {
+              render = (await call2("read", "verifyRead", { item_id: imported.item_id }, false)).result;
+            } catch (err) {
+              readErr = err;
+              problems.push(readBackMismatch(opId, "reading the imported render failed", err));
+            }
+            let itemState = "kept";
+            const blocked = readErr instanceof BridgeError && (readErr.kind === "timeout" || readErr.kind === "unreachable");
+            if (!args.keep_imported && blocked) itemState = "left";
+            if (!args.keep_imported && !blocked) {
+              let removeErr;
+              try {
+                await call2("remove", "verifyRemove", { item_id: imported.item_id, expect, label: "Verify render: remove" }, true);
+              } catch (err) {
+                removeErr = err;
+              }
+              if (removeErr !== void 0) {
+                itemState = "left";
+                problems.push(readBackMismatch(opId, `removing the imported render (item ${imported.item_id}) failed`, removeErr));
+              } else {
+                try {
+                  await call2("gone", "verifyRead", { item_id: imported.item_id }, false);
+                  itemState = "left";
+                  problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
+                } catch (errG) {
+                  if (errG instanceof BridgeError && /not_found|No imported item/i.test(errG.message)) itemState = "removed";
+                  else {
+                    itemState = "unknown";
+                    problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
+                  }
+                }
+              }
+            }
+            const leftover = itemState === "removed" ? null : imported.item_id;
+            if (!render) {
+              return {
+                ok: false,
+                error: "read_failed",
+                applied: true,
+                message: `The render was imported but could not be read back. Do not run this again before checking item ${imported.item_id} (${itemState}).`,
+                problems,
+                imported_item: leftover,
+                imported_item_state: itemState,
+                project_changed: true,
+                checkpoint
+              };
+            }
+            const checks = renderChecks(render, comp, jobFrames, sequence);
+            return {
+              ok: true,
+              matches: checks.every((c) => c.ok),
+              file: { path: file, size: stat.size, modified: stat.mtime.toISOString(), sequence },
+              render,
+              comp: { comp_id: comp.comp_id, name: comp.name },
+              checks,
+              imported_item: leftover,
+              imported_item_state: itemState,
+              ...problems.length ? { problems } : {},
+              project_changed: true,
+              checkpoint
+            };
+          });
+        } catch (err) {
+          if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+          throw err;
+        }
+      }
+    }
+  ];
+}
+var fs20, path19, AeVerifyRenderSchema, STILL, verifyTools;
+var init_verify = __esm({
+  "src/tools/ext/verify.ts"() {
+    "use strict";
+    fs20 = __toESM(require("node:fs"), 1);
+    path19 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_mutate();
+    init_read_back();
+    init_aerender();
+    AeVerifyRenderSchema = external_exports.object({
+      path: external_exports.string().min(1).optional().describe("Absolute path of the render: a movie, or one frame of an image sequence."),
+      job_id: external_exports.string().min(1).optional().describe("Or an ae_aerender_start job: its output, comp and frame range."),
+      comp_id: external_exports.number().int().optional().describe("The comp it should match. Default: the job's comp."),
+      sequence: external_exports.boolean().optional().describe("Import as an image sequence. Default: yes when other frames with the same numbering sit beside it (name.0001.png, name.0002.png), or for an aerender [####] output."),
+      keep_imported: external_exports.boolean().optional().describe("Leave the imported render in the project. Default false: it is removed again."),
+      expect: ExpectSchema
+    }).refine((v) => v.path === void 0 !== (v.job_id === void 0), { message: "Give path or job_id." });
+    STILL = /\.(png|jpe?g|tiff?|exr|dpx|tga|psd|bmp|cin|hdr|webp)$/i;
+    verifyTools = createVerifyTools();
+  }
+});
+
+// src/tools/ext/scrub.ts
+function framesInRange(start, end, frameDuration) {
+  if (!(frameDuration > 0) || !(end > start)) return 0;
+  return Math.max(0, Math.floor((end - start) / frameDuration + 1e-6));
+}
+function planSamples(frames, count) {
+  if (frames < 2) return { indexes: [], pairs: [], dense: false };
+  const n = Math.max(2, Math.floor(count));
+  if (frames - 1 <= n) {
+    const indexes2 = Array.from({ length: frames }, (_, i) => i);
+    const pairs2 = [];
+    for (let i = 0; i < frames - 1; i++) pairs2.push([i, i + 1]);
+    return { indexes: indexes2, pairs: pairs2, dense: true };
+  }
+  const lastPair = frames - 2;
+  const starts = /* @__PURE__ */ new Set();
+  for (let i = 0; i < n; i++) starts.add(Math.round(i * lastPair / (n - 1)));
+  const sortedStarts = [...starts].sort((a, b) => a - b);
+  const frameSet = /* @__PURE__ */ new Set();
+  for (const k of sortedStarts) {
+    frameSet.add(k);
+    frameSet.add(k + 1);
+  }
+  const indexes = [...frameSet].sort((a, b) => a - b);
+  const pos = new Map(indexes.map((k, i) => [k, i]));
+  const pairs = sortedStarts.map((k) => [pos.get(k), pos.get(k + 1)]);
+  return { indexes, pairs, dense: false };
+}
+function sequenceGaps(names, firstName) {
+  const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(firstName);
+  if (!m) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length}})${esc(m[3])}$`, "i");
+  const have = /* @__PURE__ */ new Set();
+  for (const n of names) {
+    const hit = re.exec(n);
+    if (hit) have.add(Number(hit[1]));
+  }
+  if (have.size === 0) return null;
+  const nums = [...have];
+  const first = Math.min(...nums);
+  const last = Math.max(...nums);
+  const missing = [];
+  let truncated = false;
+  for (let i = first; i <= last; i++) {
+    if (have.has(i)) continue;
+    if (missing.length >= MAX_LIST) {
+      truncated = true;
+      break;
+    }
+    missing.push(i);
+  }
+  return { pattern: `${m[1]}${"#".repeat(m[2].length)}${m[3]}`, first, last, present: have.size, missing, truncated };
+}
+function describeRanges(nums) {
+  const parts = [];
+  let i = 0;
+  while (i < nums.length) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    parts.push(j > i ? `${nums[i]}-${nums[j]}` : String(nums[i]));
+    i = j + 1;
+  }
+  return parts.join(", ");
+}
+function measureFrame(png, index = 0) {
+  const { width: w, height: h, data } = png;
+  const analysis = analyzeDecodedFrame(png, { index, path: "" });
+  let kind = null;
+  if (analysis.is_transparent) kind = "transparent";
+  else if (analysis.is_black) kind = "black";
+  else if (analysis.is_blank) kind = "blank";
+  const bx = Math.max(2, Math.round(w * EDGE_BAND));
+  const by = Math.max(2, Math.round(h * EDGE_BAND));
+  let lumaSum = 0;
+  let clip = 0;
+  let top = 0;
+  let bottom = 0;
+  let left = 0;
+  let right = 0;
+  for (let y = 0; y < h; y++) {
+    const inTop = y < by;
+    const inBottom = y >= h - by;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      lumaSum += luma * a / 255;
+      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip++;
+      const inLeft = x < bx;
+      const inRight = x >= w - bx;
+      if (inTop || inBottom || inLeft || inRight) {
+        const content = a >= 32 && luma >= 12;
+        if (content) {
+          if (inTop) top++;
+          if (inBottom) bottom++;
+          if (inLeft) left++;
+          if (inRight) right++;
+        }
+      }
+    }
+  }
+  const total = Math.max(1, w * h);
+  const round42 = (n) => Math.round(n * 1e4) / 1e4;
+  return {
+    hash: crypto9.createHash("md5").update(data).digest("hex"),
+    kind,
+    flags: analysis.flags,
+    mean_luma: round42(lumaSum / (255 * total)),
+    clip_frac: round42(clip / total),
+    edges: {
+      top: round42(top / Math.max(1, by * w)),
+      bottom: round42(bottom / Math.max(1, by * w)),
+      left: round42(left / Math.max(1, bx * h)),
+      right: round42(right / Math.max(1, bx * h))
+    },
+    width: w,
+    height: h
+  };
+}
+function measurePairs(captured, pairs, pixelThreshold = 0.02) {
+  const lastUse = /* @__PURE__ */ new Map();
+  pairs.forEach(([a, b], i) => {
+    lastUse.set(a, i);
+    lastUse.set(b, i);
+  });
+  const pngs = /* @__PURE__ */ new Map();
+  const measures = /* @__PURE__ */ new Map();
+  const out = [];
+  const errors = [];
+  const load = (pos, cap2) => {
+    let png = pngs.get(pos);
+    if (!png) {
+      png = decodePngFile(cap2.path);
+      pngs.set(pos, png);
+    }
+    if (!measures.has(pos)) measures.set(pos, measureFrame(png, pos));
+    return { png, measure: measures.get(pos) };
+  };
+  pairs.forEach(([pa, pb], i) => {
+    const ca = captured[pa];
+    const cb = captured[pb];
+    if (ca && cb) {
+      try {
+        const a = load(pa, ca);
+        const b = load(pb, cb);
+        const cmp = compareDecodedFrames(a.png, b.png, { threshold: pixelThreshold });
+        out.push({
+          index: out.length,
+          a_pos: pa,
+          b_pos: pb,
+          a_time: ca.frame_time,
+          b_time: cb.frame_time,
+          a: a.measure,
+          b: b.measure,
+          mean_abs_diff: cmp.mean_abs_diff,
+          pct_changed: cmp.pct_pixels_changed,
+          luma_delta: Math.round((b.measure.mean_luma - a.measure.mean_luma) * 1e4) / 1e4
+        });
+      } catch (err) {
+        errors.push({ time: ca.frame_time, message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    for (const pos of [pa, pb]) {
+      if ((lastUse.get(pos) ?? -1) <= i) {
+        pngs.delete(pos);
+      }
+    }
+  });
+  return { pairs: out, errors };
+}
+function nearCut(pair, cuts, frameDuration) {
+  const eps = 1e-6;
+  return cuts.some((c) => c >= pair.a_time - frameDuration - eps && c <= pair.b_time + frameDuration + eps);
+}
+function runsOf(pairs, key) {
+  const runs = [];
+  let i = 0;
+  while (i < pairs.length) {
+    const k = key(pairs[i]);
+    if (k === null) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < pairs.length && key(pairs[j + 1]) === k) j++;
+    runs.push({ key: k, from: i, to: j });
+    i = j + 1;
+  }
+  return runs;
+}
+function analyzePairs(pairs, ctx) {
+  const out = [];
+  const th = ctx.thresholds;
+  const fd = ctx.frameDuration;
+  const n = pairs.length;
+  if (n === 0) return out;
+  const rangeLen = Math.max(fd, ctx.rangeEnd - ctx.rangeStart);
+  for (const run of runsOf(pairs, pairKind)) {
+    const first = pairs[run.from];
+    const last = pairs[run.to];
+    const atEnd = run.from === 0 || run.to === n - 1;
+    const count = run.to - run.from + 1;
+    let severity;
+    const whole = run.from === 0 && run.to === n - 1;
+    const span = last.b_time + fd - first.a_time;
+    if (run.key === "blank") severity = atEnd ? "warn" : "info";
+    else if (!atEnd) severity = "warn";
+    else if (whole) severity = "fail";
+    else if (run.from === 0 && run.key === "transparent") severity = "warn";
+    else severity = span >= th.black_min_seconds ? "fail" : "warn";
+    let where = `from ${secs(first.a_time)} to ${secs(last.b_time)}`;
+    if (whole) where = "across the whole checked range";
+    else if (run.to === n - 1) where = `from ${secs(first.a_time)} to the end of the range`;
+    else if (run.from === 0) where = `from the start of the range to ${secs(last.b_time)}`;
+    out.push({
+      kind: run.key,
+      severity,
+      time: first.a_time,
+      end_time: last.b_time + fd,
+      message: `Frames are ${KIND_TEXT[run.key]} ${where} (${count} sample point${count === 1 ? "" : "s"}).`,
+      tiles: [first.a_pos, last.b_pos]
+    });
+  }
+  const frozenHash = (p) => pairKind(p) === null && p.a.hash === p.b.hash ? p.a.hash : null;
+  for (const run of runsOf(pairs, frozenHash)) {
+    if (run.to === run.from) continue;
+    const first = pairs[run.from];
+    const last = pairs[run.to];
+    const span = last.b_time + fd - first.a_time;
+    if (span < th.frozen_min_seconds) continue;
+    const toEnd = run.to === n - 1;
+    const whole = span >= 0.9 * rangeLen;
+    let severity = "info";
+    if (toEnd || whole) severity = "warn";
+    let where = `from ${secs(first.a_time)} to ${secs(last.b_time + fd)}`;
+    if (whole) where = "across almost the whole checked range";
+    else if (toEnd) where = `from ${secs(first.a_time)} to the end of the range`;
+    out.push({
+      kind: "frozen",
+      severity,
+      time: first.a_time,
+      end_time: last.b_time + fd,
+      value: Math.round(span * 100) / 100,
+      message: `The picture does not change ${where} (${secs(span)}). A deliberate hold is fine; a render that stopped is not.`,
+      tiles: [first.a_pos, last.b_pos]
+    });
+  }
+  const eligible = pairs.filter((p) => !nearCut(p, ctx.cuts, fd));
+  const typical = median(eligible.map((p) => p.mean_abs_diff));
+  const limit = Math.max(th.pop_min_diff, th.pop_factor * Math.max(typical, 2e-3));
+  const pops = eligible.filter((p) => p.mean_abs_diff > limit);
+  pops.sort((a, b) => b.mean_abs_diff - a.mean_abs_diff);
+  for (const p of pops.slice(0, 20)) {
+    out.push({
+      kind: "pop",
+      severity: "warn",
+      time: p.a_time,
+      end_time: p.b_time,
+      value: p.mean_abs_diff,
+      message: `The picture jumps between ${secs(p.a_time)} and ${secs(p.b_time)}: ${(p.mean_abs_diff * 100).toFixed(1)}% mean change from one frame to the next, where the shot's usual is ${(typical * 100).toFixed(2)}% and no marker or layer edge is there.`,
+      tiles: [p.a_pos, p.b_pos]
+    });
+  }
+  const swings = eligible.filter((p) => Math.abs(p.luma_delta) >= th.flicker_luma);
+  if (swings.length >= 3) {
+    let changes = 0;
+    for (let i = 1; i < swings.length; i++) {
+      if (Math.sign(swings[i].luma_delta) !== Math.sign(swings[i - 1].luma_delta)) changes++;
+    }
+    if (changes >= 2 && changes >= 0.4 * (swings.length - 1)) {
+      out.push({
+        kind: "flicker",
+        severity: "warn",
+        time: swings[0].a_time,
+        end_time: swings[swings.length - 1].b_time,
+        times: swings.slice(0, 20).map((p) => p.a_time),
+        value: swings.length,
+        message: `Brightness jumps up and down from one frame to the next at ${swings.length} of ${n} sample points (first at ${secs(swings[0].a_time)}).`,
+        tiles: [swings[0].a_pos, swings[0].b_pos]
+      });
+    }
+  }
+  const frames = pairs.map((p) => ({ time: p.a_time, m: p.a }));
+  frames.push({ time: pairs[n - 1].b_time, m: pairs[n - 1].b });
+  const need = th.edge_min_pct / 100;
+  for (const edge of ["top", "bottom", "left", "right"]) {
+    const hit = frames.filter((f) => f.m.edges[edge] >= need);
+    if (hit.length > 0 && hit.length < frames.length) {
+      out.push({
+        kind: "edge_clip",
+        severity: "info",
+        time: hit[0].time,
+        times: hit.slice(0, 10).map((f) => f.time),
+        value: hit.length,
+        message: `Visible content reaches the ${edge} edge in ${hit.length} of ${frames.length} sampled frames (first at ${secs(hit[0].time)}) and not in the others: check that nothing is cut off there. A heuristic: it can't tell an element leaving the frame on purpose.`
+      });
+    }
+  }
+  const clipped = frames.filter((f) => f.m.clip_frac * 100 >= th.clip_pct);
+  if (clipped.length > 0) {
+    const worst = clipped.reduce((a, b) => b.m.clip_frac > a.m.clip_frac ? b : a);
+    out.push({
+      kind: "rgb_extremes",
+      severity: "info",
+      time: clipped[0].time,
+      times: clipped.slice(0, 10).map((f) => f.time),
+      value: worst.m.clip_frac,
+      message: `${clipped.length} of ${frames.length} sampled frames have ${th.clip_pct}% or more of their pixels at the top of the RGB range (worst ${(worst.m.clip_frac * 100).toFixed(1)}% at ${secs(worst.time)}). A heuristic for blown highlights: AE hands over full-range RGB, so the 16-235 broadcast range can't be judged from it.`
+    });
+  }
+  out.sort((a, b) => SEVERITY_ORDER2[a.severity] - SEVERITY_ORDER2[b.severity] || (a.time ?? 0) - (b.time ?? 0));
+  return out;
+}
+function sizeFindings(info, expected, isFile) {
+  const out = [];
+  if (expected && expected.length === 2 && (info.width !== expected[0] || info.height !== expected[1])) {
+    const sameAspect = Math.abs(info.width / info.height - expected[0] / expected[1]) < 5e-3;
+    if (sameAspect) {
+      out.push({
+        kind: "size",
+        severity: "fail",
+        message: `The size is ${info.width}x${info.height}, not ${expected[0]}x${expected[1]} (same aspect ratio, different scale).`
+      });
+    } else {
+      out.push({
+        kind: "aspect",
+        severity: "fail",
+        message: `The aspect is wrong: ${info.width}x${info.height} is ${(info.width / info.height).toFixed(3)}:1, not ${(expected[0] / expected[1]).toFixed(3)}:1 (${expected[0]}x${expected[1]}).`
+      });
+    }
+  }
+  if (Math.abs(info.pixelAspect - 1) > 1e-3) {
+    out.push({
+      kind: "aspect",
+      severity: isFile ? "warn" : "info",
+      message: `Pixels are not square (pixel aspect ${info.pixelAspect}), so the picture is shown ${info.width}x${info.height} stretched to ${Math.round(info.width * info.pixelAspect)} wide.`
+    });
+  }
+  return out;
+}
+function verdictOf(findings) {
+  if (findings.some((f) => f.severity === "fail")) return "fail";
+  if (findings.some((f) => f.severity === "warn")) return "warn";
+  return "pass";
+}
+function intendedCuts(info, extra, useComp, range) {
+  const all = [...extra ?? []];
+  if (info && useComp) {
+    for (const m of info.markers ?? []) all.push(m.time);
+    for (const e of info.layer_edges ?? []) all.push(e.time);
+  }
+  const inside = all.filter((t) => Number.isFinite(t) && t > range.start && t < range.end);
+  return [...new Set(inside.map((t) => Math.round(t * 1e6) / 1e6))].sort((a, b) => a - b);
+}
+function drawScrubChart(points, range, cuts, badTimes, width = 960, height = 320) {
+  const img = createCanvas(width, height, CHART_BG);
+  const left = 8;
+  const right = width - 8;
+  const top = 22;
+  const bottom = height - 22;
+  const span = Math.max(1e-6, range.end - range.start);
+  const x = (t) => Math.round(left + (Math.min(range.end, Math.max(range.start, t)) - range.start) / span * (right - left));
+  for (let g = 0; g <= 4; g++) {
+    const gy = Math.round(top + (bottom - top) * g / 4);
+    fillRect(img, left, gy, right - left, 1, CHART_GRID);
+  }
+  for (const c of cuts) fillRect(img, x(c), top, 1, bottom - top, CHART_CUT);
+  const maxDiff = Math.max(0.02, ...points.map((p) => p.diff)) * 1.1;
+  const yDiff = (v) => Math.round(bottom - Math.min(v, maxDiff) / maxDiff * (bottom - top));
+  const yLuma = (v) => Math.round(bottom - Math.min(1, Math.max(0, v)) * (bottom - top));
+  for (let i = 1; i < points.length; i++) {
+    drawLine(img, x(points[i - 1].time), yLuma(points[i - 1].luma), x(points[i].time), yLuma(points[i].luma), 1, CHART_LUMA);
+  }
+  for (let i = 1; i < points.length; i++) {
+    drawLine(img, x(points[i - 1].time), yDiff(points[i - 1].diff), x(points[i].time), yDiff(points[i].diff), 2, CHART_DIFF);
+  }
+  for (const p of points) fillRect(img, x(p.time) - 2, yDiff(p.diff) - 2, 5, 5, CHART_DIFF);
+  for (const t of badTimes) fillRect(img, x(t) - 1, top, 3, bottom - top, [CHART_BAD[0], CHART_BAD[1], CHART_BAD[2], 140]);
+  drawText(img, `DIFF MAX ${(maxDiff * 100).toFixed(1)}`, left + 2, 6, 1, CHART_DIFF);
+  const lumaLabel = "LUMA";
+  drawText(img, lumaLabel, left + 2 + textWidth("DIFF MAX 100.0", 1) + 16, 6, 1, CHART_LUMA);
+  for (const [t, anchor] of [
+    [range.start, 0],
+    [(range.start + range.end) / 2, 0.5],
+    [range.end, 1]
+  ]) {
+    const label = `${t.toFixed(2)}s`;
+    const lx = Math.round(x(t) - anchor * textWidth(label, 1));
+    drawText(img, label, Math.max(2, Math.min(width - textWidth(label, 1) - 2, lx)), height - 14, 1, CHART_DIFF);
+  }
+  return img;
+}
+function buildSuspectSheet(captured, findings, maxSuspects, frameSize) {
+  const picks = findings.filter((f) => f.tiles && f.severity !== "info").slice(0, maxSuspects);
+  const tiles = [];
+  const shown = [];
+  const layout = sheetLayout(Math.max(1, picks.length * 2), frameSize.width, frameSize.height, 320, 2, true);
+  for (const f of picks) {
+    const [pa, pb] = f.tiles;
+    const ca = captured[pa];
+    const cb = captured[pb];
+    if (!ca || !cb) continue;
+    const label = labelText(f.kind);
+    for (const [tileCap, text, flagged] of [
+      [ca, `${label} ${ca.frame_time.toFixed(2)}s`, true],
+      [cb, `${pb === pa ? "SAME" : "NEXT"} ${cb.frame_time.toFixed(2)}s`, false]
+    ]) {
+      const full = decodePngFile(tileCap.path);
+      tiles.push({ image: resizeArea(full, layout.tileWidth, layout.tileHeight), label: text, flagged });
+    }
+    shown.push({ kind: f.kind, time: f.time, paths: [ca.path, cb.path] });
+  }
+  if (tiles.length === 0) return null;
+  return { png: buildContactSheet(tiles, layout), shown };
+}
+async function runQueued3(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+async function captureFrames(ctx, opId, compId, plan2, range, framesDir) {
+  const captured = [];
+  const failures = [];
+  let aborted = false;
+  for (let pos = 0; pos < plan2.indexes.length; pos++) {
+    const k = plan2.indexes[pos];
+    const frameTime = range.start + k * range.frameDuration;
+    if (aborted) {
+      captured.push(null);
+      continue;
+    }
+    const sampleTime = Math.min(range.duration, frameTime + SAMPLE_PHASE * range.frameDuration);
+    try {
+      const snap2 = await captureCompFrame({ ctx, opId, compId, time: sampleTime, frameIndex: k, framesDir, toolName: "ae_scrub_check" });
+      captured.push({ pos, k, frame_time: frameTime, path: snap2.path });
+    } catch (err) {
+      captured.push(null);
+      failures.push({ time: frameTime, message: err instanceof Error ? err.message : String(err) });
+      if (err instanceof BridgeError && (err.kind === "timeout" || err.kind === "unreachable")) aborted = true;
+    }
+  }
+  return { captured, failures, aborted };
+}
+function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
+  const thresholds = { ...DEFAULT_THRESHOLDS, ...args.thresholds ?? {} };
+  const measured = measurePairs(cap2.captured, plan2.pairs);
+  const findings = [...extraFindings];
+  for (const f of cap2.failures) {
+    findings.push({ kind: "capture_failed", severity: "warn", time: f.time, message: `The frame at ${secs(f.time)} could not be rendered: ${f.message}` });
+  }
+  for (const e of measured.errors) {
+    findings.push({ kind: "capture_failed", severity: "warn", time: e.time, message: `The frame pair at ${secs(e.time)} could not be compared: ${e.message}` });
+  }
+  if (cap2.aborted) {
+    findings.push({
+      kind: "capture_failed",
+      severity: "warn",
+      message: "After Effects stopped answering during the check, so the later frames were not sampled. The result covers only the frames before that."
+    });
+  }
+  findings.push(
+    ...analyzePairs(measured.pairs, {
+      frameDuration: prep.frameDuration,
+      rangeStart: prep.start,
+      rangeEnd: prep.end,
+      cuts: prep.cuts,
+      thresholds
+    })
+  );
+  findings.sort((a, b) => SEVERITY_ORDER2[a.severity] - SEVERITY_ORDER2[b.severity] || (a.time ?? 0) - (b.time ?? 0));
+  const verdict = verdictOf(findings);
+  const curve = measured.pairs.map((p) => ({ time: p.a_time, diff: p.mean_abs_diff, luma: p.a.mean_luma }));
+  const bad3 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
+  fs21.mkdirSync(framesDir, { recursive: true });
+  const stamp2 = `${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
+  const frameSize = measured.pairs[0] ? { width: measured.pairs[0].a.width, height: measured.pairs[0].a.height } : { width: prep.size.width, height: prep.size.height };
+  let chart = null;
+  let sheet = null;
+  let shown = [];
+  const kept = /* @__PURE__ */ new Set();
+  const notes = [];
+  try {
+    if (curve.length > 0) {
+      const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST), bad3);
+      const chartPath = path20.join(framesDir, `scrub_chart_${stamp2}.png`);
+      fs21.writeFileSync(chartPath, encodePng(png));
+      chart = { path: chartPath, width: png.width, height: png.height };
+    }
+  } catch (err) {
+    notes.push(`The difference chart could not be drawn: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  try {
+    const built = buildSuspectSheet(cap2.captured, findings, args.max_suspects ?? 6, frameSize);
+    if (built) {
+      const sheetPath = path20.join(framesDir, `scrub_suspects_${stamp2}.png`);
+      fs21.writeFileSync(sheetPath, encodePng(built.png));
+      sheet = { path: sheetPath, width: built.png.width, height: built.png.height, suspects: built.shown.length };
+      shown = built.shown;
+      for (const s of built.shown) for (const p of s.paths) kept.add(p);
+    }
+  } catch (err) {
+    notes.push(`The contact sheet could not be built: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!args.keep_frames) {
+    for (const c of cap2.captured) {
+      if (c && !kept.has(c.path)) {
+        try {
+          fs21.unlinkSync(c.path);
+        } catch {
+        }
+      }
+    }
+  }
+  const count = (s) => findings.filter((f) => f.severity === s).length;
+  const frameCount = framesInRange(prep.start, prep.end, prep.frameDuration);
+  const spacing = plan2.pairs.length > 1 ? (prep.end - prep.start) / plan2.pairs.length : prep.end - prep.start;
+  return {
+    ok: true,
+    mode: prep.mode,
+    verdict,
+    summary: verdict === "pass" ? `No problems found in ${measured.pairs.length} sampled frame pair${measured.pairs.length === 1 ? "" : "s"}.` : `${count("fail")} failure${count("fail") === 1 ? "" : "s"}, ${count("warn")} warning${count("warn") === 1 ? "" : "s"}, ${count("info")} note${count("info") === 1 ? "" : "s"} in ${measured.pairs.length} sampled frame pair${measured.pairs.length === 1 ? "" : "s"}.`,
+    ...prep.subject,
+    range: { start: prep.start, end: prep.end, frames: frameCount, frame_duration: prep.frameDuration, fps: round22(prep.fps) },
+    coverage: {
+      sample_points: measured.pairs.length,
+      frames_rendered: cap2.captured.filter((c) => c !== null).length,
+      dense: plan2.dense,
+      spacing_seconds: plan2.dense ? prep.frameDuration : Math.round(spacing * 1e3) / 1e3,
+      note: plan2.dense ? "Every frame in the range was checked." : "Frame pairs spread over the range: a pop or freeze between sample points can be missed. Raise samples or narrow start/end to look closer."
+    },
+    cuts: { count: prep.cuts.length, ...prep.cutSources },
+    findings: findings.map(({ tiles: _tiles, ...rest }) => rest),
+    curve: curve.slice(0, MAX_LIST).map((p) => ({ time: p.time, diff: p.diff, luma: p.luma })),
+    chart,
+    contact_sheet: sheet,
+    suspect_frames: shown.map((s) => ({ kind: s.kind, time: s.time, frame: s.paths[0], next: s.paths[1] })),
+    ...notes.length ? { notes } : {}
+  };
+}
+function resolveRange(args, base) {
+  const start = Math.max(0, args.start ?? base.start);
+  const end = Math.min(base.duration, args.end ?? base.end);
+  return { start, end };
+}
+async function scrubComp(args, ctx) {
+  const compId = args.comp_id;
+  const framesDir = defaultFramesDir();
+  fs21.mkdirSync(framesDir, { recursive: true });
+  const opId = ctx.bridge.newOpId();
+  const run = await runQueued3(ctx, `ae_scrub_check(${compId})`, opId, async () => {
+    const infoResp = await ctx.bridge.evalRaw({
+      id: `${opId}_info`,
+      script: buildJsxCall("scrubInfo", { comp_id: compId }),
+      label: `ae_scrub_check(${compId}) info`,
+      mutates: false,
+      toolName: "ae_scrub_check"
+    });
+    const info2 = infoResp.result;
+    const { start: start2, end: end2 } = resolveRange(args, { start: info2.workAreaStart, end: info2.workAreaStart + info2.workAreaDuration, duration: info2.duration });
+    const frames = framesInRange(start2, end2, info2.frameDuration);
+    if (frames < 2) return { info: info2, start: start2, end: end2, plan: null, cap: null };
+    const plan3 = planSamples(frames, args.samples ?? 24);
+    const cap3 = await captureFrames(ctx, opId, compId, plan3, { start: start2, frameDuration: info2.frameDuration, duration: info2.duration }, framesDir);
+    return { info: info2, start: start2, end: end2, plan: plan3, cap: cap3 };
+  });
+  const { info, start, end, plan: plan2, cap: cap2 } = run;
+  if (!plan2 || !cap2) {
+    return { ok: false, error: "range_too_short", message: `The range ${secs(start)} to ${secs(end)} is shorter than two frames (frame length ${info.frameDuration} s). Nothing was sampled.` };
+  }
+  const useComp = args.use_markers_as_cuts !== false;
+  const cuts = intendedCuts(info, args.cut_times, useComp, { start, end });
+  const prep = {
+    mode: "comp",
+    start,
+    end,
+    frameDuration: info.frameDuration,
+    fps: info.frameRate,
+    size: { width: info.width, height: info.height, pixelAspect: info.pixelAspect },
+    cuts,
+    cutSources: { markers: useComp ? info.markers.length : 0, layer_edges: useComp ? info.layer_edges.length : 0, given: args.cut_times?.length ?? 0 },
+    subject: {
+      comp: { id: info.comp_id, name: info.name, width: info.width, height: info.height, fps: round22(info.frameRate), duration: info.duration },
+      ...info.markers_truncated || info.layer_edges_truncated ? { cuts_truncated: true } : {}
+    }
+  };
+  return finish(args, prep, plan2, cap2, sizeFindings(prep.size, args.expected_size, false), framesDir);
+}
+async function scrubFile(args, ctx) {
+  const file = args.path;
+  if (!path20.isAbsolute(file) || !fs21.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+  const stat = fs21.statSync(file);
+  if (!stat.isFile() || stat.size === 0) return { ok: false, error: "empty", message: `${file} is not a file with content.` };
+  const sequence = STILL_FILE.test(file) && (args.sequence ?? looksLikeSequence(file));
+  const jsxPath = file.replace(/\\/g, "/");
+  const extra = [];
+  let sequenceInfo = null;
+  if (sequence) {
+    try {
+      sequenceInfo = sequenceGaps(fs21.readdirSync(path20.dirname(file)), path20.basename(file));
+    } catch {
+      sequenceInfo = null;
+    }
+    if (sequenceInfo && sequenceInfo.missing.length > 0) {
+      const list = describeRanges(sequenceInfo.missing);
+      extra.push({
+        kind: "sequence_gap",
+        severity: "fail",
+        value: sequenceInfo.missing.length,
+        message: `${sequenceInfo.missing.length}${sequenceInfo.truncated ? "+" : ""} frame number${sequenceInfo.missing.length === 1 ? " is" : "s are"} missing from ${sequenceInfo.pattern} between ${sequenceInfo.first} and ${sequenceInfo.last}: ${list}.`
+      });
+    }
+  }
+  const framesDir = defaultFramesDir();
+  fs21.mkdirSync(framesDir, { recursive: true });
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const expect = { project_path: args.expect.project_path, comp_id: args.expect?.comp_id };
+  const call2 = (suffix, fn, a, mutates) => ctx.bridge.evalRaw({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_scrub_check (${suffix})`, mutates, toolName: "ae_scrub_check" });
+  const run = await runQueued3(ctx, "ae_scrub_check", opId, async () => {
+    ctx.quarantine.assertClear();
+    const guard = await verifyTargetGuard(ctx, expect, opId);
+    const checkpoint2 = await autoCheckpoint(ctx, guard, "ae_scrub_check");
+    const imported2 = (await call2("import", "scrubImport", { path: jsxPath, sequence, fps: args.fps, expect, label: "Scrub check: import" }, true)).result;
+    const problems2 = [];
+    const notesOut2 = [];
+    let timing2 = { frameDuration: imported2.frameDuration, duration: imported2.duration, frameRate: imported2.frameRate };
+    try {
+      const st = (await call2("verify", "scrubState", { item_id: imported2.item_id, comp_id: imported2.comp_id }, false)).result;
+      const itemFps = st.item?.frameRate;
+      const itemDur = st.item?.duration;
+      const compFps = st.comp?.frameRate;
+      const compDur = st.comp?.duration;
+      if (typeof itemFps === "number" && typeof itemDur === "number" && itemFps > 0 && itemDur > 0) {
+        const off = typeof compFps === "number" && Math.abs(compFps - itemFps) > 1e-6 || typeof compDur === "number" && Math.abs(compDur - itemDur) > 0.5 / itemFps;
+        const importDiffers = Math.abs(itemFps - imported2.frameRate) > 1e-6 || Math.abs(itemDur - imported2.duration) > 0.5 / itemFps;
+        if (importDiffers) timing2 = { frameRate: itemFps, frameDuration: 1 / itemFps, duration: itemDur };
+        if (off || importDiffers) {
+          notesOut2.push(
+            "The frame rate or length from the import call (" + round22(imported2.frameRate) + " fps, " + imported2.duration + " s) differs from a separate read (item " + round22(itemFps) + " fps, " + itemDur + " s; temporary comp " + (typeof compFps === "number" ? round22(compFps) : "?") + " fps, " + (compDur ?? "?") + " s). Sampled with the item's values; frames near the end may be missing or transparent."
+          );
+        }
+      }
+    } catch (err) {
+      problems2.push(readBackMismatch(opId, "reading back the imported render's frame rate and length failed", err));
+    }
+    let plan3 = null;
+    let cap3 = null;
+    let range2 = { start: 0, end: 0 };
+    try {
+      range2 = resolveRange(args, { start: 0, end: timing2.duration, duration: timing2.duration });
+      const frames = framesInRange(range2.start, range2.end, timing2.frameDuration);
+      if (frames >= 2) {
+        plan3 = planSamples(frames, args.samples ?? 24);
+        cap3 = await captureFrames(ctx, opId, imported2.comp_id, plan3, { start: range2.start, frameDuration: timing2.frameDuration, duration: timing2.duration }, framesDir);
+      }
+    } catch (err) {
+      problems2.push(readBackMismatch(opId, "sampling the imported render failed", err));
+    }
+    let state2 = "removed";
+    let keptInUse = false;
+    if (cap3?.aborted) state2 = "left";
+    if (state2 === "removed") {
+      try {
+        const rm = (await call2("remove", "scrubRemove", { item_id: imported2.item_id, comp_id: imported2.comp_id, expect, label: "Scrub check: remove" }, true)).result;
+        keptInUse = rm?.item_kept === true;
+      } catch (err) {
+        state2 = "left";
+        problems2.push(readBackMismatch(opId, `removing the temporary comp (${imported2.comp_id}) and the imported render (item ${imported2.item_id}) failed`, err));
+      }
+    }
+    if (state2 === "removed") {
+      try {
+        const left = (await call2("gone", "scrubState", { item_id: imported2.item_id, comp_id: imported2.comp_id }, false)).result;
+        if (left.comp || left.item && !keptInUse) {
+          state2 = "left";
+          problems2.push({
+            path: "cleanup",
+            expected: "removed",
+            actual: { item: left.item?.id ?? null, comp: left.comp?.id ?? null },
+            message: "The imported render or its temporary comp is still in the project after the removal."
+          });
+        } else if (keptInUse) {
+          state2 = "kept_in_use";
+          notesOut2.push("The imported render is used by another comp, so it was left in the project; only the temporary comp was removed.");
+        }
+      } catch (err) {
+        state2 = "unknown";
+        problems2.push(readBackMismatch(opId, "the check that the temporary comp and the imported render are gone failed", err));
+      }
+    }
+    return { checkpoint: checkpoint2, imported: imported2, problems: problems2, plan: plan3, cap: cap3, range: range2, state: state2, timing: timing2, notesOut: notesOut2 };
+  });
+  const { checkpoint, imported, problems, plan: plan2, cap: cap2, range, state, timing, notesOut } = run;
+  let leftover = null;
+  if (state === "kept_in_use") leftover = { item_id: imported.item_id };
+  else if (state !== "removed") leftover = { item_id: imported.item_id, comp_id: imported.comp_id };
+  const project2 = {
+    project_changed: true,
+    imported_state: state,
+    left_in_project: leftover,
+    checkpoint,
+    ...problems.length ? { problems } : {},
+    ...notesOut.length ? { notes: notesOut } : {}
+  };
+  if (!plan2 || !cap2) {
+    return {
+      ok: false,
+      error: problems.length ? "sampling_failed" : "range_too_short",
+      applied: true,
+      message: problems.length ? `The render was imported but could not be sampled (temporary items: ${state}). Do not run this again before checking the project.` : `The range ${secs(range.start)} to ${secs(range.end)} is shorter than two frames. Nothing was sampled (temporary items: ${state}).`,
+      ...extra.length ? { findings: extra } : {},
+      ...project2
+    };
+  }
+  const prep = {
+    mode: "file",
+    start: range.start,
+    end: range.end,
+    frameDuration: timing.frameDuration,
+    fps: timing.frameRate,
+    size: { width: imported.width, height: imported.height, pixelAspect: imported.pixelAspect },
+    cuts: intendedCuts(null, args.cut_times, false, range),
+    cutSources: { markers: 0, layer_edges: 0, given: args.cut_times?.length ?? 0 },
+    subject: {
+      file: { path: file, size: stat.size, modified: stat.mtime.toISOString(), sequence, width: imported.width, height: imported.height, fps: round22(timing.frameRate), duration: timing.duration },
+      ...sequenceInfo ? { sequence_check: { pattern: sequenceInfo.pattern, first: sequenceInfo.first, last: sequenceInfo.last, present: sequenceInfo.present, missing: sequenceInfo.missing, truncated: sequenceInfo.truncated } } : {}
+    }
+  };
+  const result = finish(args, prep, plan2, cap2, [...extra, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
+  return { ...result, ...project2 };
+}
+var crypto9, fs21, path20, SCRUB_MAX_SAMPLES, MAX_LIST, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs, median, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
+var init_scrub = __esm({
+  "src/tools/ext/scrub.ts"() {
+    "use strict";
+    crypto9 = __toESM(require("node:crypto"), 1);
+    fs21 = __toESM(require("node:fs"), 1);
+    path20 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_mutate();
+    init_read_back();
+    init_render();
+    init_frames();
+    init_motion();
+    init_png_utils();
+    init_verify();
+    SCRUB_MAX_SAMPLES = 60;
+    MAX_LIST = 500;
+    SAMPLE_PHASE = 0.25;
+    ScrubThresholdsSchema = external_exports.object({
+      pop_min_diff: external_exports.number().min(0).max(1).optional().describe("A frame-to-frame change (mean absolute pixel difference, 0..1) must exceed this to count as a pop. Default 0.03."),
+      pop_factor: external_exports.number().min(1).max(100).optional().describe("...and exceed this many times the shot's median frame-to-frame change. Default 6."),
+      flicker_luma: external_exports.number().min(0).max(1).optional().describe("A brightness change (mean luma, 0..1) between a frame and the next one of at least this is a swing; flicker needs several swings that alternate up and down. Default 0.04."),
+      frozen_min_seconds: external_exports.number().min(0).max(3600).optional().describe("Identical frames at every sample point for at least this long are a frozen run. Default 0.5."),
+      clip_pct: external_exports.number().min(0).max(100).optional().describe("Percent of opaque pixels with a channel at 254 or 255 above which a frame counts as clipped. Default 5."),
+      black_min_seconds: external_exports.number().min(0).max(3600).optional().describe("A black or transparent stretch at the start or end of the range fails only when it lasts at least this long (a fade from or to black is normal); a shorter one is a warning. Default 0.4."),
+      edge_min_pct: external_exports.number().min(0).max(100).optional().describe("Percent of an edge band (the outer 1.5%) holding visible content for the edge to count as touched. Default 3.")
+    }).describe("Detection thresholds. The defaults suit typical motion design; raise them if holds and fast cuts are reported.");
+    DEFAULT_THRESHOLDS = {
+      pop_min_diff: 0.03,
+      pop_factor: 6,
+      flicker_luma: 0.04,
+      frozen_min_seconds: 0.5,
+      black_min_seconds: 0.4,
+      clip_pct: 5,
+      edge_min_pct: 3
+    };
+    AeScrubCheckSchema = external_exports.object({
+      comp_id: external_exports.number().int().optional().describe("Check this comp (read-only: nothing in the project changes). Give comp_id or path."),
+      path: external_exports.string().min(1).optional().describe(
+        "Or check a finished render: the absolute path of a movie, or of one frame of an image sequence. AE imports it, a temporary comp is built to grab frames from, and both are removed again (needs `expect`)."
+      ),
+      sequence: external_exports.boolean().optional().describe("With path: import as an image sequence. Default: yes when numbered frames with the same pattern sit beside the file."),
+      fps: external_exports.number().min(1).max(999).optional().describe("With an image sequence: the frame rate to import it at. Default: AE's sequence import rate."),
+      start: external_exports.number().min(0).optional().describe("First second to check. Default: the comp's work area start, or 0 for a file."),
+      end: external_exports.number().min(0).optional().describe("End of the checked range in seconds. Default: the work area end, or the file's end."),
+      samples: external_exports.number().int().min(2).max(SCRUB_MAX_SAMPLES).optional().describe(
+        `How many frame pairs to render (2 to ${SCRUB_MAX_SAMPLES}, default 24), spread evenly and always including the first and the last pair. Every frame is a render, so heavy comps take a while. Shots short enough are checked frame by frame. Pops and freezes between sample points can be missed: raise this or narrow start/end to look closer.`
+      ),
+      cut_times: external_exports.array(external_exports.number().min(0)).max(200).optional().describe("Extra times in seconds where a hard change is intended and must not be reported as a pop."),
+      use_markers_as_cuts: external_exports.boolean().optional().describe("Comp mode: treat comp markers and the in/out points of visible layers as intended cuts. Default true."),
+      expected_size: external_exports.array(external_exports.number().int().positive()).length(2).optional().describe("[width, height] the comp or file should have; a different size or aspect fails."),
+      thresholds: ScrubThresholdsSchema.optional(),
+      max_suspects: external_exports.number().int().min(1).max(8).optional().describe("How many suspect frames (each beside its neighbour) go on the contact sheet. Default 6."),
+      keep_frames: external_exports.boolean().optional().describe("Keep every sampled frame's PNG on disk. Default false: only the suspects' frames are kept."),
+      expect: ExpectSchema.optional().describe("Required with path (the render is imported into the project); not used with comp_id.")
+    }).refine((v) => v.comp_id === void 0 !== (v.path === void 0), { message: "Give comp_id or path, not both." }).refine((v) => v.path === void 0 || v.expect !== void 0, { message: "Checking a render file imports it into the project, so it needs `expect`." }).refine((v) => v.start === void 0 || v.end === void 0 || v.end > v.start, { message: "end must be after start." });
+    EDGE_BAND = 0.015;
+    SEVERITY_ORDER2 = { fail: 0, warn: 1, info: 2 };
+    secs = (t) => `${(Math.round(t * 100) / 100).toFixed(2)} s`;
+    median = (v) => {
+      if (v.length === 0) return 0;
+      const s = [...v].sort((a, b) => a - b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    };
+    pairKind = (p) => p.a.kind ?? p.b.kind;
+    KIND_TEXT = {
+      transparent: "fully transparent",
+      black: "black",
+      blank: "a single flat colour"
+    };
+    CHART_BG = [24, 24, 24, 255];
+    CHART_GRID = [64, 64, 64, 255];
+    CHART_DIFF = [240, 240, 240, 255];
+    CHART_LUMA = [90, 160, 255, 255];
+    CHART_CUT = [230, 190, 40, 255];
+    CHART_BAD = [230, 40, 40, 255];
+    labelText = (s) => s.toUpperCase().replace(/[^A-Z0-9_ ]/g, " ");
+    round22 = (n) => Math.round(n * 100) / 100;
+    STILL_FILE = /\.(png|jpe?g|tiff?|exr|dpx|tga|psd|bmp|cin|hdr|webp)$/i;
+    scrubTools = [
+      {
+        name: "ae_scrub_check",
+        description: "Look for motion problems between frames, which single snapshots and metadata checks miss. Renders frame PAIRS (a frame and the next) spread across a comp's work area (comp_id) or a finished render (path), and checks them in Node for: black, transparent or one-colour stretches (the last frames included), frozen runs, pops (a jump far above the shot's usual change, away from markers and layer in/out points), flicker, content touching only some edges (a cut-off heuristic), clipped highlights (an 'RGB extremes' heuristic: AE gives full-range RGB, so the 16-235 broadcast range can't be judged), missing numbers in an image sequence, wrong size or aspect, and non-square pixels. Returns pass, warn or fail with times, a contact sheet of each suspect frame next to its neighbour, and the frame-difference curve as a chart PNG (look at both). Samples are pairs spread over the range, so a pop or freeze between them can be missed: raise `samples` or narrow `start`/`end` to look closer; short ranges are checked frame by frame. Every frame is a render, so heavy comps take a while. Comp mode is read-only: the comp, its time and the project are not touched. Path mode (a movie, or one frame of a numbered sequence) imports the render and builds a temporary comp to grab frames from, in one undo group guarded by `expect`, with an automatic checkpoint; both are removed again afterwards in a second one (two undo steps in all) and a separate read confirms they are gone. The project is marked changed. Not included: a silent-audio-tail check on movies (use ae_audio_analyze for a comp's sound). " + AGENT_SAFETY_GUIDANCE,
+        schema: AeScrubCheckSchema,
+        handler: (args, ctx) => args.path !== void 0 ? scrubFile(args, ctx) : scrubComp(args, ctx)
+      }
+    ];
+  }
+});
+
+// src/tools/ext/interpret.ts
+function interpretationFindings(it) {
+  const out = [];
+  if (it.error || it.kind !== "file") {
+    if (it.proxy && it.use_proxy) {
+      out.push({ code: "proxy_in_use", severity: "warn", message: `"${it.name}" has its proxy switched on${it.proxy.file ? ` (${it.proxy.file})` : ""}. Switch it off before the final render.`, fix: { tool: "ae_footage_proxy", args: { item_ids: [it.id], action: "use_off" } } });
+    }
+    return out;
+  }
+  const name = it.name ?? `#${it.id}`;
+  if (it.has_alpha && it.alpha_mode === "ignore") {
+    out.push({
+      code: "alpha_ignored",
+      severity: "warn",
+      message: `"${name}" has an alpha channel but AE is set to ignore it, so it renders as an opaque plate.`,
+      fix: { tool: "ae_set_footage_interpretation", args: { item_id: it.id, alpha: { mode: "guess" } } }
+    });
+  }
+  if (it.has_alpha && it.invert_alpha && it.alpha_mode !== "ignore") {
+    out.push({ code: "alpha_inverted", severity: "info", message: `"${name}" has its alpha inverted. Right only if the matte was exported that way.`, fix: { tool: "ae_set_footage_interpretation", args: { item_id: it.id, alpha: { invert: false } } } });
+  }
+  const native = it.native_frame_rate;
+  const conform = it.conform_frame_rate;
+  if (native !== void 0 && conform !== void 0 && conform > 0 && !near3(native, conform, 5e-4)) {
+    const rounded = ROUNDED_RATES.some(([n, c]) => near3(native, n, 0.01) && near3(conform, c, 5e-4));
+    if (rounded) {
+      out.push({
+        code: "conform_rounded",
+        severity: "warn",
+        message: `"${name}" is ${native} fps but conformed to ${conform}: it plays ${((conform / native - 1) * 100).toFixed(2)}% fast and drifts from its audio.`,
+        fix: { tool: "ae_set_footage_interpretation", args: { item_id: it.id, conform_frame_rate: 0 } }
+      });
+    } else {
+      out.push({ code: "conform_changed", severity: "info", message: `"${name}" is ${native} fps but conformed to ${conform}, which changes its length.` });
+    }
+  }
+  if (it.loop !== void 0 && it.loop > 1) {
+    out.push({ code: "loop_set", severity: "info", message: `"${name}" loops ${it.loop} times, so it is ${it.loop}x as long in comps.`, fix: { tool: "ae_set_footage_interpretation", args: { item_id: it.id, loop: 1 } } });
+  }
+  if (it.field_separation !== void 0 && it.field_separation !== "off") {
+    const tall = (it.height ?? 0) >= 2160;
+    out.push({
+      code: tall ? "fields_on_uhd" : "fields_on",
+      severity: tall ? "warn" : "info",
+      message: tall ? `"${name}" has field separation on at ${it.width}x${it.height}, which is almost never interlaced.` : `"${name}" is field-separated (${it.field_separation}). Right only for interlaced footage.`,
+      fix: tall ? { tool: "ae_set_footage_interpretation", args: { item_id: it.id, field_separation: "off" } } : void 0
+    });
+  }
+  if (it.remove_pulldown !== void 0 && it.remove_pulldown !== "off") {
+    out.push({ code: "pulldown_removed", severity: "info", message: `"${name}" has a pulldown removed (${it.remove_pulldown}); its displayed frame rate is ${it.display_frame_rate ?? "unknown"}.` });
+  }
+  if (it.pixel_aspect !== void 0 && it.pixel_aspect !== 1 && it.width && it.height && SQUARE_SIZES.has(`${it.width}x${it.height}`)) {
+    out.push({
+      code: "pixel_aspect_non_square",
+      severity: "warn",
+      message: `"${name}" is ${it.width}x${it.height} but has pixel aspect ${it.pixel_aspect}; media at this size is square-pixel.`,
+      fix: { tool: "ae_set_footage_interpretation", args: { item_id: it.id, pixel_aspect: 1 } }
+    });
+  }
+  if (it.proxy && it.use_proxy) {
+    out.push({ code: "proxy_in_use", severity: "warn", message: `"${name}" has its proxy switched on${it.proxy.file ? ` (${it.proxy.file})` : ""}. Switch it off before the final render.`, fix: { tool: "ae_footage_proxy", args: { item_ids: [it.id], action: "use_off" } } });
+  }
+  if (it.proxy?.missing) {
+    out.push({ code: "proxy_missing", severity: "warn", message: `The proxy file of "${name}" is missing${it.proxy.file ? `: ${it.proxy.file}` : ""}.` });
+  }
+  if (it.missing) {
+    out.push({ code: "footage_missing", severity: "warn", message: `"${name}" is missing its file.` });
+  }
+  return out;
+}
+function renderQueueFindings2(read) {
+  const rq = read.render_queue;
+  if (!rq) return [];
+  const out = [];
+  const anyOn = read.items.some((i) => i.use_proxy === true && i.proxy);
+  const anyCompOn = read.items.some((i) => i.kind === "comp" && i.use_proxy === true && i.proxy);
+  if (rq.items.length > 0 && !rq.key_found) {
+    out.push({ code: "proxy_use_unreadable", severity: "info", message: "This AE did not answer to the 'Proxy Use' render setting, so queued renders could not be checked for proxies." });
+    return out;
+  }
+  if (!anyOn) return out;
+  for (const q of rq.items) {
+    if (!rendersWithProxies(q.proxy_use) || q.status !== void 0 && !WILL_RENDER.has(q.status.toLowerCase())) continue;
+    if (compsOnly(q.proxy_use) && !anyCompOn) continue;
+    {
+      out.push({ code: "queue_uses_proxies", severity: "warn", message: `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}" while footage has its proxy on: it would render from proxies.` });
+    }
+  }
+  return out;
+}
+function interpretMismatches(args, beforeRaw, afterRaw) {
+  const m = [];
+  const before = itemOf(readOf3(beforeRaw), args.item_id);
+  const after = itemOf(readOf3(afterRaw), args.item_id);
+  if (!after || after.error) {
+    m.push({ path: "item", expected: args.item_id, actual: void 0, message: "The footage item is not in the read-back" });
+    return m;
+  }
+  const unread = (field) => after.unreadable?.includes(field) === true;
+  const a = args.alpha;
+  if (a && a.mode !== "guess") {
+    if (a.mode !== void 0) expectThat(m, after.alpha_mode === a.mode, "alpha_mode", a.mode, after.alpha_mode, "Alpha mode differs");
+    if (a.premul_color !== void 0) expectThat(m, sameColor(after.premul_color, a.premul_color), "premul_color", a.premul_color, after.premul_color, "Premultiply colour differs");
+    if (a.invert !== void 0) expectThat(m, after.invert_alpha === a.invert, "invert_alpha", a.invert, after.invert_alpha, "Alpha invert differs");
+  }
+  if (args.field_separation !== void 0) expectThat(m, after.field_separation === args.field_separation, "field_separation", args.field_separation, after.field_separation, "Field separation differs");
+  if (args.high_quality_field_separation !== void 0) {
+    expectThat(m, after.high_quality_field_separation === args.high_quality_field_separation, "high_quality_field_separation", args.high_quality_field_separation, after.high_quality_field_separation, "High quality field separation differs");
+  }
+  if (args.pulldown !== void 0 && !args.pulldown.startsWith("guess_")) {
+    expectThat(m, after.remove_pulldown === args.pulldown, "remove_pulldown", args.pulldown, after.remove_pulldown, "Pulldown differs");
+  }
+  if (args.conform_frame_rate !== void 0) {
+    const nativeOk = args.conform_frame_rate === 0 && after.conform_frame_rate !== void 0 && after.native_frame_rate !== void 0 && Math.abs(after.conform_frame_rate - after.native_frame_rate) <= 1e-3;
+    expectThat(m, nativeOk || after.conform_frame_rate !== void 0 && Math.abs(after.conform_frame_rate - args.conform_frame_rate) <= 1e-3, "conform_frame_rate", args.conform_frame_rate, after.conform_frame_rate, "Conform frame rate differs");
+  }
+  if (args.loop !== void 0) expectThat(m, after.loop === args.loop, "loop", args.loop, after.loop, "Loop count differs");
+  if (args.pixel_aspect !== void 0) {
+    expectThat(m, after.pixel_aspect !== void 0 && Math.abs(after.pixel_aspect - args.pixel_aspect) <= 1e-4, "pixel_aspect", args.pixel_aspect, after.pixel_aspect, "Pixel aspect differs (AE may refuse it on this footage)");
+  }
+  if (before && !before.error) {
+    if (args.loop === void 0 && !unread("loop") && before.loop !== after.loop) m.push({ path: "loop", expected: before.loop, actual: after.loop, message: "The loop count changed though it was not asked for" });
+    if (args.pixel_aspect === void 0 && !unread("pixel_aspect") && before.pixel_aspect !== after.pixel_aspect) {
+      m.push({ path: "pixel_aspect", expected: before.pixel_aspect, actual: after.pixel_aspect, message: "The pixel aspect changed though it was not asked for" });
+    }
+    if (!args.alpha && !unread("alpha_mode") && before.alpha_mode !== after.alpha_mode) m.push({ path: "alpha_mode", expected: before.alpha_mode, actual: after.alpha_mode, message: "The alpha mode changed though it was not asked for" });
+    if (!args.alpha) {
+      if (!unread("invert_alpha") && before.invert_alpha !== after.invert_alpha) m.push({ path: "invert_alpha", expected: before.invert_alpha, actual: after.invert_alpha, message: "The alpha invert changed though it was not asked for" });
+      if (!unread("premul_color") && before.premul_color !== void 0 && after.premul_color !== void 0 && !sameColor(after.premul_color, before.premul_color)) {
+        m.push({ path: "premul_color", expected: before.premul_color, actual: after.premul_color, message: "The premultiply colour changed though it was not asked for" });
+      }
+    }
+    if (args.field_separation === void 0 && args.pulldown === void 0 && args.conform_frame_rate === void 0) {
+      if (!unread("field_separation") && before.field_separation !== after.field_separation) m.push({ path: "field_separation", expected: before.field_separation, actual: after.field_separation, message: "Field separation changed though it was not asked for" });
+      if (!unread("remove_pulldown") && before.remove_pulldown !== after.remove_pulldown) m.push({ path: "remove_pulldown", expected: before.remove_pulldown, actual: after.remove_pulldown, message: "The pulldown changed though it was not asked for" });
+      if (!unread("conform_frame_rate") && before.conform_frame_rate !== void 0 && after.conform_frame_rate !== void 0 && Math.abs(before.conform_frame_rate - after.conform_frame_rate) > 1e-3) {
+        m.push({ path: "conform_frame_rate", expected: before.conform_frame_rate, actual: after.conform_frame_rate, message: "The conform frame rate changed though it was not asked for" });
+      }
+    }
+    if (before.use_proxy !== after.use_proxy) m.push({ path: "use_proxy", expected: before.use_proxy, actual: after.use_proxy, message: "useProxy changed though it was not asked for" });
+  }
+  return m;
+}
+function proxyMismatches(args, beforeRaw, afterRaw) {
+  const m = [];
+  const before = readOf3(beforeRaw);
+  const after = readOf3(afterRaw);
+  if (!after) return m;
+  for (const id of args.item_ids) {
+    const now = itemOf(after, id);
+    if (!now || now.error) {
+      m.push({ path: `items[${id}]`, expected: id, actual: void 0, message: "The item is not in the read-back" });
+      continue;
+    }
+    const was = itemOf(before, id);
+    if (args.action === "use_on") expectThat(m, now.use_proxy === true, `items[${id}].use_proxy`, true, now.use_proxy, "useProxy is not on");
+    else if (args.action === "use_off") expectThat(m, now.use_proxy === false, `items[${id}].use_proxy`, false, now.use_proxy, "useProxy is not off");
+    else if (args.action === "clear") expectThat(m, !now.proxy, `items[${id}].proxy`, null, now.proxy, "The item still has a proxy");
+    else {
+      if (args.action === "set_solid") {
+        expectThat(m, now.proxy?.kind === "solid", `items[${id}].proxy.kind`, "solid", now.proxy?.kind, "The proxy is not a solid");
+      } else {
+        expectThat(m, now.proxy?.kind === "file", `items[${id}].proxy.kind`, "file", now.proxy?.kind, "The item has no file proxy");
+        if (args.action === "set_file" && now.proxy?.file !== void 0) {
+          expectThat(m, normPath2(now.proxy.file) === normPath2(args.file), `items[${id}].proxy.file`, args.file, now.proxy.file, "The proxy is another file");
+        }
+      }
+      if (args.use_proxy !== void 0) expectThat(m, now.use_proxy === args.use_proxy, `items[${id}].use_proxy`, args.use_proxy, now.use_proxy, "useProxy differs");
+    }
+    if (was && (args.action === "use_on" || args.action === "use_off") && was.proxy && !now.proxy) {
+      m.push({ path: `items[${id}].proxy`, expected: was.proxy, actual: now.proxy, message: "The proxy was removed though it was not asked for" });
+    }
+  }
+  return m;
+}
+var readOf3, itemOf, ROUNDED_RATES, near3, SQUARE_SIZES, rendersWithProxies, compsOnly, WILL_RENDER, ALPHA_MODES, FIELD_MODES, PULLDOWN_PHASES, PULLDOWN_CHOICES, PROXY_ACTIONS, Color2, AeGetFootageInterpretationSchema, AlphaSchema, AeSetFootageInterpretationSchema, AeFootageProxySchema, sameColor, normPath2, readCall, interpretTools;
+var init_interpret = __esm({
+  "src/tools/ext/interpret.ts"() {
+    "use strict";
+    init_zod();
+    init_common();
+    init_write_runner();
+    readOf3 = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
+    itemOf = (read, id) => read?.items.find((i) => i.id === id);
+    ROUNDED_RATES = [
+      [23.976, 24],
+      [29.97, 30],
+      [59.94, 60],
+      [47.952, 48],
+      [119.88, 120]
+    ];
+    near3 = (a, b, tol) => Math.abs(a - b) <= tol;
+    SQUARE_SIZES = /* @__PURE__ */ new Set(["1920x1080", "3840x2160", "1280x720", "4096x2160", "2560x1440", "7680x4320", "1080x1920", "2160x3840", "720x1280"]);
+    rendersWithProxies = (v) => v !== void 0 && !/no proxies/i.test(v);
+    compsOnly = (v) => v !== void 0 && /comp proxies only/i.test(v);
+    WILL_RENDER = /* @__PURE__ */ new Set(["queued", "rendering", "will_continue"]);
+    ALPHA_MODES = ["ignore", "straight", "premultiplied", "guess"];
+    FIELD_MODES = ["off", "upper_field_first", "lower_field_first"];
+    PULLDOWN_PHASES = [
+      "off",
+      "wssww",
+      "sswww",
+      "swwws",
+      "wwwss",
+      "wwssw",
+      "wssww_24p_advance",
+      "sswww_24p_advance",
+      "swwws_24p_advance",
+      "wwwss_24p_advance",
+      "wwssw_24p_advance"
+    ];
+    PULLDOWN_CHOICES = [...PULLDOWN_PHASES, "guess_3_2", "guess_24p_advance"];
+    PROXY_ACTIONS = ["set_file", "set_sequence", "set_solid", "clear", "use_on", "use_off"];
+    Color2 = external_exports.array(external_exports.number().min(0).max(1)).length(3);
+    AeGetFootageInterpretationSchema = external_exports.object({
+      item_ids: external_exports.array(external_exports.number().int()).min(1).max(500).optional().describe("Project item ids to read (footage, or comps to see their proxy). Default: every footage item that comes from a file, plus comps that carry a proxy."),
+      only_findings: external_exports.boolean().optional().describe("List only the items that have findings."),
+      include_render_queue: external_exports.boolean().optional().describe("Also read each render queue item's 'Proxy Use' setting. Default true."),
+      probe_colour: external_exports.boolean().optional().describe("Probe only: list properties on the first footage source whose names look like colour-profile settings. The Scripting Guide documents none, so expect an empty list.")
+    });
+    AlphaSchema = external_exports.object({
+      mode: external_exports.enum(ALPHA_MODES).optional().describe("ignore, straight, premultiplied (with premul_color as the matte colour), or guess (AE's guessAlphaMode, which also sets the colour and invert)."),
+      premul_color: Color2.optional().describe("Matte colour [r, g, b] in 0..1 for premultiplied alpha. Needs mode premultiplied (or footage already premultiplied)."),
+      invert: external_exports.boolean().optional().describe("Invert the alpha. Has no effect while alpha is ignored.")
+    }).refine((a) => a.mode !== void 0 || a.premul_color !== void 0 || a.invert !== void 0, { message: "Give at least one of mode, premul_color or invert." }).refine((a) => a.mode !== "guess" || a.premul_color === void 0 && a.invert === void 0, { message: "mode 'guess' sets the colour and invert itself; give it alone." }).refine((a) => a.premul_color === void 0 || a.mode === void 0 || a.mode === "premultiplied", { message: "premul_color goes with mode 'premultiplied'." }).refine((a) => a.invert === void 0 || a.mode !== "ignore", { message: "invert has no effect while alpha is ignored." }).describe("Alpha interpretation. Only for footage that has an alpha channel.");
+    AeSetFootageInterpretationSchema = external_exports.object({
+      item_id: external_exports.number().int().describe("Project item id of the footage (from a file; not a solid or placeholder)."),
+      alpha: AlphaSchema.optional(),
+      field_separation: external_exports.enum(FIELD_MODES).optional().describe("Field order of interlaced footage. Not for stills."),
+      high_quality_field_separation: external_exports.boolean().optional().describe("High quality field separation. Needs field separation on."),
+      pulldown: external_exports.enum(PULLDOWN_CHOICES).optional().describe(
+        "Pulldown phase to remove ('off' removes none), or 'guess_3_2' / 'guess_24p_advance' to let AE guess (it sets the fields and frame rate itself, so run it alone). A phase needs field separation on; the tool sets the order fields, then pulldown, then conform rate."
+      ),
+      conform_frame_rate: external_exports.number().min(0).max(99).optional().describe("Conform to this frame rate; 0 = the footage's own rate (not while a pulldown is removed). 29.97 footage conformed to 30 plays fast."),
+      loop: external_exports.number().int().min(1).max(9999).optional().describe("How many times the footage loops. Not for stills."),
+      pixel_aspect: external_exports.number().min(0.01).max(100).optional().describe("Pixel aspect ratio, 1 = square."),
+      expect: ExpectSchema
+    }).refine(
+      (v) => v.alpha !== void 0 || v.field_separation !== void 0 || v.high_quality_field_separation !== void 0 || v.pulldown !== void 0 || v.conform_frame_rate !== void 0 || v.loop !== void 0 || v.pixel_aspect !== void 0,
+      { message: "Give at least one setting to change." }
+    ).refine(
+      (v) => !(v.pulldown === "guess_3_2" || v.pulldown === "guess_24p_advance") || v.field_separation === void 0 && v.high_quality_field_separation === void 0 && v.conform_frame_rate === void 0,
+      { message: "A pulldown 'guess' sets the fields and frame rate itself; run it alone, then adjust in a second call." }
+    );
+    AeFootageProxySchema = external_exports.object({
+      item_ids: external_exports.array(external_exports.number().int()).min(1).max(100).describe("Project item ids (footage or comps). Setting a proxy takes exactly one."),
+      action: external_exports.enum(PROXY_ACTIONS).describe("set_file: a file is the proxy. set_sequence: the first file of an image sequence. set_solid: a solid placeholder. clear: no proxy. use_on / use_off: switch useProxy."),
+      file: external_exports.string().min(1).max(4e3).optional().describe("Absolute path of the proxy file (set_file, set_sequence). It must exist."),
+      force_alphabetical: external_exports.boolean().optional().describe("set_sequence: import in alphabetical order. Default false: numbered order, as AE's Import dialog does."),
+      solid: external_exports.object({
+        color: Color2,
+        width: external_exports.number().int().min(1).max(3e4),
+        height: external_exports.number().int().min(1).max(3e4),
+        name: external_exports.string().min(1).max(200).optional(),
+        pixel_aspect: external_exports.number().min(0.01).max(100).optional()
+      }).optional().describe("set_solid: the solid's colour and size."),
+      use_proxy: external_exports.boolean().optional().describe("With a set_ action: also switch useProxy to this. Default: After Effects switches useProxy ON for any set_ action (SetProxy* sets it true), so the new proxy is in use at once; pass false to keep it off."),
+      expect: ExpectSchema
+    }).refine((v) => v.action === "set_file" || v.action === "set_sequence" ? v.file !== void 0 : true, { message: "set_file and set_sequence need file." }).refine((v) => v.action !== "set_solid" || v.solid !== void 0, { message: "set_solid needs solid." }).refine((v) => v.file === void 0 || v.action === "set_file" || v.action === "set_sequence", { message: "file applies to set_file and set_sequence only." }).refine((v) => v.solid === void 0 || v.action === "set_solid", { message: "solid applies to set_solid only." }).refine((v) => v.action.startsWith("set_") ? v.item_ids.length === 1 : true, { message: "A proxy is set on one item at a time." }).refine((v) => v.use_proxy === void 0 || v.action.startsWith("set_"), { message: "use_proxy goes with a set_ action; use use_on / use_off otherwise." });
+    sameColor = (a, b) => !!a && a.length >= 3 && b.every((v, i) => Math.abs(a[i] - v) <= 1e-3);
+    normPath2 = (p) => (p ?? "").replace(/\\/g, "/").toLowerCase();
+    readCall = (itemIds) => ({ host: "interpretRead", args: { item_ids: itemIds, include_render_queue: false } });
+    interpretTools = [
+      {
+        name: "ae_get_footage_interpretation",
+        description: "Audit how After Effects interprets the project's footage, without opening Interpret Footage: alpha mode (ignore, straight, premultiplied with its matte colour), alpha invert, field separation and order, pulldown, conform / native / display frame rate, loop, pixel aspect, and each item's proxy (file, solid, missing) and whether it is switched on. Each item carries `findings` for the usual causes of edge fringing and stutter: alpha ignored on a clip that has alpha, 29.97 conformed to 30 (or 23.976 to 24), a stray loop, fields on UHD, a non-square pixel aspect on HD or UHD media, and proxies left on. With the render queue read (default), it also flags queued items whose 'Proxy Use' setting would render from proxies while footage has its proxy on. Fields a still or this AE build can't read are listed in `unreadable`. Lists 500 items at most (`truncated`); solids and placeholders are counted in `skipped`. Changes nothing in After Effects. Colour profiles per footage are not scriptable (only the project's working space is); `probe_colour` lists any colour-looking property names on the first source.",
+        schema: AeGetFootageInterpretationSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "interpretRead",
+            { item_ids: args.item_ids, include_render_queue: args.include_render_queue, probe_colour: args.probe_colour },
+            { label: "ae_get_footage_interpretation", mutates: false, toolName: "ae_get_footage_interpretation" }
+          );
+          const read = res.result;
+          const rows = (read.items ?? []).map((item) => ({ ...item, findings: interpretationFindings(item) }));
+          const shown = args.only_findings ? rows.filter((r) => r.findings.length > 0) : rows;
+          const queueFindings = renderQueueFindings2(read);
+          const all = rows.flatMap((r) => r.findings).concat(queueFindings);
+          return {
+            ...read,
+            items: shown,
+            findings_total: all.length,
+            warnings: all.filter((f) => f.severity === "warn").length,
+            render_queue_findings: queueFindings
+          };
+        }
+      },
+      {
+        name: "ae_set_footage_interpretation",
+        description: "Set a footage item's interpretation without the dialog, in one undo group guarded by `expect`: alpha (ignore, straight, premultiplied with matte colour, invert, or AE's guess), field separation and high quality, pulldown removal (a phase, or AE's 3:2 / 24p advance guess), conform frame rate, loop and pixel aspect. Everything is checked before After Effects is touched: stills, items without alpha or video, missing files, ranges, and the order rules (a pulldown needs fields on, conform 0 needs the pulldown off). The writes then run in dependency order (fields, then pulldown, then conform), and if one throws the old values are put back. The read-back (a separate evalScript) checks each setting and that loop, pixel aspect, alpha, fields, pulldown, conform rate and the proxy switch you did not ask for stayed as they were (conform 0 may read back as the native rate: both are accepted); the result lists `findings` for the item afterwards. Guessing (alpha or pulldown) chooses values by looking at the footage: the receipt shows what it chose. Per-footage colour profiles are not scriptable. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeSetFootageInterpretationSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_set_footage_interpretation",
+          label: `ae_set_footage_interpretation(${args.item_id})`,
+          expect: args.expect,
+          read: () => readCall([args.item_id]),
+          write: {
+            host: "interpretApply",
+            args: {
+              item_id: args.item_id,
+              alpha: args.alpha,
+              field_separation: args.field_separation,
+              high_quality_field_separation: args.high_quality_field_separation,
+              pulldown: args.pulldown,
+              conform_frame_rate: args.conform_frame_rate,
+              loop: args.loop,
+              pixel_aspect: args.pixel_aspect,
+              label: "Interpret footage"
+            }
+          },
+          check: (before, after) => interpretMismatches(args, before, after),
+          present: (_before, after, w) => {
+            const item = itemOf(readOf3(after), args.item_id);
+            return { item_id: args.item_id, changed: w.changed, no_change: w.no_change, item, findings: item ? interpretationFindings(item) : [] };
+          }
+        })
+      },
+      {
+        name: "ae_footage_proxy",
+        description: "Set, use or clear proxies on footage or comp items, in one undo group guarded by `expect`: set_file (a file), set_sequence (an image sequence, numbered order unless force_alphabetical), set_solid (a coloured solid), clear (setProxyToNone), use_on / use_off (useProxy, for many items at once). Like After Effects itself, any set_ action switches useProxy ON (SetProxy* sets it true) unless use_proxy: false is given, so a later render may come from the proxy until you use_off. The file must exist and the item must not be missing before After Effects is touched; use_on refuses an item with no proxy. Items already in the wanted state are skipped without an undo step. The read-back (a separate evalScript) checks the proxy kind and file, and useProxy. There is no scripting call for 'Create Proxy': stage a proxy by queueing a render with ae_render_queue_add, checking the output with ae_verify_render, then set_file here. Switch proxies off and run ae_preflight before the final render. A proxy file AE can't read may raise a dialog: read it with ae_dialogs. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeFootageProxySchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_footage_proxy",
+          label: `ae_footage_proxy(${args.action}, ${args.item_ids.length} item${args.item_ids.length === 1 ? "" : "s"})`,
+          expect: args.expect,
+          read: () => readCall(args.item_ids),
+          write: {
+            host: "interpretProxy",
+            args: {
+              item_ids: args.item_ids,
+              action: args.action,
+              file: args.file,
+              force_alphabetical: args.force_alphabetical,
+              solid: args.solid,
+              use_proxy: args.use_proxy,
+              label: "Footage proxy"
+            }
+          },
+          check: (before, after) => proxyMismatches(args, before, after),
+          present: (_before, after, w) => {
+            const read = readOf3(after);
+            return {
+              action: args.action,
+              changed_ids: w.item_ids,
+              skipped_ids: w.skipped_ids,
+              no_change: w.no_change,
+              items: read?.items.map((i) => ({ id: i.id, name: i.name, use_proxy: i.use_proxy, proxy: i.proxy ?? null }))
+            };
+          }
+        })
+      }
+    ];
+  }
+});
+
+// src/tools/ext/paths.ts
+function toPathData(p) {
+  return {
+    vertices: p.vertices.map((v) => [v[0], v[1]]),
+    inTangents: p.inTangents ? p.inTangents.map((v) => [v[0], v[1]]) : p.vertices.map(zero),
+    outTangents: p.outTangents ? p.outTangents.map((v) => [v[0], v[1]]) : p.vertices.map(zero),
+    closed: p.closed !== false
+  };
+}
+function controlPoints(p, i) {
+  const n = p.vertices.length;
+  const j = (i + 1) % n;
+  const a = p.vertices[i];
+  const b = p.vertices[j];
+  return [a, [a[0] + p.outTangents[i][0], a[1] + p.outTangents[i][1]], [b[0] + p.inTangents[j][0], b[1] + p.inTangents[j][1]], b];
+}
+function bezierAt(c, t) {
+  const u = 1 - t;
+  const w0 = u * u * u;
+  const w1 = 3 * u * u * t;
+  const w2 = 3 * u * t * t;
+  const w3 = t * t * t;
+  return [w0 * c[0][0] + w1 * c[1][0] + w2 * c[2][0] + w3 * c[3][0], w0 * c[0][1] + w1 * c[1][1] + w2 * c[2][1] + w3 * c[3][1]];
+}
+function flatten(p) {
+  const points = [[p.vertices[0][0], p.vertices[0][1]]];
+  const cum = [0];
+  const segs = segmentCount(p);
+  for (let i = 0; i < segs; i++) {
+    const c = controlPoints(p, i);
+    for (let s = 1; s <= FLATTEN_STEPS; s++) {
+      const q = bezierAt(c, s / FLATTEN_STEPS);
+      const last = points[points.length - 1];
+      points.push(q);
+      cum.push(cum[cum.length - 1] + Math.hypot(q[0] - last[0], q[1] - last[1]));
+    }
+  }
+  return { points, cum, length: cum[cum.length - 1] };
+}
+function pointAtLength(f, d) {
+  if (d <= 0) return [f.points[0][0], f.points[0][1]];
+  if (d >= f.length) {
+    const last = f.points[f.points.length - 1];
+    return [last[0], last[1]];
+  }
+  let lo = 0;
+  let hi = f.cum.length - 1;
+  while (hi - lo > 1) {
+    const mid = lo + hi >> 1;
+    if (f.cum[mid] <= d) lo = mid;
+    else hi = mid;
+  }
+  const span = f.cum[hi] - f.cum[lo];
+  const u = span > 0 ? (d - f.cum[lo]) / span : 0;
+  return [f.points[lo][0] + (f.points[hi][0] - f.points[lo][0]) * u, f.points[lo][1] + (f.points[hi][1] - f.points[lo][1]) * u];
+}
+function catmullRomTangents(points, closed, tension = 1) {
+  const n = points.length;
+  const inTangents = [];
+  const outTangents = [];
+  for (let i = 0; i < n; i++) {
+    const prev = closed ? (i - 1 + n) % n : Math.max(i - 1, 0);
+    const next = closed ? (i + 1) % n : Math.min(i + 1, n - 1);
+    const divisor = prev === i || next === i ? 3 : 6;
+    const tx = (points[next][0] - points[prev][0]) * tension / divisor;
+    const ty = (points[next][1] - points[prev][1]) * tension / divisor;
+    outTangents.push([tx, ty]);
+    inTangents.push([-tx, -ty]);
+  }
+  return { inTangents, outTangents };
+}
+function resamplePath(p, opts) {
+  const f = flatten(p);
+  if (!(f.length > 1e-9)) throw new PathMathError("The path has no length to resample.");
+  let n;
+  if (opts.count !== void 0) n = opts.count;
+  else if (opts.spacing !== void 0) n = Math.round(f.length / opts.spacing) + (p.closed ? 0 : 1);
+  else throw new PathMathError("Give count or spacing.");
+  const min = p.closed ? 3 : 2;
+  n = Math.max(min, n);
+  if (n > MAX_PATH_VERTICES) throw new PathMathError(`That is ${n} vertices; a path has at most ${MAX_PATH_VERTICES}. Use a larger spacing or a smaller count.`);
+  const vertices = [];
+  for (let k = 0; k < n; k++) vertices.push(pointAtLength(f, p.closed ? k * f.length / n : k * f.length / (n - 1)));
+  if (opts.keep_curves !== false && hasCurves(p)) {
+    const t = catmullRomTangents(vertices, p.closed);
+    return { vertices, ...t, closed: p.closed };
+  }
+  return { vertices, inTangents: vertices.map(zero), outTangents: vertices.map(zero), closed: p.closed };
+}
+function smoothPath(p, opts) {
+  if (opts.method === "catmull_rom") {
+    const t = catmullRomTangents(p.vertices, p.closed, opts.tension ?? 1);
+    return { vertices: p.vertices.map((v) => [v[0], v[1]]), ...t, closed: p.closed };
+  }
+  let pts = p.vertices.map((v) => [v[0], v[1]]);
+  const rounds = opts.iterations ?? 1;
+  for (let r = 0; r < rounds; r++) {
+    const m = p.closed ? pts.length : pts.length - 1;
+    const out = [];
+    for (let i = 0; i < m; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      const q = [0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]];
+      const s = [0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]];
+      if (p.closed) {
+        out.push(q, s);
+      } else {
+        out.push(i === 0 ? [a[0], a[1]] : q, i === m - 1 ? [b[0], b[1]] : s);
+      }
+    }
+    pts = out;
+    if (pts.length > MAX_PATH_VERTICES) throw new PathMathError(`Chaikin with ${rounds} rounds gives more than ${MAX_PATH_VERTICES} vertices. Use fewer rounds.`);
+  }
+  return { vertices: pts, inTangents: pts.map(zero), outTangents: pts.map(zero), closed: p.closed };
+}
+function reversePath(p) {
+  const n = p.vertices.length;
+  const order = [];
+  if (p.closed) {
+    order.push(0);
+    for (let i = n - 1; i >= 1; i--) order.push(i);
+  } else {
+    for (let i = n - 1; i >= 0; i--) order.push(i);
+  }
+  return {
+    vertices: order.map((i) => [p.vertices[i][0], p.vertices[i][1]]),
+    // Walking backwards swaps which handle leads and which trails.
+    inTangents: order.map((i) => [p.outTangents[i][0], p.outTangents[i][1]]),
+    outTangents: order.map((i) => [p.inTangents[i][0], p.inTangents[i][1]]),
+    closed: p.closed
+  };
+}
+function mirrorPath(p, opts) {
+  const k = opts.axis === "x" ? 0 : 1;
+  let c = opts.about;
+  if (c === void 0) {
+    const f = flatten(p);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const q of f.points) {
+      lo = Math.min(lo, q[k]);
+      hi = Math.max(hi, q[k]);
+    }
+    c = (lo + hi) / 2;
+  }
+  const flip = (v) => k === 0 ? [2 * c - v[0], v[1]] : [v[0], 2 * c - v[1]];
+  const flipT = (v) => k === 0 ? [-v[0], v[1]] : [v[0], -v[1]];
+  const out = {
+    vertices: p.vertices.map(flip),
+    inTangents: p.inTangents.map(flipT),
+    outTangents: p.outTangents.map(flipT),
+    closed: p.closed
+  };
+  return opts.reverse_direction ? reversePath(out) : out;
+}
+function pathChecksum(p) {
+  let sum = 0;
+  for (const list of [p.vertices, p.inTangents, p.outTangents]) {
+    list.forEach((v, i) => {
+      sum += v[0] * (1 + i % 7) + v[1] * (2 + i % 5);
+    });
+  }
+  return Math.round(sum * 1e3) / 1e3;
+}
+function comparePoints(expected, actual, path35, m) {
+  for (let i = 0; i < expected.length; i++) {
+    const a = actual[i];
+    const e = expected[i];
+    if (!a || Math.abs(a[0] - e[0]) > PATH_TOLERANCE || Math.abs(a[1] - e[1]) > PATH_TOLERANCE) {
+      m.push({ path: `${path35}[${i}]`, expected: e, actual: a, message: `${path35} differs from what was written at vertex ${i + 1}` });
+      return;
+    }
+  }
+}
+function pathWriteMismatches(expected, afterRaw, args, written) {
+  const m = [];
+  const after = asReadout(afterRaw);
+  if (!after) return m;
+  const p = after.path;
+  expectThat(m, p.vertexCount === expected.vertices.length, "path.vertexCount", expected.vertices.length, p.vertexCount, "Vertex count differs from what was written");
+  expectThat(m, p.closed === expected.closed, "path.closed", expected.closed, p.closed, "Closed flag differs from what was written");
+  if (p.truncated) return m;
+  if (p.vertexCount === expected.vertices.length) {
+    comparePoints(expected.vertices, p.vertices, "path.vertices", m);
+    comparePoints(expected.inTangents, p.inTangents, "path.inTangents", m);
+    comparePoints(expected.outTangents, p.outTangents, "path.outTangents", m);
+  }
+  if (args.time !== void 0) {
+    expectThat(m, after.numKeys >= 1, "numKeys", ">= 1", after.numKeys, "No key was written");
+    if (written.replaced_key === true && written.ease_restored === false) {
+      m.push({ path: "key.ease", expected: "interpolation and ease kept", actual: "not restored", message: "The key was replaced and its interpolation and ease could not be put back; check it with ae_get_layer_full" });
+    }
+  }
+  expectThat(m, after.expression.enabled !== true, "expression.enabled", false, after.expression.enabled, "An expression is on the path and overrides the written value");
+  return m;
+}
+function describeWrite(args) {
+  return args.time === void 0 ? args.operation : `${args.operation}@${args.time}s`;
+}
+function applyPathOperation(args, current) {
+  switch (args.operation) {
+    case "set":
+      return toPathData(args.path);
+    case "resample":
+      return resamplePath(current, args.resample);
+    case "smooth":
+      return smoothPath(current, args.smooth);
+    case "mirror":
+      return mirrorPath(current, args.mirror);
+    case "reverse":
+      return reversePath(current);
+  }
+}
+function repeaterChild(item, field) {
+  const wanted = {
+    anchor: ["anchor", "anchor point"],
+    position: ["position"],
+    scale: ["scale"],
+    rotation: ["rotation"],
+    start_opacity: ["start opacity", "opacity 1"],
+    end_opacity: ["end opacity", "opacity 2"]
+  };
+  const list = item.transform ?? [];
+  const hit = list.find((c) => wanted[field].some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
+  return hit?.value;
+}
+function operatorMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  const added = written.added ?? [];
+  expectThat(m, after.count === before.count + added.length, "count", before.count + added.length, after.count, "Group item count is not what the edit should leave");
+  if (added.length > 0) {
+    const lastAdded = added[added.length - 1];
+    expectThat(m, lastAdded.index === after.count, "added.last.index", after.count, lastAdded.index, "The new operator is not last in the group, so it does not act on all the paths above it");
+  }
+  for (const a of added) {
+    const item = after.items.find((i) => i.index === a.index);
+    if (!item) {
+      if (after.truncated) continue;
+      m.push({ path: `items[${a.index}]`, expected: a.name, actual: void 0, message: `The new ${a.matchName} is not in the read-back` });
+      continue;
+    }
+    expectThat(m, item.matchName === a.matchName, `items[${a.index}].matchName`, a.matchName, item.matchName, "The item at this index is not the new operator");
+    if (args.name && args.operator !== "repeater") expectThat(m, item.name === args.name, `items[${a.index}].name`, args.name, item.name, "Operator name differs");
+    const at = `items[${a.index}]`;
+    if (args.operator === "trim") {
+      const t = args.trim ?? {};
+      if (t.start !== void 0) compareValues(t.start, item.start, `${at}.start`, m);
+      if (t.end !== void 0) compareValues(t.end, item.end, `${at}.end`, m);
+      if (t.offset !== void 0) compareValues(t.offset, item.offset, `${at}.offset`, m);
+      if (t.type !== void 0) compareValues(TRIM_TYPE[t.type], item.trim_type, `${at}.trim_type`, m);
+      if (t.draw_on) {
+        const d = t.draw_on;
+        const dir = d.direction ?? "forward";
+        const t1 = d.start_time + d.duration;
+        const animated = dir === "reverse" ? "start" : "end";
+        const times = item[`${animated}_key_times`] ?? [];
+        const values = item[`${animated}_key_values`] ?? [];
+        const wantValues = dir === "reverse" ? [100, 0] : dir === "center" ? [50, 100] : [0, 100];
+        expectThat(m, times.length === 2, `${at}.${animated}_key_times`, 2, times.length, "The draw-on needs two keys");
+        if (times.length === 2) {
+          expectThat(m, Math.abs(times[0] - d.start_time) <= KEY_TIME_TOLERANCE && Math.abs(times[1] - t1) <= KEY_TIME_TOLERANCE, `${at}.${animated}_key_times`, [d.start_time, t1], times, "Draw-on key times differ");
+          compareValues(wantValues, values, `${at}.${animated}_key_values`, m);
+        }
+        if (dir === "center") {
+          const sTimes = item.start_key_times ?? [];
+          const sValues = item.start_key_values ?? [];
+          expectThat(m, sTimes.length === 2, `${at}.start_key_times`, 2, sTimes.length, "The centre draw-on needs two Start keys as well");
+          compareValues([50, 0], sValues, `${at}.start_key_values`, m);
+        }
+        if (dir === "reverse") compareValues(100, item.end, `${at}.end`, m);
+        if (written.eased === false) {
+          m.push({ path: `${at}.ease`, expected: "easy ease on both keys", actual: "linear/bezier default", message: "Easy Ease could not be applied to the draw-on keys; use ae_set_keyframe_ease" });
+        }
+      }
+    } else if (args.operator === "offset") {
+      const o = args.offset ?? {};
+      if (o.amount !== void 0) compareValues(o.amount, item.amount, `${at}.amount`, m);
+      if (o.line_join !== void 0) compareValues(LINE_JOIN[o.line_join], item.line_join, `${at}.line_join`, m);
+      if (o.miter_limit !== void 0) compareValues(o.miter_limit, item.miter_limit, `${at}.miter_limit`, m);
+      if (o.copies !== void 0) compareValues(o.copies, item.copies, `${at}.copies`, m);
+      if (o.copy_offset !== void 0) compareValues(o.copy_offset, item.copy_offset, `${at}.copy_offset`, m);
+    } else {
+      const r = args.repeater ?? {};
+      const grid = r.grid;
+      const want = {};
+      if (grid && a.role === "columns") {
+        want.copies = grid.columns;
+        want.position = [grid.spacing[0], 0];
+      } else if (grid && a.role === "rows") {
+        want.copies = grid.rows;
+        want.position = [0, grid.spacing[1]];
+      } else {
+        want.copies = r.copies;
+        want.position = r.position;
+      }
+      if (!grid || a.role === "columns") {
+        want.offset = r.offset;
+        want.scale = r.scale;
+        want.rotation = r.rotation;
+        want.anchor = r.anchor;
+        want.start_opacity = r.start_opacity;
+        want.end_opacity = r.end_opacity;
+      }
+      if (r.order !== void 0) compareValues(REPEATER_ORDER[r.order], item.order, `${at}.order`, m);
+      if (want.copies !== void 0) compareValues(want.copies, item.copies, `${at}.copies`, m);
+      if (want.offset !== void 0) compareValues(want.offset, item.offset, `${at}.offset`, m);
+      for (const f of ["position", "scale", "rotation", "anchor", "start_opacity", "end_opacity"]) {
+        if (want[f] === void 0) continue;
+        const got = repeaterChild(item, f);
+        if (got === void 0) {
+          m.push({ path: `${at}.${f}`, expected: want[f], actual: void 0, message: `The Repeater's Transform group lists no ${f} in the read-back` });
+        } else {
+          compareValues(want[f], got, `${at}.${f}`, m);
+        }
+      }
+    }
+  }
+  return m;
+}
+function linkMismatches2(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const after = afterRaw;
+  const before = beforeRaw;
+  const target = after?.target;
+  if (!target) return m;
+  if (args.unlink) {
+    expectThat(m, target.expression.enabled === false, "expression.enabled", false, target.expression.enabled, "The expression is still on");
+    expectThat(m, target.expression.text === "", "expression.text", "", target.expression.text, "The expression text is still there");
+    if (written.baked === true && before?.target) {
+      expectThat(m, target.path.vertexCount === before.target.path.vertexCount, "path.vertexCount", before.target.path.vertexCount, target.path.vertexCount, "The baked path has another vertex count than the linked one");
+      if (!target.path.truncated && target.path.vertexCount === before.target.path.vertexCount) comparePoints(before.target.path.vertices, target.path.vertices, "path.vertices", m);
+    }
+    return m;
+  }
+  expectThat(m, target.expression.enabled === true, "expression.enabled", true, target.expression.enabled, "The expression is not on");
+  expectThat(m, target.expression.text === written.expression, "expression.text", written.expression, target.expression.text, "The expression text differs");
+  expectThat(m, target.expression.error === "", "expression.error", "", target.expression.error, "After Effects reports an expression error");
+  const source = after?.source;
+  if (source && target.expression.error === "" && !args.time_offset && source.numKeys === 0 && source.expression.enabled !== true) {
+    expectThat(m, target.path.vertexCount === source.path.vertexCount, "path.vertexCount", source.path.vertexCount, target.path.vertexCount, "The linked path has another vertex count than its source");
+    expectThat(m, target.path.closed === source.path.closed, "path.closed", source.path.closed, target.path.closed, "The linked path is open or closed differently from its source");
+  }
+  return m;
+}
+function connectorMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  expectThat(m, after.num_layers === before.num_layers + 1, "numLayers", before.num_layers + 1, after.num_layers, "Layer count did not grow by one");
+  const c = after.connector;
+  if (!c) {
+    m.push({ path: "connector", expected: written.layer, actual: void 0, message: "The connector layer could not be read back" });
+    return m;
+  }
+  expectThat(m, c.expression.enabled === true, "expression.enabled", true, c.expression.enabled, "The connector's path expression is not on");
+  expectThat(m, c.expression.error === "", "expression.error", "", c.expression.error, "After Effects reports an expression error on the connector");
+  expectThat(m, c.path.vertexCount === 2, "path.vertexCount", 2, c.path.vertexCount, "The connector path should have two vertices");
+  expectThat(m, c.path.closed === false, "path.closed", false, c.path.closed, "The connector path should be open");
+  const finite = c.path.vertices.every((v) => Number.isFinite(v[0]) && Number.isFinite(v[1]));
+  expectThat(m, finite, "path.vertices", "finite", c.path.vertices, "The connector path has a non-finite point (the expression failed)");
+  if (args.behind !== false && after.from && after.to) {
+    const lowest = Math.max(after.from.index, after.to.index);
+    expectThat(m, c.layer.index === lowest + 1, "layer.index", lowest + 1, c.layer.index, "The connector is not directly below the lower endpoint");
+  }
+  return m;
+}
+async function readPath(ctx, toolName, args) {
+  const res = await ctx.bridge.callHost("pathsRead", { comp_id: args.comp_id, target: args.target, time: args.time }, readOpts(toolName, `${toolName}(${args.comp_id}) read`));
+  return asReadout(res.result);
+}
+var MAX_PATH_VERTICES, FLATTEN_STEPS, PathMathError, zero, segmentCount, hasCurves, Vec2, PathDataSchema, IndexOrName, PathRefSchema, TimeField, AePathReadSchema, RESAMPLE, SMOOTH, MIRROR, WRITE_OPS, AePathWriteSchema, DRAW_ON, TRIM, OFFSET, REPEATER, AePathOperatorSchema, AePathLinkSchema, Endpoint, AePathConnectorSchema, asReadout, PATH_TOLERANCE, LINE_JOIN, TRIM_TYPE, REPEATER_ORDER, KEY_TIME_TOLERANCE, badArgs, readOpts, toData, pathsTools;
+var init_paths = __esm({
+  "src/tools/ext/paths.ts"() {
+    "use strict";
+    init_zod();
+    init_receipts();
+    init_common();
+    init_write_runner();
+    MAX_PATH_VERTICES = 500;
+    FLATTEN_STEPS = 24;
+    PathMathError = class extends Error {
+    };
+    zero = () => [0, 0];
+    segmentCount = (p) => p.closed ? p.vertices.length : p.vertices.length - 1;
+    hasCurves = (p) => p.inTangents.some((t) => t[0] !== 0 || t[1] !== 0) || p.outTangents.some((t) => t[0] !== 0 || t[1] !== 0);
+    Vec2 = external_exports.array(external_exports.number().finite()).length(2);
+    PathDataSchema = external_exports.object({
+      vertices: external_exports.array(Vec2).min(2).max(MAX_PATH_VERTICES).describe("The points [x, y]: in the layer's pixels for a mask, in the group's space for a shape path."),
+      inTangents: external_exports.array(Vec2).optional().describe("One [x, y] per vertex, relative to it, for the curve arriving there. Default straight lines."),
+      outTangents: external_exports.array(Vec2).optional().describe("One [x, y] per vertex, relative to it, for the curve leaving there. Default straight lines."),
+      closed: external_exports.boolean().optional().describe("Default true.")
+    }).superRefine((p, ctx) => {
+      const n = p.vertices.length;
+      if (p.inTangents && p.inTangents.length !== n) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "inTangents needs one entry per vertex." });
+      if (p.outTangents && p.outTangents.length !== n) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "outTangents needs one entry per vertex." });
+    }).describe("A path in AE's Shape form (the same keys ae_path_read and ae_get_layer_full return).");
+    IndexOrName = external_exports.object({
+      index: external_exports.number().int().positive().optional().describe("1-based position."),
+      name: external_exports.string().min(1).optional().describe("Name; it must be the only one.")
+    }).refine((v) => v.index !== void 0 || v.name !== void 0, { message: "Give index or name." });
+    PathRefSchema = external_exports.object({
+      layer: LayerSelectorSchema,
+      mask: IndexOrName.optional().describe("A mask on the layer (index in the layer's Masks group)."),
+      shape: external_exports.object({
+        group: IndexOrName.optional().describe("A top-level group in the shape layer's Contents (its content index, as ae_shape numbers them). Omit when the layer has one group."),
+        path: IndexOrName.optional().describe("A free path inside the group (its content index in the group). Omit when the group has one. Rectangles, ellipses and stars have no vertices.")
+      }).optional().describe("A free path ('ADBE Vector Shape - Group') in a shape layer.")
+    }).refine((v) => v.mask !== void 0 !== (v.shape !== void 0), { message: "Give exactly one of mask or shape." }).describe("One path: a mask on a layer, or a free path in a shape layer's group.");
+    TimeField = external_exports.number().finite().optional();
+    AePathReadSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      target: PathRefSchema,
+      time: TimeField.describe("Comp time in seconds for a keyframed path. Default the comp's current time (read, not changed)."),
+      include_operators: external_exports.boolean().optional().describe("Shape paths: also list the group's contents with Trim Paths, Offset Paths and Repeater values and keys.")
+    });
+    RESAMPLE = external_exports.object({
+      count: external_exports.number().int().min(2).max(MAX_PATH_VERTICES).optional().describe("Vertices to end up with."),
+      spacing: external_exports.number().positive().optional().describe("Distance between vertices; the count follows from the path's length."),
+      keep_curves: external_exports.boolean().optional().describe("Fit a smooth curve through the new vertices when the path had curves. Default true; false gives straight segments.")
+    }).refine((v) => v.count !== void 0 !== (v.spacing !== void 0), { message: "Give exactly one of count or spacing." });
+    SMOOTH = external_exports.object({
+      method: external_exports.enum(["chaikin", "catmull_rom"]).describe("chaikin cuts corners of the vertex polygon and doubles the vertex count per round (tangents are dropped); catmull_rom keeps the vertices and sets the tangents."),
+      iterations: external_exports.number().int().min(1).max(4).optional().describe("chaikin: rounds, default 1."),
+      tension: external_exports.number().min(0).max(2).optional().describe("catmull_rom: handle length, 1 is a Catmull-Rom spline, 0 straight lines. Default 1.")
+    });
+    MIRROR = external_exports.object({
+      axis: external_exports.enum(["x", "y"]).describe("x flips left to right; y flips top to bottom."),
+      about: external_exports.number().finite().optional().describe("The line to flip across, in the path's own space. Default the middle of the path's bounds."),
+      reverse_direction: external_exports.boolean().optional().describe("Also reverse the vertex order so the mirror keeps the winding. Default false: the vertex order is kept, so a Trim Paths draw-on starts at the mirrored start point.")
+    });
+    WRITE_OPS = ["set", "resample", "smooth", "mirror", "reverse"];
+    AePathWriteSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      target: PathRefSchema,
+      operation: external_exports.enum(WRITE_OPS).describe("set writes `path`; resample, smooth, mirror and reverse change the path as it is now."),
+      path: PathDataSchema.optional().describe("operation 'set': the path to write."),
+      resample: RESAMPLE.optional(),
+      smooth: SMOOTH.optional(),
+      mirror: MIRROR.optional(),
+      time: TimeField.describe(
+        "Write a key at this comp time instead of a value. Needed when the path already has keys; on a path without keys it adds the first key (add a second with another call to morph)."
+      ),
+      allow_vertex_count_change: external_exports.boolean().optional().describe("Allow a key whose vertex count differs from the path's other keys. That breaks the morph between keys, so it is off by default."),
+      allow_feather_loss: external_exports.boolean().optional().describe("Allow a vertex count change on a mask with feather points; AE can't keep them on the right segments, so they are cleared."),
+      dry_run: external_exports.boolean().optional().describe("Compute the new path and return it without writing anything (no guard, checkpoint or undo entry)."),
+      expect: ExpectSchema
+    }).superRefine((v, ctx) => {
+      const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+      need(v.operation === "set" === (v.path !== void 0), "`path` goes with operation 'set', and only with it.");
+      need(v.operation === "resample" === (v.resample !== void 0), "`resample` goes with operation 'resample', and only with it.");
+      need(v.operation === "smooth" === (v.smooth !== void 0), "`smooth` goes with operation 'smooth', and only with it.");
+      need(v.operation === "mirror" === (v.mirror !== void 0), "`mirror` goes with operation 'mirror', and only with it.");
+    });
+    DRAW_ON = external_exports.object({
+      start_time: external_exports.number().min(0).finite().describe("Comp time the draw starts, in seconds."),
+      duration: external_exports.number().positive().finite().describe("Seconds the draw takes."),
+      direction: external_exports.enum(["forward", "reverse", "center"]).optional().describe("forward grows from the path's first vertex (End 0 to 100); reverse grows back from the end (Start 100 to 0); center grows both ways from the middle. Default forward. The path's own direction decides where 'first' is (see ae_path_write reverse)."),
+      ease: external_exports.enum(["easy", "linear"]).optional().describe("easy: Easy Ease on both keys (speed 0, influence 33.3%). Default easy.")
+    });
+    TRIM = external_exports.object({
+      start: external_exports.number().min(0).max(100).optional().describe("Percent."),
+      end: external_exports.number().min(0).max(100).optional().describe("Percent."),
+      offset: external_exports.number().finite().optional().describe("Degrees."),
+      type: external_exports.enum(["simultaneously", "individually"]).optional().describe("Trim Multiple Shapes."),
+      draw_on: DRAW_ON.optional().describe("Animate the trim from nothing to the whole path. Don't combine with start or end.")
+    });
+    OFFSET = external_exports.object({
+      amount: external_exports.number().finite().optional(),
+      line_join: external_exports.enum(["miter", "round", "bevel"]).optional(),
+      miter_limit: external_exports.number().min(1).max(100).optional(),
+      copies: external_exports.number().int().min(1).max(100).optional().describe("AE 17.1.1+."),
+      copy_offset: external_exports.number().finite().optional().describe("AE 17.1.1+.")
+    });
+    REPEATER = external_exports.object({
+      copies: external_exports.number().int().min(0).max(500).optional(),
+      offset: external_exports.number().finite().optional(),
+      order: external_exports.enum(["below", "above"]).optional().describe("Whether copies stack below or above the original."),
+      position: Vec2.optional().describe("Offset between copies, [x, y]."),
+      scale: Vec2.optional().describe("Percent, [x, y]."),
+      rotation: external_exports.number().finite().optional().describe("Degrees per copy."),
+      anchor: Vec2.optional(),
+      start_opacity: external_exports.number().min(0).max(100).optional(),
+      end_opacity: external_exports.number().min(0).max(100).optional(),
+      grid: external_exports.object({
+        columns: external_exports.number().int().min(1).max(500),
+        rows: external_exports.number().int().min(1).max(500),
+        spacing: Vec2.describe("[dx, dy] between cells.")
+      }).optional().describe("Build a grid with two Repeaters (copies along X, then that row along Y). Replaces copies and position.")
+    });
+    AePathOperatorSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      layer: LayerSelectorSchema.describe("A shape layer."),
+      group: IndexOrName.describe("The top-level group to add the operator to (content index or name). Operators act on the paths above them in the group; the new one goes last."),
+      operator: external_exports.enum(["trim", "offset", "repeater"]),
+      trim: TRIM.optional(),
+      offset: OFFSET.optional(),
+      repeater: REPEATER.optional(),
+      name: external_exports.string().min(1).max(200).optional().describe("Operator name. A grid names its two Repeaters '<name> X' and '<name> Y'."),
+      expect: ExpectSchema
+    }).superRefine((v, ctx) => {
+      const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+      need(v.operator === "offset" || v.offset === void 0, "`offset` goes with operator 'offset'.");
+      need(v.operator === "repeater" || v.repeater === void 0, "`repeater` goes with operator 'repeater'.");
+      need(v.operator === "trim" || v.trim === void 0, "`trim` goes with operator 'trim'.");
+      if (v.trim?.draw_on && (v.trim.start !== void 0 || v.trim.end !== void 0)) need(false, "draw_on animates Start or End; don't also set trim.start or trim.end.");
+      if (v.repeater?.grid && (v.repeater.copies !== void 0 || v.repeater.position !== void 0)) need(false, "grid sets the copies and position itself.");
+      if (v.repeater?.grid && v.repeater.grid.columns * v.repeater.grid.rows > 1e4) need(false, "A grid of more than 10000 cells would freeze After Effects.");
+    });
+    AePathLinkSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      target: PathRefSchema.describe("The path that follows (it gets the expression)."),
+      source: PathRefSchema.optional().describe("The path to follow. Same comp."),
+      unlink: external_exports.boolean().optional().describe("Remove the target's expression instead of adding one."),
+      bake: external_exports.boolean().optional().describe("With unlink: keep the path as it looks now as a plain value (not for keyframed paths)."),
+      allow_feather_loss: external_exports.boolean().optional().describe("With bake: allow baking a mask whose feather points belong to a path with another vertex count than the linked one; the feather points are dropped."),
+      time_offset: external_exports.number().finite().optional().describe("Follow the source this many seconds late (positive) or early (negative)."),
+      expect: ExpectSchema
+    }).refine((v) => v.unlink === true === (v.source === void 0), { message: "Give `source` to link, or `unlink: true` (with no source) to remove the link." }).refine((v) => v.unlink === true || v.bake === void 0, { message: "bake goes with unlink." }).refine((v) => v.bake === true || v.allow_feather_loss === void 0, { message: "allow_feather_loss goes with bake." }).refine((v) => v.unlink !== true || v.time_offset === void 0, { message: "time_offset goes with linking." });
+    Endpoint = external_exports.object({
+      layer: LayerSelectorSchema,
+      point: Vec2.optional().describe("A point in that layer's own space. Default its anchor point.")
+    });
+    AePathConnectorSchema = external_exports.object({
+      comp_id: external_exports.number().int(),
+      from: Endpoint,
+      to: Endpoint,
+      name: external_exports.string().min(1).max(200).optional().describe("Default 'Connector <from> - <to>'."),
+      style: external_exports.enum(["straight", "curve_h", "curve_v"]).optional().describe("straight line, or an S-curve with horizontal (curve_h) or vertical (curve_v) handles. Default straight."),
+      curve: external_exports.number().min(-5).max(5).optional().describe("Handle length as a share of the distance on the curve axis. Default 0.5."),
+      color: external_exports.array(external_exports.number().min(0).max(1)).length(3).optional().describe("Stroke [r, g, b] in 0..1. Default white."),
+      width: external_exports.number().min(0).max(1e3).optional().describe("Stroke width in pixels. Default 4."),
+      behind: external_exports.boolean().optional().describe("Put the connector directly below the lower of the two layers. Default true; false leaves it on top."),
+      expect: ExpectSchema
+    });
+    asReadout = (v) => v && typeof v === "object" && v.path ? v : null;
+    PATH_TOLERANCE = 0.01;
+    LINE_JOIN = { miter: 1, round: 2, bevel: 3 };
+    TRIM_TYPE = { simultaneously: 1, individually: 2 };
+    REPEATER_ORDER = { below: 1, above: 2 };
+    KEY_TIME_TOLERANCE = 0.05;
+    badArgs = (message) => ({ ok: false, error: "bad_args", message });
+    readOpts = (toolName, label) => ({ label, mutates: false, toolName });
+    toData = (r) => ({ vertices: r.path.vertices, inTangents: r.path.inTangents, outTangents: r.path.outTangents, closed: r.path.closed });
+    pathsTools = [
+      {
+        name: "ae_path_read",
+        description: "Read one path as JSON: a mask path or a free path ('ADBE Vector Shape - Group') in a shape layer's top-level group, with vertices, inTangents, outTangents and closed (up to 500 vertices, `truncated` says if more), its keyframe times, expression state, feather-point count (masks) and path direction (shapes). include_operators also lists the group's Trim Paths, Offset Paths and Repeater values and keys. Rectangles, ellipses and stars have no vertices and are refused. Read-only: never changes the time, selection or anything else in the project. " + AGENT_SAFETY_GUIDANCE,
+        schema: AePathReadSchema,
+        handler: async (args, ctx) => {
+          const path35 = await readPath(ctx, "ae_path_read", args);
+          if (!args.include_operators || !args.target.shape || !path35) return path35;
+          const ops = await ctx.bridge.callHost(
+            "pathsOperators",
+            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path35.group?.index } },
+            readOpts("ae_path_read", `ae_path_read(${args.comp_id}) operators`)
+          );
+          return { ...path35, operators: ops.result };
+        }
+      },
+      {
+        name: "ae_path_write",
+        description: "Write a path back into a mask or a free shape path (a Shape round trip), as a value or, with `time`, as a key. operation 'set' writes the given vertices and tangents; 'resample' (even arc-length spacing, by count or spacing), 'smooth' (chaikin or catmull_rom), 'mirror' (across x or y) and 'reverse' compute the new path here from the path as it is now. dry_run returns the computed path without writing. Refused before anything is written when: the path is keyframed and no `time` is given; an expression is on the path; a key would get another vertex count than the path's other keys (allow_vertex_count_change); a mask with feather points would change vertex count (allow_feather_loss); the path changed since it was read. Replacing an existing key keeps its interpolation and ease where AE allows (the result says if it was restored). In one undo group guarded by `expect`; the read-back (a separate evalScript) checks vertex count, closed flag, every vertex and tangent. " + AGENT_SAFETY_GUIDANCE,
+        schema: AePathWriteSchema,
+        handler: async (args, ctx) => {
+          let current = null;
+          let path35;
+          try {
+            if (args.operation === "set") {
+              path35 = toPathData(args.path);
+            } else {
+              current = await readPath(ctx, "ae_path_write", args);
+              if (!current) return badArgs("The path could not be read.");
+              if (current.path.truncated) return badArgs(`The path has ${current.path.vertexCount} vertices; only paths of up to ${MAX_PATH_VERTICES} can be changed here.`);
+              if (current.numKeys > 0 && args.time === void 0) return badArgs(`The path is keyframed (${current.numKeys} keys); give \`time\` to write a key at that time.`);
+              if (current.expression.enabled) return badArgs("The path has an expression, which overrides any value written here; remove it first (ae_path_link with unlink).");
+              path35 = applyPathOperation(args, toData(current));
+            }
+          } catch (err) {
+            if (err instanceof PathMathError) return badArgs(err.message);
+            throw err;
+          }
+          if (args.dry_run) {
+            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path35.vertices.length, path: path35, source: current?.path };
+          }
+          const base = current && { count: current.path.vertexCount, checksum: pathChecksum(current.path) };
+          return runGuardedWrite(ctx, {
+            toolName: "ae_path_write",
+            label: `ae_path_write(${describeWrite(args)})`,
+            expect: args.expect,
+            compId: args.comp_id,
+            read: () => ({ host: "pathsRead", args: { comp_id: args.comp_id, target: args.target, time: args.time } }),
+            write: {
+              host: "pathsApply",
+              args: {
+                comp_id: args.comp_id,
+                target: args.target,
+                path: path35,
+                time: args.time,
+                base,
+                allow_vertex_count_change: args.allow_vertex_count_change,
+                allow_feather_loss: args.allow_feather_loss,
+                operation: args.operation,
+                label: `Path ${args.operation}`
+              }
+            },
+            check: (_before, after, w) => pathWriteMismatches(path35, after, args, w),
+            present: (_before, after, w) => ({ ...w, path: asReadout(after)?.path, numKeys: asReadout(after)?.numKeys })
+          });
+        }
+      },
+      {
+        name: "ae_path_operator",
+        description: "Add a path operator to a top-level group of a shape layer: Trim Paths (static start/end/offset, or a draw-on preset that keys Start or End with Easy Ease), Offset Paths (amount, line join, miter limit; copies need AE 17.1.1+), or a Repeater (copies, offset, order, transform; `grid` builds a columns x rows grid from two Repeaters). The operator goes last in the group so it acts on the paths above it. Nothing is half-added: a step AE rejects takes the operator back out in the same undo group. In one undo group guarded by `expect`; the read-back (a separate evalScript) lists the group and checks each new operator's values and keys. The Repeater Transform children have no documented match names; the result lists what the group really holds (`transform_children`). " + AGENT_SAFETY_GUIDANCE,
+        schema: AePathOperatorSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_path_operator",
+          label: `ae_path_operator(${args.operator})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: () => ({ host: "pathsOperators", args: { comp_id: args.comp_id, layer: args.layer, group: args.group } }),
+          write: {
+            host: "pathsOperator",
+            args: { comp_id: args.comp_id, layer: args.layer, group: args.group, operator: args.operator, trim: args.trim, offset: args.offset, repeater: args.repeater, name: args.name, label: `Add ${args.operator}` }
+          },
+          check: (before, after, w) => operatorMismatches(args, before, after, w),
+          present: (_before, after, w) => ({ ...w, contents: after?.items })
+        })
+      },
+      {
+        name: "ae_path_link",
+        description: "Link a path to another path in the same comp by expression (the target follows the source, optionally late by `time_offset`), or remove that expression with unlink (bake keeps the current shape as a value). Works between masks and free shape paths in any mix. Layers, groups, paths and masks are found by name in the expression, so duplicated names are refused. In one undo group guarded by `expect`; the read-back (a separate evalScript) checks the expression is on and error-free and the vertex counts agree. " + AGENT_SAFETY_GUIDANCE,
+        schema: AePathLinkSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_path_link",
+          label: `ae_path_link(${args.unlink ? "unlink" : "link"})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: () => ({ host: "pathsLinkState", args: { comp_id: args.comp_id, target: args.target, source: args.source } }),
+          write: {
+            host: "pathsLink",
+            args: { comp_id: args.comp_id, target: args.target, source: args.source, unlink: args.unlink, bake: args.bake, allow_feather_loss: args.allow_feather_loss, time_offset: args.time_offset, label: args.unlink ? "Unlink path" : "Link path" }
+          },
+          check: (before, after, w) => linkMismatches2(args, before, after, w),
+          present: (_before, after, w) => ({ ...w, path: after?.target?.path })
+        })
+      },
+      {
+        name: "ae_path_connector",
+        description: "Draw a connector line between two layers: a new shape layer with a stroked two-point path whose points follow both layers by expression (each layer's anchor point or a given point, through toComp and fromComp, so parents and 3D layers are followed in 2D). straight, or an S-curve with horizontal or vertical handles. Both layers need unique names (the expression finds them by name) and must not be cameras or lights. The connector goes directly below the lower endpoint unless behind is false. In one undo group guarded by `expect`; a failed step removes the new layer again. The read-back (a separate evalScript) checks the layer count, the expression is on and error-free, the path has two points and the layer's place. " + AGENT_SAFETY_GUIDANCE,
+        schema: AePathConnectorSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_path_connector",
+          label: "ae_path_connector",
+          expect: args.expect,
+          compId: args.comp_id,
+          read: (phase, w) => {
+            if (phase === "before") return { host: "pathsConnectorState", args: { comp_id: args.comp_id } };
+            const id = (x) => x?.id;
+            return { host: "pathsConnectorState", args: { comp_id: args.comp_id, layer_id: id(w?.layer), from_id: id(w?.from), to_id: id(w?.to) } };
+          },
+          write: {
+            host: "pathsConnector",
+            args: { comp_id: args.comp_id, from: args.from, to: args.to, name: args.name, style: args.style, curve: args.curve, color: args.color, width: args.width, behind: args.behind, label: "Create connector" }
+          },
+          check: (before, after, w) => connectorMismatches(args, before, after, w),
+          present: (_before, after, w) => ({ ...w, path: after?.connector?.path })
+        })
+      }
+    ];
+  }
+});
+
+// src/tools/ext/memory.ts
+function readServerMemory() {
+  const u = process.memoryUsage();
+  return {
+    panel_rss_bytes: u.rss,
+    panel_heap_used_bytes: u.heapUsed,
+    system_free_bytes: os3.freemem(),
+    system_total_bytes: os3.totalmem()
+  };
+}
+function preflightWarnings(input) {
+  const warnings = [];
+  const minFree = input.minFreeMb ?? DEFAULT_MIN_FREE_MB;
+  const freeMb = input.freeBytes / MB;
+  if (freeMb < minFree) {
+    warnings.push(`The system has ${Math.round(freeMb)} MB of free RAM, below ${minFree} MB. Close other apps or purge before a heavy batch or render.`);
+  }
+  if (input.warnAboveMb !== void 0) {
+    if (input.aeBytes === null) {
+      warnings.push("After Effects gave no app.memoryInUse reading, so warn_above_mb could not be checked.");
+    } else if (input.aeBytes / MB > input.warnAboveMb) {
+      warnings.push(
+        `After Effects uses ${Math.round(input.aeBytes / MB)} MB, above ${input.warnAboveMb} MB. ae_memory_purge with target image or ram frees RAM caches (it also drops the RAM preview).`
+      );
+    }
+  }
+  return { ready: warnings.length === 0, warnings };
+}
+function purgeMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = readOf4(beforeRaw);
+  const after = readOf4(afterRaw);
+  if (before && after) {
+    expectThat(m, after.project_path === before.project_path, "project_path", before.project_path, after.project_path, "A different project is open after the purge");
+    if (before.dirty === false) expectThat(m, after.dirty === false, "dirty", false, after.dirty, "The purge left the project with unsaved changes");
+  }
+  expectThat(m, written.target === args.target, "target", args.target, written.target, "The host purged another target");
+  if (args.only_above_mb === void 0) expectThat(m, written.purged === true, "purged", true, written.purged, "The host did not purge");
+  return m;
+}
+var os3, MB, readOf4, PURGE_TARGETS, PREF_FILES, PrefRequestSchema, AeMemoryStatusSchema, AeMemoryPurgeSchema, DEFAULT_MIN_FREE_MB, memoryTools;
+var init_memory = __esm({
+  "src/tools/ext/memory.ts"() {
+    "use strict";
+    os3 = __toESM(require("node:os"), 1);
+    init_zod();
+    init_common();
+    init_write_runner();
+    MB = 1048576;
+    readOf4 = (v) => v && typeof v === "object" ? v : null;
+    PURGE_TARGETS = ["image", "snapshot", "ram", "undo", "all"];
+    PREF_FILES = [
+      "machine_specific",
+      "machine_independent",
+      "machine_independent_render",
+      "machine_independent_output",
+      "machine_independent_composition",
+      "machine_specific_text",
+      "machine_specific_paint"
+    ];
+    PrefRequestSchema = external_exports.object({
+      section: external_exports.string().min(1).max(200).describe("Preference section, as in AE's Prefs file."),
+      key: external_exports.string().min(1).max(200),
+      type: external_exports.enum(["long", "string", "bool", "float"]).optional().describe("How to read it. Default long."),
+      pref_file: external_exports.enum(PREF_FILES).optional().describe("Which preference file (PREFType) the key lives in. Default machine_specific; the Memory & Cache keys' file is unmeasured, so try another when exists is false.")
+    });
+    AeMemoryStatusSchema = external_exports.object({
+      prefs: external_exports.array(PrefRequestSchema).max(20).optional().describe(
+        "Preference keys to read (app.preferences, read-only). AE documents no key names for Memory & Cache or the disk cache, so the caller names them; a key AE does not have comes back with exists: false."
+      ),
+      warn_above_mb: external_exports.number().positive().optional().describe("Pre-flight: warn when app.memoryInUse is above this many megabytes."),
+      min_free_mb: external_exports.number().min(0).max(1e6).optional().describe("Pre-flight: warn when the system's free RAM is below this many megabytes. Default 1024.")
+    });
+    AeMemoryPurgeSchema = external_exports.object({
+      target: external_exports.enum(PURGE_TARGETS).describe(
+        "image: the image cache. snapshot: the snapshot cache. ram: every RAM cache (PurgeTarget.ALL_MEMORY_CACHES, AE 24.3+), disk cache kept. undo: the Edit > Undo history, which cannot be brought back. all: PurgeTarget.ALL_CACHES, RAM and the disk cache. ram and all may also clear the undo history (unmeasured); the result then says undo_history_may_be_cleared."
+      ),
+      only_above_mb: external_exports.number().min(0).optional().describe("Purge only when app.memoryInUse is above this many megabytes; otherwise do nothing (purged: false). For a watchdog between the chunks of a long job."),
+      confirm_undo_purge: external_exports.boolean().optional().describe("Required true for target undo. Set it only after the user said yes (ask with ae_ask_user); the project must be saved first (ae_save)."),
+      confirm_disk_cache_wipe: external_exports.boolean().optional().describe("Required true for target all. Set it only after the user said yes; the disk cache can take hours to rebuild. Use ram to keep it."),
+      expect: ExpectSchema
+    }).refine((v) => v.target !== "undo" || v.confirm_undo_purge === true, {
+      message: "Purging undo needs confirm_undo_purge: true, after the user said yes (it removes the whole undo history)."
+    }).refine((v) => v.target !== "all" || v.confirm_disk_cache_wipe === true, {
+      message: "Purging all caches needs confirm_disk_cache_wipe: true, after the user said yes (it also wipes the disk cache)."
+    });
+    DEFAULT_MIN_FREE_MB = 1024;
+    memoryTools = [
+      {
+        name: "ae_memory_status",
+        description: "Memory report: After Effects' app.memoryInUse, the panel's Node memory (not AE's), the system's free and total RAM, which purge targets this AE supports, and any preference keys you name (Memory & Cache keys are undocumented; a missing key reads exists: false). Give warn_above_mb and/or min_free_mb for a pre-flight check before a heavy batch or render: `preflight.ready` is false with the reasons in `warnings`. Read-only: changes nothing in AE. app.memoryInUse's relation to Task Manager is unmeasured, so treat it as a trend.",
+        schema: AeMemoryStatusSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost("memoryRead", { prefs: args.prefs }, {
+            label: "ae_memory_status",
+            mutates: false,
+            toolName: "ae_memory_status"
+          });
+          const ae = res.result;
+          const server = readServerMemory();
+          const preflight = preflightWarnings({
+            aeBytes: ae?.memory_in_use_bytes ?? null,
+            freeBytes: server.system_free_bytes,
+            warnAboveMb: args.warn_above_mb,
+            minFreeMb: args.min_free_mb
+          });
+          return { ae, server, preflight };
+        }
+      },
+      {
+        name: "ae_memory_purge",
+        description: "Purge After Effects caches with app.purge, in a guarded write with memory read before and after (separate evalScripts). target image / snapshot free RAM caches only; ram = every memory cache (AE 24.3+; the disk cache stays). image and ram also drop the user's RAM preview. ram and all MAY also clear the Edit > Undo history (not yet measured): the result reports undo_history_cleared: null and undo_history_may_be_cleared: true, so tell the user Ctrl+Z may be gone, and save first when undo matters. target undo removes the whole Edit > Undo history: it needs a saved project (ae_save), confirm_undo_purge: true, and the user's yes through ae_ask_user first; afterwards Ctrl+Z cannot undo earlier steps, so tell the user. This tool takes no checkpoint (the saved .aep is the current state; only checkpoints taken earlier, see ae_checkpoint list, hold earlier states). target all also wipes the disk cache (hours to rebuild): confirm_disk_cache_wipe: true after the user's yes. only_above_mb makes it a watchdog: nothing is purged unless memory is above that. The receipt reports memory before and after; memory not dropping is not an error. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeMemoryPurgeSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_memory_purge",
+          label: `ae_memory_purge(${args.target})`,
+          expect: args.expect,
+          read: () => ({ host: "memoryRead", args: {} }),
+          write: {
+            host: "memoryPurge",
+            args: {
+              target: args.target,
+              only_above_mb: args.only_above_mb,
+              confirm_undo_purge: args.confirm_undo_purge,
+              confirm_disk_cache_wipe: args.confirm_disk_cache_wipe
+            }
+          },
+          check: (before, after, w) => purgeMismatches(args, before, after, w),
+          present: (beforeRaw, afterRaw, w) => {
+            const before = readOf4(beforeRaw);
+            const after = readOf4(afterRaw);
+            const b = before?.memory_in_use_bytes ?? null;
+            const a = after?.memory_in_use_bytes ?? null;
+            const warnings = [];
+            if (w.undo_history_cleared === true) {
+              warnings.push(
+                "The undo history is gone: Ctrl+Z cannot undo anything done before this purge. The saved .aep is the current state; only checkpoints taken earlier (ae_checkpoint list) hold earlier states."
+              );
+            } else if (w.purged === true && w.undo_history_may_be_cleared === true) {
+              warnings.push("This purge target may also have cleared the Edit > Undo history (not yet measured). Do not assume Ctrl+Z still works for earlier steps.");
+            }
+            if (w.disk_cache_cleared === true) warnings.push("The disk cache was wiped; previews will re-render.");
+            if (w.purged === true && (w.target === "image" || w.target === "ram" || w.target === "all")) warnings.push("The RAM preview was dropped with the caches.");
+            return {
+              target: w.target,
+              purge_constant: w.purge_constant,
+              purged: w.purged,
+              skipped_reason: w.skipped_reason,
+              undo_history_cleared: w.undo_history_cleared,
+              undo_history_may_be_cleared: w.undo_history_may_be_cleared ?? false,
+              disk_cache_cleared: w.disk_cache_cleared,
+              memory_in_use_bytes: { before: b, after: a, freed: b !== null && a !== null ? b - a : null },
+              warnings
+            };
+          }
+        })
+      }
+    ];
+  }
+});
+
+// src/tools/ext/animate.ts
+function rovingMismatches(roving, afterSnapshot) {
+  const want = Array.isArray(roving) ? roving : [];
+  const keys = afterSnapshot?.keyframes ?? [];
+  return want.filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true).map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+}
+function clampInfluenceValue(influence) {
+  if (influence < 0.1) return 0.1;
+  if (influence > 100) return 100;
+  return influence;
+}
+function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot, skipKeys) {
+  if (!afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
+    return null;
+  }
+  const afterObj = afterSnapshot;
+  if (!Array.isArray(afterObj.keyframes)) {
+    return null;
+  }
+  const rawKeys = afterObj.keyframes;
+  const keySet = requestedKeys && requestedKeys.length > 0 ? new Set(requestedKeys) : null;
+  const skip = new Set(Array.isArray(skipKeys) ? skipKeys : []);
+  const targeted = (keySet ? rawKeys.filter(
+    (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
+  ) : rawKeys).filter((kf) => !(typeof kf.keyIndex === "number" && skip.has(kf.keyIndex)));
+  if (targeted.length === 0) {
+    return null;
+  }
+  if (ease === "hold" || ease === "linear") {
+    const expectedInterp = ease;
+    return {
+      expected: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: expectedInterp,
+          outInterp: expectedInterp
+        }))
+      },
+      actual: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: kf.inInterp,
+          outInterp: kf.outInterp
+        }))
+      }
+    };
+  }
+  const targetIn = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.in.speed,
+    influence: clampInfluenceValue(ease.in.influence)
+  };
+  const targetOut = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.out.speed,
+    influence: clampInfluenceValue(ease.out.influence)
+  };
+  return {
+    expected: {
+      keyframes: targeted.map((kf) => {
+        const dims = Array.isArray(kf.easeIn) && kf.easeIn.length > 0 ? kf.easeIn.length : 1;
+        return {
+          keyIndex: kf.keyIndex,
+          inInterp: "bezier",
+          outInterp: "bezier",
+          easeIn: Array.from({ length: dims }, () => ({ ...targetIn })),
+          easeOut: Array.from({ length: dims }, () => ({ ...targetOut }))
+        };
+      })
+    },
+    actual: {
+      keyframes: targeted.map((kf) => ({
+        keyIndex: kf.keyIndex,
+        inInterp: kf.inInterp,
+        outInterp: kf.outInterp,
+        easeIn: kf.easeIn,
+        easeOut: kf.easeOut
+      }))
+    }
+  };
+}
+function isCurveEase(ease) {
+  return typeof ease === "object" && ease !== null && "curve" in ease;
+}
+function asVector(v) {
+  if (typeof v === "number") return [v];
+  if (Array.isArray(v) && v.every((n) => typeof n === "number")) return v;
+  return null;
+}
+function pathLength(from, outTangent, inTangent, to) {
+  const dims = Math.min(from.length, to.length);
+  const p1 = from.slice(0, dims).map((v, d) => v + (outTangent?.[d] ?? 0));
+  const p2 = to.slice(0, dims).map((v, d) => v + (inTangent?.[d] ?? 0));
+  const steps = 200;
+  let length = 0;
+  let prev = from.slice(0, dims);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const point = from.slice(0, dims).map(
+      (v, d) => u * u * u * v + 3 * u * u * t * p1[d] + 3 * u * t * t * p2[d] + t * t * t * to[d]
+    );
+    length += Math.hypot(...point.map((v, d) => v - prev[d]));
+    prev = point;
+  }
+  return length;
+}
+function curveToSides(snapshot, keys, curve) {
+  const snap2 = snapshot;
+  if (!snap2 || !Array.isArray(snap2.keyframes)) {
+    throw new Error("Could not read the property's keyframes");
+  }
+  const byIndex = new Map(snap2.keyframes.map((k) => [k.keyIndex, k]));
+  const selected = (keys && keys.length > 0 ? [...new Set(keys)] : snap2.keyframes.map((k) => k.keyIndex)).sort(
+    (a, b) => a - b
+  );
+  const segments = [];
+  for (let i = 0; i + 1 < selected.length; i++) {
+    if (selected[i + 1] === selected[i] + 1) segments.push([selected[i], selected[i + 1]]);
+  }
+  if (segments.length === 0) {
+    throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
+  }
+  const x1 = Math.min(1, Math.max(MIN_HANDLE2, curve[0]));
+  const x2 = Math.min(1 - MIN_HANDLE2, Math.max(0, curve[2]));
+  const y1 = curve[1];
+  const y2 = curve[3];
+  const warnings = [];
+  const sides = /* @__PURE__ */ new Map();
+  const sideFor = (key) => {
+    let s = sides.get(key);
+    if (!s) {
+      s = { key };
+      sides.set(key, s);
+    }
+    return s;
+  };
+  for (const [ai, bi] of segments) {
+    const a = byIndex.get(ai);
+    const b = byIndex.get(bi);
+    if (!a || !b) {
+      throw new Error(`Keyframe ${a ? bi : ai} was not read (the property has too many keys)`);
+    }
+    const duration = b.time - a.time;
+    if (!(duration > 0)) throw new Error(`Keys ${ai} and ${bi} share a time`);
+    const from = asVector(a.value);
+    const to = asVector(b.value);
+    if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
+    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
+    let distances;
+    if (snap2.isSpatial) {
+      distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
+    } else if (dims === 1) {
+      distances = [to[0] - from[0]];
+    } else {
+      distances = Array.from({ length: dims }, (_, d) => (to[d] ?? 0) - (from[d] ?? 0));
+    }
+    const speeds = (factor) => distances.map((dist) => {
+      const speed = factor * dist / duration;
+      if (snap2.isSpatial && speed < 0) {
+        warnings.push(`Keys ${ai}-${bi}: a spatial speed can't go negative, so the anticipation was dropped.`);
+        return 0;
+      }
+      return speed === 0 ? 0 : speed;
+    });
+    const outSpeeds = speeds(y1 / x1);
+    const inSpeeds = speeds((1 - y2) / (1 - x2));
+    sideFor(ai).out = outSpeeds.map((speed) => ({ speed, influence: x1 * 100 }));
+    sideFor(bi).in = inSpeeds.map((speed) => ({ speed, influence: (1 - x2) * 100 }));
+  }
+  return {
+    sides: [...sides.values()].sort((p, q) => p.key - q.key),
+    segments,
+    warnings: [...new Set(warnings)]
+  };
+}
+function easeMatches(expected, actual) {
+  if (!actual) return false;
+  const speedTol = Math.max(1e-3, Math.abs(expected.speed) * 1e-3);
+  return Math.abs(expected.speed - actual.speed) <= speedTol && Math.abs(clampInfluenceValue(expected.influence) - actual.influence) <= 0.01;
+}
+function curveEaseMismatches(sides, afterSnapshot) {
+  const snap2 = afterSnapshot;
+  const mismatches = [];
+  const byIndex = new Map((snap2?.keyframes ?? []).map((k) => [k.keyIndex, k]));
+  for (const side of sides) {
+    const kf = byIndex.get(side.key);
+    for (const which of ["in", "out"]) {
+      const expected = side[which];
+      if (!expected) continue;
+      const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
+      const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
+      const path35 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
+      if (!ok) {
+        mismatches.push({
+          path: path35,
+          expected: { interp: "bezier", ease: expected },
+          actual: { interp, ease: actualList },
+          message: `Expected ${path35} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+        });
+      }
+    }
+  }
+  return mismatches;
+}
+function hasAnyStyleField(style) {
+  if (!style) return false;
+  return style.font !== void 0 || style.fontSize !== void 0 || style.tracking !== void 0 || style.leading !== void 0 || style.fillColor !== void 0 || style.strokeColor !== void 0 || style.strokeWidth !== void 0 || style.applyFill !== void 0 || style.applyStroke !== void 0 || style.justification !== void 0;
+}
+function resolvedRanges(result) {
+  const list = result?.ranges;
+  if (!Array.isArray(list)) return [];
+  return list.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
+}
+function rangeExpectations(ranges) {
+  const out = {};
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = r.style[k];
+  });
+  return out;
+}
+function rangeActuals(ranges, afterRanges) {
+  const out = {};
+  const list = Array.isArray(afterRanges) ? afterRanges : [];
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = list[i]?.style?.[k];
+  });
+  return out;
+}
+var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, TextStyleSchema, RANGE_STYLE_KEYS, RangeStyleSchema, TextRangeSchema, AeSetTextSchema, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
+var init_animate = __esm({
+  "src/tools/ext/animate.ts"() {
+    "use strict";
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_common();
+    init_mutate();
+    init_read_back();
+    KeyframeEaseEndSchema = external_exports.object({
+      speed: external_exports.number().describe(
+        "Temporal ease speed (units per second; typically 0 for smooth ease)."
+      ),
+      influence: external_exports.number().min(0).max(100).describe(
+        "Temporal ease influence percentage (0.1 to 100; values below 0.1 are clamped to 0.1 in After Effects)."
+      )
+    });
+    KeyframeEasePairSchema = external_exports.object({
+      in: KeyframeEaseEndSchema.describe(
+        "Incoming temporal ease {speed, influence}."
+      ),
+      out: KeyframeEaseEndSchema.describe(
+        "Outgoing temporal ease {speed, influence}."
+      )
+    });
+    KeyframeEasePresetSchema = external_exports.enum([
+      "easy_ease",
+      "linear",
+      "hold"
+    ]);
+    MIN_HANDLE2 = 1e-3;
+    EASE_CURVE_ARRAY_SCHEMA = external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= MIN_HANDLE2 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE2, {
+      message: `curve x1 must be within ${MIN_HANDLE2}..1 and x2 within 0..${1 - MIN_HANDLE2}`
+    }).describe(
+      "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
+    );
+    KeyframeEaseCurveSchema = external_exports.object({
+      curve: EASE_CURVE_ARRAY_SCHEMA
+    });
+    KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema]).describe(
+      'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment\'s first key and the in ease of its last, from that segment\'s duration and distance, and leaves every other side alone.'
+    );
+    AeSetKeyframeEaseSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("Target CompItem ID."),
+      layer: LayerSelectorSchema,
+      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+        "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
+      ),
+      keys: external_exports.array(external_exports.number().int().positive()).optional().describe(
+        "Optional 1-based keyframe indices to update. Defaults to all keyframes on the property."
+      ),
+      ease: KeyframeEaseInputSchema,
+      rove_between: external_exports.boolean().optional().describe(
+        "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. Spatial properties only (Position, Anchor Point); not with a curve or hold. Roving keys are left out of the ease check, since AE sets their ease."
+      ),
+      expect: ExpectSchema
+    });
+    TextJustificationSchema = external_exports.enum(["left", "center", "right"]);
+    RgbColorSchema = external_exports.array(external_exports.number().min(0).max(1)).length(3).describe("RGB color array [r, g, b] with components in 0..1.");
+    TextStyleSchema = external_exports.object({
+      font: external_exports.string().min(1).optional().describe("PostScript font name (e.g. 'Inter-Bold' or 'ArialMT')."),
+      fontSize: external_exports.number().positive().optional().describe("Font size in pixels."),
+      tracking: external_exports.number().optional().describe("Character tracking value."),
+      leading: external_exports.number().optional().describe("Line leading in pixels."),
+      fillColor: RgbColorSchema.optional().describe(
+        "Fill color [r, g, b] in 0..1."
+      ),
+      strokeColor: RgbColorSchema.optional().describe(
+        "Stroke color [r, g, b] in 0..1."
+      ),
+      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels."),
+      applyFill: external_exports.boolean().optional().describe("Whether fill is enabled on the text layer."),
+      applyStroke: external_exports.boolean().optional().describe("Whether stroke is enabled on the text layer."),
+      justification: TextJustificationSchema.optional().describe(
+        "Paragraph justification: 'left', 'center', or 'right'."
+      )
+    }).describe("Optional TextDocument styling properties to update.");
+    RANGE_STYLE_KEYS = [
+      "font",
+      "fontSize",
+      "tracking",
+      "baselineShift",
+      "fillColor",
+      "strokeColor",
+      "strokeWidth",
+      "applyFill",
+      "applyStroke",
+      "fauxBold",
+      "fauxItalic"
+    ];
+    RangeStyleSchema = external_exports.object({
+      font: external_exports.string().min(1).optional().describe("PostScript font name for the range."),
+      fontSize: external_exports.number().min(0.1).max(1296).optional().describe("Font size in pixels for the range."),
+      tracking: external_exports.number().optional().describe("Tracking for the range."),
+      baselineShift: external_exports.number().optional().describe("Baseline shift in pixels for the range (positive raises)."),
+      fillColor: RgbColorSchema.optional().describe("Fill colour [r, g, b] in 0..1 (also turns the fill on)."),
+      strokeColor: RgbColorSchema.optional().describe("Stroke colour [r, g, b] in 0..1 (also turns the stroke on)."),
+      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels for the range."),
+      applyFill: external_exports.boolean().optional().describe("Turn the fill on or off for the range."),
+      applyStroke: external_exports.boolean().optional().describe("Turn the stroke on or off for the range."),
+      fauxBold: external_exports.boolean().optional().describe("Faux bold for the range."),
+      fauxItalic: external_exports.boolean().optional().describe("Faux italic for the range.")
+    }).refine((s) => RANGE_STYLE_KEYS.some((k) => s[k] !== void 0), { message: "A range's style needs at least one field." });
+    TextRangeSchema = external_exports.object({
+      match: external_exports.string().min(1).max(200).optional().describe("Style this text wherever it occurs (case-sensitive), instead of start/end."),
+      occurrence: external_exports.enum(["first", "all"]).optional().describe("With match: the first occurrence or all of them (default all, at most 200)."),
+      start: external_exports.number().int().min(0).optional().describe("First character, 0-based."),
+      end: external_exports.number().int().min(1).optional().describe("One past the last character. Default: the end of the text."),
+      style: RangeStyleSchema
+    }).refine((r) => r.match !== void 0 !== (r.start !== void 0), { message: "A range takes `match`, or `start` (with `end`), not both." }).refine((r) => r.end === void 0 || r.start !== void 0, { message: "`end` goes with `start`." }).refine((r) => r.start === void 0 || r.end === void 0 || r.end > r.start, { message: "`end` must be above `start`." }).refine((r) => r.occurrence === void 0 || r.match !== void 0, { message: "`occurrence` goes with `match`." });
+    AeSetTextSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("Target CompItem ID."),
+      layer: LayerSelectorSchema,
+      text: external_exports.string().optional().describe("New text string to set on the TextLayer's Source Text."),
+      style: TextStyleSchema.optional(),
+      ranges: external_exports.array(TextRangeSchema).min(1).max(50).optional().describe(
+        "Per-word or per-character styling, applied after `text` and `style`: each range is `match` (a word) or `start`/`end`, with a `style` of font, fontSize, tracking, baselineShift, fillColor, strokeColor, strokeWidth, applyFill, applyStroke, fauxBold, fauxItalic. Needs AE 24.3+ (TextDocument.characterRange); refused before anything is written on older AE. Ranges that overlap and set the same field are refused; values are checked before the write. Read back range by range; a range whose values read back as mixed is reported as a mismatch."
+      ),
+      expect: ExpectSchema
+    }).refine((val) => val.text !== void 0 || hasAnyStyleField(val.style) || val.ranges !== void 0, {
+      message: "ae_set_text requires at least `text`, one defined property in `style`, or `ranges`."
+    });
+    AeImportFootageSchema = external_exports.object({
+      paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).describe("Absolute file paths of footage files to import."),
+      sequence: external_exports.boolean().optional().describe(
+        "If true, import as an image sequence, numbered frames in order with placeholders for missing ones (Force alphabetical order off, AE's default)."
+      ),
+      fps: external_exports.number().positive().optional().describe(
+        "Optional frame rate (conformFrameRate) to assign to imported footage items."
+      ),
+      target_folder_id: external_exports.number().int().optional().describe(
+        "Optional FolderItem ID in the project to place the imported items into."
+      ),
+      expect: ExpectSchema
+    });
+    AeReplaceFootageSchema = external_exports.object({
+      item_id: external_exports.number().int().describe("Project FootageItem ID to replace."),
+      path: external_exports.string().min(1).describe(
+        "Absolute file path to the replacement footage file (or first frame of a sequence)."
+      ),
+      sequence: external_exports.boolean().optional().describe(
+        "If true, use FootageItem.replaceWithSequence(file, false) (numbered order, gaps kept as placeholders); otherwise use FootageItem.replace(file)."
+      ),
+      expect: ExpectSchema
+    });
+    animateTools = [
+      {
+        name: "ae_set_keyframe_ease",
+        description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeSetKeyframeEaseSchema,
+        handler: async (args, ctx) => {
+          if (args.rove_between && isCurveEase(args.ease)) {
+            return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+          }
+          if (args.rove_between && args.ease === "hold") {
+            return { ok: false, error: "bad_args", message: "rove_between can't be combined with hold: held keys have no speed for roving to even out." };
+          }
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
+          const effectiveExpect = {
+            project_path: args.expect.project_path,
+            comp_id: args.expect.comp_id ?? args.comp_id
+          };
+          try {
+            return await ctx.queue.run(label, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getKeyframeEase", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path
+                }),
+                label: `${label} (before)`,
+                mutates: false,
+                toolName: "ae_set_keyframe_ease"
+              });
+              const curvePlan = isCurveEase(args.ease) ? curveToSides(beforeSnap.result, args.keys, args.ease.curve) : null;
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: curvePlan ? buildJsxCall("setKeyframeEaseSides", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  sides: curvePlan.sides,
+                  expect: effectiveExpect
+                }) : buildJsxCall("setKeyframeEase", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  keys: args.keys,
+                  ease: args.ease,
+                  rove_between: args.rove_between,
+                  expect: effectiveExpect
+                }),
+                label,
+                mutates: true,
+                toolName: "ae_set_keyframe_ease"
+              });
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getKeyframeEase", {
+                    comp_id: args.comp_id,
+                    layer: args.layer,
+                    path: args.path
+                  }),
+                  label: `${label} (after)`,
+                  mutates: false,
+                  toolName: "ae_set_keyframe_ease"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  result: writeResp.result,
+                  ...curvePlan ? {
+                    curve: args.ease,
+                    segments: curvePlan.segments,
+                    ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
+                  } : {},
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const easeCheck = extractKeyframeEaseCheck(
+                args.ease,
+                args.keys,
+                afterSnap.result,
+                writeResp.result?.roving
+              );
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: easeCheck?.expected,
+                actualForExpected: easeCheck?.actual,
+                customMismatches: curvePlan ? curveEaseMismatches(curvePlan.sides, afterSnap.result) : rovingMismatches(writeResp.result?.roving, afterSnap.result)
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                result: writeResp.result,
+                ...curvePlan ? {
+                  curve: args.ease,
+                  segments: curvePlan.segments,
+                  ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
+                } : {},
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_set_text",
+        description: "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. `ranges` styles single words or characters ('make NOW bold and red': `{ match: 'NOW', style: { fauxBold: true, fillColor: [1, 0, 0] } }`) on AE 24.3+, each range read back separately. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeSetTextSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_set_text(comp ${args.comp_id})`;
+          const effectiveExpect = {
+            project_path: args.expect.project_path,
+            comp_id: args.expect.comp_id ?? args.comp_id
+          };
+          try {
+            return await ctx.queue.run(label, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getTextDocument", {
+                  comp_id: args.comp_id,
+                  layer: args.layer
+                }),
+                label: `${label} (before)`,
+                mutates: false,
+                toolName: "ae_set_text"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("setText", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  text: args.text,
+                  style: args.style,
+                  ranges: args.ranges,
+                  expect: effectiveExpect
+                }),
+                label,
+                mutates: true,
+                toolName: "ae_set_text"
+              });
+              const appliedRanges = resolvedRanges(writeResp.result);
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getTextDocument", {
+                    comp_id: args.comp_id,
+                    layer: args.layer,
+                    ...appliedRanges.length > 0 ? { ranges: appliedRanges.map((r) => ({ start: r.start, end: r.end })) } : {}
+                  }),
+                  label: `${label} (after)`,
+                  mutates: false,
+                  toolName: "ae_set_text"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const beforeObj = beforeSnap.result ?? {};
+              const beforeDoc = beforeObj.document && typeof beforeObj.document === "object" ? beforeObj.document : beforeObj;
+              const afterObj = afterSnap.result ?? {};
+              const afterDoc = afterObj.document && typeof afterObj.document === "object" ? afterObj.document : afterObj;
+              const expectedCheck = {};
+              const actualCheck = {};
+              if (args.text !== void 0) {
+                expectedCheck.text = args.text;
+                actualCheck.text = afterDoc.text;
+              }
+              if (args.style) {
+                const styleKeys = [
+                  "font",
+                  "fontSize",
+                  "tracking",
+                  "leading",
+                  "fillColor",
+                  "strokeColor",
+                  "strokeWidth",
+                  "applyFill",
+                  "applyStroke",
+                  "justification"
+                ];
+                for (const key of styleKeys) {
+                  if (args.style[key] !== void 0) {
+                    expectedCheck[key] = args.style[key];
+                    actualCheck[key] = afterDoc[key];
+                  }
+                }
+              }
+              const readBackRanges = Array.isArray(afterObj.ranges) ? afterObj.ranges : [];
+              const verifiedRanges = appliedRanges.slice(0, readBackRanges.length);
+              const unverifiedRanges = appliedRanges.length - verifiedRanges.length;
+              Object.assign(expectedCheck, rangeExpectations(verifiedRanges));
+              Object.assign(actualCheck, rangeActuals(verifiedRanges, afterObj.ranges));
+              if (expectedCheck.justification === void 0 && typeof beforeDoc.justification === "string" && typeof afterDoc.justification === "string") {
+                expectedCheck.justification = beforeDoc.justification;
+                actualCheck.justification = afterDoc.justification;
+              }
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
+                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                result: writeResp.result,
+                checkpoint,
+                receipt,
+                ...unverifiedRanges > 0 ? { unverified_ranges: unverifiedRanges } : {}
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_import_footage",
+        description: "Import one or more footage files (or an image sequence, in numbered order with placeholders for missing frames) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeImportFootageSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_import_footage(${args.paths.length} file${args.paths.length === 1 ? "" : "s"})`;
+          try {
+            return await ctx.queue.run(label, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, args.expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getFootageItems", {}),
+                label: `${label} (before)`,
+                mutates: false,
+                toolName: "ae_import_footage"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("importFootage", {
+                  paths: args.paths,
+                  sequence: Boolean(args.sequence),
+                  fps: args.fps,
+                  target_folder_id: args.target_folder_id,
+                  expect: args.expect
+                }),
+                label,
+                timeoutMs: SLOW_TIMEOUT_MS,
+                mutates: true,
+                toolName: "ae_import_footage"
+              });
+              const itemIds = Array.isArray(writeResp.result?.item_ids) ? writeResp.result.item_ids : [];
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getFootageItems", {
+                    item_ids: itemIds
+                  }),
+                  label: `${label} (after)`,
+                  mutates: false,
+                  toolName: "ae_import_footage"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  item_ids: itemIds,
+                  items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const afterIds = Array.isArray(afterSnap.result?.item_ids) ? afterSnap.result.item_ids : [];
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: {
+                  count: args.paths.length,
+                  item_ids: itemIds
+                },
+                actualForExpected: {
+                  count: afterIds.length,
+                  item_ids: afterIds
+                }
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                item_ids: itemIds,
+                items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+                result: writeResp.result,
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_replace_footage",
+        description: "Replace or relink an existing FootageItem using `FootageItem.replace` or `FootageItem.replaceWithSequence` within one undo group, guarded by `expect`, returning the before and after file paths, `footageMissing`, and a separate read-back receipt. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeReplaceFootageSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label = `ae_replace_footage(${args.item_id})`;
+          try {
+            return await ctx.queue.run(label, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, args.expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getFootageItem", {
+                  item_id: args.item_id
+                }),
+                label: `${label} (before)`,
+                mutates: false,
+                toolName: "ae_replace_footage"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("replaceFootage", {
+                  item_id: args.item_id,
+                  path: args.path,
+                  sequence: Boolean(args.sequence),
+                  expect: args.expect
+                }),
+                label,
+                timeoutMs: SLOW_TIMEOUT_MS,
+                mutates: true,
+                toolName: "ae_replace_footage"
+              });
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getFootageItem", {
+                    item_id: args.item_id
+                  }),
+                  label: `${label} (after)`,
+                  mutates: false,
+                  toolName: "ae_replace_footage"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  item_id: args.item_id,
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const beforeObj = beforeSnap.result ?? {};
+              const writeObj = writeResp.result ?? {};
+              const afterObj = afterSnap.result ?? {};
+              const beforeFile = typeof beforeObj.file === "string" ? beforeObj.file : typeof writeObj.before_file === "string" ? writeObj.before_file : null;
+              const beforeMissing = typeof beforeObj.footageMissing === "boolean" ? beforeObj.footageMissing : typeof writeObj.before_footage_missing === "boolean" ? writeObj.before_footage_missing : false;
+              const afterFile = typeof afterObj.file === "string" ? afterObj.file : typeof writeObj.requested_path === "string" ? writeObj.requested_path : null;
+              const afterMissing = typeof afterObj.footageMissing === "boolean" ? afterObj.footageMissing : false;
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: {
+                  file: normalizeGuardPath(args.path),
+                  footageMissing: false
+                },
+                actualForExpected: {
+                  file: typeof afterFile === "string" ? normalizeGuardPath(afterFile) : null,
+                  footageMissing: afterMissing
+                }
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                item_id: args.item_id,
+                before_path: beforeFile,
+                after_path: afterFile,
+                before_file: beforeFile,
+                after_file: afterFile,
+                before_footage_missing: beforeMissing,
+                footageMissing: afterMissing,
+                result: writeResp.result,
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      }
+    ];
+  }
+});
+
 // src/tools/ext/ask.ts
 function checkImagePath(p) {
-  if (!path16.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!path21.isAbsolute(p)) return `image_path must be absolute: ${p}`;
   if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
   try {
-    const st = fs16.statSync(p);
+    const st = fs22.statSync(p);
     if (!st.isFile()) return `image_path is not a file: ${p}`;
     if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
   } catch {
@@ -13575,12 +21323,12 @@ function presentAnswer(q, a) {
 function sameCurve(a, b) {
   return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
 }
-var fs16, path16, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
+var fs22, path21, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
 var init_ask = __esm({
   "src/tools/ext/ask.ts"() {
     "use strict";
-    fs16 = __toESM(require("node:fs"), 1);
-    path16 = __toESM(require("node:path"), 1);
+    fs22 = __toESM(require("node:fs"), 1);
+    path21 = __toESM(require("node:path"), 1);
     init_zod();
     init_animate();
     PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
@@ -14036,39 +21784,39 @@ async function analyzeAudio(mono, sampleRate, opts = {}) {
   }
   const { env, hop, frameRate } = await onsetEnvelope(mono, sampleRate);
   const envMax = env.reduce((m, v) => Math.max(m, v), 0);
-  const norm = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
+  const norm2 = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
   const sensitivity = Math.max(0, Math.min(1, opts.sensitivity ?? 0.5));
   const delta = 0.02 + (1 - sensitivity) * 0.16;
   const audible = toDb(peak) >= ONSET_FLOOR_DB;
-  const peakFrames = envMax > 0 && audible ? pickPeaks(norm, frameRate, delta) : [];
+  const peakFrames = envMax > 0 && audible ? pickPeaks(norm2, frameRate, delta) : [];
   const hitWindow = Math.round(0.05 * sampleRate);
   const onsets = peakFrames.map((t) => {
     const at = t * hop;
     let p = 0;
     for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
-    return { time: round3(at / sampleRate), strength: round3(norm[t]), level_db: toDb(p) };
+    return { time: round32(at / sampleRate), strength: round32(norm2[t]), level_db: toDb(p) };
   }).filter((o) => o.level_db >= ONSET_FLOOR_DB);
   let tempo = null;
   let beats = [];
-  const est = onsets.length >= 4 ? estimatePeriod(norm, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
+  const est = onsets.length >= 4 ? estimatePeriod(norm2, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
   if (est) {
     const first = onsets[0].time;
     const last = onsets[onsets.length - 1].time;
     const periodSec = est.period / frameRate;
-    beats = (await trackBeats(norm, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round3);
-    const near2 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
+    beats = (await trackBeats(norm2, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
+    const near5 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
     tempo = {
       bpm: Math.round(60 / periodSec * 10) / 10,
-      period: round3(periodSec),
-      confidence: round3(est.confidence),
-      beats_on_onsets: beats.length ? round3(near2 / beats.length) : 0
+      period: round32(periodSec),
+      confidence: round32(est.confidence),
+      beats_on_onsets: beats.length ? round32(near5 / beats.length) : 0
     };
   }
   const hits = [...onsets].sort((a, b) => b.level_db - a.level_db || b.strength - a.strength).slice(0, opts.hits ?? 20);
   const out = {
-    duration: round3(duration),
+    duration: round32(duration),
     sample_rate: sampleRate,
-    overall: { peak_db: toDb(peak), rms_db: toDb(rms), silent_ratio: round3(silent / frameCount) },
+    overall: { peak_db: toDb(peak), rms_db: toDb(rms), silent_ratio: round32(silent / frameCount) },
     onsets,
     tempo,
     beats,
@@ -14094,7 +21842,7 @@ async function analyzeAudio(mono, sampleRate, opts = {}) {
 }
 function offsetAnalysis(a, offset) {
   if (!offset) return a;
-  const sh = (t) => round3(t + offset);
+  const sh = (t) => round32(t + offset);
   return {
     ...a,
     onsets: a.onsets.map((o) => ({ ...o, time: sh(o.time) })),
@@ -14102,7 +21850,7 @@ function offsetAnalysis(a, offset) {
     hits: a.hits.map((o) => ({ ...o, time: sh(o.time) }))
   };
 }
-var AudioDecodeError, SILENCE_DB, ONSET_FLOOR_DB, YIELD_EVERY, yieldToLoop, MAX_LEVEL_POINTS, toDb, round3;
+var AudioDecodeError, SILENCE_DB, ONSET_FLOOR_DB, YIELD_EVERY, yieldToLoop, MAX_LEVEL_POINTS, toDb, round32;
 var init_audio = __esm({
   "src/audio.ts"() {
     "use strict";
@@ -14114,103 +21862,7 @@ var init_audio = __esm({
     yieldToLoop = () => new Promise((resolve3) => setImmediate(resolve3));
     MAX_LEVEL_POINTS = 500;
     toDb = (x) => Math.round(20 * Math.log10(Math.max(x, 1e-10)) * 10) / 10;
-    round3 = (x) => Math.round(x * 1e3) / 1e3;
-  }
-});
-
-// src/tools/ext/write-runner.ts
-async function runGuardedWrite(ctx, spec) {
-  ctx.quarantine.assertClear();
-  const opId = ctx.bridge.newOpId();
-  const expect = {
-    project_path: spec.expect.project_path,
-    comp_id: spec.expect.comp_id ?? spec.compId
-  };
-  const read = async (phase, written, before) => {
-    const call2 = spec.read?.(phase, written, before);
-    if (!call2) return null;
-    const res = await ctx.bridge.evalRaw({
-      id: `${opId}_${phase}`,
-      script: buildJsxCall(call2.host, call2.args),
-      label: `${spec.label} (${phase})`,
-      mutates: false,
-      toolName: spec.toolName
-    });
-    return res.result ?? null;
-  };
-  try {
-    return await ctx.queue.run(spec.label, async () => {
-      ctx.quarantine.assertClear();
-      const guard = await verifyTargetGuard(ctx, expect, opId);
-      const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
-      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
-      const sessionFields = await noteBeforeWrite(ctx, note);
-      const before = await read("before");
-      beginInflight(note);
-      let write;
-      try {
-        write = await ctx.bridge.evalRaw({
-          id: opId,
-          script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
-          label: spec.label,
-          mutates: true,
-          toolName: spec.toolName
-        });
-      } finally {
-        endInflight(opId);
-      }
-      const written = write.result ?? {};
-      let after = null;
-      let readBackFailure = null;
-      try {
-        after = await read("after", written, before);
-      } catch (err) {
-        readBackFailure = readBackMismatch(opId, "the read-back failed", err);
-      }
-      let custom2 = [];
-      let shown = written;
-      if (!readBackFailure) {
-        try {
-          custom2 = spec.check?.(before, after, written) ?? [];
-          shown = spec.present?.(before, after, written) ?? written;
-        } catch (err) {
-          custom2 = [readBackMismatch(opId, "checking the read-back failed", err)];
-          shown = written;
-        }
-      } else {
-        custom2 = [readBackFailure];
-      }
-      const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-      await noteAfterWrite(ctx, note);
-      return {
-        op_id: opId,
-        applied: true,
-        ...shown,
-        checkpoint,
-        receipt,
-        ...sessionFields
-      };
-    });
-  } catch (err) {
-    if (err instanceof QueueWaitError) {
-      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-    }
-    throw err;
-  }
-}
-function expectThat(mismatches, ok, path32, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path32, expected, actual, message });
-}
-var init_write_runner = __esm({
-  "src/tools/ext/write-runner.ts"() {
-    "use strict";
-    init_host();
-    init_jsx();
-    init_queue();
-    init_receipts();
-    init_mutate();
-    init_read_back();
-    init_session();
+    round32 = (x) => Math.round(x * 1e3) / 1e3;
   }
 });
 
@@ -14272,22 +21924,22 @@ function stamp() {
   return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 }
 function findRenderedAudio(outputPath) {
-  if (fs17.existsSync(outputPath)) return outputPath;
-  const dir = path17.dirname(outputPath);
-  const stem = path17.basename(outputPath, path17.extname(outputPath));
+  if (fs23.existsSync(outputPath)) return outputPath;
+  const dir = path22.dirname(outputPath);
+  const stem = path22.basename(outputPath, path22.extname(outputPath));
   try {
-    const hit = fs17.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
-    return hit ? path17.join(dir, hit) : null;
+    const hit = fs23.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
+    return hit ? path22.join(dir, hit) : null;
   } catch {
     return null;
   }
 }
 async function analyzeFile(file, offset, opts, maxSeconds = MAX_ANALYSIS_SECONDS) {
-  const stat = fs17.statSync(file);
+  const stat = fs23.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES) throw new AudioDecodeError(`Audio file is over ${MAX_AUDIO_BYTES / 1048576} MB`);
-  const decoded = decodeAudio(await fs17.promises.readFile(file), { maxSeconds });
+  const decoded = decodeAudio(await fs23.promises.readFile(file), { maxSeconds });
   const analysis = offsetAnalysis(await analyzeAudio(decoded.mono, decoded.sampleRate, opts), offset);
-  const boundList = (list) => ({ list: list.slice(0, MAX_LIST), truncated: list.length > MAX_LIST });
+  const boundList = (list) => ({ list: list.slice(0, MAX_LIST2), truncated: list.length > MAX_LIST2 });
   const beats = boundList(analysis.beats);
   const onsets = boundList(analysis.onsets);
   return {
@@ -14318,7 +21970,7 @@ function createAudioTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs17.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs23.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -14369,7 +22021,7 @@ function createAudioTools(options = {}) {
         };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path17.isAbsolute(args.audio_path) || !fs17.existsSync(args.audio_path)) {
+          if (!path22.isAbsolute(args.audio_path) || !fs23.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -14405,9 +22057,9 @@ function createAudioTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; analyse at most ${MAX_ANALYSIS_SECONDS / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path17.join(rendersDir(), "audio");
-        fs17.mkdirSync(dir, { recursive: true });
-        const outputPath = path17.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
+        const dir = path22.join(rendersDir(), "audio");
+        fs23.mkdirSync(dir, { recursive: true });
+        const outputPath = path22.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -14424,7 +22076,7 @@ function createAudioTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs17.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs23.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, opts);
@@ -14488,12 +22140,12 @@ function createAudioTools(options = {}) {
     }
   ];
 }
-var fs17, path17, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
+var fs23, path22, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST2, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
 var init_audio2 = __esm({
   "src/tools/ext/audio.ts"() {
     "use strict";
-    fs17 = __toESM(require("node:fs"), 1);
-    path17 = __toESM(require("node:path"), 1);
+    fs23 = __toESM(require("node:fs"), 1);
+    path22 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_receipts();
@@ -14503,8 +22155,8 @@ var init_audio2 = __esm({
     DEFAULT_AUDIO_TEMPLATE = "AIFF 48kHz";
     MAX_ANALYSIS_SECONDS = 20 * 60;
     MAX_AUDIO_BYTES = 600 * 1024 * 1024;
-    MAX_LIST = 500;
-    MAX_SNAPSHOT_KEYS = 3 * MAX_LIST;
+    MAX_LIST2 = 500;
+    MAX_SNAPSHOT_KEYS = 3 * MAX_LIST2;
     AnalysisOptionFields = {
       levels: external_exports.boolean().optional().describe("Include RMS and peak levels in dBFS, one point per comp frame (with audio_path: per `fps`, default 25), at most 500 points, pooled for long audio. levels.step is the seconds per point, levels.frames_per_point the frames pooled into each."),
       sensitivity: external_exports.number().min(0).max(1).optional().describe("Onset sensitivity 0..1; higher finds quieter hits. Default 0.5."),
@@ -14532,7 +22184,7 @@ var init_audio2 = __esm({
       comp_id: external_exports.number().int(),
       layer: LayerSelectorSchema,
       path: external_exports.array(external_exports.string().min(1)).min(1).describe("Property path by match names or names, e.g. ['ADBE Transform Group', 'ADBE Scale']."),
-      times: external_exports.array(external_exports.number().min(0)).min(1).max(MAX_LIST).describe("Cue times in comp seconds: ae_audio_analyze's beats or onsets, or marker times."),
+      times: external_exports.array(external_exports.number().min(0)).min(1).max(MAX_LIST2).describe("Cue times in comp seconds: ae_audio_analyze's beats or onsets, or marker times."),
       peak: ValueSchema.describe("The value at each cue, e.g. [115, 115] for Scale. It must fit the property: a number for a one-value property, 2 numbers (or 3 for a 3D one) for a pair, 4 for a colour."),
       base: ValueSchema.optional().describe("The value between cues. Default: the property's own value where the cues start."),
       attack: external_exports.number().min(0).max(5).optional().describe("Seconds from base to peak before each cue. Default 0: a jump one frame before the cue."),
@@ -14549,7 +22201,7 @@ var init_audio2 = __esm({
 
 // src/tools/ext/brief.ts
 function briefPath(projectPath) {
-  return path18.join(path18.dirname(projectPath), `${path18.basename(projectPath, path18.extname(projectPath))}.brief.json`);
+  return path23.join(path23.dirname(projectPath), `${path23.basename(projectPath, path23.extname(projectPath))}.brief.json`);
 }
 function isEmpty(v) {
   if (v === void 0 || v === null || v === "") return true;
@@ -14559,7 +22211,7 @@ function isEmpty(v) {
 }
 function readBrief(file) {
   try {
-    const parsed = JSON.parse(fs18.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs24.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -14591,12 +22243,12 @@ async function openProjectPath(ctx) {
 function isLinear(c) {
   return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
 }
-var fs18, path18, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
+var fs24, path23, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
 var init_brief = __esm({
   "src/tools/ext/brief.ts"() {
     "use strict";
-    fs18 = __toESM(require("node:fs"), 1);
-    path18 = __toESM(require("node:path"), 1);
+    fs24 = __toESM(require("node:fs"), 1);
+    path23 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     BriefFieldsSchema = external_exports.object({
@@ -14689,8 +22341,8 @@ var init_brief = __esm({
             }
             brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
             const tmp = `${file}.tmp-${process.pid}`;
-            fs18.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
-            fs18.renameSync(tmp, file);
+            fs24.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
+            fs24.renameSync(tmp, file);
             saved = true;
           }
           const missing = missingFields(brief);
@@ -14756,8 +22408,8 @@ function simulateGuides(before, applied) {
 }
 function compSettingsMismatches(args, beforeRaw, afterRaw, written) {
   const m = [];
-  const before = infoOf(beforeRaw);
-  const after = infoOf(afterRaw);
+  const before = infoOf2(beforeRaw);
+  const after = infoOf2(afterRaw);
   if (!after) return m;
   const s = args.settings ?? {};
   const unreadable2 = new Set(after.unreadable ?? []);
@@ -14851,14 +22503,14 @@ function compSettingsMismatches(args, beforeRaw, afterRaw, written) {
   }
   return m;
 }
-var infoOf, Color3, CompSettingsValuesSchema, GuideOpSchema, AeCompSettingsSchema, AeGetCompSettingsSchema, BOOL_KEYS, INT_KEYS, FRAME_KEYS, sameList2, keysOf, compsettingsTools;
+var infoOf2, Color3, CompSettingsValuesSchema, GuideOpSchema, AeCompSettingsSchema, AeGetCompSettingsSchema, BOOL_KEYS, INT_KEYS, FRAME_KEYS, sameList2, keysOf, compsettingsTools;
 var init_compsettings = __esm({
   "src/tools/ext/compsettings.ts"() {
     "use strict";
     init_zod();
     init_common();
     init_write_runner();
-    infoOf = (v) => v && typeof v === "object" ? v : null;
+    infoOf2 = (v) => v && typeof v === "object" ? v : null;
     Color3 = external_exports.array(external_exports.number().min(0).max(1)).length(3);
     CompSettingsValuesSchema = external_exports.object({
       motion_blur: external_exports.boolean().optional().describe("The comp's Enable Motion Blur switch. Layers still need their own motion blur switch on."),
@@ -14885,7 +22537,7 @@ var init_compsettings = __esm({
       work_area: external_exports.object({
         start: external_exports.number().min(0).optional().describe("Work area start in seconds."),
         duration: external_exports.number().positive().optional().describe("Work area length in seconds, at least one frame.")
-      }).refine((w) => w.start !== void 0 || w.duration !== void 0, { message: "work_area needs start or duration." }).optional().describe("Work area. start + duration must not pass the comp's length; the tool refuses it before touching AE.")
+      }).strict().refine((w) => w.start !== void 0 || w.duration !== void 0, { message: "work_area needs start or duration." }).optional().describe("Work area. start + duration must not pass the comp's length; the tool refuses it before touching AE.")
     }).strict().refine((s) => !(s.display_start_time !== void 0 && s.display_start_frame !== void 0), {
       message: "Give display_start_time or display_start_frame, not both."
     });
@@ -14894,7 +22546,7 @@ var init_compsettings = __esm({
       orientation: external_exports.enum(["horizontal", "vertical"]).optional().describe("add: the new guide's direction."),
       index: external_exports.number().int().min(0).optional().describe("set / remove: 0-based index of the guide, as ae_get_comp_settings lists it at that step."),
       position: external_exports.number().min(-1e5).max(1e5).optional().describe("add / set: position in pixels from the comp's top-left.")
-    }).refine((g) => g.action !== "add" || g.orientation !== void 0 && g.position !== void 0 && g.index === void 0, {
+    }).strict().refine((g) => g.action !== "add" || g.orientation !== void 0 && g.position !== void 0 && g.index === void 0, {
       message: "add needs orientation and position, and no index."
     }).refine((g) => g.action !== "set" || g.index !== void 0 && g.position !== void 0 && g.orientation === void 0, {
       message: "set needs index and position (a guide can't change direction)."
@@ -15044,7 +22696,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs19.readFileSync(filePath, "utf8");
+  const text = fs25.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -15065,8 +22717,8 @@ function cellValue(target, cell) {
   if (target === "text") return { value: String(cell) };
   if (target === "footage") {
     const p = String(cell).trim();
-    if (!path19.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs19.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!path24.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs25.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -15233,12 +22885,12 @@ async function templateInfo(ctx, compId) {
   });
   return res.result;
 }
-var fs19, path19, DataMappingSchema, AeBuildFromDataSchema, dataTools;
+var fs25, path24, DataMappingSchema, AeBuildFromDataSchema, dataTools;
 var init_data = __esm({
   "src/tools/ext/data.ts"() {
     "use strict";
-    fs19 = __toESM(require("node:fs"), 1);
-    path19 = __toESM(require("node:path"), 1);
+    fs25 = __toESM(require("node:fs"), 1);
+    path24 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -15277,7 +22929,7 @@ var init_data = __esm({
         handler: async (args, ctx) => {
           let rows;
           if (args.data_path) {
-            if (!path19.isAbsolute(args.data_path) || !fs19.existsSync(args.data_path)) {
+            if (!path24.isAbsolute(args.data_path) || !fs25.existsSync(args.data_path)) {
               return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
             }
             try {
@@ -15415,12 +23067,12 @@ function paramMismatches(effect, params, written) {
   const mismatches = [];
   (params ?? []).forEach((p, i) => {
     if (written?.[i]?.how === "value_at_current_time") return;
-    const snap = findParamSnapshot(effect, p.param);
-    if (!snap) {
+    const snap2 = findParamSnapshot(effect, p.param);
+    if (!snap2) {
       mismatches.push({ path: `params.${p.param}`, expected: p.value, actual: void 0, message: `Parameter ${p.param} not found in read-back` });
       return;
     }
-    compareValues(expectedParamValue(snap.type, p.value), snap.value, `params.${snap.name}`, mismatches);
+    compareValues(expectedParamValue(snap2.type, p.value), snap2.value, `params.${snap2.name}`, mismatches);
   });
   return mismatches;
 }
@@ -15504,22 +23156,22 @@ function walkPresetsUnfiltered(folders, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs20.readdirSync(dir, { withFileTypes: true });
+        entries = fs26.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path20.join(dir, e.name);
+        const full = path25.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const rawCategory = path20.relative(folder.path, dir).split(path20.sep).join("/");
+          const rawCategory = path25.relative(folder.path, dir).split(path25.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           all.push({
             name,
             path: full,
-            category: rawCategory || path20.basename(folder.path),
+            category: rawCategory || path25.basename(folder.path),
             matchKey: `${rawCategory}/${name}`.toLowerCase(),
             source: kind
           });
@@ -15546,12 +23198,12 @@ function findPresets(folders, filter, source) {
   const presets = matched.map(({ matchKey, ...rest }) => rest);
   return { presets, scanned: cached.scanned };
 }
-var fs20, path20, EffectSelectorSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, effectsTools;
+var fs26, path25, EffectSelectorSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, effectsTools;
 var init_effects = __esm({
   "src/tools/ext/effects.ts"() {
     "use strict";
-    fs20 = __toESM(require("node:fs"), 1);
-    path20 = __toESM(require("node:path"), 1);
+    fs26 = __toESM(require("node:fs"), 1);
+    path25 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -15679,12 +23331,12 @@ var init_effects = __esm({
         description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
         schema: AeApplyPresetSchema,
         handler: async (args, ctx) => {
-          if (!path20.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs20.existsSync(args.preset_path)) {
+          if (!path25.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs26.existsSync(args.preset_path)) {
             return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
           }
           return runEffectWrite(args, ctx, {
             toolName: "ae_apply_preset",
-            label: `ae_apply_preset(${path20.basename(args.preset_path)})`,
+            label: `ae_apply_preset(${path25.basename(args.preset_path)})`,
             host: "applyPreset",
             hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
             check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -15962,12 +23614,12 @@ function detectScreenColor(img, minCoverage = 0.1) {
   const blue = pick(2);
   const best = green.coverage >= blue.coverage ? { ...green, kind: "green" } : { ...blue, kind: "blue" };
   if (best.coverage < minCoverage) return null;
-  const median = (v) => {
+  const median2 = (v) => {
     const s = [...v].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
   const round = (v) => Math.round(v * 1e3) / 1e3;
-  return { color: [round(median(best.rs)), round(median(best.gs)), round(median(best.bs))], kind: best.kind, coverage: round(best.coverage) };
+  return { color: [round(median2(best.rs)), round(median2(best.gs)), round(median2(best.bs))], kind: best.kind, coverage: round(best.coverage) };
 }
 function measureKey(before, after, screen, edge = 3) {
   const { width: w, height: h } = before;
@@ -16060,7 +23712,7 @@ function worstMetrics(all) {
 }
 function keyAdvice(m, kl, target) {
   const findings = [];
-  const fix = (param, value) => ({
+  const fix2 = (param, value) => ({
     tool: "ae_set_effect",
     args: {
       comp_id: target.comp_id,
@@ -16075,7 +23727,7 @@ function keyAdvice(m, kl, target) {
     findings.push({
       issue: "screen_left",
       message: `${m.screen_left_pct}% of the screen is still visible (mean alpha ${m.screen_residual_alpha}). Raising Clip Black from ${kl.clip_black} to ${next} pushes it out.`,
-      fix: fix("Keylight 906-0012", next)
+      fix: fix2("Keylight 906-0012", next)
     });
   }
   if (m.holes_pct >= 0.5) {
@@ -16083,7 +23735,7 @@ function keyAdvice(m, kl, target) {
     findings.push({
       issue: "holes",
       message: `${m.holes_pct}% of the subject is see-through. Lowering Clip White from ${kl.clip_white} to ${next} fills it in; if the subject itself is greenish, lower Screen Gain instead.`,
-      fix: fix("Keylight 906-0013", next)
+      fix: fix2("Keylight 906-0013", next)
     });
   }
   if (m.spill_after > 0.05) {
@@ -16116,8 +23768,8 @@ function keyTimes(info) {
   const start = Math.max(info.layer.inPoint, info.comp.workAreaStart);
   const end = Math.min(info.layer.outPoint, info.comp.workAreaStart + info.comp.workAreaDuration) - 1 / fps;
   if (end < start) return [Math.round(start * fps) / fps];
-  const snap = (t) => Math.round(t * fps) / fps;
-  return [.../* @__PURE__ */ new Set([snap(start), snap((start + end) / 2), snap(end)])];
+  const snap2 = (t) => Math.round(t * fps) / fps;
+  return [.../* @__PURE__ */ new Set([snap2(start), snap2((start + end) / 2), snap2(end)])];
 }
 async function queued(ctx, label, opId, fn) {
   try {
@@ -16127,12 +23779,12 @@ async function queued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs21, path21, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs27, path26, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs21 = __toESM(require("node:fs"), 1);
-    path21 = __toESM(require("node:path"), 1);
+    fs27 = __toESM(require("node:fs"), 1);
+    path26 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -16170,7 +23822,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs21.mkdirSync(framesDir, { recursive: true });
+          fs27.mkdirSync(framesDir, { recursive: true });
           const label = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -16265,8 +23917,8 @@ var init_key = __esm({
           const analyse = () => {
             const kl = run.info.keylight;
             const pairs = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-            const previewPath = path21.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs21.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            const previewPath = path26.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+            fs27.writeFileSync(previewPath, encodePng(keyPreview(pairs.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
             const canMeasure = below.length === 0 && pairs.every((p) => p.before !== null) && run.screen !== null;
             const perFrame = canMeasure ? pairs.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -16358,10 +24010,10 @@ function selectKeys(keys, args) {
     return (args.start === void 0 || k.time >= args.start - 5e-4) && (args.end === void 0 || k.time <= args.end + 5e-4);
   });
 }
-function selectionCount(snap, args) {
-  if (args.all) return snap.numKeys;
+function selectionCount(snap2, args) {
+  if (args.all) return snap2.numKeys;
   if (args.keys?.length) return new Set(args.keys).size;
-  return selectKeys(snap.keys, args).length;
+  return selectKeys(snap2.keys, args).length;
 }
 function removeKeysMismatches(beforeRaw, afterRaw, written) {
   const m = [];
@@ -16379,7 +24031,7 @@ function removeKeysMismatches(beforeRaw, afterRaw, written) {
   if (written.static_value !== void 0 && after.numKeys === 0) compareValues(written.static_value, after.value, "value", m);
   return m;
 }
-var PathSchema, AeGetKeyframesSchema, AeRemoveKeyframesSchema, keyframesTools;
+var PathSchema2, AeGetKeyframesSchema, AeRemoveKeyframesSchema, keyframesTools;
 var init_keyframes = __esm({
   "src/tools/ext/keyframes.ts"() {
     "use strict";
@@ -16388,18 +24040,18 @@ var init_keyframes = __esm({
     init_common();
     init_mutate();
     init_write_runner();
-    PathSchema = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe("Property path from the layer, by match names or names (e.g. ['ADBE Transform Group', 'ADBE Position']); a 1-based index for a sibling in an indexed group.");
+    PathSchema2 = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe("Property path from the layer, by match names or names (e.g. ['ADBE Transform Group', 'ADBE Position']); a 1-based index for a sibling in an indexed group.");
     AeGetKeyframesSchema = external_exports.object({
       comp_id: external_exports.number().int(),
       layer: LayerSelectorSchema,
-      path: PathSchema,
+      path: PathSchema2,
       start: external_exports.number().optional().describe("Only keys at or after this time (comp seconds)."),
       end: external_exports.number().optional().describe("Only keys at or before this time.")
     });
     AeRemoveKeyframesSchema = external_exports.object({
       comp_id: external_exports.number().int(),
       layer: LayerSelectorSchema,
-      path: PathSchema,
+      path: PathSchema2,
       all: external_exports.boolean().optional().describe("Remove every key."),
       keys: external_exports.array(external_exports.number().int().positive()).max(500).optional().describe("1-based key indexes to remove."),
       start: external_exports.number().optional().describe("Remove keys at or after this time (comp seconds)."),
@@ -16436,20 +24088,20 @@ var init_keyframes = __esm({
           const rangeOnly = args.all !== true && !(args.keys?.length ?? 0);
           const selectionArgs = { ...snapshot.args, ...rangeOnly ? { start: args.start, end: args.end } : {} };
           const readSelection = (label) => ctx.bridge.callHost("keysSnapshot", selectionArgs, { label, mutates: false, toolName: "ae_remove_keyframes" });
-          const badIndex = (snap) => (args.keys ?? []).find((i) => i > snap.numKeys);
+          const badIndex = (snap2) => (args.keys ?? []).find((i) => i > snap2.numKeys);
           if (args.dry_run) {
-            const snap = (await readSelection("ae_remove_keyframes (dry run)")).result;
-            const bad2 = badIndex(snap);
-            if (bad2 !== void 0) return { ok: false, error: "bad_args", message: `Key ${bad2} out of range (1..${snap.numKeys})` };
-            const would = selectKeys(snap.keys, args);
-            const count = selectionCount(snap, args);
-            const truncated = snap.truncated === true;
+            const snap2 = (await readSelection("ae_remove_keyframes (dry run)")).result;
+            const bad3 = badIndex(snap2);
+            if (bad3 !== void 0) return { ok: false, error: "bad_args", message: `Key ${bad3} out of range (1..${snap2.numKeys})` };
+            const would = selectKeys(snap2.keys, args);
+            const count = selectionCount(snap2, args);
+            const truncated = snap2.truncated === true;
             return {
               ok: true,
               dry_run: true,
               count,
               keys: would,
-              all_keys: snap.numKeys > 0 && count === snap.numKeys,
+              all_keys: snap2.numKeys > 0 && count === snap2.numKeys,
               truncated,
               ...truncated || would.length < count ? { note: `Only the first 500 keys are listed${rangeOnly ? "; the count is a lower bound" : ""}. The real removal is not capped.` } : {}
             };
@@ -16562,21 +24214,37 @@ function readsThisComp(code, at) {
 function findIndexReferences(expression) {
   const { codeOnly } = maskExpression(expression);
   const out = [];
-  const re = /layer\s*\(([^()]*)\)/g;
+  const re = /layer\s*\(/g;
   for (let m = re.exec(codeOnly); m !== null; m = re.exec(codeOnly)) {
     if (!readsThisComp(codeOnly, m.index)) continue;
-    const arg = m[1].trim();
-    const full = m[0];
-    const argStart = m.index + full.indexOf("(") + 1;
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close2 = -1;
+    for (let i = open; i < codeOnly.length; i++) {
+      const ch = codeOnly[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        if (depth === 0) {
+          close2 = i;
+          break;
+        }
+      }
+    }
+    if (close2 === -1) continue;
+    const raw = codeOnly.slice(open + 1, close2);
+    const arg = raw.trim();
+    const full = codeOnly.slice(m.index, close2 + 1);
+    const argStart = open + 1;
     if (/^\d+$/.test(arg)) {
-      out.push({ value: Number(arg), relative: false, parsed: true, start: argStart, end: argStart + m[1].length, text: full });
+      out.push({ value: Number(arg), relative: false, parsed: true, start: argStart, end: argStart + raw.length, text: full });
     } else if (/\bindex\b/.test(arg)) {
       const rel = /^(?:thisLayer\s*\.\s*)?index\s*(?:([+-])\s*(\d+))?$/.exec(arg);
       if (rel) {
         const delta = rel[1] ? rel[1] === "-" ? -Number(rel[2]) : Number(rel[2]) : 0;
-        out.push({ value: delta, relative: true, parsed: true, start: argStart, end: argStart + m[1].length, text: full });
+        out.push({ value: delta, relative: true, parsed: true, start: argStart, end: argStart + raw.length, text: full });
       } else {
-        out.push({ value: 0, relative: true, parsed: false, start: argStart, end: argStart + m[1].length, text: full });
+        out.push({ value: 0, relative: true, parsed: false, start: argStart, end: argStart + raw.length, text: full });
       }
     }
   }
@@ -16638,27 +24306,27 @@ function indexReferenceWarnings(before, map, occupant) {
     const ownerNew = map.get(ex.layer_id);
     const edits = [];
     const found = [];
-    for (const ref of findIndexReferences(ex.text)) {
-      if (ref.relative && !ref.parsed) {
+    for (const ref2 of findIndexReferences(ex.text)) {
+      if (ref2.relative && !ref2.parsed) {
         if (ownerOld !== ownerNew) {
           found.push({
             layer_id: ex.layer_id,
             layer_name: ex.layer_name,
             path: ex.path,
             kind: "relative_index_unparsed",
-            reference: ref.text,
-            message: `${ref.text} uses index arithmetic this scan can't evaluate, and its layer moved from ${ownerOld} to ${ownerNew}: check what it points at.`
+            reference: ref2.text,
+            message: `${ref2.text} uses index arithmetic this scan can't evaluate, and its layer moved from ${ownerOld} to ${ownerNew}: check what it points at.`
           });
         }
         continue;
       }
-      const oldIndex = ref.relative ? ownerOld + ref.value : ref.value;
+      const oldIndex = ref2.relative ? ownerOld + ref2.value : ref2.value;
       const target = idAt.get(oldIndex);
       if (!target) continue;
       if (!map.has(target.id)) continue;
       const newTarget = map.get(target.id);
-      const readsIndex = ref.relative ? ownerNew + ref.value : ref.value;
-      const kind = ref.relative ? "relative_index" : "index";
+      const readsIndex = ref2.relative ? ownerNew + ref2.value : ref2.value;
+      const kind = ref2.relative ? "relative_index" : "index";
       const was = { index: oldIndex, layer_id: target.id, layer_name: target.name };
       if (newTarget === null) {
         const occ = occupant(readsIndex);
@@ -16667,10 +24335,10 @@ function indexReferenceWarnings(before, map, occupant) {
           layer_name: ex.layer_name,
           path: ex.path,
           kind,
-          reference: ref.text,
+          reference: ref2.text,
           was,
           now: occ ? { index: readsIndex, ...occ } : null,
-          message: `${ref.text} pointed at "${target.name}", which is deleted; it now reads ${occ ? `"${occ.layer_name}"` : "no layer"}.`
+          message: `${ref2.text} pointed at "${target.name}", which is deleted; it now reads ${occ ? `"${occ.layer_name}"` : "no layer"}.`
         });
       } else if (newTarget !== readsIndex) {
         const occ = occupant(readsIndex);
@@ -16679,12 +24347,12 @@ function indexReferenceWarnings(before, map, occupant) {
           layer_name: ex.layer_name,
           path: ex.path,
           kind,
-          reference: ref.text,
+          reference: ref2.text,
           was,
           now: occ ? { index: readsIndex, ...occ } : null,
-          message: `${ref.text} pointed at "${target.name}", which is now at index ${newTarget}; it reads ${occ ? `"${occ.layer_name}"` : "index " + readsIndex} instead.`
+          message: `${ref2.text} pointed at "${target.name}", which is now at index ${newTarget}; it reads ${occ ? `"${occ.layer_name}"` : "index " + readsIndex} instead.`
         });
-        if (!ref.relative) edits.push({ start: ref.start, end: ref.end, to: newTarget });
+        if (!ref2.relative) edits.push({ start: ref2.start, end: ref2.end, to: newTarget });
       }
     }
     if (found.length > 0) {
@@ -16707,16 +24375,16 @@ function nameReferenceWarnings(after, renames) {
   for (const ex of after.expressions ?? []) {
     if (!ex.enabled) continue;
     if (ex.text_truncated && out.length < MAX_WARNINGS) out.push(partialScanWarning(ex));
-    for (const ref of findNameReferences(ex.text)) {
-      if (!renamed.has(ref) || names.has(ref)) continue;
+    for (const ref2 of findNameReferences(ex.text)) {
+      if (!renamed.has(ref2) || names.has(ref2)) continue;
       if (out.length >= MAX_WARNINGS) return out;
       out.push({
         layer_id: ex.layer_id,
         layer_name: ex.layer_name,
         path: ex.path,
         kind: "name",
-        reference: `layer("${ref}")`,
-        message: `layer("${ref}") refers to a layer renamed to "${renamed.get(ref)}"; no layer has the old name now. Repair it with fix_name_references or ae_batch_set.`
+        reference: `layer("${ref2}")`,
+        message: `layer("${ref2}") refers to a layer renamed to "${renamed.get(ref2)}"; no layer has the old name now. Repair it with fix_name_references or ae_batch_set.`
       });
     }
   }
@@ -16776,7 +24444,7 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
   }
   if (args.action === "trim") {
     const tol = (after.frameDuration ?? 0.05) * 1.01 + 1e-6;
-    const near2 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
+    const near5 = (a, b) => a !== void 0 && b !== void 0 && Math.abs(a - b) <= tol;
     for (const t of w.trims ?? []) {
       if (!w.applied_ids?.includes(t.id)) {
         const lb = byId(before, t.id);
@@ -16789,7 +24457,7 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
         ];
         for (const [field, got, was, planned] of pairs) {
           if (got === void 0 || was === void 0) continue;
-          if (!near2(got, was) && !near2(got, planned)) {
+          if (!near5(got, was) && !near5(got, planned)) {
             m.push({ path: `layer[${la.name}].${field}`, expected: was, actual: got, message: `"${la.name}" was reported as not trimmed but its ${field} changed` });
           }
         }
@@ -16819,6 +24487,30 @@ function layerOpsMismatches(args, beforeRaw, afterRaw, w) {
       if (!l || !field) continue;
       expectThat(m, l[field] === c.to, `layer[${l.name}].${c.key}`, c.to, l[field], "Switch differs");
     }
+  }
+  if (!(args.action === "switches" && args.locked === false)) {
+    const gone = new Set((w.deleted ?? []).map((d) => d.id));
+    const MAX_RELOCK_MISMATCHES = 50;
+    let reported = 0;
+    let more = 0;
+    for (const id of w.unlocked ?? []) {
+      const l = byId(after, id);
+      if (gone.has(id) || complete && !l) continue;
+      const before2 = m.length;
+      if (!(w.relocked ?? []).includes(id)) {
+        m.push({ path: `layer[${id}].locked`, expected: true, actual: "not relocked", message: "A layer unlocked for the edit was not reported as locked again" });
+      }
+      if (l && l.locked !== void 0) expectThat(m, l.locked === true, `layer[${l.name}].locked`, true, l.locked, "A layer unlocked for the edit is still unlocked");
+      if (m.length > before2) {
+        if (reported >= MAX_RELOCK_MISMATCHES) {
+          m.length = before2;
+          more++;
+        } else {
+          reported++;
+        }
+      }
+    }
+    if (more > 0) m.push({ path: "locked", expected: true, actual: "not relocked", message: `${more} more unlocked layers were not locked again` });
   }
   if (complete) {
     for (const l of after.layers) {
@@ -16874,6 +24566,25 @@ async function dryRun(args, ctx) {
       const id = plan2.order_after[index - 1];
       return typeof id === "number" ? { layer_id: id, layer_name: nameOf.get(id) ?? "" } : void 0;
     });
+  }
+  if (before && plan2.to_comp_id !== void 0 && before.with_comp) {
+    const dest = before.with_comp;
+    const copies = Number(plan2.would_change ?? 0) || 0;
+    const skippedIds = new Set((plan2.skipped ?? []).map((x) => x.id));
+    const map = /* @__PURE__ */ new Map();
+    for (const l of dest.layers) map.set(l.id, l.index + copies);
+    const byIndex = new Map(dest.layers.map((l) => [l.index + copies, l]));
+    would_break = [
+      ...indexReferenceWarnings(dest, map, (index) => {
+        if (index <= copies) return { layer_id: 0, layer_name: "(a copy)" };
+        const l = byIndex.get(index);
+        return l ? { layer_id: l.id, layer_name: l.name } : void 0;
+      }),
+      ...copiedToCompWarnings({ ...before, with_comp: void 0 }, before, {
+        ...plan2,
+        duplicates: (plan2.targets ?? []).filter((t) => !skippedIds.has(t.id)).map((t) => ({ source_id: t.id, id: 0, name: "" }))
+      })
+    ].slice(0, MAX_WARNINGS);
   }
   return {
     ...plan2,
@@ -17052,38 +24763,38 @@ var init_layerops = __esm({
       expect: ExpectSchema
     });
     AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
-      const bad2 = (message, path32) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path32 ? [path32] : void 0 });
+      const bad3 = (message, path35) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path35 ? [path35] : void 0 });
       const allowed = new Set(ACTION_FIELDS[v.action]);
       for (const key of ALL_ACTION_FIELDS) {
-        if (!allowed.has(key) && v[key] !== void 0) bad2(`${key} does not apply to the ${v.action} action.`, key);
+        if (!allowed.has(key) && v[key] !== void 0) bad3(`${key} does not apply to the ${v.action} action.`, key);
       }
-      if (v.action !== "sort" && v.layers === void 0 && v.where === void 0) bad2(`${v.action} needs layers or where.`, "layers");
-      if (v.where !== void 0 && Object.values(v.where).every((x) => x === void 0)) bad2("where is empty; give at least one field.", "where");
+      if (v.action !== "sort" && v.layers === void 0 && v.where === void 0) bad3(`${v.action} needs layers or where.`, "layers");
+      if (v.where !== void 0 && Object.values(v.where).every((x) => x === void 0)) bad3("where is empty; give at least one field.", "where");
       if (v.action === "parent") {
-        if (v.unparent && v.parent) bad2("Give parent or unparent, not both.", "parent");
-        if (!v.unparent && !v.parent) bad2("parent needs the new parent layer, or unparent: true.", "parent");
-        if (v.unparent && v.keep_position === false) bad2("keep_position false needs a new parent; unparent: true keeps the position.", "keep_position");
+        if (v.unparent && v.parent) bad3("Give parent or unparent, not both.", "parent");
+        if (!v.unparent && !v.parent) bad3("parent needs the new parent layer, or unparent: true.", "parent");
+        if (v.unparent && v.keep_position === false) bad3("keep_position false needs a new parent; unparent: true keeps the position.", "keep_position");
       }
       if (v.action === "reorder") {
-        if (!v.move_to) bad2("reorder needs move_to.", "move_to");
-        if ((v.move_to === "before" || v.move_to === "after") && !v.relative_to) bad2(`move_to ${v.move_to} needs relative_to.`, "relative_to");
-        if ((v.move_to === "beginning" || v.move_to === "end") && v.relative_to) bad2("relative_to goes with move_to before or after.", "relative_to");
+        if (!v.move_to) bad3("reorder needs move_to.", "move_to");
+        if ((v.move_to === "before" || v.move_to === "after") && !v.relative_to) bad3(`move_to ${v.move_to} needs relative_to.`, "relative_to");
+        if ((v.move_to === "beginning" || v.move_to === "end") && v.relative_to) bad3("relative_to goes with move_to before or after.", "relative_to");
       }
-      if (v.action === "sort" && !v.sort_by) bad2("sort needs sort_by.", "sort_by");
+      if (v.action === "sort" && !v.sort_by) bad3("sort needs sort_by.", "sort_by");
       if (v.action === "duplicate" && v.to_comp_id !== void 0) {
-        if (v.to_comp_id === v.comp_id) bad2("to_comp_id is the same comp; leave it out to duplicate in place.", "to_comp_id");
-        if (v.count !== void 0 && v.count > 1) bad2("count above 1 works for duplicates in the same comp only.", "count");
+        if (v.to_comp_id === v.comp_id) bad3("to_comp_id is the same comp; leave it out to duplicate in place.", "to_comp_id");
+        if (v.count !== void 0 && v.count > 1) bad3("count above 1 works for duplicates in the same comp only.", "count");
       }
       if (v.action === "trim") {
-        if (v.in_point === void 0 && v.out_point === void 0 && v.start_time === void 0) bad2("trim needs in_point, out_point or start_time.", "in_point");
-        if (v.in_point !== void 0 && v.out_point !== void 0 && v.in_point >= v.out_point) bad2("in_point must be before out_point.", "in_point");
+        if (v.in_point === void 0 && v.out_point === void 0 && v.start_time === void 0) bad3("trim needs in_point, out_point or start_time.", "in_point");
+        if (v.in_point !== void 0 && v.out_point !== void 0 && v.in_point >= v.out_point) bad3("in_point must be before out_point.", "in_point");
       }
       if (v.action === "rename") {
-        if (v.find === void 0 && v.template === void 0) bad2("rename needs find (with replace) or template.", "find");
-        if (v.replace !== void 0 && v.find === void 0) bad2("replace goes with find.", "replace");
+        if (v.find === void 0 && v.template === void 0) bad3("rename needs find (with replace) or template.", "find");
+        if (v.replace !== void 0 && v.find === void 0) bad3("replace goes with find.", "replace");
       }
       if (v.action === "switches" && SWITCH_FIELDS.every((k) => v[k] === void 0)) {
-        bad2(`switches needs at least one of: ${SWITCH_FIELDS.join(", ")}.`, "shy");
+        bad3(`switches needs at least one of: ${SWITCH_FIELDS.join(", ")}.`, "shy");
       }
     });
     MAX_WARNINGS = 100;
@@ -17164,11 +24875,11 @@ var init_layerops = __esm({
 });
 
 // src/tools/ext/layers.ts
-function resolveInStack(stack, sel) {
-  if (!stack || !sel) return void 0;
-  if (sel.id !== void 0) return stack.layers.find((l) => l.id === sel.id);
-  if (sel.index !== void 0) return stack.layers.find((l) => l.index === sel.index);
-  const named = stack.layers.filter((l) => l.name === sel.name);
+function resolveInStack(stack, sel2) {
+  if (!stack || !sel2) return void 0;
+  if (sel2.id !== void 0) return stack.layers.find((l) => l.id === sel2.id);
+  if (sel2.index !== void 0) return stack.layers.find((l) => l.index === sel2.index);
+  const named = stack.layers.filter((l) => l.name === sel2.name);
   return named.length === 1 ? named[0] : void 0;
 }
 function kindsFor(type) {
@@ -17190,8 +24901,8 @@ function createLayerMismatches(args, beforeRaw, afterRaw, written) {
   expectThat(m, kindsFor(args.type).includes(made.kind), "layer.kind", args.type, made.kind, "The new layer is of another kind");
   if (args.name) expectThat(m, made.name === args.name, "layer.name", args.name, made.name, "Name differs");
   if (args.type === "text" && args.text !== void 0 && made.text !== void 0 && args.text.length <= 200) {
-    const norm = (s) => s.replace(/\r\n?|\n/g, "\n");
-    expectThat(m, norm(made.text) === norm(args.text), "layer.text", args.text, made.text, "Text differs");
+    const norm2 = (s) => s.replace(/\r\n?|\n/g, "\n");
+    expectThat(m, norm2(made.text) === norm2(args.text), "layer.text", args.text, made.text, "Text differs");
   }
   if (args.three_d && args.type !== "camera" && args.type !== "light") {
     expectThat(m, made.threeD === true, "layer.threeD", true, made.threeD, "Layer is not 3D");
@@ -17220,8 +24931,8 @@ function createLayerMismatches(args, beforeRaw, afterRaw, written) {
   } else if (p?.bottom) {
     expectThat(m, made.index === after.numLayers, "layer.index", after.numLayers, made.index, "Layer is not at the bottom");
   } else if (p?.above || p?.below) {
-    const ref = resolveInStack(before, p.above ?? p.below);
-    const refNow = ref ? byId2(after, ref.id) : void 0;
+    const ref2 = resolveInStack(before, p.above ?? p.below);
+    const refNow = ref2 ? byId2(after, ref2.id) : void 0;
     const want = refNow ? p.above ? refNow.index - 1 : refNow.index + 1 : void 0;
     if (want === void 0 && (capped2(before) || capped2(after))) return m;
     expectThat(m, want !== void 0 && made.index === want, "layer.index", want, made.index, p.above ? "Layer is not directly above its reference" : "Layer is not directly below its reference");
@@ -17294,15 +25005,15 @@ function selectorRefs2(sels, before) {
   const stack = stackOf2(before);
   const ids = [];
   const indexes = [];
-  for (const sel of sels) {
-    if (!sel) continue;
-    ids.push(sel.id);
-    indexes.push(sel.index);
-    if (stack) ids.push(resolveInStack(stack, sel)?.id);
+  for (const sel2 of sels) {
+    if (!sel2) continue;
+    ids.push(sel2.id);
+    indexes.push(sel2.index);
+    if (stack) ids.push(resolveInStack(stack, sel2)?.id);
   }
   return { ids: uniq2(ids), indexes: uniq2(indexes) };
 }
-var stackOf2, byId2, capped2, LAYER_TYPES, MATTE_TYPES, PlacementSchema, Color, AeCreateLayerSchema, AePrecomposeSchema, AeSetTrackMatteSchema, uniq2, stackRead, layersTools;
+var stackOf2, byId2, capped2, LAYER_TYPES, MATTE_TYPES, PlacementSchema, Color4, AeCreateLayerSchema, AePrecomposeSchema, AeSetTrackMatteSchema, uniq2, stackRead, layersTools;
 var init_layers = __esm({
   "src/tools/ext/layers.ts"() {
     "use strict";
@@ -17322,12 +25033,12 @@ var init_layers = __esm({
     }).refine((p) => [p.above, p.below, p.index, p.bottom ? true : void 0].filter((v) => v !== void 0).length === 1, {
       message: "Placement takes exactly one of above, below, index or bottom."
     }).describe("Where the layer goes. Default: the top of the stack, as in AE.");
-    Color = external_exports.array(external_exports.number().min(0).max(1)).length(3);
+    Color4 = external_exports.array(external_exports.number().min(0).max(1)).length(3);
     AeCreateLayerSchema = external_exports.object({
       comp_id: external_exports.number().int(),
       type: external_exports.enum(LAYER_TYPES),
       name: external_exports.string().min(1).max(200).optional().describe("Layer name. Text layers are named after their text by default."),
-      color: Color.optional().describe("Solid colour [r, g, b] in 0..1 (solid and adjustment). Default white."),
+      color: Color4.optional().describe("Solid colour [r, g, b] in 0..1 (solid and adjustment). Default white."),
       width: external_exports.number().int().min(1).max(3e4).optional().describe("Solid width in pixels. Default the comp's."),
       height: external_exports.number().int().min(1).max(3e4).optional().describe("Solid height in pixels. Default the comp's."),
       text: external_exports.string().max(2e4).optional().describe("Text layer content."),
@@ -17562,929 +25273,6 @@ var init_style = __esm({
   }
 });
 
-// src/tools/ext/motion.ts
-function contactSheetTimes(comp, opts) {
-  const fps = comp.fps > 0 ? comp.fps : 25;
-  if (opts.times !== void 0) {
-    return opts.times.map((t) => {
-      if (t > comp.duration) {
-        throw new Error(`Time ${t}s is past the comp's duration (${comp.duration}s).`);
-      }
-      return { time: t, frame: Math.round(t * fps) };
-    });
-  }
-  const start = opts.start ?? comp.workAreaStart;
-  const end = Math.min(opts.end ?? comp.workAreaStart + comp.workAreaDuration, comp.duration);
-  if (end <= start) {
-    throw new Error(`Empty range: start ${start}s, end ${end}s (comp duration ${comp.duration}s).`);
-  }
-  const firstFrame = Math.round(start * fps);
-  const lastFrame = Math.max(firstFrame, Math.ceil(end * fps - 1e-6) - 1);
-  const span = lastFrame - firstFrame;
-  if (span === 0) {
-    throw new Error(
-      `Range ${start}s to ${end}s covers only one frame at ${fps}fps; widen it to sample at least 2 frames.`
-    );
-  }
-  const count = Math.min(opts.count ?? 12, span + 1);
-  const frames = [];
-  for (let i = 0; i < count; i++) {
-    const f = count === 1 ? firstFrame : Math.round(firstFrame + i * span / (count - 1));
-    if (frames[frames.length - 1] !== f) frames.push(f);
-  }
-  return frames.map((frame) => ({ frame, time: frame / fps }));
-}
-function chooseColumns(n, tileWidth, tileHeight) {
-  const cols = Math.round(Math.sqrt(n * (16 / 9) * tileHeight / tileWidth));
-  return Math.max(1, Math.min(n, cols));
-}
-function labelMetrics(tileHeight, labels) {
-  const textScale = tileHeight >= 90 ? 2 : 1;
-  return { labelHeight: labels ? GLYPH_HEIGHT * textScale + 4 * textScale : 0, textScale };
-}
-function sheetLayout(n, compWidth, compHeight, tileSize, columns, labels = true) {
-  let tile = fitWithin(compWidth, compHeight, tileSize);
-  const cols = Math.max(1, Math.min(n, columns ?? chooseColumns(n, tile.width, tile.height)));
-  const rows = Math.ceil(n / cols);
-  const sheetW = (t) => cols * t.width + (cols + 1) * SHEET_GAP;
-  const sheetH = (t) => rows * (t.height + labelMetrics(t.height, labels).labelHeight) + (rows + 1) * SHEET_GAP;
-  let longest = Math.max(sheetW(tile), sheetH(tile));
-  for (let size = Math.max(tile.width, tile.height); longest > MAX_SHEET_EDGE && size > 16; ) {
-    size = Math.max(16, Math.floor(size * MAX_SHEET_EDGE / longest) - 1);
-    tile = fitWithin(compWidth, compHeight, size);
-    longest = Math.max(sheetW(tile), sheetH(tile));
-  }
-  const { labelHeight, textScale } = labelMetrics(tile.height, labels);
-  return {
-    tileWidth: tile.width,
-    tileHeight: tile.height,
-    labelHeight,
-    textScale,
-    columns: cols,
-    rows,
-    width: sheetW(tile),
-    height: sheetH(tile)
-  };
-}
-function buildContactSheet(tiles, layout) {
-  const sheet = createCanvas(layout.width, layout.height, SHEET_BG);
-  const pad = 2 * layout.textScale;
-  tiles.forEach((tile, i) => {
-    const col = i % layout.columns;
-    const row = Math.floor(i / layout.columns);
-    const x = SHEET_GAP + col * (layout.tileWidth + SHEET_GAP);
-    const y = SHEET_GAP + row * (layout.tileHeight + layout.labelHeight + SHEET_GAP);
-    const small = tile.image.width === layout.tileWidth && tile.image.height === layout.tileHeight ? tile.image : resizeArea(tile.image, layout.tileWidth, layout.tileHeight);
-    blit(sheet, flattenOnChecker(small, 8, 112, 88), x, y);
-    if (tile.label && layout.labelHeight > 0) {
-      fillRect(sheet, x, y + layout.tileHeight, layout.tileWidth, layout.labelHeight, [0, 0, 0, 255]);
-      drawText(sheet, tile.label, x + pad, y + layout.tileHeight + pad, layout.textScale, [255, 255, 255, 255]);
-    }
-    if (tile.flagged) {
-      strokeRect(sheet, x, y, layout.tileWidth, layout.tileHeight, 3, FLAG_COLOUR);
-    }
-  });
-  return sheet;
-}
-function frameLabel(sample) {
-  return `f${sample.frame} ${sample.time.toFixed(2)}s`;
-}
-function distanceBetween(a, b) {
-  let sum = 0;
-  for (let d = 0; d < Math.min(a.length, b.length); d++) sum += (b[d] - a[d]) ** 2;
-  return Math.sqrt(sum);
-}
-function sampleSpeeds(s) {
-  const jumps = s.keys.filter((_k, i) => i > 0 && s.keys[i - 1].out_interp === "hold").map((k) => k.time);
-  const out = [];
-  for (let i = 0; i + 1 < s.times.length; i++) {
-    const t0 = s.times[i];
-    const t1 = s.times[i + 1];
-    const isJump = jumps.some((t) => t > t0 + 1e-6 && t <= t1 + 1e-6);
-    out.push({
-      time: (t0 + t1) / 2,
-      speed: isJump || t1 <= t0 ? null : distanceBetween(s.values[i], s.values[i + 1]) / (t1 - t0)
-    });
-  }
-  return out;
-}
-function segmentProfile(startSpeed, endSpeed, peak, hold) {
-  if (hold) return "hold";
-  if (peak < 1e-6) return "static";
-  const s = startSpeed / peak;
-  const e = endSpeed / peak;
-  if (s > 0.8 && e > 0.8) return "constant";
-  if (s < 0.5 && e < 0.5) return "ease in-out";
-  if (s < 0.5 && e > 0.8) return "speeds up";
-  if (s > 0.8 && e < 0.5) return "slows down";
-  return "uneven";
-}
-function analyzeMotion(s, speeds) {
-  const dims = s.values[0]?.length ?? 0;
-  const min = [];
-  const max = [];
-  for (let d = 0; d < dims; d++) {
-    min.push(Math.min(...s.values.map((v) => v[d])));
-    max.push(Math.max(...s.values.map((v) => v[d])));
-  }
-  let peak = 0;
-  let peakTime = null;
-  let distance = 0;
-  let movingTime = 0;
-  speeds.forEach((sp, i) => {
-    if (sp.speed === null) return;
-    const dt = s.times[i + 1] - s.times[i];
-    distance += sp.speed * dt;
-    movingTime += dt;
-    if (sp.speed > peak) {
-      peak = sp.speed;
-      peakTime = sp.time;
-    }
-  });
-  const overshoot = [];
-  if (s.keys.length >= 2) {
-    for (let d = 0; d < dims; d++) {
-      const keyMin = Math.min(...s.keys.map((k) => k.value[d]));
-      const keyMax = Math.max(...s.keys.map((k) => k.value[d]));
-      const tol = Math.max(1e-3, (keyMax - keyMin) * 1e-3);
-      const below = keyMin - min[d] > tol ? keyMin - min[d] : 0;
-      const above = max[d] - keyMax > tol ? max[d] - keyMax : 0;
-      if (below > 0 || above > 0) {
-        overshoot.push({ dimension: d, below_keys_by: r3(below), above_keys_by: r3(above) });
-      }
-    }
-  }
-  const segments = [];
-  for (let k = 0; k + 1 < s.keys.length; k++) {
-    const a = s.keys[k];
-    const b = s.keys[k + 1];
-    const inside = [];
-    speeds.forEach((sp, i) => {
-      if (sp.speed === null || s.times[i] < a.time - 1e-6 || s.times[i + 1] > b.time + 1e-6) return;
-      inside.push({ speed: sp.speed, time: sp.time, dt: s.times[i + 1] - s.times[i] });
-    });
-    if (inside.length === 0) continue;
-    let segPeak = inside[0];
-    for (const p of inside) if (p.speed > segPeak.speed) segPeak = p;
-    const startSpeed = inside[0].speed;
-    const endSpeed = inside[inside.length - 1].speed;
-    segments.push({
-      from_key: a.index,
-      to_key: b.index,
-      start: r3(a.time),
-      end: r3(b.time),
-      distance: r3(inside.reduce((sum, p) => sum + p.speed * p.dt, 0)),
-      start_speed: r3(startSpeed),
-      end_speed: r3(endSpeed),
-      peak_speed: r3(segPeak.speed),
-      peak_at: segPeak.speed < 1e-6 ? null : Math.round((segPeak.time - a.time) / (b.time - a.time) * 100) / 100,
-      profile: segmentProfile(startSpeed, endSpeed, segPeak.speed, a.out_interp === "hold")
-    });
-  }
-  return {
-    speed: { peak: r3(peak), peak_time: peakTime === null ? null : r3(peakTime), mean: movingTime > 0 ? r3(distance / movingTime) : 0 },
-    distance: r3(distance),
-    value: {
-      start: (s.values[0] ?? []).map(r3),
-      end: (s.values[s.values.length - 1] ?? []).map(r3),
-      min: min.map(r3),
-      max: max.map(r3)
-    },
-    overshoot,
-    segments
-  };
-}
-function formatNumber(v) {
-  const a = Math.abs(v);
-  if (a >= 1e3) return v.toFixed(0);
-  if (a >= 100) return v.toFixed(1);
-  if (a >= 1) return v.toFixed(2);
-  return v.toFixed(3);
-}
-function renderMotionGraph(s, speeds, width, height) {
-  const scale = height >= 300 ? 2 : 1;
-  const glyphH = GLYPH_HEIGHT * scale;
-  const dims = s.values[0]?.length ?? 0;
-  let vmin = Infinity;
-  let vmax = -Infinity;
-  for (const v of s.values) {
-    for (const x of v) {
-      vmin = Math.min(vmin, x);
-      vmax = Math.max(vmax, x);
-    }
-  }
-  if (!Number.isFinite(vmin)) {
-    vmin = 0;
-    vmax = 1;
-  } else if (vmax - vmin < 1e-9) {
-    const pad = Math.max(1, Math.abs(vmin) * 0.1);
-    vmin -= pad;
-    vmax += pad;
-  }
-  let peak = 0;
-  for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
-  const speedMax = peak > 0 ? peak : 1;
-  const yLabels = [formatNumber(vmax), formatNumber(vmin), formatNumber(speedMax), "0"];
-  const left = Math.max(...yLabels.map((l) => textWidth(l, scale))) + 4 * scale + 6;
-  const right = 4 * scale + 6;
-  const top = glyphH + 8;
-  const bottom = glyphH + 8;
-  const gap = glyphH + 8;
-  const plotW = Math.max(1, width - left - right);
-  const plotH = Math.max(1, Math.floor((height - top - bottom - gap) / 2));
-  const valueTop = top;
-  const speedTop = top + plotH + gap;
-  const span = s.end - s.start > 0 ? s.end - s.start : 1;
-  const xOf = (t) => left + Math.round((t - s.start) / span * (plotW - 1));
-  const yValue = (v) => valueTop + Math.round((1 - (v - vmin) / (vmax - vmin)) * (plotH - 1));
-  const ySpeed = (v) => speedTop + Math.round((1 - v / speedMax) * (plotH - 1));
-  const img = createCanvas(width, height, SHEET_BG);
-  for (const panelTop of [valueTop, speedTop]) {
-    fillRect(img, left, panelTop, plotW, plotH, PANEL_BG);
-    fillRect(img, left, panelTop + Math.floor(plotH / 2), plotW, 1, GRID_COLOUR);
-  }
-  const keysInRange = s.keys.filter((k) => k.time >= s.start - 1e-6 && k.time <= s.end + 1e-6);
-  let labelRight = -Infinity;
-  for (const k of keysInRange) {
-    const x = xOf(k.time);
-    fillRect(img, x, valueTop, 1, speedTop + plotH - valueTop, KEY_LINE);
-    const label = `#${k.index}`;
-    const w = textWidth(label, scale);
-    const lx = Math.min(Math.max(0, x - Math.floor(w / 2)), width - w);
-    if (lx > labelRight + 2 * scale) {
-      drawText(img, label, lx, top - glyphH - 4, scale, KEY_COLOUR);
-      labelRight = lx + w;
-    }
-  }
-  for (let d = 0; d < dims; d++) {
-    const colour = DIM_COLOURS[d % DIM_COLOURS.length];
-    for (let i = 0; i + 1 < s.times.length; i++) {
-      drawLine(img, xOf(s.times[i]), yValue(s.values[i][d]), xOf(s.times[i + 1]), yValue(s.values[i + 1][d]), 2, colour);
-    }
-  }
-  for (const k of keysInRange) {
-    for (let d = 0; d < Math.min(dims, k.value.length); d++) {
-      fillRect(img, xOf(k.time) - 2, yValue(k.value[d]) - 2, 5, 5, KEY_COLOUR);
-    }
-  }
-  for (let i = 0; i < speeds.length; i++) {
-    const sp = speeds[i].speed;
-    if (sp === null) continue;
-    const next = speeds[i + 1]?.speed ?? null;
-    const prev = speeds[i - 1]?.speed ?? null;
-    if (next !== null) {
-      drawLine(img, xOf(speeds[i].time), ySpeed(sp), xOf(speeds[i + 1].time), ySpeed(next), 2, SPEED_COLOUR);
-    } else if (prev === null) {
-      drawLine(img, xOf(s.times[i]), ySpeed(sp), xOf(s.times[i + 1]), ySpeed(sp), 2, SPEED_COLOUR);
-    }
-  }
-  const rightAlign = (text, x, y) => drawText(img, text, x - textWidth(text, scale), y, scale, AXIS_LABEL);
-  rightAlign(yLabels[0], left - 6, valueTop);
-  rightAlign(yLabels[1], left - 6, valueTop + plotH - glyphH);
-  rightAlign(yLabels[2], left - 6, speedTop);
-  rightAlign(yLabels[3], left - 6, speedTop + plotH - glyphH);
-  drawText(img, `${s.start.toFixed(2)}s`, left, height - bottom + 4, scale, AXIS_LABEL);
-  rightAlign(`${s.end.toFixed(2)}s`, left + plotW, height - bottom + 4);
-  return img;
-}
-function fixEase(taste) {
-  const c = taste?.preferred_ease;
-  if (!c || c.length !== 4) return { ease: "easy_ease", name: "Easy ease" };
-  const influence = (v) => Math.min(100, Math.max(0.1, Math.round(v * 1e3) / 10));
-  return {
-    ease: { in: { speed: 0, influence: influence(1 - c[2]) }, out: { speed: 0, influence: influence(c[0]) } },
-    name: "Your preferred ease"
-  };
-}
-function reviewProperty(s, analysis, speeds, path32, target, taste) {
-  const findings = [];
-  const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
-  const timingOk = !motion && taste?.allow_linear_non_motion === true;
-  const unit = s.property.spatial ? "px/s" : "/s";
-  const base = {
-    layer: s.layer,
-    property: { name: s.property.name, path: path32 }
-  };
-  const { ease: easeArg, name: easeName } = fixEase(taste);
-  const fix = (keys, extra = {}) => ({
-    tool: "ae_set_keyframe_ease",
-    args: {
-      comp_id: target.comp_id,
-      layer: { id: s.layer.id },
-      path: path32,
-      keys,
-      ease: easeArg,
-      ...extra,
-      expect: { project_path: target.project_path, comp_id: target.comp_id }
-    }
-  });
-  const segs = analysis.segments;
-  const propPeak = analysis.speed.peak;
-  const keepsMovingAfter = (time, speed) => {
-    const next = speeds.find((sp) => sp.time > time + 1e-6 && sp.speed !== null);
-    return next !== void 0 && next.speed > 0.3 * speed;
-  };
-  for (let i = 0; i < segs.length; i++) {
-    if (timingOk || segs[i].profile !== "constant") continue;
-    let j = i;
-    while (j + 1 < segs.length && segs[j + 1].profile === "constant" && Math.min(segs[j].peak_speed, segs[j + 1].peak_speed) / Math.max(segs[j].peak_speed, segs[j + 1].peak_speed) > 0.75) {
-      j++;
-    }
-    const from = segs[i].from_key;
-    const to = segs[j].to_key;
-    const many = j - i > 1;
-    const rove = j > i && s.property.spatial;
-    let middle = "";
-    if (rove) {
-      middle = ` The fix also makes the key${many ? "s" : ""} in between roving, so the move keeps one smooth speed through ${many ? "them" : "it"} (AE retimes ${many ? "them" : "it"}).`;
-    } else if (j > i) {
-      middle = ` The key${many ? "s" : ""} in between keep${many ? "" : "s"} ${many ? "their" : "its"} linear speed, which leaves a slight dip there; ${s.property.name} isn't spatial, so AE can't rove ${many ? "them" : "it"}. Match the speeds there in the graph editor if the dip shows.`;
-    }
-    findings.push({
-      ...base,
-      severity: motion ? "medium" : "low",
-      kind: "linear",
-      keys: [from, to],
-      time: segs[i].start,
-      message: `${s.property.name} runs at one constant speed (${formatNumber(segs[i].peak_speed)} ${unit}) from key ${from} to key ${to} (${segs[i].start}s to ${segs[j].end}s), so it starts and stops abruptly and reads as mechanical. ${easeName} on keys ${from} and ${to} softens both ends.${middle}`,
-      fix: fix([from, to], rove ? { rove_between: true } : {})
-    });
-    i = j;
-  }
-  for (let i = 0; i < segs.length; i++) {
-    const g = segs[i];
-    if (timingOk || !isMoving(g) || g.profile === "constant" || g.peak_speed <= 0) continue;
-    const startsHere = i === 0 || !isMoving(segs[i - 1]) || segs[i - 1].to_key !== g.from_key;
-    const endsHere = i === segs.length - 1 || !isMoving(segs[i + 1]) || segs[i + 1].from_key !== g.to_key;
-    if (startsHere && g.start_speed / g.peak_speed > 0.5) {
-      findings.push({
-        ...base,
-        severity: motion ? "medium" : "low",
-        kind: "abrupt_start",
-        keys: [g.from_key],
-        time: g.start,
-        message: `${s.property.name} starts moving at ${Math.round(g.start_speed / g.peak_speed * 100)}% of its top speed at key ${g.from_key} (${g.start}s), with no acceleration. ${easeName} on key ${g.from_key} eases it in.`,
-        fix: fix([g.from_key])
-      });
-    }
-    if (endsHere && g.end_speed / g.peak_speed > 0.5 && !keepsMovingAfter(g.end, g.end_speed)) {
-      findings.push({
-        ...base,
-        severity: motion ? "medium" : "low",
-        kind: "abrupt_stop",
-        keys: [g.to_key],
-        time: g.end,
-        message: `${s.property.name} stops dead at key ${g.to_key} (${g.end}s), arriving at ${Math.round(g.end_speed / g.peak_speed * 100)}% of its top speed. ${easeName} on key ${g.to_key} lets it settle.`,
-        fix: fix([g.to_key])
-      });
-    }
-  }
-  for (let i = 0; i + 1 < segs.length; i++) {
-    const a = segs[i];
-    const b = segs[i + 1];
-    if (!isMoving(a) || !isMoving(b) || a.to_key !== b.from_key) continue;
-    const hi = Math.max(a.end_speed, b.start_speed);
-    const lo = Math.min(a.end_speed, b.start_speed);
-    if (hi < 0.25 * propPeak || lo > 0.3 * hi) continue;
-    const nearlyStopped = lo < 0.1 * hi;
-    findings.push({
-      ...base,
-      severity: "medium",
-      kind: "speed_jump",
-      keys: [a.to_key],
-      time: a.end,
-      message: `${s.property.name} changes speed abruptly at key ${a.to_key} (${a.end}s): ${formatNumber(a.end_speed)} ${unit} in, ${formatNumber(b.start_speed)} ${unit} out.` + (nearlyStopped ? ` ${easeName} on key ${a.to_key} smooths the hand-over.` : " Match the speeds on both sides of the key (in the graph editor, or with an explicit ease)."),
-      ...nearlyStopped ? { fix: fix([a.to_key]) } : {}
-    });
-  }
-  for (const o of analysis.overshoot) {
-    const d = o.dimension;
-    const past = o.above_keys_by >= o.below_keys_by;
-    let at = 0;
-    for (let i = 1; i < s.values.length; i++) {
-      if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
-    }
-    const unwanted = taste?.avoid_overshoot === true;
-    findings.push({
-      ...base,
-      severity: unwanted ? "low" : "info",
-      kind: "overshoot",
-      keys: [],
-      time: r3(s.times[at]),
-      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. ` + (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.")
-    });
-  }
-  const fps = s.comp.fps > 0 ? s.comp.fps : 25;
-  const offGrid = s.keys.filter((k) => !k.roving).map((k) => ({ index: k.index, time: k.time, frame: k.time * fps })).filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
-  if (offGrid.length > 0) {
-    const list = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-    const many = offGrid.length > 1;
-    findings.push({
-      ...base,
-      severity: "low",
-      kind: "subframe_key",
-      keys: offGrid.map((k) => k.index),
-      time: r3(offGrid[0].time),
-      message: `${many ? "Keys" : "Key"} ${list(offGrid.map((k) => String(k.index)))} of ${s.property.name} ${many ? "sit" : "sits"} between frames (frame ${list(offGrid.map((k) => formatNumber(k.frame)))}), so no rendered frame lands on ${many ? "them" : "it"}. Move ${many ? "them" : "it"} to frame ${list(offGrid.map((k) => String(Math.round(k.frame))))}.`
-    });
-  }
-  return findings;
-}
-function sortFindings2(findings) {
-  return [...findings].sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || a.layer.index - b.layer.index || a.time - b.time
-  );
-}
-function restTimes(props, fps, ancestors = []) {
-  const transform = props.filter((p) => TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName));
-  if (!transform.length) return [];
-  const candidates = [];
-  const moving = [];
-  for (const p of transform) {
-    for (const g of p.analysis.segments) {
-      if (g.profile === "hold" || g.profile === "static") candidates.push((g.start + g.end) / 2);
-      else moving.push([g.start, g.end]);
-    }
-    const keys = p.samples.keys;
-    if (keys.length && !p.samples.property.expression) candidates.push(keys[keys.length - 1].time);
-  }
-  let ownLast = -Infinity;
-  for (const p of transform) {
-    const k = p.samples.keys;
-    if (k.length) ownLast = Math.max(ownLast, k[k.length - 1].time);
-  }
-  for (const p of ancestors) {
-    if (!TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName)) continue;
-    for (const g of p.analysis.segments) {
-      if (g.profile === "hold" || g.profile === "static") {
-        const mid = (g.start + g.end) / 2;
-        if (mid > ownLast) candidates.push(mid);
-      } else {
-        moving.push([g.start, g.end]);
-      }
-    }
-    const k = p.samples.keys;
-    if (k.length && !p.samples.property.expression) {
-      const t = k[k.length - 1].time;
-      if (t > ownLast) candidates.push(t);
-    }
-  }
-  const eps = 0.5 / (fps > 0 ? fps : 25);
-  const still = candidates.filter((t) => !moving.some(([a, b]) => t > a + eps && t < b - eps)).sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] > 2 * eps);
-  return still.slice(-10).map((t) => r3(t));
-}
-function shiftInto(rect, box) {
-  const axis = (lo, hi, blo, bhi) => {
-    if (hi - lo > bhi - blo) return (blo + bhi) / 2 - (lo + hi) / 2;
-    if (lo < blo) return blo - lo;
-    if (hi > bhi) return bhi - hi;
-    return 0;
-  };
-  return [r12(axis(rect[0], rect[2], box[0], box[2])), r12(axis(rect[1], rect[3], box[1], box[3]))];
-}
-function edgesPast(rect, box) {
-  const out = [];
-  if (rect[0] < box[0] - 0.5) out.push(`left by ${Math.round(box[0] - rect[0])} px`);
-  if (rect[2] > box[2] + 0.5) out.push(`right by ${Math.round(rect[2] - box[2])} px`);
-  if (rect[1] < box[1] - 0.5) out.push(`top by ${Math.round(box[1] - rect[1])} px`);
-  if (rect[3] > box[3] + 0.5) out.push(`bottom by ${Math.round(rect[3] - box[3])} px`);
-  return out;
-}
-function reviewBounds(b, comp, safe) {
-  if (!b.checkable) return [];
-  const W = comp.width;
-  const H = comp.height;
-  const frame = [0, 0, W, H];
-  const isText = b.kind === "text";
-  const share = isText ? safe.title : safe.action;
-  const safeBox = [W * share / 2, H * share / 2, W - W * share / 2, H - H * share / 2];
-  const base = { layer: b.layer, property: { name: "Transform", path: ["ADBE Transform Group"] }, keys: [] };
-  let cut = null;
-  let outside = null;
-  let cutTimes = 0;
-  let outsideTimes = 0;
-  for (const s of b.samples) {
-    if (!s.visible || !s.rect) continue;
-    const [l, t, r, bt] = s.rect;
-    const area = (r - l) * (bt - t);
-    if (area <= 0 || area >= 0.8 * W * H) continue;
-    const iw = Math.max(0, Math.min(r, W) - Math.max(l, 0));
-    const ih = Math.max(0, Math.min(bt, H) - Math.max(t, 0));
-    const visible = iw * ih / area;
-    if (visible <= 1e-3) continue;
-    const rect = [r12(l), r12(t), r12(r), r12(bt)];
-    if (visible < 0.98) {
-      cutTimes++;
-      cut ??= {
-        ...base,
-        severity: "low",
-        kind: "cut_off",
-        time: r3(s.time),
-        message: `${b.layer.name} comes to rest partly outside the frame at ${r3(s.time)}s: ${Math.round((1 - visible) * 100)}% of it is cut off (past the ${edgesPast(rect, frame).join(", ")}). Fine for a deliberate bleed; otherwise move it by the suggested shift.`,
-        bounds: rect,
-        suggested_shift: shiftInto(rect, safeBox)
-      };
-      continue;
-    }
-    const past = edgesPast(rect, safeBox);
-    if (past.length) {
-      outsideTimes++;
-      outside ??= {
-        ...base,
-        severity: isText ? "low" : "info",
-        kind: "outside_safe",
-        time: r3(s.time),
-        message: `${b.layer.name} rests outside the ${isText ? "title" : "action"}-safe area (${Math.round(share * 100)}%) at ${r3(s.time)}s: past it on the ${past.join(", ")}. ${isText ? "Text there can be cropped on some screens." : "Fine for decoration; keep key content inside."}`,
-        bounds: rect,
-        suggested_shift: shiftInto(rect, safeBox)
-      };
-    }
-  }
-  const more = (f, n) => f && n > 1 ? { ...f, message: `${f.message} Seen at ${n} rest points.` } : f;
-  return [more(cut, cutTimes), more(outside, outsideTimes)].filter((f) => f !== null);
-}
-async function runQueued2(ctx, label, opId, fn) {
-  try {
-    return await ctx.queue.run(label, fn);
-  } catch (err) {
-    if (err instanceof QueueWaitError) {
-      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-    }
-    throw err;
-  }
-}
-var crypto7, fs22, path22, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r3, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
-var init_motion = __esm({
-  "src/tools/ext/motion.ts"() {
-    "use strict";
-    crypto7 = __toESM(require("node:crypto"), 1);
-    fs22 = __toESM(require("node:fs"), 1);
-    path22 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_common();
-    init_render();
-    init_frames();
-    init_png_utils();
-    MAX_SHEET_FRAMES = 24;
-    MAX_SHEET_EDGE = 2400;
-    SHEET_GAP = 6;
-    SHEET_BG = [24, 24, 24, 255];
-    FLAG_COLOUR = [230, 40, 40, 255];
-    AeContactSheetSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("CompItem ID to sample."),
-      times: external_exports.array(external_exports.number().min(0)).min(2).max(MAX_SHEET_FRAMES).optional().describe(
-        `Explicit comp times in seconds (2 to ${MAX_SHEET_FRAMES}). Mutually exclusive with start/end/count.`
-      ),
-      start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the work area start."),
-      end: external_exports.number().min(0).optional().describe("Range end in comp seconds (exclusive, like the work area end). Default: the work area end."),
-      count: external_exports.number().int().min(2).max(MAX_SHEET_FRAMES).optional().describe(
-        `How many frames to sample evenly across the range, first and last frame included (2 to ${MAX_SHEET_FRAMES}, default 12).`
-      ),
-      tile_size: external_exports.number().int().min(64).max(768).optional().describe(
-        `Long edge in pixels of each tile (default 320). Tiles shrink further if the sheet would exceed ${MAX_SHEET_EDGE} px.`
-      ),
-      columns: external_exports.number().int().min(1).max(12).optional().describe("Number of columns. Default: chosen so the sheet is roughly 16:9."),
-      labels: external_exports.boolean().optional().describe("Draw the frame number and time on each tile (default true).")
-    }).superRefine((val, ctx) => {
-      if (val.times !== void 0 && (val.start !== void 0 || val.end !== void 0 || val.count !== void 0)) {
-        ctx.addIssue({
-          code: external_exports.ZodIssueCode.custom,
-          path: ["times"],
-          message: "Give either `times`, or a range (`start`/`end`/`count`), not both."
-        });
-      }
-      if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
-        ctx.addIssue({
-          code: external_exports.ZodIssueCode.custom,
-          path: ["end"],
-          message: "`end` must be after `start`."
-        });
-      }
-    });
-    DIM_COLOURS = [
-      [235, 80, 80, 255],
-      [90, 200, 90, 255],
-      [90, 150, 255, 255],
-      [200, 200, 200, 255]
-    ];
-    SPEED_COLOUR = [240, 240, 240, 255];
-    KEY_COLOUR = [255, 200, 60, 255];
-    KEY_LINE = [255, 200, 60, 90];
-    PANEL_BG = [40, 40, 40, 255];
-    GRID_COLOUR = [62, 62, 62, 255];
-    AXIS_LABEL = [200, 200, 200, 255];
-    AeMotionGraphSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("CompItem ID that holds the layer."),
-      layer: LayerSelectorSchema,
-      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
-        "Property path from the layer, by match name or display name, e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Effects', 'Gaussian Blur', 'Blurriness']. The property must hold a number, vector or colour. A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
-      ),
-      start: external_exports.number().min(0).optional().describe("Range start in comp seconds. Default: the first keyframe, or the work area start without keyframes."),
-      end: external_exports.number().min(0).optional().describe("Range end in comp seconds. Default: the last keyframe, or the work area end without keyframes."),
-      step: external_exports.number().positive().optional().describe("Seconds between samples. Default: one comp frame. Capped at 1000 samples by widening the step."),
-      width: external_exports.number().int().min(320).max(2048).optional().describe("Graph width in pixels (default 960)."),
-      height: external_exports.number().int().min(200).max(2048).optional().describe("Graph height in pixels (default 540)."),
-      include_samples: external_exports.boolean().optional().describe("Also return every sample as `sample_table` (default false; the graph and summary are usually enough).")
-    }).superRefine((val, ctx) => {
-      if (val.start !== void 0 && val.end !== void 0 && val.end <= val.start) {
-        ctx.addIssue({
-          code: external_exports.ZodIssueCode.custom,
-          path: ["end"],
-          message: "`end` must be after `start`."
-        });
-      }
-    });
-    r3 = (x) => Math.round(x * 1e3) / 1e3;
-    MOTION_MATCH_NAMES = /* @__PURE__ */ new Set([
-      "ADBE Position",
-      "ADBE Position_0",
-      "ADBE Position_1",
-      "ADBE Position_2",
-      "ADBE Anchor Point",
-      "ADBE Scale",
-      "ADBE Rotate Z",
-      "ADBE Rotate X",
-      "ADBE Rotate Y",
-      "ADBE Orientation"
-    ]);
-    SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
-    isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
-    TRANSFORM_MATCH_NAMES = /* @__PURE__ */ new Set([
-      "ADBE Position",
-      "ADBE Position_0",
-      "ADBE Position_1",
-      "ADBE Anchor Point",
-      "ADBE Scale",
-      "ADBE Rotate Z"
-    ]);
-    r12 = (x) => Math.round(x * 10) / 10;
-    AeMotionReviewSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("CompItem ID to review."),
-      layers: external_exports.array(LayerSelectorSchema).max(50).optional().describe("Only review these layers. Default: every layer in the comp."),
-      include_info: external_exports.boolean().optional().describe("Include info findings (overshoot past keyframe values). Default true."),
-      max_findings: external_exports.number().int().min(1).max(200).optional().describe("Return at most this many findings, most severe first (default 50)."),
-      bounds: external_exports.boolean().optional().describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
-      action_safe: external_exports.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
-      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's.")
-    });
-    motionTools = [
-      {
-        name: "ae_contact_sheet",
-        description: "READ-ONLY. Shows how a comp moves over time in ONE image: samples 2 to 24 frames (default 12, evenly across the work area, or a `start`/`end` range, or explicit `times`), renders each at full resolution with saveFrameToPng, shrinks them on the server and tiles them into a single PNG with frame/time labels. Transparency shows as a checkerboard; blank, black or fully transparent frames get a red border and are listed in `flagged_frames`. Look at the returned `path` to judge timing, spacing and composition across the shot; each tile's full-resolution PNG is in `frames[].path`. Every frame is a render, so heavy comps take a while: start with fewer frames. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeContactSheetSchema,
-        handler: async (args, ctx) => {
-          const framesDir = defaultFramesDir();
-          fs22.mkdirSync(framesDir, { recursive: true });
-          const opId = ctx.bridge.newOpId();
-          const captured = await runQueued2(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
-            const compResp = await ctx.bridge.evalRaw({
-              id: `${opId}_comp`,
-              script: buildJsxCall("getComp", { comp_id: args.comp_id }),
-              label: `ae_contact_sheet(${args.comp_id}) getComp`,
-              mutates: false,
-              toolName: "ae_contact_sheet"
-            });
-            const comp2 = compResp.result;
-            const samples = contactSheetTimes(
-              {
-                fps: Number(comp2.fps),
-                duration: Number(comp2.duration),
-                workAreaStart: Number(comp2.workAreaStart),
-                workAreaDuration: Number(comp2.workAreaDuration)
-              },
-              args
-            );
-            const shots2 = [];
-            for (let i = 0; i < samples.length; i++) {
-              const snap = await captureCompFrame({
-                ctx,
-                opId,
-                compId: args.comp_id,
-                time: samples[i].time,
-                frameIndex: i,
-                framesDir,
-                toolName: "ae_contact_sheet"
-              });
-              shots2.push({ ...samples[i], path: snap.path });
-            }
-            return { comp: comp2, shots: shots2 };
-          });
-          const { comp, shots } = captured;
-          const showLabels = args.labels ?? true;
-          const layout = sheetLayout(
-            shots.length,
-            Number(comp.width),
-            Number(comp.height),
-            args.tile_size ?? 320,
-            args.columns,
-            showLabels
-          );
-          const tiles = [];
-          const frames = [];
-          shots.forEach((shot, index) => {
-            const full = decodePngFile(shot.path);
-            const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
-            tiles.push({
-              image: resizeArea(full, layout.tileWidth, layout.tileHeight),
-              label: showLabels ? frameLabel(shot) : void 0,
-              flagged: analysis.flags.length > 0
-            });
-            frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
-          });
-          const sheet = buildContactSheet(tiles, layout);
-          const sheetPath = path22.join(
-            framesDir,
-            `contact_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
-          );
-          fs22.writeFileSync(sheetPath, encodePng(sheet));
-          return {
-            ok: true,
-            path: sheetPath,
-            width: layout.width,
-            height: layout.height,
-            columns: layout.columns,
-            rows: layout.rows,
-            tile_width: layout.tileWidth,
-            tile_height: layout.tileHeight,
-            comp: {
-              id: comp.id,
-              name: comp.name,
-              width: comp.width,
-              height: comp.height,
-              fps: comp.fps,
-              duration: comp.duration
-            },
-            frames,
-            flagged_frames: frames.filter((f) => f.flags.length > 0).map((f) => ({ index: f.index, time: f.time, flags: f.flags }))
-          };
-        }
-      },
-      {
-        name: "ae_motion_graph",
-        description: "READ-ONLY. Graphs how one property changes over time, like AE's graph editor, in one PNG: the value per dimension on top (red, green, blue for X, Y, Z), the speed underneath, and keyframes as yellow lines labelled #1, #2... The property is sampled with expressions applied (one sample per frame by default, at most 1000), so the graph shows what the viewer sees. Also returns the numbers: peak and mean speed, the value range, `overshoot` past the keyframe values, and per pair of keyframes a `segments[].profile` (constant, ease in-out, speeds up, slows down, hold, static, uneven). Use it to check easing and timing, or to compare before and after an ease change. Speed is the change across all dimensions per second (px/s for position). The comp is never modified, not even its current time. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeMotionGraphSchema,
-        handler: async (args, ctx) => {
-          const res = await ctx.bridge.callHost(
-            "sampleProperty",
-            {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-              start: args.start,
-              end: args.end,
-              step: args.step
-            },
-            { label: `ae_motion_graph(${args.comp_id})`, mutates: false, toolName: "ae_motion_graph" }
-          );
-          const samples = res.result;
-          const speeds = sampleSpeeds(samples);
-          const analysis = analyzeMotion(samples, speeds);
-          const width = args.width ?? 960;
-          const height = args.height ?? 540;
-          const framesDir = defaultFramesDir();
-          fs22.mkdirSync(framesDir, { recursive: true });
-          const graphPath = path22.join(
-            framesDir,
-            `graph_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
-          );
-          fs22.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
-          return {
-            ok: true,
-            path: graphPath,
-            width,
-            height,
-            comp: samples.comp,
-            layer: samples.layer,
-            property: samples.property,
-            start: r3(samples.start),
-            end: r3(samples.end),
-            step: Math.round(samples.step * 1e6) / 1e6,
-            samples: samples.times.length,
-            speed: { unit: samples.property.spatial ? "px/s" : "units/s", ...analysis.speed },
-            distance: analysis.distance,
-            value: analysis.value,
-            overshoot: analysis.overshoot,
-            segments: analysis.segments,
-            keys: samples.keys.map((k) => ({ ...k, time: r3(k.time), value: k.value.map(r3) })),
-            ...args.include_samples ? {
-              // speed_after: speed from this sample to the next (null at the last sample and across a hold jump).
-              sample_table: samples.times.map((t, i) => ({
-                time: r3(t),
-                value: samples.values[i].map(r3),
-                speed_after: i < speeds.length && speeds[i].speed !== null ? r3(speeds[i].speed) : null
-              }))
-            } : {}
-          };
-        }
-      },
-      {
-        name: "ae_motion_review",
-        description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeMotionReviewSchema,
-        handler: async (args, ctx) => {
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_motion_review(${args.comp_id})`;
-          const scanned = await runQueued2(ctx, label, opId, async () => {
-            const listResp = await ctx.bridge.evalRaw({
-              id: `${opId}_list`,
-              script: buildJsxCall("listAnimatedProperties", { comp_id: args.comp_id, layers: args.layers }),
-              label: `${label} list`,
-              mutates: false,
-              toolName: "ae_motion_review"
-            });
-            const list = listResp.result;
-            const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
-            const sampled = [];
-            for (let i = 0; i < list.properties.length; i++) {
-              const p = list.properties[i];
-              const end = p.expression && workAreaEnd > p.last_key_time + 1e-6 ? workAreaEnd : void 0;
-              const resp = await ctx.bridge.evalRaw({
-                id: `${opId}_p${i}`,
-                script: buildJsxCall("sampleProperty", { comp_id: args.comp_id, layer: { id: p.layer.id }, path: p.path, end }),
-                label: `${label} ${p.layer.name} > ${p.name}`,
-                mutates: false,
-                toolName: "ae_motion_review"
-              });
-              const speeds = sampleSpeeds(resp.result);
-              sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
-            }
-            const bounds = [];
-            if (args.bounds !== false) {
-              const byLayer = /* @__PURE__ */ new Map();
-              for (const s of sampled) byLayer.set(s.samples.layer.id, [...byLayer.get(s.samples.layer.id) ?? [], s]);
-              for (const [layerId, props] of byLayer) {
-                if (props.every((s) => s.ancestorOnly)) continue;
-                if (list.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
-                  const l = props[0].samples.layer;
-                  bounds.push({ layer: { index: l.index, id: l.id, name: l.name }, kind: "av", checkable: false, reason: "a parent's motion was not fully scanned (listing cut short)", samples: [] });
-                  continue;
-                }
-                const ancestors = props[0].parents.flatMap((id) => byLayer.get(id) ?? []);
-                const times = restTimes(props, Number(list.comp.fps), ancestors);
-                if (!times.length) continue;
-                const resp = await ctx.bridge.evalRaw({
-                  id: `${opId}_b${layerId}`,
-                  script: buildJsxCall("layerBoundsAt", { comp_id: args.comp_id, layer: { id: layerId }, times }),
-                  label: `${label} bounds ${props[0].samples.layer.name}`,
-                  mutates: false,
-                  toolName: "ae_motion_review"
-                });
-                bounds.push(resp.result);
-              }
-            }
-            return { list, sampled, bounds };
-          });
-          const target = { comp_id: args.comp_id, project_path: scanned.list.project_path };
-          const taste = ctx.settings?.get().taste;
-          let findings = [];
-          for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
-            if (ancestorOnly) continue;
-            findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
-          }
-          const safe = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
-          for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
-          const unchecked = scanned.bounds.filter((b) => !b.checkable).map((b) => ({ layer: b.layer.name, reason: b.reason }));
-          if (args.include_info === false) findings = findings.filter((f) => f.severity !== "info");
-          findings = sortFindings2(findings);
-          const counts = { medium: 0, low: 0, info: 0 };
-          const byKind = {};
-          for (const f of findings) {
-            counts[f.severity]++;
-            byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
-          }
-          const max = args.max_findings ?? 50;
-          return {
-            ok: true,
-            comp: scanned.list.comp,
-            project_path: scanned.list.project_path,
-            layers_scanned: scanned.list.layers_scanned,
-            ...scanned.list.ancestors_scanned ? { ancestors_scanned: scanned.list.ancestors_scanned } : {},
-            properties_scanned: scanned.sampled.filter((s) => !s.ancestorOnly).length,
-            properties_truncated: scanned.list.truncated,
-            ...scanned.list.ancestors_truncated ? { ancestors_truncated: true } : {},
-            clean: counts.medium === 0 && counts.low === 0,
-            counts,
-            by_kind: byKind,
-            findings: findings.slice(0, max),
-            findings_truncated: findings.length > max,
-            ...args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...unchecked.length ? { bounds_unchecked: unchecked } : {} } : {},
-            ...taste && (taste.preferred_ease || taste.allow_linear_non_motion || taste.avoid_overshoot) ? {
-              taste: {
-                preferred_ease: taste.preferred_ease,
-                allow_linear_non_motion: taste.allow_linear_non_motion,
-                avoid_overshoot: taste.avoid_overshoot
-              }
-            } : {}
-          };
-        }
-      }
-    ];
-  }
-});
-
 // src/tools/ext/layout.ts
 function alignMismatches(args, afterRaw, written) {
   const m = [];
@@ -18496,7 +25284,7 @@ function alignMismatches(args, afterRaw, written) {
     m.push({ path: "layers", expected: after.layers.length, actual: rects.length, message: "Some boxes could not be read back" });
     return m;
   }
-  const near2 = (a, b) => Math.abs(a - b) <= 0.5;
+  const near5 = (a, b) => Math.abs(a - b) <= 0.5;
   if (args.align) {
     const edge = {
       left: (r) => [r[0], box[0]],
@@ -18508,13 +25296,13 @@ function alignMismatches(args, afterRaw, written) {
     };
     after.layers.forEach((l, i) => {
       const [got, want] = edge[args.align](rects[i]);
-      expectThat(m, near2(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
+      expectThat(m, near5(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
     });
   } else {
     const h = args.distribute === "horizontal";
     const cs = rects.map((r) => centre(r, h)).sort((a, b) => a - b);
     const step2 = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
-    cs.forEach((c, i) => expectThat(m, near2(c, cs[0] + step2 * i), `centres[${i}]`, Math.round((cs[0] + step2 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
+    cs.forEach((c, i) => expectThat(m, near5(c, cs[0] + step2 * i), `centres[${i}]`, Math.round((cs[0] + step2 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
   }
   return m;
 }
@@ -18549,17 +25337,17 @@ function styleFindings(layers, opts) {
       if (seen.has(hex2)) continue;
       seen.add(hex2);
       if (opts.neutrals_ok && isNeutral(c.rgb)) continue;
-      const near2 = nearestBrand(c.rgb, opts.brand_colors);
-      if (near2 && near2.delta_e > opts.tolerance) {
+      const near5 = nearestBrand(c.rgb, opts.brand_colors);
+      if (near5 && near5.delta_e > opts.tolerance) {
         out.push({
           severity: "low",
           kind: "off_palette_colour",
           layer,
-          message: `"${l.name}" uses ${hex2} (${c.where}), ${near2.delta_e} delta E from the nearest brand colour ${near2.hex}.`,
+          message: `"${l.name}" uses ${hex2} (${c.where}), ${near5.delta_e} delta E from the nearest brand colour ${near5.hex}.`,
           colour: hex2,
           where: c.where,
-          nearest: near2.hex,
-          delta_e: near2.delta_e
+          nearest: near5.hex,
+          delta_e: near5.delta_e
         });
       }
     }
@@ -18571,12 +25359,12 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs23.rmdirSync(cur);
+      fs28.rmdirSync(cur);
     } catch {
       return;
     }
-    if (path23.resolve(cur) === path23.resolve(top)) return;
-    const up = path23.dirname(cur);
+    if (path27.resolve(cur) === path27.resolve(top)) return;
+    const up = path27.dirname(cur);
     if (up === cur) return;
     cur = up;
   }
@@ -18600,12 +25388,12 @@ function cleanBriefStyle(brief) {
   }
   return { colors, fonts, ignored };
 }
-var fs23, path23, AeAlignSchema, centre, AePurgeUnusedSchema, AeExportMogrtSchema, AeHouseStyleCheckSchema, SAFE_AREA_MAX2, layoutTools;
+var fs28, path27, AeAlignSchema, centre, AePurgeUnusedSchema, AeExportMogrtSchema, AeHouseStyleCheckSchema, SAFE_AREA_MAX2, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs23 = __toESM(require("node:fs"), 1);
-    path23 = __toESM(require("node:path"), 1);
+    fs28 = __toESM(require("node:fs"), 1);
+    path27 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -18707,8 +25495,8 @@ var init_layout = __esm({
         schema: AeExportMogrtSchema,
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
-            if (!path23.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs23.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (!path27.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
+            if (fs28.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -18716,7 +25504,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs23.mkdirSync(path23.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs28.mkdirSync(path27.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -18728,15 +25516,15 @@ var init_layout = __esm({
                 });
               } catch (err) {
                 const refused = err instanceof BridgeError && (err.kind === "evalscript_error" || err.kind === "guard");
-                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path23.dirname(args.path), createdDir);
+                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path27.dirname(args.path), createdDir);
                 throw err;
               }
               const r = res.result;
-              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path23.dirname(args.path), createdDir);
+              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path27.dirname(args.path), createdDir);
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs23.statSync(args.path);
+                  const st = fs28.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -18832,239 +25620,19 @@ var init_layout = __esm({
   }
 });
 
-// src/transcript.ts
-function parseTimecode(s) {
-  const t = s.trim().replace(",", ".");
-  const parts = t.split(":");
-  if (parts.length > 3 || parts.some((p) => p === "" || !/^\d+(\.\d+)?$/.test(p))) {
-    throw new TranscriptError(`Bad timecode "${s}"`);
-  }
-  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
-}
-function parseCueBlocks(text, isVtt) {
-  const out = [];
-  const candidates = [];
-  let untagged = 0;
-  const blocks = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
-  for (const block of blocks) {
-    const lines = block.split("\n").filter((l) => l.trim() !== "");
-    const arrow = lines.findIndex((l) => l.includes("-->"));
-    if (arrow < 0) continue;
-    const [a, rest] = lines[arrow].split("-->");
-    const b = rest.trim().split(/\s+/)[0];
-    const body = lines.slice(arrow + 1).join("\n").replace(/<[^>]+>/g, "").trim();
-    if (!body) continue;
-    let speaker;
-    const voice = isVtt ? /<v(?:\.[^ >]+)?\s+([^>]+)>/.exec(lines.slice(arrow + 1).join("\n")) : null;
-    if (voice) speaker = voice[1].trim();
-    const seg = { text: body, start: parseTimecode(a), end: parseTimecode(b), ...speaker ? { speaker } : {} };
-    if (!voice) {
-      untagged++;
-      const m = SPEAKER_PREFIX.exec(body);
-      if (m) candidates.push({ seg, name: m[1].trim(), rest: m[2].trim() });
-    }
-    out.push(seg);
-  }
-  const counts = /* @__PURE__ */ new Map();
-  for (const c of candidates) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
-  const mostlyPrefixed = candidates.length * 2 > untagged;
-  for (const c of candidates) {
-    if (isAllCaps(c.name) || mostlyPrefixed && (counts.get(c.name) ?? 0) >= 2) {
-      c.seg.speaker = c.name;
-      c.seg.text = c.rest;
-    }
-  }
-  return out;
-}
-function num2(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
-}
-function wordsFrom(list) {
-  const words = [];
-  for (const w of list) {
-    if (!w || typeof w !== "object") continue;
-    const o = w;
-    if (o.type !== void 0 && o.type !== "word") continue;
-    const text = String(o.text ?? o.word ?? "").trim();
-    const start = num2(o.start);
-    const end = num2(o.end);
-    if (!text || start === void 0 || end === void 0) continue;
-    const speaker = o.speaker_id ?? o.speaker;
-    words.push({ text, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
-  }
-  return words;
-}
-function segmentWords(words, gap = 0.8) {
-  const out = [];
-  let cur = [];
-  const flush = () => {
-    if (!cur.length) return;
-    out.push({
-      text: cur.map((w) => w.text).join(" "),
-      start: cur[0].start,
-      end: cur[cur.length - 1].end,
-      ...cur[0].speaker !== void 0 ? { speaker: cur[0].speaker } : {},
-      words: cur
-    });
-    cur = [];
-  };
-  for (const w of words) {
-    const prev = cur[cur.length - 1];
-    if (prev && (w.speaker !== prev.speaker || w.start - prev.end > gap)) flush();
-    cur.push(w);
-  }
-  flush();
-  return out;
-}
-function parseJson(text) {
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    throw new TranscriptError(`Transcript is not valid JSON: ${err.message}`);
-  }
-  const obj = data;
-  if (Array.isArray(data)) {
-    const segs = [];
-    for (const s of data) {
-      const o = s;
-      const start = num2(o?.start);
-      const end = num2(o?.end);
-      const t = String(o?.text ?? o?.word ?? "").trim();
-      if (t && start !== void 0 && end !== void 0) {
-        const speaker = o.speaker ?? o.speaker_id;
-        segs.push({ text: t, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
-      }
-    }
-    return segs;
-  }
-  if (Array.isArray(obj?.segments)) {
-    return obj.segments.flatMap((s) => {
-      const o = s;
-      const start = num2(o?.start);
-      const end = num2(o?.end);
-      if (start === void 0 || end === void 0) return [];
-      const words = Array.isArray(o.words) ? wordsFrom(o.words) : void 0;
-      const speaker = o.speaker ?? o.speaker_id;
-      return [
-        {
-          text: String(o.text ?? "").trim(),
-          start,
-          end,
-          ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {},
-          ...words && words.length ? { words } : {}
-        }
-      ];
-    });
-  }
-  if (Array.isArray(obj?.words)) return segmentWords(wordsFrom(obj.words));
-  throw new TranscriptError("JSON transcript needs `words`, `segments`, or an array of {text, start, end}");
-}
-function detectFormat(text, hint) {
-  const h = (hint ?? "").toLowerCase();
-  if (h.endsWith("srt")) return "srt";
-  if (h.endsWith("vtt")) return "vtt";
-  if (h.endsWith("json")) return "json";
-  const t = text.trimStart();
-  if (t.startsWith("{") || t.startsWith("[")) return "json";
-  if (t.startsWith("WEBVTT")) return "vtt";
-  return "srt";
-}
-function parseTranscript(text, format) {
-  const f = format ?? detectFormat(text);
-  const segs = f === "json" ? parseJson(text) : parseCueBlocks(text, f === "vtt");
-  if (!segs.length) throw new TranscriptError(`No timed lines found in the ${f.toUpperCase()} transcript`);
-  return segs.sort((a, b) => a.start - b.start);
-}
-function sentencesOf(seg) {
-  if (seg.words && seg.words.length) {
-    const out = [];
-    let cur = [];
-    for (const w of seg.words) {
-      cur.push(w);
-      if (/[.!?…]["')\]]?$/.test(w.text)) {
-        out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: w.end, speaker: seg.speaker });
-        cur = [];
-      }
-    }
-    if (cur.length) out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: cur[cur.length - 1].end, speaker: seg.speaker });
-    return out;
-  }
-  const parts = seg.text.match(/[^.!?…]+[.!?…]+["')\]]?|[^.!?…]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [seg.text];
-  const total = parts.reduce((n, p) => n + p.length, 0) || 1;
-  const span = seg.end - seg.start;
-  let t = seg.start;
-  return parts.map((p) => {
-    const d = span * p.length / total;
-    const s = { text: p, start: t, end: t + d, speaker: seg.speaker };
-    t += d;
-    return s;
-  });
-}
-function wordsOf(seg) {
-  if (seg.words && seg.words.length) return seg.words.map((w) => ({ text: w.text, start: w.start, end: w.end, speaker: w.speaker ?? seg.speaker }));
-  const words = seg.text.split(/\s+/).filter(Boolean);
-  const total = words.reduce((n, w) => n + w.length, 0) || 1;
-  const span = seg.end - seg.start;
-  let t = seg.start;
-  return words.map((w) => {
-    const d = span * w.length / total;
-    const s = { text: w, start: t, end: t + d, speaker: seg.speaker };
-    t += d;
-    return s;
-  });
-}
-function transcriptCues(segments, opts = {}) {
-  const unit = opts.unit ?? "segment";
-  const pieces = segments.flatMap((s) => {
-    if (unit === "word") return wordsOf(s);
-    if (unit === "sentence") return sentencesOf(s);
-    return [s];
-  });
-  const speakers = [];
-  const maxChars = opts.max_chars ?? 2e3;
-  return pieces.map((p) => {
-    const cue = {
-      time: round32(p.start + (opts.offset ?? 0)),
-      duration: round32(Math.max(0, p.end - p.start)),
-      comment: p.text.length > maxChars ? p.text.slice(0, maxChars) + "\u2026" : p.text
-    };
-    if (p.speaker !== void 0) {
-      cue.speaker = p.speaker;
-      if (opts.speaker_labels !== false) {
-        let i = speakers.indexOf(p.speaker);
-        if (i < 0) i = speakers.push(p.speaker) - 1;
-        cue.label = i % 16 + 1;
-      }
-    }
-    return cue;
-  });
-}
-var TranscriptError, round32, SPEAKER_PREFIX, isAllCaps;
-var init_transcript = __esm({
-  "src/transcript.ts"() {
-    "use strict";
-    TranscriptError = class extends Error {
-    };
-    round32 = (x) => Math.round(x * 1e3) / 1e3;
-    SPEAKER_PREFIX = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s;
-    isAllCaps = (name) => /[A-Z]/.test(name) && name === name.toUpperCase();
-  }
-});
-
 // src/tools/ext/markers.ts
 function cuesFromTranscript(t) {
   let text = t.text;
   if (t.path !== void 0) {
-    if (!path24.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    if (!path28.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs24.statSync(t.path);
+      stat = fs29.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
-    if (stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs24.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
+    text = fs29.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -19090,7 +25658,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
     return fresh.length;
   };
   if (!before.truncated) {
-    const lo = before.numMarkers + countFresh(near);
+    const lo = before.numMarkers + countFresh(near4);
     const hi = before.numMarkers + countFresh((a, b) => Math.abs(a - b) <= SAME_KEY);
     expectThat(m, after.numMarkers >= lo && after.numMarkers <= hi, "numMarkers", lo === hi ? lo : `${lo}..${hi}`, after.numMarkers, "Marker count is not what adding should give");
   }
@@ -19103,7 +25671,7 @@ function addMarkersMismatches(beforeRaw, afterRaw, written) {
   const nearest = (time) => {
     let best;
     for (const x of after.markers) {
-      if (near(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
+      if (near4(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
     }
     return best;
   };
@@ -19147,7 +25715,7 @@ function removeMarkersMismatches(beforeRaw, afterRaw, written) {
   const want = before.numMarkers - count;
   expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count did not drop by the number removed");
   for (const r of removed) {
-    if (after.markers.some((x) => near(x.time, r.time) && x.comment === r.comment)) {
+    if (after.markers.some((x) => near4(x.time, r.time) && x.comment === r.comment)) {
       m.push({ path: `markers@${r.time}`, expected: "removed", actual: r.comment, message: `Marker at ${r.time}s is still there` });
     }
   }
@@ -19168,18 +25736,18 @@ function selectForRemoval(list, args) {
     return false;
   });
 }
-var fs24, path24, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES, TIME_TOLERANCE, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerInputSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near, listRead, markersTools;
+var fs29, path28, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerInputSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near4, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs24 = __toESM(require("node:fs"), 1);
-    path24 = __toESM(require("node:path"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path28 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
     init_common();
     init_write_runner();
     MAX_MARKERS_PER_CALL = 500;
-    MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
+    MAX_TRANSCRIPT_BYTES2 = 5 * 1024 * 1024;
     TIME_TOLERANCE = 15e-4;
     SAME_KEY = 1e-6;
     READ_CLIP = 2e3;
@@ -19194,7 +25762,7 @@ var init_markers = __esm({
     });
     TranscriptInputSchema = external_exports.object({
       path: external_exports.string().min(1).optional().describe("Absolute path of a .srt, .vtt or .json transcript."),
-      text: external_exports.string().max(MAX_TRANSCRIPT_BYTES).optional().describe("The transcript itself, instead of a path."),
+      text: external_exports.string().max(MAX_TRANSCRIPT_BYTES2).optional().describe("The transcript itself, instead of a path."),
       format: external_exports.enum(["srt", "vtt", "json"]).optional().describe("Default: from the file extension or the content."),
       unit: external_exports.enum(["segment", "sentence", "word"]).optional().describe("One marker per segment (default), sentence or word."),
       speaker_labels: external_exports.boolean().optional().describe("A label colour per speaker. Default true."),
@@ -19226,7 +25794,7 @@ var init_markers = __esm({
       message: "Say which markers: all, start/end, comment_contains, or indexes."
     });
     listOf = (v) => v && typeof v === "object" ? v : null;
-    near = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
+    near4 = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
     listRead = (compId, layer) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
     markersTools = [
       {
@@ -19445,22 +26013,22 @@ function animatorMismatches(args, beforeRaw, afterRaw, written) {
     const want = key === "fill_color" && Array.isArray(value) && value.length === 3 ? [...value, 1] : value;
     compareValues(want, Array.isArray(want) && Array.isArray(p.value) ? p.value.slice(0, want.length) : p.value, `animator.${key}`, m);
   }
-  const sel = a.selectors[0];
+  const sel2 = a.selectors[0];
   const s = args.selector;
-  if (!sel) m.push({ path: "animator.selector", expected: "range selector", actual: void 0, message: "The animator has no range selector" });
+  if (!sel2) m.push({ path: "animator.selector", expected: "range selector", actual: void 0, message: "The animator has no range selector" });
   else {
     const keyed = args.reveal ? args.reveal.property ?? "start" : void 0;
-    if (s?.start !== void 0 && keyed !== "start") compareValues(s.start, sel.start, "selector.start", m);
-    if (s?.end !== void 0 && keyed !== "end") compareValues(s.end, sel.end, "selector.end", m);
-    if (s?.offset !== void 0 && keyed !== "offset") compareValues(s.offset, sel.offset, "selector.offset", m);
+    if (s?.start !== void 0 && keyed !== "start") compareValues(s.start, sel2.start, "selector.start", m);
+    if (s?.end !== void 0 && keyed !== "end") compareValues(s.end, sel2.end, "selector.end", m);
+    if (s?.offset !== void 0 && keyed !== "offset") compareValues(s.offset, sel2.offset, "selector.offset", m);
     if (args.reveal) {
-      const keys = sel[`${args.reveal.property ?? "start"}_keys`];
+      const keys = sel2[`${args.reveal.property ?? "start"}_keys`];
       expectThat(m, keys === 2, "selector.reveal", 2, keys, "The reveal did not get its two keys");
     }
   }
   return m;
 }
-var Vec2, MODES, MaskFields, MaskSelector, AeMaskSchema, AeTextAnimatorSchema, PROP_MATCH, masksTools;
+var Vec22, MODES, MaskFields, MaskSelector, AeMaskSchema, AeTextAnimatorSchema, PROP_MATCH, masksTools;
 var init_masks = __esm({
   "src/tools/ext/masks.ts"() {
     "use strict";
@@ -19468,19 +26036,19 @@ var init_masks = __esm({
     init_receipts();
     init_common();
     init_write_runner();
-    Vec2 = external_exports.array(external_exports.number()).length(2);
+    Vec22 = external_exports.array(external_exports.number()).length(2);
     MODES = ["add", "subtract", "intersect", "lighten", "darken", "difference", "none"];
     MaskFields = {
       name: external_exports.string().min(1).max(200).optional(),
       shape: external_exports.enum(["rect", "ellipse", "path"]).optional().describe("A new path: a rectangle or ellipse in `box`, or a free path."),
       box: external_exports.array(external_exports.number()).length(4).optional().describe("rect and ellipse: [left, top, width, height] in layer pixels."),
-      vertices: external_exports.array(Vec2).min(2).max(1e3).optional().describe("path: the points in layer pixels."),
-      in_tangents: external_exports.array(Vec2).optional(),
-      out_tangents: external_exports.array(Vec2).optional(),
+      vertices: external_exports.array(Vec22).min(2).max(1e3).optional().describe("path: the points in layer pixels."),
+      in_tangents: external_exports.array(Vec22).optional(),
+      out_tangents: external_exports.array(Vec22).optional(),
       closed: external_exports.boolean().optional(),
       mode: external_exports.enum(MODES).optional().describe("Default for a new mask: add."),
       inverted: external_exports.boolean().optional(),
-      feather: Vec2.optional().describe("[x, y] in pixels."),
+      feather: Vec22.optional().describe("[x, y] in pixels."),
       opacity: external_exports.number().min(0).max(100).optional(),
       expansion: external_exports.number().optional().describe("Pixels; negative shrinks.")
     };
@@ -19507,7 +26075,7 @@ var init_masks = __esm({
         opacity: external_exports.number().min(0).max(100).optional(),
         fill_color: external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4).optional(),
         tracking: external_exports.number().optional(),
-        blur: Vec2.optional()
+        blur: Vec22.optional()
       }).refine((p) => Object.values(p).some((v) => v !== void 0), { message: "Give at least one animator property." }).describe("What the animator does to the selected characters (offsets from their normal look)."),
       selector: external_exports.object({
         start: external_exports.number().min(0).max(100).optional(),
@@ -19650,10 +26218,10 @@ function summarize(comps) {
   return s;
 }
 function hashFingerprint(fp) {
-  return crypto8.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
+  return crypto10.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
 }
 function jobsPath(projectPath) {
-  return path25.join(path25.dirname(projectPath), `${path25.basename(projectPath, path25.extname(projectPath))}.jobs.json`);
+  return path29.join(path29.dirname(projectPath), `${path29.basename(projectPath, path29.extname(projectPath))}.jobs.json`);
 }
 function rememberJob(job) {
   memoryJobs.delete(job.id);
@@ -19667,7 +26235,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs25.readFileSync(file, "utf8");
+    raw = fs30.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -19677,7 +26245,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs25.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs30.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -19691,8 +26259,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs25.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs25.renameSync(tmp, file);
+    fs30.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs30.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -19709,7 +26277,7 @@ function loadJob(projectPath, id) {
   return memoryJobs.get(id) ?? null;
 }
 function newJobId() {
-  return `mc_${Date.now().toString(36)}_${crypto8.randomBytes(3).toString("hex")}`;
+  return `mc_${Date.now().toString(36)}_${crypto10.randomBytes(3).toString("hex")}`;
 }
 function planFromProbe(comps, names, probe) {
   const byId3 = new Map(probe.map((p) => [p.id, p]));
@@ -19733,6 +26301,11 @@ function planFromProbe(comps, names, probe) {
     plan2.set(c.comp_id, { action: "run" });
   }
   return plan2;
+}
+function isRealCheckpoint(c) {
+  if (c === null || typeof c !== "object") return false;
+  const st = c.status;
+  return st === "created" || st === "reused";
 }
 function guardChanged(opId, expect, actual) {
   return new BridgeError({
@@ -19791,17 +26364,17 @@ async function multiCompApply(args, ctx) {
       return { ok: false, error: "not_found", applied: false, message: `Not comps in this project: ${resolved.missing_ids.join(", ")}. Nothing was written.`, missing_ids: resolved.missing_ids };
     }
     if (resolved.truncated) {
-      return bad(`The selection matches ${resolved.matched} comps, more than the ${TABLE_LIMIT} a job can list. Narrow it with folder_id, nested_in, name_pattern or comp_ids. Nothing was written.`, { matched: resolved.matched });
+      return bad2(`The selection matches ${resolved.matched} comps, more than the ${TABLE_LIMIT} a job can list. Narrow it with folder_id, nested_in, name_pattern or comp_ids. Nothing was written.`, { matched: resolved.matched });
     }
     if (resolved.partial) {
-      return bad("The scan of the project was cut short, so the selection may be incomplete. Narrow it with folder_id, nested_in or comp_ids. Nothing was written.");
+      return bad2("The scan of the project was cut short, so the selection may be incomplete. Narrow it with folder_id, nested_in or comp_ids. Nothing was written.");
     }
     if (resolved.comps.length === 0) {
       return { ok: false, error: "no_comps", applied: false, message: "The selection matches no comps. Nothing was written." };
     }
     const limit = args.max_comps ?? 100;
     if (resolved.comps.length > limit) {
-      return bad(`The selection is ${resolved.comps.length} comps, over max_comps ${limit}. Narrow it or raise max_comps (at most ${MAX_JOB_COMPS}). Nothing was written.`, { matched: resolved.comps.length });
+      return bad2(`The selection is ${resolved.comps.length} comps, over max_comps ${limit}. Narrow it or raise max_comps (at most ${MAX_JOB_COMPS}). Nothing was written.`, { matched: resolved.comps.length });
     }
     job = {
       id: newJobId(),
@@ -19826,10 +26399,10 @@ async function multiCompApply(args, ctx) {
     };
   }
   const tool = await lookupTool(job.tool);
-  if (!tool) return bad(`The write tool ${job.tool} is not available on this server. Nothing was written.`);
+  if (!tool) return bad2(`The write tool ${job.tool} is not available on this server. Nothing was written.`);
   const scan = scanLayerSelectors(job.args);
   if (job.comps.length > 1 && scan.positional.length > 0) {
-    return bad(
+    return bad2(
       `Layer selectors by index or id (${scan.positional.join(", ")}) pick a different layer in every comp. Select layers by name for more than one comp. Nothing was written.`
     );
   }
@@ -19841,21 +26414,34 @@ async function multiCompApply(args, ctx) {
     else invalid.push({ comp_id: c.comp_id, message: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ") });
   }
   if (invalid.length > 0) {
-    return bad(`${job.tool} rejects its arguments (${invalid[0].message}). Nothing was written.`, { invalid: invalid.slice(0, 20), invalid_count: invalid.length });
+    return bad2(`${job.tool} rejects its arguments (${invalid[0].message}). Nothing was written.`, { invalid: invalid.slice(0, 20), invalid_count: invalid.length });
   }
   const todo = job.comps.filter(
     (c) => c.status === "pending" || resuming && args.retry_failed === true && (c.status === "failed" || c.status === "unverified" && c.error === "interrupted")
   );
   let probe = [];
   if (todo.length) {
-    const probed = await call(
-      ctx,
-      "multicompProbe",
-      { comp_ids: todo.map((c) => c.comp_id), layer_names: scan.names, expect: { project_path: args.expect.project_path } },
-      "ae_multi_comp_apply (probe layers)"
-    );
-    if (probed.guard_failed) throw guardChanged(opId, args.expect, probed.project_path);
-    probe = probed.comps;
+    const nameChunks = [];
+    for (let i = 0; i < scan.names.length; i += PROBE_NAME_LIMIT) nameChunks.push(scan.names.slice(i, i + PROBE_NAME_LIMIT));
+    if (nameChunks.length === 0) nameChunks.push([]);
+    for (const chunk of nameChunks) {
+      const probed = await call(
+        ctx,
+        "multicompProbe",
+        { comp_ids: todo.map((c) => c.comp_id), layer_names: chunk, expect: { project_path: args.expect.project_path } },
+        "ae_multi_comp_apply (probe layers)"
+      );
+      if (probed.guard_failed) throw guardChanged(opId, args.expect, probed.project_path);
+      if (probe.length === 0) {
+        probe = probed.comps.map((p) => ({ ...p, found: { ...p.found } }));
+      } else {
+        const byId3 = new Map(probe.map((p) => [p.id, p]));
+        for (const p of probed.comps) {
+          const into = byId3.get(p.id);
+          if (into) Object.assign(into.found, p.found);
+        }
+      }
+    }
   }
   const plan2 = planFromProbe(todo, scan.names, probe);
   if (args.dry_run) {
@@ -19907,6 +26493,7 @@ async function multiCompApply(args, ctx) {
   let store = saveJob(job);
   activeJobs.add(job.id);
   let stoppedAt = null;
+  const writtenNow = [];
   try {
     let wrote = false;
     for (const entry of todo) {
@@ -19942,6 +26529,7 @@ async function multiCompApply(args, ctx) {
       let outcome;
       let fatal = false;
       let checkpoint;
+      let skippedCheckpoint;
       let userChanged;
       let undoSteps2;
       entry.status = "in_flight";
@@ -19950,7 +26538,10 @@ async function multiCompApply(args, ctx) {
         const result = await tool.handler(parsedByComp.get(entry.comp_id), ctx);
         outcome = classifyResult(result);
         const r = result;
-        checkpoint = r?.checkpoint ?? (Array.isArray(r?.chunks) ? r?.chunks?.find((ch) => ch?.checkpoint !== void 0 && ch?.checkpoint !== null)?.checkpoint : void 0);
+        const candidates = [r?.checkpoint];
+        if (Array.isArray(r?.chunks)) for (const ch of r.chunks) candidates.push(ch?.checkpoint);
+        checkpoint = candidates.find(isRealCheckpoint);
+        skippedCheckpoint = candidates.find((c) => c !== void 0 && c !== null && !isRealCheckpoint(c));
         if (typeof r?.user_changed === "string" && r.user_changed.length > 0) userChanged = r.user_changed.slice(0, 500);
         if (Array.isArray(r?.chunks)) undoSteps2 = Math.max(1, r.chunks.filter((ch) => (ch?.done ?? 0) > 0).length);
         wrote = true;
@@ -19960,7 +26551,13 @@ async function multiCompApply(args, ctx) {
         fatal = c.fatal;
         wrote = wrote || outcome.applied !== false;
       }
-      if (job.checkpoint === void 0 && checkpoint !== void 0 && checkpoint !== null) job.checkpoint = checkpoint;
+      if (job.checkpoint === void 0 && checkpoint !== void 0) {
+        job.checkpoint = checkpoint;
+        delete job.checkpoint_skipped_reason;
+      } else if (job.checkpoint === void 0 && job.checkpoint_skipped_reason === void 0 && skippedCheckpoint !== void 0) {
+        const reason = skippedCheckpoint.reason;
+        job.checkpoint_skipped_reason = typeof reason === "string" && reason ? reason.slice(0, 300) : "The automatic checkpoint made no copy.";
+      }
       if (job.fingerprints && outcome.applied !== false) {
         try {
           const fpAfter = await call(ctx, "compFingerprint", { comp_id: entry.comp_id }, `ae_multi_comp_apply (fingerprint after ${entry.name})`);
@@ -19975,6 +26572,7 @@ async function multiCompApply(args, ctx) {
       Object.assign(entry, outcome, { duration_ms: Date.now() - started });
       if (userChanged !== void 0) entry.user_changed = userChanged;
       if (undoSteps2 !== void 0) entry.undo_steps = undoSteps2;
+      if (entry.applied === true || outcome.status === "ok") writtenNow.push(entry);
       store = saveJob(job);
       if (outcome.status === "unverified" || fatal) {
         stoppedAt = { comp_id: entry.comp_id, name: entry.name };
@@ -19997,8 +26595,9 @@ async function multiCompApply(args, ctx) {
     job.stop_reason = interrupted.length > 0 ? `${interrupted.length} comp(s) were being written when the job was interrupted and may be half done: ${interrupted.slice(0, 5).map((c) => `"${c.name}"`).join(", ")}. Inspect them; retry_failed runs them again.` : "Comps left pending.";
   }
   store = saveJob(job);
-  const anyApplied = job.comps.some((c) => c.applied === true || c.status === "ok");
-  const written = job.comps.filter((c) => c.applied === true || c.status === "ok");
+  const jobApplied = job.comps.some((c) => c.applied === true || c.status === "ok");
+  const anyApplied = writtenNow.length > 0;
+  const written = writtenNow;
   const undoSteps = written.reduce((n, c) => n + (c.undo_steps ?? 1), 0);
   const userChangedList = job.comps.filter((c) => c.user_changed).slice(0, 20).map((c) => ({ comp_id: c.comp_id, name: c.name, user_changed: c.user_changed }));
   const clean = summary2.failed === 0 && summary2.unverified === 0 && summary2.pending === 0;
@@ -20006,6 +26605,7 @@ async function multiCompApply(args, ctx) {
     ok: clean,
     ...clean ? {} : { error: stoppedAt ? "job_stopped" : "comps_failed" },
     applied: anyApplied,
+    job_applied: jobApplied,
     job_id: job.id,
     state: job.state,
     tool: job.tool,
@@ -20015,8 +26615,8 @@ async function multiCompApply(args, ctx) {
     comps: job.comps.slice(0, TABLE_LIMIT).map((c) => ({ ...c })),
     truncated: job.comps.length > TABLE_LIMIT,
     checkpoint: job.checkpoint ?? null,
-    checkpoint_note: job.checkpoint === void 0 || job.checkpoint === null ? "No automatic checkpoint was captured for this job, so there is no copy of the last save to go back to; only Ctrl+Z undoes it." : "One automatic checkpoint (a copy of the last save) covers the whole job when the project wasn't saved between comps; it is the way back across all comps. ae_checkpoint_revert restores it.",
-    undo_note: `Each written comp is its own undo step, and an ae_batch_set comp has one per chunk (an undo group can't span evalScripts): ${undoSteps} step${undoSteps === 1 ? "" : "s"} of Ctrl+Z to undo by hand, from ${written.length} written comp${written.length === 1 ? "" : "s"}.`,
+    checkpoint_note: job.checkpoint === void 0 || job.checkpoint === null ? `No automatic checkpoint copy was made for this job${job.checkpoint_skipped_reason ? ` (${job.checkpoint_skipped_reason})` : ""}, so there is no copy of the last save to go back to; only Ctrl+Z undoes it.` : "One automatic checkpoint (a copy of the last save) covers the whole job when the project wasn't saved between comps; it is the way back across all comps. ae_checkpoint_revert restores it.",
+    undo_note: `Each written comp is its own undo step, and an ae_batch_set comp has one per chunk (an undo group can't span evalScripts): ${undoSteps} step${undoSteps === 1 ? "" : "s"} of Ctrl+Z to undo by hand, from ${written.length} comp${written.length === 1 ? "" : "s"} written in this call.`,
     ...userChangedList.length > 0 ? { user_changed: userChangedList } : {},
     job_file: store.file,
     ...jobFileNotes(job, store),
@@ -20032,13 +26632,13 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto8, fs25, path25, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup, lookupTool, sleep, call, bad, multicompTools;
+var crypto10, fs30, path29, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup, lookupTool, sleep, PROBE_NAME_LIMIT, call, bad2, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
-    crypto8 = __toESM(require("node:crypto"), 1);
-    fs25 = __toESM(require("node:fs"), 1);
-    path25 = __toESM(require("node:path"), 1);
+    crypto10 = __toESM(require("node:crypto"), 1);
+    fs30 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -20134,12 +26734,13 @@ var init_multicomp = __esm({
     };
     lookupTool = registryLookup;
     sleep = (ms) => new Promise((resolve3) => setTimeout(resolve3, ms));
+    PROBE_NAME_LIMIT = 50;
     call = (ctx, fn, args, label) => ctx.bridge.callHost(fn, args, { label, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
-    bad = (message, extra = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra });
+    bad2 = (message, extra = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra });
     multicompTools = [
       {
         name: "ae_multi_comp_apply",
-        description: "Run one existing guarded write (ae_set_property, ae_set_text, ae_add_effect, ae_set_effect, ae_remove_effect, ae_apply_preset, ae_batch_set, ae_create_layer, ae_set_track_matte, ae_add_markers, ae_remove_markers, ae_remove_keyframes, ae_set_keyframe_ease, ae_mask, ae_text_animator, ae_shape, ae_align) on many comps in one call: pick the comps by comp_ids, a folder_id (subfolders included), nested_in (every comp inside a comp) or a name_pattern, and give op {tool, args} without comp_id and expect. Each comp goes through that tool's own handler, so its guard, undo group and separate-evalScript read-back stay in force, and comps are written one at a time with a pause so AE's UI keeps up. The result is a per-comp table (ok, skipped, failed, unverified) with an optional fingerprint hash before and after. Layers must be picked by name (index and id selectors are refused for more than one comp); a comp without the named layer is skipped, not failed. The comp list is frozen in <project>.jobs.json at the start; a stopped job (on_failure 'stop', a guard failure, a failed read-back) resumes with resume_job_id. Nothing is retried within a run. Each comp is its own undo step; the way back across the whole job is the automatic checkpoint (ae_checkpoint_revert). dry_run resolves the comps and checks arguments and layer names without writing. It sets no comp size, length or frame rate: no typed write tool does that yet. " + AGENT_SAFETY_GUIDANCE,
+        description: `Run one existing guarded write (${MULTICOMP_WRITE_TOOLS.join(", ")}) on many comps in one call: pick the comps by comp_ids, a folder_id (subfolders included), nested_in (every comp inside a comp) or a name_pattern, and give op {tool, args} without comp_id and expect. Each comp goes through that tool's own handler, so its guard, undo group and separate-evalScript read-back stay in force, and comps are written one at a time with a pause so AE's UI keeps up. The result is a per-comp table (ok, skipped, failed, unverified) with an optional fingerprint hash before and after. Layers must be picked by name (index and id selectors are refused for more than one comp); a comp without the named layer is skipped, not failed. The comp list is frozen in <project>.jobs.json at the start; a stopped job (on_failure 'stop', a guard failure, a failed read-back) resumes with resume_job_id. Nothing is retried within a run. Each comp is its own undo step; the way back across the whole job is the automatic checkpoint (ae_checkpoint_revert). dry_run resolves the comps and checks arguments and layer names without writing. It sets no comp size, length or frame rate: no typed write tool does that yet. ` + AGENT_SAFETY_GUIDANCE,
         schema: AeMultiCompApplySchema,
         handler: multiCompApply
       }
@@ -20155,7 +26756,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path26.join(defaultDataDir(), "ui");
+  return path30.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -20204,13 +26805,13 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process2, fs26, path26, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process2, fs31, path30, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     import_node_child_process2 = require("node:child_process");
-    fs26 = __toESM(require("node:fs"), 1);
-    path26 = __toESM(require("node:path"), 1);
+    fs31 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
     init_common();
@@ -20387,7 +26988,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs26.mkdirSync(outDir, { recursive: true });
+            fs31.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           const rawStdout = await runPowerShellScript2([
@@ -20453,28 +27054,28 @@ function namePattern(name, sequence) {
 }
 function listDir(dir) {
   try {
-    return fs27.readdirSync(dir);
+    return fs32.readdirSync(dir);
   } catch {
     return [];
   }
 }
 function findVersions(file, sequence) {
-  const dir = path27.dirname(file);
-  const base = path27.basename(file);
+  const dir = path31.dirname(file);
+  const base = path31.basename(file);
   const own = versionToken(base);
-  const dirName = path27.basename(dir);
+  const dirName = path31.basename(dir);
   const dirTok = versionToken(dirName);
   const byVersion = /* @__PURE__ */ new Map();
   const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
   if (dirTok && sequence && (!own || own.number === dirTok.number)) {
-    const parent = path27.dirname(dir);
+    const parent = path31.dirname(dir);
     const dirRe = new RegExp(`^${escapeRe(dirTok.before)}(\\d{1,5})${escapeRe(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
     for (const sib of listDir(parent)) {
       const m = dirRe.exec(sib);
       if (!m) continue;
-      const ext2 = path27.extname(base).toLowerCase();
-      for (const f of listDir(path27.join(parent, sib))) {
-        if (path27.extname(f).toLowerCase() === ext2) add(Number(m[1]), path27.join(parent, sib, f));
+      const ext2 = path31.extname(base).toLowerCase();
+      for (const f of listDir(path31.join(parent, sib))) {
+        if (path31.extname(f).toLowerCase() === ext2) add(Number(m[1]), path31.join(parent, sib, f));
       }
     }
     return { current: dirTok.number, versions: firstOfEach(byVersion) };
@@ -20484,7 +27085,7 @@ function findVersions(file, sequence) {
   if (!pat) return { current: null, versions: [] };
   for (const n of listDir(dir)) {
     const m = pat.re.exec(n);
-    if (m) add(Number(m[1]), path27.join(dir, n));
+    if (m) add(Number(m[1]), path31.join(dir, n));
   }
   return { current: own.number, versions: firstOfEach(byVersion) };
 }
@@ -20499,15 +27100,15 @@ function planVersion(file, sequence, want) {
   return { current, latest, target, newer };
 }
 function versionLogPath(projectPath) {
-  const ext2 = path27.extname(projectPath);
-  return path27.join(path27.dirname(projectPath), `${path27.basename(projectPath, ext2)}.versions.json`);
+  const ext2 = path31.extname(projectPath);
+  return path31.join(path31.dirname(projectPath), `${path31.basename(projectPath, ext2)}.versions.json`);
 }
 function appendVersionLog(projectPath, entries, notes) {
   const file = versionLogPath(projectPath);
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs27.readFileSync(file, "utf8");
+    raw = fs32.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -20522,22 +27123,22 @@ function appendVersionLog(projectPath, entries, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs27.renameSync(file, aside);
+      fs32.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs27.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs27.renameSync(tmp, file);
+  fs32.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs32.renameSync(tmp, file);
   return file;
 }
-var fs27, path27, VERSION_RE, escapeRe;
+var fs32, path31, VERSION_RE, escapeRe;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs27 = __toESM(require("node:fs"), 1);
-    path27 = __toESM(require("node:path"), 1);
+    fs32 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
     escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -20567,9 +27168,9 @@ function egpMismatches(args, beforeRaw, afterRaw) {
   return m;
 }
 function sameFootage(a, b, sequence) {
-  const norm = (p) => normalizeGuardPath(p);
-  if (!sequence) return norm(a) === norm(b);
-  const dir = (p) => norm(p).replace(/[\\/][^\\/]*$/, "");
+  const norm2 = (p) => normalizeGuardPath(p);
+  if (!sequence) return norm2(a) === norm2(b);
+  const dir = (p) => norm2(p).replace(/[\\/][^\\/]*$/, "");
   const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
   return dir(a) === dir(b) && ver(a) === ver(b);
 }
@@ -20611,7 +27212,7 @@ function batchMismatches(ops, afterRaw, offset) {
   });
   return m;
 }
-var PathSchema2, AeGetEssentialGraphicsSchema, AeSetEssentialGraphicsSchema, asAe, AeRenderTemplatesSchema, AeVersionFootageSchema, BatchOpSchema, AeBatchSetSchema, readOps, sleep2, productionTools;
+var PathSchema3, AeGetEssentialGraphicsSchema, AeSetEssentialGraphicsSchema, asAe, AeRenderTemplatesSchema, AeVersionFootageSchema, BatchOpSchema, AeBatchSetSchema, readOps, sleep2, productionTools;
 var init_production = __esm({
   "src/tools/ext/production.ts"() {
     "use strict";
@@ -20623,7 +27224,7 @@ var init_production = __esm({
     init_mutate();
     init_audio2();
     init_write_runner();
-    PathSchema2 = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1);
+    PathSchema3 = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1);
     AeGetEssentialGraphicsSchema = external_exports.object({
       comp_id: external_exports.number().int(),
       layer: LayerSelectorSchema.optional().describe("A precomp layer in this comp: also list its overrides (Essential Properties).")
@@ -20632,7 +27233,7 @@ var init_production = __esm({
       comp_id: external_exports.number().int(),
       action: external_exports.enum(["add", "rename", "template_name", "set_override"]).describe("add: a property to this comp's template; rename: a controller; template_name: the template's name; set_override: a precomp layer's Essential Property."),
       layer: LayerSelectorSchema.optional().describe("add: the layer holding the property; set_override: the precomp layer."),
-      path: PathSchema2.optional().describe("add: the property's path from the layer."),
+      path: PathSchema3.optional().describe("add: the property's path from the layer."),
       index: external_exports.number().int().positive().optional().describe("rename: the controller's 1-based index."),
       name: external_exports.string().min(1).max(200).optional().describe("add: the controller's name (optional); rename and template_name: the new name; set_override: the Essential Property's name."),
       value: external_exports.union([external_exports.number(), external_exports.boolean(), external_exports.string(), external_exports.array(external_exports.number())]).optional().describe("set_override: the value (text for a source text property)."),
@@ -20659,7 +27260,7 @@ var init_production = __esm({
     }).refine((v) => !v.update || v.expect !== void 0, { message: "update needs expect." }).refine((v) => v.version === void 0 || v.item_ids?.length === 1, { message: "version needs exactly one item." });
     BatchOpSchema = external_exports.object({
       layer: LayerSelectorSchema,
-      path: PathSchema2,
+      path: PathSchema3,
       value: external_exports.unknown().optional().describe("A static value (or the value at the comp's current time on an animated property)."),
       keyframes: external_exports.array(KeyframeItemSchema).max(100).optional(),
       expression: external_exports.string().max(2e4).optional()
@@ -21088,12 +27689,12 @@ function sanitizeCheckpointLabel(label) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs28, path28, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs33, path32, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs28 = __toESM(require("node:fs"), 1);
-    path28 = __toESM(require("node:path"), 1);
+    fs33 = __toESM(require("node:fs"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -21209,7 +27810,27 @@ var init_receipts2 = __esm({
       "ae_purge_unused",
       "ae_verify_render",
       "ae_layer_ops",
-      "ae_comp_settings"
+      "ae_comp_settings",
+      "ae_captions",
+      "ae_rig_add_controls",
+      "ae_rig_link",
+      "ae_rig_unlink",
+      "ae_rig_rename",
+      "ae_expr_recipe",
+      "ae_fit_text",
+      "ae_text_backdrop",
+      "ae_stagger",
+      "ae_stagger_layout",
+      "ae_time_remap",
+      "ae_camera_rig",
+      "ae_explain_layer_proof",
+      "ae_scrub_check",
+      "ae_set_footage_interpretation",
+      "ae_footage_proxy",
+      "ae_path_write",
+      "ae_path_operator",
+      "ae_path_link",
+      "ae_path_connector"
     ];
     AeCheckpointRevertSchema = external_exports.object({
       expect: ExpectSchema,
@@ -21315,7 +27936,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs28.existsSync(actualProjectPath)) {
+              if (!fs33.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -21324,16 +27945,16 @@ var init_receipts2 = __esm({
                   actual: { project_path: actualProjectPath }
                 });
               }
-              const ext2 = path28.extname(actualProjectPath) || ".aep";
-              const baseName = path28.basename(actualProjectPath, ext2);
+              const ext2 = path32.extname(actualProjectPath) || ".aep";
+              const baseName = path32.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs28.mkdirSync(checkpointDir, { recursive: true });
+              fs33.mkdirSync(checkpointDir, { recursive: true });
               const stamp2 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
               const checkpointFileName = `${baseName}_${stamp2}_${safeLabel}${ext2}`;
-              const checkpointPath = path28.join(checkpointDir, checkpointFileName);
-              fs28.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs28.statSync(checkpointPath);
+              const checkpointPath = path32.join(checkpointDir, checkpointFileName);
+              fs33.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs33.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -21349,7 +27970,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs28.existsSync(checkpointPath)
+                  checkpoint_exists: fs33.existsSync(checkpointPath)
                 }
               });
               return {
@@ -21392,7 +28013,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs28.existsSync(checkpointDir)) {
+          if (!fs33.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -21400,10 +28021,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries = fs28.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries = fs33.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries.map((e) => {
-            const fullPath = path28.join(checkpointDir, e.name);
-            const stat = fs28.statSync(fullPath);
+            const fullPath = path32.join(checkpointDir, e.name);
+            const stat = fs33.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -21456,7 +28077,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs28.existsSync(args.checkpoint_path)) {
+              if (!fs33.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -21553,201 +28174,6 @@ var init_receipts2 = __esm({
   }
 });
 
-// src/tools/ext/reframe.ts
-function parseAspect(aspect) {
-  const m = /^\s*(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)\s*$/i.exec(aspect);
-  if (!m) return void 0;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  return w > 0 && h > 0 ? w / h : void 0;
-}
-function even(n) {
-  return Math.max(4, Math.round(n / 2) * 2);
-}
-function sizeForAspect(srcW, srcH, ratio) {
-  const short = Math.min(srcW, srcH);
-  if (ratio >= 1) return { width: even(short * ratio), height: even(short) };
-  return { width: even(short), height: even(short / ratio) };
-}
-function aspectName(w, h) {
-  const r = w / h;
-  return Object.keys(DEFAULT_MARGINS).find((k) => Math.abs(parseAspect(k) - r) / r < 0.01);
-}
-function marginsFor(w, h, override) {
-  const base = DEFAULT_MARGINS[aspectName(w, h) ?? ""] ?? FALLBACK_MARGINS;
-  return { ...base, ...override ?? {} };
-}
-function planTargets(args, srcW, srcH, srcName) {
-  const problems = [];
-  const targets = args.targets.map((t) => {
-    const ratio = parseAspect(t.aspect);
-    let size;
-    if (t.width && t.height) {
-      size = { width: t.width, height: t.height };
-    } else if (ratio === void 0) {
-      problems.push(`"${t.aspect}" is not an aspect like 9:16`);
-      size = { width: srcW, height: srcH };
-    } else if (t.width) {
-      size = { width: t.width, height: even(t.width / ratio) };
-    } else if (t.height) {
-      size = { width: even(t.height * ratio), height: t.height };
-    } else {
-      size = sizeForAspect(srcW, srcH, ratio);
-    }
-    if (size.width < MIN_SIZE || size.height < MIN_SIZE || size.width > MAX_SIZE || size.height > MAX_SIZE) {
-      problems.push(`"${t.aspect}" gives ${size.width}x${size.height}; a comp must be ${MIN_SIZE} to ${MAX_SIZE} pixels on each side (give width and height)`);
-    }
-    return {
-      aspect: t.aspect,
-      name: t.name ?? `${srcName} ${size.width}x${size.height}`,
-      width: size.width,
-      height: size.height,
-      margins: marginsFor(size.width, size.height, t.margins)
-    };
-  });
-  return { targets, problems };
-}
-var DEFAULT_MARGINS, FALLBACK_MARGINS, MIN_SIZE, MAX_SIZE, MarginsSchema, AeReframeSchema, reframeTools;
-var init_reframe = __esm({
-  "src/tools/ext/reframe.ts"() {
-    "use strict";
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_receipts();
-    init_common();
-    init_mutate();
-    init_read_back();
-    DEFAULT_MARGINS = {
-      "16:9": { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 },
-      "1:1": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
-      "4:5": { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 },
-      "9:16": { top: 0.12, bottom: 0.2, left: 0.06, right: 0.06 }
-    };
-    FALLBACK_MARGINS = { top: 0.05, bottom: 0.05, left: 0.05, right: 0.05 };
-    MIN_SIZE = 4;
-    MAX_SIZE = 3e4;
-    MarginsSchema = external_exports.object({
-      top: external_exports.number().min(0).max(0.45).optional(),
-      bottom: external_exports.number().min(0).max(0.45).optional(),
-      left: external_exports.number().min(0).max(0.45).optional(),
-      right: external_exports.number().min(0).max(0.45).optional()
-    }).describe("Safe margins as fractions of the frame, e.g. { bottom: 0.25 } for a platform with a tall caption area.");
-    AeReframeSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("The approved comp to reframe."),
-      targets: external_exports.array(
-        external_exports.object({
-          aspect: external_exports.string().min(3).describe("'16:9', '1:1', '4:5', '9:16', or any 'w:h'."),
-          width: external_exports.number().int().min(4).max(3e4).optional().describe("Exact size instead of keeping the source's short side."),
-          height: external_exports.number().int().min(4).max(3e4).optional(),
-          name: external_exports.string().min(1).max(200).optional().describe("Default '<comp> <w>x<h>'."),
-          margins: MarginsSchema.optional()
-        })
-      ).min(1).max(6),
-      source_margins: MarginsSchema.optional().describe("The source comp's safe margins, if not the defaults for its aspect."),
-      shrink: external_exports.boolean().optional().describe("Shrink a pinned layer that no longer fits the safe area. Default true."),
-      guide: external_exports.boolean().optional().describe("Add a guide layer (not rendered) outlining the safe area. Default true."),
-      expect: ExpectSchema
-    });
-    reframeTools = [
-      {
-        name: "ae_reframe",
-        description: "Social cut-downs: copy a comp to other aspects (16:9, 1:1, 4:5, 9:16, or any w:h; the source's short side is kept, so 1920x1080 gives 1080x1920) and re-lay out its top-level layers. Backgrounds (footage, solids, adjustment and shape layers covering the frame) are scaled to cover the new frame. Everything else, controller nulls included, is pinned to the nearest edge or centre of the safe area, keeping its margin, and shrunk if it no longer fits; keys move with it; children follow their parent. 3D layers, cameras and lights move with the frame's centre. Precomps are treated like any other layer (shrunk to fit), so reframe inside them if they need their own layout. Default safe margins: 5% on 16:9, 6% on 1:1 and 4:5, and on 9:16 12% top, 20% bottom, 6% sides for platform UI; override with `margins` (a brief's platform numbers win). A guide layer outlines the safe area. One undo group for every size, guarded by `expect`, with an auto checkpoint. The layout is read back in a separate evalScript: `outside_safe` lists layers still past the safe area. Look at each new comp (ae_contact_sheet) before calling it done. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeReframeSchema,
-        handler: async (args, ctx) => {
-          const src = await ctx.bridge.evalRaw({
-            id: `${ctx.bridge.newOpId()}_reframe_src`,
-            script: buildJsxCall("getComp", { comp_id: args.comp_id }),
-            label: "ae_reframe (source)",
-            mutates: false,
-            toolName: "ae_reframe"
-          });
-          const { width: srcW, height: srcH, name: srcName } = src.result;
-          const { targets, problems } = planTargets(args, srcW, srcH, srcName);
-          if (problems.length > 0) return { ok: false, error: "bad_args", problems };
-          ctx.quarantine.assertClear();
-          const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
-          const opId = ctx.bridge.newOpId();
-          const projectSnapshot = (suffix) => ctx.bridge.evalRaw({
-            id: `${opId}_${suffix}`,
-            script: buildJsxCall("snapshotForReceipt", {}),
-            label: `ae_reframe (${suffix} snapshot)`,
-            mutates: false,
-            toolName: "ae_reframe"
-          });
-          try {
-            return await ctx.queue.run("ae_reframe", async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, expect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_reframe");
-              const before = await projectSnapshot("before");
-              const write = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("reframeComp", {
-                  expect,
-                  comp_id: args.comp_id,
-                  targets,
-                  source_margins: marginsFor(srcW, srcH, args.source_margins),
-                  shrink: args.shrink !== false,
-                  guide: args.guide !== false
-                }),
-                label: `ae_reframe(${targets.map((t) => t.aspect).join(", ")})`,
-                mutates: true,
-                toolName: "ae_reframe"
-              });
-              const made = write.result.comps;
-              const afterRead = await readAfterWrite(opId, () => projectSnapshot("after"));
-              const reportRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_report`,
-                  script: buildJsxCall("reframeReport", { comps: made.map((m) => ({ comp_id: m.comp_id, safe: m.safe })) }),
-                  label: "ae_reframe (read back)",
-                  mutates: false,
-                  toolName: "ae_reframe"
-                })
-              );
-              const after = afterRead.value;
-              const reportComps = reportRead.value?.result?.comps ?? [];
-              const mismatches = [];
-              const readFailure = afterRead.failure ?? reportRead.failure;
-              if (readFailure) mismatches.push(readFailure);
-              reportComps.forEach((r, i) => {
-                const t = targets[i];
-                if (r.width !== t.width || r.height !== t.height) {
-                  mismatches.push({ path: `${t.name}.size`, expected: [t.width, t.height], actual: [r.width, r.height], message: `${t.name} is not ${t.width}x${t.height}` });
-                }
-              });
-              return {
-                ok: true,
-                op_id: opId,
-                applied: true,
-                source: write.result.source,
-                comps: made.map((m, i) => ({
-                  ...m,
-                  aspect: targets[i].aspect,
-                  margins: targets[i].margins,
-                  // null: the layout couldn't be read back, so it is unchecked (not clean).
-                  outside_safe: reportRead.failure ? null : reportComps[i]?.outside_safe ?? []
-                })),
-                next: "Check each new comp with ae_contact_sheet; nudge anything in outside_safe with ae_set_property.",
-                checkpoint,
-                receipt: buildReceipt({ before: before.result, after: after?.result ?? null, customMismatches: mismatches })
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-            }
-            throw err;
-          }
-        }
-      }
-    ];
-  }
-});
-
 // src/tools/ext/shapes.ts
 function shapeMismatches(adds, beforeRaw, afterRaw, written) {
   const m = [];
@@ -21788,7 +28214,7 @@ function shapeMismatches(adds, beforeRaw, afterRaw, written) {
   });
   return m;
 }
-var Vec22, Color2, ShapeSpecSchema, AeShapeSchema, kindOf, shapesTools;
+var Vec23, Color5, ShapeSpecSchema, AeShapeSchema, kindOf, shapesTools;
 var init_shapes = __esm({
   "src/tools/ext/shapes.ts"() {
     "use strict";
@@ -21796,25 +28222,25 @@ var init_shapes = __esm({
     init_receipts();
     init_common();
     init_write_runner();
-    Vec22 = external_exports.array(external_exports.number()).length(2);
-    Color2 = external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4);
+    Vec23 = external_exports.array(external_exports.number()).length(2);
+    Color5 = external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4);
     ShapeSpecSchema = external_exports.object({
       type: external_exports.enum(["rect", "ellipse", "star", "polygon", "path"]),
       name: external_exports.string().min(1).max(200).optional().describe("The group's name. Default '<type> <n>'."),
-      size: Vec22.optional().describe("rect and ellipse: [width, height]."),
-      position: Vec22.optional().describe("The shape's centre inside its group (rect, ellipse, star, polygon)."),
+      size: Vec23.optional().describe("rect and ellipse: [width, height]."),
+      position: Vec23.optional().describe("The shape's centre inside its group (rect, ellipse, star, polygon)."),
       roundness: external_exports.number().min(0).optional().describe("rect: corner radius."),
       points: external_exports.number().int().min(3).max(100).optional().describe("star and polygon: number of points or sides."),
       outer_radius: external_exports.number().positive().optional().describe("star and polygon."),
       inner_radius: external_exports.number().positive().optional().describe("star only."),
       rotation: external_exports.number().optional().describe("star and polygon: degrees."),
-      vertices: external_exports.array(Vec22).min(2).max(1e3).optional().describe("path: the points, in layer pixels."),
-      in_tangents: external_exports.array(Vec22).optional().describe("path: one per vertex, relative to it. Default straight lines."),
-      out_tangents: external_exports.array(Vec22).optional(),
+      vertices: external_exports.array(Vec23).min(2).max(1e3).optional().describe("path: the points, in layer pixels."),
+      in_tangents: external_exports.array(Vec23).optional().describe("path: one per vertex, relative to it. Default straight lines."),
+      out_tangents: external_exports.array(Vec23).optional(),
       closed: external_exports.boolean().optional().describe("path: default true."),
-      fill: external_exports.object({ color: Color2, opacity: external_exports.number().min(0).max(100).optional() }).optional(),
-      stroke: external_exports.object({ color: Color2, width: external_exports.number().min(0), opacity: external_exports.number().min(0).max(100).optional() }).optional(),
-      group_position: Vec22.optional().describe("The group's own Transform position.")
+      fill: external_exports.object({ color: Color5, opacity: external_exports.number().min(0).max(100).optional() }).optional(),
+      stroke: external_exports.object({ color: Color5, width: external_exports.number().min(0), opacity: external_exports.number().min(0).max(100).optional() }).optional(),
+      group_position: Vec23.optional().describe("The group's own Transform position.")
     }).superRefine((s, ctx) => {
       const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
       if (s.type === "rect" || s.type === "ellipse") need(s.size !== void 0, `${s.type} needs size.`);
@@ -22464,12 +28890,12 @@ async function queued2(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs29, path29, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
+var fs34, path33, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
 var init_track = __esm({
   "src/tools/ext/track.ts"() {
     "use strict";
-    fs29 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    fs34 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -22550,7 +28976,7 @@ var init_track = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs29.mkdirSync(framesDir, { recursive: true });
+          fs34.mkdirSync(framesDir, { recursive: true });
           const patchSize = (args.pattern_size ?? 31) | 1;
           const opts = {
             patchSize,
@@ -22578,8 +29004,8 @@ var init_track = __esm({
             const points2 = [];
             let lostAt2 = null;
             for (let i = 0; i < times2.length; i++) {
-              const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: times2[i], frameIndex: i, framesDir, toolName: "ae_track_point" });
-              const png = decodePngFile(snap.path);
+              const snap2 = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: times2[i], frameIndex: i, framesDir, toolName: "ae_track_point" });
+              const png = decodePngFile(snap2.path);
               const gray = toGray(png);
               if (i === 0) {
                 firstFrame = png;
@@ -22598,14 +29024,14 @@ var init_track = __esm({
                   points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
                 }
               }
-              fs29.rmSync(snap.path, { force: true });
+              fs34.rmSync(snap2.path, { force: true });
               if (lostAt2) break;
             }
             return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast };
           });
           const { points, lostAt } = tracked;
-          const previewPath = path29.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-          fs29.writeFileSync(
+          const previewPath = path33.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+          fs34.writeFileSync(
             previewPath,
             encodePng(
               drawTrackPreview(
@@ -22689,209 +29115,23 @@ var init_track = __esm({
   }
 });
 
-// src/tools/ext/verify.ts
-function looksLikeSequence(file) {
-  if (!STILL.test(file)) return false;
-  const base = path30.basename(file);
-  if (!/[._-]\d{3,}\.[^.]+$/.test(base)) return false;
-  const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(base);
-  if (!m) return false;
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^${esc(m[1])}\\d{${m[2].length}}${esc(m[3])}$`, "i");
-  try {
-    return fs30.readdirSync(path30.dirname(file)).some((n) => n !== base && re.test(n));
-  } catch {
-    return false;
-  }
-}
-function firstFrameOf(output) {
-  if (!/\[#+\]/.test(output)) return fs30.existsSync(output) ? output : null;
-  const dir = path30.dirname(output);
-  const base = path30.basename(output);
-  const m = /^(.*)\[(#+)\](.*)$/.exec(base);
-  if (!m) return null;
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
-  try {
-    const frames = fs30.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
-    return frames.length ? path30.join(dir, frames[0]) : null;
-  } catch {
-    return null;
-  }
-}
-function renderChecks(r, c, jobFrames, sequence = false) {
-  const out = [];
-  if (!r.still) {
-    const compFrames = Math.round(c.duration * c.fps);
-    const workFrames = Math.round(c.work_area_duration * c.fps);
-    if (jobFrames !== void 0) {
-      out.push({ what: "frames", expected: jobFrames, actual: r.frames, ok: r.frames === jobFrames, note: "the job's frame range" });
-    } else {
-      const ok = r.frames === compFrames || r.frames === workFrames;
-      out.push({
-        what: "frames",
-        expected: compFrames === workFrames ? compFrames : [compFrames, workFrames],
-        actual: r.frames,
-        ok,
-        note: r.frames === workFrames && compFrames !== workFrames ? "matches the work area" : compFrames === workFrames ? void 0 : "the comp or its work area"
-      });
-    }
-    if (sequence) {
-      out.push({ what: "fps", expected: c.fps, actual: r.fps, ok: true, note: "an image sequence has no frame rate of its own; the frame count is what is checked" });
-    } else {
-      out.push({ what: "fps", expected: c.fps, actual: r.fps, ok: Math.abs(r.fps - c.fps) < 0.01 });
-    }
-  }
-  const sameSize = r.width === c.width && r.height === c.height;
-  const half = r.width * 2 === c.width && r.height * 2 === c.height;
-  out.push({ what: "size", expected: [c.width, c.height], actual: [r.width, r.height], ok: sameSize, ...half ? { note: "half resolution: check the render settings" } : {} });
-  if (c.has_audio) out.push({ what: "audio", expected: true, actual: r.has_audio, ok: r.has_audio, ...r.has_audio ? {} : { note: "the comp has sound; the output module may have audio off" } });
-  return out;
-}
-function createVerifyTools(options = {}) {
-  const getJob = options.getJob ?? ((id) => getDefaultAerenderRegistry().get(id));
-  return [
-    {
-      name: "ae_verify_render",
-      description: "Check a finished render by importing it back into After Effects: its frame count, frame rate, size and audio are read by AE (any format AE can open, image sequences too) and compared with the comp, or with the aerender job's frame range when given a job_id. The imported item is removed again unless keep_imported; the import and removal are two undo steps and mark the project changed. Guarded by `expect`, with an automatic checkpoint. No outside tools (no ffprobe). " + AGENT_SAFETY_GUIDANCE,
-      schema: AeVerifyRenderSchema,
-      handler: async (args, ctx) => {
-        let file = args.path;
-        let compName;
-        let jobFrames;
-        let jobIsSequence = false;
-        if (args.job_id) {
-          const job = getJob(args.job_id);
-          if (!job) return { ok: false, error: "unknown_job", message: `No aerender job ${args.job_id}` };
-          if (job.state !== "succeeded") return { ok: false, error: "not_finished", message: `The job is ${job.state}${job.error ? `: ${job.error}` : ""}.` };
-          file = firstFrameOf(job.output_path) ?? void 0;
-          if (!file) return { ok: false, error: "no_output", message: `No render found at ${job.output_path}` };
-          compName = job.comp_name;
-          jobIsSequence = /\[#+\]/.test(job.output_path);
-          if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
-        }
-        if (!file || !path30.isAbsolute(file) || !fs30.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-        const stat = fs30.statSync(file);
-        if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
-        if (args.comp_id === void 0 && !compName) return { ok: false, error: "bad_args", message: "Give comp_id to compare with." };
-        const sequence = (args.sequence ?? (jobIsSequence || looksLikeSequence(file))) && STILL.test(file);
-        const jsxPath = file.replace(/\\/g, "/");
-        ctx.quarantine.assertClear();
-        const opId = ctx.bridge.newOpId();
-        const call2 = (suffix, fn, a, mutates) => ctx.bridge.evalRaw({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_verify_render (${suffix})`, mutates, toolName: "ae_verify_render" });
-        try {
-          return await ctx.queue.run("ae_verify_render", async () => {
-            ctx.quarantine.assertClear();
-            const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
-            const guard = await verifyTargetGuard(ctx, expect, opId);
-            const checkpoint = await autoCheckpoint(ctx, guard, "ae_verify_render");
-            const comp = (await call2("comp", "verifyCompInfo", { comp_id: args.comp_id, comp_name: compName }, false)).result;
-            const imported = (await call2("import", "verifyImport", { path: jsxPath, sequence, fps: sequence ? comp.fps : void 0, expect, label: "Verify render: import" }, true)).result;
-            const problems = [];
-            let render = null;
-            let readErr;
-            try {
-              render = (await call2("read", "verifyRead", { item_id: imported.item_id }, false)).result;
-            } catch (err) {
-              readErr = err;
-              problems.push(readBackMismatch(opId, "reading the imported render failed", err));
-            }
-            let itemState = "kept";
-            const blocked = readErr instanceof BridgeError && (readErr.kind === "timeout" || readErr.kind === "unreachable");
-            if (!args.keep_imported && blocked) itemState = "left";
-            if (!args.keep_imported && !blocked) {
-              let removeErr;
-              try {
-                await call2("remove", "verifyRemove", { item_id: imported.item_id, expect, label: "Verify render: remove" }, true);
-              } catch (err) {
-                removeErr = err;
-              }
-              if (removeErr !== void 0) {
-                itemState = "left";
-                problems.push(readBackMismatch(opId, `removing the imported render (item ${imported.item_id}) failed`, removeErr));
-              } else {
-                try {
-                  await call2("gone", "verifyRead", { item_id: imported.item_id }, false);
-                  itemState = "left";
-                  problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
-                } catch (errG) {
-                  if (errG instanceof BridgeError && /not_found|No imported item/i.test(errG.message)) itemState = "removed";
-                  else {
-                    itemState = "unknown";
-                    problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
-                  }
-                }
-              }
-            }
-            const leftover = itemState === "removed" ? null : imported.item_id;
-            if (!render) {
-              return {
-                ok: false,
-                error: "read_failed",
-                applied: true,
-                message: `The render was imported but could not be read back. Do not run this again before checking item ${imported.item_id} (${itemState}).`,
-                problems,
-                imported_item: leftover,
-                imported_item_state: itemState,
-                project_changed: true,
-                checkpoint
-              };
-            }
-            const checks = renderChecks(render, comp, jobFrames, sequence);
-            return {
-              ok: true,
-              matches: checks.every((c) => c.ok),
-              file: { path: file, size: stat.size, modified: stat.mtime.toISOString(), sequence },
-              render,
-              comp: { comp_id: comp.comp_id, name: comp.name },
-              checks,
-              imported_item: leftover,
-              imported_item_state: itemState,
-              ...problems.length ? { problems } : {},
-              project_changed: true,
-              checkpoint
-            };
-          });
-        } catch (err) {
-          if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-          throw err;
-        }
-      }
-    }
-  ];
-}
-var fs30, path30, AeVerifyRenderSchema, STILL, verifyTools;
-var init_verify = __esm({
-  "src/tools/ext/verify.ts"() {
-    "use strict";
-    fs30 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_common();
-    init_mutate();
-    init_read_back();
-    init_aerender();
-    AeVerifyRenderSchema = external_exports.object({
-      path: external_exports.string().min(1).optional().describe("Absolute path of the render: a movie, or one frame of an image sequence."),
-      job_id: external_exports.string().min(1).optional().describe("Or an ae_aerender_start job: its output, comp and frame range."),
-      comp_id: external_exports.number().int().optional().describe("The comp it should match. Default: the job's comp."),
-      sequence: external_exports.boolean().optional().describe("Import as an image sequence. Default: yes when other frames with the same numbering sit beside it (name.0001.png, name.0002.png), or for an aerender [####] output."),
-      keep_imported: external_exports.boolean().optional().describe("Leave the imported render in the project. Default false: it is removed again."),
-      expect: ExpectSchema
-    }).refine((v) => v.path === void 0 !== (v.job_id === void 0), { message: "Give path or job_id." });
-    STILL = /\.(png|jpe?g|tiff?|exr|dpx|tga|psd|bmp|cin|hdr|webp)$/i;
-    verifyTools = createVerifyTools();
-  }
-});
-
 // src/tools/ext/index.ts
 var extTools;
 var init_ext = __esm({
   "src/tools/ext/index.ts"() {
     "use strict";
+    init_captions();
+    init_rig();
+    init_fittext();
+    init_stagger();
+    init_timeremap();
+    init_camera();
+    init_explain();
+    init_describe();
+    init_scrub();
+    init_interpret();
+    init_paths();
+    init_memory();
     init_aerender();
     init_animate();
     init_annotate();
@@ -22960,7 +29200,19 @@ var init_ext = __esm({
       ...annotateTools,
       ...compsettingsTools,
       ...preflightTools,
-      ...sessionTools
+      ...sessionTools,
+      ...captionsTools,
+      ...rigTools,
+      ...fittextTools,
+      ...staggerTools,
+      ...timeremapTools,
+      ...cameraTools,
+      ...explainTools,
+      ...describeTools,
+      ...scrubTools,
+      ...interpretTools,
+      ...pathsTools,
+      ...memoryTools
     ];
   }
 });
@@ -23266,7 +29518,7 @@ function validCurve(curve) {
 init_assets2();
 init_diagnostics();
 init_dialogs();
-var path31 = __toESM(require("node:path"), 1);
+var path34 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 init_zod();
@@ -23369,11 +29621,11 @@ function makeErrorResponse(id, code, message, data) {
     error
   };
 }
-function isPlainObject(val) {
+function isPlainObject2(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
 async function handleSingleRpc(message, ctx) {
-  if (!isPlainObject(message)) {
+  if (!isPlainObject2(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
   const hasId = "id" in message && message.id !== void 0;
@@ -23387,7 +29639,7 @@ async function handleSingleRpc(message, ctx) {
     return null;
   }
   const rawParams = message.params;
-  if (rawParams !== void 0 && !isPlainObject(rawParams)) {
+  if (rawParams !== void 0 && !isPlainObject2(rawParams)) {
     return makeErrorResponse(
       id,
       -32602,
@@ -23448,7 +29700,7 @@ async function handleSingleRpc(message, ctx) {
         );
       }
       const rawArgs = params.arguments;
-      if (rawArgs !== void 0 && !isPlainObject(rawArgs)) {
+      if (rawArgs !== void 0 && !isPlainObject2(rawArgs)) {
         return makeErrorResponse(
           id,
           -32602,
@@ -23527,7 +29779,7 @@ async function handleRpc(message, ctx) {
 }
 
 // src/panel-host.ts
-var crypto9 = __toESM(require("node:crypto"), 1);
+var crypto11 = __toESM(require("node:crypto"), 1);
 init_dialogs();
 init_host();
 init_jsx();
@@ -23561,7 +29813,7 @@ var PanelHost = class {
     }
   }
   newOpId() {
-    return `op_${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
+    return `op_${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
   }
   /**
    * Calls the panel's evalScript queue, racing against a timeout via setTimeout.
@@ -23760,7 +30012,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path31.join(resolvedDataDir, "quarantine.json")
+    path34.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -23773,14 +30025,18 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path31.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path34.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo
   };
   if (opts.sessionTracking !== false) {
-    installSessionTracking({ dataDir: resolvedDataDir, quarantine });
-    installSessionBridgeHook(host);
+    try {
+      installSessionTracking({ dataDir: resolvedDataDir, quarantine });
+      installSessionBridgeHook(host);
+    } catch (err) {
+      opts.log?.("WARN", `Session tracking is off: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   const log = opts.log;
   const assetWatcher = new AssetWatcher(ctx, { log });

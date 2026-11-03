@@ -757,12 +757,233 @@
     };
   }
 
+  // ---------- character ranges (TextDocument.characterRange, AE 24.3+) ----------
+
+  var RANGE_KEYS = ["font", "fontSize", "tracking", "baselineShift", "fillColor", "strokeColor", "strokeWidth", "applyFill", "applyStroke", "fauxBold", "fauxItalic"];
+  var MAX_RANGES = 50;
+  var MAX_MATCHES = 200;
+
+  function hasRanges(doc) {
+    try {
+      return typeof doc.characterRange === "function";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function normBreaks(s) {
+    return String(s).split("\r\n").join("\n").split("\r").join("\n");
+  }
+
+  // The scripting guide does not say whether characterRange's end is part of
+  // the range. Ask for the first character and see what text comes back.
+  function rangeEndMode(doc) {
+    var text = String(doc.text);
+    if (text.length === 0) return "exclusive";
+    try {
+      var t = doc.characterRange(0, 1).text;
+      if (t === undefined || t === null) return "exclusive";
+      t = normBreaks(t);
+      if (t === normBreaks(text.substring(0, 1))) return "exclusive";
+      if (text.length > 1 && t === normBreaks(text.substring(0, 2))) return "inclusive";
+    } catch (e) {}
+    return "exclusive";
+  }
+
+  function rangeAt(doc, mode, start, end) {
+    if (mode === "inclusive") return doc.characterRange(start, end - 1);
+    return doc.characterRange(start, end);
+  }
+
+  // A range can't include the final line break.
+  function rangeLength(text) {
+    var n = text.length;
+    if (n > 0) {
+      var ch = text.charAt(n - 1);
+      if (ch === "\r" || ch === "\n") n--;
+    }
+    return n;
+  }
+
+  // The style fields of one range, read as they are. A field AE reports as
+  // undefined (mixed values in the range) is left out and listed in `mixed`.
+  function readRangeStyle(r) {
+    var style = {};
+    var mixed = [];
+    for (var i = 0; i < RANGE_KEYS.length; i++) {
+      var k = RANGE_KEYS[i];
+      var v;
+      try {
+        v = r[k];
+      } catch (e) {
+        v = undefined;
+      }
+      if (v === undefined || v === null) {
+        mixed.push(k);
+      } else if (k === "fillColor" || k === "strokeColor") {
+        style[k] = serialiseColorArray(v);
+      } else {
+        style[k] = v;
+      }
+    }
+    return { style: style, mixed: mixed };
+  }
+
+  function readRanges(doc, ranges) {
+    var out = [];
+    if (!ranges || typeof ranges.length !== "number") return out;
+    if (!hasRanges(doc)) fail("bad_args", "Reading character ranges needs After Effects 24.3 or later (TextDocument.characterRange)");
+    var mode = rangeEndMode(doc);
+    var text = String(doc.text);
+    // Up to MAX_MATCHES, the most resolveRanges can hand out, so a correct write is never read back short.
+    for (var i = 0; i < ranges.length && i < MAX_MATCHES; i++) {
+      var s = ranges[i].start;
+      var e = ranges[i].end;
+      if (typeof s !== "number" || typeof e !== "number" || s < 0 || e <= s || e > rangeLength(text)) {
+        fail("bad_args", "Range " + i + " is outside the text");
+      }
+      var r = rangeAt(doc, mode, s, e);
+      var got = readRangeStyle(r);
+      var t = null;
+      try { t = normBreaks(r.text); } catch (eT) {}
+      out.push({ start: s, end: e, text: t, style: got.style, mixed: got.mixed });
+    }
+    return out;
+  }
+
+  function isNum(v) {
+    return typeof v === "number" && isFinite(v);
+  }
+
+  // Every range field value, checked before anything is written.
+  function checkRangeFields(i, f) {
+    var tag = "Range " + i + ": ";
+    var c;
+    if (f.font !== undefined && (typeof f.font !== "string" || f.font.length === 0)) fail("bad_args", tag + "font must be a non-empty string");
+    if (f.fontSize !== undefined && (!isNum(f.fontSize) || !(f.fontSize >= 0.1 && f.fontSize <= 1296))) fail("bad_args", tag + "fontSize must be 0.1 to 1296");
+    if (f.tracking !== undefined && (!isNum(f.tracking) || f.tracking < -1000 || f.tracking > 10000)) fail("bad_args", tag + "tracking must be a number from -1000 to 10000");
+    if (f.baselineShift !== undefined && (!isNum(f.baselineShift) || f.baselineShift < -5000 || f.baselineShift > 5000)) fail("bad_args", tag + "baselineShift must be a number from -5000 to 5000");
+    if (f.strokeWidth !== undefined && (!isNum(f.strokeWidth) || f.strokeWidth < 0 || f.strokeWidth > 1000)) fail("bad_args", tag + "strokeWidth must be a number from 0 to 1000");
+    var colours = ["fillColor", "strokeColor"];
+    for (var ci = 0; ci < colours.length; ci++) {
+      var col = f[colours[ci]];
+      if (col === undefined) continue;
+      if (!col || typeof col.length !== "number" || col.length !== 3) fail("bad_args", tag + colours[ci] + " must be [r, g, b]");
+      for (c = 0; c < 3; c++) {
+        if (!isNum(col[c]) || col[c] < 0 || col[c] > 1) fail("bad_args", tag + colours[ci] + " values must be numbers in 0..1");
+      }
+    }
+    var flags = ["applyFill", "applyStroke", "fauxBold", "fauxItalic"];
+    for (var fi = 0; fi < flags.length; fi++) {
+      if (f[flags[fi]] !== undefined && typeof f[flags[fi]] !== "boolean") fail("bad_args", tag + flags[fi] + " must be true or false");
+    }
+  }
+
+  // Fields that overwrite each other: a colour turns its own switch on.
+  function fieldGroup(k) {
+    if (k === "fillColor" || k === "applyFill") return "fill";
+    if (k === "strokeColor" || k === "applyStroke") return "stroke";
+    return k;
+  }
+
+  // Two ranges that overlap and set the same field would leave the earlier one
+  // reading back mixed, so that is refused rather than resolved silently.
+  function checkOverlaps(out) {
+    for (var a = 0; a < out.length; a++) {
+      var ga = {};
+      var ka;
+      for (ka in out[a].style) {
+        if (out[a].style.hasOwnProperty(ka)) ga[fieldGroup(ka)] = true;
+      }
+      for (var b = a + 1; b < out.length; b++) {
+        if (!(out[a].end > out[b].start && out[b].end > out[a].start)) continue;
+        var kb;
+        for (kb in out[b].style) {
+          if (out[b].style.hasOwnProperty(kb) && ga[fieldGroup(kb)]) {
+            fail(
+              "bad_args",
+              "Range " + out[a].from + " (" + out[a].start + "-" + out[a].end + ") and range " + out[b].from + " (" + out[b].start + "-" + out[b].end + ") overlap and both set " + fieldGroup(kb) + "; split them so they do not overlap"
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // The ranges ae_set_text was asked for, as offsets into the final text
+  // (`match` is looked up here). Checked before anything is written.
+  function resolveRanges(ranges, finalText, doc) {
+    var out = [];
+    if (!ranges || typeof ranges.length !== "number" || ranges.length === 0) return out;
+    if (ranges.length > MAX_RANGES) fail("bad_args", "At most " + MAX_RANGES + " ranges");
+    if (!hasRanges(doc)) fail("bad_args", "Per-range styling needs After Effects 24.3 or later (TextDocument.characterRange); nothing was written");
+    var limit = rangeLength(finalText);
+    var plain = normBreaks(finalText);
+    out.matchesTruncated = false;
+    for (var i = 0; i < ranges.length; i++) {
+      var rg = ranges[i];
+      var st = rg.style;
+      if (!st || typeof st !== "object") fail("bad_args", "Range " + i + " has no style");
+      var spans = [];
+      if (rg.match !== undefined && rg.match !== null) {
+        var needle = normBreaks(rg.match);
+        if (needle.length === 0) fail("bad_args", "Range " + i + " has an empty match");
+        var from = 0;
+        while (spans.length < MAX_MATCHES) {
+          var at = plain.indexOf(needle, from);
+          if (at < 0) break;
+          spans.push([at, at + needle.length]);
+          if (rg.occurrence === "first") break;
+          from = at + needle.length;
+        }
+        if (spans.length >= MAX_MATCHES && rg.occurrence !== "first" && plain.indexOf(needle, from) >= 0) out.matchesTruncated = true;
+        if (spans.length === 0) fail("not_found", "Range " + i + ": \"" + rg.match + "\" is not in the text");
+      } else {
+        var s = rg.start;
+        var e = rg.end;
+        if (e === undefined || e === null) e = limit;
+        if (typeof s !== "number" || s < 0 || e <= s) fail("bad_args", "Range " + i + " needs 0 <= start < end");
+        spans.push([s, e]);
+      }
+      for (var j = 0; j < spans.length; j++) {
+        if (spans[j][1] > limit) fail("bad_args", "Range " + i + " runs past the text (" + limit + " characters; a range can't include the final line break)");
+        var fields = {};
+        for (var k = 0; k < RANGE_KEYS.length; k++) {
+          var key = RANGE_KEYS[k];
+          if (st[key] !== undefined && st[key] !== null) fields[key] = st[key];
+        }
+        checkRangeFields(i, fields);
+        out.push({ start: spans[j][0], end: spans[j][1], style: fields, from: i });
+      }
+    }
+    if (out.length > MAX_MATCHES) fail("bad_args", "More than " + MAX_MATCHES + " styled ranges");
+    checkOverlaps(out);
+    return out;
+  }
+
+  function writeRange(r, style) {
+    var applied = [];
+    if (style.font !== undefined) { r.font = String(style.font); applied.push("font"); }
+    if (style.fontSize !== undefined) { r.fontSize = Number(style.fontSize); applied.push("fontSize"); }
+    if (style.tracking !== undefined) { r.tracking = Number(style.tracking); applied.push("tracking"); }
+    if (style.baselineShift !== undefined) { r.baselineShift = Number(style.baselineShift); applied.push("baselineShift"); }
+    if (style.fillColor !== undefined) { r.fillColor = style.fillColor; applied.push("fillColor"); }
+    if (style.strokeColor !== undefined) { r.strokeColor = style.strokeColor; applied.push("strokeColor"); }
+    if (style.strokeWidth !== undefined) { r.strokeWidth = Number(style.strokeWidth); applied.push("strokeWidth"); }
+    // After the colours, which turn the fill and stroke on by themselves.
+    if (style.applyFill !== undefined) { r.applyFill = Boolean(style.applyFill); applied.push("applyFill"); }
+    if (style.applyStroke !== undefined) { r.applyStroke = Boolean(style.applyStroke); applied.push("applyStroke"); }
+    if (style.fauxBold !== undefined) { r.fauxBold = Boolean(style.fauxBold); applied.push("fauxBold"); }
+    if (style.fauxItalic !== undefined) { r.fauxItalic = Boolean(style.fauxItalic); applied.push("fauxItalic"); }
+    return applied;
+  }
+
   A.getTextDocument = function (args) {
     var c = requireComp(args.comp_id);
     var l = findLayer(c, args.layer);
     var srcProp = findSourceTextProp(l);
     var doc = srcProp.value;
-    return {
+    var out = {
       comp_id: c.id,
       layer_id: l.id,
       layer_index: l.index,
@@ -770,6 +991,8 @@
       numKeys: srcProp.numKeys,
       document: serialiseTextDoc(doc)
     };
+    if (args.ranges) out.ranges = readRanges(doc, args.ranges);
+    return out;
   };
 
   A.setText = function (args) {
@@ -777,6 +1000,15 @@
     var c = requireComp(args.comp_id);
     var l = findLayer(c, args.layer);
     var srcProp = findSourceTextProp(l);
+
+    // Ranges are resolved against the final text and checked before anything is written.
+    var resolved = [];
+    if (args.ranges && args.ranges.length) {
+      var probe = srcProp.value;
+      var finalText = String(probe.text);
+      if (args.text !== undefined && args.text !== null) finalText = String(args.text);
+      resolved = resolveRanges(args.ranges, finalText, probe);
+    }
 
     return A.withUndo("Chroma AE MCP: set_text", function () {
       var doc = srcProp.value;
@@ -844,10 +1076,37 @@
         }
       }
 
+      // The ranges go on this same document, after text and style, and the whole
+      // thing is written once: a second read in this script could be stale, and a
+      // second write could put the old text and style back.
+      var rangeResults = [];
+      if (resolved.length > 0) {
+        var mode = rangeEndMode(doc);
+        if (args.text !== undefined && args.text !== null) {
+          // Nothing has been written yet (doc is a copy), so a refusal here leaves no trace.
+          var first = resolved[0];
+          var wantText = normBreaks(String(args.text)).substring(first.start, first.end);
+          var gotText = null;
+          try { gotText = normBreaks(rangeAt(doc, mode, first.start, first.end).text); } catch (eC) { gotText = null; }
+          if (gotText !== wantText) {
+            fail("runtime", "This After Effects build does not apply character ranges to text set in the same call; nothing was written. Set the text first, then style it with a second ae_set_text call.");
+          }
+        }
+        for (var ri = 0; ri < resolved.length; ri++) {
+          var rr = resolved[ri];
+          var range = rangeAt(doc, mode, rr.start, rr.end);
+          var rangeText = null;
+          try { rangeText = normBreaks(range.text); } catch (eRt) {}
+          writeRange(range, rr.style);
+          rangeResults.push({ start: rr.start, end: rr.end, text: rangeText, style: rr.style });
+        }
+        applied.push("ranges");
+      }
+
       setSourceTextValue(c, srcProp, doc);
       var justCheck = verifyAndReassertJustification(c, srcProp, targetJust);
 
-      return {
+      var result = {
         comp_id: c.id,
         layer_id: l.id,
         layer_name: l.name,
@@ -855,6 +1114,9 @@
         justification: justCheck.justification,
         justificationReasserted: justCheck.justificationReasserted
       };
+      if (rangeResults.length > 0) result.ranges = rangeResults;
+      if (resolved.matchesTruncated) result.matches_truncated = true;
+      return result;
     });
   };
 

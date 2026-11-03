@@ -101,7 +101,7 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 
 ---
 
-## Tools (87)
+## Tools (120)
 
 | Group | Tools |
 |---|---|
@@ -128,6 +128,15 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 | Many comps | `ae_multi_comp_apply`: one write tool run across comps picked by id, name pattern, folder or nesting, with a per-comp ok/skipped/failed table and a job that resumes where it stopped |
 | Comp settings | `ae_get_comp_settings`, `ae_comp_settings`: motion blur and shutter, frame blending, renderer, draft 3D, work area, background, display start, nested frame rate and resolution, shy, guides |
 | Seeing and checking | `ae_annotate_frame` (a rendered frame with numbered layer outlines, names, anchors and safe areas, and the index to go with it; 2D layers), `ae_preflight` (blockers and warnings before a render, each naming the tool that fixes it; `preflight: true` on the render tools), `ae_session_changes` (what the user changed since the agent's last write, and writes cut short by a crash; write results carry `user_changed`) |
+| Captions | `ae_captions_plan` (transcript to captions in Node: balanced line breaks, frame-rounded timing), `ae_captions` (caption layers in the safe area, one per caption or one hold-keyed layer, optional per-word highlight and a box that follows the text; updated by name), `ae_captions_read` |
+| Rigging and expressions | `ae_rig_add_controls`, `ae_rig_link`, `ae_rig_unlink`, `ae_rig_rename`, `ae_rig_list` (Expression Controls on a controller null, linked by language-proof expressions), `ae_expr_recipes`, `ae_expr_recipe` (wiggle, overshoot, inertial bounce, loopOut, delay follow, count-up) |
+| Text fitting | `ae_measure_text`, `ae_fit_text` (shrink or grow to a box or the safe area, measured and verified), `ae_text_backdrop`; `ae_set_text` styles character ranges (one word bold and red) |
+| Timing | `ae_stagger`, `ae_stagger_layout` (offset layers or keys by a step, an ease curve, centre-out or a seeded order; dry-run plan), `ae_get_time_remap`, `ae_time_remap` (freeze, reverse, constant speed, speed ramps, hold, loop; refuses ramps past the clip) |
+| Camera and 3D | `ae_camera_rig` (one- or two-node cameras, push-in, dolly, orbit, parallax, focus on a layer), `ae_scene_3d_report` (3D layers by depth, behind the camera) |
+| Diagnosis | `ae_explain_layer` (why a layer isn't showing: a ranked checklist with evidence, into precomps), `ae_explain_layer_proof` (proves a suspect on a temporary copy by a pixel diff), `ae_describe_comp` (a plain-language map and beat-by-beat timeline), `ae_scrub_check` (black, transparent and frozen frames, pops, flicker, sequence gaps, edge clipping) |
+| Footage | `ae_get_footage_interpretation`, `ae_set_footage_interpretation` (alpha, fields, pulldown, conform rate, loop, pixel aspect, without the dialog), `ae_footage_proxy` |
+| Paths | `ae_path_read`, `ae_path_write` (shape and mask paths as JSON: resample, smooth, mirror), `ae_path_operator` (Trim Paths with a draw-on, Offset, Repeater), `ae_path_link`, `ae_path_connector` (a line between two layers that follows both) |
+| Memory | `ae_memory_status`, `ae_memory_purge` (RAM caches; undo history only after a save and an explicit yes) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` (Windows through UI Automation; macOS through System Events, which needs Accessibility permission for After Effects) |
 | Diagnostics | `ae_diagnostics`: one file for triage with versions, what is in flight and for how long, queue, quarantine, settings, popups and the end of the log, token redacted. The panel's **Save diagnostics** button writes the same file. |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |
