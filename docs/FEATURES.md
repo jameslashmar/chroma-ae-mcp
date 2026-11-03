@@ -1,6 +1,6 @@
 # Feature list and gap analysis
 
-Last updated: 2026-11-04: the 0.4 work (branch `feat/roadmap-0.4`, unreleased): every P2 item and the in-scope P3 items, plus render verification inside AE. The new tools pass the build, unit tests and lint, and their host code runs against a simulated AE DOM, but **they have not been run in After Effects yet**. Rows marked ✅ (0.4) are in that state. Earlier: 0.3.0 (2026-10-30) added skills, data-driven builds, social reframe, asset import, diagnostics, registration and macOS popup reading; 0.2 (2026-10-29) the P1 slice below.
+Last updated: 2026-11-04: the 0.4 work (branch `feat/roadmap-0.4`, unreleased): every P2 item and the in-scope P3 items, plus render verification inside AE. The new tools pass the build, unit tests and lint, and their host code runs against a simulated AE DOM, and went through a multi-agent code review whose 91 confirmed findings are fixed, but **they have not been run in After Effects** (the user decided against a live test). Rows marked ✅ (0.4) are in that state. Earlier: 0.3.0 (2026-10-30) added skills, data-driven builds, social reframe, asset import, diagnostics, registration and macOS popup reading; 0.2 (2026-10-29) the P1 slice below.
 
 This file answers two questions: what we have, and what to add next. For the things to add, it also says what to borrow from the community AE MCP servers we surveyed. Every source repo is **MIT**. Borrowed code keeps its notice in `ATTRIBUTION.md`, and each borrowed file says which file it came from.
 

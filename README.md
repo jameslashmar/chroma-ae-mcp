@@ -9,7 +9,7 @@ This is an internal Chroma tool, not a consumer product.
 > - CI runs the build, 258 unit tests, the ExtendScript lint, and the in-panel MCP end to end on AE's own Node (17.7.2).
 > - macOS should work but is untested. Popup reading on macOS is written and unit-tested, but has not been run on a Mac.
 >
-> **Next: 0.4, unreleased** (branch `feat/roadmap-0.4`). 80 tools: the 25 new ones (layers, audio, markers, keyframes, shapes, masks, Essential Graphics, versions, layout, house style, render checks) pass the build, the unit tests and the ExtendScript lint, and their host code runs against a simulated AE DOM. **They have not been run in After Effects yet**; the live smoke test covers each of them and is the next step.
+> **Next: 0.4, unreleased** (branch `feat/roadmap-0.4`). 80 tools: the 25 new ones (layers, audio, markers, keyframes, shapes, masks, Essential Graphics, versions, layout, house style, render checks) pass the build, the unit tests and the ExtendScript lint, and their host code runs against a simulated AE DOM. A multi-agent code review (106 findings, 91 confirmed and fixed) went over them, and over the read-backs of the 0.3 write tools. 610 unit tests pass, and the bundle runs on AE's Node 17.7.2. **They have not been run in After Effects**; the live smoke test covers each of them for whenever someone runs it. `docs/HANDOVER.md` lists the AE behaviours they rely on.
 
 ## What it can do
 
@@ -151,7 +151,7 @@ node qa/smoke-mcp.mjs --dir <a fresh /_work/qa/ folder>           # live: every 
 - Read `CLAUDE.md` and `docs/BUILDERS.md` before writing code: they hold the ExtendScript rules and the AE 26 traps we have measured.
 - Restart AE after any manifest change. For code changes, reload the service page at `http://localhost:8097` (the panel is on `8096`); no AE restart is needed. After a `core.jsx` change, clear `$.global.__chromaAe` first.
 - Commit the output of `npm run bundle`: CI checks that the bundle is up to date.
-- Host code can be tested without AE: `server/test/support/fake-ae.ts` is a small simulated AE DOM, and `host-jsx*.test.ts` run `panel/host/*.jsx` against it under `node:vm`. It follows AE where the host code depends on it; the live smoke test is still the proof.
+- Host code can be tested without AE: `server/test/support/fake-ae.ts` is a small simulated AE DOM, and `host-jsx*.test.ts` run `panel/host/*.jsx` against it under `node:vm`. It follows AE where the host code depends on it, but only a live run in AE proves the code.
 - **Never install the ZXP on a machine that has the dev junction.** An installer could delete through it into the repo. Run `install-dev.ps1 -Uninstall` first.
 
 **Releasing:**
@@ -188,7 +188,7 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 
 **Done in 0.3.0:** automatic checkpoints around every write, the AE skills bundle, one-click registration, asset staging with auto-import, social reframe, data-driven builds and the diagnostics bundle (all from the Atom review), plus motion preview and review, curve easing, asking the user, effects and presets, brief and taste, point tracking and green-screen keying.
 
-**Built for 0.4 (unreleased, not yet live-tested):** every P2 item and the in-scope P3 items:
+**Built for 0.4 (unreleased, reviewed, not run in AE):** every P2 item and the in-scope P3 items:
 - layers: create, precompose, track mattes, align and distribute;
 - audio: analysis from an aerender pass, cue keys, VO markers from a transcript;
 - animation: keyframe read and removal, markers, roving fixes and rest bounds in `ae_motion_review`;
@@ -198,7 +198,7 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - render verification by importing into AE instead of ffprobe.
 
 **Open:**
-- [ ] **Run 0.4 in After Effects:** the live smoke test covers every new tool; then release.
+- [ ] **Release 0.4:** decide whether to release without a live AE run (the smoke test is ready if wanted), then bump the versions and package.
 - [ ] **macOS popup reading:** written (`panel/tools/ae-dialogs-mac.js`, through System Events, needing Accessibility permission for After Effects); not yet tried on a Mac.
 - [ ] **A self-hosted CI runner** on a machine with AE. The workflow and `qa/ci-live.mjs` are ready; a runner has to be set up and registered.
 - [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. They need the VoxMark and Gulp repos on the machine that runs them.
