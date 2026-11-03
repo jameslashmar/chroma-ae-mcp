@@ -219,6 +219,29 @@
     if (spec.expansion !== undefined && spec.expansion !== null) m().property("ADBE Mask Offset").setValue(spec.expansion);
   }
 
+  // The mask fields a spec writes, with the property each one lives on.
+  var MASK_FIELDS = [
+    ["shape", "ADBE Mask Shape"],
+    ["feather", "ADBE Mask Feather"],
+    ["opacity", "ADBE Mask Opacity"],
+    ["expansion", "ADBE Mask Offset"]
+  ];
+
+  // Refuses what applyMask would throw on halfway: an unknown mode, or a
+  // value for a property that has keys (setValue throws on those). index 0 is a new mask.
+  function checkMaskSpec(p, index, spec) {
+    if (spec.mode) modeValue(spec.mode);
+    if (index === 0) return;
+    var m = p.property(index);
+    for (var f = 0; f < MASK_FIELDS.length; f++) {
+      var field = MASK_FIELDS[f][0];
+      if (spec[field] === undefined || spec[field] === null) continue;
+      if (m.property(MASK_FIELDS[f][1]).numKeys > 0) {
+        fail("bad_args", "Mask " + index + " (\"" + m.name + "\") has keyframes on " + field + "; change it with ae_set_property. Nothing was changed.");
+      }
+    }
+  }
+
   function maskIndex(p, sel) {
     if (sel.index !== undefined && sel.index !== null) {
       if (sel.index < 1 || sel.index > p.numProperties) fail("not_found", "Mask " + sel.index + " out of range");
@@ -248,14 +271,28 @@
     for (i = 0; i < (args.set || []).length; i++) sets.push({ index: maskIndex(p, args.set[i].mask), spec: args.set[i] });
     for (i = 0; i < (args.remove || []).length; i++) drops.push(maskIndex(p, args.remove[i]));
     drops.sort(function (a, b) { return b - a; });
+    // The same mask selected twice (by index and by name) is removed once.
+    for (i = drops.length - 1; i > 0; i--) {
+      if (drops[i] === drops[i - 1]) drops.splice(i, 1);
+    }
+    // Everything that can fail runs before the undo group, so a refused call changes nothing.
+    var d;
+    var s;
+    for (s = 0; s < sets.length; s++) {
+      for (d = 0; d < drops.length; d++) {
+        if (sets[s].index === drops[d]) fail("bad_args", "Mask " + sets[s].index + " is both changed and removed");
+      }
+      checkMaskSpec(p, sets[s].index, sets[s].spec);
+    }
+    for (i = 0; i < (args.add || []).length; i++) checkMaskSpec(p, 0, args.add[i]);
     return A.withUndo(args.label || "Edit masks", function () {
       var changed = [];
-      for (var s = 0; s < sets.length; s++) {
+      for (s = 0; s < sets.length; s++) {
         applyMask(layer, sets[s].index, sets[s].spec);
         changed.push({ index: sets[s].index, name: parade(layer).property(sets[s].index).name });
       }
       var removed = [];
-      for (var d = 0; d < drops.length; d++) {
+      for (d = 0; d < drops.length; d++) {
         removed.push({ index: drops[d], name: parade(layer).property(drops[d]).name });
         parade(layer).property(drops[d]).remove();
       }

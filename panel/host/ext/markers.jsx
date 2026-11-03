@@ -155,29 +155,53 @@
     if (list.length > MAX_MARKERS) fail("bad_args", "At most " + MAX_MARKERS + " markers per call");
     var fromLayer = args.relative_to === "layer";
     if (fromLayer && !layer) fail("bad_args", "relative_to 'layer' needs a layer");
+    // Validate every marker before the undo group, so a write never stops halfway.
+    // Layer (source) time to comp time; time remapping is not followed. The duration
+    // is scaled by the stretch like the time (a reversed layer uses its absolute value).
+    var plan = [];
+    var scale = 1;
+    if (fromLayer) scale = Math.abs(layer.stretch) / 100;
+    for (var v = 0; v < list.length; v++) {
+      var pm = list[v];
+      if (typeof pm.time !== "number" || !isFinite(pm.time)) fail("bad_args", "Marker " + (v + 1) + " has no usable time");
+      var pt = pm.time;
+      if (fromLayer) pt = layer.startTime + (pm.time * layer.stretch) / 100;
+      if (!isFinite(pt)) fail("bad_args", "Marker " + (v + 1) + " lands at a time AE can't use");
+      var pd = 0;
+      if (pm.duration) {
+        if (typeof pm.duration !== "number" || !isFinite(pm.duration) || pm.duration < 0) fail("bad_args", "Marker " + (v + 1) + " has a bad duration");
+        pd = pm.duration * scale;
+      }
+      plan.push({ t: pt, d: pd });
+    }
     return A.withUndo(args.label || "Add markers", function () {
       var placed = [];
       var replaced = 0;
       for (var i = 0; i < list.length; i++) {
         var m = list[i];
-        var t = m.time;
-        // Layer (source) time to comp time; time remapping is not followed.
-        if (fromLayer) t = layer.startTime + (m.time * layer.stretch) / 100;
+        var t = plan[i].t;
         var mv = new MarkerValue(m.comment ? String(m.comment) : "");
-        if (m.duration) mv.duration = m.duration;
+        if (plan[i].d) mv.duration = plan[i].d;
         if (m.chapter) mv.chapter = String(m.chapter);
         if (m.url) mv.url = String(m.url);
+        var labelFailed = false;
         if (m.label !== undefined && m.label !== null) {
-          try { mv.label = m.label; } catch (eLabel) {}
+          try { mv.label = m.label; } catch (eLabel) { labelFailed = true; }
         }
         if (prop.numKeys > 0) {
           var k = prop.nearestKeyIndex(t);
           if (Math.abs(prop.keyTime(k) - t) < 0.0005) replaced++;
         }
         prop.setValueAtTime(t, mv);
-        placed.push({ time: t, comment: mv.comment });
+        // What was asked for, so the server can check it against the read-back.
+        var rec = { time: t, comment: mv.comment, duration: plan[i].d };
+        if (m.label !== undefined && m.label !== null) rec.label = m.label;
+        if (labelFailed) rec.label_failed = true;
+        if (m.chapter) rec.chapter = clip(m.chapter);
+        if (m.url) rec.url = clip(m.url);
+        placed.push(rec);
       }
-      return { target: layer ? "layer" : "comp", placed: placed, replaced: replaced };
+      return { target: layer ? "layer" : "comp", placed: placed, replaced: replaced, frame_duration: comp.frameDuration };
     });
   };
 
@@ -197,34 +221,41 @@
     }
     var needle = null;
     if (args.comment_contains) needle = String(args.comment_contains).toLowerCase();
-    return A.withUndo(args.label || "Remove markers", function () {
-      var removed = [];
-      for (var i = prop.numKeys; i >= 1; i--) {
-        var t = prop.keyTime(i);
-        var match = args.all === true;
-        if (!match && hasIndexes && wantIndex[i]) match = true;
-        if (!match && (args.start !== undefined || args.end !== undefined) && needle === null) {
-          var lo = -1e9;
-          var hi = 1e9;
-          if (args.start !== undefined && args.start !== null) lo = args.start;
-          if (args.end !== undefined && args.end !== null) hi = args.end;
-          if (t >= lo - 0.0005 && t <= hi + 0.0005) match = true;
-        }
-        if (!match && needle !== null) {
-          var c = "";
-          try { c = String(prop.keyValue(i).comment).toLowerCase(); } catch (eC) {}
-          var inRange = true;
-          if (args.start !== undefined && args.start !== null && t < args.start - 0.0005) inRange = false;
-          if (args.end !== undefined && args.end !== null && t > args.end + 0.0005) inRange = false;
-          if (inRange && c.indexOf(needle) >= 0) match = true;
-        }
-        if (match) {
-          removed.push(markerEntry(prop, i));
-          prop.removeKey(i);
-        }
+    // Reads only: pick the matches before the undo group opens.
+    var hits = [];
+    var n = prop.numKeys;
+    for (var i = 1; i <= n; i++) {
+      var t = prop.keyTime(i);
+      var match = args.all === true;
+      if (!match && hasIndexes && wantIndex[i]) match = true;
+      if (!match && (args.start !== undefined || args.end !== undefined) && needle === null) {
+        var lo = -1e9;
+        var hi = 1e9;
+        if (args.start !== undefined && args.start !== null) lo = args.start;
+        if (args.end !== undefined && args.end !== null) hi = args.end;
+        if (t >= lo - 0.0005 && t <= hi + 0.0005) match = true;
       }
-      removed.reverse();
-      return { target: layer ? "layer" : "comp", removed: removed };
+      if (!match && needle !== null) {
+        var c = "";
+        try { c = String(prop.keyValue(i).comment).toLowerCase(); } catch (eC) {}
+        var inRange = true;
+        if (args.start !== undefined && args.start !== null && t < args.start - 0.0005) inRange = false;
+        if (args.end !== undefined && args.end !== null && t > args.end + 0.0005) inRange = false;
+        if (inRange && c.indexOf(needle) >= 0) match = true;
+      }
+      if (match) hits.push(i);
+    }
+    // Report the first MAX_MARKERS (in time order) in full; the count covers them all.
+    var removed = [];
+    for (var h = 0; h < hits.length && h < MAX_MARKERS; h++) removed.push(markerEntry(prop, hits[h]));
+    return A.withUndo(args.label || "Remove markers", function () {
+      for (var r = hits.length - 1; r >= 0; r--) prop.removeKey(hits[r]);
+      return {
+        target: layer ? "layer" : "comp",
+        removed: removed,
+        removed_count: hits.length,
+        removed_truncated: hits.length > removed.length
+      };
     });
   };
 })($.global);

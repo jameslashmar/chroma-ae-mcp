@@ -42,6 +42,14 @@ function shapeRules<T extends { shape?: string; box?: number[]; vertices?: unkno
   need(v.out_tangents === undefined || v.out_tangents.length === n, "out_tangents needs one entry per vertex.");
 }
 
+// A change to an existing mask: the path fields mean nothing without a shape, and the host would drop them.
+function setRules(v: { shape?: string; box?: number[]; vertices?: unknown[]; in_tangents?: unknown[]; out_tangents?: unknown[]; closed?: boolean }, ctx: z.RefinementCtx) {
+  shapeRules(v, ctx);
+  if (!v.shape && (v.box !== undefined || v.vertices !== undefined || v.in_tangents !== undefined || v.out_tangents !== undefined || v.closed !== undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "box, vertices, tangents and closed change a mask's path only together with shape (rect, ellipse or path)." });
+  }
+}
+
 const MaskSelector = z
   .object({ index: z.number().int().positive().optional(), name: z.string().min(1).optional() })
   .refine((s) => s.index !== undefined || s.name !== undefined, { message: "Mask selector needs index or name." });
@@ -54,7 +62,7 @@ export const AeMaskSchema = z
       shapeRules(v, ctx);
       if (!v.shape) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A new mask needs a shape." });
     })).max(50).optional(),
-    set: z.array(z.object({ mask: MaskSelector, ...MaskFields }).superRefine(shapeRules)).max(50).optional().describe("Change existing masks."),
+    set: z.array(z.object({ mask: MaskSelector, ...MaskFields }).superRefine(setRules)).max(50).optional().describe("Change existing masks."),
     remove: z.array(MaskSelector).max(50).optional(),
     expect: ExpectSchema,
   })
@@ -106,7 +114,7 @@ export const AeTextAnimatorSchema = z.object({
 
 interface MaskState {
   count: number;
-  masks: Array<{ index: number; name: string; mode: string | null; inverted: boolean; feather: number[] | null; opacity: number | null; expansion: number | null; vertices: number; box: number[] | null }>;
+  masks: Array<{ index: number; name: string; mode: string | null; inverted: boolean; feather: number[] | null; opacity: number | null; expansion: number | null; vertices: number; closed?: boolean; box: number[] | null }>;
 }
 
 type MaskSpec = z.infer<typeof AeMaskSchema>["add"] extends Array<infer T> | undefined ? T : never;
@@ -126,7 +134,14 @@ function checkMask(m: ReceiptMismatch[], label: string, spec: Partial<MaskSpec>,
     const [l, t, w, h] = spec.box as number[];
     compareValues([l, t, l + w, t + h], got.box, `${label}.box`, m);
   }
-  if (spec.shape === "path") compareValues(spec.vertices?.length, got.vertices, `${label}.vertices`, m);
+  if (spec.shape === "path" && spec.vertices) {
+    compareValues(spec.vertices.length, got.vertices, `${label}.vertices`, m);
+    // The read-back box is the min/max of the vertices, so a moved point shows here. Tangents are not read back.
+    const xs = spec.vertices.map((v) => v[0]);
+    const ys = spec.vertices.map((v) => v[1]);
+    compareValues([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], got.box, `${label}.box`, m);
+    if (got.closed !== undefined) expectThat(m, got.closed === (spec.closed !== false), `${label}.closed`, spec.closed !== false, got.closed, "Mask closed state differs");
+  }
 }
 
 export function maskMismatches(args: z.infer<typeof AeMaskSchema>, beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
@@ -190,8 +205,11 @@ export function animatorMismatches(args: z.infer<typeof AeTextAnimatorSchema>, b
   const s = args.selector;
   if (!sel) m.push({ path: "animator.selector", expected: "range selector", actual: undefined, message: "The animator has no range selector" });
   else {
-    if (s?.start !== undefined && !args.reveal) compareValues(s.start, sel.start, "selector.start", m);
-    if (s?.end !== undefined) compareValues(s.end, sel.end, "selector.end", m);
+    // The property the reveal keys reads back as its value at the current time, not the static one written first.
+    const keyed = args.reveal ? (args.reveal.property ?? "start") : undefined;
+    if (s?.start !== undefined && keyed !== "start") compareValues(s.start, sel.start, "selector.start", m);
+    if (s?.end !== undefined && keyed !== "end") compareValues(s.end, sel.end, "selector.end", m);
+    if (s?.offset !== undefined && keyed !== "offset") compareValues(s.offset, sel.offset, "selector.offset", m);
     if (args.reveal) {
       const keys = sel[`${args.reveal.property ?? "start"}_keys` as "start_keys"];
       expectThat(m, keys === 2, "selector.reveal", 2, keys, "The reveal did not get its two keys");
@@ -205,7 +223,7 @@ export const masksTools: ToolDefinition<any>[] = [
     name: "ae_mask",
     description:
       "Add, change and remove a layer's masks in one undo group guarded by `expect`: a rectangle or ellipse in a box, or a free path with tangents; mode (add, subtract, intersect, lighten, darken, difference, none), inversion, feather, opacity and expansion. " +
-      "The read-back (a separate evalScript) checks the count and each mask's mode, inversion, feather, opacity, expansion and box. Animate a mask path with ae_set_property on ['ADBE Mask Parade', <mask>, 'ADBE Mask Shape']. " +
+      "The read-back (a separate evalScript) checks the count and each mask's mode, inversion, feather, opacity, expansion and box (for a path: the box of its points, the vertex count and closed; tangents are not read back). Animate a mask path with ae_set_property on ['ADBE Mask Parade', <mask>, 'ADBE Mask Shape']. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeMaskSchema,
     handler: (args: z.infer<typeof AeMaskSchema>, ctx) =>

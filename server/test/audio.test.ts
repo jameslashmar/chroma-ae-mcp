@@ -146,8 +146,8 @@ describe("analyzeAudio", () => {
   const sr = 44100;
   const clicks = Array.from({ length: 16 }, (_, i) => 0.25 + i * 0.5); // 120 BPM
 
-  it("finds 120 BPM, the onsets and the beats of a click track", () => {
-    const a = analyzeAudio(clickTrack(clicks, 8.5, sr), sr, { fps: 25 });
+  it("finds 120 BPM, the onsets and the beats of a click track", async () => {
+    const a = await analyzeAudio(clickTrack(clicks, 8.5, sr), sr, { fps: 25 });
     expect(a.tempo?.bpm).toBeGreaterThan(118);
     expect(a.tempo?.bpm).toBeLessThan(122);
     expect(a.onsets.length).toBe(clicks.length);
@@ -158,41 +158,41 @@ describe("analyzeAudio", () => {
     expect(a.hits.length).toBeLessThanOrEqual(20);
   });
 
-  it("prefers the tapped tempo over its half when hits fall on every other beat too", () => {
+  it("prefers the tapped tempo over its half when hits fall on every other beat too", async () => {
     // Accents every beat at 100 BPM.
     const beats = Array.from({ length: 14 }, (_, i) => 0.3 + i * 0.6);
-    const a = analyzeAudio(clickTrack(beats, 9, sr), sr);
+    const a = await analyzeAudio(clickTrack(beats, 9, sr), sr);
     expect(Math.abs((a.tempo?.bpm ?? 0) - 100)).toBeLessThan(3);
   });
 
-  it("reads a kick on the beat with quieter hats between as 120, not 240", () => {
+  it("reads a kick on the beat with quieter hats between as 120, not 240", async () => {
     const kicks = clickTrack(clicks, 8.5, sr);
     const hats = clickTrack(clicks.map((c) => c + 0.25), 8.5, sr);
     const mix = Float32Array.from(kicks, (v, i) => v + 0.4 * hats[i]);
-    const a = analyzeAudio(mix, sr);
+    const a = await analyzeAudio(mix, sr);
     expect(Math.abs((a.tempo?.bpm ?? 0) - 120)).toBeLessThan(2);
     // Every hit is still an onset; the kicks are the strongest.
     expect(a.onsets.length).toBeGreaterThanOrEqual(30);
     expect(a.hits.slice(0, 10).every((h) => clicks.some((c) => Math.abs(h.time - c) < 0.02))).toBe(true);
   });
 
-  it("reports silence as silence", () => {
-    const a = analyzeAudio(new Float32Array(sr * 2), sr);
+  it("reports silence as silence", async () => {
+    const a = await analyzeAudio(new Float32Array(sr * 2), sr);
     expect(a.onsets).toEqual([]);
     expect(a.tempo).toBeNull();
     expect(a.beats).toEqual([]);
     expect(a.overall.silent_ratio).toBe(1);
   });
 
-  it("keeps levels to at most 500 points", () => {
-    const a = analyzeAudio(clickTrack(clicks, 30, 22050), 22050, { fps: 30, levels: true });
+  it("keeps levels to at most 500 points", async () => {
+    const a = await analyzeAudio(clickTrack(clicks, 30, 22050), 22050, { fps: 30, levels: true });
     expect(a.levels!.rms_db.length).toBeLessThanOrEqual(500);
-    expect(a.levels!.step).toBeCloseTo(2 / 30, 3);
+    expect(a.levels!.step).toBeCloseTo(2 / 30, 5);
     expect(Math.max(...a.levels!.peak_db)).toBeGreaterThan(-6);
   });
 
-  it("shifts every time by an offset", () => {
-    const a = analyzeAudio(clickTrack(clicks.slice(0, 6), 3.5, sr), sr);
+  it("shifts every time by an offset", async () => {
+    const a = await analyzeAudio(clickTrack(clicks.slice(0, 6), 3.5, sr), sr);
     const b = offsetAnalysis(a, 10);
     expect(b.onsets[0].time).toBeCloseTo(a.onsets[0].time + 10, 3);
     expect(b.hits[0].time).toBeCloseTo(a.hits[0].time + 10, 3);

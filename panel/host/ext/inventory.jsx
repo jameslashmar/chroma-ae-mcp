@@ -119,20 +119,31 @@
       return out;
     }
 
+    // One node per parent comp, with the layers that hold this comp (as down() does).
     function up(id, depth, seen) {
       var ps = parents[id] || [];
-      var out = [];
+      var grouped = {};
+      var order = [];
       for (var k = 0; k < ps.length; k++) {
+        var e = ps[k];
+        if (!grouped[e.parent]) {
+          grouped[e.parent] = [];
+          order.push(e.parent);
+        }
+        grouped[e.parent].push({ index: e.layer_index, name: e.layer_name });
+      }
+      var out = [];
+      for (var m = 0; m < order.length; m++) {
         if (nodes >= MAX_LIST) return out;
         nodes++;
-        var e = ps[k];
-        var node = { id: e.parent, name: byId[e.parent].name, layer: { index: e.layer_index, name: e.layer_name } };
-        if (seen[e.parent]) node.repeated = true;
+        var pid = order[m];
+        var node = { id: pid, name: byId[pid].name, layers: grouped[pid] };
+        if (seen[pid]) node.repeated = true;
         else if (depth < depthLimit) {
-          seen[e.parent] = true;
-          node.used_in = up(e.parent, depth + 1, seen);
-          seen[e.parent] = false;
-        } else if ((parents[e.parent] || []).length) node.deeper = true;
+          seen[pid] = true;
+          node.used_in = up(pid, depth + 1, seen);
+          seen[pid] = false;
+        } else if ((parents[pid] || []).length) node.deeper = true;
         out.push(node);
       }
       return out;
@@ -154,18 +165,24 @@
     }
 
     // Overview: every comp with its nesting, top-level comps first.
-    function height(id, seen) {
+    // Longest nesting below a comp, memoised so the whole overview costs
+    // comps + edges (a path search is exponential on repeated precomps).
+    // hActive keeps it safe against a cycle.
+    var hMemo = {};
+    var hActive = {};
+    function height(id) {
+      if (hMemo.hasOwnProperty(id)) return hMemo[id];
+      hActive[id] = true;
       var kids = children[id] || [];
       var h = 0;
       for (var k = 0; k < kids.length; k++) {
         var cid = kids[k].child;
-        if (seen[cid]) continue;
-        seen[cid] = true;
-        var sub = 1 + height(cid, seen);
-        seen[cid] = false;
+        if (hActive[cid]) continue;
+        var sub = 1 + height(cid);
         if (sub > h) h = sub;
-        if (h > 50) return h;
       }
+      hActive[id] = false;
+      hMemo[id] = h;
       return h;
     }
     var list = [];
@@ -179,20 +196,29 @@
           nKids++;
         }
       }
-      var seenH = {};
-      seenH[cp.id] = true;
+      var distinctParents = {};
+      var nParents = 0;
+      for (var y = 0; y < parents[cp.id].length; y++) {
+        if (!distinctParents[parents[cp.id][y].parent]) {
+          distinctParents[parents[cp.id][y].parent] = true;
+          nParents++;
+        }
+      }
       list.push({
         id: cp.id,
         name: cp.name,
-        used_in: parents[cp.id].length,
+        used_in: nParents,
+        used_by_layers: parents[cp.id].length,
         contains: nKids,
-        nesting_depth: height(cp.id, seenH),
+        nesting_depth: height(cp.id),
         in_render_queue: queued[cp.id] === true
       });
     }
     var top = [];
     var unused = [];
-    for (i = 0; i < list.length; i++) {
+    // A cut-short layer scan leaves comps without edges, so nothing can be
+    // called top-level or unused from it.
+    for (i = 0; i < list.length && !partial; i++) {
       if (list[i].used_in === 0) {
         if (list[i].in_render_queue || list[i].contains > 0) top.push({ id: list[i].id, name: list[i].name });
         else unused.push({ id: list[i].id, name: list[i].name });
@@ -201,8 +227,8 @@
     return {
       num_comps: comps.length,
       comps: list,
-      top_level: top,
-      unused: unused,
+      top_level: partial ? null : top,
+      unused: partial ? null : unused,
       truncated: comps.length > MAX_LIST,
       partial: partial
     };
@@ -232,6 +258,7 @@
     var textLayers = 0;
     var visits = 0;
     var partial = false;
+    var skipped = 0;
 
     function note(td, comp, layer, key) {
       var f = fontInfo(td);
@@ -259,19 +286,45 @@
           break;
         }
         visits++;
-        var l = c.layer(j);
+        var l = null;
         var isText = false;
-        try { isText = String(l.reflect.name) === "TextLayer"; } catch (eT) {}
+        try {
+          l = c.layer(j);
+          isText = String(l.reflect.name) === "TextLayer";
+        } catch (eT) {}
         if (!isText) continue;
         textLayers++;
-        var st = l.property("ADBE Text Properties").property("ADBE Text Document");
-        if (st.numKeys > 0) {
-          var n = st.numKeys;
-          if (n > MAX_TEXT_KEYS) n = MAX_TEXT_KEYS;
-          for (var k = 1; k <= n; k++) note(st.keyValue(k), c, l, k);
-        } else {
-          note(st.value, c, l, null);
+        // One odd text layer must not fail the whole read.
+        var layerFailed = false;
+        var st = null;
+        try {
+          st = l.property("ADBE Text Properties").property("ADBE Text Document");
+        } catch (eLayer) {
+          layerFailed = true;
         }
+        // property() gives null rather than throwing for a missing property: that is unread too.
+        if (!st) layerFailed = true;
+        if (st) {
+          var n = 1;
+          var keyed = false;
+          try {
+            if (st.numKeys > 0) {
+              keyed = true;
+              n = st.numKeys;
+              if (n > MAX_TEXT_KEYS) n = MAX_TEXT_KEYS;
+            }
+          } catch (eN) {
+            layerFailed = true;
+          }
+          if (keyed) {
+            for (var k = 1; k <= n; k++) {
+              try { note(st.keyValue(k), c, l, k); } catch (eKey) { layerFailed = true; }
+            }
+          } else {
+            try { note(st.value, c, l, null); } catch (eVal) { layerFailed = true; }
+          }
+        }
+        if (layerFailed) skipped++;
       }
     }
 
@@ -309,7 +362,8 @@
       missing: missing,
       missing_known: known,
       truncated: order.length > MAX_LIST,
-      partial: partial
+      partial: partial,
+      skipped_layers: skipped
     };
   };
 })($.global);

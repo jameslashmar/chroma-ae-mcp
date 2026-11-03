@@ -28,6 +28,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { checkAfterWrite, readAfterWrite } from "../read-back.js";
 
 // ---------- schemas ----------
 
@@ -220,18 +221,33 @@ async function runEffectWrite<A extends { comp_id: number; layer: unknown; expec
         mutates: true,
         toolName: spec.toolName,
       });
-      // Separate evalScript for the read-back.
-      const after = await readEffects("after");
+      // Separate evalScript for the read-back. The write is applied from here
+      // on, so a failed read or check is reported, never thrown.
+      const afterRead = await readAfterWrite(opId, () => readEffects("after"));
       const written = write.result ?? {};
-      const receipt = buildReceipt({
-        before: before.result,
-        after: after.result,
-        customMismatches: spec.check(args, before.result, after.result, written),
-      });
+      if (afterRead.failure) {
+        return {
+          op_id: opId,
+          applied: true as const,
+          ...written,
+          checkpoint,
+          receipt: buildReceipt({ before: before.result, after: null, customMismatches: [afterRead.failure] }),
+        };
+      }
+      const after = afterRead.value!;
+      const { mismatches, shown } = checkAfterWrite(
+        opId,
+        () => ({
+          mismatches: spec.check(args, before.result, after.result, written),
+          shown: spec.present(args, before.result, after.result, written),
+        }),
+        (failure) => ({ mismatches: [failure], shown: written })
+      );
+      const receipt = buildReceipt({ before: before.result, after: after.result, customMismatches: mismatches });
       return {
         op_id: opId,
         applied: true as const,
-        ...spec.present(args, before.result, after.result, written),
+        ...shown,
         checkpoint,
         receipt,
       };

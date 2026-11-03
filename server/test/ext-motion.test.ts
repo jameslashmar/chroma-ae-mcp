@@ -980,6 +980,45 @@ describe("panel/host/ext/motion.jsx listAnimatedProperties in a simulated AE DOM
     expect(A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ball" }] }).layers_scanned).toBe(1);
     expect(() => A.listAnimatedProperties({ comp_id: 5, layers: [{ name: "Ghost" }] })).toThrow(/No layer named/);
   });
+
+  it("walks only a parent's Transform group, and reports the requested layer count", () => {
+    class CompItem {}
+    const transform = (id: number) =>
+      group("Transform", "ADBE Transform Group", PropertyType.NAMED_GROUP, [prop("Position", "ADBE Position", 2, PropertyValueType.ThreeD_SPATIAL)]);
+    const mk = (name: string, id: number, kids: any[]) => {
+      const g: any = { ...group(name, "ADBE Vector Layer", PropertyType.NAMED_GROUP, kids), index: id === 11 ? 1 : 2, id, parent: null };
+      const byIndex = g.property;
+      g.property = (k: number | string) => (typeof k === "string" ? kids.find((c) => c.matchName === k) : byIndex(k));
+      return g;
+    };
+    const parent = mk("Rig", 12, [
+      group("Effects", "ADBE Effect Parade", PropertyType.INDEXED_GROUP, [
+        group("Blur", "ADBE Gaussian Blur 2", PropertyType.NAMED_GROUP, [prop("Blurriness", "ADBE Gaussian Blur 2-0001", 3)]),
+      ]),
+      transform(12),
+    ]);
+    const child = mk("Ball", 11, [transform(11)]);
+    child.parent = parent;
+    const layers = [child, parent];
+    const comp = Object.assign(new CompItem(), {
+      id: 5, name: "Shot", frameRate: 25, width: 640, height: 360, workAreaStart: 0, workAreaDuration: 2, numLayers: 2,
+      layer: (sel: number | string) => (typeof sel === "number" ? layers[sel - 1] : layers.find((l) => l.name === sel) ?? null),
+    });
+    const G: Record<string, any> = {
+      __chromaAe: {}, Array, CompItem, PropertyType, PropertyValueType,
+      KeyframeInterpolationType: { LINEAR: 6612, BEZIER: 6613, HOLD: 6614 },
+      app: { project: { file: null, itemByID: (id: number) => (id === 5 ? comp : null) } },
+    };
+    G.$ = { global: G };
+    vm.runInNewContext(source, G);
+    const res = G.__chromaAe.listAnimatedProperties({ comp_id: 5, layers: [{ id: 11 }] });
+    const rig = res.properties.filter((p: any) => p.layer.id === 12);
+    expect(rig.map((p: any) => p.path)).toEqual([["ADBE Transform Group", "ADBE Position"]]);
+    expect(rig[0].ancestor_only).toBe(true);
+    expect(res.layers_scanned).toBe(1);
+    expect(res.ancestors_scanned).toBe(1);
+    expect(res.truncated).toBe(false);
+  });
 });
 
 describe("ae_motion_review frame and safe-area check", () => {

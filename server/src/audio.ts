@@ -56,6 +56,18 @@ function floatReader(bits: number, littleEndian: boolean): SampleReader {
   throw new AudioDecodeError(`Unsupported float bit depth ${bits}`);
 }
 
+export interface DecodeOptions {
+  /** Refuse audio longer than this before the samples are decoded (header check). */
+  maxSeconds?: number;
+}
+
+function checkLength(frames: number, sampleRate: number, maxSeconds?: number): void {
+  if (!(sampleRate > 0)) throw new AudioDecodeError("Invalid sample rate in the audio header");
+  if (maxSeconds !== undefined && frames / sampleRate > maxSeconds) {
+    throw new AudioDecodeError(`${Math.round(frames / sampleRate)} s of audio; analyse at most ${maxSeconds / 60} minutes at a time (use start/end)`);
+  }
+}
+
 function mixDown(buf: Buffer, start: number, frames: number, channels: number, bytesPerSample: number, read: SampleReader): Float32Array {
   const mono = new Float32Array(frames);
   const block = channels * bytesPerSample;
@@ -68,7 +80,7 @@ function mixDown(buf: Buffer, start: number, frames: number, channels: number, b
   return mono;
 }
 
-function decodeWav(buf: Buffer): DecodedAudio {
+function decodeWav(buf: Buffer, opts: DecodeOptions): DecodedAudio {
   let at = 12;
   let fmt: { format: number; channels: number; sampleRate: number; bits: number } | null = null;
   while (at + 8 <= buf.length) {
@@ -76,20 +88,26 @@ function decodeWav(buf: Buffer): DecodedAudio {
     let size = buf.readUInt32LE(at + 4);
     const body = at + 8;
     if (id === "fmt ") {
+      if (size < 16 || body + 16 > buf.length) throw new AudioDecodeError("Malformed WAV fmt chunk");
       let format = buf.readUInt16LE(body);
       const channels = buf.readUInt16LE(body + 2);
       const sampleRate = buf.readUInt32LE(body + 4);
       const bits = buf.readUInt16LE(body + 14);
       // WAVE_FORMAT_EXTENSIBLE: the real format is the subformat GUID's first two bytes.
-      if (format === 0xfffe && size >= 26) format = buf.readUInt16LE(body + 24);
+      if (format === 0xfffe && size >= 26 && body + 26 <= buf.length) format = buf.readUInt16LE(body + 24);
       fmt = { format, channels, sampleRate, bits };
     } else if (id === "data") {
       if (!fmt) throw new AudioDecodeError("WAV data chunk before fmt chunk");
-      // Streaming writers leave the size at 0 or 0xFFFFFFFF; use what is there.
-      if (size === 0 || body + size > buf.length) size = buf.length - body;
+      // Streaming writers leave the sizes at 0 or 0xFFFFFFFF; use what is there. A size of 0
+      // in a file whose RIFF size is set is an empty chunk, not a streaming one.
+      const riffSize = buf.readUInt32LE(4);
+      const streaming = size === 0 && (riffSize === 0 || riffSize === 0xffffffff);
+      if (streaming || body + size > buf.length) size = buf.length - body;
+      if (size === 0) throw new AudioDecodeError("WAV file has no audio data");
       const bytes = fmt.bits / 8;
-      if (fmt.channels < 1 || !Number.isInteger(bytes) || bytes < 1) throw new AudioDecodeError("Malformed WAV fmt chunk");
+      if (fmt.channels < 1 || !(fmt.sampleRate > 0) || !Number.isInteger(bytes) || bytes < 1) throw new AudioDecodeError("Malformed WAV fmt chunk");
       const frames = Math.floor(size / (bytes * fmt.channels));
+      checkLength(frames, fmt.sampleRate, opts.maxSeconds);
       let read: SampleReader;
       if (fmt.format === 1) read = intReader(fmt.bits, true);
       else if (fmt.format === 3) read = floatReader(fmt.bits, true);
@@ -107,7 +125,7 @@ function decodeWav(buf: Buffer): DecodedAudio {
   throw new AudioDecodeError("WAV file has no data chunk");
 }
 
-function decodeAiff(buf: Buffer): DecodedAudio {
+function decodeAiff(buf: Buffer, opts: DecodeOptions): DecodedAudio {
   const isAifc = fourcc(buf, 8) === "AIFC";
   let at = 12;
   let comm: { channels: number; frames: number; bits: number; sampleRate: number; compression: string } | null = null;
@@ -116,15 +134,18 @@ function decodeAiff(buf: Buffer): DecodedAudio {
     let size = buf.readUInt32BE(at + 4);
     const body = at + 8;
     if (id === "COMM") {
+      if (size < 18 || body + 18 > buf.length) throw new AudioDecodeError("Malformed AIFF COMM chunk");
       comm = {
         channels: buf.readInt16BE(body),
         frames: buf.readUInt32BE(body + 2),
         bits: buf.readInt16BE(body + 6),
         sampleRate: readExtended80(buf, body + 8),
-        compression: isAifc && size >= 22 ? fourcc(buf, body + 18) : "NONE",
+        compression: isAifc && size >= 22 && body + 22 <= buf.length ? fourcc(buf, body + 18) : "NONE",
       };
     } else if (id === "SSND") {
       if (!comm) throw new AudioDecodeError("AIFF SSND chunk before COMM chunk");
+      if (comm.channels < 1 || !(comm.sampleRate > 0)) throw new AudioDecodeError("Malformed AIFF COMM chunk");
+      if (size < 8 || body + 8 > buf.length) throw new AudioDecodeError("Malformed AIFF SSND chunk");
       if (body + size > buf.length) size = buf.length - body;
       const offset = buf.readUInt32BE(body);
       const start = body + 8 + offset;
@@ -143,6 +164,7 @@ function decodeAiff(buf: Buffer): DecodedAudio {
       const bytes = Math.ceil(bits / 8);
       const available = Math.floor((body + size - start) / (bytes * comm.channels));
       const frames = Math.max(0, Math.min(comm.frames, available));
+      checkLength(frames, comm.sampleRate, opts.maxSeconds);
       return {
         sampleRate: comm.sampleRate,
         channels: comm.channels,
@@ -156,12 +178,18 @@ function decodeAiff(buf: Buffer): DecodedAudio {
   throw new AudioDecodeError("AIFF file has no SSND chunk");
 }
 
-export function decodeAudio(buf: Buffer): DecodedAudio {
+export function decodeAudio(buf: Buffer, opts: DecodeOptions = {}): DecodedAudio {
   if (buf.length < 12) throw new AudioDecodeError("File too short to be audio");
   const head = fourcc(buf, 0);
   const kind = fourcc(buf, 8);
-  if (head === "RIFF" && kind === "WAVE") return decodeWav(buf);
-  if (head === "FORM" && (kind === "AIFF" || kind === "AIFC")) return decodeAiff(buf);
+  try {
+    if (head === "RIFF" && kind === "WAVE") return decodeWav(buf, opts);
+    if (head === "FORM" && (kind === "AIFF" || kind === "AIFC")) return decodeAiff(buf, opts);
+  } catch (err) {
+    // A read past the end of a truncated header, or an allocation that cannot be made.
+    if (err instanceof RangeError) throw new AudioDecodeError("Truncated or malformed audio file");
+    throw err;
+  }
   throw new AudioDecodeError("Not a WAV or AIFF file");
 }
 
@@ -183,7 +211,8 @@ export interface AudioAnalysis {
   tempo: { bpm: number; period: number; confidence: number; beats_on_onsets: number } | null;
   beats: number[];
   hits: Onset[];
-  levels?: { step: number; rms_db: number[]; peak_db: number[] };
+  /** step: seconds per point; each point pools frames_per_point comp frames at fps. */
+  levels?: { step: number; fps: number; frames_per_point: number; rms_db: number[]; peak_db: number[] };
 }
 
 export interface AnalyzeOptions {
@@ -198,6 +227,11 @@ export interface AnalyzeOptions {
 }
 
 const SILENCE_DB = -50;
+/** Below this peak level there are no onsets, tempo or beats: the envelope is normalised, so noise would look like rhythm. */
+const ONSET_FLOOR_DB = -60;
+/** Frames of FFT (or beat-tracker steps) between yields to the event loop. */
+const YIELD_EVERY = 2048;
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 const MAX_LEVEL_POINTS = 500;
 
 export const toDb = (x: number): number => Math.round(20 * Math.log10(Math.max(x, 1e-10)) * 10) / 10;
@@ -247,7 +281,7 @@ function fft(re: Float64Array, im: Float64Array): void {
  * Spectral flux: the summed rise in log magnitude between frames, frame t
  * centred on sample t * hop.
  */
-export function onsetEnvelope(mono: Float32Array, sampleRate: number): { env: Float64Array; hop: number; frameRate: number } {
+export async function onsetEnvelope(mono: Float32Array, sampleRate: number): Promise<{ env: Float64Array; hop: number; frameRate: number }> {
   const n = sampleRate > 60000 ? 2048 : 1024;
   const hop = n / 2;
   const frames = Math.max(1, Math.floor(mono.length / hop) + 1);
@@ -260,6 +294,8 @@ export function onsetEnvelope(mono: Float32Array, sampleRate: number): { env: Fl
   const im = new Float64Array(n);
   const env = new Float64Array(frames);
   for (let t = 0; t < frames; t++) {
+    // The panel's one Node thread serves every MCP request: let it breathe.
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
     const start = t * hop - n / 2;
     for (let i = 0; i < n; i++) {
       const s = start + i;
@@ -355,7 +391,7 @@ export function estimatePeriod(env: Float64Array, frameRate: number, minBpm: num
 }
 
 /** Ellis (2007) dynamic-programming beat tracker on the onset envelope. */
-export function trackBeats(env: Float64Array, period: number, tightness = 100): number[] {
+export async function trackBeats(env: Float64Array, period: number, tightness = 100): Promise<number[]> {
   const n = env.length;
   if (n === 0 || period <= 1) return [];
   // Smooth the envelope with a small Gaussian (sigma = period / 16).
@@ -364,6 +400,7 @@ export function trackBeats(env: Float64Array, period: number, tightness = 100): 
   const local = new Float64Array(n);
   const max = env.reduce((m, v) => Math.max(m, v), 0) || 1;
   for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
     let s = 0;
     for (let k = -radius; k <= radius; k++) {
       const i = t + k;
@@ -376,6 +413,7 @@ export function trackBeats(env: Float64Array, period: number, tightness = 100): 
   const lo = Math.round(period / 2);
   const hi = Math.round(2 * period);
   for (let t = 0; t < n; t++) {
+    if (t % YIELD_EVERY === YIELD_EVERY - 1) await yieldToLoop();
     let best = -Infinity;
     let arg = -1;
     for (let p = t - hi; p <= t - lo; p++) {
@@ -397,7 +435,7 @@ export function trackBeats(env: Float64Array, period: number, tightness = 100): 
   return beats.reverse();
 }
 
-export function analyzeAudio(mono: Float32Array, sampleRate: number, opts: AnalyzeOptions = {}): AudioAnalysis {
+export async function analyzeAudio(mono: Float32Array, sampleRate: number, opts: AnalyzeOptions = {}): Promise<AudioAnalysis> {
   const duration = mono.length / sampleRate;
   let peak = 0;
   let sumSq = 0;
@@ -410,17 +448,18 @@ export function analyzeAudio(mono: Float32Array, sampleRate: number, opts: Analy
 
   // Levels per comp frame, and the share of silent frames.
   const fps = opts.fps && opts.fps > 0 ? opts.fps : 25;
-  const frameLen = Math.max(1, Math.round(sampleRate / fps));
-  const frameCount = Math.max(1, Math.ceil(mono.length / frameLen));
+  // Frame edges sit at the true, fractional samples per frame, so they do not drift from comp frames.
+  const spf = Math.max(1, sampleRate / fps);
+  const frameCount = Math.max(1, Math.ceil(mono.length / spf));
   const frameRms = new Float64Array(frameCount);
   const framePeak = new Float64Array(frameCount);
   let silent = 0;
   for (let f = 0; f < frameCount; f++) {
     let s = 0;
     let p = 0;
-    const end = Math.min(mono.length, (f + 1) * frameLen);
+    const end = Math.min(mono.length, Math.round((f + 1) * spf));
     let count = 0;
-    for (let i = f * frameLen; i < end; i++) {
+    for (let i = Math.round(f * spf); i < end; i++) {
       s += mono[i] * mono[i];
       const a = Math.abs(mono[i]);
       if (a > p) p = a;
@@ -431,19 +470,22 @@ export function analyzeAudio(mono: Float32Array, sampleRate: number, opts: Analy
     if (toDb(frameRms[f]) < SILENCE_DB) silent++;
   }
 
-  const { env, hop, frameRate } = onsetEnvelope(mono, sampleRate);
+  const { env, hop, frameRate } = await onsetEnvelope(mono, sampleRate);
   const envMax = env.reduce((m, v) => Math.max(m, v), 0);
   const norm = Float64Array.from(env, (v) => (envMax > 0 ? v / envMax : 0));
   const sensitivity = Math.max(0, Math.min(1, opts.sensitivity ?? 0.5));
   const delta = 0.02 + (1 - sensitivity) * 0.16;
-  const peakFrames = envMax > 0 ? pickPeaks(norm, frameRate, delta) : [];
+  const audible = toDb(peak) >= ONSET_FLOOR_DB;
+  const peakFrames = envMax > 0 && audible ? pickPeaks(norm, frameRate, delta) : [];
   const hitWindow = Math.round(0.05 * sampleRate);
-  const onsets: Onset[] = peakFrames.map((t) => {
-    const at = t * hop;
-    let p = 0;
-    for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
-    return { time: round3(at / sampleRate), strength: round3(norm[t]), level_db: toDb(p) };
-  });
+  const onsets: Onset[] = peakFrames
+    .map((t) => {
+      const at = t * hop;
+      let p = 0;
+      for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
+      return { time: round3(at / sampleRate), strength: round3(norm[t]), level_db: toDb(p) };
+    })
+    .filter((o) => o.level_db >= ONSET_FLOOR_DB);
 
   let tempo: AudioAnalysis["tempo"] = null;
   let beats: number[] = [];
@@ -453,7 +495,7 @@ export function analyzeAudio(mono: Float32Array, sampleRate: number, opts: Analy
     const last = onsets[onsets.length - 1].time;
     const periodSec = est.period / frameRate;
     // Beats only where there is sound: from half a period before the first onset to half after the last.
-    beats = trackBeats(norm, est.period)
+    beats = (await trackBeats(norm, est.period))
       .map((t) => (t * hop) / sampleRate)
       .filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2)
       .map(round3);
@@ -492,7 +534,7 @@ export function analyzeAudio(mono: Float32Array, sampleRate: number, opts: Analy
       rmsDb.push(toDb(r));
       peakDb.push(toDb(p));
     }
-    out.levels = { step: round3((bucket * frameLen) / sampleRate), rms_db: rmsDb, peak_db: peakDb };
+    out.levels = { step: Math.round((bucket / fps) * 1e6) / 1e6, fps, frames_per_point: bucket, rms_db: rmsDb, peak_db: peakDb };
   }
   return out;
 }

@@ -97,10 +97,14 @@ export function shapeMismatches(adds: Spec[], beforeRaw: unknown, afterRaw: unkn
   const added = (written.added as Array<{ index: number; name: string }>) ?? [];
   const want = before.count - removed + added.length;
   expectThat(m, after.count === want, "count", want, after.count, "Content count is not what the edit should leave");
-  if (after.truncated) return m;
   added.forEach((a, i) => {
     const spec = adds[i];
     const got = after.contents.find((c) => c.index === a.index);
+    // New groups sit at the end, so on a long layer they fall past the read-back: say so, don't pass them.
+    if (!got && after.truncated) {
+      m.push({ path: `contents[${a.index}]`, expected: a.name, actual: "not read", message: `Group "${a.name}" was not verified: the read-back stops at ${after.contents.length} items` });
+      return;
+    }
     if (!got || got.name !== a.name) {
       m.push({ path: `contents[${a.index}]`, expected: a.name, actual: got?.name, message: `Group "${a.name}" is not at index ${a.index}` });
       return;

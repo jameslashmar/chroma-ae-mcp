@@ -217,19 +217,57 @@
   // step there is the sibling's 1-based position, which property() also
   // accepts and which can't collide.
   // Bounded by MAX_ANIMATED results and MAX_VISITED properties.
+  // Each entry's layer carries `parents` (ids, nearest first), so the review can
+  // count a parent's motion when it decides a child is at rest. When `layers`
+  // narrows the scan, the parents are scanned too, marked ancestor_only.
   A.listAnimatedProperties = function (args) {
     var c = requireComp(args.comp_id);
     var layers = [];
+    var ancestorOnly = {};
+    var requested = 0;
     var i;
     if (args.layers && args.layers.length > 0) {
-      for (i = 0; i < args.layers.length; i++) layers.push(findLayer(c, args.layers[i]));
+      var seen = {};
+      for (i = 0; i < args.layers.length; i++) {
+        var chosen = findLayer(c, args.layers[i]);
+        layers.push(chosen);
+        seen[chosen.id] = true;
+      }
+      requested = layers.length;
+      for (i = 0; i < requested; i++) {
+        var up = null;
+        try { up = layers[i].parent; } catch (eUp) { up = null; }
+        for (var depth = 0; up && depth < 20; depth++) {
+          if (!seen[up.id]) {
+            seen[up.id] = true;
+            ancestorOnly[up.id] = true;
+            layers.push(up);
+          }
+          try { up = up.parent; } catch (eUp2) { up = null; }
+        }
+      }
     } else {
       for (i = 1; i <= c.numLayers; i++) layers.push(c.layer(i));
+      requested = layers.length;
+    }
+    var chains = {};
+    function parentIds(layer) {
+      if (chains[layer.id]) return chains[layer.id];
+      var ids = [];
+      var cur = null;
+      try { cur = layer.parent; } catch (eP0) { cur = null; }
+      for (var d = 0; cur && d < 20; d++) {
+        ids.push(cur.id);
+        try { cur = cur.parent; } catch (eP1) { cur = null; }
+      }
+      chains[layer.id] = ids;
+      return ids;
     }
 
     var found = [];
     var visited = 0;
     var truncated = false;
+    var ancestorsTruncated = false;
 
     function walk(group, path, depth, layer, indexed) {
       if (depth > MAX_DEPTH) return;
@@ -237,7 +275,13 @@
       try { n = group.numProperties; } catch (e0) { n = 0; }
       for (var k = 1; k <= n; k++) {
         if (found.length >= MAX_ANIMATED || visited >= MAX_VISITED) {
-          truncated = true;
+          // A parent only feeds the review's rest times: running out of room
+          // there must not report the requested layers as cut short.
+          if (ancestorOnly[layer.id]) {
+            ancestorsTruncated = true;
+          } else {
+            truncated = true;
+          }
           return;
         }
         visited++;
@@ -257,8 +301,8 @@
           if (keys >= 2 && valueTypeName(p) !== null) {
             var expr = false;
             try { expr = p.canSetExpression && p.expressionEnabled && p.expression !== ""; } catch (e3) { expr = false; }
-            found.push({
-              layer: { index: layer.index, id: layer.id, name: layer.name },
+            var entry = {
+              layer: { index: layer.index, id: layer.id, name: layer.name, parents: parentIds(layer) },
               path: nextPath,
               name: p.name,
               matchName: p.matchName,
@@ -266,7 +310,9 @@
               first_key_time: p.keyTime(1),
               last_key_time: p.keyTime(keys),
               expression: expr
-            });
+            };
+            if (ancestorOnly[layer.id]) entry.ancestor_only = true;
+            found.push(entry);
           }
         } else {
           walk(p, nextPath, depth + 1, layer, p.propertyType === PropertyType.INDEXED_GROUP);
@@ -275,7 +321,14 @@
     }
 
     for (i = 0; i < layers.length; i++) {
-      walk(layers[i], [], 1, layers[i], false);
+      if (ancestorOnly[layers[i].id]) {
+        // Only a parent's Transform group moves its children.
+        var tg = null;
+        try { tg = layers[i].property("ADBE Transform Group"); } catch (eTg) { tg = null; }
+        if (tg) walk(tg, ["ADBE Transform Group"], 2, layers[i], false);
+      } else {
+        walk(layers[i], [], 1, layers[i], false);
+      }
       if (truncated) break;
     }
 
@@ -293,7 +346,9 @@
         workAreaDuration: c.workAreaDuration
       },
       project_path: projectPath,
-      layers_scanned: layers.length,
+      layers_scanned: requested,
+      ancestors_scanned: layers.length - requested,
+      ancestors_truncated: ancestorsTruncated,
       properties: found,
       truncated: truncated
     };

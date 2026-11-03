@@ -60,11 +60,19 @@ export function nearestBrand(c: Rgb, palette: string[]): { hex: string; delta_e:
 
 const squash = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
 
-/** True when the used font is one of the brief's, by family or PostScript name, spaces and hyphens aside. */
-export function fontMatches(used: { font?: string | null; family?: string | null }, briefFonts: string[]): boolean {
-  const names = [used.font, used.family].filter((x): x is string => Boolean(x)).map(squash);
+/**
+ * True when the used font is one of the brief's, by exact name once spaces and
+ * hyphens are aside: the family ("Gotham"), the PostScript name ("Gotham-Bold")
+ * or the family with its style ("Gotham Bold"). No prefix matching: "Gotham Bold"
+ * is not Gotham-Light, and "Helvetica" is not Helvetica Neue.
+ */
+export function fontMatches(used: { font?: string | null; family?: string | null; style?: string | null }, briefFonts: string[]): boolean {
+  const font = used.font ? squash(used.font) : "";
+  const family = used.family ? squash(used.family) : "";
+  const style = used.style ? squash(used.style) : "";
+  const names = [font, family, family && style ? family + style : ""].filter(Boolean);
   return briefFonts.some((b) => {
-    const want = squash(b);
-    return names.some((n) => n === want || n.startsWith(want) || want.startsWith(n));
+    const want = typeof b === "string" ? squash(b) : "";
+    return want !== "" && names.includes(want);
   });
 }

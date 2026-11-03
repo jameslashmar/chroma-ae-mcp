@@ -964,11 +964,14 @@ const TRANSFORM_MATCH_NAMES = new Set([
 /**
  * When a layer is at rest: inside a hold or a still stretch between keys,
  * or after its last transform key (unless an expression keeps it moving),
- * and no transform property is moving then. At most 10, the latest kept.
+ * and no transform property is moving then. `ancestors` are the sampled
+ * properties of the layer's parents: layerBoundsAt composes their transforms,
+ * so a time while a parent still moves is not rest. At most 10, the latest kept.
  */
 export function restTimes(
   props: Array<{ samples: PropertySamples; analysis: MotionAnalysis }>,
-  fps: number
+  fps: number,
+  ancestors: Array<{ samples: PropertySamples; analysis: MotionAnalysis }> = []
 ): number[] {
   const transform = props.filter((p) => TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName));
   if (!transform.length) return [];
@@ -981,6 +984,29 @@ export function restTimes(
     }
     const keys = p.samples.keys;
     if (keys.length && !p.samples.property.expression) candidates.push(keys[keys.length - 1].time);
+  }
+  // Where the whole chain has stopped: a parent's last key or still stretch
+  // after the layer's own last transform key, if no parent moves then.
+  let ownLast = -Infinity;
+  for (const p of transform) {
+    const k = p.samples.keys;
+    if (k.length) ownLast = Math.max(ownLast, k[k.length - 1].time);
+  }
+  for (const p of ancestors) {
+    if (!TRANSFORM_MATCH_NAMES.has(p.samples.property.matchName)) continue;
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") {
+        const mid = (g.start + g.end) / 2;
+        if (mid > ownLast) candidates.push(mid);
+      } else {
+        moving.push([g.start, g.end]);
+      }
+    }
+    const k = p.samples.keys;
+    if (k.length && !p.samples.property.expression) {
+      const t = k[k.length - 1].time;
+      if (t > ownLast) candidates.push(t);
+    }
   }
   const eps = 0.5 / (fps > 0 ? fps : 25);
   const still = candidates
@@ -1097,7 +1123,7 @@ export const AeMotionReviewSchema = z.object({
   bounds: z
     .boolean()
     .optional()
-    .describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed."),
+    .describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
   action_safe: z.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
   title_safe: z.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's."),
 });
@@ -1108,8 +1134,11 @@ interface AnimatedPropertyList {
   comp: { id: number; name: string; fps: number; width: number; height: number; workAreaStart: number; workAreaDuration: number };
   project_path: string;
   layers_scanned: number;
+  ancestors_scanned?: number;
+  ancestors_truncated?: boolean;
   properties: Array<{
-    layer: { index: number; id: number; name: string };
+    layer: { index: number; id: number; name: string; parents?: number[] };
+    ancestor_only?: boolean;
     path: PropertyPath;
     name: string;
     matchName: string;
@@ -1327,7 +1356,7 @@ export const motionTools: ToolDefinition<any>[] = [
         const list = listResp.result;
         const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
         // One evalScript per property, so AE's UI gets a breath between them.
-        const sampled: Array<{ path: PropertyPath; samples: PropertySamples; speeds: SpeedSample[]; analysis: MotionAnalysis }> = [];
+        const sampled: Array<{ path: PropertyPath; samples: PropertySamples; speeds: SpeedSample[]; analysis: MotionAnalysis; parents: number[]; ancestorOnly: boolean }> = [];
         for (let i = 0; i < list.properties.length; i++) {
           const p = list.properties[i];
           // Keys alone stop at the last key; an expression can keep moving
@@ -1341,7 +1370,7 @@ export const motionTools: ToolDefinition<any>[] = [
             toolName: "ae_motion_review",
           });
           const speeds = sampleSpeeds(resp.result);
-          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds) });
+          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
         }
         // Where each animated layer comes to rest, then its box there: one evalScript per layer.
         const bounds: LayerBounds[] = [];
@@ -1349,7 +1378,16 @@ export const motionTools: ToolDefinition<any>[] = [
           const byLayer = new Map<number, typeof sampled>();
           for (const s of sampled) byLayer.set(s.samples.layer.id, [...(byLayer.get(s.samples.layer.id) ?? []), s]);
           for (const [layerId, props] of byLayer) {
-            const times = restTimes(props, Number(list.comp.fps));
+            if (props.every((s) => s.ancestorOnly)) continue;
+            // With the listing cut short, a parent missing here may be one whose motion was never
+            // sampled: don't judge where the layer rests on half the chain.
+            if (list.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
+              const l = props[0].samples.layer;
+              bounds.push({ layer: { index: l.index, id: l.id, name: l.name }, kind: "av", checkable: false, reason: "a parent's motion was not fully scanned (listing cut short)", samples: [] });
+              continue;
+            }
+            const ancestors = props[0].parents.flatMap((id) => byLayer.get(id) ?? []);
+            const times = restTimes(props, Number(list.comp.fps), ancestors);
             if (!times.length) continue;
             const resp = await ctx.bridge.evalRaw<LayerBounds>({
               id: `${opId}_b${layerId}`,
@@ -1367,7 +1405,8 @@ export const motionTools: ToolDefinition<any>[] = [
       const target: ReviewTarget = { comp_id: args.comp_id, project_path: scanned.list.project_path };
       const taste = ctx.settings?.get().taste;
       let findings: MotionFinding[] = [];
-      for (const { path: propPath, samples, speeds, analysis } of scanned.sampled) {
+      for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
+        if (ancestorOnly) continue;
         findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
       }
       const safe: SafeAreas = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
@@ -1388,8 +1427,10 @@ export const motionTools: ToolDefinition<any>[] = [
         comp: scanned.list.comp,
         project_path: scanned.list.project_path,
         layers_scanned: scanned.list.layers_scanned,
-        properties_scanned: scanned.sampled.length,
+        ...(scanned.list.ancestors_scanned ? { ancestors_scanned: scanned.list.ancestors_scanned } : {}),
+        properties_scanned: scanned.sampled.filter((s) => !s.ancestorOnly).length,
         properties_truncated: scanned.list.truncated,
+        ...(scanned.list.ancestors_truncated ? { ancestors_truncated: true } : {}),
         clean: counts.medium === 0 && counts.low === 0,
         counts,
         by_kind: byKind,

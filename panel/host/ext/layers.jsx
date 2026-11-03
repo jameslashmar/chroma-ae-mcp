@@ -21,6 +21,7 @@
   }
 
   var MAX_LAYERS = 500;
+  var MAX_INCLUDE = 50;
 
   function fail(kind, message, extra) {
     var e = new Error(message);
@@ -143,7 +144,7 @@
     if (t === LightType.SPOT) return "spot";
     if (t === LightType.POINT) return "point";
     if (t === LightType.AMBIENT) return "ambient";
-    return String(t);
+    return null;
   }
 
   function lightTypeValue(name) {
@@ -180,7 +181,13 @@
     try { s.threeD = l.threeDLayer === true; } catch (e2) {}
     try { s.adjustment = l.adjustmentLayer === true; } catch (e3) {}
     try { if (l.source) s.sourceId = l.source.id; } catch (e4) {}
-    try { s.lightType = lightTypeName(l.lightType); } catch (e5) {}
+    // Only lights have a lightType; elsewhere the read gives undefined.
+    if (s.kind === "light") {
+      try {
+        var lt = lightTypeName(l.lightType);
+        if (lt !== null) s.lightType = lt;
+      } catch (e5) {}
+    }
     try {
       var tm = l.trackMatteType;
       if (tm !== undefined) {
@@ -204,17 +211,58 @@
     return s;
   }
 
-  function stackOf(comp) {
+  // A list of numbers from args, bounded, for include_ids / include_indexes.
+  function numberList(v) {
+    var out = [];
+    if (!v || typeof v.length !== "number") return out;
+    for (var i = 0; i < v.length && out.length < MAX_INCLUDE; i++) {
+      if (typeof v[i] === "number" && isFinite(v[i])) out.push(v[i]);
+    }
+    return out;
+  }
+
+  // The layers past the cap that the caller asked for by id or index, so a
+  // read-back can still find a layer created or changed at the bottom of a
+  // big comp.
+  function includedBeyondCap(comp, include) {
+    var extra = [];
+    var total = comp.numLayers;
+    if (total <= MAX_LAYERS || !include) return extra;
+    var wantIds = numberList(include.ids);
+    var wantIndexes = numberList(include.indexes);
+    var picked = {};
+    var i;
+    for (i = 0; i < wantIndexes.length; i++) {
+      if (wantIndexes[i] > MAX_LAYERS && wantIndexes[i] <= total) picked[wantIndexes[i]] = true;
+    }
+    if (wantIds.length > 0) {
+      for (i = MAX_LAYERS + 1; i <= total; i++) {
+        var lid = comp.layer(i).id;
+        for (var k = 0; k < wantIds.length; k++) {
+          if (wantIds[k] === lid) picked[i] = true;
+        }
+      }
+    }
+    for (i = MAX_LAYERS + 1; i <= total; i++) {
+      if (picked[i]) extra.push(stackEntry(comp.layer(i)));
+    }
+    return extra;
+  }
+
+  function stackOf(comp, include) {
     var layers = [];
     var n = comp.numLayers;
     if (n > MAX_LAYERS) n = MAX_LAYERS;
     for (var i = 1; i <= n; i++) layers.push(stackEntry(comp.layer(i)));
+    var extra = includedBeyondCap(comp, include);
+    for (var e = 0; e < extra.length; e++) layers.push(extra[e]);
     return {
       comp_id: comp.id,
       name: comp.name,
       width: comp.width,
       height: comp.height,
       duration: comp.duration,
+      frameDuration: comp.frameDuration,
       numLayers: comp.numLayers,
       layers: layers,
       truncated: comp.numLayers > MAX_LAYERS
@@ -222,7 +270,8 @@
   }
 
   A.layerStack = function (args) {
-    var out = stackOf(requireComp(args.comp_id));
+    // include_ids / include_indexes: layers past the 500 cap to list as well.
+    var out = stackOf(requireComp(args.comp_id), { ids: args.include_ids, indexes: args.include_indexes });
     if (args.with_comp_id !== undefined && args.with_comp_id !== null) {
       out.with_comp = stackOf(requireComp(args.with_comp_id));
     }
@@ -265,6 +314,35 @@
     var target = placementTarget(comp, args.placement);
     var parent = null;
     if (args.parent) parent = findLayer(comp, args.parent);
+    // Everything that can fail is checked here, before anything is added.
+    var knownTypes = { solid: 1, "null": 1, adjustment: 1, text: 1, shape: 1, camera: 1, light: 1, footage: 1, precomp: 1 };
+    if (typeof type !== "string" || knownTypes[type] !== 1) fail("bad_args", "Unknown layer type \"" + type + "\"");
+    if (name !== null && name !== undefined && (typeof name !== "string" || name.length > 200)) fail("bad_args", "name must be a string of at most 200 characters");
+    if (args.duration !== undefined && args.duration !== null) {
+      if (typeof args.duration !== "number" || !isFinite(args.duration) || args.duration <= 0) fail("bad_args", "duration must be a positive number of seconds");
+    }
+    if (args.start_time !== undefined && args.start_time !== null) {
+      if (typeof args.start_time !== "number" || !isFinite(args.start_time)) fail("bad_args", "start_time must be a number of seconds");
+    }
+    if (args.color !== undefined && args.color !== null) {
+      if (typeof args.color.length !== "number" || args.color.length !== 3) fail("bad_args", "color must be [r, g, b]");
+      for (var ci = 0; ci < 3; ci++) {
+        if (typeof args.color[ci] !== "number" || !isFinite(args.color[ci]) || args.color[ci] < 0 || args.color[ci] > 1) fail("bad_args", "color values must be numbers in 0..1");
+      }
+    }
+    var sizeKeys = ["width", "height"];
+    for (var si = 0; si < sizeKeys.length; si++) {
+      var sz = args[sizeKeys[si]];
+      if (sz !== undefined && sz !== null && (typeof sz !== "number" || !isFinite(sz) || sz < 1 || sz > 30000)) fail("bad_args", sizeKeys[si] + " must be a number in 1..30000");
+    }
+    if (args.text !== undefined && args.text !== null && String(args.text).length > 20000) fail("bad_args", "text is longer than 20000 characters");
+    if (args.box_size) {
+      if (typeof args.box_size.length !== "number" || args.box_size.length !== 2 || typeof args.box_size[0] !== "number" || typeof args.box_size[1] !== "number" || !(args.box_size[0] > 0) || !(args.box_size[1] > 0)) {
+        fail("bad_args", "box_size must be [width, height] above 0");
+      }
+    }
+    var lightValue = null;
+    if (type === "light" && args.light_type) lightValue = lightTypeValue(args.light_type);
     var item = null;
     if (type === "footage" || type === "precomp") {
       try {
@@ -276,6 +354,12 @@
       if (type === "precomp" && !(item instanceof CompItem)) fail("bad_args", "Item " + args.item_id + " is not a composition");
       if (type === "footage" && !(item instanceof FootageItem)) fail("bad_args", "Item " + args.item_id + " is not footage");
       if (item.id === comp.id) fail("bad_args", "A comp can't contain itself");
+      // An audio-only layer has no 3D switch.
+      if (type === "footage" && args.three_d === true) {
+        var hasVideo = true;
+        try { hasVideo = item.hasVideo; } catch (eHv) {}
+        if (hasVideo === false) fail("bad_args", "Item " + args.item_id + " has no video, so its layer can't be 3D");
+      }
     }
 
     return A.withUndo(args.label || "Create layer", function () {
@@ -306,27 +390,46 @@
         layer = comp.layers.addCamera(name, center);
       } else if (type === "light") {
         layer = comp.layers.addLight(name, center);
-        if (args.light_type) layer.lightType = lightTypeValue(args.light_type);
+        if (lightValue !== null) layer.lightType = lightValue;
       } else if (type === "footage" || type === "precomp") {
         layer = comp.layers.add(item, duration);
-      } else {
-        fail("bad_args", "Unknown layer type \"" + type + "\"");
       }
 
-      if (name !== null && name !== undefined) layer.name = name;
-      if (args.start_time !== undefined && args.start_time !== null) layer.startTime = args.start_time;
-      // Text, shape, camera and light layers take the comp's length; trim them.
-      if (args.duration !== undefined && args.duration !== null) {
-        if (type === "text" || type === "shape" || type === "camera" || type === "light") {
-          layer.outPoint = layer.inPoint + args.duration;
+      // The layer exists from here: if a step below throws, take it (and the
+      // solid item it added) back out in this same undo group, so a failed
+      // call leaves nothing half-built.
+      try {
+        if (name !== null && name !== undefined) layer.name = name;
+        if (args.start_time !== undefined && args.start_time !== null) layer.startTime = args.start_time;
+        if (args.duration !== undefined && args.duration !== null) {
+          if (type === "text" || type === "shape" || type === "camera" || type === "light") {
+            // These take the comp's length; trim them.
+            layer.outPoint = layer.inPoint + args.duration;
+          } else if (type === "footage" || type === "precomp") {
+            // add() sizes stills only; trim video and comps. They can't be
+            // lengthened past their source, so this only shortens.
+            var wantOut = layer.inPoint + args.duration;
+            if (wantOut < layer.outPoint) layer.outPoint = wantOut;
+          }
         }
-      }
-      if (args.three_d === true && type !== "camera" && type !== "light") layer.threeDLayer = true;
-      if (parent) layer.parent = parent;
-      if (target) {
-        if (target.how === "before") layer.moveBefore(target.layer);
-        else if (target.how === "after") layer.moveAfter(target.layer);
-        else layer.moveToEnd();
+        if (args.three_d === true && type !== "camera" && type !== "light") layer.threeDLayer = true;
+        if (parent) layer.parent = parent;
+        if (target) {
+          if (target.how === "before") layer.moveBefore(target.layer);
+          else if (target.how === "after") layer.moveAfter(target.layer);
+          else layer.moveToEnd();
+        }
+      } catch (ePost) {
+        var madeSource = null;
+        // Solids, adjustment layers and nulls each add a solid item to the project.
+        if (type === "solid" || type === "adjustment" || type === "null") {
+          try { madeSource = layer.source; } catch (eMs) {}
+        }
+        try { layer.remove(); } catch (eRm) {}
+        try {
+          if (madeSource && madeSource.usedIn.length === 0) madeSource.remove();
+        } catch (eRs) {}
+        throw ePost;
       }
       var out = { index: layer.index, id: layer.id, name: layer.name, kind: type };
       try { if (layer.source) out.sourceId = layer.source.id; } catch (eSrc) {}
@@ -387,10 +490,17 @@
     var comp = requireComp(args.comp_id);
     var layer = findLayer(comp, args.layer);
     var type = args.type;
+    // setTrackMatte / trackMatteType belong to AV layers; cameras and lights have neither.
+    var layerK = layerKind(layer);
+    if (layerK === "camera" || layerK === "light") {
+      fail("bad_args", "Track mattes apply to AV layers only; \"" + layer.name + "\" is a " + layerK + " layer");
+    }
     var modern = hasModernMatteApi(layer);
     var matte = null;
     if (type !== "none") {
       matte = findLayer(comp, args.matte);
+      var matteK = layerKind(matte);
+      if (matteK === "camera" || matteK === "light") fail("bad_args", "A " + matteK + " layer can't be a track matte");
       if (matte.index === layer.index) fail("bad_args", "A layer can't be its own track matte");
       if (!modern && matte.index !== layer.index - 1) {
         fail(

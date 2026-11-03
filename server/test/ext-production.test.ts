@@ -107,9 +107,17 @@ describe("ae_render_templates", () => {
   });
 
   it("with allow_temp goes through the guarded write and checks the queue is as it was", async () => {
-    const { ctx, calls } = fakeAe((fn) => (fn === "rqStatus" ? { numItems: 0 } : { source: "temporary_item", render_settings: ["Best Settings"], output_modules: ["Lossless"] }));
+    let looked = false;
+    const { ctx, calls } = fakeAe((fn) => {
+      if (fn === "rqStatus") return { numItems: 0 };
+      if (!looked) {
+        looked = true;
+        return { source: "none", needs_item: true, render_settings: [], output_modules: [] };
+      }
+      return { source: "temporary_item", render_settings: ["Best Settings"], output_modules: ["Lossless"] };
+    });
     const out = await tool("ae_render_templates").handler({ allow_temp: true, expect: expectArg }, ctx);
-    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "rqStatus", "renderTemplates", "rqStatus"]);
+    expect(calls.map((c) => c.fn)).toEqual(["renderTemplates", "checkGuard", "rqStatus", "renderTemplates", "rqStatus"]);
     expect(out).toMatchObject({ source: "temporary_item", audio_template_found: false });
     expect(out.receipt.matches).toBe(true);
   });

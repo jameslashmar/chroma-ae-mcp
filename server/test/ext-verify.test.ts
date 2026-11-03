@@ -31,9 +31,11 @@ describe("ae_verify_render helpers", () => {
   });
 
   it("tells sequence frames from stills and movies", () => {
-    expect(looksLikeSequence("C:/r/shot_0001.png")).toBe(true);
-    expect(looksLikeSequence("C:/r/logo.png")).toBe(false);
-    expect(looksLikeSequence("C:/r/shot_0001.mov")).toBe(false);
+    const dir = tempDir("chroma-verify-looks-");
+    for (const n of ["shot_0001.png", "shot_0002.png", "logo.png", "shot_0001.mov"]) fs.writeFileSync(path.join(dir, n), "x");
+    expect(looksLikeSequence(path.join(dir, "shot_0001.png"))).toBe(true);
+    expect(looksLikeSequence(path.join(dir, "logo.png"))).toBe(false);
+    expect(looksLikeSequence(path.join(dir, "shot_0001.mov"))).toBe(false);
   });
 
   it("finds the first frame of an aerender [####] output", () => {
@@ -64,7 +66,9 @@ describe("ae_verify_render flow", () => {
         const fn = script.slice("__chromaAe.".length, script.indexOf("("));
         calls.push(fn);
         if (fn === "checkGuard") return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: null, comp_is_valid: true }, durationMs: 1 };
-        return { ok: true, result: answer(fn), durationMs: 1 };
+        const r = answer(fn);
+        if (r instanceof Error) return { ok: false, error: { kind: "host_error", message: r.message }, durationMs: 1 } as any;
+        return { ok: true, result: r, durationMs: 1 };
       },
       queue,
       quarantine,
@@ -80,14 +84,16 @@ describe("ae_verify_render flow", () => {
     const tool = createVerifyTools({
       getJob: () => ({ state: "succeeded", output_path: out, comp_name: "Edit", start_frame: 0, end_frame: 49 } as any),
     })[0];
+    let gone = false;
     const { ctx, calls } = fakeAe((fn) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") return render({ frames: 50 });
+      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      gone = true;
       return { removed: 9 };
     });
     const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_1", expect: GUARD }), ctx);
-    expect(calls).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove"]);
+    expect(calls).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyRead"]);
     expect(res).toMatchObject({ ok: true, matches: true, imported_item: null, project_changed: true });
     expect(res.checks.find((c: { what: string }) => c.what === "frames")).toMatchObject({ expected: 50, ok: true });
   });

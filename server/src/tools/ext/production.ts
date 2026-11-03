@@ -58,6 +58,9 @@ interface EgpState {
   overrides?: Array<{ index: number; name: string; value?: unknown }>;
 }
 
+/** A checkbox reads back as 0 or 1, so a boolean is compared as the number AE reports. */
+const asAe = (v: unknown): unknown => (typeof v === "boolean" ? (v ? 1 : 0) : v);
+
 export function egpMismatches(args: z.infer<typeof AeSetEssentialGraphicsSchema>, beforeRaw: unknown, afterRaw: unknown): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = beforeRaw as EgpState | null;
@@ -76,7 +79,7 @@ export function egpMismatches(args: z.infer<typeof AeSetEssentialGraphicsSchema>
     const o = after.overrides?.find((x) => x.name === args.name);
     const actual = typeof args.value === "string" && o?.value && typeof o.value === "object" ? (o.value as { text?: string }).text : o?.value;
     if (!o) m.push({ path: `overrides.${args.name}`, expected: args.value, actual: undefined, message: "Essential Property not in the read-back" });
-    else compareValues(args.value, Array.isArray(args.value) && Array.isArray(actual) ? actual.slice(0, args.value.length) : actual, `overrides.${args.name}`, m);
+    else compareValues(asAe(args.value), asAe(Array.isArray(args.value) && Array.isArray(actual) ? actual.slice(0, args.value.length) : actual), `overrides.${args.name}`, m);
   }
   return m;
 }
@@ -117,6 +120,7 @@ interface FootageFile {
 interface FootageFiles {
   project_path: string;
   items: FootageFile[];
+  truncated?: boolean;
 }
 
 /** For a sequence AE may report another frame, so compare the folder and the version. */
@@ -138,7 +142,9 @@ export const BatchOpSchema = z
     keyframes: z.array(KeyframeItemSchema).max(100).optional(),
     expression: z.string().max(20000).optional(),
   })
-  .refine((o) => o.value !== undefined || (o.keyframes?.length ?? 0) > 0 || o.expression !== undefined, { message: "Each op sets a value, keyframes or an expression." });
+  .refine((o) => o.value !== null, { message: "value can't be null." })
+  .refine((o) => o.value !== undefined || (o.keyframes?.length ?? 0) > 0 || o.expression !== undefined, { message: "Each op sets a value, keyframes or an expression." })
+  .refine((o) => (o.keyframes ?? []).every((k) => k.value !== undefined && k.value !== null), { message: "Each keyframe needs a value." });
 
 export const AeBatchSetSchema = z.object({
   comp_id: z.number().int(),
@@ -166,6 +172,16 @@ export function batchMismatches(ops: BatchOp[], afterRaw: unknown, offset: numbe
   const m: ReceiptMismatch[] = [];
   const after = afterRaw as BatchRead | null;
   if (!after) return m;
+  // Two ops on one property in the same chunk: the read-back only shows the last write.
+  const propKey = (o: BatchOp) => JSON.stringify([o.layer, o.path]);
+  // Selectors are compared literally: {index:1} and {name:'A'} count as different properties.
+  const lastExpr = new Map<string, number>();
+  const lastValue = new Map<string, number>();
+  ops.forEach((o, i) => {
+    const k = propKey(o);
+    if (o.expression !== undefined) lastExpr.set(k, i);
+    if (o.expression !== undefined || o.value != null || (o.keyframes?.length ?? 0) > 0) lastValue.set(k, i);
+  });
   ops.forEach((op, i) => {
     const r = after.results[i];
     const label = `ops[${offset + i + 1}]`;
@@ -173,14 +189,16 @@ export function batchMismatches(ops: BatchOp[], afterRaw: unknown, offset: numbe
       m.push({ path: label, expected: "read-back", actual: r?.error, message: `Op ${offset + i + 1} could not be read back` });
       return;
     }
-    if (op.expression !== undefined) expectThat(m, r.expression === op.expression, `${label}.expression`, op.expression, r.expression, "Expression differs");
-    if (op.value !== undefined && !op.keyframes?.length && (r.numKeys ?? 0) === 0 && op.expression === undefined) {
-      compareValues(op.value, trimTo(op.value, r.value), `${label}.value`, m);
+    const finalExpr = lastExpr.get(propKey(op)) === i;
+    const final = lastValue.get(propKey(op)) === i;
+    if (finalExpr && op.expression !== undefined) expectThat(m, r.expression === op.expression, `${label}.expression`, op.expression, r.expression, "Expression differs");
+    if (final && op.value != null && !op.keyframes?.length && (r.numKeys ?? 0) === 0 && op.expression === undefined) {
+      compareValues(asAe(op.value), asAe(trimTo(op.value, r.value)), `${label}.value`, m);
     }
     for (const k of op.keyframes ?? []) {
       const got = r.keys?.find((x) => Math.abs(x.time - k.time) < 0.0005);
       if (!got || got.missing) m.push({ path: `${label}.keys@${k.time}`, expected: k.value, actual: undefined, message: `No key at ${k.time}s` });
-      else compareValues(k.value, trimTo(k.value, got.value), `${label}.keys@${k.time}`, m);
+      else compareValues(asAe(k.value), asAe(trimTo(k.value, got.value)), `${label}.keys@${k.time}`, m);
     }
   });
   return m;
@@ -231,8 +249,12 @@ export const productionTools: ToolDefinition<any>[] = [
     schema: AeRenderTemplatesSchema,
     handler: async (args: z.infer<typeof AeRenderTemplatesSchema>, ctx: ToolContext) => {
       type Templates = { source: string; render_settings: string[]; output_modules: string[]; needs_item?: boolean };
-      let res: Templates;
-      if (args.allow_temp) {
+      // Look first: an existing item answers with no guard, no checkpoint and no change.
+      let res = (await ctx.bridge.callHost<Templates>("renderTemplates", {}, { label: "ae_render_templates", mutates: false, toolName: "ae_render_templates" })).result;
+      if (res.needs_item) {
+        if (!args.allow_temp) {
+          return { ok: false, error: "empty_queue", message: "The render queue is empty. Add an item (ae_render_queue_add), or call again with allow_temp and expect." };
+        }
         if (!args.expect) return { ok: false, error: "bad_args", message: "allow_temp needs expect." };
         const out = await runGuardedWrite(ctx, {
           toolName: "ae_render_templates",
@@ -246,11 +268,6 @@ export const productionTools: ToolDefinition<any>[] = [
           },
         });
         res = out as unknown as Templates;
-      } else {
-        res = (await ctx.bridge.callHost<Templates>("renderTemplates", {}, { label: "ae_render_templates", mutates: false, toolName: "ae_render_templates" })).result;
-        if (res.needs_item) {
-          return { ok: false, error: "empty_queue", message: "The render queue is empty. Add an item (ae_render_queue_add), or call again with allow_temp and expect." };
-        }
       }
       return { ...res, audio_template_found: res.output_modules.includes(DEFAULT_AUDIO_TEMPLATE) };
     },
@@ -268,6 +285,15 @@ export const productionTools: ToolDefinition<any>[] = [
       const files = (
         await ctx.bridge.callHost<FootageFiles>("footageFiles", { item_ids: args.item_ids }, { label: "ae_version_footage (files)", mutates: false, toolName: "ae_version_footage" })
       ).result;
+      const found = new Set(files.items.map((f) => f.item_id));
+      const missingIds = (args.item_ids ?? []).filter((id) => !found.has(id));
+      if (args.item_ids?.length && missingIds.length === args.item_ids.length) {
+        return { ok: false, error: "not_found", message: `No footage item with a file has id ${missingIds.join(", ")}`, missing_ids: missingIds };
+      }
+      const extra = {
+        ...(files.truncated ? { truncated: true, truncated_note: "More than 500 footage items have a file; only the first 500 were checked. Pass item_ids for the rest." } : {}),
+        ...(missingIds.length ? { missing_ids: missingIds } : {}),
+      };
       const report = files.items.map((f) => {
         const plan = planVersion(f.file, f.sequence, args.version);
         return {
@@ -286,7 +312,7 @@ export const productionTools: ToolDefinition<any>[] = [
         return { ok: false, error: "no_such_version", message: `No v${args.version} found next to ${report[0].file}`, items: report };
       }
       if (!args.update || args.dry_run || outdated.length === 0) {
-        return { ok: true, ...(args.dry_run ? { dry_run: true } : {}), checked: report.length, outdated: outdated.length, items: args.update ? outdated : report };
+        return { ok: true, ...(args.dry_run ? { dry_run: true } : {}), checked: report.length, outdated: outdated.length, ...extra, items: args.update ? outdated : report };
       }
       const jobs = outdated.map((r) => ({ item_id: r.item_id, path: r.target as string, sequence: r.sequence }));
       const ids = jobs.map((j) => j.item_id);
@@ -310,6 +336,8 @@ export const productionTools: ToolDefinition<any>[] = [
         present: (_before, _after, w) => ({ replaced: w.replaced }),
       })) as Record<string, unknown>;
       let logPath: string | undefined;
+      const logNotes: { aside?: string } = {};
+      let logError: string | undefined;
       if (files.project_path !== "<unsaved>") {
         const entries: VersionLogEntry[] = outdated.map((r) => ({
           at: new Date().toISOString(),
@@ -321,18 +349,22 @@ export const productionTools: ToolDefinition<any>[] = [
           to_version: r.target_version as number,
         }));
         try {
-          logPath = appendVersionLog(files.project_path, entries);
-        } catch {
+          logPath = appendVersionLog(files.project_path, entries, logNotes);
+        } catch (e) {
           logPath = undefined;
+          logError = (e as Error).message;
         }
       }
-      return { ...out, items: outdated, ...(logPath ? { log_path: logPath } : { log_path: null }) };
+      return { ...out, ...extra, items: outdated, ...(logPath ? { log_path: logPath } : { log_path: null }),
+        ...(logNotes.aside ? { log_aside: logNotes.aside, log_note: "The existing versions log could not be read as JSON; it was kept as log_aside and a new log was started." } : {}),
+        ...(logError ? { log_error: logError } : {}),
+      };
     },
   },
   {
     name: "ae_batch_set",
     description:
-      "Set many properties at once (values, keyframes or expressions on any layers of one comp): every layer and property is found before anything is written, " +
+      "Set many properties at once (values, keyframes or expressions on any layers of one comp): every layer and property in every chunk is found by a read-only pass before anything is written, " +
       "then each chunk of up to 500 ops is one undo group guarded by `expect`, with a short pause between chunks so AE's UI keeps up. " +
       "The read-back (a separate evalScript per chunk) checks every value, key and expression. A failing op stops the batch and says which. " +
       AGENT_SAFETY_GUIDANCE,
@@ -342,6 +374,20 @@ export const productionTools: ToolDefinition<any>[] = [
       const chunks: Array<Record<string, unknown>> = [];
       let done = 0;
       const mismatches: ReceiptMismatch[] = [];
+      // A read-only pass over every chunk first, so a bad layer or path in op 1200 stops the batch before op 1 is written.
+      for (let start = 0; start < args.ops.length; start += size) {
+        const ops = args.ops.slice(start, start + size);
+        const check = (
+          await ctx.bridge.callHost<{ ok: boolean; error?: string }>(
+            "batchValidate",
+            { comp_id: args.comp_id, ops, base: start },
+            { label: `ae_batch_set (check ${start + 1}-${start + ops.length} of ${args.ops.length})`, mutates: false, toolName: "ae_batch_set" }
+          )
+        ).result;
+        if (check && check.ok === false) {
+          return { ok: false, error: "bad_args", applied: false, done: 0, message: `${check.error ?? "An op is invalid"}. Nothing was written.` };
+        }
+      }
       for (let start = 0; start < args.ops.length; start += size) {
         const ops = args.ops.slice(start, start + size);
         if (start > 0) await sleep(250);
@@ -351,21 +397,34 @@ export const productionTools: ToolDefinition<any>[] = [
           expect: args.expect,
           compId: args.comp_id,
           read: () => ({ host: "batchRead", args: { comp_id: args.comp_id, ops: readOps(ops) } }),
-          write: { host: "batchSet", args: { comp_id: args.comp_id, ops, label: `Batch set ${start + 1}-${start + ops.length}` } },
+          write: { host: "batchSet", args: { comp_id: args.comp_id, ops, base: start, label: `Batch set ${start + 1}-${start + ops.length}` } },
           check: (_before, after, w) => (w.failed_at ? [] : batchMismatches(ops, after, start)),
-          present: (_before, _after, w) => ({ written: w }),
-        })) as unknown as { written: { done: number; failed_at?: number; error?: string }; receipt: { matches: boolean; mismatches: ReceiptMismatch[] }; checkpoint: unknown };
-        done += res.written.done;
+        })) as unknown as { done?: number; failed_at?: number; error?: string; receipt: { matches: boolean; mismatches: ReceiptMismatch[] }; checkpoint: unknown };
+        // runGuardedWrite spreads the write's own result at the top level, also when the read-back failed.
+        const chunkDone = typeof res.done === "number" ? res.done : 0;
+        done += chunkDone;
         mismatches.push(...res.receipt.mismatches);
-        chunks.push({ ops: `${start + 1}-${start + ops.length}`, done: res.written.done, matches: res.receipt.matches, checkpoint: res.checkpoint });
-        if (res.written.failed_at) {
+        chunks.push({ ops: `${start + 1}-${start + ops.length}`, done: chunkDone, matches: res.receipt.matches, checkpoint: res.checkpoint });
+        if (res.failed_at) {
           return {
             ok: false,
             error: "op_failed",
-            failed_op: start + res.written.failed_at,
-            message: `Op ${start + res.written.failed_at} failed: ${res.written.error}. Ops before it in this chunk were applied (one undo step); later chunks were not run.`,
+            failed_op: start + res.failed_at,
+            message: `Op ${start + res.failed_at} failed: ${res.error}. Ops before it in this chunk were applied (one undo step); later chunks were not run.`,
             done,
             chunks,
+          };
+        }
+        if (res.receipt.mismatches.some((m) => m.path === "read_back")) {
+          // Often a popup blocking AE: don't pile more writes on top.
+          return {
+            ok: false,
+            error: "read_back_failed",
+            applied: true,
+            done,
+            chunks,
+            mismatches: res.receipt.mismatches.filter((m) => m.path === "read_back"),
+            message: `Ops ${start + 1}-${start + ops.length} were applied but their read-back failed; later chunks were not run. Do not resend; inspect the state with a read tool.`,
           };
         }
       }

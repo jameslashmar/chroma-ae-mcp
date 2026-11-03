@@ -377,7 +377,13 @@
       s.width = it.width;
       s.height = it.height;
       s.duration = it.duration;
-      try { if (it.footageMissing) s.missing = true; } catch (e3) {}
+      // footageMissing is also true for placeholders; keep them apart from lost files.
+      try {
+        if (it.footageMissing) {
+          if (itemKind(it) === "placeholder") s.placeholder = true;
+          else s.missing = true;
+        }
+      } catch (e3) {}
     }
     return s;
   }
@@ -410,14 +416,17 @@
   var MAX_VISIT = 20000;
 
   A.getProject = function (args) {
-    var depth = (args && args.depth) ? args.depth : 3;
+    // Any filter, sort or paging asks for the flat, paged list; offset 0 counts.
+    var filtered = args && (args.type || args.name_contains || args.missing_only || args.sort || (args.offset !== undefined && args.offset !== null) || args.limit);
+    var depth = 3;
+    if (args && args.depth) depth = args.depth;
+    else if (filtered) depth = 20;
     var root = app.project.rootFolder;
     if (args && args.folder_id !== undefined && args.folder_id !== null) {
       var f = app.project.itemByID(args.folder_id);
       if (!f || !(f instanceof FolderItem)) fail("not_found", "No FolderItem with id " + args.folder_id);
       root = f;
     }
-    var filtered = args && (args.type || args.name_contains || args.missing_only || args.sort || args.offset || args.limit);
     if (!filtered) {
       // The original shape: the tree walk, cut at MAX_LIST.
       var items = [];
@@ -434,13 +443,16 @@
         }
       };
       walk(root, depth);
-      return {
+      var legacy = {
         project_path: projectPath(),
         numItems: app.project.numItems,
         root_id: root.id,
         items: items,
         truncated: truncated
       };
+      // The paged list is a different order, so offset 500 would not continue this page.
+      if (truncated) legacy.next = "Cut at " + MAX_LIST + ". Call again with offset:0 (and limit) for the full paged list; do not continue this page at offset " + MAX_LIST + ".";
+      return legacy;
     }
     var needle = null;
     if (args.name_contains) needle = String(args.name_contains).toLowerCase();
@@ -460,7 +472,7 @@
         if (ok && needle !== null && String(item.name).toLowerCase().indexOf(needle) < 0) ok = false;
         if (ok && args.missing_only === true) {
           var missing = false;
-          try { missing = item instanceof FootageItem && item.footageMissing === true; } catch (eM) {}
+          try { missing = itemKind(item) === "footage" && item.footageMissing === true; } catch (eM) {}
           if (!missing) ok = false;
         }
         if (ok) matched.push(item);

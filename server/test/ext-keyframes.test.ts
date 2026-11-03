@@ -90,11 +90,12 @@ describe("keyframe tools", () => {
 
   it("ae_remove_keyframes removes, reads back separately, and checks the kept value", async () => {
     const { ctx, calls } = fakeAe({
-      keysSnapshot: [snap([[0, 0], [1, 100]]), snap([], 60)],
+      keysSnapshot: [snap([[0, 0], [1, 100]])],
+      keysSnapshotStatic: [snap([[0, 0], [1, 100]]), snap([], 60)],
       removeKeys: [{ removed: [{ index: 1, time: 0, value: 0 }, { index: 2, time: 1, value: 100 }], numKeys: 0, static_value: 60, static_value_at: 0.6 }],
     });
     const out = await tool("ae_remove_keyframes").handler(AeRemoveKeyframesSchema.parse({ ...base, all: true, static_value_at: 0.6 }), ctx);
-    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "keysSnapshot", "removeKeys", "keysSnapshot"]);
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "keysSnapshot", "checkGuard", "keysSnapshotStatic", "removeKeys", "keysSnapshotStatic"]);
     expect(out.receipt.matches).toBe(true);
     expect(out).toMatchObject({ numKeys: 0, static_value: 60, static_value_at: 0.6 });
   });

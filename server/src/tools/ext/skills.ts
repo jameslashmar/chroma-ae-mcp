@@ -37,6 +37,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readAfterWrite } from "../read-back.js";
 
 const SkillNameSchema = z
   .string()
@@ -315,8 +316,9 @@ export const skillsTools: ToolDefinition<any>[] = [
             mutates: true,
             toolName: "ae_skill_run",
           });
-          // Separate evalScript for the read-back.
-          const after = await snapshot("after");
+          // Separate evalScript for the read-back. The skill has run from here
+          // on, so a failed read is reported, never thrown.
+          const afterRead = await readAfterWrite(opId, () => snapshot("after"));
           return {
             ok: true,
             op_id: opId,
@@ -324,7 +326,11 @@ export const skillsTools: ToolDefinition<any>[] = [
             ...about,
             ...(write.result ?? {}),
             checkpoint,
-            receipt: buildReceipt({ before: before.result, after: after.result }),
+            receipt: buildReceipt({
+              before: before.result,
+              after: afterRead.value?.result ?? null,
+              customMismatches: afterRead.failure ? [afterRead.failure] : undefined,
+            }),
           };
         });
       } catch (err) {

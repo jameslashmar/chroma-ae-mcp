@@ -82,7 +82,9 @@ export function findVersions(file: string, sequence: boolean): { current: number
   const byVersion = new Map<number, string[]>();
   const add = (v: number, p: string) => byVersion.set(v, [...(byVersion.get(v) ?? []), p]);
 
-  if (dirTok && sequence) {
+  // The folder is the version only when the file has no version of its own or the two agree
+  // ('shot_v003/shot_v003.0001.exr'); a 'show_v2/shot010_v003.0001.exr' is versioned by its file name.
+  if (dirTok && sequence && (!own || own.number === dirTok.number)) {
     // Versioned folders: look at the siblings of the folder.
     const parent = path.dirname(dir);
     const dirRe = new RegExp(`^${escapeRe(dirTok.before)}(\\d{1,5})${escapeRe(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
@@ -125,7 +127,10 @@ export function planVersion(file: string, sequence: boolean, want?: number): Ver
   const { current, versions } = findVersions(file, sequence);
   const latest = versions.length ? versions[versions.length - 1].version : null;
   const target = want !== undefined ? versions.find((v) => v.version === want) ?? null : versions[versions.length - 1] ?? null;
-  return { current, latest, target, newer: target !== null && current !== null && target.version !== current };
+  // Without a requested version only a higher one is newer: with the current file gone from disk the
+  // latest found can be older than current, and that is not an update. A requested version may be a rollback.
+  const newer = target !== null && current !== null && (want !== undefined ? target.version !== current : target.version > current);
+  return { current, latest, target, newer };
 }
 
 export interface VersionLogEntry {
@@ -144,16 +149,39 @@ export function versionLogPath(projectPath: string): string {
   return path.join(path.dirname(projectPath), `${path.basename(projectPath, ext)}.versions.json`);
 }
 
-export function appendVersionLog(projectPath: string, entries: VersionLogEntry[]): string {
+/**
+ * Appends to the log. A log that can't be parsed is never overwritten: it is
+ * renamed to `<log>.<time>.bak` (its path goes in `notes.aside`) and a new log
+ * starts. A log that can't be read at all (locked, no access) throws.
+ */
+export function appendVersionLog(projectPath: string, entries: VersionLogEntry[], notes?: { aside?: string }): string {
   const file = versionLogPath(projectPath);
   let log: { entries: VersionLogEntry[] } = { entries: [] };
+  let raw: string | null = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (Array.isArray(parsed?.entries)) log = parsed;
-  } catch {
-    // A new log.
+    raw = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  if (raw !== null) {
+    let parsed: { entries?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+    if (parsed && Array.isArray(parsed.entries)) {
+      log = parsed as { entries: VersionLogEntry[] };
+    } else {
+      const aside = `${file}.${Date.now()}.bak`;
+      fs.renameSync(file, aside);
+      if (notes) notes.aside = aside;
+    }
   }
   log.entries.push(...entries);
-  fs.writeFileSync(file, JSON.stringify(log, null, 2));
+  // Write beside it and rename into place, so a crash can't leave half a log.
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs.renameSync(tmp, file);
   return file;
 }

@@ -88,6 +88,16 @@
       var io = new ImportOptions(f);
       if (args.sequence === true) io.sequence = true;
       var item = app.project.importFile(io);
+      if (!(item instanceof FootageItem)) {
+        // roll the import back in this same call; verifyRemove only takes footage
+        try { item.remove(); } catch (eR) {}
+        fail("bad_args", "Not a footage file AE can verify: " + args.path);
+      }
+      // A sequence takes AE's Sequence Footage import rate (30 fps by default), not
+      // the render's: conform our own temporary item to the comp's rate.
+      if (args.sequence === true && typeof args.fps === "number" && args.fps > 0) {
+        try { item.mainSource.conformFrameRate = args.fps; } catch (eC) {}
+      }
       return { item_id: item.id, name: item.name };
     });
   };

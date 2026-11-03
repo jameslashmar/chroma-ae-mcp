@@ -288,12 +288,15 @@
       for (var w = 0; w < args.item_ids.length; w++) want[args.item_ids[w]] = true;
     }
     var out = [];
-    for (var i = 1; i <= app.project.numItems && out.length < MAX_LIST; i++) {
+    var truncated = false;
+    for (var i = 1; i <= app.project.numItems; i++) {
       var it = app.project.item(i);
       if (!(it instanceof FootageItem)) continue;
       if (want && !want[it.id]) continue;
       var path = fileOf(it);
       if (!path) continue;
+      // Only a 501st match means something was left out.
+      if (out.length >= MAX_LIST) { truncated = true; break; }
       var missing = false;
       try { missing = it.footageMissing === true; } catch (eM) {}
       var uses = 0;
@@ -302,7 +305,7 @@
     }
     var projectPath = "<unsaved>";
     try { if (app.project.file) projectPath = app.project.file.fsName; } catch (eP) {}
-    return { project_path: projectPath, items: out, truncated: out.length >= MAX_LIST };
+    return { project_path: projectPath, items: out, truncated: truncated };
   };
 
   A.versionFootage = function (args) {
@@ -321,7 +324,8 @@
       var done = [];
       for (var k = 0; k < resolved.length; k++) {
         var r = resolved[k];
-        if (r.sequence) r.item.replaceWithSequence(r.file, true);
+        // false: numeric frame order with placeholders for gaps, as ae_import_assets imports a sequence.
+        if (r.sequence) r.item.replaceWithSequence(r.file, false);
         else r.item.replace(r.file);
         done.push({ item_id: r.item.id, name: r.item.name, from: r.from, to: r.file.fsName });
       }
@@ -331,27 +335,44 @@
 
   // ---------- batch property writes ----------
 
-  // Every op's layer and property, found before anything is written.
-  function resolveOps(comp, ops) {
+  // Every op's layer and property, found before anything is written. base is
+  // the number of ops in earlier chunks, so messages name the op's place in the whole batch.
+  function resolveOps(comp, ops, base) {
     var out = [];
+    var skip = base || 0;
     for (var i = 0; i < ops.length; i++) {
       var op = ops[i];
+      var n = skip + i + 1;
       var layer;
       var prop;
       try {
         layer = findLayer(comp, op.layer);
         prop = resolvePath(layer, op.path);
       } catch (e) {
-        fail("bad_args", "Op " + (i + 1) + ": " + e.message);
+        fail("bad_args", "Op " + n + ": " + e.message);
       }
-      if (prop.propertyType !== PropertyType.PROPERTY) fail("bad_args", "Op " + (i + 1) + ": " + op.path.join(" > ") + " is a group");
+      if (prop.propertyType !== PropertyType.PROPERTY) fail("bad_args", "Op " + n + ": " + op.path.join(" > ") + " is a group");
       if (op.expression !== undefined && op.expression !== null && !prop.canSetExpression) {
-        fail("bad_args", "Op " + (i + 1) + ": " + prop.name + " can't take an expression");
+        fail("bad_args", "Op " + n + ": " + prop.name + " can't take an expression");
       }
       out.push({ layer: layer, prop: prop });
     }
     return out;
   }
+
+  // Read-only: the same checks batchSet makes, so the server can run them on
+  // every chunk before the first write. Reports the first bad op, changes nothing.
+  A.batchValidate = function (args) {
+    var comp = requireComp(args.comp_id);
+    var ops = args.ops || [];
+    if (ops.length > MAX_LIST) fail("bad_args", "At most " + MAX_LIST + " ops per check");
+    try {
+      resolveOps(comp, ops, args.base);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+    return { ok: true, checked: ops.length };
+  };
 
   A.batchRead = function (args) {
     var comp = requireComp(args.comp_id);
@@ -387,7 +408,7 @@
     var comp = requireComp(args.comp_id);
     var ops = args.ops || [];
     if (ops.length > MAX_LIST) fail("bad_args", "At most " + MAX_LIST + " ops in one undo group");
-    resolveOps(comp, ops);
+    resolveOps(comp, ops, args.base);
     return A.withUndo(args.label || "Batch set", function () {
       var done = 0;
       for (var i = 0; i < ops.length; i++) {

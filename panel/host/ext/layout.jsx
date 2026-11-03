@@ -190,19 +190,36 @@
     return null;
   }
 
-  // Moves a layer by [dx, dy]: its static position, or with shift_keys every key.
-  function moveBy(l, dx, dy, shiftKeys) {
+  // The position properties a move by [dx, dy] writes. Separated dimensions
+  // write only the axes that actually move; a still layer has no targets.
+  function moveTargets(l, dx, dy) {
     var tr = l.property("ADBE Transform Group");
     var pos = tr.property("ADBE Position");
     var separated = false;
     try { separated = pos.dimensionsSeparated === true; } catch (e) {}
     var targets = [];
     if (separated) {
-      targets.push({ p: tr.property("ADBE Position_0"), d: dx, axis: -1 });
-      targets.push({ p: tr.property("ADBE Position_1"), d: dy, axis: -1 });
-    } else {
+      if (dx !== 0) targets.push({ p: tr.property("ADBE Position_0"), d: dx, axis: -1 });
+      if (dy !== 0) targets.push({ p: tr.property("ADBE Position_1"), d: dy, axis: -1 });
+    } else if (dx !== 0 || dy !== 0) {
       targets.push({ p: pos, d: [dx, dy], axis: 0 });
     }
+    return targets;
+  }
+
+  // True when the move would have to change keys. Read-only: the caller
+  // checks every layer with it before the undo group opens.
+  function moveNeedsKeys(l, dx, dy) {
+    var targets = moveTargets(l, dx, dy);
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i].p.numKeys > 0) return true;
+    }
+    return false;
+  }
+
+  // Moves a layer by [dx, dy]: its static position, or with shift_keys every key.
+  function moveBy(l, dx, dy, shiftKeys) {
+    var targets = moveTargets(l, dx, dy);
     for (var i = 0; i < targets.length; i++) {
       var tg = targets[i];
       if (tg.p.numKeys > 0) {
@@ -229,8 +246,12 @@
     if (args.time !== undefined && args.time !== null) t = args.time;
     var layers = [];
     var rects = [];
+    var seen = {};
     for (var i = 0; i < args.layers.length; i++) {
       var l = layoutLayer(comp, args.layers[i]);
+      // The same layer twice would move twice as far.
+      if (seen["L" + l.id]) fail("bad_args", "\"" + l.name + "\" is listed twice");
+      seen["L" + l.id] = true;
       layers.push(l);
       rects.push(boxAt(l, t));
     }
@@ -273,6 +294,14 @@
     } else {
       fail("bad_args", "Give align or distribute");
     }
+    // Everything that can fail runs before the undo group, so a refused call moves nothing.
+    if (args.shift_keys !== true) {
+      for (var q = 0; q < layers.length; q++) {
+        if (moveNeedsKeys(layers[q], deltas[q][0], deltas[q][1])) {
+          fail("bad_args", "\"" + layers[q].name + "\"'s position is animated; pass shift_keys to move every key. Nothing was changed.");
+        }
+      }
+    }
     return A.withUndo(args.label || "Align layers", function () {
       var moved = [];
       for (var k = 0; k < layers.length; k++) {
@@ -301,20 +330,24 @@
     for (var k = 0; k < list.length; k++) kinds[list[k]] = true;
     var items = [];
     var folders = [];
+    var total = 0;
     for (var i = 1; i <= app.project.numItems; i++) {
       var it = app.project.item(i);
       if (it instanceof FootageItem) {
         var kind = footageKind(it);
         if (!kinds[kind] || !isUnused(it)) continue;
+        total++;
         if (items.length >= MAX_LIST) continue;
         var e = { id: it.id, name: it.name, kind: kind, file: null };
         try { if (it.file) e.file = it.file.fsName; } catch (eF) {}
         items.push(e);
       } else if (it instanceof FolderItem && args && args.empty_folders && it.numItems === 0) {
+        total++;
+        if (folders.length >= MAX_LIST) continue;
         folders.push({ id: it.id, name: it.name, kind: "folder" });
       }
     }
-    return { items: items, folders: folders, numItems: app.project.numItems };
+    return { items: items, folders: folders, total_unused: total, truncated: total > items.length + folders.length, numItems: app.project.numItems };
   };
 
   A.purgeItems = function (args) {
@@ -379,8 +412,12 @@
 
   A.styleScan = function (args) {
     var comp = requireComp(args.comp_id);
+    // The check time: the caller's, else the comp's current time.
+    var at = comp.time;
+    if (args.time !== undefined && args.time !== null) at = args.time;
     var out = [];
-    for (var i = 1; i <= comp.numLayers && out.length < MAX_LIST; i++) {
+    var i;
+    for (i = 1; i <= comp.numLayers && out.length < MAX_LIST; i++) {
       var l = comp.layer(i);
       var kind = "";
       try { kind = String(l.reflect.name); } catch (e0) {}
@@ -392,6 +429,26 @@
           entry.font = td.font;
           entry.family = td.fontFamily;
           entry.font_size = td.fontSize;
+          try { entry.font_style = td.fontStyle; } catch (eY) {}
+          // Size on screen: the layer's and its parents' Scale at the check time (flat layers only).
+          try {
+            var eff = 1;
+            var cur = l;
+            var flat = true;
+            for (var hop = 0; cur && hop < 20; hop++) {
+              if (cur.threeDLayer === true) {
+                flat = false;
+                break;
+              }
+              var sc = cur.property("ADBE Transform Group").property("ADBE Scale").valueAtTime(at, false);
+              eff = eff * Math.min(Math.abs(sc[0]), Math.abs(sc[1])) / 100;
+              cur = cur.parent;
+            }
+            if (flat) {
+              entry.scale_factor = eff;
+              entry.screen_font_size = td.fontSize * eff;
+            }
+          } catch (eZ) {}
           try { if (td.fontObject) entry.font_missing = td.fontObject.isSubstitute === true; } catch (eM) {}
           if (td.applyFill) entry.colours.push({ where: "text fill", role: "fill", rgb: rgb(td.fillColor) });
           if (td.applyStroke) entry.colours.push({ where: "text stroke", role: "stroke", rgb: rgb(td.strokeColor) });
@@ -409,6 +466,6 @@
       }
       if (entry.kind !== "other") out.push(entry);
     }
-    return { comp_id: comp.id, name: comp.name, width: comp.width, height: comp.height, time: comp.time, layers: out };
+    return { comp_id: comp.id, name: comp.name, width: comp.width, height: comp.height, time: at, layers: out, truncated: i <= comp.numLayers };
   };
 })($.global);

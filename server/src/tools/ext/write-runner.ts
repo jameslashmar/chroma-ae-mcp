@@ -16,6 +16,7 @@ import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import type { ExpectGuard, ToolContext } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
+import { readBackMismatch } from "../read-back.js";
 
 export interface HostCall {
   host: string;
@@ -33,9 +34,10 @@ export interface GuardedWriteSpec<W extends Written = Written> {
   /**
    * The read for the receipt. Called with "before", then with "after" and
    * what the write returned (the read after can depend on it, e.g. a new
-   * comp's id). Return null to skip a read.
+   * comp's id), and with what the before read returned (so the read after
+   * can ask for the layers the write touched). Return null to skip a read.
    */
-  read?: (phase: "before" | "after", written?: W) => HostCall | null;
+  read?: (phase: "before" | "after", written?: W, before?: unknown) => HostCall | null;
   /** The write. `expect` is added to its args. */
   write: HostCall;
   check?: (before: unknown, after: unknown, written: W) => ReceiptMismatch[];
@@ -49,8 +51,8 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
     project_path: spec.expect.project_path,
     comp_id: spec.expect.comp_id ?? spec.compId,
   };
-  const read = async (phase: "before" | "after", written?: W) => {
-    const call = spec.read?.(phase, written);
+  const read = async (phase: "before" | "after", written?: W, before?: unknown) => {
+    const call = spec.read?.(phase, written, before);
     if (!call) return null;
     const res = await ctx.bridge.evalRaw({
       id: `${opId}_${phase}`,
@@ -76,18 +78,36 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
         toolName: spec.toolName,
       });
       const written = (write.result ?? {}) as W;
+      // From here the write is applied: nothing below may throw, or the caller
+      // sees a bare error for a change that happened and resends it.
       // Separate evalScript for the read-back: a read in the write's own
       // script returns stale values.
-      const after = await read("after", written);
-      const receipt = buildReceipt({
-        before,
-        after,
-        customMismatches: spec.check?.(before, after, written) ?? [],
-      });
+      let after: unknown = null;
+      let readBackFailure: ReceiptMismatch | null = null;
+      try {
+        after = await read("after", written, before);
+      } catch (err) {
+        readBackFailure = readBackMismatch(opId, "the read-back failed", err);
+      }
+      let custom: ReceiptMismatch[] = [];
+      let shown: Record<string, unknown> = written;
+      if (!readBackFailure) {
+        // check and present assume a valid read-back, so they are skipped when it failed.
+        try {
+          custom = spec.check?.(before, after, written) ?? [];
+          shown = spec.present?.(before, after, written) ?? written;
+        } catch (err) {
+          custom = [readBackMismatch(opId, "checking the read-back failed", err)];
+          shown = written;
+        }
+      } else {
+        custom = [readBackFailure];
+      }
+      const receipt = buildReceipt({ before, after, customMismatches: custom });
       return {
         op_id: opId,
         applied: true as const,
-        ...(spec.present?.(before, after, written) ?? written),
+        ...shown,
         checkpoint,
         receipt,
       };

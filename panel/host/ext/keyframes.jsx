@@ -139,6 +139,7 @@
       }
       if (match) picked.push(i);
     }
+    if (picked.length === 0) fail("bad_args", "No keys match that selection; the property has " + prop.numKeys + " key(s)");
     // The value to keep once every key is gone, read before anything changes.
     var keepAll = picked.length > 0 && picked.length === prop.numKeys;
     var keepValue = null;
@@ -159,10 +160,26 @@
       var out = { removed: removed, numKeys: prop.numKeys, property: prop.name };
       if (keepAll && keepValue !== null && prop.numKeys === 0) {
         prop.setValue(keepValue);
-        out.static_value = plain(keepValue);
-        out.static_value_at = keepAt;
+        // Text and shape values flatten to "[object ...]", which proves nothing: not reported.
+        if (typeof keepValue === "number" || keepValue instanceof Array) {
+          out.static_value = plain(keepValue);
+          out.static_value_at = keepAt;
+        }
       }
       return out;
     });
+  };
+
+  // keysSnapshot for the read-backs of removeKeys: with no keys left, `value`
+  // is the one before any expression, which is what removeKeys wrote with
+  // setValue (prop.value would carry a wiggle on top). Read-only.
+  A.keysSnapshotStatic = function (args) {
+    var out = A.keysSnapshot(args);
+    if (out.numKeys === 0) {
+      var comp = requireComp(args.comp_id);
+      var prop = resolvePath(findLayer(comp, args.layer), args.path);
+      try { out.value = plain(prop.valueAtTime(comp.time, true)); } catch (eStatic) {}
+    }
+    return out;
   };
 })($.global);

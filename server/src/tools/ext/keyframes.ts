@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { ReceiptMismatch } from "../../receipts.js";
 import { compareValues } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolDefinition } from "../common.js";
+import { verifyTargetGuard } from "../mutate.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 const PathSchema = z
@@ -107,6 +108,17 @@ export function selectKeys(keys: Array<{ index: number; time: number }>, args: z
   });
 }
 
+/**
+ * How many keys removeKeys would take. `all` and an index list are known
+ * from numKeys alone; a time range is counted in the snapshot (the host
+ * applies the range before its 500-key cap, so 500 means "at least 500").
+ */
+export function selectionCount(snap: KeysSnapshot, args: z.infer<typeof AeRemoveKeyframesSchema>): number {
+  if (args.all) return snap.numKeys;
+  if (args.keys?.length) return new Set(args.keys).size;
+  return selectKeys(snap.keys, args).length;
+}
+
 export function removeKeysMismatches(beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = beforeRaw as KeysSnapshot | null;
@@ -131,12 +143,12 @@ export const keyframesTools: ToolDefinition<any>[] = [
     name: "ae_get_keyframes",
     description:
       "Read a property's keyframes: time, value, in and out interpolation, temporal ease per side (speed, influence; named 'easy ease', 'linear', 'hold' or 'bezier'), " +
-      "spatial tangents, roving and auto-bezier flags. Read-only; at most 500 keys.",
+      "spatial tangents, roving and auto-bezier flags. Read-only; at most 500 keys in the start/end range (`truncated` means more keys in range exist).",
     schema: AeGetKeyframesSchema,
     handler: async (args: z.infer<typeof AeGetKeyframesSchema>, ctx) => {
       const res = await ctx.bridge.callHost<{ name: string; matchName: string; isSpatial: boolean; numKeys: number; keyframes: KeyframeEntry[]; truncated?: boolean }>(
         "getKeyframeEase",
-        { comp_id: args.comp_id, layer: args.layer, path: args.path },
+        { comp_id: args.comp_id, layer: args.layer, path: args.path, start: args.start, end: args.end },
         { label: "ae_get_keyframes", mutates: false, toolName: "ae_get_keyframes" }
       );
       const r = res.result;
@@ -154,15 +166,43 @@ export const keyframesTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeRemoveKeyframesSchema,
     handler: async (args: z.infer<typeof AeRemoveKeyframesSchema>, ctx) => {
-      const snapshot = { host: "keysSnapshot", args: { comp_id: args.comp_id, layer: args.layer, path: args.path } };
+      // The write's own read-backs: `value` is the one before any expression.
+      const snapshot = { host: "keysSnapshotStatic", args: { comp_id: args.comp_id, layer: args.layer, path: args.path } };
+      // A time range goes to the host so the 500-key cap applies to the keys in range.
+      const rangeOnly = args.all !== true && !(args.keys?.length ?? 0);
+      const selectionArgs = { ...snapshot.args, ...(rangeOnly ? { start: args.start, end: args.end } : {}) };
+      const readSelection = (label: string) =>
+        ctx.bridge.callHost<KeysSnapshot>("keysSnapshot", selectionArgs, { label, mutates: false, toolName: "ae_remove_keyframes" });
+      const badIndex = (snap: KeysSnapshot) => (args.keys ?? []).find((i) => i > snap.numKeys);
       if (args.dry_run) {
-        const res = await ctx.bridge.callHost<KeysSnapshot>(snapshot.host, snapshot.args, {
-          label: "ae_remove_keyframes (dry run)",
-          mutates: false,
-          toolName: "ae_remove_keyframes",
-        });
-        const would = selectKeys(res.result.keys, args);
-        return { ok: true, dry_run: true, count: would.length, keys: would, all_keys: would.length === res.result.numKeys };
+        const snap = (await readSelection("ae_remove_keyframes (dry run)")).result;
+        const bad = badIndex(snap);
+        if (bad !== undefined) return { ok: false, error: "bad_args", message: `Key ${bad} out of range (1..${snap.numKeys})` };
+        const would = selectKeys(snap.keys, args);
+        const count = selectionCount(snap, args);
+        const truncated = snap.truncated === true;
+        return {
+          ok: true,
+          dry_run: true,
+          count,
+          keys: would,
+          all_keys: snap.numKeys > 0 && count === snap.numKeys,
+          truncated,
+          ...(truncated || would.length < count
+            ? { note: `Only the first 500 keys are listed${rangeOnly ? "; the count is a lower bound" : ""}. The real removal is not capped.` }
+            : {}),
+        };
+      }
+      // A selection that matches nothing stops here, before the checkpoint and the undo group.
+      ctx.quarantine.assertClear();
+      // Guard first, so a wrong project fails with the guard error and not a
+      // misleading not_found / bad_args / no_match from another project's ids.
+      await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
+      const pre = (await readSelection("ae_remove_keyframes (match)")).result;
+      const preBad = badIndex(pre);
+      if (preBad !== undefined) return { ok: false, error: "bad_args", message: `Key ${preBad} out of range (1..${pre.numKeys})` };
+      if (selectionCount(pre, args) === 0) {
+        return { ok: false, error: "no_match", message: `No keys match that selection; nothing was removed. The property has ${pre.numKeys} key(s).`, numKeys: pre.numKeys };
       }
       return runGuardedWrite(ctx, {
         toolName: "ae_remove_keyframes",

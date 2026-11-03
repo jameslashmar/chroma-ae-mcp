@@ -23,16 +23,17 @@ export const AeCompTreeSchema = z.object({
 
 export const AeFontsSchema = z.object({
   comp_id: z.number().int().optional().describe("Only this comp's text layers. Default: the whole project."),
-  missing_only: z.boolean().optional().describe("List only missing or substituted fonts."),
+  missing_only: z.boolean().optional().describe("List only fonts known to be missing or substituted. Fonts whose state AE couldn't report are left out and counted in unknown_state."),
 });
 
 export const inventoryTools: ToolDefinition<any>[] = [
   {
     name: "ae_comp_tree",
     description:
-      "Read how comps nest. Without comp_id: every comp with how many comps use it, how many it contains, its nesting depth and whether it is in the render queue, " +
-      "plus the top-level comps (used nowhere, but rendered or containing others) and the unused ones (used nowhere, containing nothing, not queued). " +
-      "With comp_id: what that comp contains, level by level (with the layers that hold each precomp), and where it is used, up to the top. Read-only.",
+      "Read how comps nest. Without comp_id: every comp with how many comps use it, how many it contains, its nesting depth and whether it is in the render queue (used_in counts distinct comps, used_by_layers counts layers), " +
+      "plus the top-level comps (used nowhere, but rendered or containing others) and the unused ones (used nowhere, containing nothing, not queued); " +
+      "both are null when partial is true (the layer scan was cut short, so they can't be told). " +
+      "With comp_id: what that comp contains, level by level (with the layers that hold each precomp), and where it is used, up to the top (one entry per parent comp, with its layers). Read-only.",
     schema: AeCompTreeSchema,
     handler: async (args: z.infer<typeof AeCompTreeSchema>, ctx) => {
       const res = await ctx.bridge.callHost("compTree", { comp_id: args.comp_id, depth: args.depth }, {
@@ -47,7 +48,8 @@ export const inventoryTools: ToolDefinition<any>[] = [
     name: "ae_fonts",
     description:
       "List the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, " +
-      "and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). Read-only. " +
+      "and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). " +
+      "skipped_layers counts text layers that could not be fully read (each counted once). Read-only. " +
       "Check them against the brief's fonts (ae_brief) before a delivery.",
     schema: AeFontsSchema,
     handler: async (args: z.infer<typeof AeFontsSchema>, ctx) => {
@@ -57,7 +59,12 @@ export const inventoryTools: ToolDefinition<any>[] = [
         { label: "ae_fonts", mutates: false, toolName: "ae_fonts" }
       );
       const r = res.result;
-      return args.missing_only ? { ...r, fonts: r.fonts.filter((f) => f.missing === true) } : r;
+      if (!args.missing_only) return r;
+      // Only fonts known to be missing; say how many were left out because AE couldn't tell.
+      const unknown = r.fonts.filter((f) => f.missing === null || f.missing === undefined).length;
+      const out: Record<string, unknown> = { ...r, fonts: r.fonts.filter((f) => f.missing === true), unknown_state: unknown };
+      if (unknown > 0) out.note = `${unknown} font(s) have an unknown state (AE couldn't say) and are not listed; they may be missing.`;
+      return out;
     },
   },
 ];

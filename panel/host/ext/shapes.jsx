@@ -291,7 +291,12 @@
         if (hits === 0) fail("not_found", "No content named \"" + sel.name + "\"");
         if (hits > 1) fail("bad_args", hits + " contents are named \"" + sel.name + "\"; remove by index");
       }
-      drop.push(idx);
+      // Two selectors for the same content remove it once; a second removal would take whatever shifted into its place.
+      var dup = false;
+      for (var d = 0; d < drop.length; d++) {
+        if (drop[d] === idx) dup = true;
+      }
+      if (!dup) drop.push(idx);
     }
     drop.sort(function (a, b) { return b - a; });
     return A.withUndo(args.label || "Edit shapes", function () {

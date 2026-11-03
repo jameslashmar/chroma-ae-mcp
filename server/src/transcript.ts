@@ -53,8 +53,17 @@ export function parseTimecode(s: string): number {
   return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
 }
 
+/** Matches "NAME: text" at the start of a cue body. */
+const SPEAKER_PREFIX = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s;
+
+/** All capitals ("ANNA", "DR. SMITH"): the usual way subtitle exports write a speaker. */
+const isAllCaps = (name: string) => /[A-Z]/.test(name) && name === name.toUpperCase();
+
 function parseCueBlocks(text: string, isVtt: boolean): TranscriptSegment[] {
   const out: TranscriptSegment[] = [];
+  // "NAME: text" prefix candidates, decided once the whole file is read.
+  const candidates: Array<{ seg: TranscriptSegment; name: string; rest: string }> = [];
+  let untagged = 0;
   const blocks = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
   for (const block of blocks) {
     const lines = block.split("\n").filter((l) => l.trim() !== "");
@@ -70,19 +79,27 @@ function parseCueBlocks(text: string, isVtt: boolean): TranscriptSegment[] {
       .trim();
     if (!body) continue;
     let speaker: string | undefined;
-    let textOut = body;
     // VTT voice spans "<v Name>" were stripped above; read them from the raw block.
     const voice = isVtt ? /<v(?:\.[^ >]+)?\s+([^>]+)>/.exec(lines.slice(arrow + 1).join("\n")) : null;
     if (voice) speaker = voice[1].trim();
-    else {
-      // "NAME: text" speaker prefixes, common in SRT exports.
-      const m = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s.exec(body);
-      if (m) {
-        speaker = m[1].trim();
-        textOut = m[2].trim();
-      }
+    const seg: TranscriptSegment = { text: body, start: parseTimecode(a), end: parseTimecode(b), ...(speaker ? { speaker } : {}) };
+    if (!voice) {
+      untagged++;
+      const m = SPEAKER_PREFIX.exec(body);
+      if (m) candidates.push({ seg, name: m[1].trim(), rest: m[2].trim() });
     }
-    out.push({ text: textOut, start: parseTimecode(a), end: parseTimecode(b), ...(speaker ? { speaker } : {}) });
+    out.push(seg);
+  }
+  // A prefix is a speaker when it is all caps, or when most cues in the file carry a
+  // prefix and this one repeats. Otherwise "Note: ..." or "Step 1: ..." keeps its text.
+  const counts = new Map<string, number>();
+  for (const c of candidates) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+  const mostlyPrefixed = candidates.length * 2 > untagged;
+  for (const c of candidates) {
+    if (isAllCaps(c.name) || (mostlyPrefixed && (counts.get(c.name) ?? 0) >= 2)) {
+      c.seg.speaker = c.name;
+      c.seg.text = c.rest;
+    }
   }
   return out;
 }

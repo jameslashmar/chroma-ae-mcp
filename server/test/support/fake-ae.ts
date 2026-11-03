@@ -482,6 +482,9 @@ export class FakeLayer {
   moveToEnd() {
     this.move(this.comp.stack.length - 1);
   }
+  remove() {
+    this.comp.stack = this.comp.stack.filter((l) => l !== this);
+  }
 }
 
 export class FakeComp extends CompItem {
@@ -561,6 +564,9 @@ export class FakeComp extends CompItem {
   }
   get numLayers() {
     return this.stack.length;
+  }
+  remove() {
+    this.project.all = this.project.all.filter((x) => x !== this);
   }
   get frameDuration() {
     return 1 / this.frameRate;

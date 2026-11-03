@@ -86,7 +86,7 @@ export function alignMismatches(args: z.infer<typeof AeAlignSchema>, afterRaw: u
 
 export const AePurgeUnusedSchema = z.object({
   kinds: z.array(z.enum(["footage", "solid", "placeholder"])).min(1).optional().describe("Which unused items. Default all three."),
-  empty_folders: z.boolean().optional().describe("Also remove folders with nothing in them. Default false."),
+  empty_folders: z.boolean().optional().describe("Also remove folders that are already empty when scanned. Default false. A folder this purge empties stays; run it again to remove that too."),
   keep: z.array(z.number().int()).max(500).optional().describe("Item ids to leave alone."),
   apply: z.boolean().optional().describe("Remove them. Default false: list what would go. Needs expect."),
   expect: ExpectSchema.optional(),
@@ -96,6 +96,8 @@ interface Unused {
   items: Array<{ id: number; name: string; kind: string; file: string | null }>;
   folders: Array<{ id: number; name: string; kind: string }>;
   numItems: number;
+  total_unused?: number;
+  truncated?: boolean;
 }
 
 // ---------- MOGRT ----------
@@ -115,11 +117,19 @@ export const AeHouseStyleCheckSchema = z.object({
   fonts: z.array(z.string().min(1)).max(20).optional().describe("Instead of the brief's fonts."),
   color_tolerance: z.number().min(0).max(100).optional().describe("Delta E (CIE76) within which a colour counts as the brand colour. Default 12."),
   neutrals_ok: z.boolean().optional().describe("Black, white and greys pass the palette check. Default true."),
-  min_font_size: z.number().positive().optional().describe("Flag text smaller than this, in pixels."),
+  min_font_size: z.number().positive().optional().describe("Flag text smaller than this, in pixels on screen: the text size times the layer's and its parents' Scale at the check time. Text-animator scale, 3D depth and nested-comp scale are not counted."),
   safe_area: z.boolean().optional().describe("Check text layers against title safe at the check time. Default true."),
   title_safe: z.number().min(0).max(0.5).optional().describe("Default 0.2, AE's."),
   time: z.number().optional().describe("When to check the safe area. Default the comp's current time."),
 });
+
+interface StyleScan {
+  width: number;
+  height: number;
+  time: number;
+  truncated?: boolean;
+  layers: StyleLayer[];
+}
 
 interface StyleLayer {
   index: number;
@@ -130,6 +140,9 @@ interface StyleLayer {
   font?: string;
   family?: string;
   font_size?: number;
+  font_style?: string;
+  scale_factor?: number;
+  screen_font_size?: number;
   font_missing?: boolean;
   colours: Array<{ where: string; role: string; rgb: Rgb | null }>;
 }
@@ -151,11 +164,21 @@ export function styleFindings(
     const layer = { index: l.index, id: l.id, name: l.name };
     if (l.kind === "text") {
       if (l.font_missing) out.push({ severity: "medium", kind: "missing_font", layer, message: `"${l.name}" uses ${l.font}, which is missing; AE is showing a substitute.`, font: l.font });
-      if (opts.fonts.length && l.font && !fontMatches(l, opts.fonts)) {
+      if (opts.fonts.length && l.font && !fontMatches({ font: l.font, family: l.family, style: l.font_style }, opts.fonts)) {
         out.push({ severity: "medium", kind: "off_brand_font", layer, message: `"${l.name}" is set in ${l.family ?? l.font} (${l.font}), not one of the brief's fonts: ${opts.fonts.join(", ")}.`, font: l.font });
       }
-      if (opts.min_font_size && l.font_size !== undefined && l.font_size < opts.min_font_size) {
-        out.push({ severity: "low", kind: "small_text", layer, message: `"${l.name}" is ${l.font_size} px, under the ${opts.min_font_size} px minimum.`, font_size: l.font_size });
+      const size = l.screen_font_size ?? l.font_size;
+      if (opts.min_font_size && size !== undefined && size < opts.min_font_size) {
+        const px = Math.round(size * 10) / 10;
+        const scaled = l.screen_font_size !== undefined && l.font_size !== undefined && Math.abs(l.screen_font_size - l.font_size) > 0.05;
+        out.push({
+          severity: "low",
+          kind: "small_text",
+          layer,
+          message: `"${l.name}" is ${px} px${scaled ? ` on screen (${l.font_size} px text at ${Math.round((l.scale_factor ?? 1) * 1000) / 10}% scale)` : ""}, under the ${opts.min_font_size} px minimum.`,
+          font_size: l.font_size,
+          ...(scaled ? { screen_font_size: px } : {}),
+        });
       }
     }
     if (!opts.brand_colors.length) continue;
@@ -184,6 +207,45 @@ export function styleFindings(
   const order = { medium: 0, low: 1, info: 2 };
   return out.sort((a, b) => order[a.severity] - order[b.severity] || a.layer.index - b.layer.index);
 }
+
+/** Removes the empty folders mkdirSync made, from `dir` up to `top`; stops at the first one that has files. */
+function removeEmptyDirs(dir: string, top: string): void {
+  let cur = dir;
+  for (;;) {
+    try {
+      fs.rmdirSync(cur);
+    } catch {
+      return;
+    }
+    if (path.resolve(cur) === path.resolve(top)) return;
+    const up = path.dirname(cur);
+    if (up === cur) return;
+    cur = up;
+  }
+}
+
+/** Brief values come from a hand-editable file: keep the usable ones and name the rest. */
+export function cleanBriefStyle(brief: { brand_colors?: unknown; fonts?: unknown } | null | undefined): { colors: string[]; fonts: string[]; ignored: string[] } {
+  const list = (v: unknown): unknown[] => {
+    if (Array.isArray(v)) return v;
+    if (v === undefined || v === null) return [];
+    return [v];
+  };
+  const colors: string[] = [];
+  const fonts: string[] = [];
+  const ignored: string[] = [];
+  for (const c of list(brief?.brand_colors)) {
+    if (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c.trim())) colors.push(c.trim());
+    else ignored.push(`brand colour ${JSON.stringify(c)}`);
+  }
+  for (const f of list(brief?.fonts)) {
+    if (typeof f === "string" && f.trim() !== "") fonts.push(f.trim());
+    else ignored.push(`font ${JSON.stringify(f)}`);
+  }
+  return { colors, fonts, ignored };
+}
+
+const SAFE_AREA_MAX = 50;
 
 // ---------- tools ----------
 
@@ -225,9 +287,10 @@ export const layoutTools: ToolDefinition<any>[] = [
       const found = (await ctx.bridge.callHost<Unused>(read.host, read.args, { label: "ae_purge_unused (scan)", mutates: false, toolName: "ae_purge_unused" })).result;
       const keep = new Set(args.keep ?? []);
       const targets = [...found.items, ...found.folders].filter((i) => !keep.has(i.id));
-      if (!args.apply || targets.length === 0) return { ok: true, dry_run: !args.apply, count: targets.length, items: targets };
+      const cut = found.truncated === true ? { truncated: true, total_unused: found.total_unused, note: "The scan stops at 500 items; apply this list, then run it again for the rest." } : {};
+      if (!args.apply || targets.length === 0) return { ok: true, dry_run: !args.apply, count: targets.length, ...cut, items: targets };
       if (!args.expect) return { ok: false, error: "bad_args", message: "apply needs expect." };
-      // Folders last, so a folder emptied by this purge isn't refused as non-empty.
+      // Folders last. Only folders already empty at scan time are listed; one this purge empties is left for the next run.
       const ids = [...found.items.filter((i) => !keep.has(i.id)).map((i) => i.id), ...found.folders.filter((i) => !keep.has(i.id)).map((i) => i.id)];
       return runGuardedWrite(ctx, {
         toolName: "ae_purge_unused",
@@ -239,7 +302,7 @@ export const layoutTools: ToolDefinition<any>[] = [
           const left = [...((after as Unused | null)?.items ?? []), ...((after as Unused | null)?.folders ?? [])].filter((i) => ids.includes(i.id));
           return left.map((i) => ({ path: `items[${i.id}]`, expected: "removed", actual: i.name, message: `"${i.name}" is still in the project` }));
         },
-        present: (_before, after, w) => ({ removed: w.removed, numItems: (after as Unused | null)?.numItems }),
+        present: (_before, after, w) => ({ removed: w.removed, numItems: (after as Unused | null)?.numItems, ...cut }),
       });
     },
   },
@@ -255,7 +318,6 @@ export const layoutTools: ToolDefinition<any>[] = [
       if (args.path !== undefined) {
         if (!path.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
         if (fs.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
-        fs.mkdirSync(path.dirname(args.path), { recursive: true });
       }
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
@@ -263,14 +325,26 @@ export const layoutTools: ToolDefinition<any>[] = [
       try {
         return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
           await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-          const res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string }>({
-            id: opId,
-            script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
-            label: `ae_export_mogrt(${args.comp_id})`,
-            mutates: false,
-            toolName: "ae_export_mogrt",
-          });
+          // The folder is made only now: the quarantine and the guard have passed.
+          const createdDir = args.path !== undefined ? fs.mkdirSync(path.dirname(args.path), { recursive: true }) : undefined;
+          let res;
+          try {
+            res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string }>({
+              id: opId,
+              script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
+              label: `ae_export_mogrt(${args.comp_id})`,
+              mutates: false,
+              toolName: "ae_export_mogrt",
+            });
+          } catch (err) {
+            // The host refused (no controllers, unsaved project): don't leave empty folders behind.
+            // After a timeout the export may still be running (a dialog blocking AE), so keep its folder.
+            const refused = err instanceof BridgeError && (err.kind === "evalscript_error" || err.kind === "guard");
+            if (refused && createdDir !== undefined && args.path !== undefined) removeEmptyDirs(path.dirname(args.path), createdDir);
+            throw err;
+          }
           const r = res.result;
+          if (!r.exported && createdDir !== undefined && args.path !== undefined) removeEmptyDirs(path.dirname(args.path), createdDir);
           let file: { path: string; size: number; fresh: boolean } | null = null;
           if (args.path) {
             try {
@@ -304,17 +378,45 @@ export const layoutTools: ToolDefinition<any>[] = [
       "Nested comps are checked by running it on them.",
     schema: AeHouseStyleCheckSchema,
     handler: async (args: z.infer<typeof AeHouseStyleCheckSchema>, ctx: ToolContext) => {
-      const status = (await ctx.bridge.callHost<{ project_path: string }>("status", {}, { label: "ae_house_style_check (status)", mutates: false, toolName: "ae_house_style_check" })).result;
+      const opId = ctx.bridge.newOpId();
+      const label = "ae_house_style_check";
+      // One lease for the whole scan, so no other tool runs between the layers' reads.
+      let gathered: { status: { project_path: string }; scan: StyleScan; bounds: LayerBounds[]; safeTotal: number; unchecked: Array<{ layer: string; reason: string }> };
+      try {
+        gathered = await ctx.queue.run(`ae_house_style_check(${args.comp_id})`, async () => {
+          let n = 0;
+          const read = <T,>(fn: string, hostArgs: unknown, what: string) =>
+            ctx.bridge.evalRaw<T>({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs), label: `${label} (${what})`, mutates: false, toolName: label });
+          const status = (await read<{ project_path: string }>("status", {}, "status")).result;
+          const scan = (await read<StyleScan>("styleScan", { comp_id: args.comp_id, time: args.time }, "scan")).result;
+          const bounds: LayerBounds[] = [];
+          const unchecked: Array<{ layer: string; reason: string }> = [];
+          const texts = scan.layers.filter((x) => x.kind === "text" && x.enabled);
+          if (args.safe_area !== false) {
+            const t = args.time ?? scan.time;
+            for (const l of texts.slice(0, SAFE_AREA_MAX)) {
+              try {
+                bounds.push((await read<LayerBounds>("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, `bounds ${l.name}`)).result);
+              } catch (err) {
+                // Only a failure the host reported for this layer (it vanished mid-scan) is one unchecked entry.
+                // A timeout or an unreachable panel means the bridge is stuck: stop, do not stack more evals behind it.
+                if (!(err instanceof BridgeError) || err.kind !== "evalscript_error") throw err;
+                unchecked.push({ layer: l.name, reason: err instanceof Error ? err.message : String(err) });
+              }
+            }
+          }
+          return { status, scan, bounds, safeTotal: texts.length, unchecked };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+        throw err;
+      }
+      const { status, scan, bounds, safeTotal, unchecked } = gathered;
       const brief = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
-      const brandColors = args.brand_colors ?? brief?.brand_colors ?? [];
-      const fonts = args.fonts ?? brief?.fonts ?? [];
-      const scan = (
-        await ctx.bridge.callHost<{ width: number; height: number; time: number; layers: StyleLayer[] }>("styleScan", { comp_id: args.comp_id }, {
-          label: "ae_house_style_check (scan)",
-          mutates: false,
-          toolName: "ae_house_style_check",
-        })
-      ).result;
+      const cleaned = cleanBriefStyle(brief);
+      const brandColors = args.brand_colors ?? cleaned.colors;
+      const fonts = args.fonts ?? cleaned.fonts;
+      const ignored = [...(args.brand_colors ? [] : cleaned.ignored.filter((x) => x.startsWith("brand colour"))), ...(args.fonts ? [] : cleaned.ignored.filter((x) => x.startsWith("font")))];
       const findings: StyleFinding[] = styleFindings(scan.layers, {
         brand_colors: brandColors,
         fonts,
@@ -322,27 +424,22 @@ export const layoutTools: ToolDefinition<any>[] = [
         neutrals_ok: args.neutrals_ok !== false,
         min_font_size: args.min_font_size,
       });
-      if (args.safe_area !== false) {
-        const t = args.time ?? scan.time;
-        for (const l of scan.layers.filter((x) => x.kind === "text" && x.enabled)) {
-          const b = (
-            await ctx.bridge.callHost<LayerBounds>("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, {
-              label: `ae_house_style_check (bounds ${l.name})`,
-              mutates: false,
-              toolName: "ae_house_style_check",
-            })
-          ).result;
-          for (const f of reviewBounds(b, { width: scan.width, height: scan.height }, { action: 0.1, title: args.title_safe ?? 0.2 })) {
-            findings.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind as StyleFinding["kind"], layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
-          }
+      for (const b of bounds) {
+        for (const f of reviewBounds(b, { width: scan.width, height: scan.height }, { action: 0.1, title: args.title_safe ?? 0.2 })) {
+          findings.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind as StyleFinding["kind"], layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
         }
       }
+      const safeCut = args.safe_area !== false && safeTotal > SAFE_AREA_MAX;
       const counts = { medium: 0, low: 0, info: 0 };
       for (const f of findings) counts[f.severity]++;
       return {
         ok: true,
         clean: findings.length === 0,
         used: { brand_colors: brandColors, fonts, from_brief: Boolean(brief) && !args.brand_colors && !args.fonts },
+        ...(ignored.length ? { ignored_brief_entries: ignored } : {}),
+        ...(scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape and solid layers; later layers were not checked." } : {}),
+        ...(safeCut ? { safe_area_truncated: true, safe_area_checked: SAFE_AREA_MAX, safe_area_note: `Title safe was checked on the first ${SAFE_AREA_MAX} of ${safeTotal} text layers.` } : {}),
+        ...(unchecked.length ? { safe_area_unchecked: unchecked } : {}),
         ...(brandColors.length === 0 || fonts.length === 0
           ? { note: `No brand ${brandColors.length === 0 ? "colours" : ""}${brandColors.length === 0 && fonts.length === 0 ? " or " : ""}${fonts.length === 0 ? "fonts" : ""} to check against: set them with ae_brief or pass them here.` }
           : {}),

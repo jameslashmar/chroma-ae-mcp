@@ -847,6 +847,7 @@ describe("Task G3 animate tools (ext-animate)", () => {
       });
 
       let replacedWithSeq = false;
+      let replacedForceAlpha: boolean | null = null;
       const mockFootage = Object.assign(new MockFootageItem(), {
         id: 77,
         name: "clip.mov",
@@ -863,7 +864,8 @@ describe("Task G3 animate tools (ext-animate)", () => {
           this.footageMissing = false;
         },
         replaceWithSequence: function (f: MockFile, forceAlpha: boolean) {
-          replacedWithSeq = forceAlpha;
+          replacedWithSeq = true;
+          replacedForceAlpha = forceAlpha;
           this.file = f;
           this.footageMissing = false;
         },
@@ -974,7 +976,7 @@ describe("Task G3 animate tools (ext-animate)", () => {
       expect(textDocState.text).toBe("Updated Text");
       expect(textDocState.justification).toBe(7413);
 
-      // 3. Test importFootage with sequence: true (forceAlphabetical)
+      // 3. Test importFootage with sequence: true (numbered order, forceAlphabetical off)
       const importRes = A.importFootage({
         paths: ["C:/seq/frame_0001.png"],
         sequence: true,
@@ -984,7 +986,7 @@ describe("Task G3 animate tools (ext-animate)", () => {
       });
       expect(importRes.item_ids).toEqual([201]);
       expect(importedOptions[0].sequence).toBe(true);
-      expect(importedOptions[0].forceAlphabetical).toBe(true);
+      expect(importedOptions[0].forceAlphabetical).toBe(false);
 
       // 4. Test replaceFootage with sequence: true
       const replaceRes = A.replaceFootage({
@@ -996,6 +998,8 @@ describe("Task G3 animate tools (ext-animate)", () => {
       expect(replaceRes.before_file).toBe("C:/old/clip.mov");
       expect(replaceRes.before_footage_missing).toBe(true);
       expect(replacedWithSeq).toBe(true);
+      // Numbered order with placeholders for gaps, not Force alphabetical order.
+      expect(replacedForceAlpha).toBe(false);
       expect(mockFootage.footageMissing).toBe(false);
     });
   });
