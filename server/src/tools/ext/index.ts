@@ -15,7 +15,9 @@ import { inventoryTools } from "./inventory.js";
 import { keyTools } from "./key.js";
 import { keyframesTools } from "./keyframes.js";
 import { layersTools } from "./layers.js";
+import { layoutTools } from "./layout.js";
 import { markersTools } from "./markers.js";
+import { masksTools } from "./masks.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
 import { productionTools } from "./production.js";
@@ -52,4 +54,6 @@ export const extTools: ToolDefinition<any>[] = [
   ...inventoryTools,
   ...shapesTools,
   ...productionTools,
+  ...masksTools,
+  ...layoutTools,
 ];

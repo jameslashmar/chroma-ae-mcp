@@ -483,6 +483,43 @@ async function main() {
   r = await call("ae_version_footage", { item_ids: [tileId], update: true, expect });
   check("ae_version_footage (update)", r.applied && r.receipt?.matches === true && Boolean(r.log_path), `${path.basename(String(r.items?.[0]?.target))}, log ${path.basename(String(r.log_path))}`);
 
+  // ---------- 0.4: masks, text animators, layout, purge, house style ----------
+  r = await call("ae_mask", { comp_id: LC, layer: { name: "Mover" }, add: [{ name: "Round", shape: "ellipse", box: [0, 0, 80, 80], feather: [6, 6] }], expect });
+  check("ae_mask (add)", r.applied && r.receipt?.matches === true && r.masks?.[0]?.vertices === 4, JSON.stringify(r.masks?.[0]?.box));
+  r = await call("ae_mask", { comp_id: LC, layer: { name: "Mover" }, set: [{ mask: { name: "Round" }, mode: "subtract", inverted: true }], expect });
+  check("ae_mask (set)", r.applied && r.receipt?.matches === true && r.masks?.[0]?.mode === "subtract", `${r.masks?.[0]?.mode}, inverted ${r.masks?.[0]?.inverted}`);
+
+  await call("ae_create_layer", { comp_id: LC, type: "text", text: "Reveal me", name: "Reveal", expect });
+  r = await call("ae_text_animator", {
+    comp_id: LC,
+    layer: { name: "Reveal" },
+    properties: { opacity: 0, position: [0, 30, 0] },
+    selector: { based_on: "characters", shape: "ramp_up" },
+    reveal: { from: 0, to: 100, start_time: 0, duration: 1.5 },
+    expect,
+  });
+  check("ae_text_animator", r.applied && r.receipt?.matches === true, `${(r.animator?.properties ?? []).map((p) => p.matchName).join(", ")}; ${(r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
+  for (const n of ["Box1", "Box2", "Box3"]) await call("ae_create_layer", { comp_id: LC, type: "solid", name: n, width: 40, height: 40, color: [0.9, 0.9, 0.9], expect });
+  await call("ae_batch_set", {
+    comp_id: LC,
+    ops: [80, 200, 520].map((x, i) => ({ layer: { name: `Box${i + 1}` }, path: ["ADBE Transform Group", "ADBE Position"], value: [x, 260] })),
+    expect,
+  });
+  r = await call("ae_align", { comp_id: LC, layers: [{ name: "Box1" }, { name: "Box2" }, { name: "Box3" }], distribute: "horizontal", expect });
+  check("ae_align (distribute)", r.applied && r.receipt?.matches === true, (r.moved ?? []).map((m) => `${m.name} ${Math.round(m.delta?.[0])}`).join(", "));
+  r = await call("ae_align", { comp_id: LC, layers: [{ name: "Box1" }, { name: "Box2" }, { name: "Box3" }], align: "top", to: "title_safe", expect });
+  check("ae_align (top, title safe)", r.applied && r.receipt?.matches === true && Math.abs((r.layers?.[0]?.rect?.[1] ?? 0) - 36) < 0.6, JSON.stringify(r.layers?.map((l) => l.rect?.map((v) => Math.round(v)))));
+
+  r = await call("ae_purge_unused", {});
+  const purgeable = r.count;
+  check("ae_purge_unused (list)", r.dry_run === true && purgeable >= 1, (r.items ?? []).map((i) => `${i.name} (${i.kind})`).join(", "));
+  r = await call("ae_purge_unused", { kinds: ["footage"], apply: true, expect });
+  check("ae_purge_unused (apply)", r.applied && r.receipt?.matches === true && (r.removed ?? []).length >= 1, `${(r.removed ?? []).length} removed`);
+
+  r = await call("ae_house_style_check", { comp_id: LC, brand_colors: ["#3399ff", "#ffcc00"], fonts: ["Arial"], min_font_size: 10 });
+  check("ae_house_style_check", r.ok && Array.isArray(r.findings) && r.checked?.text >= 1, `${r.counts?.medium} medium, ${r.counts?.low} low: ${[...new Set((r.findings ?? []).map((f) => f.kind))].join(", ")}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
 
@@ -495,6 +532,8 @@ async function main() {
   );
   r = await call("ae_audio_analyze", { audio_path: CLICKS_WAV });
   check("ae_audio_analyze (file)", r.ok && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3 && r.onsets?.length === 8, `${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets`);
+  r = await call("ae_export_mogrt", { comp_id: PRE, path: path.join(RENDER, "smoke_template.mogrt"), overwrite: true, expect });
+  check("ae_export_mogrt", r.ok && r.file?.size > 0 && r.file?.fresh === true, `${r.controllers} controller(s), ${r.file?.size} bytes ${r.message ?? ""}`);
 
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 90, expect });
   check("ae_set_property (after save)", r.applied && r.checkpoint?.status === want("created") && !r.checkpoint?.unsaved_changes_not_included, cpNote(r));

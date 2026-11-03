@@ -30,6 +30,7 @@ export const PropertyValueType = {
 export const KeyframeInterpolationType = { LINEAR: 6612, BEZIER: 6613, HOLD: 6614 };
 export const TrackMatteType = { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 };
 export const LightType = { PARALLEL: 4412, SPOT: 4413, POINT: 4414, AMBIENT: 4415 };
+export const MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 };
 
 export class KeyframeEase {
   constructor(public speed: number, public influence: number) {}
@@ -50,6 +51,11 @@ export class TextDocument {
   fontStyle = "Regular";
   fontLocation = "";
   fontObject: { isSubstitute: boolean } | undefined;
+  fontSize = 72;
+  applyFill = true;
+  fillColor = [1, 1, 1];
+  applyStroke = false;
+  strokeColor = [0, 0, 0];
   constructor(public text: string) {}
 }
 
@@ -149,6 +155,9 @@ export class FakeProperty {
   setValuesAtTimes(ts: number[], vs: unknown[]) {
     if (ts.length !== vs.length) throw new Error("setValuesAtTimes: lengths differ");
     ts.forEach((t, i) => this.setValueAtTime(t, vs[i]));
+  }
+  setValueAtKey(i: number, raw: unknown) {
+    this.k(i).value = local(raw);
   }
   removeKey(i: number) {
     this.k(i);
@@ -279,6 +288,53 @@ const SHAPE_FACTORY: Record<string, (n: number) => FakeGroup> = {
     ]),
 };
 
+class FakeMask extends Object {}
+
+const TEXT_ANIM_PROPS: Record<string, [string, number, unknown]> = {
+  "ADBE Text Position 3D": ["Position", PropertyValueType.ThreeD_SPATIAL, [0, 0, 0]],
+  "ADBE Text Scale 3D": ["Scale", PropertyValueType.ThreeD, [100, 100, 100]],
+  "ADBE Text Rotation": ["Rotation", PropertyValueType.OneD, 0],
+  "ADBE Text Opacity": ["Opacity", PropertyValueType.OneD, 100],
+  "ADBE Text Fill Color": ["Fill Color", PropertyValueType.COLOR, [1, 0, 0, 1]],
+  "ADBE Text Tracking Amount": ["Tracking Amount", PropertyValueType.OneD, 0],
+  "ADBE Text Blur": ["Blur", PropertyValueType.TwoD, [0, 0]],
+};
+
+const MORE_FACTORY: Record<string, (n: number) => FakeGroup | FakeProperty> = {
+  "ADBE Mask Atom": (n) => {
+    const g = new FakeGroup(`Mask ${n}`, "ADBE Mask Atom", [
+      P("Mask Path", "ADBE Mask Shape", PropertyValueType.SHAPE, new Shape()),
+      P("Mask Feather", "ADBE Mask Feather", PropertyValueType.TwoD, [0, 0]),
+      P("Mask Opacity", "ADBE Mask Opacity", PropertyValueType.OneD, 100),
+      P("Mask Expansion", "ADBE Mask Offset", PropertyValueType.OneD, 0),
+    ]) as FakeGroup & { maskMode: number; inverted: boolean };
+    g.maskMode = MaskMode.ADD;
+    g.inverted = false;
+    return g;
+  },
+  "ADBE Text Animator": (n) =>
+    new FakeGroup(`Animator ${n}`, "ADBE Text Animator", [
+      new FakeGroup("Selectors", "ADBE Text Selectors", [], true),
+      new FakeGroup("Properties", "ADBE Text Animator Properties", [], true),
+    ]),
+  "ADBE Text Selector": (n) =>
+    new FakeGroup(`Range Selector ${n}`, "ADBE Text Selector", [
+      P("Start", "ADBE Text Percent Start", PropertyValueType.OneD, 0),
+      P("End", "ADBE Text Percent End", PropertyValueType.OneD, 100),
+      P("Offset", "ADBE Text Percent Offset", PropertyValueType.OneD, 0),
+      new FakeGroup("Advanced", "ADBE Text Range Advanced", [
+        P("Units", "ADBE Text Range Units", PropertyValueType.OneD, 1),
+        P("Based On", "ADBE Text Range Type2", PropertyValueType.OneD, 1),
+        P("Shape", "ADBE Text Range Shape", PropertyValueType.OneD, 1),
+        P("Ease High", "ADBE Text Levels Max Ease", PropertyValueType.OneD, 0),
+        P("Ease Low", "ADBE Text Levels Min Ease", PropertyValueType.OneD, 0),
+        P("Randomize Order", "ADBE Text Randomize Order", PropertyValueType.OneD, 0),
+      ]),
+    ]),
+};
+for (const [mn, [name, type, value]] of Object.entries(TEXT_ANIM_PROPS)) MORE_FACTORY[mn] = () => P(name, mn, type, value);
+void FakeMask;
+
 export class FakeGroup {
   propertyType: number;
   parentProperty: FakeGroup | null = null;
@@ -294,7 +350,7 @@ export class FakeGroup {
     return this.props.find((p) => p.matchName === sel || p.name === sel) ?? null;
   }
   addProperty(matchName: string) {
-    const make = SHAPE_FACTORY[matchName];
+    const make = SHAPE_FACTORY[matchName] ?? MORE_FACTORY[matchName];
     if (!make || this.propertyType !== PropertyType.INDEXED_GROUP) throw new Error(`Can't add ${matchName} to ${this.name}`);
     const made = make(this.props.filter((p) => p.matchName === matchName).length + 1);
     made.parentProperty = this;
@@ -352,10 +408,16 @@ export class FakeLayer {
       new FakeProperty("Marker", "ADBE Marker", PropertyValueType.MARKER, null),
       transform,
       new FakeGroup("Effects", "ADBE Effect Parade", []),
+      new FakeGroup("Masks", "ADBE Mask Parade", [], true),
     ];
     if (kind === "ShapeLayer") props.push(new FakeGroup("Contents", "ADBE Root Vectors Group", [], true));
     if (kind === "TextLayer") {
-      props.push(new FakeGroup("Text", "ADBE Text Properties", [new FakeProperty("Source Text", "ADBE Text Document", PropertyValueType.TEXT_DOCUMENT, new TextDocument(name))]));
+      props.push(
+        new FakeGroup("Text", "ADBE Text Properties", [
+          new FakeProperty("Source Text", "ADBE Text Document", PropertyValueType.TEXT_DOCUMENT, new TextDocument(name)),
+          new FakeGroup("Animators", "ADBE Text Animators", [], true),
+        ])
+      );
     }
     this.group = new FakeGroup(name, "ADBE AV Layer", props);
     if (comp.modernMattes) {
@@ -441,7 +503,7 @@ export class FakeComp extends CompItem {
     };
     this.layers = {
       addSolid: (color: number[], name: string, w: number, h: number, _pa: number, dur?: number) => {
-        const item = project.addFootage(name, w, h, new SolidSource());
+        const item = project.addFootage(name, w, h, Object.assign(new SolidSource(), { color: local(color) }));
         const l = new FakeLayer(this, name);
         l.source = item;
         l.rect = { left: 0, top: 0, width: w, height: h };
@@ -507,6 +569,12 @@ export class FakeComp extends CompItem {
   setMotionGraphicsControllerName(i: number, name: string) {
     this.controllers[i - 1] = name;
   }
+  exported: Array<{ overwrite: boolean; path?: string }> = [];
+  exportAsMotionGraphicsTemplate(overwrite: boolean, path?: string) {
+    this.exported.push({ overwrite, path });
+    if (path) fs.writeFileSync(path, "mogrt");
+    return true;
+  }
   layer(sel: number | string) {
     if (typeof sel === "number") return this.stack[sel - 1] ?? null;
     return this.stack.find((l) => l.name === sel) ?? null;
@@ -528,6 +596,9 @@ export class FakeFolder extends FolderItem {
   item(i: number) {
     return this.children[i - 1];
   }
+  remove() {
+    this.project.all = this.project.all.filter((x) => x !== this);
+  }
 }
 
 export class FakeFootage extends FootageItem {
@@ -536,9 +607,15 @@ export class FakeFootage extends FootageItem {
   duration = 0;
   footageMissing = false;
   file: { fsName: string } | null = null;
-  usedIn: unknown[] = [];
+  project: FakeProject | null = null;
   constructor(public name: string, public width: number, public height: number, public mainSource: any) {
     super();
+  }
+  get usedIn() {
+    return (this.project?.all ?? []).filter((c): c is FakeComp => c instanceof FakeComp && c.stack.some((l) => l.source === this));
+  }
+  remove() {
+    if (this.project) this.project.all = this.project.all.filter((x) => x !== this);
   }
   replace(f: FakeFile) {
     this.file = { fsName: f.fsName };
@@ -580,7 +657,9 @@ export class FakeProject {
     return this.place(new FakeFolder(this, name), folder);
   }
   addFootage(name: string, w: number, h: number, source: unknown = new FileSource(), folder?: FakeFolder) {
-    return this.place(new FakeFootage(name, w, h, source), folder);
+    const f = this.place(new FakeFootage(name, w, h, source), folder);
+    f.project = this;
+    return f;
   }
 }
 
@@ -634,6 +713,7 @@ export function loadHost(project: FakeProject, extFiles: string[], extra: Record
     KeyframeInterpolationType,
     TrackMatteType,
     LightType,
+    MaskMode,
     app: {
       project,
       version: "26.2.1",

@@ -2703,8 +2703,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path26, errorMaps, issueData } = params;
-  const fullPath = [...path26, ...issueData.path || []];
+  const { data, path: path27, errorMaps, issueData } = params;
+  const fullPath = [...path27, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2820,11 +2820,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path26, key) {
+  constructor(parent, value, path27, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path26;
+    this._path = path27;
     this._key = key;
   }
   get path() {
@@ -8446,7 +8446,7 @@ var diagnosticsTools = [
 ];
 
 // src/panel-entry.ts
-var path25 = __toESM(require("node:path"), 1);
+var path26 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -9416,14 +9416,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path26 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path27 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path26,
+          path: path27,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path26} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path27} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -10478,8 +10478,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path26, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path26, expected, actual, message });
+function expectThat(mismatches, ok, path27, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path27, expected, actual, message });
 }
 
 // src/tools/ext/audio.ts
@@ -13490,434 +13490,64 @@ var layersTools = [
   }
 ];
 
-// src/tools/ext/markers.ts
-var fs19 = __toESM(require("node:fs"), 1);
-var path19 = __toESM(require("node:path"), 1);
+// src/tools/ext/layout.ts
+var fs20 = __toESM(require("node:fs"), 1);
+var path20 = __toESM(require("node:path"), 1);
 
-// src/transcript.ts
-var TranscriptError = class extends Error {
-};
-var round32 = (x) => Math.round(x * 1e3) / 1e3;
-function parseTimecode(s) {
-  const t = s.trim().replace(",", ".");
-  const parts = t.split(":");
-  if (parts.length > 3 || parts.some((p) => p === "" || !/^\d+(\.\d+)?$/.test(p))) {
-    throw new TranscriptError(`Bad timecode "${s}"`);
-  }
-  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
+// src/style.ts
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) throw new Error(`Not a #rrggbb colour: ${hex}`);
+  const n = parseInt(m[1], 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 }
-function parseCueBlocks(text, isVtt) {
-  const out = [];
-  const blocks = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
-  for (const block of blocks) {
-    const lines = block.split("\n").filter((l) => l.trim() !== "");
-    const arrow = lines.findIndex((l) => l.includes("-->"));
-    if (arrow < 0) continue;
-    const [a, rest] = lines[arrow].split("-->");
-    const b = rest.trim().split(/\s+/)[0];
-    const body = lines.slice(arrow + 1).join("\n").replace(/<[^>]+>/g, "").trim();
-    if (!body) continue;
-    let speaker;
-    let textOut = body;
-    const voice = isVtt ? /<v(?:\.[^ >]+)?\s+([^>]+)>/.exec(lines.slice(arrow + 1).join("\n")) : null;
-    if (voice) speaker = voice[1].trim();
-    else {
-      const m = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s.exec(body);
-      if (m) {
-        speaker = m[1].trim();
-        textOut = m[2].trim();
-      }
-    }
-    out.push({ text: textOut, start: parseTimecode(a), end: parseTimecode(b), ...speaker ? { speaker } : {} });
-  }
-  return out;
+function rgbToHex(c) {
+  return `#${c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("")}`;
 }
-function num(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
+function toLinear(v) {
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
 }
-function wordsFrom(list) {
-  const words = [];
-  for (const w of list) {
-    if (!w || typeof w !== "object") continue;
-    const o = w;
-    if (o.type !== void 0 && o.type !== "word") continue;
-    const text = String(o.text ?? o.word ?? "").trim();
-    const start = num(o.start);
-    const end = num(o.end);
-    if (!text || start === void 0 || end === void 0) continue;
-    const speaker = o.speaker_id ?? o.speaker;
-    words.push({ text, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
-  }
-  return words;
+function rgbToLab(c) {
+  const [r, g, b] = c.map(toLinear);
+  const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+  const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b;
+  const z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883;
+  const f = (t) => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  const fx = f(x);
+  const fy = f(y);
+  const fz = f(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
-function segmentWords(words, gap = 0.8) {
-  const out = [];
-  let cur = [];
-  const flush = () => {
-    if (!cur.length) return;
-    out.push({
-      text: cur.map((w) => w.text).join(" "),
-      start: cur[0].start,
-      end: cur[cur.length - 1].end,
-      ...cur[0].speaker !== void 0 ? { speaker: cur[0].speaker } : {},
-      words: cur
-    });
-    cur = [];
-  };
-  for (const w of words) {
-    const prev = cur[cur.length - 1];
-    if (prev && (w.speaker !== prev.speaker || w.start - prev.end > gap)) flush();
-    cur.push(w);
-  }
-  flush();
-  return out;
+function deltaE(a, b) {
+  const p = rgbToLab(a);
+  const q = rgbToLab(b);
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
 }
-function parseJson(text) {
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    throw new TranscriptError(`Transcript is not valid JSON: ${err.message}`);
-  }
-  const obj = data;
-  if (Array.isArray(data)) {
-    const segs = [];
-    for (const s of data) {
-      const o = s;
-      const start = num(o?.start);
-      const end = num(o?.end);
-      const t = String(o?.text ?? o?.word ?? "").trim();
-      if (t && start !== void 0 && end !== void 0) {
-        const speaker = o.speaker ?? o.speaker_id;
-        segs.push({ text: t, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
-      }
-    }
-    return segs;
-  }
-  if (Array.isArray(obj?.segments)) {
-    return obj.segments.flatMap((s) => {
-      const o = s;
-      const start = num(o?.start);
-      const end = num(o?.end);
-      if (start === void 0 || end === void 0) return [];
-      const words = Array.isArray(o.words) ? wordsFrom(o.words) : void 0;
-      const speaker = o.speaker ?? o.speaker_id;
-      return [
-        {
-          text: String(o.text ?? "").trim(),
-          start,
-          end,
-          ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {},
-          ...words && words.length ? { words } : {}
-        }
-      ];
-    });
-  }
-  if (Array.isArray(obj?.words)) return segmentWords(wordsFrom(obj.words));
-  throw new TranscriptError("JSON transcript needs `words`, `segments`, or an array of {text, start, end}");
+function isNeutral(c) {
+  const lab = rgbToLab(c);
+  return Math.hypot(lab[1], lab[2]) < 3;
 }
-function detectFormat(text, hint) {
-  const h = (hint ?? "").toLowerCase();
-  if (h.endsWith("srt")) return "srt";
-  if (h.endsWith("vtt")) return "vtt";
-  if (h.endsWith("json")) return "json";
-  const t = text.trimStart();
-  if (t.startsWith("{") || t.startsWith("[")) return "json";
-  if (t.startsWith("WEBVTT")) return "vtt";
-  return "srt";
-}
-function parseTranscript(text, format) {
-  const f = format ?? detectFormat(text);
-  const segs = f === "json" ? parseJson(text) : parseCueBlocks(text, f === "vtt");
-  if (!segs.length) throw new TranscriptError(`No timed lines found in the ${f.toUpperCase()} transcript`);
-  return segs.sort((a, b) => a.start - b.start);
-}
-function sentencesOf(seg) {
-  if (seg.words && seg.words.length) {
-    const out = [];
-    let cur = [];
-    for (const w of seg.words) {
-      cur.push(w);
-      if (/[.!?…]["')\]]?$/.test(w.text)) {
-        out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: w.end, speaker: seg.speaker });
-        cur = [];
-      }
-    }
-    if (cur.length) out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: cur[cur.length - 1].end, speaker: seg.speaker });
-    return out;
+function nearestBrand(c, palette) {
+  let best = null;
+  for (const hex of palette) {
+    const d = deltaE(c, hexToRgb(hex));
+    if (!best || d < best.delta_e) best = { hex: hex.toLowerCase(), delta_e: Math.round(d * 10) / 10 };
   }
-  const parts = seg.text.match(/[^.!?…]+[.!?…]+["')\]]?|[^.!?…]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [seg.text];
-  const total = parts.reduce((n, p) => n + p.length, 0) || 1;
-  const span = seg.end - seg.start;
-  let t = seg.start;
-  return parts.map((p) => {
-    const d = span * p.length / total;
-    const s = { text: p, start: t, end: t + d, speaker: seg.speaker };
-    t += d;
-    return s;
+  return best;
+}
+var squash = (s) => s.toLowerCase().replace(/[\s_-]+/g, "");
+function fontMatches(used, briefFonts) {
+  const names = [used.font, used.family].filter((x) => Boolean(x)).map(squash);
+  return briefFonts.some((b) => {
+    const want = squash(b);
+    return names.some((n) => n === want || n.startsWith(want) || want.startsWith(n));
   });
 }
-function wordsOf(seg) {
-  if (seg.words && seg.words.length) return seg.words.map((w) => ({ text: w.text, start: w.start, end: w.end, speaker: w.speaker ?? seg.speaker }));
-  const words = seg.text.split(/\s+/).filter(Boolean);
-  const total = words.reduce((n, w) => n + w.length, 0) || 1;
-  const span = seg.end - seg.start;
-  let t = seg.start;
-  return words.map((w) => {
-    const d = span * w.length / total;
-    const s = { text: w, start: t, end: t + d, speaker: seg.speaker };
-    t += d;
-    return s;
-  });
-}
-function transcriptCues(segments, opts = {}) {
-  const unit = opts.unit ?? "segment";
-  const pieces = segments.flatMap((s) => {
-    if (unit === "word") return wordsOf(s);
-    if (unit === "sentence") return sentencesOf(s);
-    return [s];
-  });
-  const speakers = [];
-  const maxChars = opts.max_chars ?? 2e3;
-  return pieces.map((p) => {
-    const cue = {
-      time: round32(p.start + (opts.offset ?? 0)),
-      duration: round32(Math.max(0, p.end - p.start)),
-      comment: p.text.length > maxChars ? p.text.slice(0, maxChars) + "\u2026" : p.text
-    };
-    if (p.speaker !== void 0) {
-      cue.speaker = p.speaker;
-      if (opts.speaker_labels !== false) {
-        let i = speakers.indexOf(p.speaker);
-        if (i < 0) i = speakers.push(p.speaker) - 1;
-        cue.label = i % 16 + 1;
-      }
-    }
-    return cue;
-  });
-}
-
-// src/tools/ext/markers.ts
-var MAX_MARKERS_PER_CALL = 500;
-var MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
-var TIME_TOLERANCE = 15e-4;
-var MarkerInputSchema = external_exports.object({
-  time: external_exports.number().min(0).describe("Seconds, in comp time (or the layer's own time with relative_to 'layer')."),
-  comment: external_exports.string().max(5e3).optional(),
-  duration: external_exports.number().min(0).optional().describe("Marker length in seconds."),
-  label: external_exports.number().int().min(0).max(16).optional().describe("Label colour 0..16 (0 none)."),
-  chapter: external_exports.string().max(500).optional(),
-  url: external_exports.string().max(2e3).optional()
-});
-var TranscriptInputSchema = external_exports.object({
-  path: external_exports.string().min(1).optional().describe("Absolute path of a .srt, .vtt or .json transcript."),
-  text: external_exports.string().max(MAX_TRANSCRIPT_BYTES).optional().describe("The transcript itself, instead of a path."),
-  format: external_exports.enum(["srt", "vtt", "json"]).optional().describe("Default: from the file extension or the content."),
-  unit: external_exports.enum(["segment", "sentence", "word"]).optional().describe("One marker per segment (default), sentence or word."),
-  speaker_labels: external_exports.boolean().optional().describe("A label colour per speaker. Default true."),
-  offset: external_exports.number().optional().describe("Seconds added to every transcript time.")
-}).refine((t) => t.path === void 0 !== (t.text === void 0), { message: "Give the transcript's path or its text, not both." });
-var TargetFields = {
-  comp_id: external_exports.number().int(),
-  layer: LayerSelectorSchema.optional().describe("Markers on this layer. Default: the comp's own markers.")
-};
-var AeGetMarkersSchema = external_exports.object(TargetFields);
-var AeAddMarkersSchema = external_exports.object({
-  ...TargetFields,
-  markers: external_exports.array(MarkerInputSchema).min(1).max(MAX_MARKERS_PER_CALL).optional(),
-  transcript: TranscriptInputSchema.optional(),
-  relative_to: external_exports.enum(["comp", "layer"]).optional().describe("'layer': times are in the layer's own time (startTime and stretch applied; time remapping is not). Default 'layer' for a transcript on a layer, else 'comp'."),
-  dry_run: external_exports.boolean().optional().describe("Return the markers that would be added without touching AE."),
-  expect: ExpectSchema
-}).refine((v) => v.markers === void 0 !== (v.transcript === void 0), { message: "Give markers or a transcript." }).refine((v) => v.relative_to !== "layer" || v.layer !== void 0, { message: "relative_to 'layer' needs a layer." });
-var AeRemoveMarkersSchema = external_exports.object({
-  ...TargetFields,
-  all: external_exports.boolean().optional(),
-  start: external_exports.number().optional().describe("Remove markers at or after this time (comp seconds)."),
-  end: external_exports.number().optional().describe("Remove markers at or before this time."),
-  comment_contains: external_exports.string().min(1).optional().describe("Case-insensitive; combined with start/end when given."),
-  indexes: external_exports.array(external_exports.number().int().positive()).max(MAX_MARKERS_PER_CALL).optional().describe("1-based marker indexes."),
-  dry_run: external_exports.boolean().optional().describe("List the markers that would go without touching AE."),
-  expect: ExpectSchema
-}).refine((v) => v.all === true || v.start !== void 0 || v.end !== void 0 || v.comment_contains !== void 0 || (v.indexes?.length ?? 0) > 0, {
-  message: "Say which markers: all, start/end, comment_contains, or indexes."
-});
-var listOf = (v) => v && typeof v === "object" ? v : null;
-var near = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
-function cuesFromTranscript(t) {
-  let text = t.text;
-  if (t.path !== void 0) {
-    if (!path19.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
-    let stat;
-    try {
-      stat = fs19.statSync(t.path);
-    } catch {
-      throw new TranscriptError(`No transcript at ${t.path}`);
-    }
-    if (stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs19.readFileSync(t.path, "utf8").replace(/^﻿/, "");
-  }
-  const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
-  return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
-}
-function addMarkersMismatches(beforeRaw, afterRaw, written) {
-  const m = [];
-  const before = listOf(beforeRaw);
-  const after = listOf(afterRaw);
-  const placed = written.placed ?? [];
-  if (!before || !after) return m;
-  const fresh = [];
-  for (const p of placed) {
-    if (before.markers.some((b) => near(b.time, p.time))) continue;
-    if (fresh.some((t) => near(t, p.time))) continue;
-    fresh.push(p.time);
-  }
-  if (!before.truncated) {
-    const want = before.numMarkers + fresh.length;
-    expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count is not what adding should give");
-  }
-  if (after.truncated) return m;
-  const lastAt = /* @__PURE__ */ new Map();
-  for (const p of placed) {
-    const key = [...lastAt.keys()].find((t) => near(t, p.time)) ?? p.time;
-    lastAt.set(key, p.comment);
-  }
-  for (const [time, comment] of lastAt) {
-    const got = after.markers.find((x) => near(x.time, time));
-    if (!got) m.push({ path: `markers@${time}`, expected: comment, actual: void 0, message: `No marker at ${time}s` });
-    else expectThat(m, got.comment === comment, `markers@${time}.comment`, comment, got.comment, `Marker at ${time}s has another comment`);
-  }
-  return m;
-}
-function removeMarkersMismatches(beforeRaw, afterRaw, written) {
-  const m = [];
-  const before = listOf(beforeRaw);
-  const after = listOf(afterRaw);
-  const removed = written.removed ?? [];
-  if (!before || !after) return m;
-  const want = before.numMarkers - removed.length;
-  expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count did not drop by the number removed");
-  for (const r of removed) {
-    if (after.markers.some((x) => near(x.time, r.time) && x.comment === r.comment)) {
-      m.push({ path: `markers@${r.time}`, expected: "removed", actual: r.comment, message: `Marker at ${r.time}s is still there` });
-    }
-  }
-  return m;
-}
-function selectForRemoval(list, args) {
-  const needle = args.comment_contains?.toLowerCase();
-  const inRange = (t) => (args.start === void 0 || t >= args.start - 5e-4) && (args.end === void 0 || t <= args.end + 5e-4);
-  return list.filter((x) => {
-    if (args.all) return true;
-    if (args.indexes?.includes(x.index)) return true;
-    if (needle !== void 0) return inRange(x.time) && x.comment.toLowerCase().includes(needle);
-    if (args.start !== void 0 || args.end !== void 0) return inRange(x.time);
-    return false;
-  });
-}
-var listRead = (compId, layer) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
-var markersTools = [
-  {
-    name: "ae_get_markers",
-    description: "List a comp's markers, or a layer's (time, duration, comment, label colour, chapter, URL). Read-only; at most 500, with truncated: true beyond.",
-    schema: AeGetMarkersSchema,
-    handler: async (args, ctx) => {
-      const res = await ctx.bridge.callHost("listMarkers", args.layer ? { comp_id: args.comp_id, layer: args.layer } : { comp_id: args.comp_id }, {
-        label: "ae_get_markers",
-        mutates: false,
-        toolName: "ae_get_markers"
-      });
-      return res.result;
-    }
-  },
-  {
-    name: "ae_add_markers",
-    description: "Add markers to a comp or a layer in one undo group guarded by `expect`: from a list (time, comment, duration, label colour, chapter, URL), or from a transcript (VO to markers): SRT, WebVTT, ElevenLabs speech-to-text JSON (`words`), Whisper-style JSON (`segments`), one marker per segment, sentence or word, with the text as the comment, the spoken length as the duration and a label colour per speaker. Transcript times are taken as the layer's own time when a layer is given. The beats and onsets from ae_audio_analyze go in as a list. A marker at a time that already has one replaces it, as in AE. dry_run returns the markers without touching AE. The read-back (a separate evalScript) checks the count and each comment. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeAddMarkersSchema,
-    handler: async (args, ctx) => {
-      let cues;
-      try {
-        cues = args.markers ?? cuesFromTranscript(args.transcript).map(({ speaker, ...c }) => c);
-      } catch (err) {
-        if (err instanceof TranscriptError) return { ok: false, error: "bad_transcript", message: err.message };
-        throw err;
-      }
-      if (cues.length > MAX_MARKERS_PER_CALL) {
-        return {
-          ok: false,
-          error: "too_many",
-          message: `${cues.length} markers; at most ${MAX_MARKERS_PER_CALL} per call. Use unit 'segment' or 'sentence', or split the transcript.`
-        };
-      }
-      const relativeTo = args.relative_to ?? (args.transcript && args.layer ? "layer" : "comp");
-      if (args.dry_run) {
-        return { ok: true, dry_run: true, target: args.layer ? "layer" : "comp", relative_to: relativeTo, count: cues.length, markers: cues };
-      }
-      return runGuardedWrite(ctx, {
-        toolName: "ae_add_markers",
-        label: `ae_add_markers(${cues.length})`,
-        expect: args.expect,
-        compId: args.comp_id,
-        read: () => listRead(args.comp_id, args.layer),
-        write: {
-          host: "addMarkers",
-          args: { comp_id: args.comp_id, layer: args.layer, markers: cues, relative_to: relativeTo, label: `Add ${cues.length} markers` }
-        },
-        check: addMarkersMismatches,
-        present: (_before, after, w) => ({
-          target: w.target,
-          relative_to: relativeTo,
-          added: (w.placed ?? []).length,
-          replaced: w.replaced,
-          numMarkers: listOf(after)?.numMarkers
-        })
-      });
-    }
-  },
-  {
-    name: "ae_remove_markers",
-    description: "Remove a comp's or a layer's markers in one undo group guarded by `expect`: all, those in a time range, those whose comment contains a text (within the range if given), or by index. dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count and that the removed markers are gone. " + AGENT_SAFETY_GUIDANCE,
-    schema: AeRemoveMarkersSchema,
-    handler: async (args, ctx) => {
-      if (args.dry_run) {
-        const res = await ctx.bridge.callHost("listMarkers", args.layer ? { comp_id: args.comp_id, layer: args.layer } : { comp_id: args.comp_id }, {
-          label: "ae_remove_markers (dry run)",
-          mutates: false,
-          toolName: "ae_remove_markers"
-        });
-        const would = selectForRemoval(res.result.markers, args);
-        return { ok: true, dry_run: true, count: would.length, markers: would, truncated: res.result.truncated };
-      }
-      return runGuardedWrite(ctx, {
-        toolName: "ae_remove_markers",
-        label: "ae_remove_markers",
-        expect: args.expect,
-        compId: args.comp_id,
-        read: () => listRead(args.comp_id, args.layer),
-        write: {
-          host: "removeMarkers",
-          args: {
-            comp_id: args.comp_id,
-            layer: args.layer,
-            all: args.all,
-            start: args.start,
-            end: args.end,
-            comment_contains: args.comment_contains,
-            indexes: args.indexes,
-            label: "Remove markers"
-          }
-        },
-        check: removeMarkersMismatches,
-        present: (_before, after, w) => ({ target: w.target, removed: w.removed, numMarkers: listOf(after)?.numMarkers })
-      });
-    }
-  }
-];
 
 // src/tools/ext/motion.ts
 var crypto4 = __toESM(require("node:crypto"), 1);
-var fs20 = __toESM(require("node:fs"), 1);
-var path20 = __toESM(require("node:path"), 1);
+var fs19 = __toESM(require("node:fs"), 1);
+var path19 = __toESM(require("node:path"), 1);
 var MAX_SHEET_FRAMES = 24;
 var MAX_SHEET_EDGE = 2400;
 var SHEET_GAP = 6;
@@ -14295,14 +13925,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path26, target, taste) {
+function reviewProperty(s, analysis, speeds, path27, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path26 }
+    property: { name: s.property.name, path: path27 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys, extra = {}) => ({
@@ -14310,7 +13940,7 @@ function reviewProperty(s, analysis, speeds, path26, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path26,
+      path: path27,
       keys,
       ease: easeArg,
       ...extra,
@@ -14556,7 +14186,7 @@ var motionTools = [
     schema: AeContactSheetSchema,
     handler: async (args, ctx) => {
       const framesDir = defaultFramesDir();
-      fs20.mkdirSync(framesDir, { recursive: true });
+      fs19.mkdirSync(framesDir, { recursive: true });
       const opId = ctx.bridge.newOpId();
       const captured = await runQueued(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
         const compResp = await ctx.bridge.evalRaw({
@@ -14614,11 +14244,11 @@ var motionTools = [
         frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
       });
       const sheet = buildContactSheet(tiles, layout);
-      const sheetPath = path20.join(
+      const sheetPath = path19.join(
         framesDir,
         `contact_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs20.writeFileSync(sheetPath, encodePng(sheet));
+      fs19.writeFileSync(sheetPath, encodePng(sheet));
       return {
         ok: true,
         path: sheetPath,
@@ -14664,12 +14294,12 @@ var motionTools = [
       const width = args.width ?? 960;
       const height = args.height ?? 540;
       const framesDir = defaultFramesDir();
-      fs20.mkdirSync(framesDir, { recursive: true });
-      const graphPath = path20.join(
+      fs19.mkdirSync(framesDir, { recursive: true });
+      const graphPath = path19.join(
         framesDir,
         `graph_c${args.comp_id}_${Date.now()}_${crypto4.randomBytes(4).toString("hex")}.png`
       );
-      fs20.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+      fs19.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
       return {
         ok: true,
         path: graphPath,
@@ -14792,10 +14422,866 @@ var motionTools = [
   }
 ];
 
-// src/tools/ext/panels.ts
-var import_node_child_process2 = require("node:child_process");
+// src/tools/ext/layout.ts
+var AeAlignSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layers: external_exports.array(LayerSelectorSchema).min(1).max(200),
+  align: external_exports.enum(["left", "center_h", "right", "top", "center_v", "bottom"]).optional(),
+  distribute: external_exports.enum(["horizontal", "vertical"]).optional().describe("Space the layers' centres evenly (between the outermost two, or across `to`)."),
+  to: external_exports.enum(["comp", "layers", "action_safe", "title_safe"]).optional().describe("What to align to. Default comp for align, layers for distribute."),
+  time: external_exports.number().optional().describe("The time the boxes are measured at. Default the comp's current time."),
+  shift_keys: external_exports.boolean().optional().describe("Move every position key of an animated layer by the same amount. Without it animated layers are refused."),
+  expect: ExpectSchema
+}).refine((v) => v.align === void 0 !== (v.distribute === void 0), { message: "Give align or distribute." }).refine((v) => v.distribute === void 0 || v.layers.length >= 2, { message: "Distribute needs two or more layers." });
+var centre = (r, h) => h ? (r[0] + r[2]) / 2 : (r[1] + r[3]) / 2;
+function alignMismatches(args, afterRaw, written) {
+  const m = [];
+  const after = afterRaw;
+  const box = written.box;
+  if (!after || !box) return m;
+  const rects = after.layers.map((l) => l.rect).filter((r) => r !== null);
+  if (rects.length !== after.layers.length) {
+    m.push({ path: "layers", expected: after.layers.length, actual: rects.length, message: "Some boxes could not be read back" });
+    return m;
+  }
+  const near2 = (a, b) => Math.abs(a - b) <= 0.5;
+  if (args.align) {
+    const edge = {
+      left: (r) => [r[0], box[0]],
+      right: (r) => [r[2], box[2]],
+      top: (r) => [r[1], box[1]],
+      bottom: (r) => [r[3], box[3]],
+      center_h: (r) => [centre(r, true), (box[0] + box[2]) / 2],
+      center_v: (r) => [centre(r, false), (box[1] + box[3]) / 2]
+    };
+    after.layers.forEach((l, i) => {
+      const [got, want] = edge[args.align](rects[i]);
+      expectThat(m, near2(got, want), `layers[${l.name}].${args.align}`, Math.round(want * 10) / 10, Math.round(got * 10) / 10, `"${l.name}" is not aligned`);
+    });
+  } else {
+    const h = args.distribute === "horizontal";
+    const cs = rects.map((r) => centre(r, h)).sort((a, b) => a - b);
+    const step = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
+    cs.forEach((c, i) => expectThat(m, near2(c, cs[0] + step * i), `centres[${i}]`, Math.round((cs[0] + step * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
+  }
+  return m;
+}
+var AePurgeUnusedSchema = external_exports.object({
+  kinds: external_exports.array(external_exports.enum(["footage", "solid", "placeholder"])).min(1).optional().describe("Which unused items. Default all three."),
+  empty_folders: external_exports.boolean().optional().describe("Also remove folders with nothing in them. Default false."),
+  keep: external_exports.array(external_exports.number().int()).max(500).optional().describe("Item ids to leave alone."),
+  apply: external_exports.boolean().optional().describe("Remove them. Default false: list what would go. Needs expect."),
+  expect: ExpectSchema.optional()
+});
+var AeExportMogrtSchema = external_exports.object({
+  comp_id: external_exports.number().int().describe("A comp with Essential Graphics controllers."),
+  path: external_exports.string().min(1).optional().describe("Absolute .mogrt path. Default: AE's own Essential Graphics folder."),
+  overwrite: external_exports.boolean().optional().describe("Replace an existing file. Default false."),
+  expect: ExpectSchema
+});
+var AeHouseStyleCheckSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  brand_colors: external_exports.array(external_exports.string().regex(/^#[0-9a-fA-F]{6}$/)).max(40).optional().describe("Instead of the brief's brand colours."),
+  fonts: external_exports.array(external_exports.string().min(1)).max(20).optional().describe("Instead of the brief's fonts."),
+  color_tolerance: external_exports.number().min(0).max(100).optional().describe("Delta E (CIE76) within which a colour counts as the brand colour. Default 12."),
+  neutrals_ok: external_exports.boolean().optional().describe("Black, white and greys pass the palette check. Default true."),
+  min_font_size: external_exports.number().positive().optional().describe("Flag text smaller than this, in pixels."),
+  safe_area: external_exports.boolean().optional().describe("Check text layers against title safe at the check time. Default true."),
+  title_safe: external_exports.number().min(0).max(0.5).optional().describe("Default 0.2, AE's."),
+  time: external_exports.number().optional().describe("When to check the safe area. Default the comp's current time.")
+});
+function styleFindings(layers, opts) {
+  const out = [];
+  for (const l of layers) {
+    const layer = { index: l.index, id: l.id, name: l.name };
+    if (l.kind === "text") {
+      if (l.font_missing) out.push({ severity: "medium", kind: "missing_font", layer, message: `"${l.name}" uses ${l.font}, which is missing; AE is showing a substitute.`, font: l.font });
+      if (opts.fonts.length && l.font && !fontMatches(l, opts.fonts)) {
+        out.push({ severity: "medium", kind: "off_brand_font", layer, message: `"${l.name}" is set in ${l.family ?? l.font} (${l.font}), not one of the brief's fonts: ${opts.fonts.join(", ")}.`, font: l.font });
+      }
+      if (opts.min_font_size && l.font_size !== void 0 && l.font_size < opts.min_font_size) {
+        out.push({ severity: "low", kind: "small_text", layer, message: `"${l.name}" is ${l.font_size} px, under the ${opts.min_font_size} px minimum.`, font_size: l.font_size });
+      }
+    }
+    if (!opts.brand_colors.length) continue;
+    const seen = /* @__PURE__ */ new Set();
+    for (const c of l.colours) {
+      if (!c.rgb) continue;
+      const hex = rgbToHex(c.rgb);
+      if (seen.has(hex)) continue;
+      seen.add(hex);
+      if (opts.neutrals_ok && isNeutral(c.rgb)) continue;
+      const near2 = nearestBrand(c.rgb, opts.brand_colors);
+      if (near2 && near2.delta_e > opts.tolerance) {
+        out.push({
+          severity: "low",
+          kind: "off_palette_colour",
+          layer,
+          message: `"${l.name}" uses ${hex} (${c.where}), ${near2.delta_e} delta E from the nearest brand colour ${near2.hex}.`,
+          colour: hex,
+          where: c.where,
+          nearest: near2.hex,
+          delta_e: near2.delta_e
+        });
+      }
+    }
+  }
+  const order = { medium: 0, low: 1, info: 2 };
+  return out.sort((a, b) => order[a.severity] - order[b.severity] || a.layer.index - b.layer.index);
+}
+var layoutTools = [
+  {
+    name: "ae_align",
+    description: "Align layers (left, horizontal centre, right, top, vertical centre, bottom) to the comp, the action- or title-safe area, or their combined box; or distribute their centres evenly. Boxes are the layers' content (sourceRectAtTime through anchor, scale, rotation and position) at `time`. 2D, unparented layers only; animated positions move only with shift_keys. One undo group guarded by `expect`; the read-back (a separate evalScript) measures the boxes again. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeAlignSchema,
+    handler: (args, ctx) => {
+      const to = args.to ?? (args.distribute ? "layers" : "comp");
+      return runGuardedWrite(ctx, {
+        toolName: "ae_align",
+        label: `ae_align(${args.align ?? `distribute ${args.distribute}`})`,
+        expect: args.expect,
+        compId: args.comp_id,
+        read: (_phase, w) => ({ host: "boundsOf", args: { comp_id: args.comp_id, layers: args.layers, time: w?.time ?? args.time } }),
+        write: {
+          host: "alignLayers",
+          args: { comp_id: args.comp_id, layers: args.layers, align: args.align, distribute: args.distribute, to, time: args.time, shift_keys: args.shift_keys, label: "Align layers" }
+        },
+        check: (_before, after, w) => alignMismatches(args, after, w),
+        present: (_before, after, w) => ({ to, box: w.box, moved: w.moved, layers: after?.layers })
+      });
+    }
+  },
+  {
+    name: "ae_purge_unused",
+    description: "Find project items nothing uses: footage, solids and placeholders in no comp, and optionally empty folders. By default it only lists them; with apply (and expect) it removes them in one undo group, re-checking each is still unused first. Comps are never removed. The read-back (a separate evalScript) checks they are gone. " + AGENT_SAFETY_GUIDANCE,
+    schema: AePurgeUnusedSchema,
+    handler: async (args, ctx) => {
+      const read = { host: "unusedItems", args: { kinds: args.kinds, empty_folders: args.empty_folders } };
+      const found = (await ctx.bridge.callHost(read.host, read.args, { label: "ae_purge_unused (scan)", mutates: false, toolName: "ae_purge_unused" })).result;
+      const keep = new Set(args.keep ?? []);
+      const targets = [...found.items, ...found.folders].filter((i) => !keep.has(i.id));
+      if (!args.apply || targets.length === 0) return { ok: true, dry_run: !args.apply, count: targets.length, items: targets };
+      if (!args.expect) return { ok: false, error: "bad_args", message: "apply needs expect." };
+      const ids = [...found.items.filter((i) => !keep.has(i.id)).map((i) => i.id), ...found.folders.filter((i) => !keep.has(i.id)).map((i) => i.id)];
+      return runGuardedWrite(ctx, {
+        toolName: "ae_purge_unused",
+        label: `ae_purge_unused(${ids.length})`,
+        expect: args.expect,
+        read: () => read,
+        write: { host: "purgeItems", args: { ids, label: `Remove ${ids.length} unused item${ids.length === 1 ? "" : "s"}` } },
+        check: (_before, after) => {
+          const left = [...after?.items ?? [], ...after?.folders ?? []].filter((i) => ids.includes(i.id));
+          return left.map((i) => ({ path: `items[${i.id}]`, expected: "removed", actual: i.name, message: `"${i.name}" is still in the project` }));
+        },
+        present: (_before, after, w) => ({ removed: w.removed, numItems: after?.numItems })
+      });
+    }
+  },
+  {
+    name: "ae_export_mogrt",
+    description: "Export a comp's Essential Graphics template as a .mogrt, from the saved project (ae_save first; AE exports what is on disk), to `path` or AE's own Essential Graphics folder. Guarded by `expect`; no undo group, since it writes a file, not the project. Dialogs are never suppressed: if AE asks something, the call says so and ae_dialogs shows it. With a path, the file is checked on disk (new, not empty). Pairs with premiere-pro-mcp, which can place the template in a sequence. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeExportMogrtSchema,
+    handler: async (args, ctx) => {
+      if (args.path !== void 0) {
+        if (!path20.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
+        if (fs20.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+        fs20.mkdirSync(path20.dirname(args.path), { recursive: true });
+      }
+      ctx.quarantine.assertClear();
+      const opId = ctx.bridge.newOpId();
+      const started = Date.now();
+      try {
+        return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
+          await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
+          const res = await ctx.bridge.evalRaw({
+            id: opId,
+            script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
+            label: `ae_export_mogrt(${args.comp_id})`,
+            mutates: false,
+            toolName: "ae_export_mogrt"
+          });
+          const r = res.result;
+          let file = null;
+          if (args.path) {
+            try {
+              const st = fs20.statSync(args.path);
+              file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
+            } catch {
+              file = null;
+            }
+          }
+          const verified = args.path ? Boolean(file && file.size > 0 && file.fresh) : r.exported;
+          return {
+            ok: r.exported && verified,
+            exported: r.exported,
+            controllers: r.controllers,
+            template_name: r.template_name,
+            file,
+            ...args.path && !verified ? { message: "AE reported an export but the file is missing, empty or old." } : {}
+          };
+        });
+      } catch (err) {
+        if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+        throw err;
+      }
+    }
+  },
+  {
+    name: "ae_house_style_check",
+    description: "Check a comp against the house style: text in the brief's fonts (ae_brief) and not missing, colours of text, shapes and solids within color_tolerance (delta E) of a brand colour, text above a minimum size, and text inside title safe at the check time. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. Nested comps are checked by running it on them.",
+    schema: AeHouseStyleCheckSchema,
+    handler: async (args, ctx) => {
+      const status = (await ctx.bridge.callHost("status", {}, { label: "ae_house_style_check (status)", mutates: false, toolName: "ae_house_style_check" })).result;
+      const brief = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
+      const brandColors = args.brand_colors ?? brief?.brand_colors ?? [];
+      const fonts = args.fonts ?? brief?.fonts ?? [];
+      const scan = (await ctx.bridge.callHost("styleScan", { comp_id: args.comp_id }, {
+        label: "ae_house_style_check (scan)",
+        mutates: false,
+        toolName: "ae_house_style_check"
+      })).result;
+      const findings = styleFindings(scan.layers, {
+        brand_colors: brandColors,
+        fonts,
+        tolerance: args.color_tolerance ?? 12,
+        neutrals_ok: args.neutrals_ok !== false,
+        min_font_size: args.min_font_size
+      });
+      if (args.safe_area !== false) {
+        const t = args.time ?? scan.time;
+        for (const l of scan.layers.filter((x) => x.kind === "text" && x.enabled)) {
+          const b = (await ctx.bridge.callHost("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, {
+            label: `ae_house_style_check (bounds ${l.name})`,
+            mutates: false,
+            toolName: "ae_house_style_check"
+          })).result;
+          for (const f of reviewBounds(b, { width: scan.width, height: scan.height }, { action: 0.1, title: args.title_safe ?? 0.2 })) {
+            findings.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind, layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
+          }
+        }
+      }
+      const counts = { medium: 0, low: 0, info: 0 };
+      for (const f of findings) counts[f.severity]++;
+      return {
+        ok: true,
+        clean: findings.length === 0,
+        used: { brand_colors: brandColors, fonts, from_brief: Boolean(brief) && !args.brand_colors && !args.fonts },
+        ...brandColors.length === 0 || fonts.length === 0 ? { note: `No brand ${brandColors.length === 0 ? "colours" : ""}${brandColors.length === 0 && fonts.length === 0 ? " or " : ""}${fonts.length === 0 ? "fonts" : ""} to check against: set them with ae_brief or pass them here.` } : {},
+        checked: { text: scan.layers.filter((l) => l.kind === "text").length, shape: scan.layers.filter((l) => l.kind === "shape").length, solid: scan.layers.filter((l) => l.kind === "solid").length },
+        counts,
+        findings
+      };
+    }
+  }
+];
+
+// src/tools/ext/markers.ts
 var fs21 = __toESM(require("node:fs"), 1);
 var path21 = __toESM(require("node:path"), 1);
+
+// src/transcript.ts
+var TranscriptError = class extends Error {
+};
+var round32 = (x) => Math.round(x * 1e3) / 1e3;
+function parseTimecode(s) {
+  const t = s.trim().replace(",", ".");
+  const parts = t.split(":");
+  if (parts.length > 3 || parts.some((p) => p === "" || !/^\d+(\.\d+)?$/.test(p))) {
+    throw new TranscriptError(`Bad timecode "${s}"`);
+  }
+  return parts.reduce((acc, p) => acc * 60 + Number(p), 0);
+}
+function parseCueBlocks(text, isVtt) {
+  const out = [];
+  const blocks = text.replace(/\r\n?/g, "\n").split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.split("\n").filter((l) => l.trim() !== "");
+    const arrow = lines.findIndex((l) => l.includes("-->"));
+    if (arrow < 0) continue;
+    const [a, rest] = lines[arrow].split("-->");
+    const b = rest.trim().split(/\s+/)[0];
+    const body = lines.slice(arrow + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+    if (!body) continue;
+    let speaker;
+    let textOut = body;
+    const voice = isVtt ? /<v(?:\.[^ >]+)?\s+([^>]+)>/.exec(lines.slice(arrow + 1).join("\n")) : null;
+    if (voice) speaker = voice[1].trim();
+    else {
+      const m = /^([A-Z][\w .'-]{0,30}):\s+(.+)$/s.exec(body);
+      if (m) {
+        speaker = m[1].trim();
+        textOut = m[2].trim();
+      }
+    }
+    out.push({ text: textOut, start: parseTimecode(a), end: parseTimecode(b), ...speaker ? { speaker } : {} });
+  }
+  return out;
+}
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : void 0;
+}
+function wordsFrom(list) {
+  const words = [];
+  for (const w of list) {
+    if (!w || typeof w !== "object") continue;
+    const o = w;
+    if (o.type !== void 0 && o.type !== "word") continue;
+    const text = String(o.text ?? o.word ?? "").trim();
+    const start = num(o.start);
+    const end = num(o.end);
+    if (!text || start === void 0 || end === void 0) continue;
+    const speaker = o.speaker_id ?? o.speaker;
+    words.push({ text, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
+  }
+  return words;
+}
+function segmentWords(words, gap = 0.8) {
+  const out = [];
+  let cur = [];
+  const flush = () => {
+    if (!cur.length) return;
+    out.push({
+      text: cur.map((w) => w.text).join(" "),
+      start: cur[0].start,
+      end: cur[cur.length - 1].end,
+      ...cur[0].speaker !== void 0 ? { speaker: cur[0].speaker } : {},
+      words: cur
+    });
+    cur = [];
+  };
+  for (const w of words) {
+    const prev = cur[cur.length - 1];
+    if (prev && (w.speaker !== prev.speaker || w.start - prev.end > gap)) flush();
+    cur.push(w);
+  }
+  flush();
+  return out;
+}
+function parseJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new TranscriptError(`Transcript is not valid JSON: ${err.message}`);
+  }
+  const obj = data;
+  if (Array.isArray(data)) {
+    const segs = [];
+    for (const s of data) {
+      const o = s;
+      const start = num(o?.start);
+      const end = num(o?.end);
+      const t = String(o?.text ?? o?.word ?? "").trim();
+      if (t && start !== void 0 && end !== void 0) {
+        const speaker = o.speaker ?? o.speaker_id;
+        segs.push({ text: t, start, end, ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {} });
+      }
+    }
+    return segs;
+  }
+  if (Array.isArray(obj?.segments)) {
+    return obj.segments.flatMap((s) => {
+      const o = s;
+      const start = num(o?.start);
+      const end = num(o?.end);
+      if (start === void 0 || end === void 0) return [];
+      const words = Array.isArray(o.words) ? wordsFrom(o.words) : void 0;
+      const speaker = o.speaker ?? o.speaker_id;
+      return [
+        {
+          text: String(o.text ?? "").trim(),
+          start,
+          end,
+          ...speaker !== void 0 && speaker !== null ? { speaker: String(speaker) } : {},
+          ...words && words.length ? { words } : {}
+        }
+      ];
+    });
+  }
+  if (Array.isArray(obj?.words)) return segmentWords(wordsFrom(obj.words));
+  throw new TranscriptError("JSON transcript needs `words`, `segments`, or an array of {text, start, end}");
+}
+function detectFormat(text, hint) {
+  const h = (hint ?? "").toLowerCase();
+  if (h.endsWith("srt")) return "srt";
+  if (h.endsWith("vtt")) return "vtt";
+  if (h.endsWith("json")) return "json";
+  const t = text.trimStart();
+  if (t.startsWith("{") || t.startsWith("[")) return "json";
+  if (t.startsWith("WEBVTT")) return "vtt";
+  return "srt";
+}
+function parseTranscript(text, format) {
+  const f = format ?? detectFormat(text);
+  const segs = f === "json" ? parseJson(text) : parseCueBlocks(text, f === "vtt");
+  if (!segs.length) throw new TranscriptError(`No timed lines found in the ${f.toUpperCase()} transcript`);
+  return segs.sort((a, b) => a.start - b.start);
+}
+function sentencesOf(seg) {
+  if (seg.words && seg.words.length) {
+    const out = [];
+    let cur = [];
+    for (const w of seg.words) {
+      cur.push(w);
+      if (/[.!?…]["')\]]?$/.test(w.text)) {
+        out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: w.end, speaker: seg.speaker });
+        cur = [];
+      }
+    }
+    if (cur.length) out.push({ text: cur.map((x) => x.text).join(" "), start: cur[0].start, end: cur[cur.length - 1].end, speaker: seg.speaker });
+    return out;
+  }
+  const parts = seg.text.match(/[^.!?…]+[.!?…]+["')\]]?|[^.!?…]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [seg.text];
+  const total = parts.reduce((n, p) => n + p.length, 0) || 1;
+  const span = seg.end - seg.start;
+  let t = seg.start;
+  return parts.map((p) => {
+    const d = span * p.length / total;
+    const s = { text: p, start: t, end: t + d, speaker: seg.speaker };
+    t += d;
+    return s;
+  });
+}
+function wordsOf(seg) {
+  if (seg.words && seg.words.length) return seg.words.map((w) => ({ text: w.text, start: w.start, end: w.end, speaker: w.speaker ?? seg.speaker }));
+  const words = seg.text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((n, w) => n + w.length, 0) || 1;
+  const span = seg.end - seg.start;
+  let t = seg.start;
+  return words.map((w) => {
+    const d = span * w.length / total;
+    const s = { text: w, start: t, end: t + d, speaker: seg.speaker };
+    t += d;
+    return s;
+  });
+}
+function transcriptCues(segments, opts = {}) {
+  const unit = opts.unit ?? "segment";
+  const pieces = segments.flatMap((s) => {
+    if (unit === "word") return wordsOf(s);
+    if (unit === "sentence") return sentencesOf(s);
+    return [s];
+  });
+  const speakers = [];
+  const maxChars = opts.max_chars ?? 2e3;
+  return pieces.map((p) => {
+    const cue = {
+      time: round32(p.start + (opts.offset ?? 0)),
+      duration: round32(Math.max(0, p.end - p.start)),
+      comment: p.text.length > maxChars ? p.text.slice(0, maxChars) + "\u2026" : p.text
+    };
+    if (p.speaker !== void 0) {
+      cue.speaker = p.speaker;
+      if (opts.speaker_labels !== false) {
+        let i = speakers.indexOf(p.speaker);
+        if (i < 0) i = speakers.push(p.speaker) - 1;
+        cue.label = i % 16 + 1;
+      }
+    }
+    return cue;
+  });
+}
+
+// src/tools/ext/markers.ts
+var MAX_MARKERS_PER_CALL = 500;
+var MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
+var TIME_TOLERANCE = 15e-4;
+var MarkerInputSchema = external_exports.object({
+  time: external_exports.number().min(0).describe("Seconds, in comp time (or the layer's own time with relative_to 'layer')."),
+  comment: external_exports.string().max(5e3).optional(),
+  duration: external_exports.number().min(0).optional().describe("Marker length in seconds."),
+  label: external_exports.number().int().min(0).max(16).optional().describe("Label colour 0..16 (0 none)."),
+  chapter: external_exports.string().max(500).optional(),
+  url: external_exports.string().max(2e3).optional()
+});
+var TranscriptInputSchema = external_exports.object({
+  path: external_exports.string().min(1).optional().describe("Absolute path of a .srt, .vtt or .json transcript."),
+  text: external_exports.string().max(MAX_TRANSCRIPT_BYTES).optional().describe("The transcript itself, instead of a path."),
+  format: external_exports.enum(["srt", "vtt", "json"]).optional().describe("Default: from the file extension or the content."),
+  unit: external_exports.enum(["segment", "sentence", "word"]).optional().describe("One marker per segment (default), sentence or word."),
+  speaker_labels: external_exports.boolean().optional().describe("A label colour per speaker. Default true."),
+  offset: external_exports.number().optional().describe("Seconds added to every transcript time.")
+}).refine((t) => t.path === void 0 !== (t.text === void 0), { message: "Give the transcript's path or its text, not both." });
+var TargetFields = {
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.optional().describe("Markers on this layer. Default: the comp's own markers.")
+};
+var AeGetMarkersSchema = external_exports.object(TargetFields);
+var AeAddMarkersSchema = external_exports.object({
+  ...TargetFields,
+  markers: external_exports.array(MarkerInputSchema).min(1).max(MAX_MARKERS_PER_CALL).optional(),
+  transcript: TranscriptInputSchema.optional(),
+  relative_to: external_exports.enum(["comp", "layer"]).optional().describe("'layer': times are in the layer's own time (startTime and stretch applied; time remapping is not). Default 'layer' for a transcript on a layer, else 'comp'."),
+  dry_run: external_exports.boolean().optional().describe("Return the markers that would be added without touching AE."),
+  expect: ExpectSchema
+}).refine((v) => v.markers === void 0 !== (v.transcript === void 0), { message: "Give markers or a transcript." }).refine((v) => v.relative_to !== "layer" || v.layer !== void 0, { message: "relative_to 'layer' needs a layer." });
+var AeRemoveMarkersSchema = external_exports.object({
+  ...TargetFields,
+  all: external_exports.boolean().optional(),
+  start: external_exports.number().optional().describe("Remove markers at or after this time (comp seconds)."),
+  end: external_exports.number().optional().describe("Remove markers at or before this time."),
+  comment_contains: external_exports.string().min(1).optional().describe("Case-insensitive; combined with start/end when given."),
+  indexes: external_exports.array(external_exports.number().int().positive()).max(MAX_MARKERS_PER_CALL).optional().describe("1-based marker indexes."),
+  dry_run: external_exports.boolean().optional().describe("List the markers that would go without touching AE."),
+  expect: ExpectSchema
+}).refine((v) => v.all === true || v.start !== void 0 || v.end !== void 0 || v.comment_contains !== void 0 || (v.indexes?.length ?? 0) > 0, {
+  message: "Say which markers: all, start/end, comment_contains, or indexes."
+});
+var listOf = (v) => v && typeof v === "object" ? v : null;
+var near = (a, b) => Math.abs(a - b) <= TIME_TOLERANCE;
+function cuesFromTranscript(t) {
+  let text = t.text;
+  if (t.path !== void 0) {
+    if (!path21.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    let stat;
+    try {
+      stat = fs21.statSync(t.path);
+    } catch {
+      throw new TranscriptError(`No transcript at ${t.path}`);
+    }
+    if (stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
+    text = fs21.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+  }
+  const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
+  return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
+}
+function addMarkersMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = listOf(beforeRaw);
+  const after = listOf(afterRaw);
+  const placed = written.placed ?? [];
+  if (!before || !after) return m;
+  const fresh = [];
+  for (const p of placed) {
+    if (before.markers.some((b) => near(b.time, p.time))) continue;
+    if (fresh.some((t) => near(t, p.time))) continue;
+    fresh.push(p.time);
+  }
+  if (!before.truncated) {
+    const want = before.numMarkers + fresh.length;
+    expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count is not what adding should give");
+  }
+  if (after.truncated) return m;
+  const lastAt = /* @__PURE__ */ new Map();
+  for (const p of placed) {
+    const key = [...lastAt.keys()].find((t) => near(t, p.time)) ?? p.time;
+    lastAt.set(key, p.comment);
+  }
+  for (const [time, comment] of lastAt) {
+    const got = after.markers.find((x) => near(x.time, time));
+    if (!got) m.push({ path: `markers@${time}`, expected: comment, actual: void 0, message: `No marker at ${time}s` });
+    else expectThat(m, got.comment === comment, `markers@${time}.comment`, comment, got.comment, `Marker at ${time}s has another comment`);
+  }
+  return m;
+}
+function removeMarkersMismatches(beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = listOf(beforeRaw);
+  const after = listOf(afterRaw);
+  const removed = written.removed ?? [];
+  if (!before || !after) return m;
+  const want = before.numMarkers - removed.length;
+  expectThat(m, after.numMarkers === want, "numMarkers", want, after.numMarkers, "Marker count did not drop by the number removed");
+  for (const r of removed) {
+    if (after.markers.some((x) => near(x.time, r.time) && x.comment === r.comment)) {
+      m.push({ path: `markers@${r.time}`, expected: "removed", actual: r.comment, message: `Marker at ${r.time}s is still there` });
+    }
+  }
+  return m;
+}
+function selectForRemoval(list, args) {
+  const needle = args.comment_contains?.toLowerCase();
+  const inRange = (t) => (args.start === void 0 || t >= args.start - 5e-4) && (args.end === void 0 || t <= args.end + 5e-4);
+  return list.filter((x) => {
+    if (args.all) return true;
+    if (args.indexes?.includes(x.index)) return true;
+    if (needle !== void 0) return inRange(x.time) && x.comment.toLowerCase().includes(needle);
+    if (args.start !== void 0 || args.end !== void 0) return inRange(x.time);
+    return false;
+  });
+}
+var listRead = (compId, layer) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
+var markersTools = [
+  {
+    name: "ae_get_markers",
+    description: "List a comp's markers, or a layer's (time, duration, comment, label colour, chapter, URL). Read-only; at most 500, with truncated: true beyond.",
+    schema: AeGetMarkersSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost("listMarkers", args.layer ? { comp_id: args.comp_id, layer: args.layer } : { comp_id: args.comp_id }, {
+        label: "ae_get_markers",
+        mutates: false,
+        toolName: "ae_get_markers"
+      });
+      return res.result;
+    }
+  },
+  {
+    name: "ae_add_markers",
+    description: "Add markers to a comp or a layer in one undo group guarded by `expect`: from a list (time, comment, duration, label colour, chapter, URL), or from a transcript (VO to markers): SRT, WebVTT, ElevenLabs speech-to-text JSON (`words`), Whisper-style JSON (`segments`), one marker per segment, sentence or word, with the text as the comment, the spoken length as the duration and a label colour per speaker. Transcript times are taken as the layer's own time when a layer is given. The beats and onsets from ae_audio_analyze go in as a list. A marker at a time that already has one replaces it, as in AE. dry_run returns the markers without touching AE. The read-back (a separate evalScript) checks the count and each comment. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeAddMarkersSchema,
+    handler: async (args, ctx) => {
+      let cues;
+      try {
+        cues = args.markers ?? cuesFromTranscript(args.transcript).map(({ speaker, ...c }) => c);
+      } catch (err) {
+        if (err instanceof TranscriptError) return { ok: false, error: "bad_transcript", message: err.message };
+        throw err;
+      }
+      if (cues.length > MAX_MARKERS_PER_CALL) {
+        return {
+          ok: false,
+          error: "too_many",
+          message: `${cues.length} markers; at most ${MAX_MARKERS_PER_CALL} per call. Use unit 'segment' or 'sentence', or split the transcript.`
+        };
+      }
+      const relativeTo = args.relative_to ?? (args.transcript && args.layer ? "layer" : "comp");
+      if (args.dry_run) {
+        return { ok: true, dry_run: true, target: args.layer ? "layer" : "comp", relative_to: relativeTo, count: cues.length, markers: cues };
+      }
+      return runGuardedWrite(ctx, {
+        toolName: "ae_add_markers",
+        label: `ae_add_markers(${cues.length})`,
+        expect: args.expect,
+        compId: args.comp_id,
+        read: () => listRead(args.comp_id, args.layer),
+        write: {
+          host: "addMarkers",
+          args: { comp_id: args.comp_id, layer: args.layer, markers: cues, relative_to: relativeTo, label: `Add ${cues.length} markers` }
+        },
+        check: addMarkersMismatches,
+        present: (_before, after, w) => ({
+          target: w.target,
+          relative_to: relativeTo,
+          added: (w.placed ?? []).length,
+          replaced: w.replaced,
+          numMarkers: listOf(after)?.numMarkers
+        })
+      });
+    }
+  },
+  {
+    name: "ae_remove_markers",
+    description: "Remove a comp's or a layer's markers in one undo group guarded by `expect`: all, those in a time range, those whose comment contains a text (within the range if given), or by index. dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count and that the removed markers are gone. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeRemoveMarkersSchema,
+    handler: async (args, ctx) => {
+      if (args.dry_run) {
+        const res = await ctx.bridge.callHost("listMarkers", args.layer ? { comp_id: args.comp_id, layer: args.layer } : { comp_id: args.comp_id }, {
+          label: "ae_remove_markers (dry run)",
+          mutates: false,
+          toolName: "ae_remove_markers"
+        });
+        const would = selectForRemoval(res.result.markers, args);
+        return { ok: true, dry_run: true, count: would.length, markers: would, truncated: res.result.truncated };
+      }
+      return runGuardedWrite(ctx, {
+        toolName: "ae_remove_markers",
+        label: "ae_remove_markers",
+        expect: args.expect,
+        compId: args.comp_id,
+        read: () => listRead(args.comp_id, args.layer),
+        write: {
+          host: "removeMarkers",
+          args: {
+            comp_id: args.comp_id,
+            layer: args.layer,
+            all: args.all,
+            start: args.start,
+            end: args.end,
+            comment_contains: args.comment_contains,
+            indexes: args.indexes,
+            label: "Remove markers"
+          }
+        },
+        check: removeMarkersMismatches,
+        present: (_before, after, w) => ({ target: w.target, removed: w.removed, numMarkers: listOf(after)?.numMarkers })
+      });
+    }
+  }
+];
+
+// src/tools/ext/masks.ts
+var Vec2 = external_exports.array(external_exports.number()).length(2);
+var MODES = ["add", "subtract", "intersect", "lighten", "darken", "difference", "none"];
+var MaskFields = {
+  name: external_exports.string().min(1).max(200).optional(),
+  shape: external_exports.enum(["rect", "ellipse", "path"]).optional().describe("A new path: a rectangle or ellipse in `box`, or a free path."),
+  box: external_exports.array(external_exports.number()).length(4).optional().describe("rect and ellipse: [left, top, width, height] in layer pixels."),
+  vertices: external_exports.array(Vec2).min(2).max(1e3).optional().describe("path: the points in layer pixels."),
+  in_tangents: external_exports.array(Vec2).optional(),
+  out_tangents: external_exports.array(Vec2).optional(),
+  closed: external_exports.boolean().optional(),
+  mode: external_exports.enum(MODES).optional().describe("Default for a new mask: add."),
+  inverted: external_exports.boolean().optional(),
+  feather: Vec2.optional().describe("[x, y] in pixels."),
+  opacity: external_exports.number().min(0).max(100).optional(),
+  expansion: external_exports.number().optional().describe("Pixels; negative shrinks.")
+};
+function shapeRules(v, ctx) {
+  const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+  if (v.shape === "rect" || v.shape === "ellipse") need(v.box !== void 0, `${v.shape} needs box.`);
+  if (v.shape === "path") need(v.vertices !== void 0, "path needs vertices.");
+  const n = v.vertices?.length ?? 0;
+  need(v.in_tangents === void 0 || v.in_tangents.length === n, "in_tangents needs one entry per vertex.");
+  need(v.out_tangents === void 0 || v.out_tangents.length === n, "out_tangents needs one entry per vertex.");
+}
+var MaskSelector = external_exports.object({ index: external_exports.number().int().positive().optional(), name: external_exports.string().min(1).optional() }).refine((s) => s.index !== void 0 || s.name !== void 0, { message: "Mask selector needs index or name." });
+var AeMaskSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema,
+  add: external_exports.array(external_exports.object(MaskFields).superRefine((v, ctx) => {
+    shapeRules(v, ctx);
+    if (!v.shape) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "A new mask needs a shape." });
+  })).max(50).optional(),
+  set: external_exports.array(external_exports.object({ mask: MaskSelector, ...MaskFields }).superRefine(shapeRules)).max(50).optional().describe("Change existing masks."),
+  remove: external_exports.array(MaskSelector).max(50).optional(),
+  expect: ExpectSchema
+}).refine((v) => (v.add?.length ?? 0) + (v.set?.length ?? 0) + (v.remove?.length ?? 0) > 0, { message: "Give masks to add, set or remove." });
+var AeTextAnimatorSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.describe("A text layer."),
+  name: external_exports.string().min(1).max(200).optional(),
+  properties: external_exports.object({
+    position: external_exports.array(external_exports.number()).min(2).max(3).optional(),
+    scale: external_exports.array(external_exports.number()).min(2).max(3).optional(),
+    rotation: external_exports.number().optional(),
+    opacity: external_exports.number().min(0).max(100).optional(),
+    fill_color: external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4).optional(),
+    tracking: external_exports.number().optional(),
+    blur: Vec2.optional()
+  }).refine((p) => Object.values(p).some((v) => v !== void 0), { message: "Give at least one animator property." }).describe("What the animator does to the selected characters (offsets from their normal look)."),
+  selector: external_exports.object({
+    start: external_exports.number().min(0).max(100).optional(),
+    end: external_exports.number().min(0).max(100).optional(),
+    offset: external_exports.number().min(-100).max(100).optional(),
+    based_on: external_exports.enum(["characters", "characters_excluding_spaces", "words", "lines"]).optional(),
+    shape: external_exports.enum(["square", "ramp_up", "ramp_down", "triangle", "round", "smooth"]).optional(),
+    ease_high: external_exports.number().min(-100).max(100).optional(),
+    ease_low: external_exports.number().min(-100).max(100).optional(),
+    randomize: external_exports.boolean().optional()
+  }).optional().describe("The range selector: which characters the properties apply to, in percent."),
+  reveal: external_exports.object({
+    property: external_exports.enum(["start", "end", "offset"]).optional().describe("Default start."),
+    from: external_exports.number(),
+    to: external_exports.number(),
+    start_time: external_exports.number().min(0),
+    duration: external_exports.number().positive()
+  }).optional().describe("Keyframe the selector over time, e.g. start 0 -> 100 for a character-by-character reveal with opacity 0."),
+  expect: ExpectSchema
+});
+function checkMask(m, label, spec, got) {
+  if (!got) {
+    m.push({ path: label, expected: spec.name ?? "mask", actual: void 0, message: `${label} is not in the read-back` });
+    return;
+  }
+  if (spec.name) expectThat(m, got.name === spec.name, `${label}.name`, spec.name, got.name, "Mask name differs");
+  if (spec.mode) expectThat(m, got.mode === spec.mode, `${label}.mode`, spec.mode, got.mode, "Mask mode differs");
+  if (spec.inverted !== void 0) expectThat(m, got.inverted === spec.inverted, `${label}.inverted`, spec.inverted, got.inverted, "Inversion differs");
+  if (spec.feather) compareValues(spec.feather, got.feather, `${label}.feather`, m);
+  if (spec.opacity !== void 0) compareValues(spec.opacity, got.opacity, `${label}.opacity`, m);
+  if (spec.expansion !== void 0) compareValues(spec.expansion, got.expansion, `${label}.expansion`, m);
+  if (spec.shape === "rect" || spec.shape === "ellipse") {
+    const [l, t, w, h] = spec.box;
+    compareValues([l, t, l + w, t + h], got.box, `${label}.box`, m);
+  }
+  if (spec.shape === "path") compareValues(spec.vertices?.length, got.vertices, `${label}.vertices`, m);
+}
+function maskMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  const added = written.added ?? [];
+  const removed = written.removed ?? [];
+  const want = before.count - removed.length + added.length;
+  expectThat(m, after.count === want, "count", want, after.count, "Mask count is not what the edit should leave");
+  added.forEach((a, i) => checkMask(m, `masks[${a.index}]`, args.add[i], after.masks.find((x) => x.index === a.index)));
+  const changed = written.changed ?? [];
+  changed.forEach((c, i) => checkMask(m, `masks[${c.name}]`, args.set[i], after.masks.find((x) => x.name === (args.set[i].name ?? c.name))));
+  return m;
+}
+var PROP_MATCH = {
+  position: "ADBE Text Position 3D",
+  scale: "ADBE Text Scale 3D",
+  rotation: "ADBE Text Rotation",
+  opacity: "ADBE Text Opacity",
+  fill_color: "ADBE Text Fill Color",
+  tracking: "ADBE Text Tracking Amount",
+  blur: "ADBE Text Blur"
+};
+function animatorMismatches(args, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  expectThat(m, after.count === before.count + 1, "count", before.count + 1, after.count, "The layer did not gain an animator");
+  const a = after.animators.find((x) => x.index === written.index);
+  if (!a) {
+    m.push({ path: "animator", expected: written.index, actual: void 0, message: "The new animator is not in the read-back" });
+    return m;
+  }
+  for (const [key, value] of Object.entries(args.properties)) {
+    if (value === void 0) continue;
+    const p = a.properties.find((x) => x.matchName === PROP_MATCH[key]);
+    if (!p) {
+      m.push({ path: `animator.${key}`, expected: value, actual: void 0, message: `The animator has no ${key}` });
+      continue;
+    }
+    const want = key === "fill_color" && Array.isArray(value) && value.length === 3 ? [...value, 1] : value;
+    compareValues(want, Array.isArray(want) && Array.isArray(p.value) ? p.value.slice(0, want.length) : p.value, `animator.${key}`, m);
+  }
+  const sel = a.selectors[0];
+  const s = args.selector;
+  if (!sel) m.push({ path: "animator.selector", expected: "range selector", actual: void 0, message: "The animator has no range selector" });
+  else {
+    if (s?.start !== void 0 && !args.reveal) compareValues(s.start, sel.start, "selector.start", m);
+    if (s?.end !== void 0) compareValues(s.end, sel.end, "selector.end", m);
+    if (args.reveal) {
+      const keys = sel[`${args.reveal.property ?? "start"}_keys`];
+      expectThat(m, keys === 2, "selector.reveal", 2, keys, "The reveal did not get its two keys");
+    }
+  }
+  return m;
+}
+var masksTools = [
+  {
+    name: "ae_mask",
+    description: "Add, change and remove a layer's masks in one undo group guarded by `expect`: a rectangle or ellipse in a box, or a free path with tangents; mode (add, subtract, intersect, lighten, darken, difference, none), inversion, feather, opacity and expansion. The read-back (a separate evalScript) checks the count and each mask's mode, inversion, feather, opacity, expansion and box. Animate a mask path with ae_set_property on ['ADBE Mask Parade', <mask>, 'ADBE Mask Shape']. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeMaskSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_mask",
+      label: `ae_mask(+${args.add?.length ?? 0} ~${args.set?.length ?? 0} -${args.remove?.length ?? 0})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => ({ host: "maskList", args: { comp_id: args.comp_id, layer: args.layer } }),
+      write: { host: "maskEdit", args: { comp_id: args.comp_id, layer: args.layer, add: args.add, set: args.set, remove: args.remove, label: "Edit masks" } },
+      check: (before, after, w) => maskMismatches(args, before, after, w),
+      present: (_before, after, w) => ({ added: w.added, changed: w.changed, removed: w.removed, masks: after?.masks })
+    })
+  },
+  {
+    name: "ae_text_animator",
+    description: "Add a text animator to a text layer in one undo group guarded by `expect`: properties (position, scale, rotation, opacity, fill colour, tracking, blur) applied through a range selector (start, end, offset in percent; based on characters, words or lines; shape; ease high and low; random order), and optionally a reveal that keyframes the selector's start, end or offset. A classic reveal: opacity 0 with a reveal of start from 0 to 100. The read-back (a separate evalScript) checks the animator's properties, its selector and the reveal's keys. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeTextAnimatorSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_text_animator",
+      label: `ae_text_animator(${Object.keys(args.properties).join(",")})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => ({ host: "textAnimators", args: { comp_id: args.comp_id, layer: args.layer } }),
+      write: {
+        host: "addTextAnimator",
+        args: { comp_id: args.comp_id, layer: args.layer, name: args.name, properties: args.properties, selector: args.selector, reveal: args.reveal, label: "Add text animator" }
+      },
+      check: (before, after, w) => animatorMismatches(args, before, after, w),
+      present: (_before, after, w) => ({ animator: after?.animators.find((x) => x.index === w.index) ?? w })
+    })
+  }
+];
+
+// src/tools/ext/panels.ts
+var import_node_child_process2 = require("node:child_process");
+var fs22 = __toESM(require("node:fs"), 1);
+var path22 = __toESM(require("node:path"), 1);
 var CURATED_NATIVE_PANELS = [
   "Align",
   "Audio",
@@ -14829,7 +15315,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path21.join(defaultDataDir(), "ui");
+  return path22.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -15024,7 +15510,7 @@ var panelsTools = [
       }
       const outDir = defaultUiDir();
       try {
-        fs21.mkdirSync(outDir, { recursive: true });
+        fs22.mkdirSync(outDir, { recursive: true });
       } catch {
       }
       const rawStdout = await runPowerShellScript2([
@@ -15058,8 +15544,8 @@ var panelsTools = [
 ];
 
 // src/versions.ts
-var fs22 = __toESM(require("node:fs"), 1);
-var path22 = __toESM(require("node:path"), 1);
+var fs23 = __toESM(require("node:fs"), 1);
+var path23 = __toESM(require("node:path"), 1);
 var VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
 function versionToken(name) {
   let m;
@@ -15092,28 +15578,28 @@ function namePattern(name, sequence) {
 }
 function listDir(dir) {
   try {
-    return fs22.readdirSync(dir);
+    return fs23.readdirSync(dir);
   } catch {
     return [];
   }
 }
 function findVersions(file, sequence) {
-  const dir = path22.dirname(file);
-  const base = path22.basename(file);
+  const dir = path23.dirname(file);
+  const base = path23.basename(file);
   const own = versionToken(base);
-  const dirName = path22.basename(dir);
+  const dirName = path23.basename(dir);
   const dirTok = versionToken(dirName);
   const byVersion = /* @__PURE__ */ new Map();
   const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
   if (dirTok && sequence) {
-    const parent = path22.dirname(dir);
+    const parent = path23.dirname(dir);
     const dirRe = new RegExp(`^${escapeRe(dirTok.before)}(\\d{1,5})${escapeRe(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
     for (const sib of listDir(parent)) {
       const m = dirRe.exec(sib);
       if (!m) continue;
-      const ext2 = path22.extname(base).toLowerCase();
-      for (const f of listDir(path22.join(parent, sib))) {
-        if (path22.extname(f).toLowerCase() === ext2) add(Number(m[1]), path22.join(parent, sib, f));
+      const ext2 = path23.extname(base).toLowerCase();
+      for (const f of listDir(path23.join(parent, sib))) {
+        if (path23.extname(f).toLowerCase() === ext2) add(Number(m[1]), path23.join(parent, sib, f));
       }
     }
     return { current: dirTok.number, versions: firstOfEach(byVersion) };
@@ -15123,7 +15609,7 @@ function findVersions(file, sequence) {
   if (!pat) return { current: null, versions: [] };
   for (const n of listDir(dir)) {
     const m = pat.re.exec(n);
-    if (m) add(Number(m[1]), path22.join(dir, n));
+    if (m) add(Number(m[1]), path23.join(dir, n));
   }
   return { current: own.number, versions: firstOfEach(byVersion) };
 }
@@ -15137,19 +15623,19 @@ function planVersion(file, sequence, want) {
   return { current, latest, target, newer: target !== null && current !== null && target.version !== current };
 }
 function versionLogPath(projectPath) {
-  const ext2 = path22.extname(projectPath);
-  return path22.join(path22.dirname(projectPath), `${path22.basename(projectPath, ext2)}.versions.json`);
+  const ext2 = path23.extname(projectPath);
+  return path23.join(path23.dirname(projectPath), `${path23.basename(projectPath, ext2)}.versions.json`);
 }
 function appendVersionLog(projectPath, entries) {
   const file = versionLogPath(projectPath);
   let log = { entries: [] };
   try {
-    const parsed = JSON.parse(fs22.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs23.readFileSync(file, "utf8"));
     if (Array.isArray(parsed?.entries)) log = parsed;
   } catch {
   }
   log.entries.push(...entries);
-  fs22.writeFileSync(file, JSON.stringify(log, null, 2));
+  fs23.writeFileSync(file, JSON.stringify(log, null, 2));
   return file;
 }
 
@@ -15422,8 +15908,8 @@ var productionTools = [
 ];
 
 // src/tools/ext/receipts.ts
-var fs23 = __toESM(require("node:fs"), 1);
-var path23 = __toESM(require("node:path"), 1);
+var fs24 = __toESM(require("node:fs"), 1);
+var path24 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -15721,7 +16207,11 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_set_essential_graphics",
   "ae_render_templates",
   "ae_version_footage",
-  "ae_batch_set"
+  "ae_batch_set",
+  "ae_mask",
+  "ae_text_animator",
+  "ae_align",
+  "ae_purge_unused"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -15827,7 +16317,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs23.existsSync(actualProjectPath)) {
+          if (!fs24.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -15836,16 +16326,16 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const ext2 = path23.extname(actualProjectPath) || ".aep";
-          const baseName = path23.basename(actualProjectPath, ext2);
+          const ext2 = path24.extname(actualProjectPath) || ".aep";
+          const baseName = path24.basename(actualProjectPath, ext2);
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          fs23.mkdirSync(checkpointDir, { recursive: true });
+          fs24.mkdirSync(checkpointDir, { recursive: true });
           const stamp2 = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp2}_${safeLabel}${ext2}`;
-          const checkpointPath = path23.join(checkpointDir, checkpointFileName);
-          fs23.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs23.statSync(checkpointPath);
+          const checkpointPath = path24.join(checkpointDir, checkpointFileName);
+          fs24.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs24.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -15861,7 +16351,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs23.existsSync(checkpointPath)
+              checkpoint_exists: fs24.existsSync(checkpointPath)
             }
           });
           return {
@@ -15904,7 +16394,7 @@ var receiptsTools = [
         });
       }
       const checkpointDir = checkpointDirFor(actualProjectPath);
-      if (!fs23.existsSync(checkpointDir)) {
+      if (!fs24.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -15912,10 +16402,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs23.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs24.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path23.join(checkpointDir, e.name);
-        const stat = fs23.statSync(fullPath);
+        const fullPath = path24.join(checkpointDir, e.name);
+        const stat = fs24.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -15968,7 +16458,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs23.existsSync(args.checkpoint_path)) {
+          if (!fs24.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -16233,25 +16723,25 @@ var reframeTools = [
 ];
 
 // src/tools/ext/shapes.ts
-var Vec2 = external_exports.array(external_exports.number()).length(2);
+var Vec22 = external_exports.array(external_exports.number()).length(2);
 var Color2 = external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4);
 var ShapeSpecSchema = external_exports.object({
   type: external_exports.enum(["rect", "ellipse", "star", "polygon", "path"]),
   name: external_exports.string().min(1).max(200).optional().describe("The group's name. Default '<type> <n>'."),
-  size: Vec2.optional().describe("rect and ellipse: [width, height]."),
-  position: Vec2.optional().describe("The shape's centre inside its group (rect, ellipse, star, polygon)."),
+  size: Vec22.optional().describe("rect and ellipse: [width, height]."),
+  position: Vec22.optional().describe("The shape's centre inside its group (rect, ellipse, star, polygon)."),
   roundness: external_exports.number().min(0).optional().describe("rect: corner radius."),
   points: external_exports.number().int().min(3).max(100).optional().describe("star and polygon: number of points or sides."),
   outer_radius: external_exports.number().positive().optional().describe("star and polygon."),
   inner_radius: external_exports.number().positive().optional().describe("star only."),
   rotation: external_exports.number().optional().describe("star and polygon: degrees."),
-  vertices: external_exports.array(Vec2).min(2).max(1e3).optional().describe("path: the points, in layer pixels."),
-  in_tangents: external_exports.array(Vec2).optional().describe("path: one per vertex, relative to it. Default straight lines."),
-  out_tangents: external_exports.array(Vec2).optional(),
+  vertices: external_exports.array(Vec22).min(2).max(1e3).optional().describe("path: the points, in layer pixels."),
+  in_tangents: external_exports.array(Vec22).optional().describe("path: one per vertex, relative to it. Default straight lines."),
+  out_tangents: external_exports.array(Vec22).optional(),
   closed: external_exports.boolean().optional().describe("path: default true."),
   fill: external_exports.object({ color: Color2, opacity: external_exports.number().min(0).max(100).optional() }).optional(),
   stroke: external_exports.object({ color: Color2, width: external_exports.number().min(0), opacity: external_exports.number().min(0).max(100).optional() }).optional(),
-  group_position: Vec2.optional().describe("The group's own Transform position.")
+  group_position: Vec22.optional().describe("The group's own Transform position.")
 }).superRefine((s, ctx) => {
   const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
   if (s.type === "rect" || s.type === "ellipse") need(s.size !== void 0, `${s.type} needs size.`);
@@ -16775,8 +17265,8 @@ ${args.description}`,
 ];
 
 // src/tools/ext/track.ts
-var fs24 = __toESM(require("node:fs"), 1);
-var path24 = __toESM(require("node:path"), 1);
+var fs25 = __toESM(require("node:fs"), 1);
+var path25 = __toESM(require("node:path"), 1);
 function toGray(img) {
   const n = img.width * img.height;
   const data = new Float32Array(n);
@@ -16980,7 +17470,7 @@ var trackTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs24.mkdirSync(framesDir, { recursive: true });
+      fs25.mkdirSync(framesDir, { recursive: true });
       const patchSize = (args.pattern_size ?? 31) | 1;
       const opts = {
         patchSize,
@@ -17028,14 +17518,14 @@ var trackTools = [
               points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
             }
           }
-          fs24.rmSync(snap.path, { force: true });
+          fs25.rmSync(snap.path, { force: true });
           if (lostAt2) break;
         }
         return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker.contrast };
       });
       const { points, lostAt } = tracked;
-      const previewPath = path24.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-      fs24.writeFileSync(
+      const previewPath = path25.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+      fs25.writeFileSync(
         previewPath,
         encodePng(
           drawTrackPreview(
@@ -17140,7 +17630,9 @@ var extTools = [
   ...keyframesTools,
   ...inventoryTools,
   ...shapesTools,
-  ...productionTools
+  ...productionTools,
+  ...masksTools,
+  ...layoutTools
 ];
 
 // src/tools/quarantine.ts
@@ -17711,7 +18203,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path25.join(resolvedDataDir, "quarantine.json")
+    path26.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -17724,7 +18216,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path25.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path26.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo
