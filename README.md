@@ -12,8 +12,8 @@ An MCP server that lets Claude Code, Claude Desktop, Cursor and Codex drive **Ad
 
 This is an internal Chroma tool, not a consumer product.
 
-> **Status: v0.4.0, released 2026-11-03** (signed ZXP on the [v0.4.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.4.0)).
-> - 80 tools. The 55 from 0.3 were live-tested on AE 26.2.1 (Windows). **The 25 new in 0.4** (layers, audio, markers, keyframes, shapes, masks, Essential Graphics, versions, layout, house style, render checks) **and the new panel have not yet been run in After Effects**: they pass the build, 615 unit tests and the ExtendScript lint, their host code runs against a simulated AE DOM, and a multi-agent review (106 findings, 91 confirmed and fixed) went over them. The live smoke test covers every tool for whenever someone runs it; `docs/HANDOVER.md` lists the AE behaviours they rely on.
+> **Status: v0.4.1, released 2026-11-03** (signed ZXP on the [v0.4.1 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.4.1)). From 0.4.1 the panel updates itself from GitHub releases (see [Updates](#updates)); 0.4.0 has to be updated by hand once.
+> - 80 tools. The 55 from 0.3 were live-tested on AE 26.2.1 (Windows). The new panel has been opened in AE 26.3 and connects. **The 25 tools new in 0.4** (layers, audio, markers, keyframes, shapes, masks, Essential Graphics, versions, layout, house style, render checks) **have not yet been run in After Effects**: they pass the build, 624 unit tests and the ExtendScript lint, their host code runs against a simulated AE DOM, and a multi-agent review (106 findings, 91 confirmed and fixed) went over them. The live smoke test covers every tool for whenever someone runs it; `docs/HANDOVER.md` lists the AE behaviours they rely on.
 > - CI runs the build, the unit tests, the ExtendScript lint, and the in-panel MCP end to end on AE's own Node (17.7.2).
 > - macOS should work but is untested. Popup reading on macOS is written and unit-tested, but has not been run on a Mac.
 
@@ -37,12 +37,26 @@ This is an internal Chroma tool, not a consumer product.
 1. **Install the ZXP.** Download `chroma-ae-mcp-<version>.zxp` from the latest release and install it with the [aescripts ZXP Installer](https://aescripts.com/learn/zxp-installer/) (or Anastasiy's). The certificate is self-signed ("Chroma AE MCP"), so expect a one-time warning.
 2. **Start After Effects.** The MCP service starts by itself, invisibly, about 30 s after launch.
 3. **Open Window > Extensions > Chroma AE MCP.** The panel should show **Connected** (pictured above).
-4. **Register your clients.** Under **Register with**, click each one you use: **Claude Code**, **Claude Desktop**, **Cursor**, **Codex**. A tick means it is registered; clicking again removes it.
+4. **Set up your AI.** Under **Register with**, pick one: **Code** (Claude Code), **Desktop** (Claude Desktop), **Cursor** or **Codex**. **Copy** then puts that one's setup on the clipboard, and the line under the button says where it goes: a terminal command for Claude Code and Codex, or an entry to add inside `"mcpServers"` in the config file for Claude Desktop and Cursor. Pick the next one and copy again for each AI you use. Once an AI is set up, **Register with** twirls closed and lists what is set up; click it to open it again.
 5. **Restart the client** (in Claude Code, `/mcp`). The `ae_*` tools appear.
 
 **What you need:** Claude Code needs nothing but AE: the MCP runs on the Node built into AE's CEP. Claude Desktop, Cursor and Codex go through a small stdio relay, which needs Node 16 or later on the machine.
 
-**The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** at the bottom lists each tool call and checkpoint, newest first, with the raw service log inside it. Its twirl opens it below the tiles; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. The panel remembers which you chose.
+**The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** at the bottom lists each tool call and checkpoint, and the service's own events (started, token loaded, warnings), newest first, with the raw service log inside it. Its twirl opens it below the tiles; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. The panel remembers which you chose.
+
+### Updates
+
+<img src="docs/images/panel-update.png" width="240" align="right" alt="The panel with an update bar at the top: v0.4.2 is out, You have v0.4.1, with What's new and Update buttons">
+
+The panel checks GitHub for a newer release when it opens, and again when you click **Check for updates** at the bottom of the panel. When there is one, a bar at the top says so:
+
+- **What's new** opens the release notes in your browser.
+- **Update** downloads the release's `.zxp` to your Downloads folder, checks it against the release's SHA256 (nothing is installed if it doesn't match), and opens it, so the ZXP installer registered for `.zxp` files (the aescripts ZXP Installer, or Anastasiy's) installs it.
+- **Restart After Effects** when the installer finishes.
+
+A dev install (the `install-dev.ps1` junction) only shows the notice, without the button: update it with `git pull`. Coming from 0.4.0, which has no update button, install 0.4.1 by hand once.
+
+<br clear="right">
 
 **The token** belongs to this machine and survives restarts. **New token** in the panel replaces it, and Claude Code's user-scope `chroma-ae` entry is registered again automatically. The relay clients read the token themselves and need nothing.
 
@@ -182,7 +196,7 @@ Details in `qa/README.md` and `docs/QA-HARNESS.md`.
 ## Troubleshooting
 
 - **Tools fail with `unreachable`:** is AE running and the service up? The panel shows Connected, and `curl -H "Authorization: Bearer <token>" http://127.0.0.1:7790/health` answers. The service starts about 30 s after AE launches.
-- **401 errors:** the token was regenerated. Click **Claude Code** under Register with (twice if it is ticked), or paste the setup command again.
+- **401 errors:** the token was regenerated. Pick **Code** under Register with, click **Copy setup command** and paste it into a terminal again.
 - **Something is stuck:** click **Save diagnostics** in the panel (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
 - **A call times out:** the message names any popup blocking AE. Answer it in AE, or with `ae_dialog_respond` under the rules above, then check the state and `ae_acknowledge` the op.
 - **Port 7790 is busy:** the service retries every 5 s and never starts a second server. Check that an old AE instance isn't still running.
@@ -196,6 +210,8 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 
 **Done in 0.3.0:** automatic checkpoints around every write, the AE skills bundle, one-click registration, asset staging with auto-import, social reframe, data-driven builds and the diagnostics bundle (all from the Atom review), plus motion preview and review, curve easing, asking the user, effects and presets, brief and taste, point tracking and green-screen keying.
 
+**Done in 0.4.1:** the panel updates itself from GitHub releases; Register with picks one AI and copies that AI's own setup (a command for Claude Code and Codex, a config entry for Claude Desktop and Cursor) and twirls closed once something is set up; the Log shows the service's own events as well as tool calls; New token, Save diagnostics and Check for updates moved to the bottom.
+
 **Done in 0.4.0 (reviewed, not yet run in AE):** a new panel (session tiles, reply-time chart, and a Log that opens below them or fills the panel), every P2 item and the in-scope P3 items:
 - layers: create, precompose, track mattes, align and distribute;
 - audio: analysis from an aerender pass, cue keys, VO markers from a transcript;
@@ -206,7 +222,8 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - render verification by importing into AE instead of ffprobe.
 
 **Open:**
-- [ ] **Live AE run of 0.4:** run the smoke test (`qa/ci-live.mjs`) and open the new panel in AE 26.
+- [ ] **Live AE run of 0.4:** run the smoke test (`qa/ci-live.mjs`) for the 25 new tools.
+- [ ] **Try Update for real** when 0.4.2 comes out, from an installed 0.4.1.
 - [ ] **macOS popup reading:** written (`panel/tools/ae-dialogs-mac.js`, through System Events, needing Accessibility permission for After Effects); not yet tried on a Mac.
 - [ ] **A self-hosted CI runner** on a machine with AE. The workflow and `qa/ci-live.mjs` are ready; a runner has to be set up and registered.
 - [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. They need the VoxMark and Gulp repos on the machine that runs them.
