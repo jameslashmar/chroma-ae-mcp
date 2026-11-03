@@ -422,6 +422,19 @@ async function main() {
   const edgeCut = (r.findings ?? []).find((f) => f.kind === "cut_off" && f.layer?.name === "Edge");
   check("ae_motion_review (rest bounds)", Boolean(edgeCut) && edgeCut.suggested_shift?.[0] < 0, String(edgeCut?.message ?? JSON.stringify(r.bounds_unchecked ?? r.by_kind)));
 
+  // ---------- 0.4: reads ----------
+  r = await call("ae_comp_tree", {});
+  const layersNode = (r.comps ?? []).find((c) => c.name === "Layers");
+  check("ae_comp_tree", layersNode?.contains === 1 && (r.unused ?? []).some((c) => c.name === "Skill target"), `${r.num_comps} comps, unused ${(r.unused ?? []).map((c) => c.name).join(", ")}`);
+  r = await call("ae_comp_tree", { comp_id: LC });
+  check("ae_comp_tree (one comp)", r.contains?.[0]?.name === "Smoke Precomp", JSON.stringify(r.contains?.map((n) => n.name)));
+  r = await call("ae_fonts", {});
+  check("ae_fonts", r.text_layers >= 2 && r.fonts?.length >= 1 && typeof r.missing_known === "boolean", `${(r.fonts ?? []).map((f) => `${f.font}${f.missing ? " (missing)" : ""}`).join(", ")}`);
+  r = await call("ae_get_project", { type: "comp", sort: "name", limit: 2 });
+  check("ae_get_project (paged)", r.items?.length === 2 && r.total >= 5 && r.next_offset === 2, `${r.total} comps; ${(r.items ?? []).map((i) => i.name).join(", ")}`);
+  r = await call("ae_get_comp", { comp_id: LC, limit: 1 });
+  check("ae_get_comp (paged)", r.layers?.length === 1 && r.next_offset === 1, `${r.numLayers} layers, next ${r.next_offset}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
 

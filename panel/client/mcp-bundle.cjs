@@ -12710,6 +12710,45 @@ var framesTools = [
   }
 ];
 
+// src/tools/ext/inventory.ts
+var AeCompTreeSchema = external_exports.object({
+  comp_id: external_exports.number().int().optional().describe("Show this comp's tree: what it contains, down, and where it is used, up. Default: an overview of every comp."),
+  depth: external_exports.number().int().min(1).max(50).optional().describe("How many levels to follow (default 10).")
+});
+var AeFontsSchema = external_exports.object({
+  comp_id: external_exports.number().int().optional().describe("Only this comp's text layers. Default: the whole project."),
+  missing_only: external_exports.boolean().optional().describe("List only missing or substituted fonts.")
+});
+var inventoryTools = [
+  {
+    name: "ae_comp_tree",
+    description: "Read how comps nest. Without comp_id: every comp with how many comps use it, how many it contains, its nesting depth and whether it is in the render queue, plus the top-level comps (used nowhere, but rendered or containing others) and the unused ones (used nowhere, containing nothing, not queued). With comp_id: what that comp contains, level by level (with the layers that hold each precomp), and where it is used, up to the top. Read-only.",
+    schema: AeCompTreeSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost("compTree", { comp_id: args.comp_id, depth: args.depth }, {
+        label: "ae_comp_tree",
+        mutates: false,
+        toolName: "ae_comp_tree"
+      });
+      return res.result;
+    }
+  },
+  {
+    name: "ae_fonts",
+    description: "List the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). Read-only. Check them against the brief's fonts (ae_brief) before a delivery.",
+    schema: AeFontsSchema,
+    handler: async (args, ctx) => {
+      const res = await ctx.bridge.callHost(
+        "fontsInUse",
+        { comp_id: args.comp_id },
+        { label: "ae_fonts", mutates: false, toolName: "ae_fonts" }
+      );
+      const r = res.result;
+      return args.missing_only ? { ...r, fonts: r.fonts.filter((f) => f.missing === true) } : r;
+    }
+  }
+];
+
 // src/tools/ext/key.ts
 var fs18 = __toESM(require("node:fs"), 1);
 var path18 = __toESM(require("node:path"), 1);
@@ -16635,7 +16674,8 @@ var extTools = [
   ...layersTools,
   ...markersTools,
   ...audioTools,
-  ...keyframesTools
+  ...keyframesTools,
+  ...inventoryTools
 ];
 
 // src/tools/quarantine.ts
@@ -16674,10 +16714,22 @@ var quarantineTools = [
 var AeStatusSchema = external_exports.object({});
 var AeGetProjectSchema = external_exports.object({
   folder_id: external_exports.number().int().optional().describe("Optional folder item ID to start traversal from (defaults to root)."),
-  depth: external_exports.number().int().min(1).max(20).default(3).optional().describe("Maximum folder traversal depth (default: 3).")
+  depth: external_exports.number().int().min(1).max(20).default(3).optional().describe("Maximum folder traversal depth (default: 3)."),
+  type: external_exports.enum(["comp", "footage", "solid", "folder", "placeholder"]).optional().describe("Only items of this kind (a flat, paged list). Footage excludes solids and placeholders."),
+  name_contains: external_exports.string().min(1).optional().describe("Only items whose name contains this (case-insensitive)."),
+  missing_only: external_exports.boolean().optional().describe("Only footage whose file is missing."),
+  sort: external_exports.enum(["tree", "name", "id"]).optional().describe("Order of a filtered or paged list. Default tree (the folder walk)."),
+  offset: external_exports.number().int().min(0).optional().describe("Skip this many matches (paging; see next_offset)."),
+  limit: external_exports.number().int().min(1).max(500).optional().describe("At most this many items (default and maximum 500).")
 });
+var PagingFields = {
+  offset: external_exports.number().int().min(0).optional().describe("Skip this many layers (paging; see next_offset)."),
+  limit: external_exports.number().int().min(1).max(500).optional().describe("At most this many layers (default and maximum 500).")
+};
 var AeGetCompSchema = external_exports.object({
-  comp_id: external_exports.number().int().describe("The CompItem ID to inspect.")
+  comp_id: external_exports.number().int().describe("The CompItem ID to inspect."),
+  name_contains: external_exports.string().min(1).optional().describe("Only layers whose name contains this (case-insensitive)."),
+  ...PagingFields
 });
 var AeGetLayerPropsSchema = external_exports.object({
   comp_id: external_exports.number().int().describe("The CompItem ID containing the layer."),
@@ -16712,7 +16764,7 @@ var readTools = [
   },
   {
     name: "ae_get_project",
-    description: "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path. " + AGENT_SAFETY_GUIDANCE,
+    description: "Read the project item tree: id, name, typeName, parent folder id; compositions include width, height, fps, duration; footage items include file path and missing: true when the file is gone. For big projects, filter by kind, name or missing footage, sort, and page with offset/limit: the result then has total and next_offset. " + AGENT_SAFETY_GUIDANCE,
     schema: AeGetProjectSchema,
     handler: async (args, ctx) => {
       const depth = args.depth ?? 3;
@@ -16720,7 +16772,13 @@ var readTools = [
         "getProject",
         {
           folder_id: args.folder_id,
-          depth
+          depth: args.type || args.name_contains || args.missing_only ? args.depth ?? 20 : depth,
+          type: args.type,
+          name_contains: args.name_contains,
+          missing_only: args.missing_only,
+          sort: args.sort === "tree" ? void 0 : args.sort,
+          offset: args.offset,
+          limit: args.limit
         },
         {
           label: "ae_get_project",
@@ -16733,12 +16791,12 @@ var readTools = [
   },
   {
     name: "ae_get_comp",
-    description: "Read composition settings, work area, and layers (index, name, id, type, in/out, parent, enabled, solo, locked, label, 3D, blending mode, track matte). " + AGENT_SAFETY_GUIDANCE,
+    description: "Read composition settings, work area, and layers (index, name, id, type, in/out, parent, enabled, solo, locked, label, 3D, blending mode, track matte). Comps with more than 500 layers page with offset/limit (next_offset says where to continue); name_contains filters the layers. " + AGENT_SAFETY_GUIDANCE,
     schema: AeGetCompSchema,
     handler: async (args, ctx) => {
       const res = await ctx.bridge.callHost(
         "getComp",
-        { comp_id: args.comp_id },
+        { comp_id: args.comp_id, name_contains: args.name_contains, offset: args.offset, limit: args.limit },
         {
           label: `ae_get_comp(${args.comp_id})`,
           mutates: false,
