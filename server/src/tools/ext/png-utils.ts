@@ -272,10 +272,40 @@ const GLYPHS: Record<string, string[]> = {
   "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
   ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
   ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
+  "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
   "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
   "#": ["01010", "01010", "11111", "01010", "11111", "01010", "01010"],
   s: ["00000", "00000", "01110", "10000", "01110", "00001", "11110"],
   f: ["00110", "01001", "01000", "11100", "01000", "01000", "01000"],
+  // Capitals and a few marks, for layer name tags (ae_annotate_frame). Other lowercase letters are not drawn.
+  "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+  "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+  "G": ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
+  "H": ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+  "I": ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+  "J": ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
+  "K": ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+  "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  "Q": ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+  "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+  "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+  "W": ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
+  "X": ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+  "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+  "Z": ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+  "_": ["00000", "00000", "00000", "00000", "00000", "00000", "11111"],
+  "/": ["00001", "00001", "00010", "00100", "01000", "10000", "10000"],
 };
 
 export const GLYPH_WIDTH = 5;
@@ -337,4 +367,127 @@ export function writeScaledCopy(
   const out = resizeArea(src, target.width, target.height);
   fs.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
+}
+
+// ---------- helpers for ae_annotate_frame ----------
+
+/** A copy of the rectangle (x, y, w, h) of `src`, clipped to it. At least 1x1. */
+export function cropImage(src: RgbaImage, x: number, y: number, w: number, h: number): PNG {
+  const x0 = Math.min(src.width - 1, Math.max(0, Math.round(x)));
+  const y0 = Math.min(src.height - 1, Math.max(0, Math.round(y)));
+  const cw = Math.max(1, Math.min(src.width - x0, Math.round(w)));
+  const ch = Math.max(1, Math.min(src.height - y0, Math.round(h)));
+  const out = new PNG({ width: cw, height: ch });
+  for (let row = 0; row < ch; row++) {
+    const si = ((y0 + row) * src.width + x0) * 4;
+    Buffer.from(src.data.buffer, src.data.byteOffset + si, cw * 4).copy(out.data, row * cw * 4);
+  }
+  return out;
+}
+
+/** Nearest-neighbour resize to an exact size: pixels stay crisp when zooming in. */
+export function scaleNearest(src: RgbaImage, dstWidth: number, dstHeight: number): PNG {
+  const dw = Math.max(1, Math.round(dstWidth));
+  const dh = Math.max(1, Math.round(dstHeight));
+  const out = new PNG({ width: dw, height: dh });
+  for (let y = 0; y < dh; y++) {
+    const sy = Math.min(src.height - 1, Math.floor(((y + 0.5) * src.height) / dh));
+    for (let x = 0; x < dw; x++) {
+      const sx = Math.min(src.width - 1, Math.floor(((x + 0.5) * src.width) / dw));
+      const si = (sy * src.width + sx) * 4;
+      const di = (y * dw + x) * 4;
+      out.data[di] = src.data[si];
+      out.data[di + 1] = src.data[si + 1];
+      out.data[di + 2] = src.data[si + 2];
+      out.data[di + 3] = src.data[si + 3];
+    }
+  }
+  return out;
+}
+
+/** True when any pixel is not fully opaque. */
+export function hasTransparency(src: RgbaImage): boolean {
+  for (let i = 3; i < src.width * src.height * 4; i += 4) {
+    if (src.data[i] < 255) return true;
+  }
+  return false;
+}
+
+export interface RegionStats {
+  /** Mean colour weighted by alpha, so transparent pixels don't pull it to black. */
+  mean_rgb: [number, number, number];
+  hex: string;
+  /** Rec. 709 weights on the encoded (not linear) mean colour, 0..1. */
+  luma: number;
+  /** Mean alpha, 0..1: how much of the region is covered. */
+  alpha_mean: number;
+  pixels: number;
+}
+
+/** Mean colour and luma of the pixel rectangle [x0, x1) x [y0, y1) of `src`. */
+export function regionStats(src: RgbaImage, x0: number, y0: number, x1: number, y1: number): RegionStats {
+  const ax = Math.max(0, Math.min(src.width, Math.floor(x0)));
+  const ay = Math.max(0, Math.min(src.height, Math.floor(y0)));
+  const bx = Math.max(ax, Math.min(src.width, Math.ceil(x1)));
+  const by = Math.max(ay, Math.min(src.height, Math.ceil(y1)));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let a = 0;
+  for (let y = ay; y < by; y++) {
+    for (let x = ax; x < bx; x++) {
+      const i = (y * src.width + x) * 4;
+      const alpha = src.data[i + 3] / 255;
+      r += src.data[i] * alpha;
+      g += src.data[i + 1] * alpha;
+      b += src.data[i + 2] * alpha;
+      a += alpha;
+    }
+  }
+  const pixels = (bx - ax) * (by - ay);
+  const mean: [number, number, number] = a > 0 ? [clamp255(r / a), clamp255(g / a), clamp255(b / a)] : [0, 0, 0];
+  const hex = "#" + mean.map((v) => v.toString(16).padStart(2, "0")).join("");
+  const luma = (0.2126 * mean[0] + 0.7152 * mean[1] + 0.0722 * mean[2]) / 255;
+  return {
+    mean_rgb: mean,
+    hex,
+    luma: Math.round(luma * 1000) / 1000,
+    alpha_mean: pixels > 0 ? Math.round((a / pixels) * 1000) / 1000 : 0,
+    pixels,
+  };
+}
+
+/** A closed outline through `points`. Use an opaque colour (see drawLine). */
+export function drawPolygon(dst: PNG, points: Array<[number, number]>, thickness: number, rgba: Rgba): void {
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    drawLine(dst, Math.round(a[0]), Math.round(a[1]), Math.round(b[0]), Math.round(b[1]), thickness, rgba);
+  }
+}
+
+/** A plus-shaped cross centred on (x, y) with arms of `arm` pixels. */
+export function drawCross(dst: PNG, x: number, y: number, arm: number, thickness: number, rgba: Rgba): void {
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  drawLine(dst, cx - arm, cy, cx + arm, cy, thickness, rgba);
+  drawLine(dst, cx, cy - arm, cx, cy + arm, thickness, rgba);
+}
+
+/** Text on a filled box. Returns the box, so callers can keep later labels from overlapping it. */
+export function drawLabel(
+  dst: PNG,
+  text: string,
+  x: number,
+  y: number,
+  scale: number,
+  fg: Rgba,
+  bg: Rgba,
+  pad: number = 2
+): { x: number; y: number; w: number; h: number } {
+  const w = textWidth(text, scale) + pad * 2;
+  const h = GLYPH_HEIGHT * scale + pad * 2;
+  fillRect(dst, x, y, w, h, bg);
+  drawText(dst, text, x + pad, y + pad, scale, fg);
+  return { x, y, w, h };
 }

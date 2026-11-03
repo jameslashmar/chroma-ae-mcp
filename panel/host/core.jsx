@@ -511,6 +511,24 @@
     };
   };
 
+  // The comp-level switches ae_comp_settings writes (motion blur, renderer,
+  // frame blending, resolution factor, ...), so a read of the comp shows them.
+  // Each one is read on its own: an attribute an AE build lacks is left out.
+  var COMP_SWITCHES = [
+    "motionBlur", "shutterAngle", "shutterPhase", "motionBlurSamplesPerFrame", "motionBlurAdaptiveSampleLimit",
+    "frameBlending", "renderer", "draft3d", "resolutionFactor", "hideShyLayers",
+    "preserveNestedFrameRate", "preserveNestedResolution", "displayStartTime", "displayStartFrame"
+  ];
+
+  function addCompSwitches(c, out) {
+    for (var i = 0; i < COMP_SWITCHES.length; i++) {
+      try {
+        var v = c[COMP_SWITCHES[i]];
+        if (v !== undefined && v !== null) out[COMP_SWITCHES[i]] = serialiseValue(v);
+      } catch (e) {}
+    }
+  }
+
   A.getComp = function (args) {
     var c = requireComp(args.comp_id);
     var all = [];
@@ -540,6 +558,7 @@
       layers: layers,
       truncated: pg.next_offset !== null
     };
+    addCompSwitches(c, out);
     if (needle !== null || args.offset || args.limit) {
       out.matched = all.length;
       out.offset = pg.offset;

@@ -408,6 +408,35 @@
     return out;
   }
 
+  // The comp-level switches ae_comp_settings writes, so ae_comp_diff sees a
+  // change to them. An attribute an AE build lacks is left out.
+  var COMP_SWITCHES = [
+    "motionBlur", "shutterAngle", "shutterPhase", "motionBlurSamplesPerFrame", "motionBlurAdaptiveSampleLimit",
+    "frameBlending", "renderer", "draft3d", "resolutionFactor", "hideShyLayers",
+    "preserveNestedFrameRate", "preserveNestedResolution", "displayStartTime", "displayStartFrame"
+  ];
+
+  function fpCompSwitches(c, out) {
+    for (var i = 0; i < COMP_SWITCHES.length; i++) {
+      try {
+        var v = c[COMP_SWITCHES[i]];
+        if (v !== undefined && v !== null) out[COMP_SWITCHES[i]] = serialiseValue(v);
+      } catch (e) {}
+    }
+    // Item guides: orientation and position of each, bounded.
+    try {
+      var gl = c.guides;
+      if (gl && typeof gl.length === "number" && gl.length > 0) {
+        var guides = [];
+        if (gl.length > MAX_LIST) out.guides_truncated = true;
+        for (var g = 0; g < gl.length && g < MAX_LIST; g++) {
+          guides.push({ orientationType: serialiseValue(gl[g].orientationType), position: serialiseValue(gl[g].position) });
+        }
+        out.guides = guides;
+      }
+    } catch (eG) {}
+  }
+
   A.compFingerprint = function (args) {
     var compId = null;
     if (args && args.comp_id !== undefined) {
@@ -442,7 +471,7 @@
       layers.push(fpLayer(c.layer(i), state));
     }
 
-    return {
+    var result = {
       comp_id: c.id,
       name: c.name,
       width: c.width,
@@ -459,6 +488,8 @@
       truncated: state.truncated,
       layers: layers
     };
+    fpCompSwitches(c, result);
+    return result;
   };
 
   A.openProject = function (args) {

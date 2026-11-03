@@ -14,6 +14,7 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
+import { preflightRefusal, runPreflightGate, type GateSummary } from "./preflight.js";
 
 export const WINDOWS_FALLBACK_AERENDER =
   "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
@@ -522,6 +523,12 @@ export const AeAerenderStartSchema = z
       .min(0)
       .optional()
       .describe("Optional end frame index (-e)."),
+    preflight: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run the ae_preflight delivery check on this comp (by name) and the comps it nests first, and refuse to start if it finds a blocker (missing footage or fonts, expressions in error, comp not found). Nothing is started when it refuses. Default false."
+      ),
   })
   .superRefine((val, ctx) => {
     if (
@@ -575,7 +582,7 @@ export function createAerenderTools(
     {
       name: "ae_aerender_start",
       description:
-        "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project, logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. " +
+        "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args: AeAerenderStartArgs, ctx: ToolContext) => {
@@ -667,6 +674,19 @@ export function createAerenderTools(
 
               if (args.expect.comp_id !== undefined) {
                 await verifyTargetGuard(ctx, args.expect, opId);
+              }
+
+              // Read-only, before anything is created or spawned. The tool makes
+              // the output folder itself, so the folder is not checked.
+              let preflight: GateSummary | undefined;
+              if (args.preflight) {
+                const gate = await runPreflightGate(ctx, {
+                  toolName: "ae_aerender_start",
+                  opId,
+                  comp_names: [args.comp_name],
+                });
+                if (gate.blocked) return preflightRefusal("ae_aerender_start", gate.summary);
+                preflight = gate.summary;
               }
 
               const aerenderBin = resolveAerenderPath({
@@ -851,6 +871,7 @@ export function createAerenderTools(
                 args: initialRecord.args,
                 log_path: initialRecord.log_path,
                 started_at: initialRecord.started_at,
+                ...(preflight ? { preflight } : {}),
               };
             }
           );

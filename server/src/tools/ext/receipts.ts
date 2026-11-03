@@ -85,6 +85,23 @@ export interface CompFingerprint {
   markers?: unknown[];
   propertyCount?: number;
   truncated?: boolean;
+  // Comp switches (ae_comp_settings), so ae_comp_diff sees them change.
+  motionBlur?: unknown;
+  shutterAngle?: unknown;
+  shutterPhase?: unknown;
+  motionBlurSamplesPerFrame?: unknown;
+  motionBlurAdaptiveSampleLimit?: unknown;
+  frameBlending?: unknown;
+  renderer?: unknown;
+  draft3d?: unknown;
+  resolutionFactor?: unknown;
+  hideShyLayers?: unknown;
+  preserveNestedFrameRate?: unknown;
+  preserveNestedResolution?: unknown;
+  displayStartTime?: unknown;
+  displayStartFrame?: unknown;
+  guides?: unknown[];
+  guides_truncated?: boolean;
   layers: FingerprintLayer[];
 }
 
@@ -189,6 +206,21 @@ const COMP_SCALAR_FIELDS: Array<keyof CompFingerprint> = [
   "workAreaDuration",
   "bgColor",
   "markers",
+  "motionBlur",
+  "shutterAngle",
+  "shutterPhase",
+  "motionBlurSamplesPerFrame",
+  "motionBlurAdaptiveSampleLimit",
+  "frameBlending",
+  "renderer",
+  "draft3d",
+  "resolutionFactor",
+  "hideShyLayers",
+  "preserveNestedFrameRate",
+  "preserveNestedResolution",
+  "displayStartTime",
+  "displayStartFrame",
+  "guides",
 ];
 
 const LAYER_SCALAR_FIELDS: Array<keyof FingerprintLayer> = [
@@ -521,6 +553,8 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_align",
   "ae_purge_unused",
   "ae_verify_render",
+  "ae_layer_ops",
+  "ae_comp_settings",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

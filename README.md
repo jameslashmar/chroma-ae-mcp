@@ -101,7 +101,7 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 
 ---
 
-## Tools (80)
+## Tools (87)
 
 | Group | Tools |
 |---|---|
@@ -124,6 +124,10 @@ Codex ──stdio──► tools/stdio-relay.cjs ───┘   ├─ single-wr
 | Receipts & safety | `ae_comp_fingerprint`, `ae_comp_diff`, `ae_checkpoint_create`, `ae_checkpoint_list`, `ae_checkpoint_revert`, `ae_auto_checkpoint`, `ae_save` (copies the .aep first; never save-as) |
 | Render | `ae_render_queue_add`, `ae_render_queue_status`, `ae_render_templates`, `ae_aerender_start`, `ae_aerender_status`, `ae_aerender_cancel` (background; success is judged from the log as well as the exit code), `ae_verify_render` (imports the render back and checks its frames, frame rate, size and audio against the comp or the job; no ffprobe) |
 | Delivery | `ae_version_footage` (newer versions on disk, swapped and logged next to the .aep), `ae_get_essential_graphics`, `ae_set_essential_graphics`, `ae_export_mogrt`, `ae_purge_unused`, `ae_house_style_check` (fonts, brand colours by delta E, small text, title safe) |
+| Layer housekeeping | `ae_layer_ops`: parent, reorder, sort, duplicate (or copy to another comp), delete, trim, rename by pattern, and switches (shy, solo, lock, 3D, motion blur, blend mode, label); dry run; warns when a `layer(index)` expression now reads another layer, which AE doesn't report |
+| Many comps | `ae_multi_comp_apply`: one write tool run across comps picked by id, name pattern, folder or nesting, with a per-comp ok/skipped/failed table and a job that resumes where it stopped |
+| Comp settings | `ae_get_comp_settings`, `ae_comp_settings`: motion blur and shutter, frame blending, renderer, draft 3D, work area, background, display start, nested frame rate and resolution, shy, guides |
+| Seeing and checking | `ae_annotate_frame` (a rendered frame with numbered layer outlines, names, anchors and safe areas, and the index to go with it; 2D layers), `ae_preflight` (blockers and warnings before a render, each naming the tool that fixes it; `preflight: true` on the render tools), `ae_session_changes` (what the user changed since the agent's last write, and writes cut short by a crash; write results carry `user_changed`) |
 | Popups | `ae_dialogs`, `ae_dialog_respond` (Windows through UI Automation; macOS through System Events, which needs Accessibility permission for After Effects) |
 | Diagnostics | `ae_diagnostics`: one file for triage with versions, what is in flight and for how long, queue, quarantine, settings, popups and the end of the log, token redacted. The panel's **Save diagnostics** button writes the same file. |
 | UI | `ae_list_panels`, `ae_open_panel`, `ae_ui_screenshot` |
@@ -133,8 +137,8 @@ Each tool's schema and description, as the agent sees them, live in `server/src/
 **Native panels.** CEP extensions open directly. AE's own Window-menu panels open through `app.executeCommand`, which does work through CEP (measured), but those commands **toggle**, so `ae_open_panel` refuses a native panel unless `allow_toggle` is set after checking with `ae_ui_screenshot`.
 
 **Where it keeps things.**
-- Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/`.
-- Next to a project: `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
+- Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/`, `session-state.json` and `inflight-ops.json` (`ae_session_changes`).
+- Next to a project: `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `<name>.jobs.json` (`ae_multi_comp_apply`'s jobs), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
 - Audio renders for `ae_audio_analyze` go to `renders/audio/` in the data dir.
 
 ---

@@ -4,7 +4,9 @@
  * The guarded write every mutating tool goes through, in one queue lease:
  * quarantine check → target guard → automatic checkpoint → before read →
  * the write (one undo group, inside the host function) → after read in a
- * separate evalScript → receipt.
+ * separate evalScript → receipt. With session tracking on (ext/session.ts)
+ * it also reports what the user changed since the last write, keeps a
+ * write-ahead record while the write runs, and stores the new baseline.
  *
  * Tool groups describe what to read and write; this runs it the same way
  * each time, so a new tool can't skip a step.
@@ -17,6 +19,7 @@ import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import type { ExpectGuard, ToolContext } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
 import { readBackMismatch } from "../read-back.js";
+import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite } from "./session.js";
 
 export interface HostCall {
   host: string;
@@ -69,14 +72,24 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
+      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
+      const sessionFields = await noteBeforeWrite(ctx, note);
       const before = await read("before");
-      const write = await ctx.bridge.evalRaw<W>({
-        id: opId,
-        script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
-        label: spec.label,
-        mutates: true,
-        toolName: spec.toolName,
-      });
+      // The record lives while the evalScript runs; if AE dies mid-write it is
+      // still there at the next start and turns into a quarantine entry.
+      beginInflight(note);
+      let write;
+      try {
+        write = await ctx.bridge.evalRaw<W>({
+          id: opId,
+          script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
+          label: spec.label,
+          mutates: true,
+          toolName: spec.toolName,
+        });
+      } finally {
+        endInflight(opId);
+      }
       const written = (write.result ?? {}) as W;
       // From here the write is applied: nothing below may throw, or the caller
       // sees a bare error for a change that happened and resends it.
@@ -104,12 +117,14 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
         custom = [readBackFailure];
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom });
+      await noteAfterWrite(ctx, note);
       return {
         op_id: opId,
         applied: true as const,
         ...shown,
         checkpoint,
         receipt,
+        ...sessionFields,
       };
     });
   } catch (err) {

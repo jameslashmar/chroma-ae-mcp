@@ -8,6 +8,7 @@ import { QueueWaitError } from "../queue.js";
 import { DEFAULT_SETTINGS } from "../settings.js";
 import { recordRunJsx } from "../skills.js";
 import { readAfterWrite } from "./read-back.js";
+import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite } from "./ext/session.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
@@ -328,6 +329,8 @@ export const mutateTools: ToolDefinition<any>[] = [
           const guard = await verifyTargetGuard(ctx, expect, opId);
           const checkpoint = await autoCheckpoint(ctx, guard, "ae_run_jsx");
 
+          const note = { opId, toolName: "ae_run_jsx", label: args.label, expect, checkpoint: checkpoint?.path ?? null };
+          const sessionFields = await noteBeforeWrite(ctx, note);
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("snapshotForReceipt", {
@@ -338,18 +341,24 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_run_jsx",
           });
 
-          const writeResp = await ctx.bridge.evalRaw({
-            id: opId,
-            script: buildJsxCall("runUserJsx", {
-              code: args.code,
-              mutates: true,
+          beginInflight(note);
+          let writeResp;
+          try {
+            writeResp = await ctx.bridge.evalRaw({
+              id: opId,
+              script: buildJsxCall("runUserJsx", {
+                code: args.code,
+                mutates: true,
+                label: args.label,
+                expect,
+              }),
               label: args.label,
-              expect,
-            }),
-            label: args.label,
-            mutates: true,
-            toolName: "ae_run_jsx",
-          });
+              mutates: true,
+              toolName: "ae_run_jsx",
+            });
+          } finally {
+            endInflight(opId);
+          }
 
           // Separate evalScript for read-back (reads in the same script as a write return stale values).
           // The write is applied from here on, so a failed read is reported, never thrown.
@@ -371,6 +380,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             customMismatches: afterRead.failure ? [afterRead.failure] : undefined,
           });
           recordRunJsx({ op_id: opId, label: args.label, code: args.code, mutates: true, at: new Date().toISOString() });
+          await noteAfterWrite(ctx, note);
 
           return {
             op_id: opId,
@@ -378,6 +388,7 @@ export const mutateTools: ToolDefinition<any>[] = [
             result: writeResp.result,
             checkpoint,
             receipt,
+            ...sessionFields,
           };
         });
       } catch (err) {
@@ -416,6 +427,8 @@ export const mutateTools: ToolDefinition<any>[] = [
           const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
           const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_property");
 
+          const note = { opId, toolName: "ae_set_property", label, expect: effectiveExpect, checkpoint: checkpoint?.path ?? null };
+          const sessionFields = await noteBeforeWrite(ctx, note);
           const beforeSnap = await ctx.bridge.evalRaw({
             id: `${opId}_before`,
             script: buildJsxCall("getLayerProps", {
@@ -429,21 +442,27 @@ export const mutateTools: ToolDefinition<any>[] = [
             toolName: "ae_set_property",
           });
 
-          const writeResp = await ctx.bridge.evalRaw({
-            id: opId,
-            script: buildJsxCall("setProperty", {
-              comp_id: args.comp_id,
-              layer: args.layer,
-              path: args.path,
-              value: args.value,
-              keyframes: args.keyframes,
-              expression: args.expression,
-              expect: effectiveExpect,
-            }),
-            label,
-            mutates: true,
-            toolName: "ae_set_property",
-          });
+          beginInflight(note);
+          let writeResp;
+          try {
+            writeResp = await ctx.bridge.evalRaw({
+              id: opId,
+              script: buildJsxCall("setProperty", {
+                comp_id: args.comp_id,
+                layer: args.layer,
+                path: args.path,
+                value: args.value,
+                keyframes: args.keyframes,
+                expression: args.expression,
+                expect: effectiveExpect,
+              }),
+              label,
+              mutates: true,
+              toolName: "ae_set_property",
+            });
+          } finally {
+            endInflight(opId);
+          }
 
           // Separate evalScript for read-back. The write is applied from here
           // on, so a failed read is reported, never thrown.
@@ -462,12 +481,14 @@ export const mutateTools: ToolDefinition<any>[] = [
             })
           );
           if (afterRead.failure) {
+            await noteAfterWrite(ctx, note);
             return {
               op_id: opId,
               applied: true as const,
               result: writeResp.result,
               checkpoint,
               receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] }),
+              ...sessionFields,
             };
           }
           const afterSnap = afterRead.value!;
@@ -507,12 +528,14 @@ export const mutateTools: ToolDefinition<any>[] = [
               Object.keys(expectedCheck).length > 0 ? actualCheck : undefined,
           });
 
+          await noteAfterWrite(ctx, note);
           return {
             op_id: opId,
             applied: true as const,
             result: writeResp.result,
             checkpoint,
             receipt,
+            ...sessionFields,
           };
         });
       } catch (err) {
