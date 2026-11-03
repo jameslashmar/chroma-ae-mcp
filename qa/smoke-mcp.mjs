@@ -115,6 +115,23 @@ const cpNote = (r) =>
     ? `checkpoint ${r.checkpoint.status}${r.checkpoint.unsaved_changes_not_included ? " (unsaved changes left out)" : ""}`
     : "no checkpoint field";
 
+// ---- helpers for the waves 1-3 steps ----
+// A step that cannot run here (no font, no video footage, no matching template) is logged, not failed.
+const skipped = [];
+function skip(tool, why) {
+  skipped.push({ tool, why });
+  console.log(`SKIP  ${tool.padEnd(30)} ${why}`);
+}
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const brief = (r) => JSON.stringify(r).slice(0, 220);
+/** A guarded write that was applied and read back clean. */
+const okWrite = (r) => r.applied === true && r.receipt?.matches === true;
+/** The tool refused: a schema error, a typed refusal (ok false) or a call that applied nothing. */
+const refused = (r) => r.__isError === true || Boolean(r.__error) || r.ok === false || r.applied === false;
+/** Why a call failed, for the note column. */
+const why = (r) =>
+  String(r.message ?? r.__error ?? ((r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ") || r.error || ""));
+
 async function main() {
   const client = createClient();
   await assertSafeInitialProject(client);
@@ -450,6 +467,7 @@ async function main() {
 
   r = await call("ae_render_templates", {});
   check("ae_render_templates", r.render_settings?.length > 0 && r.output_modules?.length > 0 && typeof r.audio_template_found === "boolean", `${r.source}; AIFF 48kHz ${r.audio_template_found ? "found" : "missing"}`);
+  const audioTemplate = r.audio_template_found === true; // ae_loudness_check on a comp renders audio with it
 
   // The precomp made earlier from MATTE and Plate becomes a template; its layer in Layers gets an override.
   const PRE = (await call("ae_get_project", { type: "comp", name_contains: "Smoke Precomp" })).items?.[0]?.id;
@@ -519,6 +537,505 @@ async function main() {
 
   r = await call("ae_house_style_check", { comp_id: LC, brand_colors: ["#3399ff", "#ffcc00"], fonts: ["Arial"], min_font_size: 10 });
   check("ae_house_style_check", r.ok && Array.isArray(r.findings) && r.checked?.text >= 1, `${r.counts?.medium} medium, ${r.counts?.low} low: ${[...new Set((r.findings ?? []).map((f) => f.kind))].join(", ")}`);
+
+  // ======================================================================
+  // Waves 1-3 (149 tools in all, 69 of them new). NONE of these steps has run in a live After Effects yet;
+  // the arguments and checks come from the tools' zod schemas and results. Expect to adjust some on the first run.
+  // Each group works in a scratch comp of its own, so the Smoke, Layers and Audio comps keep what the later checks read.
+  // ======================================================================
+  const wave = await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: waves 1-3 scene",
+    expect,
+    code: [
+      "function mk(n, w, h, d) { return app.project.items.addComp(n, w, h, 1, d, 25); }",
+      "var ids = {};",
+      // Work: four solids for the stagger, rig, fit text and path tools (8 s so captions-style timing fits).
+      'var wk = mk("Wave Work", 640, 360, 8); ids.work = wk.id;',
+      'for (var i = 1; i <= 4; i++) { var s = wk.layers.addSolid([0.2 * i, 0.5, 0.9 - 0.2 * i], "Row" + i, 60, 60, 1); s.property("ADBE Transform Group").property("ADBE Position").setValue([100 * i, 200]); }',
+      'var cp = mk("Wave Captions", 640, 360, 8); ids.caps = cp.id;',
+      // A 4 s comp used as a precomp layer "Clip": the time remap tools need a layer with a source length.
+      'var rs = mk("Wave Remap Src", 320, 180, 4); rs.layers.addSolid([0.9, 0.4, 0.1], "Src", 320, 180, 1); ids.remap_src = rs.id;',
+      'var rm = mk("Wave Remap", 640, 360, 8); var clip = rm.layers.add(rs); clip.name = "Clip"; ids.remap = rm.id;',
+      'var cm = mk("Wave Cam", 640, 360, 4); cm.layers.addSolid([0.2, 0.4, 0.8], "CamPlate", 640, 360, 1); ids.cam = cm.id;',
+      // Two text layers that overlap, on a dark plate.
+      'var lg = mk("Wave Legibility", 640, 360, 4); ids.leg = lg.id;',
+      'lg.layers.addSolid([0.1, 0.1, 0.12], "Leg BG", 640, 360, 1);',
+      'var la = lg.layers.addText("Legibility check"); la.name = "Leg A";',
+      'var lb = lg.layers.addText("Overlap"); lb.name = "Leg B";',
+      'la.property("ADBE Transform Group").property("ADBE Position").setValue([320, 170]);',
+      'lb.property("ADBE Transform Group").property("ADBE Position").setValue([330, 180]);',
+      'var vc = mk("Wave Variants", 640, 360, 4); ids.vars = vc.id;',
+      'var v1 = vc.layers.addSolid([1, 0.6, 0.1], "V1", 80, 80, 1); var v2 = vc.layers.addSolid([0.1, 0.6, 1], "V2", 80, 80, 1);',
+      'v1.property("ADBE Transform Group").property("ADBE Position").setValue([200, 180]);',
+      'v2.property("ADBE Transform Group").property("ADBE Position").setValue([440, 180]);',
+      'var ma = mk("MC A", 320, 180, 2); ma.layers.addSolid([1, 1, 1], "Mover", 40, 40, 1); ids.mca = ma.id;',
+      'var mb = mk("MC B", 320, 180, 2); mb.layers.addSolid([1, 1, 1], "Mover", 40, 40, 1); ids.mcb = mb.id;',
+      // Layer ops: four plain solids and one locked one on top.
+      'var po = mk("Wave Ops", 640, 360, 4); ids.ops = po.id;',
+      'for (var j = 1; j <= 4; j++) po.layers.addSolid([0.5, 0.5, 0.5], "Op" + j, 80, 80, 1);',
+      'var lk = po.layers.addSolid([0.9, 0.2, 0.2], "Op Lock", 80, 80, 1); lk.locked = true;',
+      "return ids;",
+    ].join("\n"),
+  });
+  const W = wave.result ?? {};
+  if (typeof W.work !== "number") throw new Error("Could not build the waves 1-3 scene: " + brief(wave));
+  const TR = "ADBE Transform Group";
+  const ROT = [TR, "ADBE Rotate Z"];
+  let ramPurgeAvailable = null; // from ae_memory_status: PurgeTarget.ALL_MEMORY_CACHES needs AE 24.3+
+
+  // ---------- wave 1: session ----------
+  r = await call("ae_session_changes", { rebase: true });
+  if (r.tracking_enabled === false) skip("ae_session_changes (rebase)", "session tracking is off on this server (tracking_enabled is false)");
+  else check("ae_session_changes (rebase)", r.rebased === true && !r.__isError, `baseline ${r.baseline ? "taken" : "none (session tracking off?)"}`);
+
+  // ---------- wave 1: ae_comp_settings, ae_get_comp_settings ----------
+  {
+    const cs0 = await call("ae_get_comp_settings", { comp_id: W.work });
+    const g0 = cs0.guide_count;
+    check("ae_get_comp_settings", typeof g0 === "number" && cs0.comp_id === W.work && cs0.width === 640, `${g0} guide(s), motion blur ${cs0.motion_blur}, unreadable ${(cs0.unreadable ?? []).join(",") || "none"}`);
+    r = await call("ae_comp_settings", {
+      comp_id: W.work,
+      expect,
+      settings: { motion_blur: !cs0.motion_blur, shutter_angle: 180, motion_blur_samples: 16, motion_blur_adaptive_limit: 128, work_area: { start: 0, duration: Math.min(1, cs0.duration ?? 1) } },
+      guides: [
+        { action: "add", orientation: "vertical", position: 400 },
+        { action: "add", orientation: "horizontal", position: 300 },
+        { action: "set", index: g0, position: 420 },
+        { action: "remove", index: g0 + 1 },
+      ],
+    });
+    check("ae_comp_settings", okWrite(r), why(r));
+    r = await call("ae_get_comp_settings", { comp_id: W.work, match: { width: 640, height: 360, fps: 25 } });
+    check("ae_get_comp_settings (guides, brief match)", r.guide_count === g0 + 1 && r.match?.ok === true, `${r.guide_count} guide(s); differences ${JSON.stringify(r.match?.differences)}`);
+    // Put the switches and the work area back, remove the guide that is left.
+    r = await call("ae_comp_settings", {
+      comp_id: W.work,
+      expect,
+      settings: {
+        motion_blur: cs0.motion_blur,
+        shutter_angle: cs0.shutter_angle,
+        motion_blur_samples: cs0.motion_blur_samples,
+        motion_blur_adaptive_limit: cs0.motion_blur_adaptive_limit,
+        work_area: cs0.work_area,
+      },
+      guides: [{ action: "remove", index: g0 }],
+    });
+    check("ae_comp_settings (restore)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 1: ae_multi_comp_apply (two small comps; Smoke itself is not touched) ----------
+  {
+    const op = { tool: "ae_set_property", args: { layer: { name: "Mover" }, path: [TR, "ADBE Opacity"], value: 50 } };
+    r = await call("ae_multi_comp_apply", { op, name_pattern: "^MC (A|B)$", dry_run: true, expect });
+    check("ae_multi_comp_apply (dry run)", r.ok && r.dry_run === true && r.would_run === 2 && r.would_fail === 0, brief(r));
+    r = await call("ae_multi_comp_apply", { op, name_pattern: "^MC (A|B)$", fingerprints: true, pause_ms: 100, expect });
+    check("ae_multi_comp_apply (run)", r.ok && r.state === "done" && r.summary?.ok === 2, brief(r.summary));
+    check("ae_multi_comp_apply (undo note)", /step/.test(r.undo_note ?? ""), String(r.undo_note ?? "no undo_note").slice(0, 100));
+    const job = r.job_id;
+    r = await call("ae_multi_comp_apply", { resume_job_id: job, expect });
+    check("ae_multi_comp_apply (resume a done job)", r.state === "done" && r.summary?.pending === 0, brief(r.summary));
+    r = await call("ae_multi_comp_apply", { op: { tool: "ae_set_property", args: { layer: { name: "No Such Layer" }, path: [TR, "ADBE Opacity"], value: 10 } }, name_pattern: "^MC (A|B)$", expect });
+    check("ae_multi_comp_apply (missing layer is skipped)", r.summary?.skipped === 2 && r.summary?.failed === 0, brief(r.summary));
+    r = await call("ae_multi_comp_apply", { op: { tool: "ae_set_property", args: { layer: { index: 1 }, path: [TR, "ADBE Opacity"], value: 10 } }, name_pattern: "^MC (A|B)$", expect });
+    check("ae_multi_comp_apply (index selector refused for 2 comps)", refused(r), why(r).slice(0, 120));
+  }
+
+  // ---------- wave 1: ae_layer_ops (Wave Ops comp: Op Lock on top, then Op4..Op1) ----------
+  {
+    const ops = (args) => call("ae_layer_ops", { comp_id: W.ops, expect, ...args });
+    const ops4 = [{ name: "Op1" }, { name: "Op2" }, { name: "Op3" }, { name: "Op4" }];
+    r = await ops({ action: "reorder", layers: [{ name: "Op1" }], move_to: "beginning", dry_run: true });
+    check("ae_layer_ops (dry run)", r.dry_run === true && !r.__isError, brief(r.stack ?? r));
+    r = await ops({ action: "parent", layers: [{ name: "Op2" }], parent: { name: "Op1" } });
+    check("ae_layer_ops (parent)", okWrite(r) && typeof r.parent_id === "number", why(r));
+    r = await ops({ action: "parent", layers: [{ name: "Op2" }], unparent: true });
+    check("ae_layer_ops (unparent)", okWrite(r), why(r));
+    r = await ops({ action: "reorder", layers: [{ name: "Op1" }], move_to: "beginning" });
+    check("ae_layer_ops (reorder)", okWrite(r), why(r));
+    r = await ops({ action: "sort", layers: ops4, sort_by: "name" });
+    check("ae_layer_ops (sort)", okWrite(r), why(r));
+    r = await ops({ action: "trim", layers: [{ name: "Op3" }], start_time: 0.5, in_point: 0.75, out_point: 2.5 });
+    check("ae_layer_ops (trim: start, in and out)", okWrite(r), why(r));
+    r = await ops({ action: "switches", layers: [{ name: "Op2" }, { name: "Op3" }], shy: true, label_color: 5, blend_mode: "screen" });
+    check("ae_layer_ops (switches)", okWrite(r), why(r));
+    r = await ops({ action: "rename", layers: [{ name: "Op1" }], find: "Op1", replace: "First" });
+    check("ae_layer_ops (rename)", okWrite(r) && r.renames?.length === 1, why(r));
+    r = await ops({ action: "delete", layers: [{ name: "Op Lock" }] });
+    check("ae_layer_ops (delete of a locked layer is refused)", refused(r), why(r).slice(0, 120));
+    r = await ops({ action: "delete", layers: [{ name: "Op Lock" }], unlock_locked: true });
+    check("ae_layer_ops (delete, unlock_locked)", okWrite(r) && r.deleted_total === 1 && Array.isArray(r.unlocked), why(r));
+    // Into another comp first (so "Op4" is still one name), then in place.
+    r = await ops({ action: "duplicate", layers: [{ name: "Op4" }], to_comp_id: W.mcb });
+    check("ae_layer_ops (duplicate into another comp)", okWrite(r), why(r));
+    r = await ops({ action: "duplicate", layers: [{ name: "Op4" }], count: 2 });
+    check("ae_layer_ops (duplicate in place)", okWrite(r) && r.duplicates_total === 2, why(r));
+  }
+
+  // ---------- wave 2: captions (Wave Captions, 25 fps, 8 s) ----------
+  {
+    const srt = "1\n00:00:00,400 --> 00:00:02,000\nHello there friends\n\n2\n00:00:03,200 --> 00:00:04,400\nSecond caption here\n";
+    const words = JSON.stringify({
+      words: [
+        { text: "Hello", start: 0.4, end: 0.8, type: "word" },
+        { text: "there", start: 0.8, end: 1.2, type: "word" },
+        { text: "friends.", start: 1.2, end: 1.8, type: "word" },
+        { text: "Second", start: 3.2, end: 3.6, type: "word" },
+        { text: "caption", start: 3.6, end: 4.0, type: "word" },
+        { text: "here", start: 4.0, end: 4.4, type: "word" },
+      ],
+    });
+    const hl = { color: [1, 0.8, 0] };
+    r = await call("ae_captions_plan", { transcript: { text: srt }, frame_rate: 25 });
+    check("ae_captions_plan", r.count === 2 && r.estimated_word_times === true, `${r.count} captions; ${(r.warnings ?? []).length} warning(s)`);
+    r = await call("ae_captions", { comp_id: W.caps, transcript: { text: words }, highlight: hl, box: {}, style: { font_size: 60 }, expect });
+    check("ae_captions", okWrite(r) && r.count === 2 && r.created?.length >= 2, `${r.created?.length} layers created; outside safe ${JSON.stringify(r.outside_safe)}; ${why(r)}`);
+    r = await call("ae_captions_read", { comp_id: W.caps });
+    check("ae_captions_read", r.total_captions === 2 && r.captions?.[0]?.highlight?.present === true, `${r.total_captions} captions`);
+    check("ae_captions_read (box expressions)", (r.boxes ?? []).every((b) => (b.expression_errors ?? []).length === 0), `${(r.boxes ?? []).length} box(es)`);
+    r = await call("ae_captions", { comp_id: W.caps, transcript: { text: words, to_s: 3 }, highlight: hl, box: {}, style: { font_size: 60 }, expect });
+    check("ae_captions (re-run updates by name, drops the stale one)", okWrite(r) && (r.updated ?? []).includes("Caption 001") && (r.removed ?? []).includes("Caption 002"), `updated ${JSON.stringify(r.updated)}, removed ${JSON.stringify(r.removed)}; ${why(r)}`);
+    r = await call("ae_captions", { comp_id: W.caps, name_prefix: "Hold", mode: "single", transcript: { text: words }, highlight: { color: [0, 1, 1] }, expect });
+    check("ae_captions (single layer, hold keys)", okWrite(r), why(r));
+    r = await call("ae_captions_read", { comp_id: W.caps, mode: "single", name_prefix: "Hold" });
+    check("ae_captions_read (single)", r.captions?.length === 1, `${r.captions?.[0]?.numKeys} Source Text keys`);
+    // A continuation chunk: number 3 on, remove_stale must not touch 1 and 2.
+    r = await call("ae_captions", { comp_id: W.caps, first_number: 3, remove_stale: true, transcript: { text: "1\n00:00:05,000 --> 00:00:06,000\nChunk three\n" }, expect });
+    check("ae_captions (continuation from number 3)", okWrite(r) && (r.removed ?? []).length === 0, `created ${JSON.stringify(r.created)}; ${why(r)}`);
+    r = await call("ae_captions_read", { comp_id: W.caps, from_number: 3, to_number: 3 });
+    check("ae_captions_read (from_number, to_number)", r.captions?.length === 1, `${r.captions?.length} caption(s)`);
+  }
+
+  // ---------- wave 2: fit text (Wave Work) ----------
+  {
+    r = await call("ae_create_layer", { comp_id: W.work, type: "text", name: "FitTitle", text: "A VERY LONG TITLE THAT WILL NOT FIT THE BOX", expect });
+    check("ae_create_layer (text for fitting)", okWrite(r), why(r));
+    const fitLayer = [{ name: "FitTitle" }];
+    r = await call("ae_measure_text", { comp_id: W.work, layers: fitLayer, max_width: 300 });
+    check("ae_measure_text (overflow)", r.layers?.[0]?.fits === false && r.layers?.[0]?.bounds?.width > 300, `width ${r.layers?.[0]?.bounds?.width}, size ${r.layers?.[0]?.fontSize}`);
+    r = await call("ae_fit_text", { comp_id: W.work, layers: fitLayer, max_width: 300, dry_run: true, expect });
+    check("ae_fit_text (dry run)", r.dry_run === true && r.layers?.[0]?.plan?.status === "resize", JSON.stringify(r.layers?.[0]?.plan));
+    r = await call("ae_fit_text", { comp_id: W.work, layers: fitLayer, max_width: 300, expect });
+    check("ae_fit_text (size)", r.ok && r.applied === true && r.all_fit === true && r.receipt?.matches !== false, `${r.passes?.length} pass(es); ${JSON.stringify((r.layers ?? []).map((l) => [l.status, l.from_size, l.to_size]))}`);
+    r = await call("ae_measure_text", { comp_id: W.work, layers: fitLayer, max_width: 300 });
+    check("ae_measure_text (fits now)", r.layers?.[0]?.fits === true, `width ${r.layers?.[0]?.bounds?.width}`);
+    r = await call("ae_fit_text", { comp_id: W.work, layers: fitLayer, mode: "live", max_width: 200, dry_run: true, expect });
+    check("ae_fit_text (live, dry run)", r.dry_run === true && Array.isArray(r.would), JSON.stringify(r.would));
+    r = await call("ae_fit_text", { comp_id: W.work, layers: fitLayer, mode: "live", max_width: 200, expect });
+    check("ae_fit_text (live expression)", okWrite(r), why(r));
+    r = await call("ae_fit_text", { comp_id: W.work, layers: fitLayer, mode: "unlive", expect });
+    check("ae_fit_text (unlive)", okWrite(r), why(r));
+    r = await call("ae_text_backdrop", { comp_id: W.work, layer: fitLayer[0], padding: [20, 10], expect });
+    check("ae_text_backdrop", okWrite(r), `${r.backdrop?.kind ?? "no backdrop"}; ${why(r)}`);
+    r = await call("ae_set_text", { comp_id: W.work, layer: fitLayer[0], ranges: [{ match: "LONG", style: { fauxBold: true, fillColor: [1, 0, 0] } }], expect });
+    check("ae_set_text (ranges)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 2: stagger (Row1 to Row3 in Wave Work) ----------
+  {
+    const rows = [{ name: "Row1" }, { name: "Row2" }, { name: "Row3" }];
+    const OP = [TR, "ADBE Opacity"];
+    r = await call("ae_batch_set", {
+      comp_id: W.work,
+      ops: rows.map((l) => ({ layer: l, path: OP, keyframes: [{ time: 0, value: 0 }, { time: 1, value: 100 }] })),
+      expect,
+    });
+    check("ae_batch_set (opacity keys for the stagger)", r.ok && r.done === 3, `${r.done} done`);
+    r = await call("ae_stagger", { comp_id: W.work, layers: rows, step: 0.2, order: "center_out", dry_run: true, expect });
+    check("ae_stagger (dry run)", r.dry_run === true && r.layers?.length === 3, `${r.layers?.length} layer(s) planned`);
+    r = await call("ae_stagger", { comp_id: W.work, layers: rows, step: 0.2, order: "stack", expect });
+    check("ae_stagger (layers)", okWrite(r), why(r));
+    const keysArgs = { comp_id: W.work, mode: "keys", layers: rows, property_path: OP, total: 0.6, order: "random", seed: 7, expect };
+    const planA = await call("ae_stagger", { ...keysArgs, dry_run: true });
+    const planB = await call("ae_stagger", { ...keysArgs, dry_run: true });
+    check("ae_stagger (same seed, same plan)", JSON.stringify(planA.layers?.map((l) => l.offset)) === JSON.stringify(planB.layers?.map((l) => l.offset)) && planA.layers?.length === 3, JSON.stringify(planA.layers?.map((l) => l.offset)));
+    r = await call("ae_stagger", keysArgs);
+    check("ae_stagger (keys)", okWrite(r) && JSON.stringify(r.layers?.map((l) => l.offset)) === JSON.stringify(planA.layers?.map((l) => l.offset)), why(r));
+    r = await call("ae_stagger", { comp_id: W.work, mode: "copy_keys", source: rows[0], layers: [rows[1], rows[2]], property_path: OP, step: 0.25, replace_existing: true, expect });
+    check("ae_stagger (copy_keys)", okWrite(r), why(r));
+    r = await call("ae_stagger_layout", { comp_id: W.work, pattern: "grid", layers: rows, columns: 2, spacing: [120, 90], expect });
+    check("ae_stagger_layout (grid)", okWrite(r), why(r));
+    r = await call("ae_stagger_layout", { comp_id: W.work, pattern: "radial", layers: rows, radius: 100, origin: [320, 180], expect });
+    check("ae_stagger_layout (radial)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 2: rig (Rig Controls null, Row4) ----------
+  {
+    const holder = { name: "Rig Controls" };
+    r = await call("ae_rig_add_controls", {
+      comp_id: W.work,
+      layer: holder,
+      create_if_missing: true,
+      controls: [
+        { name: "Speed", kind: "slider", value: 50 },
+        { name: "Spin", kind: "angle", value: 90 },
+        { name: "Show", kind: "checkbox", value: true },
+        { name: "Tint", kind: "color", value: [0, 0.5, 1] },
+        { name: "Center", kind: "point", value: [100, 100] },
+        { name: "Mode", kind: "dropdown", items: ["A", "B", "C"], value: 2 },
+      ],
+      expect,
+    });
+    check("ae_rig_add_controls", okWrite(r), why(r));
+    r = await call("ae_rig_add_controls", { comp_id: W.work, layer: holder, controls: [{ name: "Target", kind: "layer", layer: { name: "Row1" } }, { name: "Many", kind: "dropdown", items: Array.from({ length: 20 }, (_, i) => `Item ${i + 1}`) }], expect });
+    check("ae_rig_add_controls (layer control, 20 dropdown items)", okWrite(r), why(r));
+    r = await call("ae_rig_add_controls", { comp_id: W.work, layer: holder, controls: [{ name: "Big", kind: "slider", value: 5e6 }], expect });
+    check("ae_rig_add_controls (slider over 1e6 refused)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_rig_list", { comp_id: W.work });
+    check("ae_rig_list", Array.isArray(r.controls) && r.controls.length >= 8, `${r.controls?.length} controls`);
+    r = await call("ae_rig_link", { comp_id: W.work, links: [{ layer: { name: "Row4" }, path: ROT, control: { name: "Spin", layer: holder } }], replace: true, expect });
+    check("ae_rig_link", okWrite(r), why(r));
+    r = await call("ae_rig_rename", { comp_id: W.work, layer: holder, control: "Spin", new_name: "Twist", expect });
+    check("ae_rig_rename", okWrite(r), why(r));
+    r = await call("ae_expr_recipes", { recipe: "wiggle" });
+    check("ae_expr_recipes", r.recipes?.length === 1 && r.recipes[0].name === "wiggle", `${r.recipes?.[0]?.name}`);
+    r = await call("ae_expr_recipe", { comp_id: W.work, layer: { name: "Row4" }, path: [TR, "ADBE Position"], recipe: "wiggle", controller: holder, replace: true, expect });
+    check("ae_expr_recipe (wiggle)", okWrite(r), why(r));
+    r = await call("ae_rig_unlink", { comp_id: W.work, targets: [{ layer: { name: "Row4" }, path: [TR, "ADBE Position"] }, { layer: { name: "Row4" }, path: ROT }], expect });
+    check("ae_rig_unlink", okWrite(r), why(r));
+  }
+
+  // ---------- wave 2: time remap (Wave Remap: precomp layer Clip, 4 s source) ----------
+  {
+    const clip = { name: "Clip" };
+    const tr = (args) => call("ae_time_remap", { comp_id: W.remap, layer: clip, expect, ...args });
+    r = await call("ae_get_time_remap", { comp_id: W.remap, layer: clip });
+    check("ae_get_time_remap", r.ok && r.eligible === true && r.remap_enabled === false, `source ${r.source?.duration}s; ${r.ineligible_reason ?? ""}`);
+    r = await call("ae_get_time_remap", { comp_id: W.work, layer: { name: "Row1" } });
+    check("ae_get_time_remap (a solid is not eligible)", r.eligible === false && Boolean(r.ineligible_reason), String(r.ineligible_reason));
+    r = await tr({ operation: "enable" });
+    check("ae_time_remap (enable)", okWrite(r) && r.after?.remap_enabled === true, `AE's own keys: ${JSON.stringify((r.keys ?? []).map((k) => [k.time, k.value]))}; ${why(r)}`);
+    r = await tr({ operation: "ramp", points: [{ time: 0, speed: 100 }, { time: 1, speed: 10000 }] });
+    check("ae_time_remap (ramp past the source end is refused)", refused(r), why(r).slice(0, 140));
+    r = await tr({ operation: "freeze", at_time: 1 });
+    check("ae_time_remap (freeze)", okWrite(r), why(r));
+    r = await tr({ operation: "ramp", method: "per_frame", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] });
+    check("ae_time_remap (ramp, per_frame)", okWrite(r), why(r));
+    r = await tr({ operation: "ramp", method: "bezier", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] });
+    check("ae_time_remap (ramp, bezier: ease speed unit)", okWrite(r), why(r));
+    r = await tr({ operation: "reverse" });
+    check("ae_time_remap (reverse)", okWrite(r), why(r));
+    r = await tr({ operation: "hold_last_frame" });
+    check("ae_time_remap (hold_last_frame)", okWrite(r), why(r));
+    r = await tr({ operation: "loop", loop_type: "cycle" });
+    check("ae_time_remap (loop)", okWrite(r), why(r));
+    r = await tr({ operation: "disable" });
+    check("ae_time_remap (disable)", okWrite(r) && r.after?.remap_enabled === false, why(r));
+    r = await tr({ operation: "speed", speed_percent: 200 });
+    check("ae_time_remap (speed 200)", okWrite(r), why(r));
+    r = await call("ae_get_time_remap", { comp_id: W.remap, layer: clip, sample_times: [0, 1] });
+    check("ae_get_time_remap (after)", r.ok && r.stretch === 50, `stretch ${r.stretch}`);
+  }
+
+  // ---------- wave 2: camera (Wave Cam) ----------
+  {
+    r = await call("ae_camera_rig", {
+      comp_id: W.cam,
+      name: "SmokeCam",
+      preset: "push_in",
+      lens: { focal_length: 35 },
+      motion: { amount: 600, duration: 2 },
+      focus: { layer: { name: "CamPlate" }, aperture: 20 },
+      spread: { layers: [{ name: "CamPlate" }], near: 300, far: 300 },
+      expect,
+    });
+    check("ae_camera_rig (two nodes, push in, DOF, spread)", okWrite(r) && r.camera?.two_node === true, why(r));
+    check("ae_camera_rig (active camera, depth of field)", r.is_active_camera === true && r.camera?.dof === true, `active ${r.is_active_camera}, dof ${r.camera?.dof}`);
+    r = await call("ae_scene_3d_report", { comp_id: W.cam, time: 0 });
+    check("ae_scene_3d_report", r.camera?.source === "layer" && r.camera?.name === "SmokeCam" && r.camera?.two_node === true && r.layers_by_depth?.length >= 1, `${r.counts?.three_d} 3D layer(s); ${JSON.stringify(r.warnings)}`);
+    r = await call("ae_camera_rig", { comp_id: W.cam, name: "SmokeDolly", nodes: "one", preset: "dolly", expect });
+    check("ae_camera_rig (one node, dolly)", okWrite(r) && r.camera?.two_node === false, why(r));
+    r = await call("ae_camera_rig", { comp_id: W.cam, preset: "orbit", nodes: "one", expect });
+    check("ae_camera_rig (orbit with one node is refused)", refused(r), why(r).slice(0, 120));
+  }
+
+  // ---------- wave 2: paths (shape layers PathTest and PathBake in Wave Work) ----------
+  {
+    const zeroes = [[0, 0], [0, 0], [0, 0], [0, 0]];
+    await call("ae_create_layer", { comp_id: W.work, type: "shape", name: "PathTest", expect });
+    await call("ae_shape", { comp_id: W.work, layer: { name: "PathTest" }, add: [{ type: "path", name: "Zig", vertices: [[0, 0], [100, 0], [100, 80], [0, 80]], in_tangents: zeroes, out_tangents: zeroes, closed: false, stroke: { color: [1, 1, 1], width: 4 } }], expect });
+    await call("ae_create_layer", { comp_id: W.work, type: "shape", name: "PathBake", expect });
+    await call("ae_shape", { comp_id: W.work, layer: { name: "PathBake" }, add: [{ type: "path", name: "Zag", vertices: [[0, 0], [50, 0], [50, 50], [0, 50]], in_tangents: zeroes, out_tangents: zeroes, closed: true, stroke: { color: [1, 1, 1], width: 4 } }], expect });
+    const pTest = { layer: { name: "PathTest" }, shape: { group: { index: 1 }, path: { index: 1 } } };
+    const pBake = { layer: { name: "PathBake" }, shape: { group: { index: 1 }, path: { index: 1 } } };
+    r = await call("ae_path_read", { comp_id: W.work, target: pTest, include_operators: true });
+    check("ae_path_read", r.path?.vertexCount === 4 && r.path?.closed === false, `${r.path?.vertexCount} vertices; ${JSON.stringify(r.operators ?? null).slice(0, 80)}`);
+    // Unkeyed edits first: the keyed write comes last, because a keyed path refuses bake and the others.
+    r = await call("ae_path_write", { comp_id: W.work, target: pTest, operation: "resample", resample: { count: 12 }, dry_run: true, expect });
+    check("ae_path_write (dry run)", r.dry_run === true && r.vertex_count === 12, `${r.vertex_count} vertices planned`);
+    r = await call("ae_path_write", { comp_id: W.work, target: pTest, operation: "resample", resample: { count: 12 }, expect });
+    check("ae_path_write (resample)", okWrite(r), why(r));
+    r = await call("ae_path_write", { comp_id: W.work, target: pTest, operation: "smooth", smooth: { method: "catmull_rom" }, expect });
+    check("ae_path_write (smooth)", okWrite(r), why(r));
+    r = await call("ae_path_write", { comp_id: W.work, target: pTest, operation: "mirror", mirror: { axis: "x" }, expect });
+    check("ae_path_write (mirror)", okWrite(r), why(r));
+    r = await call("ae_path_operator", { comp_id: W.work, layer: { name: "PathTest" }, group: { index: 1 }, operator: "trim", trim: { draw_on: { start_time: 0, duration: 1 } }, expect });
+    check("ae_path_operator (trim, draw-on)", okWrite(r), why(r));
+    r = await call("ae_path_operator", { comp_id: W.work, layer: { name: "PathTest" }, group: { index: 1 }, operator: "repeater", repeater: { grid: { columns: 3, rows: 2, spacing: [30, 30] }, order: "above" }, expect });
+    check("ae_path_operator (repeater grid)", okWrite(r), `transform children ${JSON.stringify(r.transform_children ?? null).slice(0, 80)}; ${why(r)}`);
+    r = await call("ae_path_operator", { comp_id: W.work, layer: { name: "PathTest" }, group: { index: 1 }, operator: "offset", offset: { amount: 6, line_join: "round" }, expect });
+    check("ae_path_operator (offset)", okWrite(r), why(r));
+    // Link the unkeyed PathBake to PathTest, then unlink and bake it.
+    r = await call("ae_path_link", { comp_id: W.work, target: pBake, source: pTest, expect });
+    check("ae_path_link (link)", okWrite(r), why(r));
+    r = await call("ae_path_link", { comp_id: W.work, target: pBake, unlink: true, bake: true, expect });
+    check("ae_path_link (unlink, bake)", okWrite(r) && r.baked === true, why(r));
+    r = await call("ae_path_write", { comp_id: W.work, target: pTest, operation: "reverse", time: 0, expect });
+    check("ae_path_write (path key at a time)", okWrite(r) && r.numKeys === 1, `${r.numKeys} key(s); ${why(r)}`);
+    r = await call("ae_path_connector", { comp_id: W.work, from: { layer: { name: "PathTest" } }, to: { layer: { name: "PathBake" } }, name: "Smoke Connector", expect });
+    check("ae_path_connector", okWrite(r), why(r));
+    // The keyed path cannot be baked: link it, unlink it without bake.
+    r = await call("ae_path_link", { comp_id: W.work, target: pTest, source: pBake, expect });
+    check("ae_path_link (onto a keyed path)", okWrite(r), why(r));
+    r = await call("ae_path_link", { comp_id: W.work, target: pTest, unlink: true, expect });
+    check("ae_path_link (unlink, no bake)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 2: describe, explain; wave 1: annotate, preflight ----------
+  {
+    r = await call("ae_describe_comp", { comp_id: W.work, gantt: true, include_layers: true });
+    check("ae_describe_comp", r.ok === true && r.read_only === true && typeof r.summary === "string" && r.layers?.length === Math.min(r.comp?.num_layers, 200), `${r.comp?.num_layers} layers, ${r.beats?.length} beats, ${r.throughout?.length} throughout`);
+    check("ae_describe_comp (gantt, roles)", fs.existsSync(String(r.gantt?.path)) && Object.values(r.roles ?? {}).reduce((a, b) => a + b, 0) === r.layers?.length, String(r.gantt?.path ?? "no gantt").slice(-40));
+    r = await call("ae_describe_comp", { comp_id: W.work, max_layers: 1 });
+    check("ae_describe_comp (paging)", r.range?.to === 1 && r.range?.next_from_layer === 2, JSON.stringify(r.range));
+    r = await call("ae_describe_comp", { comp_id: W.work, from_layer: 9999 });
+    check("ae_describe_comp (from_layer past the end is refused)", refused(r), why(r).slice(0, 100));
+
+    r = await call("ae_annotate_frame", { comp_id: COMP, time: 1 });
+    check("ae_annotate_frame", r.ok && fs.existsSync(String(r.path)) && r.frames?.[0]?.layer_count >= 1, `${r.width}x${r.height}, ${r.frames?.[0]?.layer_count} layer(s) drawn`);
+    r = await call("ae_annotate_frame", { comp_id: COMP, time: 0.5, time_b: 2, layers: "all", layer_ids: [999], outlines: true, tags: true, anchors: false });
+    check("ae_annotate_frame (A/B pair, an id that is not in the comp)", r.ok && r.mode === "pair" && r.frames?.length === 2, `missing ${JSON.stringify(r.frames?.[0]?.missing_layer_ids)}`);
+
+    // Hide a probe layer, then ask why it does not show.
+    await call("ae_create_layer", { comp_id: W.work, type: "solid", name: "Explain probe", color: [1, 0, 0], expect });
+    r = await call("ae_layer_ops", { action: "switches", comp_id: W.work, layers: [{ name: "Explain probe" }], enabled: false, expect });
+    check("ae_layer_ops (switch a layer off)", okWrite(r), why(r));
+    r = await call("ae_explain_layer", { comp_id: W.work, layer: { name: "Explain probe" }, time: 0 });
+    check("ae_explain_layer", r.verdict === "hidden" && r.findings?.[0]?.id === "disabled" && r.findings[0].severity === "blocks", `${r.verdict}: ${r.headline}`);
+    check("ae_explain_layer (limits stated)", Array.isArray(r.limits) && r.limits.length >= 3, `${r.limits?.length} limits`);
+    r = await call("ae_explain_layer", { comp_id: W.work, point: [10, 10], time: 0 });
+    check("ae_explain_layer (point)", r.verdict === "point_only" && Array.isArray(r.at_point?.candidates), `${r.at_point?.candidates?.length} candidate(s)`);
+    r = await call("ae_explain_layer", { comp_id: W.remap, layer: { name: "Clip" }, time: 0, inside: true });
+    check("ae_explain_layer (inside a precomp)", r.findings !== undefined && !r.__isError, `${r.verdict}`);
+    r = await call("ae_explain_layer_proof", { comp_id: W.work, layer: { name: "Explain probe" }, suspect: "enabled", time: 0, expect });
+    check("ae_explain_layer_proof", r.applied === true && r.receipt?.matches === true && r.proof?.copy_removed === true && ["confirmed", "not_confirmed", "inconclusive"].includes(r.verdict), `${r.verdict}; ${why(r)}`);
+    r = await call("ae_explain_layer_proof", { comp_id: W.work, layer: { name: "Explain probe" }, suspect: "solo", time: 0, expect });
+    check("ae_explain_layer_proof (a suspect that does not apply is refused before a checkpoint)", refused(r) && !r.checkpoint, why(r).slice(0, 120));
+
+    r = await call("ae_preflight", { comp_ids: [W.work], force_eval: true });
+    check(
+      "ae_preflight (delivery, forced expressions)",
+      r.ok && ["blocked", "warnings", "clear", "incomplete"].includes(r.verdict) && !(r.findings ?? []).some((f) => /not been implemented/.test(String(f.message ?? ""))),
+      `${r.verdict}: ${JSON.stringify(r.counts)}`
+    );
+    r = await call("ae_preflight", { scope: "health" });
+    check("ae_preflight (health)", r.ok && r.scope === "health" && r.health !== undefined, `${r.progress?.comps_scanned} comps scanned`);
+
+    // Comp mode only reads: the comp and its time are not touched.
+    r = await call("ae_scrub_check", { comp_id: COMP, samples: 6 });
+    check("ae_scrub_check (comp)", r.ok === true && ["pass", "warn", "fail"].includes(r.verdict) && r.coverage?.sample_points >= 2 && fs.existsSync(String(r.chart?.path)), `${r.verdict}; ${r.coverage?.sample_points} pairs, ${r.findings?.length} finding(s)`);
+    r = await call("ae_scrub_check", { comp_id: COMP, start: 0, end: 0.001 });
+    check("ae_scrub_check (a sub-frame range is refused)", r.ok === false && r.error === "range_too_short", String(r.error));
+  }
+
+  // ---------- wave 2: footage interpretation and proxies (a still: loop and fields do not apply to it) ----------
+  {
+    r = await call("ae_import_footage", { paths: [path.join(MEDIA, "a.png")], expect });
+    const FOOT = r.item_ids?.[0];
+    check("ae_import_footage (for the interpretation steps)", r.applied && typeof FOOT === "number", `item ${FOOT}`);
+    r = await call("ae_get_footage_interpretation", { item_ids: [FOOT] });
+    check("ae_get_footage_interpretation", r.items?.[0]?.id === FOOT, `${r.items?.[0]?.is_still ? "still" : "not a still"}, pixel aspect ${r.items?.[0]?.pixel_aspect}`);
+    r = await call("ae_set_footage_interpretation", { item_id: FOOT, pixel_aspect: 2, expect });
+    check("ae_set_footage_interpretation (pixel aspect)", okWrite(r), why(r));
+    r = await call("ae_set_footage_interpretation", { item_id: FOOT, pixel_aspect: 1, expect });
+    check("ae_set_footage_interpretation (put back)", okWrite(r), why(r));
+    r = await call("ae_set_footage_interpretation", { item_id: FOOT, loop: 2, expect });
+    check("ae_set_footage_interpretation (loop on a still is refused)", refused(r), why(r).slice(0, 120));
+    skip("ae_set_footage_interpretation (alpha, fields, pulldown, conform, and loop on video)", "the scratch project has stills and a WAV only: no video, no alpha channel to change");
+    r = await call("ae_get_footage_interpretation", { only_findings: true });
+    check("ae_get_footage_interpretation (project audit)", Array.isArray(r.items) && typeof r.warnings === "number", `${r.items?.length} item(s) with findings, ${r.warnings} warning(s)`);
+    r = await call("ae_footage_proxy", { item_ids: [FOOT], action: "set_solid", solid: { color: [0.5, 0.5, 0.5], width: 480, height: 270 }, use_proxy: true, expect });
+    check("ae_footage_proxy (set_solid)", okWrite(r), why(r));
+    r = await call("ae_footage_proxy", { item_ids: [FOOT], action: "use_off", expect });
+    check("ae_footage_proxy (use_off)", okWrite(r), why(r));
+    r = await call("ae_footage_proxy", { item_ids: [FOOT], action: "clear", expect });
+    check("ae_footage_proxy (clear)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 3: legibility (Wave Legibility: two overlapping texts) ----------
+  {
+    for (const n of ["Leg A", "Leg B"]) await call("ae_set_text", { comp_id: W.leg, layer: { name: n }, style: { fontSize: 60, fillColor: [1, 1, 1] }, expect });
+    r = await call("ae_check_text_overlap", { comp_id: W.leg, times: [1] });
+    check("ae_check_text_overlap", r.ok && r.read_only === true && r.overlap_count >= 1, `${r.text_layers} text layer(s), ${r.overlap_count} overlap(s)`);
+    r = await call("ae_estimate_legibility", { comp_id: W.leg, times: [1] });
+    check("ae_estimate_legibility", r.ok && r.read_only === true && typeof r.verdict === "string" && (!r.times_checked?.[0]?.annotated_path || /\.png$/i.test(r.times_checked[0].annotated_path)), `verdict ${r.verdict}`);
+    const compsBefore = (await call("ae_get_project", { type: "comp", limit: 1 })).total;
+    r = await call("ae_check_legibility", { comp_id: W.leg, times: [1], expect });
+    check("ae_check_legibility", r.applied === true && r.receipt?.matches !== false && r.temp_comp?.copy_removed === true, `${r.verdict}: ${r.pass} pass, ${r.fail} fail, ${r.inconclusive} inconclusive; ${cpNote(r)}`);
+    const compsAfter = (await call("ae_get_project", { type: "comp", limit: 1 })).total;
+    check("ae_check_legibility (the copy is gone)", compsBefore === compsAfter, `${compsBefore} -> ${compsAfter} comps`);
+    r = await call("ae_check_legibility", { comp_id: W.leg, times: [1], layers: [{ name: "does-not-exist" }], expect });
+    check("ae_check_legibility (a bad selector is refused)", refused(r), why(r).slice(0, 100));
+  }
+
+  // ---------- wave 3: variants (Wave Variants; ask:false, so nobody has to answer) ----------
+  {
+    const vA = { id: "a", label: "Shift right", ops: [{ op: "offset", layers: [{ name: "V1" }, { name: "V2" }], delta: [60, 0] }] };
+    const vB = { id: "b", label: "Staggered", ops: [{ op: "shift_time", layers: [{ name: "V1" }, { name: "V2" }], stagger: 0.25 }] };
+    r = await call("ae_variants", { comp_id: W.vars, variants: [vA, vB], dry_run: true, expect });
+    check("ae_variants (dry run)", r.ok && r.dry_run === true && !r.__isError, brief(r).slice(0, 120));
+    r = await call("ae_variants", { comp_id: W.vars, variants: [vA, vB], ask: false, times: [0.5], expect });
+    check("ae_variants", okWrite(r) && r.copies?.length === 2 && typeof r.set_id === "string", `${r.set_id}; ${why(r)}`);
+    check("ae_variants (sheet rendered)", Boolean(r.renders?.sheet_path) && fs.existsSync(String(r.renders.sheet_path)) && (r.renders.errors ?? []).length === 0, String(r.renders?.sheet_path ?? "no sheet").slice(-40));
+    r = await call("ae_variants_pick", { comp_id: W.vars, set_id: r.set_id, variant_id: "b", expect });
+    check("ae_variants_pick", okWrite(r) && r.applied_variant?.id === "b", `${JSON.stringify(r.cleanup)}; ${why(r)}`);
+    const vC = { id: "c", label: "Longer", ops: [{ op: "comp_duration", seconds: 3 }] };
+    const vD = { id: "d", label: "Up", ops: [{ op: "offset", layers: [{ name: "V1" }], delta: [0, -40] }] };
+    r = await call("ae_variants", { comp_id: W.vars, variants: [vC, vD], ask: false, expect });
+    const discardId = r.set_id;
+    r = await call("ae_variants_discard", { comp_id: W.vars, set_id: discardId, expect });
+    check("ae_variants_discard", okWrite(r), `${JSON.stringify(r.cleanup)}; ${why(r)}`);
+  }
+
+  // ---------- wave 2: memory (the purges that can drop the undo history come later) ----------
+  {
+    r = await call("ae_memory_status", { warn_above_mb: 1, min_free_mb: 1 });
+    ramPurgeAvailable = r.ae?.purge_targets_available?.ram ?? null;
+    check("ae_memory_status", Boolean(r.ae) && Boolean(r.server) && typeof r.preflight?.ready === "boolean", `AE ${r.ae?.memory_in_use_bytes ?? "unreadable"} bytes; ready ${r.preflight?.ready}`);
+    r = await call("ae_memory_status", { prefs: [{ section: "No Such Section", key: "No Such Key" }] });
+    check("ae_memory_status (a missing pref)", r.ae?.prefs?.[0]?.exists === false, JSON.stringify(r.ae?.prefs?.[0]));
+    r = await call("ae_memory_purge", { target: "image", expect });
+    check("ae_memory_purge (image)", r.applied === true && r.purged === true && r.undo_history_cleared === false, `${why(r)}; receipt ${r.receipt?.matches}`);
+    r = await call("ae_memory_purge", { target: "image", only_above_mb: 1_000_000, expect });
+    check("ae_memory_purge (watchdog below its threshold)", r.purged === false && r.skipped_reason === "below_threshold", String(r.skipped_reason));
+    r = await call("ae_memory_purge", { target: "snapshot", expect });
+    check("ae_memory_purge (snapshot)", r.applied === true && !(r.warnings ?? []).some((w) => /RAM preview/.test(w)), why(r));
+    r = await call("ae_memory_purge", { target: "ram", expect });
+    check("ae_memory_purge (ram without the confirm flag is refused)", refused(r), why(r).slice(0, 100));
+  }
+
+  // ---------- wave 3: learn taste (Wave Work, last, because the trim changes a layer) ----------
+  {
+    r = await call("ae_taste_baseline", { comp_id: W.work });
+    check("ae_taste_baseline", r.ok === true && r.layers > 0 && typeof r.baseline_id === "string", `${r.layers} layers, ${r.animated_properties} animated properties`);
+    r = await call("ae_learn_taste", { comp_id: W.work, record: false });
+    check("ae_learn_taste (no edits)", r.ok === true && r.changed === false && r.observations?.length === 0, JSON.stringify(r.counts));
+    r = await call("ae_layer_ops", { action: "trim", comp_id: W.work, layers: [{ name: "Row3" }], out_point: 2, expect });
+    check("ae_layer_ops (trim, as the edit to learn from)", okWrite(r), why(r));
+    r = await call("ae_learn_taste", { comp_id: W.work, record: false });
+    check("ae_learn_taste (after an agent write, so no ask)", r.ok === true && r.changed === true && r.agent_wrote_since_baseline === true && r.ask === null, JSON.stringify({ wrote: r.agent_wrote_since_baseline, counts: r.counts }));
+    r = await call("ae_taste_rules", { action: "save", rule_ids: ["ease_influence"] });
+    check("ae_taste_rules (save without a yes is refused)", refused(r), why(r).slice(0, 100));
+    r = await call("ae_taste_rules", { action: "save", rule_ids: ["ease_influence"], ask_id: "ask_none" });
+    check("ae_taste_rules (save with an unanswered ask)", r.ok === false && ["not_answered", "unknown_rule"].includes(r.error), String(r.error));
+    r = await call("ae_taste_rules", { action: "list" });
+    check("ae_taste_rules (list)", r.ok === true && Array.isArray(r.saved), `${r.saved?.length} saved rule(s), ${r.proposals?.length} proposal(s)`);
+  }
+
+  // The agent's own guarded writes above must not show up as the user's changes.
+  r = await call("ae_session_changes", {});
+  if (r.tracking_enabled === false) skip("ae_session_changes (lists)", "session tracking is off on this server (tracking_enabled is false)");
+  else check("ae_session_changes (lists)", Array.isArray(r.interrupted_ops) && Array.isArray(r.acknowledged_interrupted_ops), `changes ${r.changes === null ? "none (no baseline)" : JSON.stringify(r.changes?.changed)}, ${r.interrupted_ops?.length} interrupted`);
 
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
@@ -599,6 +1116,36 @@ async function main() {
     r.ok ? `${r.width}x${r.height}` : `${r.error} (AE is minimized)`
   );
 
+  // ---------- wave 3: loudness (the Audio comp holds the 120 BPM click track) ----------
+  // The comp measure renders audio with aerender, so the project must be saved and clean first.
+  await call("ae_save", { expect });
+  if (audioTemplate) {
+    r = await call("ae_loudness_check", { comp_id: AUDIO_COMP, expect: { ...expect, comp_id: AUDIO_COMP }, wait_seconds: 110 });
+    check(
+      "ae_loudness_check (comp, aerender)",
+      r.ok === true && r.state === "done" && r.source?.sample_rate > 0 && typeof r.verdict === "object",
+      `${r.state ?? r.error}: ${r.measurement?.integrated_lufs} LUFS, true peak ${r.measurement?.true_peak_dbtp} dBTP ${r.message ?? ""}`
+    );
+  } else {
+    skip("ae_loudness_check (comp, aerender)", "no AIFF 48 kHz output module template (ae_render_templates audio_template_found is false)");
+  }
+  r = await call("ae_loudness_check", { audio_path: CLICKS_WAV, standard: "streaming" });
+  check("ae_loudness_check (file)", r.ok === true && r.source?.sample_rate === 48000 && typeof r.verdict === "object", `${r.measurement?.integrated_lufs} LUFS, gain needed ${r.verdict?.gain_needed_db} dB`);
+  {
+    const lx = { ...expect, comp_id: AUDIO_COMP };
+    r = await call("ae_loudness_apply", { comp_id: AUDIO_COMP, gain_db: -3, expect: lx });
+    check("ae_loudness_apply (-3 dB)", okWrite(r) && (r.layers ?? []).length >= 1, `${(r.layers ?? []).map((l) => l.name).join(", ")}; ${why(r)}`);
+    r = await call("ae_loudness_apply", { comp_id: AUDIO_COMP, gain_db: 3, expect: lx });
+    check("ae_loudness_apply (+3 dB, back)", okWrite(r), why(r));
+    // The click layer starts at 0 and ends with the comp, so the default comp-scope fade fits.
+    r = await call("ae_loudness_apply", { comp_id: AUDIO_COMP, fade_in: 0.5, fade_out: 0.5, expect: lx });
+    check("ae_loudness_apply (fades)", okWrite(r), why(r));
+    r = await call("ae_loudness_apply", { comp_id: AUDIO_COMP, gain_db: 0, fade_in: 0.25, fade_scope: "layer", expect: lx });
+    check("ae_loudness_apply (fade, layer scope)", okWrite(r), why(r));
+    r = await call("ae_loudness_apply", { comp_id: AUDIO_COMP, gain_db: 12, true_peak_db: -3, true_peak_max_db: -1, expect: lx });
+    check("ae_loudness_apply (a gain over the true-peak ceiling is refused)", r.ok === false && r.error === "true_peak_conflict", String(r.error));
+  }
+
   // ---------- background render (needs a saved, clean project) ----------
   await call("ae_save", { expect });
   const om = await call("ae_run_jsx", {
@@ -637,6 +1184,237 @@ async function main() {
       (v.checks ?? []).map((c) => `${c.what} ${JSON.stringify(c.actual)}${c.ok ? "" : " (expected " + JSON.stringify(c.expected) + ")"}`).join(", ") || String(v.message ?? v.error)
     );
   }
+
+  // ======================================================================
+  // Waves 1-3, late block (not run live yet, see the note above the first waves 1-3 step).
+  // These steps rewrite the render queue, render for a while, close and reopen the project or drop the undo history,
+  // so they go last, in this order. Each one leaves the project saved and open for the next, or is the last of its kind.
+  // ======================================================================
+  const smokeKey = (await call("ae_get_project", { type: "comp", name_contains: "Smoke Key" })).items?.find((i) => i.name === "Smoke Key");
+  const firstFrame = job.state === "succeeded" && pngTemplate ? frames.slice().sort()[0] : undefined; // smoke_00000.png of the aerender step
+  r = await call("ae_save", { expect });
+  check("ae_save (before the late block)", r.applied && r.receipt?.matches !== false, path.basename(String(r.backup_path)));
+
+  // ---------- wave 2: scrub check on a render file (imports it, checks it, removes it again) ----------
+  if (firstFrame) {
+    r = await call("ae_scrub_check", { path: path.join(RENDER, firstFrame), sequence: true, fps: 25, samples: 4, expect });
+    check("ae_scrub_check (render file)", r.ok === true && r.imported_state === "removed" && r.left_in_project === null, `${r.verdict}; imported ${r.imported_state}; ${r.message ?? ""}`);
+    r = await call("ae_get_project", { type: "comp", name_contains: "Scrub check" });
+    check("ae_scrub_check (no temp comp left behind)", (r.items ?? []).length === 0, `${(r.items ?? []).length} left`);
+    await call("ae_save", { expect });
+  } else {
+    skip("ae_scrub_check (render file)", "the aerender step produced no PNG sequence (no PNG output module template, or the render failed)");
+  }
+
+  // ---------- wave 3: render queue edits (queue items past the first are removed again at the end) ----------
+  {
+    const specs = await call("ae_delivery_specs", { item_index: 1 });
+    check(
+      "ae_delivery_specs",
+      Array.isArray(specs.specs) && specs.specs.length >= 12 && specs.specs.find((s) => s.id === "gif")?.feasible === false,
+      `${specs.specs?.length} specs; this AE can do: ${(specs.specs ?? []).filter((s) => s.feasible).map((s) => s.id).join(", ")}`
+    );
+    r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "rqedit_a.mov"), expect });
+    const rqIdx = r.index;
+    check("ae_render_queue_add (item for the edit steps)", r.applied && typeof rqIdx === "number" && rqIdx >= 2, `index ${rqIdx}`);
+    const insp = await call("ae_render_queue_inspect", { item_index: rqIdx, settings: true });
+    const fileBefore = insp.items?.[0]?.output_modules?.[0]?.file;
+    check("ae_render_queue_inspect", Boolean(insp.items?.[0]?.render_settings) && Boolean(fileBefore), `${path.basename(String(fileBefore))}`);
+    r = await call("ae_render_queue_inspect", { include_templates: true });
+    check("ae_render_queue_inspect (templates)", Array.isArray(r.render_settings_templates) && Array.isArray(r.output_module_templates), `${r.render_settings_templates?.length} render settings, ${r.output_module_templates?.length} output module templates`);
+    r = await call("ae_render_queue_edit", { item_index: rqIdx, comp_id: COMP, skip_frames: 1, time_span: "work_area", log_type: "errors_and_settings", expect });
+    check("ae_render_queue_edit", okWrite(r), why(r));
+    r = await call("ae_render_queue_edit", { item_index: rqIdx, output_modules: [{ index: 1, settings: { Format: "H.264" } }], expect });
+    check("ae_render_queue_edit (Format is read-only: refused)", refused(r), why(r).slice(0, 100));
+    r = await call("ae_render_queue_duplicate", { item_index: rqIdx, comp_id: COMP, count: 1, expect });
+    check("ae_render_queue_duplicate", okWrite(r) && r.copies?.[0]?.item?.output_modules?.[0]?.file !== fileBefore, `copy writes ${path.basename(String(r.copies?.[0]?.item?.output_modules?.[0]?.file))}; ${why(r)}`);
+    const yt = (specs.specs ?? []).find((s) => s.id === "youtube_1080p");
+    if (yt?.feasible) {
+      r = await call("ae_render_queue_apply_spec", { item_index: rqIdx, comp_id: COMP, specs: ["youtube_1080p"], output_folder: RENDER, allow_stretch: true, allow_overwrite: true, expect });
+      check("ae_render_queue_apply_spec", okWrite(r), why(r));
+    } else {
+      skip("ae_render_queue_apply_spec", `youtube_1080p is not feasible here: ${yt?.refusal ?? yt?.reason ?? "no reason given"}`);
+    }
+    r = await call("ae_check_delivery_file", { spec_id: "youtube_1080p", file_path: path.join(RENDER, "no_such_file.mp4") });
+    check("ae_check_delivery_file (missing file)", r.exists === false && r.ok === false, JSON.stringify(r.issues));
+    if (firstFrame) {
+      r = await call("ae_check_delivery_file", { spec_id: "png_sequence", file_path: path.join(RENDER, firstFrame) });
+      check("ae_check_delivery_file (a real frame)", r.exists === true && r.size_bytes > 0, `${r.size_bytes} bytes; ${JSON.stringify(r.issues)}`);
+    } else {
+      skip("ae_check_delivery_file (a real frame)", "no rendered frame to check");
+    }
+    r = await call("ae_run_jsx", {
+      mutates: true,
+      label: "qa smoke: remove the queue items the edit steps added",
+      expect,
+      code: "var q = app.project.renderQueue; for (var i = q.numItems; i >= 2; i--) q.item(i).remove(); return q.numItems;",
+    });
+    check("ae_render_queue_* (cleanup, the first item is left)", r.applied !== false && r.result === 1, `${r.result} item(s) in the queue`);
+    await call("ae_save", { expect });
+  }
+
+  // ---------- wave 3: render batch (a frozen copy of the saved project, aerender in the background) ----------
+  const rbOut = path.join(ROOT, "batch_out");
+  let batchSpec = null;
+  if (pngTemplate) batchSpec = { name: "png", output_module_template: pngTemplate, extension: "png", sequence: true };
+  else {
+    const lossless = (om.result ?? []).find((t) => /lossless/i.test(t));
+    if (lossless) batchSpec = { name: "lossless", output_module_template: lossless, extension: "mov" };
+  }
+  if (batchSpec && smokeKey) {
+    const job1 = { comps: ["Smoke Key"], specs: [batchSpec], output_dir: rbOut };
+    r = await call("ae_render_batch_plan", job1);
+    check("ae_render_batch_plan", r.ok === true && r.valid === true && r.item_count === 1, `${r.item_count} item(s); errors ${JSON.stringify(r.errors)}`);
+    r = await call("ae_render_batch_plan", { comps: ["__no_such_comp__"], output_dir: rbOut });
+    check("ae_render_batch_plan (a missing comp)", r.valid === false && r.errors?.[0]?.code === "comp_not_found", JSON.stringify(r.errors?.[0]));
+    r = await call("ae_render_batch", { expect, ...job1, preflight: true, max_cpu_percent: 50 });
+    const batchId = r.batch_id;
+    check("ae_render_batch", r.ok === true && r.applied === true && typeof batchId === "string" && r.frozen_project !== AEP, `${batchId}; ${r.error ?? ""} ${r.message ?? ""}`.slice(0, 200));
+    let rb = r;
+    for (let i = 0; i < 150 && batchId; i++) {
+      rb = await call("ae_render_batch_status", { batch_id: batchId });
+      if (rb.state && rb.state !== "running") break;
+      await sleep(2000);
+    }
+    check("ae_render_batch_status (finished)", rb.state === "succeeded" && rb.items?.[0]?.output_bytes > 0, `${rb.state}, ${rb.items?.[0]?.output_bytes} bytes, ${rb.items?.[0]?.error ?? ""}`);
+    r = await call("ae_render_batch_status", {});
+    check("ae_render_batch_status (recent batches)", Array.isArray(r.batches) && r.batches.some((b) => b.batch_id === batchId), `${r.batches?.length} batch(es)`);
+    r = await call("ae_render_batch_plan", job1);
+    check("ae_render_batch_plan (the new output is protected)", r.items?.[0]?.existing?.would_block === true, JSON.stringify(r.items?.[0]?.existing));
+    r = await call("ae_render_batch_resume", { expect, batch_id: batchId });
+    check("ae_render_batch_resume (a finished batch keeps its output)", r.ok === true && r.reset === 0 && r.kept === 1, `${r.state}, kept ${r.kept}, reset ${r.reset}`);
+    r = await call("ae_render_batch_cancel", { batch_id: batchId });
+    check("ae_render_batch_cancel (a finished batch is a no-op)", r.ok === true && r.already_finished === true, String(r.state));
+    skip("ae_render_batch_cancel (a running batch)", "the batch is too short to cancel mid-render; the kill path needs a long render by hand");
+  } else {
+    skip("ae_render_batch_plan / ae_render_batch / _status / _resume / _cancel", "no PNG or Lossless output module template to render with, or no Smoke Key comp");
+  }
+
+  // ---------- wave 3: delivery chain (a recipe, then a run that renders through the batch above) ----------
+  if (batchSpec && smokeKey) {
+    const dex = { project_path: AEP };
+    await call("ae_save", { expect });
+    r = await call("ae_deliver_recipe", {
+      action: "set",
+      name: "smoke",
+      comp_id: smokeKey.id,
+      stages: [
+        { kind: "preflight" },
+        { kind: "house_style" },
+        { kind: "save", args: { backup: false } },
+        { kind: "render", args: { output_dir: path.join(ROOT, "deliver_out"), specs: [batchSpec] } },
+        { kind: "verify" },
+      ],
+      checkpoint_mode: "each_write",
+      expect: dex,
+    });
+    check("ae_deliver_recipe (set)", r.ok === true && r.recipe?.stages?.length === 5, `${(r.warnings ?? []).join("; ")}`);
+    r = await call("ae_deliver_recipe", { action: "get", name: "smoke", expect: dex });
+    check("ae_deliver_recipe (get)", r.ok === true && !r.__isError, brief(r).slice(0, 140));
+    r = await call("ae_deliver_recipe", { action: "list", expect: dex });
+    check("ae_deliver_recipe (list)", r.ok === true && (r.recipes ?? []).some((x) => x.name === "smoke"), `${(r.recipes ?? []).length} recipe(s)`);
+    r = await call("ae_deliver_step", { action: "start", recipe: "smoke", dry_run: true, expect: dex });
+    check("ae_deliver_step (dry run)", r.ok === true && r.dry_run === true && r.stages?.length === 5, `${r.stages?.length} stages`);
+    let run = await call("ae_deliver_step", { action: "start", recipe: "smoke", expect: dex });
+    const runId = run.run_id;
+    for (let i = 0; i < 60 && run.state === "waiting"; i++) {
+      await sleep(5000);
+      run = await call("ae_deliver_step", { action: "next", run_id: runId, expect: dex });
+    }
+    check("ae_deliver_step (done, or stopped at a named stage)", run.state === "done" || (run.state === "blocked" && typeof run.stopped_at === "string"), `${run.state}${run.stopped_at ? " at " + run.stopped_at : ""}; ${run.stop_reason ?? run.message ?? ""}`.slice(0, 200));
+    check("ae_deliver_step (outputs come from the batch)", (run.outputs ?? []).length >= 1 || run.state === "blocked", `${(run.outputs ?? []).length} output(s)`);
+    r = await call("ae_deliver_status", { run_id: runId, expect: dex });
+    check("ae_deliver_status", r.ok !== false && typeof r.report === "string" && r.report.startsWith("Delivery report"), String(r.report ?? r.message ?? "no report").slice(0, 60));
+    r = await call("ae_deliver_status", { list: true, expect: dex });
+    check("ae_deliver_status (list)", r.ok !== false && !r.__isError, brief(r).slice(0, 100));
+    if (run.state !== "done") {
+      r = await call("ae_deliver_step", { action: "cancel", run_id: runId, expect: dex });
+      check("ae_deliver_step (cancel the open run)", r.ok !== false && !r.__isError, String(r.state));
+    }
+    r = await call("ae_deliver_recipe", { action: "delete", name: "smoke", expect: dex });
+    check("ae_deliver_recipe (delete)", r.ok === true && r.deleted === "smoke", String(r.deleted));
+    await call("ae_save", { expect });
+  } else {
+    skip("ae_deliver_recipe / ae_deliver_step / ae_deliver_status", "the render stage needs the batch above (an output module template to render with)");
+  }
+
+  // ---------- wave 3: collect files, report, relink (relink closes the project and reopens it) ----------
+  {
+    const dest = path.join(ROOT, "collect");
+    r = await call("ae_collect_files", { dest, expect });
+    check("ae_collect_files (dry run)", r.dry_run === true && typeof r.files === "number" && typeof r.bytes === "number", `${r.files} file(s), ${r.bytes_human}; not collected: ${JSON.stringify(r.problems_total ?? 0)} problem(s)`);
+    // A call works for max_seconds and a zip runs on in the background: call again with the same arguments until both are done.
+    let col = await call("ae_collect_files", { dest, dry_run: false, zip: true, report: "markdown", expect });
+    for (let i = 0; i < 30 && (col.complete !== true || col.zip?.status === "running"); i++) {
+      await sleep(2000);
+      col = await call("ae_collect_files", { dest, dry_run: false, zip: true, report: "markdown", expect });
+    }
+    check("ae_collect_files (copy)", col.complete === true && col.errors_total === 0, `${col.files_done}/${col.files_total} file(s), ${col.copied_files} copied`);
+    check("ae_collect_files (zip verified)", col.zip?.ok === true && col.zip?.verified === true, JSON.stringify(col.zip ?? null).slice(0, 120));
+    r = await call("ae_collect_files", { dest, dry_run: false, report: "none", expect });
+    check("ae_collect_files (resume copies nothing again)", r.complete === true && r.copied_files === 0, `${r.copied_files} copied`);
+    r = await call("ae_collect_report", { dest, format: "json", write: false });
+    check("ae_collect_report (json)", Array.isArray(r.report?.comps) && r.report.comps.length > 0 && Boolean(r.report?.ae), `${r.report?.comps?.length} comps`);
+    r = await call("ae_collect_report", { dest });
+    check("ae_collect_report (markdown, written)", r.format === "markdown" && typeof r.markdown === "string" && r.markdown.length > 0, `written ${JSON.stringify(r.written)}`);
+    r = await call("ae_collect_relink", { dest, confirm_close_project: true, expect });
+    check("ae_collect_relink", okWrite(r) && r.original_reopened === true && r.copy_saved === true && r.errors_total === 0, `relinked ${r.relinked}, proxies ${r.proxies_relinked}; ${why(r)}`);
+    // The original must be open again for what follows; if it is not, try to put it back.
+    r = await call("ae_status");
+    if (!new RegExp("Smoke\\.aep$", "i").test(String(r.project_path))) {
+      // Discarding is only safe for the smoke's own scratch files: the collect copy under ROOT, or an unsaved project.
+      const openPath = r.project_path == null ? "<unsaved>" : String(r.project_path);
+      const norm = (x) => x.split("\\").join("/").toLowerCase();
+      if (openPath !== "<unsaved>" && !norm(openPath).startsWith(norm(ROOT) + "/")) {
+        throw new Error("After ae_collect_relink the open project is not the smoke's own (" + openPath + "); not discarding it.");
+      }
+      const back = await call("ae_project_session", { action: "open", path: AEP, expect: { project_path: openPath }, if_dirty: "discard", user_confirmed: true });
+      check("ae_collect_relink (original reopened by hand)", back.applied === true, brief(back).slice(0, 120));
+    }
+  }
+
+  // ---------- wave 2: memory purges that can drop the undo history ----------
+  {
+    if (ramPurgeAvailable === false) skip("ae_memory_purge (ram, confirmed)", "this AE has no ALL_MEMORY_CACHES purge target (needs AE 24.3+)");
+    else {
+    r = await call("ae_memory_purge", { target: "ram", confirm_undo_purge: true, expect });
+    check("ae_memory_purge (ram, confirmed)", r.applied === true && r.purged === true && r.undo_history_cleared === null && r.undo_history_may_be_cleared === true, `${why(r)}; ${(r.warnings ?? []).length} warning(s)`);
+    }
+    r = await call("ae_memory_purge", { target: "undo", confirm_undo_purge: true, expect });
+    check("ae_memory_purge (undo, confirmed)", r.applied === true && r.purged === true && r.undo_history_cleared === true, why(r));
+    skip("ae_memory_purge (all)", "it also wipes the disk cache, which is the machine's own, not the scratch project's");
+  }
+
+  // ---------- wave 3: project session (open, new, close change the open project: this is the last block) ----------
+  {
+    r = await call("ae_project_session", { action: "autosave" });
+    check("ae_project_session (autosave read)", !r.__isError && typeof r.auto_save?.prefs_available === "boolean" && r.policy?.enabled === false, `prefs available ${r.auto_save?.prefs_available}`);
+    r = await call("ae_project_session", { action: "autosave", policy: { enabled: true, after_minutes: 5 }, user_confirmed: true, expect });
+    check("ae_project_session (timed-save policy on)", r.policy?.enabled === true && r.policy?.max_backups === 10 && !r.__isError, JSON.stringify(r.policy ?? r).slice(0, 120));
+    r = await call("ae_project_session", { action: "autosave", policy: { enabled: false } });
+    check("ae_project_session (timed-save policy off)", r.policy?.enabled === false, JSON.stringify(r.policy ?? r).slice(0, 120));
+    r = await call("ae_project_session", { action: "recover" });
+    check("ae_project_session (recover list)", Array.isArray(r.files) && Array.isArray(r.searched), `${r.files?.length} file(s) in ${r.searched?.length} folder(s)`);
+    // A dirty project must ask, never close.
+    await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 85, expect });
+    r = await call("ae_project_session", { action: "close", expect });
+    check("ae_project_session (close on a dirty project asks)", r.needs_user === true && r.applied === false, `options ${JSON.stringify(r.options)}`);
+    // Open the same project again, saving the change first (a backup goes to _mcp_backups).
+    r = await call("ae_project_session", { action: "open", path: AEP, if_dirty: "save", expect });
+    check("ae_project_session (open, if_dirty save)", okWrite(r) && r.opened === true && /_mcp_backups/.test(String(r.backup_path)) && typeof r.missing_footage?.count === "number", `missing footage ${r.missing_footage?.count}; backup ${path.basename(String(r.backup_path))}; ${why(r)}`);
+    // app.project.dirty is undocumented and can read null; AE then asks (needs_user) and the scratch project is discarded on purpose.
+    r = await call("ae_project_session", { action: "new", expect });
+    if (r.needs_user === true && r.dirty === null) {
+      console.log("  note: AE did not report the dirty flag (known limit); discarding the scratch project");
+      r = await call("ae_project_session", { action: "new", expect, if_dirty: "discard", user_confirmed: true });
+    }
+    check("ae_project_session (new)", okWrite(r) && r.created === true, why(r));
+    r = await call("ae_project_session", { action: "close", expect: { project_path: "<unsaved>" } });
+    if (r.needs_user === true && r.dirty === null) {
+      r = await call("ae_project_session", { action: "close", expect: { project_path: "<unsaved>" }, if_dirty: "discard", user_confirmed: true });
+    }
+    check("ae_project_session (close leaves an empty untitled project)", okWrite(r) && r.closed === true, why(r));
+  }
 }
 
 let fatal = null;
@@ -647,11 +1425,11 @@ try {
   console.error(`\nStopped: ${fatal}`);
 }
 const passed = results.filter((x) => x.ok).length;
-console.log(`\n${passed}/${results.length} passed${fatal ? " (stopped early)" : ""}. Project: ${AEP}`);
+console.log(`\n${passed}/${results.length} passed${fatal ? " (stopped early)" : ""}${skipped.length ? `, ${skipped.length} skipped` : ""}. Project: ${AEP}`);
 const outDir = path.join(__dirname, "out");
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(
   path.join(outDir, "smoke.json"),
-  JSON.stringify({ project: AEP, passed, total: results.length, fatal, results }, null, 2)
+  JSON.stringify({ project: AEP, passed, total: results.length, fatal, skipped, results }, null, 2)
 );
 process.exitCode = fatal || passed !== results.length ? 1 : 0;

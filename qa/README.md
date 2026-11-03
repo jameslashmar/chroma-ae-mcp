@@ -41,7 +41,7 @@ Reports are written to `qa/out/junit.xml` and `qa/out/report.md`.
 - It builds its own comp, saves it, and runs each write tool, checking the auto checkpoint each one reports.
 - It runs `ae_motion_review` before and after `ae_set_keyframe_ease` easy-eases the linear Dot, so the review, fix and re-review loop is covered.
 - It runs each read tool, plus a five-frame background `aerender`.
-- It takes about a minute.
+- It takes about a minute for the tools up to 0.4. The waves 1-3 steps (below) add a render batch, a delivery run, a file collect and a project close and reopen, so the whole run takes several minutes.
 
 ```bash
 node qa/smoke-mcp.mjs                       # work dir: <tmp>/_work/qa/mcp-smoke/<stamp>
@@ -53,6 +53,18 @@ node qa/smoke-mcp.mjs --dir D:/_work/qa/smoke
 - Results go to `qa/out/smoke.json`, and the exit code is 1 on any failure.
 - `ae_ui_screenshot` passes when AE is minimized too, because it then reports `ae_minimized` instead of an image.
 - It covers the skills (a project skill saved, listed and run into its own comp), data builds, a 9:16 reframe, the asset import and diagnostics. The global skills folder and the asset watcher setting are left alone.
+
+### Waves 1-3 steps (not run live yet)
+
+The 69 tools added in waves 1-3 (layer ops, multi-comp apply, annotate, comp settings, preflight, session changes, captions, rig and recipes, fit text, stagger, time remap, camera, explain, describe, scrub, footage interpretation, paths, memory, render queue edits, render batch, collect, deliver, loudness, legibility, variants, learn taste, project session) have steps in the smoke test. **No wave 1-3 tool has run in a live After Effects**; the steps come from the tools' schemas and results, so expect to adjust some arguments and checks on the first run.
+
+- Each group works in a scratch comp of its own (`Wave Work`, `Wave Ops`, `Wave Captions`, `Wave Remap`, `Wave Cam`, `Wave Legibility`, `Wave Variants`, `MC A`, `MC B`), so the Smoke, Layers and Audio comps keep what the older checks read.
+- The block before the first `ae_save` holds the authoring and read tools. Loudness (it renders the Audio comp with aerender) comes after the reads.
+- A late block after the aerender and verify steps holds what renders for a while or changes the open project, in this order: scrub of the rendered PNG, render queue edits (the queue is cut back to its first item), render batch, delivery chain, collect (files, zip, report, relink), the memory purges that can drop the undo history, and project session. `ae_collect_relink` closes the project and reopens it; `ae_project_session` is last, and it should end with an empty untitled project open, which the isolation guard accepts on the next run. If AE will not report the project's dirty flag, the smoke discards its own scratch project to get there; if that fails, Smoke.aep stays open, which the guard also accepts.
+- Steps that this scratch project cannot support are logged as `SKIP` with the reason, listed under `skipped` in `qa/out/smoke.json`, and do not count as failures: footage interpretation of video (alpha, fields, pulldown, conform, loop: the project has stills and a WAV only), the comp loudness measure when AE has no AIFF 48 kHz output module template, a spec apply that this AE cannot meet, the render batch and delivery chain when there is no PNG or Lossless output module template, a cancel of a running batch (too short to catch), the `ram` memory purge on an AE older than 24.3, the session-changes checks when session tracking is off, and the `all` memory purge (it wipes the disk cache).
+- The dry runs, refusals and read tools need nothing special. Writes check `applied` and `receipt.matches`.
+- Not covered by any step: `ae_acknowledge`, `ae_aerender_cancel`, `ae_checkpoint_revert`, `ae_dialog_respond` and `ae_open_panel` (older tools that need a person, a dialog or a long job).
+- `ae_learn_taste` and `ae_taste_baseline` write to the server's learn-taste ledger (not the project) and `ae_taste_rules` is only called to be refused or listed, so no taste rule is saved. Each run adds a baseline to that ledger, which keeps 20, so it can push out the user's oldest baseline; run the smoke against a server with its own data dir to avoid that.
 
 ## Live job for a self-hosted runner
 
