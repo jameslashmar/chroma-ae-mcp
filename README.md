@@ -54,7 +54,7 @@ The panel checks GitHub for a newer release when it opens, and again when you cl
 - **Update** downloads the release's `.zxp` to your Downloads folder, checks it against the release's SHA256 (nothing is installed if it doesn't match), and opens it, so the ZXP installer registered for `.zxp` files (the aescripts ZXP Installer, or Anastasiy's) installs it.
 - **Restart After Effects** when the installer finishes.
 
-A dev install (the `install-dev.ps1` junction) only shows the notice, without the button: update it with `git pull`. Coming from 0.4.0, which has no update button, install 0.4.1 by hand once.
+Coming from 0.4.0, which has no update button, install 0.4.1 by hand once.
 
 <br clear="right">
 
