@@ -18,8 +18,10 @@ import { layersTools } from "./layers.js";
 import { markersTools } from "./markers.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
+import { productionTools } from "./production.js";
 import { receiptsTools } from "./receipts.js";
 import { reframeTools } from "./reframe.js";
+import { shapesTools } from "./shapes.js";
 import { skillsTools } from "./skills.js";
 import { trackTools } from "./track.js";
 
@@ -48,4 +50,6 @@ export const extTools: ToolDefinition<any>[] = [
   ...audioTools,
   ...keyframesTools,
   ...inventoryTools,
+  ...shapesTools,
+  ...productionTools,
 ];

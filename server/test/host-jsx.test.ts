@@ -360,3 +360,123 @@ describe("core.jsx paged reads", () => {
 
 // Keep the MarkerValue import live for readers: AE's marker values carry these fields.
 void MarkerValue;
+
+describe("shapes.jsx", () => {
+  it("adds a rectangle with fill and stroke, a polygon and a path, then removes one, looking each step up again", () => {
+    const { project, comp } = scene();
+    const { A } = loadHost(project, ["layers.jsx", "shapes.jsx"]);
+    A.createLayer({ comp_id: comp.id, type: "shape", name: "Art", expect: GUARD });
+    const r = A.shapeEdit({
+      comp_id: comp.id,
+      layer: { name: "Art" },
+      add: [
+        { type: "rect", name: "Card", size: [200, 120], roundness: 12, fill: { color: [0, 0.5, 1] }, stroke: { color: [1, 1, 1], width: 4 } },
+        { type: "polygon", points: 6, outer_radius: 80 },
+        { type: "path", vertices: [[0, 0], [100, 0], [50, 80]], closed: true },
+      ],
+      expect: GUARD,
+    });
+    expect(r.added.map((a: any) => a.name)).toEqual(["Card", "polygon 2", "path 3"]);
+    const c = A.shapeContents({ comp_id: comp.id, layer: { name: "Art" } });
+    expect(c.count).toBe(3);
+    const card = c.contents[0];
+    expect(card.items.map((i: any) => i.kind)).toEqual(["rect", "stroke", "fill"]);
+    expect(card.items[0]).toMatchObject({ size: [200, 120], roundness: 12 });
+    expect(card.items[2].color).toEqual([0, 0.5, 1, 1]);
+    expect(card.items[1].width).toBe(4);
+    expect(c.contents[1].items[0]).toMatchObject({ kind: "star", star_kind: "polygon", points: 6, outer_radius: 80 });
+    expect(c.contents[2].items[0]).toMatchObject({ kind: "path", vertices: 3, closed: true });
+    A.shapeEdit({ comp_id: comp.id, layer: { name: "Art" }, remove: [{ name: "polygon 2" }], expect: GUARD });
+    expect(A.shapeContents({ comp_id: comp.id, layer: { name: "Art" } }).contents.map((x: any) => x.name)).toEqual(["Card", "path 3"]);
+  });
+
+  it("refuses a layer that isn't a shape layer, and an ambiguous name to remove", () => {
+    const { project, comp } = scene();
+    const { A } = loadHost(project, ["layers.jsx", "shapes.jsx"]);
+    A.createLayer({ comp_id: comp.id, type: "solid", name: "BG", expect: GUARD });
+    expect(() => A.shapeContents({ comp_id: comp.id, layer: { name: "BG" } })).toThrow(/not a shape layer/);
+    A.createLayer({ comp_id: comp.id, type: "shape", name: "Art", expect: GUARD });
+    A.shapeEdit({ comp_id: comp.id, layer: { name: "Art" }, add: [{ type: "ellipse", name: "Dot", size: [10, 10] }, { type: "ellipse", name: "Dot", size: [20, 20] }], expect: GUARD });
+    expect(() => A.shapeEdit({ comp_id: comp.id, layer: { name: "Art" }, remove: [{ name: "Dot" }], expect: GUARD })).toThrow(/2 contents are named/);
+  });
+});
+
+describe("production.jsx", () => {
+  it("adds properties to the template, renames a controller, names the template and sets an override", () => {
+    const project = new FakeProject();
+    const tpl = project.addComp("Lower Third");
+    const main = project.addComp("Main");
+    tpl.layers.addText("Name");
+    main.layers.add(tpl);
+    const { A } = loadHost(project, ["production.jsx"]);
+    A.egpEdit({ comp_id: tpl.id, action: "add", layer: { name: "Name" }, path: ["ADBE Transform Group", "ADBE Opacity"], name: "Fade", expect: GUARD });
+    A.egpEdit({ comp_id: tpl.id, action: "rename", index: 1, name: "Opacity", expect: GUARD });
+    A.egpEdit({ comp_id: tpl.id, action: "template_name", name: "LT Basic", expect: GUARD });
+    expect(A.egpRead({ comp_id: tpl.id })).toMatchObject({ template_name: "LT Basic", controllers: [{ index: 1, name: "Opacity" }] });
+    A.egpEdit({ comp_id: main.id, action: "set_override", layer: { index: 1 }, name: "Opacity", value: 40, expect: GUARD });
+    const read = A.egpRead({ comp_id: main.id, layer: { index: 1 } });
+    expect(read.overrides).toEqual([{ index: 1, name: "Opacity", value: 40 }]);
+    expect(() => A.egpEdit({ comp_id: tpl.id, action: "rename", index: 5, name: "x", expect: GUARD })).toThrow(/out of range/);
+  });
+
+  it("reads template names from an existing queue item, or a temporary one it removes", () => {
+    const project = new FakeProject();
+    const comp = project.addComp("Edit");
+    const { A, undo } = loadHost(project, ["production.jsx"]);
+    expect(A.renderTemplates({})).toMatchObject({ source: "none", needs_item: true });
+    const temp = A.renderTemplates({ allow_temp: true, expect: GUARD });
+    expect(temp.source).toBe("temporary_item");
+    expect(temp.output_modules).toContain("AIFF 48kHz");
+    expect(project.renderQueue.numItems).toBe(0);
+    expect(undo.begun).toBe(1);
+    project.renderQueue.items.add(comp);
+    expect(A.renderTemplates({}).source).toBe("existing_item");
+    expect(undo.begun).toBe(1);
+  });
+
+  it("lists footage files and swaps them in one undo group, as sequences where needed", () => {
+    const project = new FakeProject();
+    const movie = project.addFootage("plate", 1920, 1080);
+    movie.file = { fsName: __filename };
+    movie.mainSource.isStill = false;
+    const seq = project.addFootage("seq", 1920, 1080);
+    seq.file = { fsName: "C:/shots/seq_v001.0001.exr" };
+    seq.mainSource.isStill = false;
+    const { A } = loadHost(project, ["production.jsx"]);
+    const files = A.footageFiles({});
+    expect(files.items.map((f: any) => [f.name, f.sequence])).toEqual([
+      ["plate", false],
+      ["seq", true],
+    ]);
+    const r = A.versionFootage({ items: [{ item_id: movie.id, path: __filename, sequence: false }], expect: GUARD });
+    expect(r.replaced[0]).toMatchObject({ item_id: movie.id, to: __filename });
+    expect(() => A.versionFootage({ items: [{ item_id: seq.id, path: "C:/nope/seq_v002.0001.exr", sequence: true }], expect: GUARD })).toThrow(/does not exist/);
+  });
+
+  it("checks every op before writing, then writes them in one undo group through setProperty", () => {
+    const { project, comp } = scene();
+    const { A, undo } = loadHost(project, ["layers.jsx", "production.jsx"]);
+    for (const n of ["A", "B"]) A.createLayer({ comp_id: comp.id, type: "solid", name: n, expect: GUARD });
+    const opacity = ["ADBE Transform Group", "ADBE Opacity"];
+    const before = undo.begun;
+    expect(() => A.batchSet({ comp_id: comp.id, ops: [{ layer: { name: "A" }, path: opacity, value: 10 }, { layer: { name: "Z" }, path: opacity, value: 10 }], expect: GUARD })).toThrow(/Op 2: No layer named "Z"/);
+    expect(comp.layer("A")!.transform("ADBE Opacity").value).toBe(100);
+    const r = A.batchSet({
+      comp_id: comp.id,
+      ops: [
+        { layer: { name: "A" }, path: opacity, value: 25 },
+        { layer: { name: "B" }, path: opacity, keyframes: [{ time: 0, value: 0 }, { time: 1, value: 100 }] },
+      ],
+      expect: GUARD,
+    });
+    expect(r).toEqual({ done: 2 });
+    expect(undo.begun - before).toBe(1);
+    const read = A.batchRead({ comp_id: comp.id, ops: [{ layer: { name: "A" }, path: opacity }, { layer: { name: "B" }, path: opacity, times: [0, 1, 2] }] });
+    expect(read.results[0]).toMatchObject({ value: 25, numKeys: 0 });
+    expect(read.results[1].keys).toEqual([
+      { time: 0, value: 0 },
+      { time: 1, value: 100 },
+      { time: 2, value: null, missing: true },
+    ]);
+  });
+});

@@ -53,6 +53,21 @@ export class TextDocument {
   constructor(public text: string) {}
 }
 
+export class Shape {
+  vertices: number[][] = [];
+  inTangents: number[][] = [];
+  outTangents: number[][] = [];
+  closed = true;
+}
+
+/** ExtendScript's File, looking at the real disk. */
+export class FakeFile {
+  constructor(public fsName: string) {}
+  get exists() {
+    return fs.existsSync(this.fsName);
+  }
+}
+
 export class CompItem {}
 export class FolderItem {}
 export class FootageItem {}
@@ -70,6 +85,13 @@ interface Key {
   roving: boolean;
 }
 
+/**
+ * Arrays the host code builds come from the vm's realm, where `instanceof
+ * Array` (bound to this realm's Array) is false. AE has one realm, so copy
+ * them into this one on the way in.
+ */
+const local = (v: unknown): unknown => (Array.isArray(v) ? Array.from(v, local) : v);
+
 const lerp = (a: unknown, b: unknown, u: number): unknown => {
   if (typeof a === "number" && typeof b === "number") return a + (b - a) * u;
   if (Array.isArray(a) && Array.isArray(b)) return a.map((x, i) => (x as number) + (((b[i] as number) ?? x) - (x as number)) * u);
@@ -83,6 +105,7 @@ export class FakeProperty {
   expression = "";
   expressionEnabled = false;
   propertyIndex = 1;
+  parentProperty: FakeGroup | null = null;
   keys: Key[] = [];
   constructor(
     public name: string,
@@ -110,9 +133,10 @@ export class FakeProperty {
   }
   setValue(v: unknown) {
     if (this.keys.length) throw new Error("Can't setValue on a keyframed property");
-    this.staticValue = v;
+    this.staticValue = local(v);
   }
-  setValueAtTime(t: number, v: unknown) {
+  setValueAtTime(t: number, raw: unknown) {
+    const v = local(raw);
     const at = this.keys.findIndex((k) => Math.abs(k.time - t) < 1e-9);
     const ease = [new KeyframeEase(0, 16.666667)];
     const key: Key = { time: t, value: v, inI: KeyframeInterpolationType.LINEAR, outI: KeyframeInterpolationType.LINEAR, inEase: ease, outEase: ease, roving: false };
@@ -195,20 +219,93 @@ export class FakeProperty {
   keyInSpatialTangent() {
     return [0, 0, 0];
   }
+  remove() {
+    this.parentProperty?.detach(this);
+  }
+  canAddToMotionGraphicsTemplate(_comp: FakeComp) {
+    return this.propertyValueType !== PropertyValueType.CUSTOM_VALUE;
+  }
+  addToMotionGraphicsTemplate(comp: FakeComp) {
+    comp.controllers.push(this.name);
+  }
+  addToMotionGraphicsTemplateAs(comp: FakeComp, name: string) {
+    comp.controllers.push(name);
+  }
   keyOutSpatialTangent() {
     return [0, 0, 0];
   }
 }
 
+const P = (name: string, matchName: string, type: number, value: unknown) => new FakeProperty(name, matchName, type, value);
+
+/** What addProperty makes inside shape contents, keyed by match name. */
+const SHAPE_FACTORY: Record<string, (n: number) => FakeGroup> = {
+  "ADBE Vector Group": (n) =>
+    new FakeGroup(`Group ${n}`, "ADBE Vector Group", [
+      new FakeGroup("Contents", "ADBE Vectors Group", [], true),
+      new FakeGroup("Transform", "ADBE Vector Transform Group", [P("Position", "ADBE Vector Position", PropertyValueType.TwoD, [0, 0])]),
+    ]),
+  "ADBE Vector Shape - Rect": (n) =>
+    new FakeGroup(`Rectangle Path ${n}`, "ADBE Vector Shape - Rect", [
+      P("Size", "ADBE Vector Rect Size", PropertyValueType.TwoD, [100, 100]),
+      P("Position", "ADBE Vector Rect Position", PropertyValueType.TwoD_SPATIAL, [0, 0]),
+      P("Roundness", "ADBE Vector Rect Roundness", PropertyValueType.OneD, 0),
+    ]),
+  "ADBE Vector Shape - Ellipse": (n) =>
+    new FakeGroup(`Ellipse Path ${n}`, "ADBE Vector Shape - Ellipse", [
+      P("Size", "ADBE Vector Ellipse Size", PropertyValueType.TwoD, [100, 100]),
+      P("Position", "ADBE Vector Ellipse Position", PropertyValueType.TwoD_SPATIAL, [0, 0]),
+    ]),
+  "ADBE Vector Shape - Star": (n) =>
+    new FakeGroup(`Polystar Path ${n}`, "ADBE Vector Shape - Star", [
+      P("Type", "ADBE Vector Star Type", PropertyValueType.OneD, 1),
+      P("Points", "ADBE Vector Star Points", PropertyValueType.OneD, 5),
+      P("Position", "ADBE Vector Star Position", PropertyValueType.TwoD_SPATIAL, [0, 0]),
+      P("Rotation", "ADBE Vector Star Rotation", PropertyValueType.OneD, 0),
+      P("Inner Radius", "ADBE Vector Star Inner Radius", PropertyValueType.OneD, 50),
+      P("Outer Radius", "ADBE Vector Star Outer Radius", PropertyValueType.OneD, 100),
+    ]),
+  "ADBE Vector Shape - Group": (n) => new FakeGroup(`Path ${n}`, "ADBE Vector Shape - Group", [P("Path", "ADBE Vector Shape", PropertyValueType.SHAPE, new Shape())]),
+  "ADBE Vector Graphic - Fill": (n) =>
+    new FakeGroup(`Fill ${n}`, "ADBE Vector Graphic - Fill", [
+      P("Color", "ADBE Vector Fill Color", PropertyValueType.COLOR, [1, 0, 0, 1]),
+      P("Opacity", "ADBE Vector Fill Opacity", PropertyValueType.OneD, 100),
+    ]),
+  "ADBE Vector Graphic - Stroke": (n) =>
+    new FakeGroup(`Stroke ${n}`, "ADBE Vector Graphic - Stroke", [
+      P("Color", "ADBE Vector Stroke Color", PropertyValueType.COLOR, [1, 1, 1, 1]),
+      P("Stroke Width", "ADBE Vector Stroke Width", PropertyValueType.OneD, 2),
+      P("Opacity", "ADBE Vector Stroke Opacity", PropertyValueType.OneD, 100),
+    ]),
+};
+
 export class FakeGroup {
-  propertyType = PropertyType.NAMED_GROUP;
-  constructor(public name: string, public matchName: string, public props: Array<FakeProperty | FakeGroup>) {}
+  propertyType: number;
+  parentProperty: FakeGroup | null = null;
+  constructor(public name: string, public matchName: string, public props: Array<FakeProperty | FakeGroup>, indexed = false) {
+    this.propertyType = indexed ? PropertyType.INDEXED_GROUP : PropertyType.NAMED_GROUP;
+    for (const p of props) p.parentProperty = this;
+  }
   get numProperties() {
     return this.props.length;
   }
   property(sel: string | number) {
     if (typeof sel === "number") return this.props[sel - 1] ?? null;
     return this.props.find((p) => p.matchName === sel || p.name === sel) ?? null;
+  }
+  addProperty(matchName: string) {
+    const make = SHAPE_FACTORY[matchName];
+    if (!make || this.propertyType !== PropertyType.INDEXED_GROUP) throw new Error(`Can't add ${matchName} to ${this.name}`);
+    const made = make(this.props.filter((p) => p.matchName === matchName).length + 1);
+    made.parentProperty = this;
+    this.props.push(made);
+    return made;
+  }
+  detach(p: FakeProperty | FakeGroup) {
+    this.props = this.props.filter((x) => x !== p);
+  }
+  remove() {
+    this.parentProperty?.detach(this);
   }
 }
 
@@ -256,6 +353,7 @@ export class FakeLayer {
       transform,
       new FakeGroup("Effects", "ADBE Effect Parade", []),
     ];
+    if (kind === "ShapeLayer") props.push(new FakeGroup("Contents", "ADBE Root Vectors Group", [], true));
     if (kind === "TextLayer") {
       props.push(new FakeGroup("Text", "ADBE Text Properties", [new FakeProperty("Source Text", "ADBE Text Document", PropertyValueType.TEXT_DOCUMENT, new TextDocument(name))]));
     }
@@ -286,7 +384,16 @@ export class FakeLayer {
     return this.group.numProperties;
   }
   property(sel: string | number) {
+    if (sel === "ADBE Layer Overrides") return this.overrides();
     return this.group.property(sel);
+  }
+  private overrideGroup: FakeGroup | null = null;
+  /** A precomp layer of a templated comp has one Essential Property per controller. */
+  private overrides() {
+    const src = this.source as FakeComp | null;
+    if (!(src instanceof FakeComp) || !src.controllers.length) return null;
+    this.overrideGroup ??= new FakeGroup("Essential Properties", "ADBE Layer Overrides", src.controllers.map((c) => P(c, c, PropertyValueType.OneD, 0)));
+    return this.overrideGroup;
   }
   transform(name: string) {
     return (this.group.property("ADBE Transform Group") as FakeGroup).property(name) as FakeProperty;
@@ -322,6 +429,8 @@ export class FakeComp extends CompItem {
   parentFolder: FakeFolder | null = null;
   markerProperty = new FakeProperty("Marker", "ADBE Marker", PropertyValueType.MARKER, null);
   modernMattes = true;
+  motionGraphicsTemplateName = "";
+  controllers: string[] = [];
   layers: Record<string, (...a: any[]) => any>;
   constructor(public project: FakeProject, public name: string, public width = 640, public height = 360, public duration = 3) {
     super();
@@ -389,6 +498,15 @@ export class FakeComp extends CompItem {
   get frameDuration() {
     return 1 / this.frameRate;
   }
+  get motionGraphicsTemplateControllerCount() {
+    return this.controllers.length;
+  }
+  getMotionGraphicsTemplateControllerName(i: number) {
+    return this.controllers[i - 1];
+  }
+  setMotionGraphicsControllerName(i: number, name: string) {
+    this.controllers[i - 1] = name;
+  }
   layer(sel: number | string) {
     if (typeof sel === "number") return this.stack[sel - 1] ?? null;
     return this.stack.find((l) => l.name === sel) ?? null;
@@ -418,8 +536,17 @@ export class FakeFootage extends FootageItem {
   duration = 0;
   footageMissing = false;
   file: { fsName: string } | null = null;
-  constructor(public name: string, public width: number, public height: number, public mainSource: unknown) {
+  usedIn: unknown[] = [];
+  constructor(public name: string, public width: number, public height: number, public mainSource: any) {
     super();
+  }
+  replace(f: FakeFile) {
+    this.file = { fsName: f.fsName };
+    this.footageMissing = false;
+  }
+  replaceWithSequence(f: FakeFile) {
+    this.file = { fsName: f.fsName };
+    this.mainSource = Object.assign(new FileSource(), { isStill: false });
   }
 }
 
@@ -428,7 +555,7 @@ export class FakeProject {
   rootFolder: FakeFolder;
   file: { fsName: string } | null = null;
   dirty = false;
-  renderQueue = { items: [] as Array<{ comp: FakeComp }>, get numItems() { return this.items.length; }, item(i: number) { return this.items[i - 1]; } };
+  renderQueue = makeRenderQueue();
   constructor() {
     this.rootFolder = new FakeFolder(this, "Root");
   }
@@ -457,6 +584,33 @@ export class FakeProject {
   }
 }
 
+export const RS_TEMPLATES = ["Best Settings", "Draft Settings", "Multi-Machine Settings"];
+export const OM_TEMPLATES = ["Lossless", "AIFF 48kHz", "High Quality with Alpha"];
+
+function makeRenderQueue() {
+  const items: any[] = [];
+  return {
+    items: Object.assign(items, {
+      add(comp: FakeComp) {
+        const item = {
+          comp,
+          templates: RS_TEMPLATES,
+          outputModule: () => ({ templates: OM_TEMPLATES }),
+          remove: () => items.splice(items.indexOf(item), 1),
+        };
+        items.push(item);
+        return item;
+      },
+    }),
+    get numItems() {
+      return items.length;
+    },
+    item(i: number) {
+      return items[i - 1];
+    },
+  };
+}
+
 const HOST_DIR = path.resolve(__dirname, "../../../panel/host");
 
 /** Loads core.jsx and the given ext files into a fresh context over `project`. */
@@ -471,6 +625,9 @@ export function loadHost(project: FakeProject, extFiles: string[], extra: Record
     PlaceholderSource,
     TextDocument,
     MarkerValue,
+    Shape,
+    File: FakeFile,
+    FileSource,
     KeyframeEase,
     PropertyType,
     PropertyValueType,

@@ -435,6 +435,54 @@ async function main() {
   r = await call("ae_get_comp", { comp_id: LC, limit: 1 });
   check("ae_get_comp (paged)", r.layers?.length === 1 && r.next_offset === 1, `${r.numLayers} layers, next ${r.next_offset}`);
 
+  // ---------- 0.4: shapes, Essential Graphics, templates, versions, batch ----------
+  await call("ae_create_layer", { comp_id: LC, type: "shape", name: "Art", expect });
+  r = await call("ae_shape", {
+    comp_id: LC,
+    layer: { name: "Art" },
+    add: [
+      { type: "rect", name: "Card", size: [200, 120], roundness: 12, fill: { color: [0, 0.5, 1] }, stroke: { color: [1, 1, 1], width: 4 } },
+      { type: "polygon", name: "Hex", points: 6, outer_radius: 60, fill: { color: [1, 0.8, 0] } },
+    ],
+    expect,
+  });
+  check("ae_shape", r.applied && r.receipt?.matches === true && r.contents?.length === 2, `${(r.contents ?? []).map((c) => `${c.name}: ${(c.items ?? []).map((i) => i.kind).join("+")}`).join("; ")}`);
+
+  r = await call("ae_render_templates", {});
+  check("ae_render_templates", r.render_settings?.length > 0 && r.output_modules?.length > 0 && typeof r.audio_template_found === "boolean", `${r.source}; AIFF 48kHz ${r.audio_template_found ? "found" : "missing"}`);
+
+  // The precomp made earlier from MATTE and Plate becomes a template; its layer in Layers gets an override.
+  const PRE = (await call("ae_get_project", { type: "comp", name_contains: "Smoke Precomp" })).items?.[0]?.id;
+  r = await call("ae_set_essential_graphics", { comp_id: PRE, action: "add", layer: { name: "MATTE" }, path: ["ADBE Transform Group", "ADBE Opacity"], name: "Matte opacity", expect });
+  check("ae_set_essential_graphics (add)", r.applied && r.receipt?.matches === true, `${r.essential_graphics?.controllers?.length} controllers`);
+  r = await call("ae_set_essential_graphics", { comp_id: PRE, action: "template_name", name: "Smoke Template", expect });
+  check("ae_set_essential_graphics (name)", r.applied && r.receipt?.matches === true, String(r.essential_graphics?.template_name));
+  r = await call("ae_set_essential_graphics", { comp_id: LC, action: "set_override", layer: { name: "Smoke Precomp" }, name: "Matte opacity", value: 50, expect });
+  check("ae_set_essential_graphics (override)", r.applied && r.receipt?.matches === true, JSON.stringify(r.essential_graphics?.overrides));
+  r = await call("ae_get_essential_graphics", { comp_id: LC, layer: { name: "Smoke Precomp" } });
+  check("ae_get_essential_graphics", r.overrides?.[0]?.value === 50, JSON.stringify(r.overrides));
+
+  r = await call("ae_batch_set", {
+    comp_id: LC,
+    ops: [
+      { layer: { name: "Mover" }, path: ["ADBE Transform Group", "ADBE Opacity"], value: 60 },
+      { layer: { name: "Edge" }, path: ["ADBE Transform Group", "ADBE Opacity"], expression: "50 + 50 * Math.sin(time * 4)" },
+      { layer: { name: "Art" }, path: ["ADBE Transform Group", "ADBE Rotate Z"], keyframes: [{ time: 0, value: 0 }, { time: 2, value: 90 }] },
+    ],
+    expect,
+  });
+  check("ae_batch_set", r.ok && r.done === 3 && r.matches === true, `${r.chunks?.length} chunk(s); ${(r.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ")}`);
+
+  // A still with two versions on disk: import v001, then version up.
+  fs.writeFileSync(path.join(MEDIA, "tile_v001.png"), Buffer.from(RED_PNG, "base64"));
+  fs.writeFileSync(path.join(MEDIA, "tile_v002.png"), Buffer.from(BLUE_PNG, "base64"));
+  const tile = await call("ae_import_footage", { paths: [path.join(MEDIA, "tile_v001.png")], expect });
+  const tileId = tile.item_ids?.[0];
+  r = await call("ae_version_footage", { item_ids: [tileId] });
+  check("ae_version_footage (report)", r.outdated === 1 && r.items?.[0]?.latest === 2, `item ${tileId}: v${r.items?.[0]?.current} -> v${r.items?.[0]?.latest}`);
+  r = await call("ae_version_footage", { item_ids: [tileId], update: true, expect });
+  check("ae_version_footage (update)", r.applied && r.receipt?.matches === true && Boolean(r.log_path), `${path.basename(String(r.items?.[0]?.target))}, log ${path.basename(String(r.log_path))}`);
+
   r = await call("ae_save", { expect });
   check("ae_save", r.applied && r.receipt?.matches !== false && Boolean(r.backup_path), path.basename(String(r.backup_path)));
 

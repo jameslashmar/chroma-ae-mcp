@@ -2703,8 +2703,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path25, errorMaps, issueData } = params;
-  const fullPath = [...path25, ...issueData.path || []];
+  const { data, path: path26, errorMaps, issueData } = params;
+  const fullPath = [...path26, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2820,11 +2820,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path25, key) {
+  constructor(parent, value, path26, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path25;
+    this._path = path26;
     this._key = key;
   }
   get path() {
@@ -8446,7 +8446,7 @@ var diagnosticsTools = [
 ];
 
 // src/panel-entry.ts
-var path24 = __toESM(require("node:path"), 1);
+var path25 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 function zodToJsonSchema(schema) {
@@ -9416,14 +9416,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path25 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path26 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path25,
+          path: path26,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path25} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path26} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -10478,8 +10478,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path25, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path25, expected, actual, message });
+function expectThat(mismatches, ok, path26, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path26, expected, actual, message });
 }
 
 // src/tools/ext/audio.ts
@@ -11090,7 +11090,7 @@ var AeBuildFromDataSchema = external_exports.object({
   dry_run: external_exports.boolean().optional().describe("Check the data and mapping against the template and report what would be built, without writing."),
   expect: ExpectSchema
 }).refine((v) => v.rows === void 0 !== (v.data_path === void 0), { message: "Give either rows or data_path." });
-function prepareRows(rows, mapping, namePattern, templateName) {
+function prepareRows(rows, mapping, namePattern2, templateName) {
   const problems = [];
   const skipped = [];
   const columns = new Set(rows.flatMap((r) => Object.keys(r)));
@@ -11111,7 +11111,7 @@ function prepareRows(rows, mapping, namePattern, templateName) {
       }
       return v.value;
     });
-    return { row: i + 1, name: fillName(namePattern, r, i + 1, templateName), values };
+    return { row: i + 1, name: fillName(namePattern2, r, i + 1, templateName), values };
   });
   return { prepared, problems, skipped };
 }
@@ -14295,14 +14295,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path25, target, taste) {
+function reviewProperty(s, analysis, speeds, path26, target, taste) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path25 }
+    property: { name: s.property.name, path: path26 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix = (keys, extra = {}) => ({
@@ -14310,7 +14310,7 @@ function reviewProperty(s, analysis, speeds, path25, target, taste) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path25,
+      path: path26,
       keys,
       ease: easeArg,
       ...extra,
@@ -15057,9 +15057,373 @@ var panelsTools = [
   }
 ];
 
-// src/tools/ext/receipts.ts
+// src/versions.ts
 var fs22 = __toESM(require("node:fs"), 1);
 var path22 = __toESM(require("node:path"), 1);
+var VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
+function versionToken(name) {
+  let m;
+  let last = null;
+  VERSION_RE.lastIndex = 0;
+  while (m = VERSION_RE.exec(name)) last = m;
+  if (!last) return null;
+  const start = last.index + last[1].length;
+  return {
+    before: name.slice(0, start + 1),
+    number: Number(last[3]),
+    digits: last[3].length,
+    after: name.slice(start + 1 + last[3].length)
+  };
+}
+var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function namePattern(name, sequence) {
+  const tok = versionToken(name);
+  if (!tok) return null;
+  let after = escapeRe(tok.after);
+  let frameAware = false;
+  if (sequence) {
+    const fm = /^(.*?)(\d+)(\.[^.]+)$/.exec(tok.after);
+    if (fm) {
+      after = `${escapeRe(fm[1])}\\d+${escapeRe(fm[3])}`;
+      frameAware = true;
+    }
+  }
+  return { re: new RegExp(`^${escapeRe(tok.before)}(\\d{1,5})${after}$`, process.platform === "win32" ? "i" : ""), frameAware };
+}
+function listDir(dir) {
+  try {
+    return fs22.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+function findVersions(file, sequence) {
+  const dir = path22.dirname(file);
+  const base = path22.basename(file);
+  const own = versionToken(base);
+  const dirName = path22.basename(dir);
+  const dirTok = versionToken(dirName);
+  const byVersion = /* @__PURE__ */ new Map();
+  const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
+  if (dirTok && sequence) {
+    const parent = path22.dirname(dir);
+    const dirRe = new RegExp(`^${escapeRe(dirTok.before)}(\\d{1,5})${escapeRe(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
+    for (const sib of listDir(parent)) {
+      const m = dirRe.exec(sib);
+      if (!m) continue;
+      const ext2 = path22.extname(base).toLowerCase();
+      for (const f of listDir(path22.join(parent, sib))) {
+        if (path22.extname(f).toLowerCase() === ext2) add(Number(m[1]), path22.join(parent, sib, f));
+      }
+    }
+    return { current: dirTok.number, versions: firstOfEach(byVersion) };
+  }
+  if (!own) return { current: null, versions: [] };
+  const pat = namePattern(base, sequence);
+  if (!pat) return { current: null, versions: [] };
+  for (const n of listDir(dir)) {
+    const m = pat.re.exec(n);
+    if (m) add(Number(m[1]), path22.join(dir, n));
+  }
+  return { current: own.number, versions: firstOfEach(byVersion) };
+}
+function firstOfEach(byVersion) {
+  return [...byVersion.entries()].map(([version, files]) => ({ version, path: files.sort((a, b) => a.localeCompare(b, void 0, { numeric: true }))[0] })).sort((a, b) => a.version - b.version);
+}
+function planVersion(file, sequence, want) {
+  const { current, versions } = findVersions(file, sequence);
+  const latest = versions.length ? versions[versions.length - 1].version : null;
+  const target = want !== void 0 ? versions.find((v) => v.version === want) ?? null : versions[versions.length - 1] ?? null;
+  return { current, latest, target, newer: target !== null && current !== null && target.version !== current };
+}
+function versionLogPath(projectPath) {
+  const ext2 = path22.extname(projectPath);
+  return path22.join(path22.dirname(projectPath), `${path22.basename(projectPath, ext2)}.versions.json`);
+}
+function appendVersionLog(projectPath, entries) {
+  const file = versionLogPath(projectPath);
+  let log = { entries: [] };
+  try {
+    const parsed = JSON.parse(fs22.readFileSync(file, "utf8"));
+    if (Array.isArray(parsed?.entries)) log = parsed;
+  } catch {
+  }
+  log.entries.push(...entries);
+  fs22.writeFileSync(file, JSON.stringify(log, null, 2));
+  return file;
+}
+
+// src/tools/ext/production.ts
+var PathSchema2 = external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1);
+var AeGetEssentialGraphicsSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.optional().describe("A precomp layer in this comp: also list its overrides (Essential Properties).")
+});
+var AeSetEssentialGraphicsSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  action: external_exports.enum(["add", "rename", "template_name", "set_override"]).describe("add: a property to this comp's template; rename: a controller; template_name: the template's name; set_override: a precomp layer's Essential Property."),
+  layer: LayerSelectorSchema.optional().describe("add: the layer holding the property; set_override: the precomp layer."),
+  path: PathSchema2.optional().describe("add: the property's path from the layer."),
+  index: external_exports.number().int().positive().optional().describe("rename: the controller's 1-based index."),
+  name: external_exports.string().min(1).max(200).optional().describe("add: the controller's name (optional); rename and template_name: the new name; set_override: the Essential Property's name."),
+  value: external_exports.union([external_exports.number(), external_exports.boolean(), external_exports.string(), external_exports.array(external_exports.number())]).optional().describe("set_override: the value (text for a source text property)."),
+  expect: ExpectSchema
+}).superRefine((v, ctx) => {
+  const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+  if (v.action === "add") need(v.layer !== void 0 && v.path !== void 0, "add needs layer and path.");
+  if (v.action === "rename") need(v.index !== void 0 && v.name !== void 0, "rename needs index and name.");
+  if (v.action === "template_name") need(v.name !== void 0, "template_name needs name.");
+  if (v.action === "set_override") need(v.layer !== void 0 && v.name !== void 0 && v.value !== void 0, "set_override needs layer, name and value.");
+});
+function egpMismatches(args, beforeRaw, afterRaw) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  if (args.action === "add") {
+    const want = before.controllers.length + 1;
+    expectThat(m, after.controllers.length === want, "controllers.length", want, after.controllers.length, "The template did not gain a controller");
+    if (args.name) expectThat(m, after.controllers.some((c) => c.name === args.name), "controllers.name", args.name, after.controllers.map((c) => c.name), "No controller with that name");
+  } else if (args.action === "rename") {
+    const c = after.controllers.find((x) => x.index === args.index);
+    expectThat(m, c?.name === args.name, `controllers[${args.index}].name`, args.name, c?.name, "Controller name differs");
+  } else if (args.action === "template_name") {
+    expectThat(m, after.template_name === args.name, "template_name", args.name, after.template_name, "Template name differs");
+  } else {
+    const o = after.overrides?.find((x) => x.name === args.name);
+    const actual = typeof args.value === "string" && o?.value && typeof o.value === "object" ? o.value.text : o?.value;
+    if (!o) m.push({ path: `overrides.${args.name}`, expected: args.value, actual: void 0, message: "Essential Property not in the read-back" });
+    else compareValues(args.value, Array.isArray(args.value) && Array.isArray(actual) ? actual.slice(0, args.value.length) : actual, `overrides.${args.name}`, m);
+  }
+  return m;
+}
+var AeRenderTemplatesSchema = external_exports.object({
+  allow_temp: external_exports.boolean().optional().describe("With an empty render queue, add a temporary item to read the names from and remove it again. That marks the project changed (save before aerender). Needs expect."),
+  comp_id: external_exports.number().int().optional().describe("The comp for the temporary item. Default the first comp."),
+  expect: ExpectSchema.optional()
+});
+var AeVersionFootageSchema = external_exports.object({
+  item_ids: external_exports.array(external_exports.number().int()).max(500).optional().describe("Footage items to check or update. Default: every footage item with a file."),
+  version: external_exports.number().int().min(0).optional().describe("Swap to this version instead of the latest (one item only)."),
+  update: external_exports.boolean().optional().describe("Swap the items to the newer version. Default false: only report. Needs expect."),
+  dry_run: external_exports.boolean().optional().describe("With update: show what would change without touching AE."),
+  expect: ExpectSchema.optional()
+}).refine((v) => !v.update || v.expect !== void 0, { message: "update needs expect." }).refine((v) => v.version === void 0 || v.item_ids?.length === 1, { message: "version needs exactly one item." });
+function sameFootage(a, b, sequence) {
+  const norm = (p) => normalizeGuardPath(p);
+  if (!sequence) return norm(a) === norm(b);
+  const dir = (p) => norm(p).replace(/[\\/][^\\/]*$/, "");
+  const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
+  return dir(a) === dir(b) && ver(a) === ver(b);
+}
+var BatchOpSchema = external_exports.object({
+  layer: LayerSelectorSchema,
+  path: PathSchema2,
+  value: external_exports.unknown().optional().describe("A static value (or the value at the comp's current time on an animated property)."),
+  keyframes: external_exports.array(KeyframeItemSchema).max(100).optional(),
+  expression: external_exports.string().max(2e4).optional()
+}).refine((o) => o.value !== void 0 || (o.keyframes?.length ?? 0) > 0 || o.expression !== void 0, { message: "Each op sets a value, keyframes or an expression." });
+var AeBatchSetSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  ops: external_exports.array(BatchOpSchema).min(1).max(5e3),
+  chunk_size: external_exports.number().int().min(1).max(500).optional().describe("Ops per undo group (default and maximum 500)."),
+  expect: ExpectSchema
+});
+var readOps = (ops) => ops.map((o) => ({ layer: o.layer, path: o.path, ...o.keyframes?.length ? { times: o.keyframes.map((k) => k.time) } : {} }));
+function trimTo(want, got) {
+  if (Array.isArray(want) && Array.isArray(got)) return got.slice(0, want.length);
+  if (typeof want === "string" && got && typeof got === "object" && "text" in got) return got.text;
+  return got;
+}
+function batchMismatches(ops, afterRaw, offset) {
+  const m = [];
+  const after = afterRaw;
+  if (!after) return m;
+  ops.forEach((op, i) => {
+    const r = after.results[i];
+    const label = `ops[${offset + i + 1}]`;
+    if (!r || r.error) {
+      m.push({ path: label, expected: "read-back", actual: r?.error, message: `Op ${offset + i + 1} could not be read back` });
+      return;
+    }
+    if (op.expression !== void 0) expectThat(m, r.expression === op.expression, `${label}.expression`, op.expression, r.expression, "Expression differs");
+    if (op.value !== void 0 && !op.keyframes?.length && (r.numKeys ?? 0) === 0 && op.expression === void 0) {
+      compareValues(op.value, trimTo(op.value, r.value), `${label}.value`, m);
+    }
+    for (const k of op.keyframes ?? []) {
+      const got = r.keys?.find((x) => Math.abs(x.time - k.time) < 5e-4);
+      if (!got || got.missing) m.push({ path: `${label}.keys@${k.time}`, expected: k.value, actual: void 0, message: `No key at ${k.time}s` });
+      else compareValues(k.value, trimTo(k.value, got.value), `${label}.keys@${k.time}`, m);
+    }
+  });
+  return m;
+}
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var productionTools = [
+  {
+    name: "ae_get_essential_graphics",
+    description: "Read a comp's Essential Graphics template: its name and controllers (index and name). With a precomp layer, also that layer's overrides (Essential Properties) and their values. Read-only.",
+    schema: AeGetEssentialGraphicsSchema,
+    handler: async (args, ctx) => (await ctx.bridge.callHost("egpRead", { comp_id: args.comp_id, layer: args.layer }, { label: "ae_get_essential_graphics", mutates: false, toolName: "ae_get_essential_graphics" })).result
+  },
+  {
+    name: "ae_set_essential_graphics",
+    description: "Change Essential Graphics in one undo group guarded by `expect`: add a layer property to the comp's template (optionally named), rename a controller, name the template, or set an override (Essential Property) on a precomp layer of a templated comp: text as a string, numbers, colours or points as arrays. The read-back (a separate evalScript) checks the controller count and names, the template name, or the override's value. Export the template with ae_export_mogrt. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeSetEssentialGraphicsSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_set_essential_graphics",
+      label: `ae_set_essential_graphics(${args.action})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => ({ host: "egpRead", args: { comp_id: args.comp_id, layer: args.action === "set_override" ? args.layer : void 0 } }),
+      write: {
+        host: "egpEdit",
+        args: { comp_id: args.comp_id, action: args.action, layer: args.layer, path: args.path, index: args.index, name: args.name, value: args.value, label: "Essential Graphics" }
+      },
+      check: (before, after) => egpMismatches(args, before, after),
+      present: (_before, after) => ({ essential_graphics: after })
+    })
+  },
+  {
+    name: "ae_render_templates",
+    description: `List the render-settings and output-module template names this AE has (built-in and the user's), read from a render-queue item: an existing one changes nothing; with an empty queue, allow_temp adds a temporary item and removes it (the project is then marked changed: save before aerender). Says whether '${DEFAULT_AUDIO_TEMPLATE}', the audio template ae_audio_analyze uses by default, is there.`,
+    schema: AeRenderTemplatesSchema,
+    handler: async (args, ctx) => {
+      let res;
+      if (args.allow_temp) {
+        if (!args.expect) return { ok: false, error: "bad_args", message: "allow_temp needs expect." };
+        const out = await runGuardedWrite(ctx, {
+          toolName: "ae_render_templates",
+          label: "ae_render_templates (temporary item)",
+          expect: args.expect,
+          read: () => ({ host: "rqStatus", args: {} }),
+          write: { host: "renderTemplates", args: { allow_temp: true, comp_id: args.comp_id, label: "Read render templates" } },
+          check: (before, after) => {
+            const n = (s) => s?.numItems;
+            return n(before) === n(after) ? [] : [{ path: "renderQueue.numItems", expected: n(before), actual: n(after), message: "The temporary render-queue item was not removed" }];
+          }
+        });
+        res = out;
+      } else {
+        res = (await ctx.bridge.callHost("renderTemplates", {}, { label: "ae_render_templates", mutates: false, toolName: "ae_render_templates" })).result;
+        if (res.needs_item) {
+          return { ok: false, error: "empty_queue", message: "The render queue is empty. Add an item (ae_render_queue_add), or call again with allow_temp and expect." };
+        }
+      }
+      return { ...res, audio_template_found: res.output_modules.includes(DEFAULT_AUDIO_TEMPLATE) };
+    }
+  },
+  {
+    name: "ae_version_footage",
+    description: "Shot versioning. Reports which footage items have a newer version on disk (the last v<number> in the file name, or in the folder name for sequences in versioned folders), and with update swaps them to the latest (or a given version) in one undo group guarded by `expect`, keeping the item, so every comp using it follows. Image sequences are swapped as sequences. Each swap is logged in <project>.versions.json next to the .aep. dry_run shows the plan without touching AE. The read-back (a separate evalScript) checks each item now points at the new file. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeVersionFootageSchema,
+    handler: async (args, ctx) => {
+      const files = (await ctx.bridge.callHost("footageFiles", { item_ids: args.item_ids }, { label: "ae_version_footage (files)", mutates: false, toolName: "ae_version_footage" })).result;
+      const report = files.items.map((f) => {
+        const plan2 = planVersion(f.file, f.sequence, args.version);
+        return {
+          item_id: f.item_id,
+          name: f.name,
+          sequence: f.sequence,
+          file: f.file,
+          current: plan2.current,
+          latest: plan2.latest,
+          newer: plan2.newer,
+          ...plan2.target ? { target: plan2.target.path, target_version: plan2.target.version } : {}
+        };
+      });
+      const outdated = report.filter((r) => r.newer);
+      if (args.version !== void 0 && report[0] && report[0].target === void 0) {
+        return { ok: false, error: "no_such_version", message: `No v${args.version} found next to ${report[0].file}`, items: report };
+      }
+      if (!args.update || args.dry_run || outdated.length === 0) {
+        return { ok: true, ...args.dry_run ? { dry_run: true } : {}, checked: report.length, outdated: outdated.length, items: args.update ? outdated : report };
+      }
+      const jobs = outdated.map((r) => ({ item_id: r.item_id, path: r.target, sequence: r.sequence }));
+      const ids = jobs.map((j) => j.item_id);
+      const out = await runGuardedWrite(ctx, {
+        toolName: "ae_version_footage",
+        label: `ae_version_footage(${jobs.length})`,
+        expect: args.expect,
+        read: () => ({ host: "footageFiles", args: { item_ids: ids } }),
+        write: { host: "versionFootage", args: { items: jobs, label: `Version up ${jobs.length} footage item${jobs.length === 1 ? "" : "s"}` } },
+        check: (_before, after) => {
+          const m = [];
+          const now = after?.items ?? [];
+          for (const j of jobs) {
+            const got = now.find((x) => x.item_id === j.item_id);
+            if (!got || !sameFootage(got.file, j.path, j.sequence)) {
+              m.push({ path: `items[${j.item_id}].file`, expected: j.path, actual: got?.file, message: `Item ${j.item_id} does not point at the new version` });
+            }
+          }
+          return m;
+        },
+        present: (_before, _after, w) => ({ replaced: w.replaced })
+      });
+      let logPath;
+      if (files.project_path !== "<unsaved>") {
+        const entries = outdated.map((r) => ({
+          at: (/* @__PURE__ */ new Date()).toISOString(),
+          item_id: r.item_id,
+          name: r.name,
+          from: r.file,
+          to: r.target,
+          from_version: r.current,
+          to_version: r.target_version
+        }));
+        try {
+          logPath = appendVersionLog(files.project_path, entries);
+        } catch {
+          logPath = void 0;
+        }
+      }
+      return { ...out, items: outdated, ...logPath ? { log_path: logPath } : { log_path: null } };
+    }
+  },
+  {
+    name: "ae_batch_set",
+    description: "Set many properties at once (values, keyframes or expressions on any layers of one comp): every layer and property is found before anything is written, then each chunk of up to 500 ops is one undo group guarded by `expect`, with a short pause between chunks so AE's UI keeps up. The read-back (a separate evalScript per chunk) checks every value, key and expression. A failing op stops the batch and says which. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeBatchSetSchema,
+    handler: async (args, ctx) => {
+      const size = args.chunk_size ?? 500;
+      const chunks = [];
+      let done = 0;
+      const mismatches = [];
+      for (let start = 0; start < args.ops.length; start += size) {
+        const ops = args.ops.slice(start, start + size);
+        if (start > 0) await sleep(250);
+        const res = await runGuardedWrite(ctx, {
+          toolName: "ae_batch_set",
+          label: `ae_batch_set(${start + 1}-${start + ops.length} of ${args.ops.length})`,
+          expect: args.expect,
+          compId: args.comp_id,
+          read: () => ({ host: "batchRead", args: { comp_id: args.comp_id, ops: readOps(ops) } }),
+          write: { host: "batchSet", args: { comp_id: args.comp_id, ops, label: `Batch set ${start + 1}-${start + ops.length}` } },
+          check: (_before, after, w) => w.failed_at ? [] : batchMismatches(ops, after, start),
+          present: (_before, _after, w) => ({ written: w })
+        });
+        done += res.written.done;
+        mismatches.push(...res.receipt.mismatches);
+        chunks.push({ ops: `${start + 1}-${start + ops.length}`, done: res.written.done, matches: res.receipt.matches, checkpoint: res.checkpoint });
+        if (res.written.failed_at) {
+          return {
+            ok: false,
+            error: "op_failed",
+            failed_op: start + res.written.failed_at,
+            message: `Op ${start + res.written.failed_at} failed: ${res.written.error}. Ops before it in this chunk were applied (one undo step); later chunks were not run.`,
+            done,
+            chunks
+          };
+        }
+      }
+      return { ok: true, applied: true, done, chunks, matches: mismatches.length === 0, mismatches: mismatches.slice(0, 50), mismatches_truncated: mismatches.length > 50 };
+    }
+  }
+];
+
+// src/tools/ext/receipts.ts
+var fs23 = __toESM(require("node:fs"), 1);
+var path23 = __toESM(require("node:path"), 1);
 var DIFF_EPSILON = 1e-5;
 function valuesEqual(a, b) {
   if (a === b) return true;
@@ -15352,7 +15716,12 @@ var AUTO_CHECKPOINT_TOOLS = [
   "ae_add_markers",
   "ae_remove_markers",
   "ae_cue_keys",
-  "ae_remove_keyframes"
+  "ae_remove_keyframes",
+  "ae_shape",
+  "ae_set_essential_graphics",
+  "ae_render_templates",
+  "ae_version_footage",
+  "ae_batch_set"
 ];
 var AeCheckpointRevertSchema = external_exports.object({
   expect: ExpectSchema,
@@ -15458,7 +15827,7 @@ var receiptsTools = [
               actual: { project_path: "<unsaved>" }
             });
           }
-          if (!fs22.existsSync(actualProjectPath)) {
+          if (!fs23.existsSync(actualProjectPath)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -15467,16 +15836,16 @@ var receiptsTools = [
               actual: { project_path: actualProjectPath }
             });
           }
-          const ext2 = path22.extname(actualProjectPath) || ".aep";
-          const baseName = path22.basename(actualProjectPath, ext2);
+          const ext2 = path23.extname(actualProjectPath) || ".aep";
+          const baseName = path23.basename(actualProjectPath, ext2);
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          fs22.mkdirSync(checkpointDir, { recursive: true });
+          fs23.mkdirSync(checkpointDir, { recursive: true });
           const stamp2 = formatBackupTimestamp(/* @__PURE__ */ new Date());
           const safeLabel = sanitizeCheckpointLabel(args.label);
           const checkpointFileName = `${baseName}_${stamp2}_${safeLabel}${ext2}`;
-          const checkpointPath = path22.join(checkpointDir, checkpointFileName);
-          fs22.copyFileSync(actualProjectPath, checkpointPath);
-          const stat = fs22.statSync(checkpointPath);
+          const checkpointPath = path23.join(checkpointDir, checkpointFileName);
+          fs23.copyFileSync(actualProjectPath, checkpointPath);
+          const stat = fs23.statSync(checkpointPath);
           const receipt = buildReceipt({
             before: {
               project_path: actualProjectPath,
@@ -15492,7 +15861,7 @@ var receiptsTools = [
               checkpoint_exists: true
             },
             actualForExpected: {
-              checkpoint_exists: fs22.existsSync(checkpointPath)
+              checkpoint_exists: fs23.existsSync(checkpointPath)
             }
           });
           return {
@@ -15535,7 +15904,7 @@ var receiptsTools = [
         });
       }
       const checkpointDir = checkpointDirFor(actualProjectPath);
-      if (!fs22.existsSync(checkpointDir)) {
+      if (!fs23.existsSync(checkpointDir)) {
         return {
           project_path: actualProjectPath,
           checkpoint_dir: checkpointDir,
@@ -15543,10 +15912,10 @@ var receiptsTools = [
           truncated: false
         };
       }
-      const entries = fs22.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+      const entries = fs23.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
       const items = entries.map((e) => {
-        const fullPath = path22.join(checkpointDir, e.name);
-        const stat = fs22.statSync(fullPath);
+        const fullPath = path23.join(checkpointDir, e.name);
+        const stat = fs23.statSync(fullPath);
         return {
           name: e.name,
           path: fullPath,
@@ -15599,7 +15968,7 @@ var receiptsTools = [
           ctx.quarantine.assertClear();
           const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
           const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-          if (!fs22.existsSync(args.checkpoint_path)) {
+          if (!fs23.existsSync(args.checkpoint_path)) {
             throw new BridgeError({
               kind: "guard",
               op_id: opId,
@@ -15860,6 +16229,100 @@ var reframeTools = [
         throw err;
       }
     }
+  }
+];
+
+// src/tools/ext/shapes.ts
+var Vec2 = external_exports.array(external_exports.number()).length(2);
+var Color2 = external_exports.array(external_exports.number().min(0).max(1)).min(3).max(4);
+var ShapeSpecSchema = external_exports.object({
+  type: external_exports.enum(["rect", "ellipse", "star", "polygon", "path"]),
+  name: external_exports.string().min(1).max(200).optional().describe("The group's name. Default '<type> <n>'."),
+  size: Vec2.optional().describe("rect and ellipse: [width, height]."),
+  position: Vec2.optional().describe("The shape's centre inside its group (rect, ellipse, star, polygon)."),
+  roundness: external_exports.number().min(0).optional().describe("rect: corner radius."),
+  points: external_exports.number().int().min(3).max(100).optional().describe("star and polygon: number of points or sides."),
+  outer_radius: external_exports.number().positive().optional().describe("star and polygon."),
+  inner_radius: external_exports.number().positive().optional().describe("star only."),
+  rotation: external_exports.number().optional().describe("star and polygon: degrees."),
+  vertices: external_exports.array(Vec2).min(2).max(1e3).optional().describe("path: the points, in layer pixels."),
+  in_tangents: external_exports.array(Vec2).optional().describe("path: one per vertex, relative to it. Default straight lines."),
+  out_tangents: external_exports.array(Vec2).optional(),
+  closed: external_exports.boolean().optional().describe("path: default true."),
+  fill: external_exports.object({ color: Color2, opacity: external_exports.number().min(0).max(100).optional() }).optional(),
+  stroke: external_exports.object({ color: Color2, width: external_exports.number().min(0), opacity: external_exports.number().min(0).max(100).optional() }).optional(),
+  group_position: Vec2.optional().describe("The group's own Transform position.")
+}).superRefine((s, ctx) => {
+  const need = (ok, message) => ok || ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message });
+  if (s.type === "rect" || s.type === "ellipse") need(s.size !== void 0, `${s.type} needs size.`);
+  if (s.type === "star" || s.type === "polygon") need(s.points !== void 0 && s.outer_radius !== void 0, `${s.type} needs points and outer_radius.`);
+  if (s.type === "star") need(s.inner_radius !== void 0, "star needs inner_radius.");
+  if (s.type === "path") {
+    need(s.vertices !== void 0, "path needs vertices.");
+    const n = s.vertices?.length ?? 0;
+    need(s.in_tangents === void 0 || s.in_tangents.length === n, "in_tangents needs one entry per vertex.");
+    need(s.out_tangents === void 0 || s.out_tangents.length === n, "out_tangents needs one entry per vertex.");
+  }
+});
+var AeShapeSchema = external_exports.object({
+  comp_id: external_exports.number().int(),
+  layer: LayerSelectorSchema.describe("A shape layer (ae_create_layer type 'shape' makes an empty one)."),
+  add: external_exports.array(ShapeSpecSchema).max(200).optional().describe("Groups to add, in order, each at the bottom of the contents."),
+  remove: external_exports.array(external_exports.object({ index: external_exports.number().int().positive().optional(), name: external_exports.string().min(1).optional() }).refine((r) => r.index !== void 0 || r.name !== void 0)).max(200).optional().describe("Top-level contents to remove, by index or name (removed before anything is added)."),
+  expect: ExpectSchema
+}).refine((v) => (v.add?.length ?? 0) + (v.remove?.length ?? 0) > 0, { message: "Give shapes to add or contents to remove." });
+var kindOf = (t) => t === "polygon" ? "star" : t;
+function shapeMismatches(adds, beforeRaw, afterRaw, written) {
+  const m = [];
+  const before = beforeRaw;
+  const after = afterRaw;
+  if (!before || !after) return m;
+  const removed = (written.removed ?? []).length;
+  const added = written.added ?? [];
+  const want = before.count - removed + added.length;
+  expectThat(m, after.count === want, "count", want, after.count, "Content count is not what the edit should leave");
+  if (after.truncated) return m;
+  added.forEach((a, i) => {
+    const spec = adds[i];
+    const got = after.contents.find((c) => c.index === a.index);
+    if (!got || got.name !== a.name) {
+      m.push({ path: `contents[${a.index}]`, expected: a.name, actual: got?.name, message: `Group "${a.name}" is not at index ${a.index}` });
+      return;
+    }
+    const items = got.items ?? [];
+    const shape = items.find((x) => x.kind === kindOf(spec.type));
+    expectThat(m, shape !== void 0, `${a.name}.shape`, kindOf(spec.type), items.map((x) => x.kind), `Group "${a.name}" has no ${spec.type}`);
+    if (shape && spec.size) compareValues(spec.size, shape.size, `${a.name}.size`, m);
+    if (shape && spec.points !== void 0) compareValues(spec.points, shape.points, `${a.name}.points`, m);
+    if (shape && spec.vertices) compareValues(spec.vertices.length, shape.vertices, `${a.name}.vertices`, m);
+    const fill = items.find((x) => x.kind === "fill");
+    if (spec.fill) {
+      expectThat(m, fill !== void 0, `${a.name}.fill`, "fill", void 0, `Group "${a.name}" has no fill`);
+      if (fill) compareValues(spec.fill.color.slice(0, 3), fill.color?.slice(0, 3), `${a.name}.fill.color`, m);
+    }
+    const stroke = items.find((x) => x.kind === "stroke");
+    if (spec.stroke) {
+      expectThat(m, stroke !== void 0, `${a.name}.stroke`, "stroke", void 0, `Group "${a.name}" has no stroke`);
+      if (stroke) compareValues(spec.stroke.width, stroke.width, `${a.name}.stroke.width`, m);
+    }
+  });
+  return m;
+}
+var shapesTools = [
+  {
+    name: "ae_shape",
+    description: "Build a shape layer's contents: add groups (rectangle, ellipse, star, polygon, or a free path with tangents), each with an optional fill and stroke, and remove top-level contents, in one undo group guarded by `expect`. The read-back (a separate evalScript) lists the contents and checks each new group's shape, size, fill colour and stroke width. Change existing shape properties (or animate them) with ae_set_property on their path; ae_get_layer_full lists the paths. " + AGENT_SAFETY_GUIDANCE,
+    schema: AeShapeSchema,
+    handler: (args, ctx) => runGuardedWrite(ctx, {
+      toolName: "ae_shape",
+      label: `ae_shape(+${args.add?.length ?? 0} -${args.remove?.length ?? 0})`,
+      expect: args.expect,
+      compId: args.comp_id,
+      read: () => ({ host: "shapeContents", args: { comp_id: args.comp_id, layer: args.layer } }),
+      write: { host: "shapeEdit", args: { comp_id: args.comp_id, layer: args.layer, add: args.add, remove: args.remove, label: "Edit shape contents" } },
+      check: (before, after, w) => shapeMismatches(args.add ?? [], before, after, w),
+      present: (_before, after, w) => ({ added: w.added, removed: w.removed, contents: after?.contents })
+    })
   }
 ];
 
@@ -16312,8 +16775,8 @@ ${args.description}`,
 ];
 
 // src/tools/ext/track.ts
-var fs23 = __toESM(require("node:fs"), 1);
-var path23 = __toESM(require("node:path"), 1);
+var fs24 = __toESM(require("node:fs"), 1);
+var path24 = __toESM(require("node:path"), 1);
 function toGray(img) {
   const n = img.width * img.height;
   const data = new Float32Array(n);
@@ -16517,7 +16980,7 @@ var trackTools = [
     handler: async (args, ctx) => {
       const opId = ctx.bridge.newOpId();
       const framesDir = defaultFramesDir();
-      fs23.mkdirSync(framesDir, { recursive: true });
+      fs24.mkdirSync(framesDir, { recursive: true });
       const patchSize = (args.pattern_size ?? 31) | 1;
       const opts = {
         patchSize,
@@ -16565,14 +17028,14 @@ var trackTools = [
               points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
             }
           }
-          fs23.rmSync(snap.path, { force: true });
+          fs24.rmSync(snap.path, { force: true });
           if (lostAt2) break;
         }
         return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker.contrast };
       });
       const { points, lostAt } = tracked;
-      const previewPath = path23.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-      fs23.writeFileSync(
+      const previewPath = path24.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+      fs24.writeFileSync(
         previewPath,
         encodePng(
           drawTrackPreview(
@@ -16675,7 +17138,9 @@ var extTools = [
   ...markersTools,
   ...audioTools,
   ...keyframesTools,
-  ...inventoryTools
+  ...inventoryTools,
+  ...shapesTools,
+  ...productionTools
 ];
 
 // src/tools/quarantine.ts
@@ -17246,7 +17711,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path24.join(resolvedDataDir, "quarantine.json")
+    path25.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -17259,7 +17724,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path24.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path25.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo
