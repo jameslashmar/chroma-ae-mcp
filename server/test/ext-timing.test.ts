@@ -27,7 +27,7 @@ import {
   type HostTiming,
   type TimingCheck,
 } from "../src/tools/ext/timing.js";
-import { FakeLayer, FakeProject, FileSource, TextDocument, loadHost, type FakeComp } from "./support/fake-ae.js";
+import { FakeLayer, FakeProject, FileSource, Shape, TextDocument, loadHost, type FakeComp } from "./support/fake-ae.js";
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -592,5 +592,154 @@ describe("ae_timing_check", () => {
     expect(out.findings).toEqual([]);
     expect(out.verdict).toBe("clean");
     expect(out.lines).toHaveLength(1);
+  });
+});
+
+// ---------- review fixes ----------
+
+describe("facts: ordinary copy is not a finding", () => {
+  const facts = ["£4.99", "Aurora Pro", "Chroma London"];
+  const bad = (t: string) => unapprovedTokens(t, facts);
+
+  it("ignores Title Case calls to action and sale names", () => {
+    for (const t of ["Learn More", "Sign Up Today", "Black Friday", "Visit Our Store", "Get Started Now", "Discover Built Different"]) {
+      expect(bad(t)).toEqual([]);
+    }
+  });
+
+  it("ignores times, ratios, phone numbers, ordinals, #n, years and dates as single tokens", () => {
+    for (const t of ["Doors 10:30", "Open 24/7", "Call 0800 123 4567", "We are #1", "Our 2nd store", "Since 1999", "In 2031", "Ends 31 Dec", "From March 5th", "A 16/9 frame", "Call +44 20 7946 0958"]) {
+      expect(bad(t)).toEqual([]);
+    }
+  });
+
+  it("still reads real numbers around them", () => {
+    expect(bad("10:30 and 50% off").map((x) => x.text)).toEqual(["50%"]);
+    expect(bad("Ends 31 Dec, only 3 left").map((x) => x.text)).toEqual(["3"]);
+  });
+
+  it("keeps Unicode letters in names", () => {
+    expect(extractNames("Welcome to Zürich Airport")).toEqual(["Zürich Airport"]);
+    expect(bad("Fly from Zürich Airport").map((x) => x.text)).toEqual(["Zürich Airport"]);
+  });
+
+  it("flags the real misses: a wrong price is P0, a near-miss name is P1", () => {
+    expect(bad("Only £5.99")).toEqual([{ text: "£5.99", kind: "number" }]);
+    expect(bad("Meet Aurora Max")).toEqual([{ text: "Aurora Max", kind: "name" }]);
+    const only = new Set<TimingCheck>(["facts"]);
+    const sp = resolveMotionSpec({ facts });
+    const a = scene(8);
+    text(a.comp, "Only £5.99", 1, 5);
+    expect(run(readHost(a.project, a.comp), sp, only).findings[0].severity).toBe("P0");
+    const b = scene(8);
+    text(b.comp, "Aurora Max", 1, 5);
+    expect(run(readHost(b.project, b.comp), sp, only).findings[0].severity).toBe("P1");
+  });
+});
+
+describe("silent_film uses the range", () => {
+  const only = new Set<TimingCheck>(["silent_film"]);
+  const music = (project: FakeProject, comp: FakeComp, inS: number, outS: number) => {
+    const a = video(project, comp, "Music");
+    a.hasAudio = true;
+    a.inPoint = inS;
+    a.outPoint = outS;
+    return a;
+  };
+
+  it("flags a 5 s music layer in a 30 s film, and reports the uncovered stretch", () => {
+    const { project, comp } = scene(30);
+    music(project, comp, 0, 5);
+    const out = run(readHost(project, comp), undefined, only);
+    expect(out.findings).toHaveLength(1);
+    expect(out.findings[0]).toMatchObject({ check: "silent_film", severity: "P1", start_s: 5, end_s: 30 });
+    expect(out.audioLayers).toBe(1);
+  });
+
+  it("passes with full coverage, also from two layers, and ignores audio outside the range", () => {
+    const { project, comp } = scene(30);
+    music(project, comp, 0, 16);
+    music(project, comp, 15, 30);
+    expect(run(readHost(project, comp), undefined, only).findings).toEqual([]);
+    const o = scene(40);
+    music(o.project, o.comp, 30, 40);
+    const out = run(readHost(o.project, o.comp), undefined, only, [0, 25]);
+    expect(out.findings).toHaveLength(1);
+    expect(out.audioLayers).toBe(0);
+  });
+
+  it("allows an audio gap up to 15 s", () => {
+    const { project, comp } = scene(30);
+    music(project, comp, 0, 15);
+    music(project, comp, 29, 30);
+    expect(run(readHost(project, comp), undefined, only).findings).toEqual([]);
+  });
+});
+
+describe("truncated host data", () => {
+  const only = new Set<TimingCheck>(["dead_stretches"]);
+
+  it("treats a layer whose spans were cut as changing to its out point", () => {
+    const { project, comp } = scene(700);
+    const s = still(project, comp);
+    const pos = s.transform("ADBE Position");
+    // 220 separate moves (440 keys), each 1 s long with a 2 s rest between: more than MAX_SPANS.
+    for (let i = 0; i < 220; i++) {
+      pos.setValueAtTime(i * 3, [i, 0, 0]);
+      pos.setValueAtTime(i * 3 + 1, [i + 1, 0, 0]);
+    }
+    const host = readHost(project, comp);
+    const l = host.layers[0];
+    expect(l.truncated).toBe(true);
+    expect(l.spans).toHaveLength(200);
+    expect(l.change_from_s).toBeCloseTo(l.spans[199][1], 4);
+    const out = run(host, undefined, only);
+    expect(out.stretches).toEqual([]);
+    expect(out.findings.map((f) => f.severity)).toEqual(["P2"]);
+    expect(out.findings[0].message).toMatch(/read in part/);
+  });
+
+  it("caps the keys read per property", () => {
+    const { project, comp } = scene(2000);
+    const s = still(project, comp);
+    const op = s.transform("ADBE Opacity");
+    for (let i = 0; i < 600; i++) op.setValueAtTime(i, i % 2 ? 100 : 50);
+    const l = readHost(project, comp).layers[0];
+    expect(l.truncated).toBe(true);
+    expect(l.change_from_s).toBeGreaterThan(400);
+    expect(l.change_from_s).toBeLessThan(600);
+  });
+
+  it("skips dead_stretches and says so when layers were dropped", () => {
+    const { project, comp } = scene(10);
+    still(project, comp);
+    const host = readHost(project, comp);
+    host.truncated = true;
+    host.layer_count = 900;
+    const out = run(host, undefined, only);
+    expect(out.stretches).toEqual([]);
+    expect(out.deadSkipped).toBe(true);
+    expect(out.findings).toHaveLength(1);
+    expect(out.findings[0]).toMatchObject({ check: "dead_stretches", severity: "P2" });
+  });
+});
+
+describe("timing.jsx value comparison", () => {
+  it("does not count identical Shape or TextDocument keys as movement, but does count real changes", () => {
+    const { project, comp } = scene(10);
+    const s = still(project, comp);
+    const mk = (s.property("ADBE Mask Parade") as any).addProperty("ADBE Mask Atom");
+    const path = mk.property("ADBE Mask Shape");
+    const sh = (v: number) => Object.assign(new Shape(), { vertices: [[v, 0], [10, 10]], inTangents: [[0, 0], [0, 0]], outTangents: [[0, 0], [0, 0]] });
+    path.setValueAtTime(0, sh(0));
+    path.setValueAtTime(2, sh(0));
+    path.setValueAtTime(4, sh(5));
+    expect(readHost(project, comp).layers[0].spans).toEqual([[2, 4]]);
+  });
+});
+
+describe("expressions", () => {
+  it("is stated in the tool description and the result notes", () => {
+    expect(tool.description).toMatch(/expression marks its whole layer as changing/);
   });
 });

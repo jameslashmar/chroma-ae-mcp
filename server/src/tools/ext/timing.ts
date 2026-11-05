@@ -88,6 +88,8 @@ export interface HostTimingLayer {
   audio_muted: boolean;
   video_playing: boolean;
   expression: boolean;
+  /** Set when the layer was read in part: from this time to the out point it counts as changing. */
+  change_from_s?: number | null;
   spans: Array<[number, number]>;
   points: number[];
   opacity: HostOpacity;
@@ -110,7 +112,10 @@ export interface HostTiming {
   solo_any: boolean;
   layer_count: number;
   layers: HostTimingLayer[];
+  /** Layers past the host's cap were not read. */
   truncated: boolean;
+  /** The host's total key cap was hit; later properties and layers were read in part. */
+  keys_truncated?: boolean;
 }
 
 // ---------- findings ----------
@@ -368,8 +373,15 @@ export function changeIntervals(layers: HostTimingLayer[], soloAny: boolean): In
     const moments = [...l.points, ...(l.text_keys ?? []).map((k) => k.t)];
     for (const t of moments) if (pres.some((p) => t >= p[0] - EPS && t <= p[1] + EPS)) out.push([t, t]);
     if (l.expression || l.video_playing) out.push(...pres);
+    // Read in part (spans or properties cut off): the unread tail must not look dead.
+    if (l.truncated) out.push(...intersectIntervals([[l.change_from_s ?? l.in_s, l.out_s]], pres));
   }
   return mergeIntervals(out);
+}
+
+/** Layers the host read in part (properties, keys or spans cut off at its caps). */
+export function partialLayers(host: HostTiming): HostTimingLayer[] {
+  return host.layers.filter((l) => l.truncated && presence(l, host.solo_any).length > 0);
 }
 
 export function deadStretches(layers: HostTimingLayer[], soloAny: boolean, range: Interval, limit: number): DeadStretch[] {
@@ -412,24 +424,40 @@ export function deadStretchFindings(stretches: DeadStretch[], limit: number, fps
 // ---------- silent film ----------
 
 export function silentFilmFindings(layers: HostTimingLayer[], range: Interval, fps: number): { findings: TimingFinding[]; audio_layers: number } {
-  const carriers = layers.filter((l) => l.has_audio && l.audio_enabled && !l.audio_muted && l.out_s > l.in_s);
+  // Only audio that plays inside the checked range counts.
+  const carriers = layers.filter(
+    (l) => l.has_audio && l.audio_enabled && !l.audio_muted && l.out_s > l.in_s && l.out_s > range[0] + EPS && l.in_s < range[1] - EPS
+  );
   const length = range[1] - range[0];
-  if (carriers.length > 0 || length <= SILENT_AFTER_S + EPS) return { findings: [], audio_layers: carriers.length };
-  return {
-    audio_layers: 0,
-    findings: [
-      finding(fps, {
+  if (length <= SILENT_AFTER_S + EPS) return { findings: [], audio_layers: carriers.length };
+  const covered = mergeIntervals(carriers.map((l) => [Math.max(l.in_s, range[0]), Math.min(l.out_s, range[1])] as Interval));
+  const gaps: Interval[] = [];
+  let cursor = range[0];
+  for (const c of covered) {
+    if (c[0] > cursor + EPS) gaps.push([cursor, c[0]]);
+    cursor = Math.max(cursor, c[1]);
+  }
+  if (cursor < range[1] - EPS) gaps.push([cursor, range[1]]);
+  const findings = gaps
+    .filter((g) => g[1] - g[0] > SILENT_AFTER_S + EPS)
+    .map((g) => {
+      const whole = carriers.length === 0;
+      return finding(fps, {
         check: "silent_film",
         severity: "P1",
-        start_s: range[0],
-        end_s: range[1],
+        start_s: g[0],
+        end_s: g[1],
         layers: [],
-        message: `${r3(length)} s with no audio layer that is on and not muted (limit ${SILENT_AFTER_S} s)`,
-        fix: "Add a music bed, voice-over or sound design, or tell the client the film is silent on purpose",
-        detail: { length_s: r3(length), limit_s: SILENT_AFTER_S },
-      }),
-    ],
-  };
+        message: whole
+          ? `${r3(g[1] - g[0])} s with no audio layer that is on and not muted (limit ${SILENT_AFTER_S} s)`
+          : `${r3(g[1] - g[0])} s (${r3(g[0])}-${r3(g[1])} s) with no audio playing: the audio layers that are on do not cover it (limit ${SILENT_AFTER_S} s)`,
+        fix: whole
+          ? "Add a music bed, voice-over or sound design, or tell the client the film is silent on purpose"
+          : `Extend or loop the audio over ${r3(g[0])}-${r3(g[1])} s, or tell the client that stretch is silent on purpose`,
+        detail: { length_s: r3(g[1] - g[0]), limit_s: SILENT_AFTER_S, audio_layers: carriers.length },
+      });
+    });
+  return { findings, audio_layers: carriers.length };
 }
 
 // ---------- facts ----------
@@ -447,15 +475,44 @@ function numKey(core: string): string {
   return Number.isFinite(n) ? String(n) : core;
 }
 
+const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+
+/**
+ * Tokens that look like numbers but are not claims: times, ratios and fractions ("24/7"),
+ * phone-like digit groups, "#1", day-month dates and years 1900-2099. Masked out before
+ * numbers are read, so "10:30" is not 10 and 30. A currency sign or % keeps a number real
+ * ("£1,999"), and a four-digit year with a decimal or comma is not a year.
+ */
+const COMPOSITE_RES: RegExp[] = [
+  /\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\.?)?/gi,
+  /\d+\/\d+(?:\/\d+)?/g,
+  /#\s?\d+/g,
+  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${MONTHS})\\b\\.?(?:\\s+(?:19|20)\\d{2})?`, "gi"),
+  new RegExp(`\\b(?:${MONTHS})\\b\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+(?:19|20)\\d{2})?\\b`, "gi"),
+  /(?<![£$€\d.,])\b(?:19|20)\d{2}\b(?![\d%]|[.,]\d)/g,
+];
+const PHONE_RE = /\+?\(?\d{2,5}\)?(?:[ -]\d{2,5}){2,}/g;
+
+function maskComposites(text: string): string {
+  let t = text;
+  const blank = (m: string) => " ".repeat(m.length);
+  t = t.replace(PHONE_RE, (m) => (m.replace(/\D/g, "").length >= 8 ? blank(m) : m));
+  for (const re of COMPOSITE_RES) t = t.replace(re, blank);
+  return t;
+}
+
 /**
  * Numbers in text: digits with an optional currency sign, thousands commas, decimals and %,
  * and bn/m/k after a currency sign. Digits glued to letters ("3D", "4K", "H264", "2nd") are not numbers.
+ * With `skipComposite` (the default) times, ratios, phone numbers, "#n", dates and years are
+ * not numbers either.
  */
-export function extractNumbers(text: string): Array<{ text: string; key: string }> {
+export function extractNumbers(text: string, skipComposite = true): Array<{ text: string; key: string }> {
   const out: Array<{ text: string; key: string }> = [];
-  NUM_RE.lastIndex = 0;
+  if (skipComposite) text = maskComposites(text);
+  const re = new RegExp(NUM_RE.source, NUM_RE.flags);
   let m: RegExpExecArray | null;
-  while ((m = NUM_RE.exec(text))) {
+  while ((m = re.exec(text))) {
     const start = m.index;
     const currency = m[1];
     let core = m[2];
@@ -465,18 +522,18 @@ export function extractNumbers(text: string): Array<{ text: string; key: string 
       core = core.replace(/,+$/, "");
       end -= m[2].length - core.length;
     }
-    if (start > 0 && /[A-Za-z0-9]/.test(text[start - 1])) continue;
+    if (start > 0 && /[\p{L}0-9]/u.test(text[start - 1])) continue;
     if (suffix && suffix !== "%" && !currency) {
       suffix = "";
       end -= (m[3] ?? "").length;
     }
-    if (end < text.length && /[A-Za-z]/.test(text[end])) continue;
+    if (end < text.length && /\p{L}/u.test(text[end])) continue;
     out.push({ text: text.slice(start, end), key: numKey(core) });
   }
   return out;
 }
 
-const NAME_WORD = /^[A-Z][A-Za-z'’&-]*$/;
+const NAME_WORD = /^\p{Lu}[\p{L}'’&-]*$/u;
 const LEAD_STOP = new Set(["the", "a", "an", "our", "your", "my", "this", "that", "these", "those", "new", "introducing", "meet", "why", "how", "what", "when", "get", "buy", "shop", "try", "join", "see", "watch", "discover", "free", "now", "and", "or", "but", "with", "for", "from", "in", "on", "at", "to", "by", "it", "its", "we", "you"]);
 const CONNECT = new Set(["of", "the", "de", "van", "von", "du", "la", "le", "&"]);
 
@@ -484,16 +541,16 @@ const CONNECT = new Set(["of", "the", "de", "van", "von", "du", "la", "le", "&"]
  * Capitalised multi-word runs ("Aurora Pro", "Bank of America"). Conservative: all-caps text
  * is skipped (shouted copy has no case to go by), so is a Title Case line of four words or
  * more (a headline), and common lead-in words ("Introducing", "The", "New") are stripped
- * before a run is judged. A run ends at punctuation.
+ * before a run is judged. A run ends at punctuation. Letters are Unicode ("Zürich Airport").
  */
 export function extractNames(text: string): string[] {
   const out: string[] = [];
   for (const segment of text.split(/[\r\n]+/)) {
     const seg = segment.trim();
-    if (!seg || !/[a-z]/.test(seg)) continue;
+    if (!seg || !/\p{Ll}/u.test(seg)) continue;
     const words = seg.split(/\s+/);
-    const alpha = words.filter((w) => /[A-Za-z]/.test(w));
-    if (alpha.length >= 4 && alpha.every((w) => /^[A-Z]/.test(w))) continue;
+    const alpha = words.filter((w) => /\p{L}/u.test(w));
+    if (alpha.length >= 4 && alpha.every((w) => /^\p{Lu}/u.test(w))) continue;
     let run: string[] = [];
     const flush = () => {
       while (run.length && LEAD_STOP.has(run[0].toLowerCase())) run.shift();
@@ -518,12 +575,41 @@ export function extractNames(text: string): string[] {
   return out;
 }
 
-const normName = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9&]+/g, " ").trim()} `;
+const normName = (s: string) => ` ${s.toLowerCase().replace(/[^\p{L}\p{N}&]+/gu, " ").trim()} `;
+
+/**
+ * Words of ordinary call-to-action and marketing copy. A Capitalised run that contains any of
+ * them ("Learn More", "Sign Up Today", "Black Friday") is a phrase, not a name.
+ */
+export const COMMON_COPY_WORDS = new Set([
+  "learn", "more", "sign", "up", "today", "visit", "our", "store", "shop", "now", "get", "started", "buy", "free", "new", "black", "friday",
+  "built", "different", "discover", "find", "out", "see", "how", "why", "what", "the", "a", "an", "and", "of", "for", "with", "your", "you", "we",
+  // Further everyday copy words, days and months.
+  "product", "products", "launch", "event", "events", "collection", "sale", "offer", "offers", "limited", "edition", "special", "best", "top", "big", "great",
+  "welcome", "thank", "thanks", "join", "call", "book", "contact", "order", "download", "watch", "read", "view", "start", "tomorrow", "tonight", "cyber", "monday",
+  "tuesday", "wednesday", "thursday", "saturday", "sunday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+  "november", "december", "all", "this", "that", "only", "save", "off", "pre", "available", "coming", "soon", "next", "last", "first", "online", "in", "on", "at", "to", "by",
+]);
+
+const nameWords = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+/**
+ * Whether an uncovered Capitalised run is worth flagging. Not when it contains a common copy word.
+ * Otherwise yes when it shares a word with a fact (a near-miss of an approved name, the real
+ * risk) or contains a capitalised word that is not common copy (a proper noun nobody approved).
+ */
+function isLikelyUnapprovedName(name: string, facts: string[]): boolean {
+  const caps = name.split(/\s+/).filter((w) => NAME_WORD.test(w)).flatMap(nameWords);
+  if (caps.some((w) => COMMON_COPY_WORDS.has(w))) return false;
+  const factWords = new Set(facts.flatMap(nameWords));
+  if (caps.some((w) => factWords.has(w))) return true;
+  return caps.some((w) => w.length >= 2 && !COMMON_COPY_WORDS.has(w));
+}
 
 /** Text tokens no fact covers. Numbers match on value alone (a fact "£4.99" covers "4.99"); a name is covered when it contains a fact or a fact contains it. */
 export function unapprovedTokens(text: string, facts: string[]): FactToken[] {
   const factNums = new Set<string>();
-  for (const f of facts) for (const n of extractNumbers(f)) factNums.add(n.key);
+  for (const f of facts) for (const n of extractNumbers(f, false)) factNums.add(n.key);
   const factNames = facts.map(normName).filter((f) => f.trim().length >= 2);
   const out: FactToken[] = [];
   const seen = new Set<string>();
@@ -535,11 +621,15 @@ export function unapprovedTokens(text: string, facts: string[]): FactToken[] {
   for (const name of extractNames(text)) {
     const nn = normName(name);
     if (factNames.some((f) => nn.includes(f) || f.includes(nn)) || seen.has("w" + nn)) continue;
+    if (!isLikelyUnapprovedName(name, facts)) continue;
     seen.add("w" + nn);
     out.push({ text: name, kind: "name" });
   }
   return out;
 }
+
+/** A price or a percentage that no fact covers is a wrong claim until shown otherwise (P0); everything else is a prompt to check (P1). */
+const isMoneyOrPercent = (t: FactToken) => t.kind === "number" && (/^[£$€]/.test(t.text) || /%$/.test(t.text));
 
 export function factsFindings(lines: TextLine[], facts: string[], range: Interval, fps: number): TimingFinding[] {
   if (facts.length === 0) return [];
@@ -555,7 +645,7 @@ export function factsFindings(lines: TextLine[], facts: string[], range: Interva
     out.push(
       finding(fps, {
         check: "facts",
-        severity: "P0",
+        severity: bad.some(isMoneyOrPercent) ? "P0" : "P1",
         start_s: x.start_s,
         end_s: x.end_s,
         layers: [ref(x.layer)],
@@ -614,9 +704,45 @@ export function analyzeTiming(host: HostTiming, spec: ResolvedMotionSpec, checks
     reports = readingReport(lines, spec, range, fps);
     findings.push(...unreadFindings(reports, fps));
   }
+  let deadSkipped = false;
+  const partial = partialLayers(host);
   if (checks.has("dead_stretches")) {
-    stretches = deadStretches(host.layers, host.solo_any, range, spec.dead_stretch_s);
-    findings.push(...deadStretchFindings(stretches, spec.dead_stretch_s, fps));
+    if (host.truncated) {
+      // Layers past the host's cap were never read: any gap could be filled by one of them.
+      deadSkipped = true;
+      findings.push(
+        finding(fps, {
+          check: "dead_stretches",
+          severity: "P2",
+          start_s: range[0],
+          end_s: range[1],
+          layers: [],
+          message: `dead_stretches skipped: only the first ${host.layers.length} of ${host.layer_count} layers were read, so a gap could be filled by a layer that was not read`,
+          fix: "Run it on a comp with fewer layers (pre-compose groups), or check the timeline by eye",
+          detail: { layers_read: host.layers.length, layer_count: host.layer_count },
+        })
+      );
+    } else {
+      stretches = deadStretches(host.layers, host.solo_any, range, spec.dead_stretch_s);
+      findings.push(...deadStretchFindings(stretches, spec.dead_stretch_s, fps));
+      if (partial.length > 0) {
+        // Properties or keys were cut off at the host's caps: those layers count as changing from
+        // the cut-off on, so stretches they cover are not reported, and may be missed.
+        const from = Math.min(...partial.map((l) => l.change_from_s ?? l.in_s));
+        findings.push(
+          finding(fps, {
+            check: "dead_stretches",
+            severity: "P2",
+            start_s: Math.max(range[0], from),
+            end_s: range[1],
+            layers: partial.slice(0, 8).map(ref),
+            message: `${partial.length} layer${partial.length === 1 ? " was" : "s were"} read in part (too many properties or keys), so they count as changing from where the read stopped and dead stretches there can be missed`,
+            fix: "Check that stretch by eye or with confirm_with_frames",
+            detail: { layers: partial.length, keys_truncated: host.keys_truncated === true },
+          })
+        );
+      }
+    }
   }
   let audioLayers: number | undefined;
   if (checks.has("silent_film")) {
@@ -625,7 +751,7 @@ export function analyzeTiming(host: HostTiming, spec: ResolvedMotionSpec, checks
     findings.push(...s.findings);
   }
   if (checks.has("facts")) findings.push(...factsFindings(lines, spec.facts, range, fps));
-  return { findings, lines, reports, stretches, audioLayers };
+  return { findings, lines, reports, stretches, audioLayers, deadSkipped, partial: partial.length };
 }
 
 async function frameStage(
@@ -739,10 +865,13 @@ export async function timingCheckHandler(args: AeTimingCheckArgs, ctx: ToolConte
     `Range ${r3(rs)}-${r3(re)} s (${args.start_s === undefined && args.end_s === undefined ? "the work area" : "as asked"}). Lines are judged on their whole on-screen span even when it crosses the range edge.`,
     `On screen means in to out point with Opacity above ${MIN_VISIBLE_OPACITY} %; hold keys on Opacity, animator opacity, mattes and blend modes are not modelled.`,
     "Text inside precomps is not read (a precomp only counts as playing or still). Effects that move by themselves with no keys or expression are not seen as change; use confirm_with_frames to check a stretch.",
-    "facts: numbers match on value alone; a name is covered when it contains a fact or a fact contains it; all-caps text and Title Case lines of 4+ words are skipped.",
+    "Expressions: any enabled expression marks its whole layer as changing, even if it produces no visible movement (a known false negative for dead_stretches).",
+    "facts: a price or percentage no fact covers is P0; other numbers and names are P1. Numbers match on value alone; times, ratios, phone numbers, dates, years and #n are not read as numbers; a name is covered when it contains a fact or a fact contains it; all-caps text, Title Case lines of 4+ words and common call-to-action phrases (\"Learn More\", \"Black Friday\") are skipped.",
+    "silent_film: only audio layers that overlap the range count, and an audio-free stretch over 15 s is flagged.",
   ];
   if (host.truncated) notes.push(`Only the first ${host.layers.length} of ${host.layer_count} layers were read.`);
-  if (host.layers.some((l) => l.truncated)) notes.push("A layer with very many properties or keyframes was read in part.");
+  if (a.deadSkipped) notes.push("dead_stretches was skipped because layers were not read (see the P2 finding).");
+  else if (a.partial > 0) notes.push(`${a.partial} layer(s) with very many properties or keyframes were read in part; they count as changing from where the read stopped, so dead stretches there can be missed.`);
   if (checks.has("facts") && spec.facts.length === 0) notes.push("The brief has no motion.facts list, so the facts check had nothing to compare against.");
   if (checks.has("first_frame") && !wantFirst) notes.push("first_frame was not run.");
 
@@ -786,8 +915,9 @@ export const timingTools: ToolDefinition<any>[] = [
       "(1) unread_lines: each text line's on-screen time (in to out, narrowed where Opacity is under 5 %, one line per Source Text key) against reading time = base + per-word, the last line at least last_line_s (defaults 0.5 s + 0.3 s per word, 2 s); " +
       "(2) dead_stretches: spans over dead_stretch_s (default 3 s) where no keyframe segment moves, no layer comes or goes, no video footage or animated precomp plays (stills and solids don't count), computed from layer data with no render (`confirm_with_frames` also diffs three rendered frames in each of the first three stretches); " +
       "(3) first_frame: renders the first frame of the range (the work area start by default) and flags it when blank, black or transparent; " +
-      "(4) silent_film: over 15 s with no audio layer that is on and unmuted; " +
-      "(5) facts: with `motion.facts` in the brief, every number and Capitalised multi-word name in visible text that no fact covers. " +
+      "(4) silent_film: only audio layers that overlap the range and are on and unmuted count; an audio-free stretch over 15 s inside a range over 15 s is flagged (P1) with its start and end; " +
+      "(5) facts: with `motion.facts` in the brief, numbers and Capitalised multi-word names in visible text that no fact covers; a price or percentage is P0, anything else P1; times, dates, phone numbers, ratios and ordinary call-to-action phrases (Learn More, Black Friday) are ignored. " +
+      "Known limits: any enabled expression marks its whole layer as changing (so a layer with a dead expression hides a dead stretch); layers or properties beyond the host's read caps are marked, and dead_stretches is skipped (P2) when layers were not read. " +
       "Returns `spec` (register, which fields came from the brief, thresholds used) and `findings` sorted P0 first, each with start/end in seconds and frames, layers, a message and a one-line fix. " +
       "Range: the work area, or start_s/end_s. Only the first-frame check (and confirm_with_frames) renders; the time indicator and project are not touched. Text in precomps is not read.",
     schema: AeTimingCheckSchema,
