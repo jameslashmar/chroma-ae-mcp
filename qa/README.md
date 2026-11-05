@@ -54,7 +54,7 @@ node qa/smoke-mcp.mjs --dir D:/_work/qa/smoke
 - `ae_ui_screenshot` passes when AE is minimized too, because it then reports `ae_minimized` instead of an image.
 - It covers the skills (a project skill saved, listed and run into its own comp), data builds, a 9:16 reframe, the asset import and diagnostics. The global skills folder and the asset watcher setting are left alone.
 
-### Waves 1-3 steps (not run live yet)
+### Waves 1-3 steps
 
 The 69 tools added in waves 1-3 (layer ops, multi-comp apply, annotate, comp settings, preflight, session changes, captions, rig and recipes, fit text, stagger, time remap, camera, explain, describe, scrub, footage interpretation, paths, memory, render queue edits, render batch, collect, deliver, loudness, legibility, variants, learn taste, project session) have steps in the smoke test. **No wave 1-3 tool has run in a live After Effects**; the steps come from the tools' schemas and results, so expect to adjust some arguments and checks on the first run.
 
@@ -67,7 +67,7 @@ The 69 tools added in waves 1-3 (layer ops, multi-comp apply, annotate, comp set
 - **First live run (AE 26.2.1) corrections.** `ae_import_assets` ages its still for real (a 2.5 s wait): `fs.utimesSync` moves only mtime, while the importer also counts ctime and birthtime, so the file still looked half-written and nothing was imported. `ae_export_mogrt` is called without `allow_font_dialog`; the scene's Space Grotesk is installed locally, not from Adobe Fonts, so the tool must refuse and name the font (that refusal is the pass; AE would otherwise open a modal "fonts were not synced from Adobe" dialog that blocks the whole queue). `ae_render_queue_apply_spec` passes when the only skipped key is Channels `RGB` (an H.264 template has no Channels key); any other skipped key, such as Audio Sample Rate or Output Audio, fails the step. `ae_dialogs` shows the OK of an AE-painted dialog as `OK` (OCR reads `0K`, kept as `raw_name`); a two-button AE-painted dialog can only be cancelled unattended.
 - `ae_learn_taste` and `ae_taste_baseline` write to the server's learn-taste ledger (not the project) and `ae_taste_rules` is only called to be refused or listed, so no taste rule is saved. Each run adds a baseline to that ledger, which keeps 20, so it can push out the user's oldest baseline; run the smoke against a server with its own data dir to avoid that.
 
-### Waves 4-5 steps (not run live yet)
+### Waves 4-5 steps
 
 The 18 compositing tools of wave 4 (planar tracking, stabilize, clean plate, inpaint, mattes, patch fits, patch check, screen replacement) and the 6 new tools of wave 5 (`ae_create_comp`, `ae_project_items`, `ae_project_settings`, `ae_view`, `ae_keyframes_transform`, `ae_detect_cuts`), with the wave 5 extensions of older tools, have steps in the smoke test. **None of them has run in a live After Effects.** The arguments come from the current zod schemas (every call was also validated against them offline, with a fake endpoint, which only proves the arguments are accepted); the checks on results are first guesses, so expect to adjust some on the first run. The build handoffs were only a start: some of their steps used helpers that do not exist (`ae_undo`, `ae_comp_create`) or arguments that changed.
 

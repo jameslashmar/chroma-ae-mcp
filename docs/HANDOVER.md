@@ -1,5 +1,21 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## Live smoke, 2026-11-05 (read this first)
+
+`qa/smoke-mcp.mjs` ran on After Effects 26.2.1 on Windows, on a generated scratch project. Four runs: 112 of 501, 466 of 522, 518 of 527, 519 of 526. So statements below that a tool "has not run in AE" are out of date for what the smoke covers. The smoke checks that tools work and read back correctly; it does not judge how good a result looks, and it uses no real footage, so tracker, clean plate, grain and colour match quality on real shots is still untested.
+
+What the live runs found that the fake AE could not show:
+- ExtendScript refuses ES3 reserved words that node:vm accepts (`var short`, an unquoted `delete` key). One such file used to stop every later ext file loading; the service now loads each file in its own try/catch and the linter refuses them.
+- Removing the last Time Remap key hides the property, so new keys are written before old ones go.
+- AE pre-lists hidden children (text selectors, stroke dashes): `canAddProperty` tells what must be added first.
+- Dropdown controls have a per-instance `Pseudo/@@` match name: recognise them by `isDropdownEffect`.
+- Renaming an effect by script does not update expressions; `autoFixExpressions` only takes bare names.
+- `exportAsMotionGraphicsTemplate` opens a modal dialog for fonts not from Adobe Fonts.
+
+**Open problem: aerender.** The 7 remaining failures are all aerender jobs that never start rendering: the log stops at the version line or the launch line, and the `AfterFX.com` engine is idle or gone. In the last run 3 of 7 jobs worked. Most manual runs hung too, including with AE closed, which points away from the MCP's code, but the cause is not proven. Two guesses did not hold: "started too soon after the previous job" and "our service boots inside the engine". It worked on 2026-10-30. Not tried yet: a restart of the machine, and turning off the other CEP extensions the engine loads. Until it is solved, jobs fail cleanly after 3 attempts instead of hanging, and `ae_render_batch` runs one aerender at a time.
+
+AE-painted dialogs (Crash Repair, save prompts) cannot be answered by `ae_dialog_respond` when they have several buttons; a person, or focusing AE and sending Enter for the default button, has to do it.
+
 After wave 3, Emre asked for compositing tools: remove something from a shot, track it, fix a single frame and track the fix back. That became wave 4. A coverage audit of the AE Scripting Guide against the tools then found 28 gaps (6 new tools, 22 extensions; its first two defect fixes, `eea1e63`, were committed before the wave 4 commit); Emre chose to build all of them as wave 5. Same branch `feat/roadmap-0.4`, one commit per wave. Emre again decided against a live After Effects test for now. **None of the wave 4 or wave 5 tools has run in After Effects**, and the live smoke run that is coming has never happened: expect to adjust some arguments and checks on the first pass. This section covers:
 - what was added;
 - how it was checked;
