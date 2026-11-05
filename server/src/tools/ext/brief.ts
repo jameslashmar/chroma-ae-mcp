@@ -229,7 +229,7 @@ export const AeBriefSchema = z
   })
   .refine((v) => (!v.set && v.import_swatches?.confirm !== true) || v.expect !== undefined, { message: "Saving a brief needs expect.project_path." });
 
-const BRIEF_FIELDS = ["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change"] as const;
+const BRIEF_FIELDS = ["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change", "motion"] as const;
 
 /** Questions for missing fields, shaped for ae_ask_user where a choice fits and for the chat otherwise. */
 export const BRIEF_QUESTIONS: Record<(typeof BRIEF_FIELDS)[number], { question: string; options?: Array<{ id: string; label: string }>; multi_select?: boolean }> = {
@@ -260,6 +260,15 @@ export const BRIEF_QUESTIONS: Record<(typeof BRIEF_FIELDS)[number], { question: 
   brand_colors: { question: "Which brand colours should it use (hex codes)?" },
   fonts: { question: "Which fonts should it use?" },
   do_not_change: { question: "Is there anything I must leave alone?" },
+  motion: {
+    question: "What kind of motion is this? It sets the timing, easing and stagger the checks hold the work to.",
+    options: [
+      { id: "ui_micro", label: "UI micro: quick, functional (150-400 ms)" },
+      { id: "brand_film", label: "Brand film: smooth, premium, no overshoot" },
+      { id: "energetic", label: "Energetic: snappy, punchy, some overshoot" },
+      { id: "handmade", label: "Handmade: slower, stepped, organic" },
+    ],
+  },
 };
 
 export function briefPath(projectPath: string): string {
@@ -282,13 +291,27 @@ export function readBrief(file: string): Brief | null {
   }
 }
 
-/** Merges `patch` into `current`; empty values clear a field. */
+/**
+ * Merges `patch` into `current`; empty values clear a field. `motion` merges one level deep:
+ * each sub-field in the patch replaces that sub-field whole, an empty sub-field ("", [], {})
+ * clears it, omitted sub-fields are kept. `motion: {}` clears the whole spec, and a motion
+ * left with no sub-fields is dropped.
+ */
 export function mergeBrief(current: Brief | null, patch: BriefFields, now: Date): Brief {
   const next: Record<string, unknown> = { ...(current ?? {}) };
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
     if (isEmpty(v)) delete next[k];
-    else next[k] = v;
+    else if (k === "motion") {
+      const merged: Record<string, unknown> = { ...((next.motion as object | undefined) ?? {}) };
+      for (const [mk, mv] of Object.entries(v as object)) {
+        if (mv === undefined) continue;
+        if (isEmpty(mv)) delete merged[mk];
+        else merged[mk] = mv;
+      }
+      if (Object.keys(merged).length === 0) delete next.motion;
+      else next.motion = merged;
+    } else next[k] = v;
   }
   next.updated_at = now.toISOString();
   return next as Brief;
@@ -314,6 +337,13 @@ export async function loadMotionSpec(ctx: ToolContext): Promise<ResolvedMotionSp
   const brief = file ? readBrief(file) : null;
   const parsed = MotionSpecSchema.safeParse(brief?.motion ?? {});
   return { ...resolveMotionSpec(parsed.success ? parsed.data : null), brief_path: brief ? file : null };
+}
+
+/** The brief's motion spec filled from register defaults, for the ae_brief result. A malformed stored spec falls back to defaults. */
+function motionResolved(brief: Brief | null) {
+  const parsed = MotionSpecSchema.safeParse(brief?.motion ?? {});
+  const r = resolveMotionSpec(parsed.success ? parsed.data : null);
+  return parsed.success ? r : { ...r, warning: "The stored motion spec does not validate; register defaults are used." };
 }
 
 export async function openProjectPath(ctx: ToolContext): Promise<string> {
@@ -395,6 +425,8 @@ export const briefTools: ToolDefinition<any>[] = [
     description:
       "Read or save the open project's brief: goal, audience, format, feel, references, brand colours and fonts, and what not to change. It lives next to the .aep as <name>.brief.json, so it travels with the project. " +
       "Call it at the start of any creative job. The result lists `missing` fields with `questions`; ask the ones that matter for the task, choices through ae_ask_user (pass the question and options as given) and open questions in the chat, then save the answers with `set`. " +
+      "`motion` is the project's motion language as numbers: register (ui_micro, brand_film (default), energetic, handmade), signature_ease, durations_ms, stagger_ms, overshoot_max_pct, exit_ratio, platform safe zone, min_text_pct, reading time, dead_stretch_s, facts, banned and beats. The motion, timing and house-style checks read their thresholds from it; anything left out comes from the register's defaults (see `motion_resolved` in the result, where `from_brief` names what was set). " +
+      "Saving `motion` merges one level deep: `set: {motion: {platform: 'reels_9_16'}}` keeps the register, beats and the rest; each sub-field you give replaces that sub-field whole; an empty one (\"\", [], {}) clears it; `motion: {}` clears the whole spec. A bad value (unknown register, a beat that ends before it starts, hero_s outside its beat) is rejected and nothing is saved. `motion` is listed as missing only while none of it is set. " +
       "Respect `do_not_change` in everything you do. Unsaved projects have no brief until they are saved. Never touches the AE project. " +
       "`import_swatches` {path, confirm} reads a client .ase palette through After Effects and lists its colours as #rrggbb (RGB and Gray exact, CMYK and LAB approximate, no names, so they are numbered); show them to the user with ae_ask_user, then repeat with confirm true to merge them into brand_colors (existing colours are kept, 12 at most).",
     schema: AeBriefSchema,
@@ -450,6 +482,8 @@ export const briefTools: ToolDefinition<any>[] = [
         exists: brief !== null,
         saved,
         brief,
+        motion: brief?.motion ?? null,
+        motion_resolved: motionResolved(brief),
         missing,
         questions: missing.map((field) => ({ field, ...BRIEF_QUESTIONS[field] })),
         ...(swatchReport ? { swatch_import: swatchReport } : {}),

@@ -61,7 +61,7 @@ describe("ae_brief", () => {
     const aep = path.join(tempDir(), "Shot.aep");
     const out = await tool("ae_brief").handler(AeBriefSchema.parse({}), ctxFor(aep));
     expect(out).toMatchObject({ ok: true, exists: false, saved: false, brief: null });
-    expect(out.missing).toEqual(["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change"]);
+    expect(out.missing).toEqual(["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change", "motion"]);
     const feel = out.questions.find((q: any) => q.field === "feel");
     expect(feel).toMatchObject({ multi_select: true });
     expect(feel.options.length).toBeGreaterThan(2);

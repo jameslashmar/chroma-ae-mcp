@@ -49,13 +49,19 @@ export const PLATFORM_PRESETS = {
 export type PlatformPreset = keyof typeof PLATFORM_PRESETS;
 export const PLATFORM_PRESET_IDS = Object.keys(PLATFORM_PRESETS) as PlatformPreset[];
 
-export const MotionBeatSchema = z.object({
-  start_s: z.number().min(0),
-  end_s: z.number().min(0),
-  role: z.string().min(1).max(40).optional().describe("hook, tension, reveal, proof, payoff, claim, cta, ..."),
-  text: z.string().max(300).optional().describe("What is on screen in this beat."),
-  hero_s: z.number().min(0).optional().describe("The frame that must work as a still."),
-});
+export const MotionBeatSchema = z
+  .object({
+    start_s: z.number().min(0),
+    end_s: z.number().min(0),
+    role: z.string().min(1).max(40).optional().describe("hook, tension, reveal, proof, payoff, claim, cta, ..."),
+    text: z.string().max(300).optional().describe("What is on screen in this beat."),
+    hero_s: z.number().min(0).optional().describe("The frame that must work as a still."),
+  })
+  .refine((b) => b.end_s > b.start_s, { message: "a beat must end after it starts (end_s > start_s)", path: ["end_s"] })
+  .refine((b) => b.hero_s === undefined || (b.hero_s >= b.start_s && b.hero_s <= b.end_s), {
+    message: "hero_s must fall inside the beat (start_s..end_s)",
+    path: ["hero_s"],
+  });
 
 export const MotionSpecSchema = z
   .object({
