@@ -210,6 +210,50 @@
     };
   };
 
+  function isKind(l, name) {
+    try {
+      return typeof G[name] !== "undefined" && l instanceof G[name];
+    } catch (eK) {
+      return false;
+    }
+  }
+
+  // What the choreography checks need to know about a layer: its time span,
+  // kind, size, parent and any expression on position, scale or rotation.
+  // Read-only; every access is guarded since layer types differ.
+  function layerInfo(l) {
+    var kind = "av";
+    if (isKind(l, "CameraLayer")) kind = "camera";
+    else if (isKind(l, "LightLayer")) kind = "light";
+    else if (isKind(l, "TextLayer")) kind = "text";
+    else if (isKind(l, "ShapeLayer")) kind = "shape";
+    var info = { index: l.index, id: l.id, name: l.name, kind: kind, in_point: null, out_point: null, width: null, height: null, parent: null, transform_expressions: [] };
+    try { info.in_point = l.inPoint; info.out_point = l.outPoint; } catch (e0) {}
+    try { if (l.nullLayer === true) info.kind = "null"; } catch (e1) {}
+    try { if (kind !== "camera" && kind !== "light") { info.width = l.width; info.height = l.height; } } catch (e2) {}
+    try { if (l.parent) info.parent = l.parent.id; } catch (e3) {}
+    var names = ["ADBE Position", "ADBE Scale", "ADBE Rotate Z"];
+    var tg = null;
+    try { tg = l.property("ADBE Transform Group"); } catch (e4) { tg = null; }
+    if (tg) {
+      for (var n = 0; n < names.length; n++) {
+        try {
+          var tp = tg.property(names[n]);
+          if (tp && tp.canSetExpression && tp.expressionEnabled && tp.expression !== "") {
+            info.transform_expressions.push({ name: tp.name, text: String(tp.expression).substring(0, 300) });
+          }
+        } catch (e5) {}
+      }
+    }
+    return info;
+  }
+
+  // The effect an effect property belongs to, so a slider can be told apart by its effect's name.
+  function effectNameOf(layer, path) {
+    if (path.length < 2 || path[0] !== "ADBE Effect Parade") return null;
+    try { return layer.property("ADBE Effect Parade").property(path[1]).name; } catch (eN) { return null; }
+  }
+
   // Lists the keyframed numeric properties (2+ keys) of a comp's layers, for
   // the motion review. args: { comp_id, layers? }. Each path step is a match
   // name, except inside indexed groups (effects, masks, shape contents),
@@ -311,6 +355,8 @@
               last_key_time: p.keyTime(keys),
               expression: expr
             };
+            var fxName = effectNameOf(layer, nextPath);
+            if (fxName !== null) entry.effect_name = fxName;
             if (ancestorOnly[layer.id]) entry.ancestor_only = true;
             found.push(entry);
           }
@@ -335,6 +381,11 @@
     var projectPath = "<unsaved>";
     try { if (app.project.file) projectPath = app.project.file.fsName; } catch (e4) {}
 
+    var layerInfos = [];
+    for (i = 0; i < layers.length; i++) {
+      if (!ancestorOnly[layers[i].id]) layerInfos.push(layerInfo(layers[i]));
+    }
+
     return {
       comp: {
         id: c.id,
@@ -346,6 +397,7 @@
         workAreaDuration: c.workAreaDuration
       },
       project_path: projectPath,
+      layer_info: layerInfos,
       layers_scanned: requested,
       ancestors_scanned: layers.length - requested,
       ancestors_truncated: ancestorsTruncated,
