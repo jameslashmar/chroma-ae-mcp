@@ -6,7 +6,7 @@
 //   switches, audio, the text on screen (one entry per Source Text key), the
 //   Opacity value or keys, the time spans in which any property keyframe
 //   changes value (merged), single change times (hold keys, text changes),
-//   whether an expression is on, and whether footage or a precomp plays.
+//   whether an expression is on (an enabled expression marks the layer as changing), and whether footage or a precomp plays.
 //   The judging (reading time, dead stretches, facts) is done on the Node side.
 //
 // Not covered (said in the tool's notes): text inside precomps (a precomp only
@@ -26,6 +26,8 @@
   var MAX_LAYERS = 500;
   var MAX_PROPS = 3000;
   var MAX_SPANS = 200;
+  var MAX_KEYS_TOTAL = 20000;
+  var MAX_KEYS_PER_PROP = 500;
   var MAX_TEXT_KEYS = 200;
   var MAX_OPACITY_KEYS = 200;
   var MAX_TEXT = 300;
@@ -97,13 +99,34 @@
     var i;
     if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-9;
     if (a === b) return true;
-    if (a && b && typeof a.length === "number" && typeof b.length === "number" && typeof a !== "string" && typeof b !== "string") {
+    if (a === null || b === null || a === undefined || b === undefined) return false;
+    if (typeof a !== "object" || typeof b !== "object") return false;
+    if (typeof a.length === "number" && typeof b.length === "number") {
       if (a.length !== b.length) return false;
       for (i = 0; i < a.length; i++) {
         if (!same(a[i], b[i])) return false;
       }
       return true;
     }
+    // Shape (mask or path): vertices, tangents and closed.
+    if (a.vertices !== undefined && b.vertices !== undefined) {
+      if (!same(a.vertices, b.vertices)) return false;
+      if (!same(a.inTangents, b.inTangents)) return false;
+      if (!same(a.outTangents, b.outTangents)) return false;
+      return a.closed === b.closed;
+    }
+    // TextDocument: text, and size and fill colour when they can be read.
+    if (typeof a.text === "string" && typeof b.text === "string") {
+      if (a.text !== b.text) return false;
+      try {
+        if (a.fontSize !== b.fontSize) return false;
+        if (!same(a.fillColor, b.fillColor)) return false;
+      } catch (e) {
+        return false;
+      }
+      return true;
+    }
+    // Any other object: treat as different (moving) rather than guess.
     return false;
   }
 
@@ -115,7 +138,17 @@
     }
   }
 
-  // acc: { spans: [[a, b]], points: [t], expr: bool, props: n }
+  // acc: { spans: [[a, b]], points: [t], expr: bool, props: n, truncated: bool,
+  //         tailFrom: time or null, budget: { keys: n } }
+  // truncated means some properties or keys were not read; tailFrom is the time
+  // from which the layer must then be treated as changing (a very early time
+  // when not known, so the layer counts from its in point).
+  function markTruncated(acc, from) {
+    acc.truncated = true;
+    if (from === null || from === undefined) from = -1e9;
+    if (acc.tailFrom === null || from < acc.tailFrom) acc.tailFrom = from;
+  }
+
   function scanProps(group, acc, skipText) {
     var n = 0;
     var i;
@@ -125,8 +158,8 @@
       return;
     }
     for (i = 1; i <= n; i++) {
-      if (acc.props >= MAX_PROPS) {
-        acc.truncated = true;
+      if (acc.props >= MAX_PROPS || acc.budget.keys <= 0) {
+        markTruncated(acc, null);
         return;
       }
       var p = null;
@@ -149,7 +182,13 @@
         } catch (e3) {}
         var k = p.numKeys;
         var j;
+        var lastT = null;
         for (j = 1; j < k; j++) {
+          if (j > MAX_KEYS_PER_PROP || acc.budget.keys <= 0) {
+            markTruncated(acc, lastT);
+            break;
+          }
+          acc.budget.keys--;
           var a = null;
           var b = null;
           var ta = 0;
@@ -162,6 +201,7 @@
           } catch (e4) {
             continue;
           }
+          lastT = round4(tb);
           if (same(a, b)) continue;
           if (isHold(p, j)) acc.points.push(round4(tb));
           else acc.spans.push([round4(ta), round4(tb)]);
@@ -226,9 +266,10 @@
       } catch (e1) {
         continue;
       }
-      var acc = { spans: [], points: [], expr: false, props: 0, truncated: false };
+      var acc = { spans: [], points: [], expr: false, props: 0, truncated: false, tailFrom: null, budget: budget };
       scanProps(l, acc, false);
-      if (acc.spans.length > 0 || acc.points.length > 0 || acc.expr) return true;
+      // Not fully read: assume it animates rather than report a false dead stretch.
+      if (acc.spans.length > 0 || acc.points.length > 0 || acc.expr || acc.truncated) return true;
       var src = null;
       try {
         src = l.source;
@@ -362,6 +403,8 @@
     var layers = [];
     var soloAny = false;
     var truncated = false;
+    var keysTruncated = false;
+    var keyBudget = { keys: MAX_KEYS_TOTAL };
     var i;
     for (i = 1; i <= n; i++) {
       var l = c.layer(i);
@@ -391,6 +434,7 @@
         audio_muted: false,
         video_playing: false,
         expression: false,
+        change_from_s: null,
         spans: [],
         points: [],
         opacity: { value: 100, keys: null },
@@ -410,20 +454,30 @@
       } catch (e3) {}
       if (entry.has_audio && entry.audio_enabled) entry.audio_muted = audioMuted(lay);
 
-      var acc = { spans: [], points: [], expr: false, props: 0, truncated: false };
+      var acc = { spans: [], points: [], expr: false, props: 0, truncated: false, tailFrom: null, budget: keyBudget };
       scanProps(lay, acc, true);
       entry.expression = acc.expr;
-      entry.truncated = acc.truncated;
       var spans = mergeSpans(acc.spans);
       if (spans.length > MAX_SPANS) {
         spans = spans.slice(0, MAX_SPANS);
-        entry.truncated = true;
+        markTruncated(acc, spans[spans.length - 1][1]);
       }
       entry.spans = spans;
       acc.points.sort(function (x, y) {
         return x - y;
       });
-      entry.points = acc.points.length > MAX_SPANS ? acc.points.slice(0, MAX_SPANS) : acc.points;
+      if (acc.points.length > MAX_SPANS) {
+        entry.points = acc.points.slice(0, MAX_SPANS);
+        markTruncated(acc, entry.points[entry.points.length - 1]);
+      } else {
+        entry.points = acc.points;
+      }
+      entry.truncated = acc.truncated;
+      if (acc.truncated) {
+        if (acc.tailFrom !== null && acc.tailFrom > -1e8) entry.change_from_s = acc.tailFrom;
+        else entry.change_from_s = entry.in_s;
+        if (keyBudget.keys <= 0) keysTruncated = true;
+      }
       entry.opacity = readOpacity(lay);
 
       if (kind === "text") {
@@ -434,8 +488,9 @@
       if (kind === "footage") {
         entry.video_playing = footageKind(lay.source) === "video";
       } else if (kind === "precomp") {
-        var budget = { left: MAX_PRECOMP_LAYERS };
+        var budget = { left: MAX_PRECOMP_LAYERS, keys: keyBudget.keys };
         entry.video_playing = compAnimates(lay.source, 1, budget);
+        keyBudget.keys = budget.keys;
       }
       layers.push(entry);
     }
@@ -454,7 +509,8 @@
       solo_any: soloAny,
       layer_count: n,
       layers: layers,
-      truncated: truncated
+      truncated: truncated,
+      keys_truncated: keysTruncated
     };
   };
 })($.global);
