@@ -12,6 +12,8 @@ What the live runs found that the fake AE could not show:
 - Renaming an effect by script does not update expressions; `autoFixExpressions` only takes bare names.
 - `exportAsMotionGraphicsTemplate` opens a modal dialog for fonts not from Adobe Fonts.
 
+**Lead on the aerender problem (2026-11-05, PRISM, AE 26.3):** four manual aerender runs all started and opened the project in 7-29 s, but in 3 of 4 aerender exited and left its `AfterFX.com` engine idle (0 CPU, about 2.4 GB) for good. The gate waited 120 s for such an engine and then failed the next job, and a fresh aerender started beside an idle one may be what hangs. The server now ends a job's own engine 10 s after its aerender exits (`ENGINE_EXIT_GRACE_MS`). Not tried yet: a second aerender started while an idle engine is alive, which would confirm the cause.
+
 **Open problem: aerender.** The 7 remaining failures are all aerender jobs that never start rendering: the log stops at the version line or the launch line, and the `AfterFX.com` engine is idle or gone. In the last run 3 of 7 jobs worked. Most manual runs hung too, including with AE closed, which points away from the MCP's code, but the cause is not proven. Two guesses did not hold: "started too soon after the previous job" and "our service boots inside the engine". It worked on 2026-10-30. Not tried yet: a restart of the machine, and turning off the other CEP extensions the engine loads. Until it is solved, jobs fail cleanly after 3 attempts instead of hanging, and `ae_render_batch` runs one aerender at a time.
 
 AE-painted dialogs (Crash Repair, save prompts) cannot be answered by `ae_dialog_respond` when they have several buttons; a person, or focusing AE and sending Enter for the default button, has to do it.

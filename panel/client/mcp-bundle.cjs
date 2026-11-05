@@ -6742,6 +6742,7 @@ __export(aerender_exports, {
   DEFAULT_GATE_SAMPLE_GAP_MS: () => DEFAULT_GATE_SAMPLE_GAP_MS,
   DEFAULT_GATE_SLOW_CHECK_MS: () => DEFAULT_GATE_SLOW_CHECK_MS,
   DEFAULT_GATE_STARTUP_LIMIT_MS: () => DEFAULT_GATE_STARTUP_LIMIT_MS,
+  ENGINE_EXIT_GRACE_MS: () => ENGINE_EXIT_GRACE_MS,
   MACOS_FALLBACK_AERENDER: () => MACOS_FALLBACK_AERENDER,
   WINDOWS_FALLBACK_AERENDER: () => WINDOWS_FALLBACK_AERENDER,
   aerenderTools: () => aerenderTools,
@@ -7305,7 +7306,7 @@ function createAerenderTools(options = {}) {
   return [
     {
       name: "ae_aerender_start",
-      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. ' + AGENT_SAFETY_GUIDANCE,
+      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
@@ -7574,7 +7575,7 @@ function createAerenderTools(options = {}) {
     }
   ];
 }
-var childProcess, crypto2, fs6, path7, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, DEFAULT_GATE_COOL_DOWN_MS, DEFAULT_GATE_STARTUP_LIMIT_MS, DEFAULT_GATE_SAMPLE_GAP_MS, DEFAULT_GATE_SLOW_CHECK_MS, DEFAULT_GATE_DEAD_ENGINE_MS, AerenderStartGate, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
+var childProcess, crypto2, fs6, path7, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, DEFAULT_GATE_COOL_DOWN_MS, DEFAULT_GATE_STARTUP_LIMIT_MS, DEFAULT_GATE_SAMPLE_GAP_MS, DEFAULT_GATE_SLOW_CHECK_MS, DEFAULT_GATE_DEAD_ENGINE_MS, AerenderStartGate, ENGINE_EXIT_GRACE_MS, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
 var init_aerender = __esm({
   "src/tools/ext/aerender.ts"() {
     "use strict";
@@ -7935,6 +7936,10 @@ AERENDER SPAWN ERROR: ${err.message}
         });
         child.on("exit", (code, signal) => {
           if (att.stopped) return;
+          const exitedPid = child.pid;
+          if (this.opts.engines_known && typeof exitedPid === "number") {
+            this.opts.set_timer(() => this.stopEnginesOf(exitedPid, logPath, "AERENDER EXIT"), ENGINE_EXIT_GRACE_MS);
+          }
           const current = registry.get(jobId);
           if (current?.cancelled) {
             registry.update(jobId, {
@@ -8158,7 +8163,7 @@ AERENDER SPAWN ERROR: ${err.message}
        * leftover engine does not block every later job. Asks for a fresh process list in the
        * background; "could not tell" ends nothing.
        */
-      stopEnginesOf(pid, logPath) {
+      stopEnginesOf(pid, logPath, why = "AERENDER CANCEL") {
         if (typeof pid !== "number" || pid <= 0 || !this.opts.engines_known) return;
         this.queryEngines((s) => {
           if (s.list === null) return;
@@ -8174,7 +8179,7 @@ AERENDER SPAWN ERROR: ${err.message}
           if (killed.length > 0) {
             try {
               fs6.appendFileSync(logPath, `
-AERENDER CANCEL: also ended its AfterFX.com engine pid ${killed.join(", ")}
+${why}: also ended its AfterFX.com engine pid ${killed.join(", ")}
 `);
             } catch {
             }
@@ -8320,6 +8325,7 @@ AERENDER CANCEL: also ended its AfterFX.com engine pid ${killed.join(", ")}
         return registered;
       }
     };
+    ENGINE_EXIT_GRACE_MS = 1e4;
     AeAerenderStartSchema = external_exports.object({
       expect: ExpectSchema,
       comp_name: external_exports.string().min(1).optional().describe(

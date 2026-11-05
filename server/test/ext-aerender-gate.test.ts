@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AerenderJobRegistry,
   cancelAerenderJob,
+  ENGINE_EXIT_GRACE_MS,
   launchAerenderJob,
   listEnginesAsync,
   type AerenderEngineInfo,
@@ -248,6 +249,7 @@ describe("aerender start gate", () => {
     const first = r.children[0];
     r.exit(first, 0);
     r.engines.push(r.engineOf(first, 7001));
+    r.unkillable.add(7001); // an engine the exit clean-up cannot end either
     r.engines.push({ pid: 7002, ppid: 99999, command: "d -noui -m -s other.aep" });
     const b = r.launch("B");
     expect(b.phase).toBe("queued");
@@ -260,7 +262,7 @@ describe("aerender start gate", () => {
     r.advance(2000);
     expect(r.children).toHaveLength(2);
     expect(r.registry.get(b.job_id)!.phase).toBe("spawned");
-    expect(r.killed).toEqual([]);
+    expect(r.killed).toEqual([7001]); // only the exit clean-up's one try; the queued job never touches it
   });
 
   it("fails a queued job that waited too long for an earlier engine, names it and does not touch it", () => {
@@ -269,13 +271,14 @@ describe("aerender start gate", () => {
     const first = r.children[0];
     r.exit(first, 0);
     r.engines.push(r.engineOf(first, 7001));
+    r.unkillable.add(7001); // an engine the exit clean-up cannot end either
     const b = r.launch("B");
     r.advance(90_000);
     const rec = r.registry.get(b.job_id)!;
     expect(rec.state).toBe("failed");
     expect(rec.error).toContain("pid 7001");
     expect(rec.error).toContain("not touched");
-    expect(r.killed).toEqual([]);
+    expect(r.killed).toEqual([7001]); // only the exit clean-up's one try; the queued job never touches it
     expect(r.children).toHaveLength(1);
   });
 
@@ -330,6 +333,7 @@ describe("aerender gate: how long a queued job waits for an engine", () => {
     const first = r.children[0];
     r.say(a.job_id, "PROGRESS: 11/5/2026 4:43:20 AM: Starting composition");
     r.engines.push(r.engineOf(first, 7001));
+    r.unkillable.add(7001); // an engine the exit clean-up cannot end either
     const b = r.launch("B");
     const c = r.launch("C");
     r.advance(600_000);
@@ -349,7 +353,7 @@ describe("aerender gate: how long a queued job waits for an engine", () => {
     expect(r.registry.get(c.job_id)!.phase).toBe("queued");
     r.advance(130_000);
     expect(r.registry.get(c.job_id)!.state).toBe("failed");
-    expect(r.killed).toEqual([]);
+    expect(r.killed).toEqual([7001]); // only the exit clean-up's one try; the queued job never touches it
   });
 
   it("does not fail a job for the engine of a job that is still running (no handle after a restart), and says so", () => {
@@ -686,6 +690,7 @@ describe("aerender gate: process list queries", () => {
     const first = r.children[0];
     r.exit(first, 0);
     r.engines.push(r.engineOf(first, 7001));
+    r.unkillable.add(7001); // an engine the exit clean-up cannot end either
     const b = r.launch("B");
     expect(b.phase).toBe("queued");
     await r.advanceAsync(COOL + 5000);
@@ -744,6 +749,7 @@ describe("aerender gate: the 120 s limits with the production (asynchronous, cac
     const first = r.children[0];
     r.exit(first, 0);
     r.engines.push(r.engineOf(first, 7001));
+    r.unkillable.add(7001); // an engine the exit clean-up cannot end either
     const b = r.launch("B");
     await r.advanceAsync(COOL + 10_000);
     expect(r.registry.get(b.job_id)!.queued_reason).toContain("pid 7001");
@@ -758,7 +764,7 @@ describe("aerender gate: the 120 s limits with the production (asynchronous, cac
     expect(rec.state).toBe("failed");
     expect(rec.error).toContain("pid 7001");
     expect(r.children).toHaveLength(1);
-    expect(r.killed).toEqual([]);
+    expect(r.killed).toEqual([7001]); // only the exit clean-up's one try; the queued job never touches it
   });
 
   it("starts a job after the wait when the process list stays unreadable", async () => {
@@ -818,5 +824,34 @@ describe("aerender gate: the 120 s limits with the production (asynchronous, cac
     const secs = Number(/(\d+) s after this job began to wait/.exec(rec.error ?? "")?.[1]);
     expect(secs).toBeGreaterThan(118);
     expect(secs).toBeLessThan(140);
+  });
+});
+
+describe("aerender engine left behind after a normal exit", () => {
+  it("ends the job's own AfterFX.com engine once the grace period has passed, and no other", () => {
+    const r = make();
+    const a = r.launch("A");
+    const child = r.children[0];
+    r.engines.push(r.engineOf(child, 7101));
+    r.engines.push({ pid: 7102, ppid: 99999, command: "d -noui -m -s other.aep" });
+    r.say(a.job_id, "PROGRESS: Launching After Effects...");
+    r.exit(child, 0);
+    expect(r.registry.get(a.job_id)!.state).toBe("succeeded");
+    // Within the grace period the engine may still quit by itself.
+    r.advance(ENGINE_EXIT_GRACE_MS - 1);
+    expect(r.killed).not.toContain(7101);
+    r.advance(1);
+    expect(r.killed).toContain(7101);
+    expect(r.killed).not.toContain(7102);
+    expect(fs.readFileSync(r.logOf(a.job_id), "utf8")).toContain("AERENDER EXIT: also ended its AfterFX.com engine pid 7101");
+  });
+
+  it("ends nothing when the engine quit by itself", () => {
+    const r = make();
+    const a = r.launch("A");
+    r.exit(r.children[0], 0);
+    r.advance(ENGINE_EXIT_GRACE_MS + 1);
+    expect(r.killed).toEqual([]);
+    expect(fs.readFileSync(r.logOf(a.job_id), "utf8")).not.toContain("AERENDER EXIT");
   });
 });
