@@ -6,6 +6,8 @@
 //   layers' own box, or distribute their centres evenly
 // - unusedItems (read) / purgeItems (guarded write): footage, solids and
 //   placeholders no comp uses, and empty folders
+// - exploreConsolidatePlan / exploreConsolidateFootage and exploreReducePlan / exploreReduceProject:
+//   duplicate footage and a project reduced to chosen comps (plan = read, the others guarded writes)
 // - exportMogrt (no undo group: it writes a file, not the project)
 // - styleScan (read): fonts, sizes and colours used by text, shape and solid
 //   layers, for the house style check
@@ -369,6 +371,212 @@
         targets[k].remove();
       }
       return { removed: removed, numItems: app.project.numItems };
+    });
+  };
+
+  // ---------- consolidate duplicate footage / reduce to comps ----------
+
+  var INTERPRETATION_FIELDS = [
+    "alphaMode", "premulColor", "invertAlpha", "fieldSeparationType", "highQualityFieldSeparation",
+    "removePulldown", "loop", "conformFrameRate", "nativeFrameRate"
+  ];
+
+  function pathKey(p) {
+    return String(p).replace(/\\/g, "/").toLowerCase();
+  }
+
+  // The file and interpretation of a footage item, as one string; null for an item that has no file.
+  function duplicateKey(it) {
+    var f = null;
+    try { if (it.mainSource instanceof SolidSource || it.mainSource instanceof PlaceholderSource) return null; } catch (e0) {}
+    try { if (it.file) f = it.file.fsName; } catch (e1) {}
+    if (!f) return null;
+    var key = pathKey(f);
+    var src = null;
+    try { src = it.mainSource; } catch (e2) {}
+    for (var i = 0; i < INTERPRETATION_FIELDS.length; i++) {
+      var v = "";
+      try { v = String(src[INTERPRETATION_FIELDS[i]]); } catch (e3) { v = "?"; }
+      key += "|" + v;
+    }
+    // AE's Consolidate keeps items apart that differ in pixel aspect, still vs sequence, or length / frame rate.
+    var extra = [];
+    try { extra.push(String(it.pixelAspect)); } catch (e4) { extra.push("?"); }
+    try { extra.push(String(src.isStill)); } catch (e5) { extra.push("?"); }
+    try { extra.push(String(it.duration)); } catch (e6) { extra.push("?"); }
+    try { extra.push(String(it.frameRate)); } catch (e7) { extra.push("?"); }
+    key += "|" + extra.join("|");
+    return key;
+  }
+
+  function usedInCount(it) {
+    try { return it.usedIn.length; } catch (e) { return 0; }
+  }
+
+  // Read-only: footage items with a file that share a file and an interpretation. Which one After Effects keeps, and
+  // whether it also merges items this rule does not group (solids, other interpretations), is its own undocumented rule.
+  A.exploreConsolidatePlan = function () {
+    var byKey = {};
+    var order = [];
+    var footageWithFile = 0;
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var it = app.project.item(i);
+      if (!(it instanceof FootageItem)) continue;
+      var key = duplicateKey(it);
+      if (key === null) continue;
+      footageWithFile++;
+      if (!byKey[key]) {
+        byKey[key] = [];
+        order.push(key);
+      }
+      byKey[key].push(it);
+    }
+    var groups = [];
+    var groupTotal = 0;
+    var removable = 0;
+    for (var g = 0; g < order.length; g++) {
+      var list = byKey[order[g]];
+      if (list.length < 2) continue;
+      groupTotal++;
+      removable += list.length - 1;
+      if (groups.length >= MAX_LIST) continue;
+      var members = [];
+      for (var m = 0; m < list.length && m < 50; m++) {
+        members.push({ id: list[m].id, name: list[m].name, used_in: usedInCount(list[m]) });
+      }
+      var file = null;
+      try { file = list[0].file.fsName; } catch (eF) {}
+      groups.push({ file: file, count: list.length, items: members, items_truncated: list.length > 50 });
+    }
+    return {
+      numItems: app.project.numItems,
+      footage_with_file: footageWithFile,
+      group_total: groupTotal,
+      removable: removable,
+      groups: groups,
+      truncated: groupTotal > groups.length
+    };
+  };
+
+  A.exploreConsolidateFootage = function (args) {
+    assertGuard(args.expect);
+    if (typeof app.project.consolidateFootage !== "function") {
+      fail("bad_args", "This After Effects has no Project.consolidateFootage; duplicate footage cannot be merged by script here.");
+    }
+    var plan = A.exploreConsolidatePlan();
+    if (plan.group_total === 0) {
+      return { no_op: true, removed: 0, planned_groups: 0, planned_removals: 0, numItems: app.project.numItems, note: "No footage items share a file and an interpretation. Nothing was changed." };
+    }
+    return A.withUndo(args.label || "Consolidate duplicate footage", function () {
+      var n = app.project.consolidateFootage();
+      var removed = null;
+      if (typeof n === "number") removed = n;
+      return {
+        removed: removed,
+        planned_groups: plan.group_total,
+        planned_removals: plan.removable,
+        items_before: plan.numItems,
+        numItems: app.project.numItems
+      };
+    });
+  };
+
+  // Items a set of comps depends on, through layer sources and nested comps (not through expressions).
+  function reachedFrom(comps) {
+    var reached = {};
+    var queue = [];
+    var i;
+    for (i = 0; i < comps.length; i++) {
+      reached["I" + comps[i].id] = true;
+      queue.push(comps[i]);
+    }
+    var guardCount = 0;
+    while (queue.length > 0 && guardCount < 100000) {
+      guardCount++;
+      var comp = queue.shift();
+      for (var li = 1; li <= comp.numLayers; li++) {
+        var src = null;
+        try { src = comp.layer(li).source; } catch (e0) { src = null; }
+        if (!src) continue;
+        if (reached["I" + src.id]) continue;
+        reached["I" + src.id] = true;
+        if (src instanceof CompItem) queue.push(src);
+      }
+    }
+    return reached;
+  }
+
+  function keepComps(ids) {
+    var comps = [];
+    var seen = {};
+    for (var i = 0; i < ids.length; i++) {
+      var it = null;
+      try { it = app.project.itemByID(ids[i]); } catch (e) { it = null; }
+      if (!it) fail("not_found", "No project item with id " + ids[i]);
+      if (!(it instanceof CompItem)) fail("bad_args", "\"" + it.name + "\" (id " + ids[i] + ") is not a comp; reduce_to_comp_ids takes comps");
+      if (seen["I" + it.id]) continue;
+      seen["I" + it.id] = true;
+      comps.push(it);
+    }
+    return comps;
+  }
+
+  function itemKind(it) {
+    if (it instanceof CompItem) return "comp";
+    if (it instanceof FootageItem) return footageKind(it);
+    return "other";
+  }
+
+  // Read-only: what reduceProject would leave out, by the same comp-tree walk. Folders are counted, not listed.
+  A.exploreReducePlan = function (args) {
+    var comps = keepComps(args.comp_ids || []);
+    if (comps.length === 0) fail("bad_args", "reduce_to_comp_ids needs at least one comp");
+    var reached = reachedFrom(comps);
+    var remove = [];
+    var removeTotal = 0;
+    var keptItems = 0;
+    var folders = 0;
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var it = app.project.item(i);
+      if (it instanceof FolderItem) {
+        folders++;
+        continue;
+      }
+      if (reached["I" + it.id]) {
+        keptItems++;
+        continue;
+      }
+      removeTotal++;
+      if (remove.length < MAX_LIST) remove.push({ id: it.id, name: it.name, kind: itemKind(it) });
+    }
+    var keep = [];
+    for (var k = 0; k < comps.length; k++) keep.push({ id: comps[k].id, name: comps[k].name });
+    return {
+      numItems: app.project.numItems,
+      keep_comps: keep,
+      kept_items: keptItems,
+      remove: remove,
+      remove_total: removeTotal,
+      truncated: removeTotal > remove.length,
+      folders_total: folders
+    };
+  };
+
+  A.exploreReduceProject = function (args) {
+    assertGuard(args.expect);
+    if (typeof app.project.reduceProject !== "function") {
+      fail("bad_args", "This After Effects has no Project.reduceProject; the project cannot be reduced by script here.");
+    }
+    var plan = A.exploreReducePlan({ comp_ids: args.comp_ids });
+    if (plan.remove_total === 0) {
+      return { no_op: true, removed: 0, planned_removals: 0, numItems: app.project.numItems, note: "Everything in the project is reached from those comps. Nothing was changed." };
+    }
+    var comps = keepComps(args.comp_ids);
+    return A.withUndo(args.label || "Reduce project to comps", function () {
+      var n = app.project.reduceProject(comps);
+      var removed = null;
+      if (typeof n === "number") removed = n;
+      return { removed: removed, planned_removals: plan.remove_total, items_before: plan.numItems, numItems: app.project.numItems };
     });
   };
 

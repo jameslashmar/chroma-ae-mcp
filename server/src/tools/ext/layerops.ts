@@ -9,7 +9,12 @@
  * - trim in and out points, or move the start time
  * - rename by find and replace, or by a template with a counter
  * - layer switches: shy, solo, lock, guide, video, collapse, 3D, motion blur,
- *   quality, sampling quality, blend mode, label
+ *   quality, sampling quality, blend mode, label, effects, preserve
+ *   transparency, adjustment, audio, frame blending, per-character 3D,
+ *   environment layer, auto-orient, comment and time stretch
+ * - replace_source (AVLayer.replaceSource), separate_dimensions (Position),
+ *   split (duplicate + in/out points) and solid_settings (colour, size, name
+ *   of a solid, for the item or copy-on-write for the selected layers)
  *
  * AE does not rewrite layer(3) in an expression when the stack changes, and
  * the expression never errors: it silently points at another layer. So the
@@ -28,6 +33,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
+import { SLOW_TIMEOUT_MS } from "../../host.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 // ---------- read-back shape ----------
@@ -54,6 +60,26 @@ export interface OpsLayer {
   quality?: string;
   samplingQuality?: string;
   blendMode?: string;
+  effectsActive?: boolean;
+  preserveTransparency?: boolean;
+  adjustment?: boolean;
+  audioEnabled?: boolean;
+  frameBlending?: string;
+  threeDPerChar?: boolean;
+  environment?: boolean;
+  autoOrient?: string;
+  comment?: string;
+  stretch?: number;
+  /** The layer's source item, when it has one. */
+  sourceId?: number;
+  sourceName?: string;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  /** A solid source's colour [r, g, b]. */
+  solidColor?: number[];
+  /** Whether Position is separated, and the key count of each follower when it is. */
+  positionSeparated?: boolean;
+  followerKeys?: number[];
 }
 
 export interface OpsExpression {
@@ -89,7 +115,10 @@ const capped = (stack: OpsStack | null) => !!stack && (stack.truncated === true 
 
 // ---------- schemas ----------
 
-export const OPS_ACTIONS = ["parent", "reorder", "sort", "duplicate", "delete", "trim", "rename", "switches"] as const;
+export const OPS_ACTIONS = [
+  "parent", "reorder", "sort", "duplicate", "delete", "trim", "rename", "switches",
+  "replace_source", "separate_dimensions", "split", "solid_settings",
+] as const;
 export const BLEND_MODES = [
   "normal", "dissolve", "dancing_dissolve", "darken", "multiply", "color_burn", "classic_color_burn", "linear_burn", "darker_color",
   "add", "lighten", "screen", "color_dodge", "classic_color_dodge", "linear_dodge", "lighter_color", "overlay", "soft_light",
@@ -97,17 +126,29 @@ export const BLEND_MODES = [
   "subtract", "divide", "hue", "saturation", "color", "luminosity", "stencil_alpha", "stencil_luma", "silhouette_alpha",
   "silhouette_luma", "alpha_add", "luminescent_premul",
 ] as const;
-const LAYER_KINDS = ["solid", "null", "adjustment", "text", "shape", "camera", "light", "footage", "precomp", "audio"] as const;
+const LAYER_KINDS = ["solid", "null", "adjustment", "text", "shape", "camera", "light", "footage", "precomp", "audio", "model_3d", "parametric_mesh"] as const;
+const FRAME_BLENDING = ["none", "frame_mix", "pixel_motion"] as const;
+const AUTO_ORIENT = ["off", "along_path", "towards_camera", "characters_toward_camera"] as const;
 
 export const WhereSchema = z
   .object({
     label: z.number().int().min(0).max(16).optional().describe("Label colour index 0-16 (0 is none)."),
-    kind: z.enum(LAYER_KINDS).optional().describe("Layer kind."),
+    kind: z.enum(LAYER_KINDS).optional().describe("Layer kind. model_3d (3D model layer, AE 24.4+) and parametric_mesh (AE 26.3+) only match on those versions."),
     name_contains: z.string().min(1).optional().describe("Case-insensitive part of the layer name."),
     shy: z.boolean().optional(),
     locked: z.boolean().optional(),
     enabled: z.boolean().optional().describe("The video (eye) switch."),
     has_parent: z.boolean().optional(),
+    effects_active: z.boolean().optional().describe("The effects (fx) switch."),
+    preserve_transparency: z.boolean().optional(),
+    adjustment: z.boolean().optional().describe("The adjustment layer switch."),
+    audio_enabled: z.boolean().optional().describe("The audio switch."),
+    three_d: z.boolean().optional().describe("The 3D switch."),
+    three_d_per_char: z.boolean().optional().describe("Per-character 3D (text layers)."),
+    environment: z.boolean().optional().describe("Environment layer switch (does not render in a Classic 3D comp; warns there)."),
+    frame_blending: z.enum(FRAME_BLENDING).optional(),
+    auto_orient: z.enum(AUTO_ORIENT).optional(),
+    comment_contains: z.string().min(1).optional().describe("Case-insensitive part of the layer comment."),
   })
   .describe("Narrows the layers (or, with no `layers`, the whole stack) to those that match every field given.");
 
@@ -123,7 +164,13 @@ const ACTION_FIELDS: Record<(typeof OPS_ACTIONS)[number], readonly string[]> = {
   switches: [
     "shy", "solo", "locked", "guide", "enabled", "collapse_transformations", "three_d", "motion_blur",
     "quality", "sampling_quality", "blend_mode", "label_color",
+    "effects_active", "preserve_transparency", "adjustment", "audio_enabled", "frame_blending", "three_d_per_char",
+    "environment", "auto_orient", "comment", "stretch",
   ],
+  replace_source: ["item_id", "fix_expressions", "keep_size"],
+  separate_dimensions: ["enable"],
+  split: ["time", "times", "name_suffix"],
+  solid_settings: ["color", "width", "height", "name", "scope"],
 };
 const ALL_ACTION_FIELDS = [...new Set(Object.values(ACTION_FIELDS).flat())];
 const SWITCH_FIELDS = ACTION_FIELDS.switches;
@@ -192,6 +239,53 @@ const BaseObject = z.object({
   sampling_quality: z.enum(["bilinear", "bicubic"]).optional(),
   blend_mode: z.enum(BLEND_MODES).optional(),
   label_color: z.number().int().min(0).max(16).optional().describe("switches: label colour index 0-16 (AE's custom label colours can't be set by script)."),
+  effects_active: z.boolean().optional().describe("switches: the effects (fx) switch; off disables every effect on the layer. Cameras and lights are skipped."),
+  preserve_transparency: z.boolean().optional().describe("switches: preserve underlying transparency. Layers with video only."),
+  adjustment: z.boolean().optional().describe("switches: turn an existing layer into an adjustment layer or back. Nulls, cameras, lights and audio-only layers are skipped."),
+  audio_enabled: z.boolean().optional().describe("switches: the audio switch. Only layers that have audio; others are skipped."),
+  frame_blending: z
+    .enum(FRAME_BLENDING)
+    .optional()
+    .describe("switches: frame blending mode of a layer with video: none, frame_mix or pixel_motion. It is written even when the comp's own Frame Blending switch is off, but shows nothing then; the result warns."),
+  three_d_per_char: z.boolean().optional().describe("switches: per-character 3D. Text layers only; others are skipped."),
+  environment: z
+    .boolean()
+    .optional()
+    .describe("switches: environment layer (AVLayer.environmentLayer). Turns the 3D switch on too. Does not render in a Classic 3D comp (warns there); skipped with a reason on an AE without the member."),
+  auto_orient: z
+    .enum(AUTO_ORIENT)
+    .optional()
+    .describe("switches: auto-orient: off, along_path, towards_camera (camera or point of interest), characters_toward_camera (text layers with per-character 3D; skipped where this AE lacks it)."),
+  comment: z.string().max(1000).optional().describe("switches: the layer comment (empty string clears it)."),
+  stretch: z
+    .number()
+    .min(-9900)
+    .max(9900)
+    .optional()
+    .describe("switches: time stretch in percent: 100 is no stretch, 200 is twice as slow, negative plays backwards. Scales the layer's keyframes and markers and moves its out point; needs no time remap. Values between -1 and 1 (including 0) are refused: AE would silently turn them into 1 or -1."),
+
+  // replace_source
+  item_id: z.number().int().optional().describe("replace_source: id of the footage or comp project item that becomes the layers' source (the Alt-drag replace; keeps keys, effects, masks and timing)."),
+  fix_expressions: z.boolean().optional().describe("replace_source: let AE rewrite expressions that name the old source. Default true."),
+  keep_size: z.boolean().optional().describe("replace_source: when the new source has another size, scale the layer by old size / new size so it keeps its on-screen size, and scale a plain Anchor Point by new size / old size so the content stays in place. A layer with keyframed or expression-driven Scale is not compensated; a keyframed or expression-driven Anchor Point keeps its numbers with a warning. Default false."),
+
+  // separate_dimensions
+  enable: z.boolean().optional().describe("separate_dimensions: true separates Position into X, Y (and Z) properties, false unifies them again."),
+
+  // split
+  time: z.number().min(-36000).max(36000).optional().describe("split: the comp time (seconds) to cut at. Snapped to the comp's frames."),
+  times: z.array(z.number().min(-36000).max(36000)).min(1).max(50).optional().describe("split: several cut times in comp seconds, instead of time."),
+  name_suffix: z.string().min(1).max(100).optional().describe("split: name the later parts as the original name plus this text; {n} is the part number (2 for the first new part). Default: AE's own copy names."),
+
+  // solid_settings
+  color: z.array(z.number().min(0).max(1)).length(3).optional().describe("solid_settings: the solid's colour [r, g, b], each 0-1."),
+  width: z.number().int().min(1).max(30000).optional().describe("solid_settings: the solid's width in pixels."),
+  height: z.number().int().min(1).max(30000).optional().describe("solid_settings: the solid's height in pixels."),
+  name: z.string().min(1).max(200).optional().describe("solid_settings: the solid item's name (not the layer's; use the rename action for that)."),
+  scope: z
+    .enum(["item", "layer_only"])
+    .optional()
+    .describe("solid_settings: item changes the solid item itself, so every layer in every comp that uses it changes too. layer_only makes a new solid item for the selected layers and swaps them onto it. Required when the solid is also used by layers outside the selection (a dry run lists them)."),
 
   expect: ExpectSchema,
 });
@@ -231,6 +325,24 @@ export const AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
   }
   if (v.action === "switches" && SWITCH_FIELDS.every((k) => (v as Record<string, unknown>)[k] === undefined)) {
     bad(`switches needs at least one of: ${SWITCH_FIELDS.join(", ")}.`, "shy");
+  }
+  if (v.action === "switches") {
+    if (v.stretch !== undefined && Math.abs(v.stretch) < 1) {
+      bad("stretch must be at least 1 or at most -1 in size: AE turns values from 0 to 1 into 1 and from -1 to 0 into -1. 100 is no stretch.", "stretch");
+    }
+    if (v.environment === true && v.three_d === false) bad("An environment layer must be 3D: drop three_d false.", "three_d");
+    if (v.auto_orient === "characters_toward_camera" && v.three_d_per_char === false) {
+      bad("characters_toward_camera needs per-character 3D: drop three_d_per_char false.", "three_d_per_char");
+    }
+  }
+  if (v.action === "replace_source" && v.item_id === undefined) bad("replace_source needs item_id.", "item_id");
+  if (v.action === "separate_dimensions" && v.enable === undefined) bad("separate_dimensions needs enable (true to separate, false to unify).", "enable");
+  if (v.action === "split") {
+    if (v.time === undefined && v.times === undefined) bad("split needs time or times.", "time");
+    if (v.time !== undefined && v.times !== undefined) bad("Give time or times, not both.", "times");
+  }
+  if (v.action === "solid_settings" && v.color === undefined && v.width === undefined && v.height === undefined && v.name === undefined) {
+    bad("solid_settings needs at least one of color, width, height, name.", "color");
   }
 });
 
@@ -563,6 +675,26 @@ interface Written extends Record<string, unknown> {
   changes?: Array<{ id: number; key: string; from: unknown; to: unknown }>;
   to_comp_id?: number;
   no_op?: boolean;
+  to_item_id?: number;
+  replacements?: Array<{ id: number; from_item_id: number; to_item_id: number; size_changed?: boolean; scale_compensated?: boolean; anchor_compensated?: boolean }>;
+  separations?: Array<{ id: number; from: boolean; to: boolean; position_keys?: number }>;
+  splits?: Array<{
+    id: number;
+    name?: string;
+    original_out?: number;
+    first_part_out?: number;
+    copies: Array<{ id: number; in_point: number; out_point: number }>;
+  }>;
+  solid_results?: Array<{
+    from_item_id: number;
+    item_id?: number;
+    scope: string;
+    layer_ids: number[];
+    width?: number;
+    height?: number;
+    color?: number[];
+    name?: string;
+  }>;
   /** Ids unlocked for the edit, and the ids the host relocked afterwards. */
   unlocked?: number[];
   relocked?: number[];
@@ -582,10 +714,29 @@ const SWITCH_FIELD: Record<string, keyof OpsLayer> = {
   sampling_quality: "samplingQuality",
   blend_mode: "blendMode",
   label_color: "label",
+  effects_active: "effectsActive",
+  preserve_transparency: "preserveTransparency",
+  adjustment: "adjustment",
+  audio_enabled: "audioEnabled",
+  frame_blending: "frameBlending",
+  three_d_per_char: "threeDPerChar",
+  environment: "environment",
+  auto_orient: "autoOrient",
+  comment: "comment",
+  stretch: "stretch",
 };
 
 /** The fields of a layer no action here changes by itself: if one differs, the write touched a layer it shouldn't have. */
-const BYSTANDER_FIELDS = ["name", "enabled", "shy", "solo", "locked", "label", "guide", "threeD", "motionBlur", "blendMode"] as const;
+const BYSTANDER_FIELDS = [
+  "name", "enabled", "shy", "solo", "locked", "label", "guide", "threeD", "motionBlur", "blendMode",
+  "effectsActive", "preserveTransparency", "adjustment", "audioEnabled", "frameBlending", "threeDPerChar", "environment", "autoOrient", "comment", "stretch",
+] as const;
+
+/** Numbers compare with a small tolerance (stretch reads back as 100.00000001), the rest strictly. */
+function sameSwitch(a: unknown, b: unknown): boolean {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= 1e-3;
+  return a === b;
+}
 
 export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, beforeRaw: unknown, afterRaw: unknown, w: Written): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
@@ -598,7 +749,7 @@ export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, bef
   for (const d of w.duplicates ?? []) touched.add(d.id);
   if (typeof w.parent_id === "number") touched.add(w.parent_id);
 
-  const grew = (w.action === "duplicate" && w.to_comp_id === undefined ? (w.duplicates_total ?? w.duplicates?.length ?? 0) : 0) - (w.action === "delete" ? (w.deleted_total ?? w.deleted?.length ?? 0) : 0);
+  const grew = ((w.action === "duplicate" && w.to_comp_id === undefined) || w.action === "split" ? (w.duplicates_total ?? w.duplicates?.length ?? 0) : 0) - (w.action === "delete" ? (w.deleted_total ?? w.deleted?.length ?? 0) : 0);
   expectThat(m, after.numLayers === before.numLayers + grew, "numLayers", before.numLayers + grew, after.numLayers, "Layer count is not what the action should leave");
 
   if (args.action === "parent") {
@@ -691,7 +842,66 @@ export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, bef
       const l = byId(after, c.id);
       const field = SWITCH_FIELD[c.key];
       if (!l || !field) continue;
-      expectThat(m, l[field] === c.to, `layer[${l.name}].${c.key}`, c.to, l[field], "Switch differs");
+      expectThat(m, sameSwitch(l[field], c.to), `layer[${l.name}].${c.key}`, c.to, l[field], "Switch differs");
+    }
+  }
+
+  if (args.action === "replace_source") {
+    for (const r of w.replacements ?? []) {
+      if (!w.applied_ids?.includes(r.id)) continue;
+      const l = byId(after, r.id);
+      if (l) expectThat(m, l.sourceId === r.to_item_id, `layer[${l.name}].sourceId`, r.to_item_id, l.sourceId, "The layer's source is not the new item");
+    }
+  }
+
+  if (args.action === "separate_dimensions") {
+    for (const s of w.separations ?? []) {
+      if (!w.applied_ids?.includes(s.id)) continue;
+      const l = byId(after, s.id);
+      if (!l) continue;
+      expectThat(m, l.positionSeparated === s.to, `layer[${l.name}].positionSeparated`, s.to, l.positionSeparated, "Position is not in the separation state asked for");
+      if (s.to && (s.position_keys ?? 0) > 0 && Array.isArray(l.followerKeys) && l.followerKeys.length > 0) {
+        expectThat(m, l.followerKeys.some((n) => n > 0), `layer[${l.name}].followerKeys`, "keys on the followers", l.followerKeys, "Position had keyframes but the separated followers hold none");
+      }
+    }
+  }
+
+  if (args.action === "split") {
+    const tol = (after.frameDuration ?? 0.05) * 1.01 + 1e-6;
+    for (const sp of w.splits ?? []) {
+      const orig = byId(after, sp.id);
+      if (!orig || sp.copies.length === 0) continue;
+      if (sp.first_part_out !== undefined && orig.outPoint !== undefined) {
+        expectThat(m, Math.abs(orig.outPoint - sp.first_part_out) <= tol, `layer[${orig.name}].outPoint`, sp.first_part_out, orig.outPoint, "The first part does not end at the first cut");
+      }
+      for (const c of sp.copies) {
+        const copy = byId(after, c.id);
+        if (!copy) {
+          if (!capped(after)) m.push({ path: `split[${c.id}]`, expected: "present", actual: undefined, message: "A new part is not in the read-back" });
+          continue;
+        }
+        if (copy.inPoint !== undefined) expectThat(m, Math.abs(copy.inPoint - c.in_point) <= tol, `layer[${copy.name}].inPoint`, c.in_point, copy.inPoint, "A new part does not start at its cut");
+        if (copy.outPoint !== undefined) expectThat(m, Math.abs(copy.outPoint - c.out_point) <= tol, `layer[${copy.name}].outPoint`, c.out_point, copy.outPoint, "A new part does not end where the next one starts");
+        expectThat(m, copy.index < orig.index, `layer[${copy.name}].index`, `above ${orig.index}`, copy.index, "A later part should sit above the original");
+      }
+    }
+  }
+
+  if (args.action === "solid_settings") {
+    for (const r of w.solid_results ?? []) {
+      for (const id of r.layer_ids) {
+        const l = byId(after, id);
+        if (!l) continue;
+        const where = `layer[${l.name}]`;
+        if (r.item_id !== undefined) expectThat(m, l.sourceId === r.item_id, `${where}.sourceId`, r.item_id, l.sourceId, "The layer is not on the expected solid");
+        if (r.width !== undefined && l.sourceWidth !== undefined) expectThat(m, l.sourceWidth === r.width, `${where}.sourceWidth`, r.width, l.sourceWidth, "Solid width differs");
+        if (r.height !== undefined && l.sourceHeight !== undefined) expectThat(m, l.sourceHeight === r.height, `${where}.sourceHeight`, r.height, l.sourceHeight, "Solid height differs");
+        if (r.name !== undefined && l.sourceName !== undefined) expectThat(m, l.sourceName === r.name, `${where}.sourceName`, r.name, l.sourceName, "Solid name differs");
+        if (r.color !== undefined && l.solidColor !== undefined) {
+          const close = r.color.every((c, i) => Math.abs(c - (l.solidColor?.[i] ?? NaN)) <= 1e-3);
+          expectThat(m, close, `${where}.solidColor`, r.color, l.solidColor, "Solid colour differs");
+        }
+      }
     }
   }
 
@@ -723,12 +933,18 @@ export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, bef
   }
 
   // Layers the action did not name must come out as they went in.
+  // Renaming a shared solid item renames the layers that follow its name, so their name is not compared.
+  const renamedItems = new Set<number>();
+  for (const r of w.solid_results ?? []) {
+    if (r.scope === "item" && r.name !== undefined) renamedItems.add(r.from_item_id);
+  }
   if (complete) {
     for (const l of after.layers) {
       if (touched.has(l.id)) continue;
       const was = byId(before, l.id);
       if (!was) continue;
       for (const f of BYSTANDER_FIELDS) {
+        if (f === "name" && was.sourceId !== undefined && renamedItems.has(was.sourceId)) continue;
         if (was[f] !== undefined && l[f] !== undefined && was[f] !== l[f]) {
           m.push({ path: `layers[${l.name}].${f}`, expected: was[f], actual: l[f], message: `"${l.name}" was not part of the action but its ${f} changed` });
         }
@@ -740,7 +956,10 @@ export function layerOpsMismatches(args: Pick<OpsArgs, "action" | "locked">, bef
 
 // ---------- tool ----------
 
-const STRUCTURAL: ReadonlyArray<OpsArgs["action"]> = ["reorder", "sort", "duplicate", "delete", "rename"];
+const STRUCTURAL: ReadonlyArray<OpsArgs["action"]> = ["reorder", "sort", "duplicate", "delete", "rename", "split"];
+
+/** Actions that can take a long time in AE (a replaceSource per layer, a duplicate per cut). The wait is longer; the evalScript is never aborted. */
+const SLOW_ACTIONS: ReadonlyArray<OpsArgs["action"]> = ["replace_source", "split", "solid_settings"];
 
 const uniq = (v: Array<number | undefined | null>): number[] => [...new Set(v.filter((n): n is number => typeof n === "number"))].slice(0, 50);
 
@@ -876,7 +1095,13 @@ export const layeropsTools: ToolDefinition<any>[] = [
     description:
       "Everyday layer edits in one call: action parent (assigns layer.parent, so the child keeps its on-screen position; keep_position false uses setParentWithJump and the layer jumps), " +
       "reorder (beginning, end, before or after a layer), sort (by name, start time, in or out point, z, label), duplicate (in place, or copyToComp into another comp), delete, " +
-      "trim (in point, out point, start time), rename (find and replace, or a template with a padded counter) and switches (shy, solo, locked, guide, enabled, collapse transformations, 3D, motion blur, quality, sampling quality, blend mode, label colour). " +
+      "trim (in point, out point, start time), rename (find and replace, or a template with a padded counter), " +
+      "switches (shy, solo, locked, guide, enabled, collapse transformations, 3D, motion blur, quality, sampling quality, blend mode, label colour, " +
+      "effects_active, preserve_transparency, adjustment, audio_enabled, frame_blending none/frame_mix/pixel_motion, three_d_per_char, environment, auto_orient, comment, and stretch (time stretch in percent: 100 is none, negative reverses, never between -1 and 1)), " +
+      "replace_source (item_id: swap the source of the layers for another footage or comp item, keeping keys, effects, masks and timing; refuses nulls, text, shapes, cameras, lights and comp cycles; keep_size compensates Scale and also scales a plain Anchor Point by new size / old size so the content stays in place (a keyframed or expression-driven Anchor Point keeps its numbers, with a warning); slow on many layers), " +
+      "separate_dimensions (enable: separate Position into X/Y/Z or unify; afterwards Position is written through 'ADBE Position_0/_1/_2'), " +
+      "split (time or times: cuts each layer in two or more parts the way the Timeline's Split Layer does, with the later part above; warns about time remap, track mattes, children and moved layer(index) references) and " +
+      "solid_settings (colour, width, height, name of a solid: scope item changes the shared solid and every layer using it, scope layer_only gives the selected layers a new solid of their own). " +
       "Pick the layers with `layers` and/or `where` (label, kind, name part, switches). Layer types a switch does not fit (cameras and lights have no motion blur, 3D is always on) are skipped and listed, not errors. " +
       "Locked layers are refused unless unlock_locked is true, which unlocks and relocks them in the same undo group. " +
       "dry_run returns the plan with nothing written. " +
@@ -899,7 +1124,11 @@ export const layeropsTools: ToolDefinition<any>[] = [
           ids.push(w?.parent_id);
           return opsRead(args, ids, "after");
         },
-        write: { host: "layeropsApply", args: { ...hostArgs(args), label: `Layer ops: ${args.action}` } },
+        write: {
+          host: "layeropsApply",
+          args: { ...hostArgs(args), label: `Layer ops: ${args.action}` },
+          timeoutMs: SLOW_ACTIONS.includes(args.action) ? SLOW_TIMEOUT_MS : undefined,
+        },
         check: (before, after, w) => layerOpsMismatches(args, before, after, w),
         present: (beforeRaw, afterRaw, w) => {
           const before = stackOf(beforeRaw);

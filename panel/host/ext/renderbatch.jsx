@@ -8,6 +8,9 @@
 //   already has an item to read them from, and, for each listed comp, its
 //   first QUEUED render-queue item (aerender -comp renders that item and,
 //   without -RStemplate/-OMtemplate, uses its settings and every output module).
+//   With rq_items ([{ rq_index }]) it also reads those Render Queue items for
+//   aerender -rqindex: status, comp, time span, frame rate and every output
+//   module (name, file), so the plan can count each output.
 //
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
@@ -74,6 +77,63 @@
     return found;
   }
 
+  var STATUS_NAMES = ["WILL_CONTINUE", "NEEDS_OUTPUT", "UNQUEUED", "QUEUED", "RENDERING", "USER_STOPPED", "ERR_STOPPED", "DONE"];
+
+  function statusNameOf(v) {
+    var i;
+    if (typeof RQItemStatus === "undefined") return String(v);
+    for (i = 0; i < STATUS_NAMES.length; i++) {
+      try {
+        if (RQItemStatus[STATUS_NAMES[i]] === v) return STATUS_NAMES[i].toLowerCase();
+      } catch (e0) {}
+    }
+    return String(v);
+  }
+
+  // The Render Queue items a batch names by index (aerender -rqindex): what the
+  // plan needs to count every output module. Reads only.
+  function queueItemReads(wanted) {
+    var out = [];
+    var rq = app.project.renderQueue;
+    var total = rq.numItems;
+    var i;
+    var j;
+    for (i = 0; i < wanted.length && i < MAX_NAMES; i++) {
+      var n = wanted[i];
+      var row = { index: n, found: false };
+      if (typeof n === "number" && n >= 1 && n <= total && n === Math.floor(n)) {
+        try {
+          var it = rq.item(n);
+          var comp = it.comp;
+          row.found = true;
+          row.comp_id = comp.id;
+          row.comp_name = clip(comp.name);
+          row.comp_duration = comp.duration;
+          row.comp_frame_rate = comp.frameRate;
+          row.status = statusNameOf(it.status);
+          row.render = it.render === true;
+          try { row.time_span_start = it.timeSpanStart; } catch (e1) {}
+          try { row.time_span_duration = it.timeSpanDuration; } catch (e2) {}
+          try { row.skip_frames = it.skipFrames; } catch (e3) {}
+          row.num_output_modules = it.numOutputModules;
+          row.output_modules = [];
+          for (j = 1; j <= it.numOutputModules && j <= 20; j++) {
+            var om = { index: j, name: null, file: null };
+            try { om.name = clip(it.outputModule(j).name); } catch (e4) {}
+            try { om.file = clip(it.outputModule(j).file.fsName); } catch (e5) {}
+            row.output_modules.push(om);
+          }
+          if (it.numOutputModules > 20) row.output_modules_truncated = true;
+        } catch (e6) {
+          row.found = false;
+          row.error = String(e6);
+        }
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
   A.renderbatchRead = function (args) {
     var names = (args && args.comp_names) || [];
     var want = {};
@@ -137,7 +197,7 @@
       }
     } catch (e4) {}
 
-    return {
+    var res = {
       ae_version: st.aeVersion,
       project_path: st.project_path,
       dirty: st.dirty,
@@ -146,5 +206,18 @@
       templates: templates,
       truncated: names.length > MAX_NAMES
     };
+    var rqWanted = [];
+    var q;
+    if (args && args.rq_items && args.rq_items.length) {
+      for (q = 0; q < args.rq_items.length; q++) rqWanted.push(args.rq_items[q].rq_index);
+      try {
+        res.queue_total = app.project.renderQueue.numItems;
+        res.queue_items = queueItemReads(rqWanted);
+      } catch (e7) {
+        res.queue_items = [];
+        res.queue_error = String(e7);
+      }
+    }
+    return res;
   };
 })($.global);

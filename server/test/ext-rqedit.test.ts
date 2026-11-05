@@ -17,6 +17,7 @@ import {
   checkDeliveryFile,
   copiesMismatches,
   editMismatches,
+  removeMismatches,
   itemMismatches,
   pathKey,
   rqeditTools,
@@ -146,6 +147,9 @@ class FakeItem {
   }
   applyTemplate(name: string) {
     if (!this.templates.includes(name)) throw new Error(`No template ${name}`);
+  }
+  remove() {
+    this.rq.list.splice(this.rq.list.indexOf(this), 1);
   }
   /** A copy keeps the source's output paths, as AE may. */
   duplicate() {
@@ -1277,5 +1281,389 @@ describe("rqedit.jsx: review fixes", () => {
     const r = plainOf(A.rqeditRead({ item_indexes: [1] }));
     expect(r.items[0].output_modules.length).toBe(20);
     expect(r.items[0].output_modules_truncated).toBe(true);
+  });
+});
+
+// ---------- w5render: the queued flag and removing items ----------
+
+describe("w5render: queued flag and remove (schemas and pure logic)", () => {
+  const base = { expect: expectArg };
+
+  it("queued is a change of its own; removal is a call of its own", () => {
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, item_index: 1, queued: true }).success).toBe(true);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, item_index: 1, queued: false, skip_frames: 1 }).success).toBe(true);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, queued: true }).success).toBe(false);
+    const ok = AeRenderQueueEditSchema.safeParse({ ...base, remove: [{ index: 2, comp_id: 5 }, { index: 1, comp_id: 6 }] });
+    expect(ok.success).toBe(true);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove: [{ index: 2 }] }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove: [{ index: 2, comp_id: 5 }, { index: 2, comp_id: 5 }] }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove: [] }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove: [{ index: 2, comp_id: 5 }], remove_filter: { status: "done" } }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove: [{ index: 2, comp_id: 5 }], queued: true }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, item_index: 1, remove_filter: { status: "done" } }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove_filter: { status: "done", comp_id: 4 } }).success).toBe(true);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove_filter: { status: "rendering" } }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, remove_filter: { status: "unqueued" }, dry_run: true }).success).toBe(true);
+    expect(AeRenderQueueEditSchema.safeParse({ ...base, item_index: 1, queued: true, dry_run: true }).success).toBe(false);
+    expect(AeRenderQueueEditSchema.safeParse({ item_index: 1, queued: true }).success).toBe(false);
+  });
+
+  it("the edit description names the new actions and still ends with the safety guidance", () => {
+    const d = tool("ae_render_queue_edit").description;
+    expect(d).toMatch(/queued: true\/false/);
+    expect(d).toMatch(/remove_filter/);
+    expect(d).toMatch(/dry_run/);
+    expect(d.endsWith(AGENT_SAFETY_GUIDANCE)).toBe(true);
+    expect(tool("ae_render_queue_inspect").description).toMatch(/queued\) flag/);
+  });
+
+  it("itemMismatches reads the queued flag, and a NEEDS_OUTPUT item as a missing output", () => {
+    const echo: PlanEcho = { queued: true, modules: [], num_output_modules: 1 };
+    expect(itemMismatches("item", echo, item(1, { render: true, status: "queued" }), [])).toEqual([]);
+    const off = itemMismatches("item", echo, item(1, { render: false, status: "unqueued" }), []);
+    expect(off.map((m) => m.path)).toEqual(["item.queued"]);
+    const needs = itemMismatches("item", echo, item(1, { render: false, status: "needs_output" }), []);
+    expect(needs).toHaveLength(1);
+    expect(needs[0].message).toMatch(/NEEDS_OUTPUT.*no valid output file/);
+    expect(itemMismatches("item", { queued: false, modules: [], num_output_modules: 1 }, item(1, { render: false }), [])).toEqual([]);
+  });
+
+  it("removeMismatches checks the shrink, the survivors and the host's errors", () => {
+    const before = queueOfItems(item(1, { comp_id: 5 }), item(2, { comp_id: 6 }), item(3, { comp_id: 7 }));
+    const written = { removed: [{ index: 2 }], errors: [], expect: { num_items: 2, survivor_comp_ids: [5, 7] } };
+    expect(removeMismatches(before, queueOfItems(item(1, { comp_id: 5 }), item(2, { comp_id: 7 })), written)).toEqual([]);
+    const notShrunk = removeMismatches(before, before, written);
+    expect(notShrunk.map((m) => m.path)).toContain("numItems");
+    const wrongOne = removeMismatches(before, queueOfItems(item(1, { comp_id: 6 }), item(2, { comp_id: 7 })), written);
+    expect(wrongOne.map((m) => m.path)).toEqual(["items[1].comp_id"]);
+    const failed = removeMismatches(before, before, { removed: [], errors: [{ step: "Remove render queue item 2", message: "boom" }], expect: { num_items: 3, survivor_comp_ids: null } });
+    expect(failed.map((m) => m.path)).toEqual(["remove.errors[0]"]);
+    // A capped read does not claim the survivors differ.
+    expect(removeMismatches(before, { ...queueOfItems(item(1, { comp_id: 5 })), numItems: 2, truncated: true }, written)).toEqual([]);
+  });
+});
+
+describe("w5render: ae_render_queue_edit through a fake bridge", () => {
+  it("queued: sends the flag, reads back in a separate call and flags a NEEDS_OUTPUT result", async () => {
+    const args = AeRenderQueueEditSchema.parse({ item_index: 1, comp_id: 5, queued: true, expect: expectArg });
+    const echo: PlanEcho = { queued: true, num_output_modules: 1, modules: [] };
+    const run = async (afterItem: ItemRead) => {
+      const { ctx, calls } = fakeAe({
+        rqeditRead: [queueOfItems(item(1, { render: false, status: "unqueued" })), queueOfItems(afterItem)],
+        rqeditEdit: [{ item_index: 1, comp_id: 5, steps_done: ["queued true"], skipped: [], errors: [], warnings: [], added_modules: [], removed_modules: [], expect: echo }],
+      });
+      const out: any = await tool("ae_render_queue_edit").handler(args, ctx);
+      expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "rqeditRead", "rqeditEdit", "rqeditRead"]);
+      expect(calls[2].script).toContain('"queued":true');
+      return out;
+    };
+    expect((await run(item(1, { render: true, status: "queued" }))).receipt.matches).toBe(true);
+    const bad = await run(item(1, { render: false, status: "needs_output" }));
+    expect(bad.applied).toBe(true);
+    expect(bad.receipt.matches).toBe(false);
+    expect(bad.receipt.mismatches[0].message).toMatch(/NEEDS_OUTPUT/);
+  });
+
+  it("remove: guards, reads, removes, reads back, and the receipt matches", async () => {
+    const args = AeRenderQueueEditSchema.parse({ remove: [{ index: 2, comp_id: 6 }], expect: expectArg });
+    const { ctx, calls } = fakeAe({
+      rqeditRead: [queueOfItems(item(1, { comp_id: 5 }), item(2, { comp_id: 6 }), item(3, { comp_id: 7 })), queueOfItems(item(1, { comp_id: 5 }), item(2, { comp_id: 7 }))],
+      rqeditRemove: [{ removed: [{ index: 2, comp_id: 6, comp_name: "B", status: "done" }], errors: [], num_items_before: 3, expect: { num_items: 2, survivor_comp_ids: [5, 7] } }],
+    });
+    const out: any = await tool("ae_render_queue_edit").handler(args, ctx);
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "rqeditRead", "rqeditRemove", "rqeditRead"]);
+    expect(calls[2].script).toContain('"remove"');
+    expect(out).toMatchObject({ applied: true, removed: [{ index: 2 }], num_items_before: 3, num_items: 2 });
+    expect(out.receipt.matches).toBe(true);
+  });
+
+  it("remove: a queue that did not shrink shows in the receipt, and a failed read-back does not throw", async () => {
+    const args = AeRenderQueueEditSchema.parse({ remove_filter: { status: "done" }, expect: expectArg });
+    const three = queueOfItems(item(1), item(2), item(3));
+    const written = { removed: [{ index: 3, comp_id: 5, comp_name: "A", status: "done" }], errors: [], num_items_before: 3, expect: { num_items: 2, survivor_comp_ids: [5, 5] } };
+    const { ctx } = fakeAe({ rqeditRead: [three, three], rqeditRemove: [written] });
+    const out: any = await tool("ae_render_queue_edit").handler(args, ctx);
+    expect(out.applied).toBe(true);
+    expect(out.receipt.matches).toBe(false);
+    expect(out.receipt.mismatches.map((m: any) => m.path)).toContain("numItems");
+    const { ctx: ctx2 } = fakeAe({
+      rqeditRead: [
+        three,
+        () => {
+          throw new Error("AE is busy");
+        },
+      ],
+      rqeditRemove: [written],
+    });
+    const out2: any = await tool("ae_render_queue_edit").handler(args, ctx2);
+    expect(out2.applied).toBe(true);
+    expect(out2.receipt.mismatches[0].message).toMatch(/Do not resend/);
+  });
+
+  it("remove with dry_run is a plain read: no checkpoint, no read-back, nothing written", async () => {
+    const args = AeRenderQueueEditSchema.parse({ remove_filter: { status: "done" }, dry_run: true, expect: expectArg });
+    const { ctx, calls } = fakeAe({
+      rqeditRemove: [{ dry_run: true, no_op: true, would_remove: [{ index: 3, comp_id: 5, comp_name: "A", status: "done" }], num_items: 3, num_items_after: 2, removed: [], errors: [] }],
+    });
+    const out: any = await tool("ae_render_queue_edit").handler(args, ctx);
+    expect(calls.map((c) => c.fn)).toEqual(["rqeditRemove"]);
+    expect(calls[0].script).toContain('"dry_run":true');
+    expect(out).toMatchObject({ applied: false, dry_run: true, would_remove: [{ index: 3 }], num_items_after: 2 });
+  });
+});
+
+describe("w5render: no_op and comp_id review fixes", () => {
+  it("the handler result carries no_op for an already-queued item and for a removal that matched nothing", async () => {
+    const args = AeRenderQueueEditSchema.parse({ item_index: 1, comp_id: 5, queued: true, expect: expectArg });
+    const echo: PlanEcho = { queued: true, num_output_modules: 1, modules: [] };
+    const q = queueOfItems(item(1, { render: true, status: "queued" }));
+    const { ctx } = fakeAe({
+      rqeditRead: [q, q],
+      rqeditEdit: [{ item_index: 1, comp_id: 5, no_op: true, steps_done: [], skipped: [], errors: [], warnings: ["already queued"], added_modules: [], removed_modules: [], expect: echo }],
+    });
+    const out: any = await tool("ae_render_queue_edit").handler(args, ctx);
+    expect(out.applied).toBe(true);
+    expect(out.no_op).toBe(true);
+    const rm = AeRenderQueueEditSchema.parse({ remove_filter: { status: "done" }, expect: expectArg });
+    const two = queueOfItems(item(1), item(2));
+    const { ctx: ctx2 } = fakeAe({
+      rqeditRead: [two, two],
+      rqeditRemove: [{ no_op: true, removed: [], errors: [], warnings: [], num_items_before: 2, expect: { num_items: 2, survivor_comp_ids: [5, 5] } }],
+    });
+    const out2: any = await tool("ae_render_queue_edit").handler(rm, ctx2);
+    expect(out2.no_op).toBe(true);
+  });
+
+  it("a top-level comp_id is refused with remove / remove_filter", () => {
+    const r = AeRenderQueueEditSchema.safeParse({ remove_filter: { status: "done" }, comp_id: 5, expect: expectArg });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify((r as any).error.issues)).toMatch(/remove_filter\.comp_id/);
+  });
+});
+
+describe("w5render: rqedit.jsx queued flag", () => {
+  /** AE gives an item without an output file NEEDS_OUTPUT when it is queued. */
+  function autoStatus(item: any) {
+    let render = item.render;
+    Object.defineProperty(item, "render", {
+      configurable: true,
+      get: () => render,
+      set: (v: boolean) => {
+        render = v;
+        if (!v) item.status = STATUS.UNQUEUED;
+        else item.status = item.mods.every((m: any) => m.file) ? STATUS.QUEUED : STATUS.NEEDS_OUTPUT;
+      },
+    });
+  }
+
+  it("queues and unqueues an item in one undo group, and the read-back agrees", () => {
+    const { A, item, undo } = scene();
+    autoStatus(item);
+    item.outputModule(1).file = new FakeFile("C:/out/a.mov");
+    item.render = false;
+    const on = plainOf(A.rqeditEdit({ item_index: 1, item_comp_id: item.comp.id, queued: true, expect: GUARD }));
+    expect(undo.begun).toBe(1);
+    expect(undo.ended).toBe(1);
+    expect(on.errors).toEqual([]);
+    expect(on.steps_done).toEqual(["Render queue item 1: queued true"]);
+    expect(item.render).toBe(true);
+    expect(item.status).toBe(STATUS.QUEUED);
+    expect(itemMismatches("item", on.expect, read(A, 1).items[0], on.skipped)).toEqual([]);
+    const un = plainOf(A.rqeditEdit({ item_index: 1, queued: false, expect: GUARD }));
+    expect(un.no_op).toBeUndefined();
+    expect(item.render).toBe(false);
+    expect(read(A, 1).items[0]).toMatchObject({ render: false, status: "unqueued" });
+    expect(undo.begun).toBe(2);
+  });
+
+  it("an item already in the asked state is a no_op without an undo group", () => {
+    const { A, item, undo } = scene();
+    item.render = true;
+    const out = plainOf(A.rqeditEdit({ item_index: 1, queued: true, expect: GUARD }));
+    expect(out.no_op).toBe(true);
+    expect(out.warnings[0]).toMatch(/already queued/);
+    expect(undo.begun).toBe(0);
+    // With another change asked for the group is opened as usual.
+    const both = plainOf(A.rqeditEdit({ item_index: 1, queued: true, skip_frames: 3, expect: GUARD }));
+    expect(both.no_op).toBeUndefined();
+    expect(undo.begun).toBe(1);
+    expect(item.skipFrames).toBe(3);
+  });
+
+  it("queueing an item without a valid output reads back NEEDS_OUTPUT, which the receipt reports", () => {
+    const { A, item } = scene();
+    autoStatus(item);
+    item.render = false;
+    const out = plainOf(A.rqeditEdit({ item_index: 1, queued: true, expect: GUARD }));
+    expect(item.status).toBe(STATUS.NEEDS_OUTPUT);
+    const m = itemMismatches("item", out.expect, read(A, 1).items[0], out.skipped);
+    expect(m).toHaveLength(1);
+    expect(m[0].message).toMatch(/NEEDS_OUTPUT/);
+  });
+
+  it("sets the file first, then queues, in one call", () => {
+    const { A, item } = scene();
+    autoStatus(item);
+    item.render = false;
+    const out = plainOf(A.rqeditEdit({ item_index: 1, queued: true, modules: [{ index: 1, file: "C:/out/b.mov" }], allow_overwrite: true, expect: GUARD }));
+    expect(out.errors).toEqual([]);
+    expect(item.status).toBe(STATUS.QUEUED);
+    expect(itemMismatches("item", out.expect, read(A, 1).items[0], out.skipped)).toEqual([]);
+  });
+
+  it("refuses a DONE or rendering item and a non-boolean flag before the undo group", () => {
+    const { A, item, rq, undo } = scene();
+    item.status = STATUS.DONE;
+    expect(() => A.rqeditEdit({ item_index: 1, queued: false, expect: GUARD })).toThrow(/DONE/);
+    item.status = STATUS.RENDERING;
+    expect(() => A.rqeditEdit({ item_index: 1, queued: true, expect: GUARD })).toThrow(/rendering/);
+    item.status = STATUS.QUEUED;
+    expect(() => A.rqeditEdit({ item_index: 1, queued: "yes", expect: GUARD })).toThrow(/true or false/);
+    rq.rendering = true;
+    expect(() => A.rqeditEdit({ item_index: 1, queued: false, expect: GUARD })).toThrow(/rendering/);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("inspect reports each item's render flag and the comp's frame rate", () => {
+    const { A, item } = scene();
+    item.render = false;
+    expect(read(A, 1).items[0]).toMatchObject({ render: false });
+    expect(typeof (plainOf(A.rqeditRead({})) as any).items[0].comp_frame_rate).toBe("number");
+  });
+});
+
+describe("w5render: rqedit.jsx removing items", () => {
+  function queueOfFour() {
+    const s = scene();
+    const comps = [s.comp, s.project.addComp("B", 640, 360, 4), s.project.addComp("C", 640, 360, 4), s.project.addComp("D", 640, 360, 4)];
+    s.rq.add(comps[1]);
+    s.rq.add(comps[2]);
+    s.rq.add(comps[3]);
+    s.rq.list[0].status = STATUS.DONE;
+    s.rq.list[1].status = STATUS.QUEUED;
+    s.rq.list[2].status = STATUS.DONE;
+    s.rq.list[3].status = STATUS.UNQUEUED;
+    return { ...s, comps };
+  }
+  const order = (rq: any) => rq.list.map((i: any) => i.comp.id);
+
+  it("removes by index and comp, highest first, in one undo group, and the host's echo matches a read", () => {
+    const { A, rq, comps, undo } = queueOfFour();
+    const ids = comps.map((c) => c.id);
+    const out = plainOf(A.rqeditRemove({ remove: [{ index: 1, comp_id: ids[0] }, { index: 3, comp_id: ids[2] }], expect: GUARD }));
+    expect(undo.begun).toBe(1);
+    expect(undo.ended).toBe(1);
+    expect(out.errors).toEqual([]);
+    expect(out.removed.map((r: any) => r.index)).toEqual([1, 3]);
+    expect(out.removed[0]).toMatchObject({ comp_id: ids[0], status: "done" });
+    expect(order(rq)).toEqual([ids[1], ids[3]]);
+    expect(out.expect).toEqual({ num_items: 2, survivor_comp_ids: [ids[1], ids[3]] });
+    const after = read(A) as any;
+    expect(after.numItems).toBe(2);
+    expect(removeMismatches(null, after, out)).toEqual([]);
+  });
+
+  it("remove_filter scans the whole queue, not just the first 500 items", () => {
+    const { A, rq, comp, undo } = scene() as any;
+    for (let n = 0; n < 504; n++) rq.add(comp);
+    for (let n = 0; n < rq.list.length; n++) rq.list[n].status = n >= 502 ? STATUS.DONE : STATUS.QUEUED;
+    const total = rq.numItems;
+    const dry = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, dry_run: true, expect: GUARD }));
+    expect(dry.would_remove.length).toBe(total - 502);
+    const out = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, expect: GUARD }));
+    expect(out.errors).toEqual([]);
+    expect(out.removed.length).toBe(total - 502);
+    expect(rq.numItems).toBe(502);
+    expect(undo.begun).toBe(1);
+  });
+
+  it("remove_filter refuses more than 500 matches before the undo group, in a dry run too, and takes exactly 500", () => {
+    const { A, rq, comp, undo } = scene() as any;
+    for (let n = 0; n < 501; n++) rq.add(comp);
+    for (let n = 0; n < rq.list.length; n++) rq.list[n].status = STATUS.DONE;
+    const total = rq.numItems;
+    expect(total).toBeGreaterThan(500);
+    expect(() => A.rqeditRemove({ remove_filter: { status: "done" }, dry_run: true, expect: GUARD })).toThrow(/at most 500/);
+    expect(() => A.rqeditRemove({ remove_filter: { status: "done" }, expect: GUARD })).toThrow(/at most 500/);
+    expect(undo.begun).toBe(0);
+    expect(rq.numItems).toBe(total);
+    // Exactly 500 matches is allowed.
+    for (let n = 0; n < total - 500; n++) rq.list[n].status = STATUS.QUEUED;
+    const dry = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, dry_run: true, expect: GUARD }));
+    expect(dry.would_remove.length).toBe(500);
+    const out = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, expect: GUARD }));
+    expect(out.errors).toEqual([]);
+    expect(out.removed.length).toBe(500);
+    expect(rq.numItems).toBe(total - 500);
+    expect(undo.begun).toBe(1);
+  });
+
+  it("refuses the whole removal when any index holds another comp, is listed twice or lacks a comp id", () => {
+    const { A, rq, comps, undo } = queueOfFour();
+    const ids = comps.map((c) => c.id);
+    expect(() => A.rqeditRemove({ remove: [{ index: 1, comp_id: ids[0] }, { index: 2, comp_id: ids[3] }], expect: GUARD })).toThrow(/queue changed/);
+    expect(() => A.rqeditRemove({ remove: [{ index: 1, comp_id: ids[0] }, { index: 1, comp_id: ids[0] }], expect: GUARD })).toThrow(/listed twice/);
+    expect(() => A.rqeditRemove({ remove: [{ index: 1 }], expect: GUARD })).toThrow(/comp_id/);
+    expect(() => A.rqeditRemove({ remove: [{ index: 9, comp_id: 1 }], expect: GUARD })).toThrow(/No render queue item 9/);
+    expect(() => A.rqeditRemove({ expect: GUARD })).toThrow(/either remove/);
+    expect(rq.numItems).toBe(4);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("refuses while the queue renders and never removes a rendering item", () => {
+    const { A, rq, comps, undo } = queueOfFour();
+    rq.list[1].status = STATUS.RENDERING;
+    expect(() => A.rqeditRemove({ remove: [{ index: 2, comp_id: comps[1].id }], expect: GUARD })).toThrow(/rendering/);
+    rq.rendering = true;
+    expect(() => A.rqeditRemove({ remove: [{ index: 1, comp_id: comps[0].id }], expect: GUARD })).toThrow(/rendering/);
+    // A status filter skips a rendering item by construction.
+    rq.rendering = false;
+    const out = plainOf(A.rqeditRemove({ remove_filter: { status: "queued" }, expect: GUARD }));
+    expect(out.no_op).toBe(true);
+    expect(rq.numItems).toBe(4);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("removes by status filter, optionally for one comp", () => {
+    const { A, rq, comps, undo } = queueOfFour();
+    const ids = comps.map((c) => c.id);
+    const one = plainOf(A.rqeditRemove({ remove_filter: { status: "done", comp_id: ids[2] }, expect: GUARD }));
+    expect(one.removed.map((r: any) => r.index)).toEqual([3]);
+    expect(order(rq)).toEqual([ids[0], ids[1], ids[3]]);
+    const all = plainOf(A.rqeditRemove({ remove_filter: { status: "DONE" }, expect: GUARD }));
+    expect(all.removed.map((r: any) => r.comp_id)).toEqual([ids[0]]);
+    expect(order(rq)).toEqual([ids[1], ids[3]]);
+    expect(undo.begun).toBe(2);
+    expect(() => A.rqeditRemove({ remove_filter: { status: "rendering" }, expect: GUARD })).toThrow(/not one of/);
+  });
+
+  it("dry_run lists what would go and changes nothing, no undo group", () => {
+    const { A, rq, undo } = queueOfFour();
+    const out = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, dry_run: true, expect: GUARD }));
+    expect(out).toMatchObject({ dry_run: true, no_op: true, num_items: 4, num_items_after: 2 });
+    expect(out.would_remove.map((r: any) => r.index)).toEqual([1, 3]);
+    expect(rq.numItems).toBe(4);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("a removal AE rejects is reported, the rest still go, and the survivors are not claimed exactly", () => {
+    const { A, rq, comps } = queueOfFour();
+    const ids = comps.map((c) => c.id);
+    rq.list[2].remove = () => {
+      throw new Error("locked");
+    };
+    const out = plainOf(A.rqeditRemove({ remove_filter: { status: "done" }, expect: GUARD }));
+    expect(out.errors).toHaveLength(1);
+    expect(out.errors[0].message).toMatch(/locked/);
+    expect(out.removed.map((r: any) => r.index)).toEqual([1]);
+    expect(out.expect).toEqual({ num_items: 3, survivor_comp_ids: null });
+    expect(order(rq)).toEqual([ids[1], ids[2], ids[3]]);
+  });
+
+  it("no match is a no_op, the guard still applies", () => {
+    const { A, undo } = queueOfFour();
+    expect(plainOf(A.rqeditRemove({ remove_filter: { status: "err_stopped" }, expect: GUARD })).no_op).toBe(true);
+    expect(undo.begun).toBe(0);
+    expect(() => A.rqeditRemove({ remove_filter: { status: "done" } })).toThrow(/no expect/);
   });
 });

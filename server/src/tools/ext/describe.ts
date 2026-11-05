@@ -152,10 +152,10 @@ const fmtTime = (t: number) => r1(t).toFixed(1);
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Roles in the order the summary lists them. */
-const ROLE_ORDER = ["text", "shape", "solid", "footage", "precomp", "adjustment", "null", "camera", "light", "audio"];
+const ROLE_ORDER = ["text", "shape", "solid", "footage", "precomp", "model_3d", "parametric_mesh", "adjustment", "null", "camera", "light", "audio"];
 
 /** Roles that draw something in the comp (so they have an entrance and exit worth narrating). */
-const VISIBLE_ROLES = new Set(["text", "shape", "solid", "footage", "precomp", "adjustment"]);
+const VISIBLE_ROLES = new Set(["text", "shape", "solid", "footage", "precomp", "model_3d", "parametric_mesh", "adjustment"]);
 
 /**
  * Beat clustering works on start times only, so one long action cannot swallow
@@ -673,6 +673,8 @@ const ROLE_COLORS: Record<string, Rgba> = {
   solid: [190, 150, 90, 255],
   footage: [170, 120, 200, 255],
   precomp: [230, 130, 150, 255],
+  model_3d: [110, 190, 200, 255],
+  parametric_mesh: [110, 170, 220, 255],
   adjustment: [200, 200, 100, 255],
   null: [150, 150, 150, 255],
   camera: [100, 190, 190, 255],
@@ -768,7 +770,7 @@ export const describeTools: ToolDefinition<any>[] = [
     name: "ae_describe_comp",
     description:
       "Read a plain-language map of a comp that takes ten seconds to read, before you edit it or to check you understood a file: " +
-      "format and length, the layers by role (text, shape, solid, footage, precomp, adjustment, null, camera, light, audio) and the stack as runs of a role, " +
+      "format and length, the layers by role (text, shape, solid, footage, precomp, model_3d, parametric_mesh, adjustment, null, camera, light, audio) and the stack as runs of a role, " +
       "a beat-by-beat timeline built from keyframes (e.g. '0.5-2.0 s: \"Logo\" scales up with overshoot'), which layers carry expressions, which precomps nest where, the comp and layer markers, and open concerns " +
       "(unused, very short, never visible, missing footage, expression errors, solo on). " +
       "Roles come from layer flags and sources, not from AE's class names. Beats cluster keyframe segments by time and use simple wording rules: they are a reading aid, not AE's own data. " +

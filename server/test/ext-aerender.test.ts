@@ -12,6 +12,13 @@ import { SingleWriterQueue } from "../src/queue.js";
 import { zodToJsonSchema } from "../src/schema.js";
 import {
   AeAerenderCancelSchema,
+  buildAerenderArgs,
+  itemFrameRange,
+  itemOutputs,
+  rqStatusRefusal,
+  selectRqItem,
+  selectWholeQueue,
+  type RqItemRead,
   AeAerenderStartSchema,
   AeAerenderStatusSchema,
   AerenderJobRegistry,
@@ -21,6 +28,7 @@ import {
   parseAerenderProgress,
   resolveAerenderPath,
 } from "../src/tools/ext/aerender.js";
+import { AGENT_SAFETY_GUIDANCE } from "../src/tools/common.js";
 
 class FakeChildProcess extends EventEmitter {
   pid: number;
@@ -401,5 +409,332 @@ describe("ext/aerender (background aerender jobs)", () => {
     expect(doneStatus.exit_code).toBe(0);
     expect(doneStatus.percent).toBe(100);
     expect(doneStatus.log_tail).toContain("Total Time Elapsed");
+  });
+});
+
+// ---------- w5render: -rqindex, whole queue and the new flags ----------
+
+
+const qItem = (index: number, extra: Partial<RqItemRead> = {}): RqItemRead => ({
+  index,
+  comp_id: 5,
+  comp_name: "Hero",
+  status: "queued",
+  render: true,
+  comp_frame_rate: 25,
+  comp_duration: 4,
+  time_span_start: 0,
+  time_span_duration: 4,
+  skip_frames: 0,
+  num_output_modules: 2,
+  output_modules: [
+    { index: 1, name: "Output Module 1", file: "C:/out/hero.mp4" },
+    { index: 2, name: "Output Module 2", file: "C:/out/hero.mov" },
+  ],
+  ...extra,
+});
+
+describe("w5render: ae_aerender_start schema", () => {
+  const base = { expect: { project_path: "C:/proj/demo.aep" } };
+  const ok = (v: object) => AeAerenderStartSchema.safeParse({ ...base, ...v }).success;
+
+  it("takes exactly one source", () => {
+    expect(ok({ comp_name: "Main", output_path: "C:/out/a.mov" })).toBe(true);
+    expect(ok({ rq_index: 2, item_comp_id: 5 })).toBe(true);
+    expect(ok({ whole_queue: true })).toBe(true);
+    expect(ok({})).toBe(false);
+    expect(ok({ comp_name: "Main" })).toBe(false);
+    expect(ok({ output_path: "C:/out/a.mov" })).toBe(false);
+    // rq_index needs its comp guard; the guard goes with rq_index only.
+    expect(ok({ rq_index: 2 })).toBe(false);
+    expect(ok({ comp_name: "Main", output_path: "C:/out/a.mov", item_comp_id: 5 })).toBe(false);
+    expect(ok({ rq_index: 0, item_comp_id: 5 })).toBe(false);
+    expect(ok({ rq_index: 2, item_comp_id: 5, whole_queue: true })).toBe(false);
+    expect(ok({ whole_queue: true, comp_name: "Main" })).toBe(false);
+  });
+
+  it("comp_name next to rq_index is an extra guard, not an error (deliver fills it)", () => {
+    expect(ok({ rq_index: 2, item_comp_id: 5, comp_name: "Hero" })).toBe(true);
+  });
+
+  it("refuses what would override the queue item", () => {
+    for (const extra of [{ output_path: "C:/out/a.mov" }, { output_module_template: "Lossless" }, { render_settings_template: "Best Settings" }, { start_frame: 0 }, { end_frame: 3 }]) {
+      expect(ok({ rq_index: 2, item_comp_id: 5, ...extra })).toBe(false);
+      expect(ok({ whole_queue: true, ...extra })).toBe(false);
+    }
+    const r = AeAerenderStartSchema.safeParse({ ...base, rq_index: 2, item_comp_id: 5, start_frame: 0 });
+    expect(r.success ? "" : r.error.issues[0].message).toMatch(/ae_render_queue_edit/);
+  });
+
+  it("takes the flags for every source and bounds them", () => {
+    const flags = { continue_on_missing_footage: true, mem_usage: { image_cache_percent: 50, max_mem_percent: 80 }, log_level: "errors", sound: false };
+    expect(ok({ comp_name: "Main", output_path: "C:/out/a.mov", ...flags })).toBe(true);
+    expect(ok({ rq_index: 1, item_comp_id: 5, ...flags })).toBe(true);
+    expect(ok({ whole_queue: true, ...flags })).toBe(true);
+    expect(ok({ whole_queue: true, mem_usage: { image_cache_percent: 0, max_mem_percent: 80 } })).toBe(false);
+    expect(ok({ whole_queue: true, mem_usage: { image_cache_percent: 50 } })).toBe(false);
+    expect(ok({ whole_queue: true, log_level: "verbose" })).toBe(false);
+    expect(ok({ whole_queue: true, log_level: "errors_and_progress" })).toBe(true);
+  });
+
+  it("converts to JSON Schema and describes the new fields", () => {
+    const json = zodToJsonSchema(AeAerenderStartSchema);
+    for (const k of ["rq_index", "item_comp_id", "whole_queue", "continue_on_missing_footage", "mem_usage", "log_level", "sound"]) {
+      expect(json.properties).toHaveProperty(k);
+      expect((json.properties as any)[k].description).toBeTruthy();
+    }
+    const tool = createAerenderTools().find((t) => t.name === "ae_aerender_start")!;
+    expect(tool.description).toMatch(/rq_index/);
+    expect(tool.description).toMatch(/Never uses -reuse/);
+    expect(tool.description.endsWith(AGENT_SAFETY_GUIDANCE)).toBe(true);
+  });
+});
+
+describe("w5render: buildAerenderArgs", () => {
+  const p = { project_path: "C:/p/a.aep" };
+
+  it("keeps the comp form exactly as it was", () => {
+    expect(buildAerenderArgs({ ...p, comp_name: "Main", output_path: "C:/o.mov", output_module_template: "Lossless", render_settings_template: "Best", start_frame: 1, end_frame: 9, max_cpu_percent: 40 })).toEqual([
+      "-project", "C:/p/a.aep", "-comp", "Main", "-output", "C:/o.mov", "-RStemplate", "Best", "-OMtemplate", "Lossless", "-s", "1", "-e", "9", "-mfr", "ON", "40",
+    ]);
+  });
+
+  it("-rqindex replaces -comp and -output; the whole queue has neither", () => {
+    expect(buildAerenderArgs({ ...p, rq_index: 3, comp_name: "Hero", output_path: "ignored.mov" })).toEqual(["-project", "C:/p/a.aep", "-rqindex", "3"]);
+    expect(buildAerenderArgs({ ...p, whole_queue: true })).toEqual(["-project", "C:/p/a.aep"]);
+  });
+
+  it("adds the flags after the rest, and no -v unless asked (so PROGRESS stays)", () => {
+    const args = buildAerenderArgs({ ...p, rq_index: 1, max_cpu_percent: 50, continue_on_missing_footage: true, mem_usage: { image_cache_percent: 40, max_mem_percent: 90 }, log_level: "errors", sound: true });
+    expect(args).toEqual(["-project", "C:/p/a.aep", "-rqindex", "1", "-mfr", "ON", "50", "-continueOnMissingFootage", "-mem_usage", "40", "90", "-v", "ERRORS", "-sound", "ON"]);
+    expect(buildAerenderArgs({ ...p, whole_queue: true, log_level: "errors_and_progress", sound: false })).toEqual(["-project", "C:/p/a.aep", "-v", "ERRORS_AND_PROGRESS", "-sound", "OFF"]);
+    expect(buildAerenderArgs({ ...p, whole_queue: true, continue_on_missing_footage: false })).toEqual(["-project", "C:/p/a.aep"]);
+  });
+
+  it("never adds -reuse", () => {
+    const all = buildAerenderArgs({ ...p, rq_index: 1, max_cpu_percent: 50, continue_on_missing_footage: true, mem_usage: { image_cache_percent: 1, max_mem_percent: 2 }, log_level: "errors", sound: true });
+    expect(all.some((a) => /reuse/i.test(a))).toBe(false);
+  });
+});
+
+describe("w5render: choosing a Render Queue item", () => {
+  const read = (...items: RqItemRead[]) => ({ numItems: items.length, items });
+
+  it("accepts a queued item with its comp and lists every output module", () => {
+    const r = selectRqItem(read(qItem(1), qItem(2, { comp_id: 6, comp_name: "Other" })), { rq_index: 2, item_comp_id: 6 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.selection).toMatchObject({ comp_name: "Other", comp_id: 6, comp_ids: [6], item_indexes: [2], outputs: ["C:/out/hero.mp4", "C:/out/hero.mov"] });
+    expect(r.selection.frame_range).toEqual({ start_frame: 0, end_frame: 99 });
+  });
+
+  it("treats comp_name as an extra guard", () => {
+    expect(selectRqItem(read(qItem(1)), { rq_index: 1, item_comp_id: 5, comp_name: "Hero" }).ok).toBe(true);
+    expect(selectRqItem(read(qItem(1)), { rq_index: 1, item_comp_id: 5, comp_name: "Wrong" })).toMatchObject({ ok: false, code: "rq_item_name_mismatch" });
+  });
+
+  it("refuses a missing item, another comp, and every status that is not QUEUED with the fix", () => {
+    expect(selectRqItem(read(qItem(1)), { rq_index: 4, item_comp_id: 5 })).toMatchObject({ ok: false, code: "rq_item_not_found" });
+    expect(selectRqItem(read(qItem(1)), { rq_index: 1, item_comp_id: 9 })).toMatchObject({ ok: false, code: "rq_item_comp_mismatch", expected: 9, actual: 5 });
+    const refused = (status: string) => selectRqItem(read(qItem(1, { status })), { rq_index: 1, item_comp_id: 5 }) as { ok: false; code: string; message: string };
+    expect(refused("unqueued")).toMatchObject({ code: "rq_item_not_queued" });
+    expect(refused("unqueued").message).toMatch(/ae_render_queue_edit.*queued: true/);
+    expect(refused("needs_output").message).toMatch(/output file/);
+    expect(refused("done").message).toMatch(/ae_render_queue_duplicate/);
+    expect(refused("rendering").message).toMatch(/interactive After Effects/);
+    expect(refused("err_stopped").message).toMatch(/not QUEUED/);
+    expect(rqStatusRefusal(3, undefined)).toMatch(/UNKNOWN/);
+  });
+
+  it("refuses an item with an output module that has no file", () => {
+    const r = selectRqItem(read(qItem(1, { output_modules: [{ index: 1, file: "C:/out/a.mp4" }, { index: 2, file: null }] })), { rq_index: 1, item_comp_id: 5 });
+    expect(r).toMatchObject({ ok: false, code: "rq_item_no_output" });
+    expect(itemOutputs(qItem(1, { output_modules: [{ index: 1, file: "" }] }))).toEqual({ paths: [], missing: [1] });
+  });
+
+  it("derives the frame range from the time span, and gives none when skip frames or a missing rate make it unknowable", () => {
+    expect(itemFrameRange(qItem(1, { time_span_start: 1, time_span_duration: 2 }))).toEqual({ start_frame: 25, end_frame: 74 });
+    expect(itemFrameRange(qItem(1, { skip_frames: 1 }))).toBeUndefined();
+    expect(itemFrameRange(qItem(1, { comp_frame_rate: undefined }))).toBeUndefined();
+    expect(itemFrameRange(qItem(1, { time_span_duration: 0 }))).toBeUndefined();
+  });
+
+  it("whole queue: the queued items, all their outputs, comps once; refuses when none is queued", () => {
+    const r = selectWholeQueue({ numItems: 3, items: [qItem(1), qItem(2, { status: "done" }), qItem(3, { comp_id: 6, output_modules: [{ index: 1, file: "C:/out/b.mov" }] })] });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.selection).toMatchObject({ comp_name: "<render queue>", comp_ids: [5, 6], item_indexes: [1, 3], outputs: ["C:/out/hero.mp4", "C:/out/hero.mov", "C:/out/b.mov"] });
+    expect(r.selection.warnings[0]).toMatch(/1 item\(s\) are not QUEUED/);
+    expect(selectWholeQueue({ numItems: 1, items: [qItem(1, { status: "unqueued" })] })).toMatchObject({ ok: false, code: "rq_queue_empty" });
+    expect(selectWholeQueue({ numItems: 0, items: [] })).toMatchObject({ ok: false, code: "rq_queue_empty" });
+    expect(selectWholeQueue({ numItems: 1, items: [qItem(1, { output_modules: [{ index: 1, file: null }] })] })).toMatchObject({ ok: false, code: "rq_item_no_output" });
+  });
+});
+
+describe("w5render: ae_aerender_start from the Render Queue, through a fake bridge", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  function setup(opts: { items?: RqItemRead[] | ((dir: string) => RqItemRead[]); dirty?: boolean; project?: string } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-aerender-rq-"));
+    dirs.push(dir);
+    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"));
+    const child = new FakeChildProcess(777);
+    let spawned: { cmd: string; args: readonly string[] } | null = null;
+    const tools = createAerenderTools({
+      registry,
+      platform: "win32",
+      afterFxPath: "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/AfterFX.exe",
+      existsSync: () => true,
+      spawn: (cmd, args) => {
+        spawned = { cmd, args };
+        return child as unknown as childProcess.ChildProcess;
+      },
+    });
+    const queue = new SingleWriterQueue();
+    const quarantine = new QuarantineStore(path.join(dir, "quarantine.json"));
+    const calls: Array<{ fn: string; script: string }> = [];
+    const given = typeof opts.items === "function" ? opts.items(dir) : opts.items;
+    const items = given ?? [qItem(1), qItem(2, { comp_id: 6, comp_name: "Other", output_modules: [{ index: 1, file: path.join(dir, "out", "other.mov") }] })];
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        const fn = script.slice("__chromaAe.".length, script.indexOf("("));
+        calls.push({ fn, script });
+        if (fn === "status") return { ok: true, result: { aeVersion: "26.0x68", project_path: opts.project ?? "C:\\Projects\\Demo.aep", dirty: opts.dirty === true }, durationMs: 1 };
+        if (fn === "rqeditRead") {
+          const asked = /"item_indexes":\[(\d+)\]/.exec(script);
+          const list = asked ? items.filter((i) => i.index === Number(asked[1])) : items;
+          return { ok: true, result: { numItems: items.length, rendering: false, items: list }, durationMs: 1 };
+        }
+        throw new Error(`Unexpected script: ${script}`);
+      },
+      queue,
+      quarantine,
+    });
+    const start = tools.find((t) => t.name === "ae_aerender_start")!;
+    const status = tools.find((t) => t.name === "ae_aerender_status")!;
+    const ctx = { bridge: host, queue, quarantine };
+    return { dir, registry, child, calls, start, status, ctx, spawned: () => spawned };
+  }
+  const expectArg = { project_path: "c:/projects/demo.aep" };
+
+  it("renders one queue item by -rqindex, with all its outputs on the record", async () => {
+    const t = setup();
+    const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5 }), t.ctx)) as Record<string, any>;
+    expect(t.calls.map((c) => c.fn)).toEqual(["status", "rqeditRead"]);
+    expect(t.calls[1].script).toContain('"item_indexes":[1]');
+    expect(t.spawned()!.args).toEqual(["-project", "C:\\Projects\\Demo.aep", "-rqindex", "1"]);
+    expect(out).toMatchObject({
+      ok: true,
+      source: "rq_index",
+      rq_index: 1,
+      item_comp_id: 5,
+      comp_name: "Hero",
+      output_path: "C:/out/hero.mp4",
+      output_paths: ["C:/out/hero.mp4", "C:/out/hero.mov"],
+      frame_range: { start_frame: 0, end_frame: 99 },
+    });
+    const rec = t.registry.get(out.job_id)!;
+    expect(rec).toMatchObject({ comp_name: "Hero", rq_index: 1, item_comp_id: 5, comp_id: 5, output_paths: ["C:/out/hero.mp4", "C:/out/hero.mov"], start_frame: 0, end_frame: 99 });
+    // The frame range is for the record only: aerender must not get -s / -e.
+    expect(rec.args).not.toContain("-s");
+    expect(rec.args).not.toContain("-e");
+    expect(typeof rec.comp_name).toBe("string");
+  });
+
+  it("makes the output folder of every module before the spawn", async () => {
+    const t = setup({
+      items: (dir) => [qItem(1, { output_modules: [{ index: 1, file: path.join(dir, "deliver", "sub", "a.mp4") }, { index: 2, file: path.join(dir, "deliver2", "b.mov") }] })],
+    });
+    await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5 }), t.ctx);
+    expect(fs.existsSync(path.join(t.dir, "deliver", "sub"))).toBe(true);
+    expect(fs.existsSync(path.join(t.dir, "deliver2"))).toBe(true);
+  });
+
+  it("status reports the rq fields; progress of several items in a row does not crash", async () => {
+    const t = setup();
+    const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, whole_queue: true }), t.ctx)) as Record<string, any>;
+    t.child.stdout.write(
+      [
+        'PROGRESS:  Starting composition "Hero".',
+        "PROGRESS:  0:00:00:00 (0): 0 Seconds",
+        "PROGRESS:  0:00:00:01 (1): 0 Seconds",
+        'PROGRESS:  Starting composition "Other".',
+        "PROGRESS:  0:00:00:00 (0): 0 Seconds",
+      ].join("\n") + "\n"
+    );
+    const running = (await t.status.handler({ job_id: out.job_id }, t.ctx)) as Record<string, any>;
+    expect(running).toMatchObject({ state: "running", whole_queue: true, comp_name: "<render queue>", current_frame: 0 });
+    expect(running.percent).toBeNull();
+    expect(running.output_paths).toHaveLength(3);
+    t.child.emit("exit", 0, null);
+    const done = (await t.status.handler({ job_id: out.job_id }, t.ctx)) as Record<string, any>;
+    expect(done).toMatchObject({ state: "succeeded", percent: 100 });
+  });
+
+  it("renders the whole queue with neither -comp nor -rqindex, and lists every queued output", async () => {
+    const t = setup();
+    const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, whole_queue: true, continue_on_missing_footage: true }), t.ctx)) as Record<string, any>;
+    expect(t.spawned()!.args).toEqual(["-project", "C:\\Projects\\Demo.aep", "-continueOnMissingFootage"]);
+    expect(t.calls[1].script).not.toContain("item_indexes\":[");
+    expect(out).toMatchObject({ source: "whole_queue", comp_name: "<render queue>", queued_items: [1, 2] });
+    expect(out.output_paths).toHaveLength(3);
+    expect(t.registry.get(out.job_id)).toMatchObject({ whole_queue: true, comp_name: "<render queue>" });
+  });
+
+  it("passes the flags on a plain comp job too, and no -v when log_level is left out", async () => {
+    const t = setup();
+    await t.start.handler(
+      AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: path.join(t.dir, "o.mov"), mem_usage: { image_cache_percent: 30, max_mem_percent: 70 }, sound: false }),
+      t.ctx
+    );
+    const args = t.spawned()!.args;
+    expect(args.slice(0, 6)).toEqual(["-project", "C:\\Projects\\Demo.aep", "-comp", "Main", "-output", path.join(t.dir, "o.mov")]);
+    expect(args.slice(6)).toEqual(["-mem_usage", "30", "70", "-sound", "OFF"]);
+    expect(args).not.toContain("-v");
+  });
+
+  it("comp_name next to rq_index must be the item's comp", async () => {
+    const t = setup();
+    await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5, comp_name: "Hero" }), t.ctx);
+    expect(t.spawned()).not.toBeNull();
+    const t2 = setup();
+    await expect(t2.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5, comp_name: "Nope" }), t2.ctx)).rejects.toMatchObject({ kind: "guard" });
+    expect(t2.spawned()).toBeNull();
+  });
+
+  it("refuses with a reason and spawns nothing: dirty, wrong comp, not queued, no item, nothing queued", async () => {
+    const dirty = setup({ dirty: true });
+    await expect(dirty.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5 }), dirty.ctx)).rejects.toThrow(/ae_save/);
+    expect(dirty.calls.map((c) => c.fn)).toEqual(["status"]);
+    expect(dirty.spawned()).toBeNull();
+
+    const refuse = async (args: object, items?: RqItemRead[]) => {
+      const t = setup({ items });
+      let err: any;
+      try {
+        await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, ...args }), t.ctx);
+      } catch (e) {
+        err = e;
+      }
+      expect(t.spawned()).toBeNull();
+      expect(t.registry.list()).toHaveLength(0);
+      expect(err).toBeInstanceOf(BridgeError);
+      expect(err.kind).toBe("guard");
+      return err as BridgeError;
+    };
+    expect((await refuse({ rq_index: 1, item_comp_id: 99 })).message).toMatch(/comp 5.*not 99/);
+    expect((await refuse({ rq_index: 1, item_comp_id: 5 }, [qItem(1, { status: "unqueued" })])).message).toMatch(/queued: true/);
+    expect((await refuse({ rq_index: 1, item_comp_id: 5 }, [qItem(1, { status: "done" })])).message).toMatch(/DONE/);
+    expect((await refuse({ rq_index: 7, item_comp_id: 5 })).message).toMatch(/No Render Queue item 7/);
+    expect((await refuse({ whole_queue: true }, [qItem(1, { status: "unqueued" })])).message).toMatch(/No item in the Render Queue is QUEUED/);
+  });
+
+  it("keeps refusing an unsaved or other project for a queue source", async () => {
+    const t = setup({ project: "C:/work/other.aep" });
+    await expect(t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5 }), t.ctx)).rejects.toMatchObject({ kind: "guard" });
+    expect(t.calls.map((c) => c.fn)).toEqual(["status"]);
   });
 });

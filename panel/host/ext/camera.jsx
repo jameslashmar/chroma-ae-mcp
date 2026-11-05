@@ -8,7 +8,9 @@
 //   side to work out depth, behind-camera and out-of-frame layers
 // - cameraRig (guarded write): a one- or two-node camera, a controller null
 //   with sliders driving it by expression (push-in, dolly, orbit, parallax),
-//   depth of field focused on a layer, and "make these 3D with a Z spread"
+//   depth of field focused on a layer, and "make these 3D with a Z spread";
+//   with args.camera it instead retunes an existing camera (lens, depth of
+//   field, focus, aperture, blur, one or two nodes, the 26.3 focus options)
 //
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
@@ -119,6 +121,14 @@
     if (r === "LightLayer") return "light";
     if (r === "TextLayer") return "text";
     if (r === "ShapeLayer") return "shape";
+    if (r === "ThreeDModelLayer") return "model_3d";
+    if (r === "ParametricMeshLayer") return "parametric_mesh";
+    try {
+      if (typeof ThreeDModelLayer !== "undefined" && l instanceof ThreeDModelLayer) return "model_3d";
+    } catch (eM1) {}
+    try {
+      if (typeof ParametricMeshLayer !== "undefined" && l instanceof ParametricMeshLayer) return "parametric_mesh";
+    } catch (eM2) {}
     try {
       if (l.nullLayer) return "null";
     } catch (e1) {}
@@ -151,6 +161,15 @@
     try {
       return prop.value;
     } catch (e1) {}
+    return null;
+  }
+
+  // The stored value at a time (before expressions); null when the property is missing.
+  function rawAt(prop, t) {
+    if (!prop) return null;
+    try {
+      return prop.valueAtTime(t, true);
+    } catch (e0) {}
     return null;
   }
 
@@ -235,9 +254,114 @@
     return null;
   }
 
+  // The 26.3 Advanced 3D camera options have no documented match names. Try the
+  // likely ones, then look through the options group by display name; the
+  // result says which match name answered, or null when the camera has none.
+  var PROBE = {
+    focus_area_width: {
+      names: ["ADBE Camera Focus Area Width", "ADBE Camera Focus Area"],
+      words: [["focus", "area"]]
+    },
+    near_far_blur_multiplier: {
+      names: ["ADBE Camera Near Far Blur Multiplier", "ADBE Camera Near-Far Blur Multiplier"],
+      words: [["blur", "multiplier"], ["near", "far"]]
+    }
+  };
+
+  function probeCameraOption(opts, key) {
+    var spec = PROBE[key];
+    if (!opts || !spec) return null;
+    var i;
+    for (i = 0; i < spec.names.length; i++) {
+      var p = child(opts, spec.names[i]);
+      if (p) return { prop: p, match_name: spec.names[i] };
+    }
+    var n = 0;
+    try {
+      n = opts.numProperties;
+    } catch (e0) {}
+    for (i = 1; i <= n && i <= 60; i++) {
+      var c = null;
+      var label = "";
+      var mn = "";
+      try {
+        c = opts.property(i);
+        label = String(c.name).toLowerCase();
+        mn = String(c.matchName);
+      } catch (e1) {
+        c = null;
+      }
+      if (!c) continue;
+      for (var g = 0; g < spec.words.length; g++) {
+        var all = true;
+        for (var w = 0; w < spec.words[g].length; w++) {
+          if (label.indexOf(spec.words[g][w]) < 0) all = false;
+        }
+        if (all) return { prop: c, match_name: mn };
+      }
+    }
+    return null;
+  }
+
+  function numKeysOf(prop) {
+    if (!prop) return null;
+    try {
+      return prop.numKeys;
+    } catch (e) {}
+    return null;
+  }
+
+  function lightTypeNameOf(l) {
+    var t;
+    try {
+      t = l.lightType;
+    } catch (e0) {
+      return null;
+    }
+    try {
+      if (t === LightType.PARALLEL) return "parallel";
+      if (t === LightType.SPOT) return "spot";
+      if (t === LightType.POINT) return "point";
+      if (t === LightType.AMBIENT) return "ambient";
+      if (typeof LightType.ENVIRONMENT !== "undefined" && t === LightType.ENVIRONMENT) return "environment";
+    } catch (e1) {}
+    return null;
+  }
+
+  // A light for the scene report: type, environment source, intensity, colour,
+  // cone and shadows at a time. Options the light lacks read null.
+  function lightState(l, t) {
+    var g = child(l, "ADBE Light Options Group");
+    var st = {
+      type: lightTypeNameOf(l),
+      source: null,
+      intensity: scalar(valueAt(child(g, "ADBE Light Intensity"), t)),
+      color: null,
+      casts_shadows: null,
+      cone_angle: scalar(valueAt(child(g, "ADBE Light Cone Angle"), t)),
+      cone_feather: null,
+      shadow_darkness: scalar(valueAt(child(g, "ADBE Light Shadow Darkness"), t)),
+      shadow_diffusion: scalar(valueAt(child(g, "ADBE Light Shadow Diffusion"), t))
+    };
+    var fe = child(g, "ADBE Light Cone Feather 2");
+    if (!fe) fe = child(g, "ADBE Light Cone Feather");
+    st.cone_feather = scalar(valueAt(fe, t));
+    var col = valueAt(child(g, "ADBE Light Color"), t);
+    if (col && typeof col.length === "number") st.color = [col[0], col[1], col[2]];
+    var cs = valueAt(child(g, "ADBE Casts Shadows"), t);
+    if (cs === true) st.casts_shadows = true;
+    else if (cs === false) st.casts_shadows = false;
+    else if (typeof cs === "number") st.casts_shadows = cs >= 0.5;
+    try {
+      var ls = l.lightSource;
+      if (ls) st.source = { id: ls.id, name: String(ls.name) };
+    } catch (e2) {}
+    return st;
+  }
+
   // ---------- reads ----------
 
-  function cameraInfo(l, comp, t, activeId) {
+  function cameraInfo(l, comp, t, activeId, atTime) {
     var tr = child(l, "ADBE Transform Group");
     var opts = child(l, "ADBE Camera Options Group");
     var pos = child(tr, "ADBE Position");
@@ -273,6 +397,36 @@
     try {
       if (l.parent) info.parent_id = l.parent.id;
     } catch (e0) {}
+    info.num_keys = {
+      zoom: numKeysOf(zoomP),
+      focus_distance: numKeysOf(focusP),
+      aperture: numKeysOf(apertureP),
+      blur_level: numKeysOf(blurP)
+    };
+    var faw = probeCameraOption(opts, "focus_area_width");
+    var nfb = probeCameraOption(opts, "near_far_blur_multiplier");
+    info.focus_area_width = null;
+    info.near_far_blur_multiplier = null;
+    if (faw) info.focus_area_width = scalar(valueAt(faw.prop, t));
+    if (nfb) info.near_far_blur_multiplier = scalar(valueAt(nfb.prop, t));
+    info.num_keys.focus_area_width = null;
+    info.num_keys.near_far_blur_multiplier = null;
+    if (faw) info.num_keys.focus_area_width = numKeysOf(faw.prop);
+    if (nfb) info.num_keys.near_far_blur_multiplier = numKeysOf(nfb.prop);
+    if (isNum(atTime)) {
+      // The stored values at the time a retune keyed, so a receipt can check the key's value.
+      info.values_at = {
+        time: atTime,
+        zoom: scalar(rawAt(zoomP, atTime)),
+        focus_distance: scalar(rawAt(focusP, atTime)),
+        aperture: scalar(rawAt(apertureP, atTime)),
+        blur_level: scalar(rawAt(blurP, atTime)),
+        focus_area_width: null,
+        near_far_blur_multiplier: null
+      };
+      if (faw) info.values_at.focus_area_width = scalar(rawAt(faw.prop, atTime));
+      if (nfb) info.values_at.near_far_blur_multiplier = scalar(rawAt(nfb.prop, atTime));
+    }
     var watched = [
       ["position", pos],
       ["point_of_interest", poi],
@@ -300,7 +454,7 @@
       name: String(l.name),
       kind: kind,
       enabled: l.enabled === true,
-      three_d: kind === "camera" || kind === "light",
+      three_d: kind === "camera" || kind === "light" || kind === "model_3d" || kind === "parametric_mesh",
       parent_id: null,
       in_point: l.inPoint,
       out_point: l.outPoint,
@@ -386,7 +540,7 @@
     for (var i = 1; i <= n; i++) {
       var l = comp.layer(i);
       if (layerKind(l) === "camera") {
-        if (cameras.length < MAX_CAMERAS) cameras.push(cameraInfo(l, comp, t, activeId));
+        if (cameras.length < MAX_CAMERAS) cameras.push(cameraInfo(l, comp, t, activeId, args.at_time));
         else truncated = true;
       }
       for (var k = 0; k < ids.length; k++) {
@@ -488,7 +642,7 @@
         enabled: l.enabled === true,
         solo: isSolo,
         selected: false,
-        three_d: kind === "camera" || kind === "light",
+        three_d: kind === "camera" || kind === "light" || kind === "model_3d" || kind === "parametric_mesh",
         parent_id: null,
         in_point: l.inPoint,
         out_point: l.outPoint,
@@ -533,6 +687,7 @@
           blur_level: ci.blur_level
         };
       }
+      if (kind === "light") o.light = lightState(l, t);
       layers.push(o);
     }
     var compActive = null;
@@ -770,9 +925,275 @@
     return out;
   }
 
+  // ---------- retune an existing camera ----------
+
+  function sameNum(a, b) {
+    return isNum(a) && isNum(b) && Math.abs(a - b) <= 1e-6 + Math.abs(b) * 1e-9;
+  }
+
+  function oneOf(v) {
+    if (v === true || v === 1) return true;
+    return false;
+  }
+
+  // One planned change to a camera property: apply it, or take it back.
+  // keyedAt is a time when the property is keyframed (the value is keyed
+  // there); otherwise the base value is set, and a fixed focus distance also
+  // clears an expression that drove it.
+  function valueChange(key, prop, want, keyedAt, clearExpr) {
+    var had = false;
+    var oldAt = null;
+    var oldVal = null;
+    var oldExpr = "";
+    if (keyedAt !== null) {
+      var ni = prop.nearestKeyIndex(keyedAt);
+      if (ni >= 1 && Math.abs(prop.keyTime(ni) - keyedAt) < 1e-6) had = true;
+      oldAt = prop.valueAtTime(keyedAt, true);
+    } else {
+      oldVal = prop.value;
+      try {
+        if (prop.expression) oldExpr = String(prop.expression);
+      } catch (e0) {}
+    }
+    return {
+      key: key,
+      want: want,
+      keyed: keyedAt !== null,
+      replaced_key: had,
+      apply: function () {
+        if (keyedAt !== null) {
+          prop.setValueAtTime(keyedAt, want);
+        } else {
+          if (clearExpr) prop.expression = "";
+          prop.setValue(want);
+        }
+      },
+      revert: function () {
+        if (keyedAt !== null) {
+          if (had) {
+            prop.setValueAtTime(keyedAt, oldAt);
+          } else {
+            var k = prop.nearestKeyIndex(keyedAt);
+            if (k >= 1 && Math.abs(prop.keyTime(k) - keyedAt) < 1e-6) prop.removeKey(k);
+          }
+        } else {
+          prop.setValue(oldVal);
+          if (clearExpr && oldExpr) prop.expression = oldExpr;
+        }
+      }
+    };
+  }
+
+  function expressionChange(key, prop, text) {
+    var old = "";
+    try {
+      if (prop.expression) old = String(prop.expression);
+    } catch (e0) {}
+    return {
+      key: key,
+      want: text,
+      keyed: false,
+      replaced_key: false,
+      apply: function () {
+        prop.expression = text;
+      },
+      revert: function () {
+        prop.expression = old;
+      }
+    };
+  }
+
+  function retuneCamera(args, comp) {
+    var cam = findLayer(comp, args.camera);
+    if (layerKind(cam) !== "camera") fail("bad_args", "\"" + cam.name + "\" is not a camera layer");
+    var locked = false;
+    try {
+      locked = cam.locked === true;
+    } catch (eL) {}
+    if (locked) fail("bad_args", "Camera \"" + cam.name + "\" is locked");
+    var onlyOnCreate = ["name", "preset", "controller_name", "motion", "spread", "distance"];
+    for (var oc = 0; oc < onlyOnCreate.length; oc++) {
+      if (has(args[onlyOnCreate[oc]])) fail("bad_args", onlyOnCreate[oc] + " applies when creating a camera, not with camera (retune)");
+    }
+    if (!has(args.lens) && !has(args.nodes) && !has(args.focus) && !has(args.depth_of_field)) {
+      fail("bad_args", "Retuning needs at least one of lens, nodes, focus, depth_of_field");
+    }
+    var atTime = null;
+    if (has(args.at_time)) {
+      if (!isNum(args.at_time) || args.at_time < 0 || args.at_time >= comp.duration) fail("bad_args", "at_time must be a time inside the comp");
+      atTime = args.at_time;
+    }
+    var opts = child(cam, "ADBE Camera Options Group");
+    var zoomP = child(opts, "ADBE Camera Zoom");
+    var dofP = child(opts, "ADBE Camera Depth of Field");
+    var focusP = child(opts, "ADBE Camera Focus Distance");
+    var apP = child(opts, "ADBE Camera Aperture");
+    var blurP = child(opts, "ADBE Camera Blur Level");
+    var warnings = [];
+    var changes = [];
+
+    // How a numeric property is written: keyed ones need at_time, expression-driven ones are refused.
+    function plan(key, prop, label, want, allowClearExpr) {
+      var keys = numKeysOf(prop);
+      var keyedAt = null;
+      if (keys !== null && keys > 0) {
+        if (atTime === null) fail("bad_args", label + " is keyframed (" + keys + " keys); give at_time to key a new value there, or remove the keys first");
+        keyedAt = atTime;
+      }
+      var ex = expressionOf(prop);
+      if (ex !== null && keyedAt !== null) fail("bad_args", label + " is keyframed and driven by an expression; remove the expression or the keys first");
+      if (ex !== null && !allowClearExpr) fail("bad_args", label + " is driven by an expression; remove the expression first");
+      checkLimits(prop, want, label);
+      var current = null;
+      if (keyedAt !== null) current = scalar(valueAt(prop, keyedAt));
+      else current = scalar(valueAt(prop, 0));
+      if (sameNum(current, want) && ex === null) return;
+      changes.push(valueChange(key, prop, want, keyedAt, allowClearExpr && ex !== null));
+    }
+
+    if (has(args.lens)) {
+      if (!zoomP) fail("unsupported", "The camera has no Zoom property");
+      var newZoom = lensZoom(comp, args.lens);
+      plan("zoom", zoomP, "zoom", newZoom, false);
+    }
+
+    var f = null;
+    if (has(args.focus)) f = args.focus;
+    var wantDof = null;
+    if (has(args.depth_of_field)) {
+      if (typeof args.depth_of_field !== "boolean") fail("bad_args", "depth_of_field must be true or false");
+      wantDof = args.depth_of_field;
+    }
+    if (f) {
+      if (wantDof === false) fail("bad_args", "focus turns depth of field on; it can't be combined with depth_of_field false");
+      if (has(f.layer) && has(f.distance)) fail("bad_args", "focus takes a layer or a distance, not both");
+      if (!has(f.layer) && !has(f.distance) && !has(f.aperture) && !has(f.blur_level) && !has(f.focus_area_width) && !has(f.near_far_blur_multiplier)) {
+        fail("bad_args", "focus needs at least one option");
+      }
+      wantDof = true;
+    }
+    var probes = { focus_area_width: null, near_far_blur_multiplier: null };
+    if (wantDof !== null) {
+      if (!dofP) fail("unsupported", "The camera has no Depth of Field property");
+      var dofNow = oneOf(valueAt(dofP, 0));
+      if (numKeysOf(dofP) > 0) fail("bad_args", "Depth of Field is keyframed; remove the keys first");
+      if (dofNow !== wantDof) {
+        var dofVal = 0;
+        if (wantDof) dofVal = 1;
+        changes.push(valueChange("depth_of_field", dofP, dofVal, null, false));
+      }
+    }
+    if (f) {
+      if (has(f.layer)) {
+        if (!focusP) fail("unsupported", "The camera has no Focus Distance property");
+        var target = findLayer(comp, f.layer);
+        var tk = layerKind(target);
+        if (tk === "camera" || tk === "light") fail("bad_args", "The focus target can't be a " + tk + " layer");
+        var same = 0;
+        for (var fi = 1; fi <= comp.numLayers; fi++) {
+          if (comp.layer(fi).name === target.name) same++;
+        }
+        if (same > 1) fail("bad_args", same + " layers are named \"" + target.name + "\"; rename the focus target first");
+        if (numKeysOf(focusP) > 0) fail("bad_args", "Focus Distance is keyframed; a focus layer would replace the keys. Remove them first");
+        var fx = focusExpression(target.name);
+        var curEx = expressionOf(focusP);
+        if (curEx !== fx) changes.push(expressionChange("focus_expression", focusP, fx));
+      }
+      if (has(f.distance)) {
+        if (!focusP) fail("unsupported", "The camera has no Focus Distance property");
+        if (!isNum(f.distance) || f.distance < 0) fail("bad_args", "focus.distance must be a number of pixels, 0 or more");
+        if (expressionOf(focusP) !== null) warnings.push("The Focus Distance expression is replaced by the fixed distance");
+        plan("focus_distance", focusP, "focus.distance", f.distance, true);
+      }
+      if (has(f.aperture)) {
+        if (!isNum(f.aperture) || f.aperture < 0) fail("bad_args", "focus.aperture must be 0 or more");
+        if (apP) plan("aperture", apP, "focus.aperture", f.aperture, false);
+        else warnings.push("This camera has no Aperture property; focus.aperture was not applied");
+      }
+      if (has(f.blur_level)) {
+        if (!isNum(f.blur_level) || f.blur_level < 0 || f.blur_level > 1000) fail("bad_args", "focus.blur_level must be 0 to 1000 (percent)");
+        if (blurP) plan("blur_level", blurP, "focus.blur_level", f.blur_level, false);
+        else warnings.push("This camera has no Blur Level property; focus.blur_level was not applied");
+      }
+      var probeKeys = ["focus_area_width", "near_far_blur_multiplier"];
+      for (var pk = 0; pk < probeKeys.length; pk++) {
+        var pkey = probeKeys[pk];
+        if (!has(f[pkey])) continue;
+        if (!isNum(f[pkey]) || f[pkey] < 0) fail("bad_args", "focus." + pkey + " must be a number, 0 or more");
+        var pr = probeCameraOption(opts, pkey);
+        if (!pr) {
+          warnings.push("This camera has no " + pkey + " property (the Advanced 3D focus options need After Effects 26.3); it was not applied");
+          continue;
+        }
+        probes[pkey] = pr.match_name;
+        plan(pkey, pr.prop, "focus." + pkey, f[pkey], false);
+      }
+    }
+
+    var nodesWanted = null;
+    if (has(args.nodes)) {
+      if (args.nodes !== "one" && args.nodes !== "two") fail("bad_args", "nodes must be \"one\" or \"two\"");
+      if (typeof AutoOrientType === "undefined") fail("bad_args", "AutoOrientType is not available in this After Effects");
+      nodesWanted = args.nodes;
+    }
+    var tr = child(cam, "ADBE Transform Group");
+    var nodesNow = "one";
+    if (twoNodeOf(cam, poiOf(cam, tr))) nodesNow = "two";
+    var oldAutoOrient = null;
+    if (nodesWanted !== null && nodesWanted !== nodesNow) {
+      oldAutoOrient = cam.autoOrient;
+      changes.push({
+        key: "nodes",
+        want: nodesWanted,
+        keyed: false,
+        replaced_key: false,
+        apply: function () {
+          if (nodesWanted === "one") cam.autoOrient = AutoOrientType.NO_AUTO_ORIENT;
+          else cam.autoOrient = AutoOrientType.CAMERA_OR_POINT_OF_INTEREST;
+        },
+        revert: function () {
+          cam.autoOrient = oldAutoOrient;
+        }
+      });
+      if (nodesWanted === "two") warnings.push("The camera now aims at its point of interest; check where that sits");
+      else warnings.push("The camera is one-node now and points along its own rotation; its point of interest no longer aims it");
+    }
+
+    var camRef = { id: cam.id, index: cam.index, name: String(cam.name) };
+    var plain = [];
+    for (var ci = 0; ci < changes.length; ci++) {
+      plain.push({ key: changes[ci].key, value: changes[ci].want, keyed: changes[ci].keyed, replaced_key: changes[ci].replaced_key });
+    }
+    if (changes.length === 0) {
+      return { retune: true, no_op: true, camera: camRef, controller: null, changes: [], keyed_at: atTime, probe: probes, warnings: warnings };
+    }
+    return A.withUndo(args.label || "Retune camera", function () {
+      var done = [];
+      try {
+        for (var k = 0; k < changes.length; k++) {
+          changes[k].apply();
+          done.push(changes[k]);
+        }
+      } catch (err) {
+        for (var r = done.length - 1; r >= 0; r--) {
+          try {
+            done[r].revert();
+          } catch (eRv) {}
+        }
+        throw err;
+      }
+      return { retune: true, camera: camRef, controller: null, changes: plain, keyed_at: atTime, probe: probes, warnings: warnings };
+    });
+  }
+
   A.cameraRig = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
+    if (has(args.camera)) return retuneCamera(args, comp);
+    if (has(args.depth_of_field) || has(args.at_time)) fail("bad_args", "depth_of_field and at_time apply with camera (retune) only");
+    if (has(args.focus) && (has(args.focus.focus_area_width) || has(args.focus.near_far_blur_multiplier))) {
+      fail("bad_args", "focus_area_width and near_far_blur_multiplier apply with camera (retune) only");
+    }
 
     var presets = { "static": 1, push_in: 1, dolly: 1, orbit: 1, parallax: 1 };
     var preset = "static";

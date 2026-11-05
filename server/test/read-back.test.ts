@@ -121,3 +121,35 @@ describe("a failing read-back after an applied write is reported, not thrown", (
     expect(out.backup_path).toBeTruthy();
   });
 });
+
+describe("the wave 5 animate paths report a failing read-back too", () => {
+  const cases: Array<[string, string, Record<string, unknown>, unknown?]> = [
+    ["ae_set_text typography", "ae_set_text", { comp_id: 1, layer, style: { caps: "all" }, paragraph: { justify: "full" }, expect: guard }, { applied: ["caps"], set: { typography: { caps: "all" } } }],
+    ["ae_set_keyframe_ease extras only", "ae_set_keyframe_ease", { comp_id: 1, layer, path: ["ADBE Transform Group", "ADBE Position"], in_interp: "linear", label: 3, expect: guard }],
+    ["ae_import_footage import_as comp", "ae_import_footage", { paths: ["C:/art/a.psd"], import_as: "comp", expect: guard }, { item_ids: [42], items: [], new_comp_ids: [42], new_folder_ids: [43] }],
+    ["ae_replace_footage reload", "ae_replace_footage", { action: "reload", item_ids: [7], expect: guard }, { item_ids: [7], reloaded: [7], skipped: [] }],
+  ];
+
+  for (const [title, name, args, writeResult] of cases) {
+    it(title, async () => {
+      const t = tool(name);
+      const { ctx, wasWritten } = aeFailingAfterWrite("<unsaved>", writeResult ?? {});
+      const out = (await t.handler(t.schema.parse(args), ctx)) as any;
+      expect(wasWritten()).toBe(true);
+      expectAppliedWithReadBackFailure(out);
+      if (name === "ae_import_footage") {
+        expect(out.item_ids).toEqual([42]);
+        expect(out.new_comp_ids).toEqual([42]);
+      }
+    });
+  }
+
+  it("a reload that finds nothing to reload changes nothing and reads nothing back", async () => {
+    const t = tool("ae_replace_footage");
+    const { ctx, calls } = aeFailingAfterWrite("<unsaved>", { no_op: true, item_ids: [], reloaded: [], skipped: [] });
+    const out = (await t.handler(t.schema.parse({ action: "reload", folder_id: 3, expect: guard }), ctx)) as any;
+    expect(out.no_op).toBe(true);
+    expect(calls).toEqual(["checkGuard", "animateReloadTargets", "animateReloadFootage"]);
+    expect(out.receipt.matches).toBe(true);
+  });
+});

@@ -1231,3 +1231,16 @@ describe("timed save accounting", () => {
 });
 
 void FakeFootage;
+
+describe("untitled projects point at ae_save save_as", () => {
+  it("leaveVerdict's reason for saving an untitled project names save_as", () => {
+    const v = leaveVerdict(true, "save", "<unsaved>");
+    expect(v.proceed).toBe(false);
+    expect(v.reason).toContain("save_as: { path }");
+    expect(v.reason).not.toContain("Save it once in After Effects");
+  });
+
+  it("the tool description says how to save a project made with new", () => {
+    expect(tool.description).toContain("ae_save and save_as: { path }");
+  });
+});

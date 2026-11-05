@@ -426,15 +426,73 @@ const REPEATER = z.object({
     .describe("Build a grid with two Repeaters (copies along X, then that row along Y). Replaces copies and position."),
 });
 
+const MERGE = z.object({
+  mode: z.enum(["merge", "add", "subtract", "intersect", "exclude"]).optional().describe("Merge Paths mode, in the order of AE's menu (exclude is Exclude Intersections). Default AE's: merge."),
+});
+
+const ROUND_CORNERS = z.object({ radius: z.number().min(0).max(100000).optional().describe("Pixels.") });
+
+const PointsType = z.enum(["corner", "smooth"]).describe("Corner or smooth points. The numbers behind the menu are not in the Scripting Guide (assumed corner=1, smooth=2), so the result says it is unverified.");
+
+const ZIG_ZAG = z.object({
+  size: z.number().min(-100000).max(100000).optional(),
+  ridges_per_segment: z.number().int().min(0).max(1000).optional(),
+  points: PointsType.optional(),
+});
+
+const PUCKER_BLOAT = z.object({ amount: z.number().min(-100).max(100).optional().describe("Percent: negative pinches (pucker), positive bulges (bloat).") });
+
+const TWIST = z.object({
+  angle: z.number().min(-100000).max(100000).optional().describe("Degrees."),
+  center: Vec2.optional().describe("[x, y] in the group's space."),
+});
+
+const WIGGLE_COMMON = {
+  wiggles_per_second: z.number().min(0).max(1000).optional(),
+  correlation: z.number().min(0).max(100).optional().describe("Percent."),
+  temporal_phase: z.number().min(-100000).max(100000).optional().describe("Degrees."),
+  spatial_phase: z.number().min(-100000).max(100000).optional().describe("Degrees."),
+  random_seed: z.number().int().min(0).max(1000000).optional(),
+};
+
+const WIGGLE_PATHS = z.object({
+  size: z.number().min(-100000).max(100000).optional(),
+  detail: z.number().int().min(0).max(1000).optional(),
+  points: PointsType.optional(),
+  ...WIGGLE_COMMON,
+});
+
+const WIGGLE_TRANSFORM = z.object({
+  ...WIGGLE_COMMON,
+  transform: z
+    .object({
+      position: Vec2.optional(),
+      scale: Vec2.optional().describe("Percent."),
+      rotation: z.number().min(-100000).max(100000).optional().describe("Degrees."),
+      anchor: Vec2.optional(),
+    })
+    .optional()
+    .describe("The wiggle amounts of the operator's own Transform group. Its children have no documented match names (looked up by likely match names, then display names); the result lists what the group holds (`transform_children`)."),
+});
+
+const PATH_OPERATORS = ["trim", "offset", "repeater", "merge", "round_corners", "zig_zag", "pucker_bloat", "twist", "wiggle_paths", "wiggle_transform"] as const;
+
 export const AePathOperatorSchema = z
   .object({
     comp_id: z.number().int(),
     layer: LayerSelectorSchema.describe("A shape layer."),
     group: IndexOrName.describe("The top-level group to add the operator to (content index or name). Operators act on the paths above them in the group; the new one goes last."),
-    operator: z.enum(["trim", "offset", "repeater"]),
+    operator: z.enum(PATH_OPERATORS),
     trim: TRIM.optional(),
     offset: OFFSET.optional(),
     repeater: REPEATER.optional(),
+    merge: MERGE.optional().describe("Merge Paths ('ADBE Vector Filter - Merge')."),
+    round_corners: ROUND_CORNERS.optional().describe("Round Corners ('ADBE Vector Filter - RC')."),
+    zig_zag: ZIG_ZAG.optional().describe("Zig Zag ('ADBE Vector Filter - Zigzag')."),
+    pucker_bloat: PUCKER_BLOAT.optional().describe("Pucker & Bloat ('ADBE Vector Filter - PB')."),
+    twist: TWIST.optional().describe("Twist ('ADBE Vector Filter - Twist')."),
+    wiggle_paths: WIGGLE_PATHS.optional().describe("Wiggle Paths ('ADBE Vector Filter - Roughen')."),
+    wiggle_transform: WIGGLE_TRANSFORM.optional().describe("Wiggle Transform ('ADBE Vector Filter - Wiggler')."),
     name: z.string().min(1).max(200).optional().describe("Operator name. A grid names its two Repeaters '<name> X' and '<name> Y'."),
     expect: ExpectSchema,
   })
@@ -443,6 +501,9 @@ export const AePathOperatorSchema = z
     need(v.operator === "offset" || v.offset === undefined, "`offset` goes with operator 'offset'.");
     need(v.operator === "repeater" || v.repeater === undefined, "`repeater` goes with operator 'repeater'.");
     need(v.operator === "trim" || v.trim === undefined, "`trim` goes with operator 'trim'.");
+    for (const op of ["merge", "round_corners", "zig_zag", "pucker_bloat", "twist", "wiggle_paths", "wiggle_transform"] as const) {
+      need(v.operator === op || v[op] === undefined, `\`${op}\` goes with operator '${op}'.`);
+    }
     if (v.trim?.draw_on && (v.trim.start !== undefined || v.trim.end !== undefined)) need(false, "draw_on animates Start or End; don't also set trim.start or trim.end.");
     if (v.repeater?.grid && (v.repeater.copies !== undefined || v.repeater.position !== undefined)) need(false, "grid sets the copies and position itself.");
     if (v.repeater?.grid && v.repeater.grid.columns * v.repeater.grid.rows > 10000) need(false, "A grid of more than 10000 cells would freeze After Effects.");
@@ -606,6 +667,53 @@ function repeaterChild(item: OperatorItem, field: string): unknown {
   return hit?.value;
 }
 
+const MERGE_MODE: Record<string, number> = { merge: 1, add: 2, subtract: 3, intersect: 4, exclude: 5 };
+const POINTS_TYPE: Record<string, number> = { corner: 1, smooth: 2 };
+
+/** How each setting of the newer operators reads back: a number, a point, or a menu item by name. */
+const GENERIC_FIELDS: Record<string, Record<string, Record<string, number> | null>> = {
+  merge: { mode: MERGE_MODE },
+  round_corners: { radius: null },
+  zig_zag: { size: null, ridges_per_segment: null, points: POINTS_TYPE },
+  pucker_bloat: { amount: null },
+  twist: { angle: null, center: null },
+  wiggle_paths: { size: null, detail: null, points: POINTS_TYPE, wiggles_per_second: null, correlation: null, temporal_phase: null, spatial_phase: null, random_seed: null },
+  wiggle_transform: { wiggles_per_second: null, correlation: null, temporal_phase: null, spatial_phase: null, random_seed: null },
+};
+
+const WIGGLER_CHILD: Record<string, string[]> = {
+  anchor: ["anchor", "anchor point"],
+  position: ["position"],
+  scale: ["scale"],
+  rotation: ["rotation"],
+};
+
+/** Checks the settings of Merge Paths, Round Corners, Zig Zag, Pucker & Bloat, Twist and the two Wiggles against the read-back. */
+export function genericMismatches(args: OperatorArgs, item: OperatorItem, at: string, m: ReceiptMismatch[]): void {
+  const fields = GENERIC_FIELDS[args.operator];
+  if (!fields) return;
+  const spec = ((args as unknown as Record<string, unknown>)[args.operator] ?? {}) as Record<string, unknown>;
+  for (const [key, map] of Object.entries(fields)) {
+    const want = spec[key];
+    if (want === undefined) continue;
+    compareValues(map ? map[want as string] : want, item[key], `${at}.${key}`, m);
+  }
+  const transform = (spec.transform ?? undefined) as Record<string, unknown> | undefined;
+  if (transform) {
+    const list = (item.transform as Array<{ name: string; matchName: string; value: unknown }> | undefined) ?? [];
+    for (const [key, want] of Object.entries(transform)) {
+      if (want === undefined) continue;
+      const names = WIGGLER_CHILD[key] ?? [key];
+      const hit = list.find((c) => names.some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
+      if (hit === undefined) {
+        m.push({ path: `${at}.transform.${key}`, expected: want, actual: undefined, message: `The Wiggle Transform's Transform group lists no ${key} in the read-back` });
+      } else {
+        compareValues(want, hit.value, `${at}.transform.${key}`, m);
+      }
+    }
+  }
+}
+
 export function operatorMismatches(args: OperatorArgs, beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = beforeRaw as OperatorsReadout | null;
@@ -665,6 +773,8 @@ export function operatorMismatches(args: OperatorArgs, beforeRaw: unknown, after
       if (o.miter_limit !== undefined) compareValues(o.miter_limit, item.miter_limit, `${at}.miter_limit`, m);
       if (o.copies !== undefined) compareValues(o.copies, item.copies, `${at}.copies`, m);
       if (o.copy_offset !== undefined) compareValues(o.copy_offset, item.copy_offset, `${at}.copy_offset`, m);
+    } else if (args.operator !== "repeater") {
+      genericMismatches(args, item, at, m);
     } else {
       const r = args.repeater ?? {};
       const grid = r.grid;
@@ -870,7 +980,12 @@ export const pathsTools: ToolDefinition<any>[] = [
     name: "ae_path_operator",
     description:
       "Add a path operator to a top-level group of a shape layer: Trim Paths (static start/end/offset, or a draw-on preset that keys Start or End with Easy Ease), Offset Paths (amount, line join, miter limit; copies need AE 17.1.1+), " +
-      "or a Repeater (copies, offset, order, transform; `grid` builds a columns x rows grid from two Repeaters). The operator goes last in the group so it acts on the paths above it. " +
+      "or a Repeater (copies, offset, order, transform; `grid` builds a columns x rows grid from two Repeaters). " +
+      "Also: merge (Merge Paths: merge, add, subtract, intersect, exclude), round_corners (radius), zig_zag (size, ridges per segment, corner or smooth points), pucker_bloat (amount, -100 to 100), twist (angle, center), " +
+      "wiggle_paths (size, detail, points, wiggles per second, correlation, temporal and spatial phase, random seed) and wiggle_transform (the same timing settings plus the wiggle amounts of its own Transform group). " +
+      "The Points menu numbers (corner=1, smooth=2) and the Wiggle Transform's Transform children are not in the Scripting Guide: the result says so and lists the children. " +
+      "The operator goes last in the group so it acts on the paths above it (Merge Paths in particular combines every path above it). " +
+      "Existing operators of these kinds are listed by ae_path_read with include_operators. " +
       "Nothing is half-added: a step AE rejects takes the operator back out in the same undo group. In one undo group guarded by `expect`; the read-back (a separate evalScript) lists the group and checks each new operator's values and keys. " +
       "The Repeater Transform children have no documented match names; the result lists what the group really holds (`transform_children`). " +
       AGENT_SAFETY_GUIDANCE,
@@ -884,7 +999,7 @@ export const pathsTools: ToolDefinition<any>[] = [
         read: () => ({ host: "pathsOperators", args: { comp_id: args.comp_id, layer: args.layer, group: args.group } }),
         write: {
           host: "pathsOperator",
-          args: { comp_id: args.comp_id, layer: args.layer, group: args.group, operator: args.operator, trim: args.trim, offset: args.offset, repeater: args.repeater, name: args.name, label: `Add ${args.operator}` },
+          args: { comp_id: args.comp_id, layer: args.layer, group: args.group, operator: args.operator, trim: args.trim, offset: args.offset, repeater: args.repeater, merge: args.merge, round_corners: args.round_corners, zig_zag: args.zig_zag, pucker_bloat: args.pucker_bloat, twist: args.twist, wiggle_paths: args.wiggle_paths, wiggle_transform: args.wiggle_transform, name: args.name, label: `Add ${args.operator}` },
         },
         check: (before, after, w) => operatorMismatches(args, before, after, w),
         present: (_before, after, w) => ({ ...w, contents: (after as OperatorsReadout | null)?.items }),

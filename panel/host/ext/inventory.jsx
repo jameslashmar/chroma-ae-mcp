@@ -5,9 +5,13 @@
 // - fontsInUse: the fonts text layers use (keyframed source text too), and
 //   which are missing or substituted (AE 24+ font API; unknown before)
 //
+// - inventorySearchFonts / inventoryCheckFonts / inventoryUsedFonts / inventoryReplacePlan: reads for
+//   ae_fonts search / check / replace (dry run)
+// - inventoryReplaceFont: the one write (Project.replaceFont, AE 24.5, not undoable; the server checkpoints first)
+//
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
-// - Read only: nothing here changes the project, the selection or the time.
+// - Reads change nothing in the project, the selection or the time; only inventoryReplaceFont writes.
 
 (function (G) {
   var A = G.__chromaAe;
@@ -20,10 +24,27 @@
   var MAX_USES = 20;
   var MAX_TEXT_KEYS = 20;
 
-  function fail(kind, message) {
+  function fail(kind, message, details) {
     var e = new Error(message);
     e.__kind = kind;
+    if (details) {
+      e.__expected = details.expected;
+      e.__actual = details.actual;
+    }
     throw e;
+  }
+
+  function assertGuard(expect) {
+    if (!expect || expect.project_path === undefined) {
+      fail("guard", "Mutation refused: no expect.project_path given.");
+    }
+    var g = A.checkGuard({ expect: expect });
+    if (!g.ok) {
+      fail("guard", "Target guard refused mutation: the open project or comp does not match expect. Stop and re-read state.", {
+        expected: expect,
+        actual: { project_path: g.project_path, comp_id: g.comp_id, comp_is_valid: g.comp_is_valid }
+      });
+    }
   }
 
   function requireComp(id) {
@@ -365,5 +386,769 @@
       partial: partial,
       skipped_layers: skipped
     };
+  };
+
+  // ---------- font search, check and replace (AE 24.0+ app.fonts; members newer are feature-detected) ----------
+  //
+  // inventorySearchFonts  read   a bounded scan of app.fonts.allFonts, paged
+  // inventoryCheckFonts   read   exists / substitute / duplicates / glyphs / variable axes / fallback for given fonts
+  // inventoryUsedFonts    read   Project.usedFonts (24.5) resolved to layers; also the read-back of a replace
+  // inventoryReplacePlan  read   the dry run of a replace
+  // inventoryReplaceFont  WRITE  Project.replaceFont (24.5): NOT undoable, so the server checkpoints first
+
+  var MAX_FONT_SCAN = 8000;
+  var FONT_SCAN_MS = 2500;
+  var MAX_PAGE = 100;
+  var MAX_CHECK_FONTS = 50;
+  var MAX_USED_LAYERS = 100;
+  var MAX_PLAN_LAYERS = 100;
+  var MAX_GLYPH_CHARS = 2000;
+  var BIG_FLOAT = 1e30;
+
+  function clipStr(s, n) {
+    var t = String(s);
+    if (t.length > n) return t.substring(0, n);
+    return t;
+  }
+
+  function fontsApi() {
+    var f = null;
+    try { f = app.fonts; } catch (e) { f = null; }
+    if (f === undefined) return null;
+    return f;
+  }
+
+  function noFontsReason() {
+    return "This After Effects has no app.fonts (it needs 24.0).";
+  }
+
+  function normF(s) {
+    return String(s).toLowerCase().replace(/[\s\-_]+/g, "");
+  }
+
+  function readMember(obj, name) {
+    try {
+      var v = obj[name];
+      if (v !== undefined && v !== null) return v;
+    } catch (e) {}
+    return undefined;
+  }
+
+  // The name of a CTScript enum value ("CT_ROMAN_SCRIPT"), or its string form.
+  function ctScriptName(v) {
+    try {
+      if (typeof CTScript !== "undefined") {
+        for (var k in CTScript) {
+          if (CTScript[k] === v) return String(k);
+        }
+      }
+    } catch (e) {}
+    return String(v);
+  }
+
+  // Word-order variants of the CTScript names (the enum puts the qualifier first and joins words).
+  var CT_SCRIPT_ALIASES = {
+    CHINESESIMPLIFIED: "SIMPLIFIEDCHINESE",
+    CHINESETRADITIONAL: "TRADITIONALCHINESE",
+    ROMANEASTEUROPEAN: "EASTEUROPEANROMAN"
+  };
+
+  // Strip spaces, dashes and underscores so "chinese_simplified" and "CT_SIMPLIFIEDCHINESE_SCRIPT" compare equal.
+  function ctScriptKey(s) {
+    return String(s).toUpperCase().replace(/^CT_/, "").replace(/_SCRIPT$/, "").replace(/[\s\-_]+/g, "");
+  }
+
+  function ctScriptFromName(name) {
+    var want = String(name);
+    var upper = want.toUpperCase().replace(/[\s\-]+/g, "_");
+    var tries = [want, upper, "CT_" + upper + "_SCRIPT", "CT_" + upper];
+    try {
+      if (typeof CTScript === "undefined") return undefined;
+      for (var i = 0; i < tries.length; i++) {
+        var v = CTScript[tries[i]];
+        if (v !== undefined) return v;
+      }
+      var key = ctScriptKey(want);
+      if (CT_SCRIPT_ALIASES[key] !== undefined) key = CT_SCRIPT_ALIASES[key];
+      // The alias table gives the exact enum stem, so try it directly before relying on enumeration.
+      var direct = CTScript["CT_" + key + "_SCRIPT"];
+      if (direct !== undefined) return direct;
+      for (var k in CTScript) {
+        if (k.indexOf("CT_") === 0 && ctScriptKey(k) === key && CTScript[k] !== undefined) return CTScript[k];
+      }
+    } catch (e) {}
+    return undefined;
+  }
+
+  // Line breaks and control characters have no glyph of their own; the glyph check must not see them.
+  function glyphText(s) {
+    return String(s).replace(/[\r\n\t\u0003\u2028\u2029]/g, "");
+  }
+
+  function writingScriptNames(f) {
+    var out = [];
+    try {
+      var ws = f.writingScripts;
+      for (var i = 0; ws && i < ws.length && i < 20; i++) out.push(ctScriptName(ws[i]));
+    } catch (e) {}
+    return out;
+  }
+
+  function axesOf(f) {
+    var axes = [];
+    try {
+      var raw = f.designAxesData;
+      for (var a = 0; raw && a < raw.length && a < 20; a++) {
+        var ax = {};
+        var tag = readMember(raw[a], "axisTag");
+        if (tag === undefined) tag = readMember(raw[a], "tag");
+        var nm = readMember(raw[a], "axisName");
+        if (nm === undefined) nm = readMember(raw[a], "name");
+        var mn = readMember(raw[a], "minValue");
+        if (mn === undefined) mn = readMember(raw[a], "min");
+        var mx = readMember(raw[a], "maxValue");
+        if (mx === undefined) mx = readMember(raw[a], "max");
+        var df = readMember(raw[a], "defaultValue");
+        if (df === undefined) df = readMember(raw[a], "default");
+        if (tag !== undefined) ax.tag = String(tag);
+        if (nm !== undefined) ax.name = String(nm);
+        if (mn !== undefined) ax.min = mn;
+        if (mx !== undefined) ax.max = mx;
+        if (df !== undefined) ax["default"] = df;
+        axes.push(ax);
+      }
+    } catch (e) {}
+    return axes;
+  }
+
+  function fontSummary(f, full) {
+    var d = {};
+    var map = [
+      ["postscript", "postScriptName"], ["family", "familyName"], ["style", "styleName"], ["full_name", "fullName"],
+      ["native_family", "nativeFamilyName"], ["native_style", "nativeStyleName"], ["native_full_name", "nativeFullName"],
+      ["is_from_adobe_fonts", "isFromAdobeFonts"], ["is_substitute", "isSubstitute"], ["has_design_axes", "hasDesignAxes"],
+      ["location", "location"], ["font_id", "fontID"]
+    ];
+    for (var i = 0; i < map.length; i++) {
+      var v = readMember(f, map[i][1]);
+      if (v === undefined) continue;
+      if (typeof v === "string") d[map[i][0]] = clipStr(v, 400);
+      else d[map[i][0]] = v;
+    }
+    if (full) {
+      d.writing_scripts = writingScriptNames(f);
+      if (d.has_design_axes === true) d.axes = axesOf(f);
+    }
+    return d;
+  }
+
+  // The raw FontObject for a spec: {postscript} or {family, style}. Prefers a font AE does not substitute.
+  function rawFont(spec) {
+    var fonts = fontsApi();
+    if (!fonts) return null;
+    var list = null;
+    try {
+      if (spec.postscript !== undefined && spec.postscript !== null && String(spec.postscript) !== "") {
+        list = fonts.getFontsByPostScriptName(String(spec.postscript));
+      } else if (spec.family !== undefined && spec.style !== undefined) {
+        list = fonts.getFontsByFamilyNameAndStyleName(String(spec.family), String(spec.style));
+      }
+    } catch (e) {
+      list = null;
+    }
+    if (list === null || list === undefined) return null;
+    if (list.length === undefined) return list;
+    if (list.length === 0) return null;
+    for (var i = 0; i < list.length; i++) {
+      var sub = false;
+      try { sub = list[i].isSubstitute === true; } catch (e2) {}
+      if (!sub) return list[i];
+    }
+    return list[0];
+  }
+
+  function specLabel(spec) {
+    if (spec.postscript !== undefined && spec.postscript !== null && String(spec.postscript) !== "") return String(spec.postscript);
+    return String(spec.family) + " " + String(spec.style);
+  }
+
+  // A font reference from the tool: a PostScript name, or { family, style }.
+  function toSpec(ref, what) {
+    if (typeof ref === "string") {
+      if (ref.length < 1 || ref.length > 200) fail("bad_args", what + " must be a PostScript name of 1..200 characters");
+      return { postscript: ref };
+    }
+    if (ref && typeof ref === "object") {
+      if (typeof ref.postscript === "string" && ref.postscript.length > 0) return { postscript: ref.postscript };
+      if (typeof ref.family === "string" && typeof ref.style === "string" && ref.family.length > 0 && ref.style.length > 0) {
+        return { family: ref.family, style: ref.style };
+      }
+    }
+    fail("bad_args", what + " must be a PostScript name, or { family, style }");
+    return null;
+  }
+
+  // ----- search -----
+
+  function matchesQuery(info, q) {
+    var names = [info.postscript, info.family, info.style, info.full_name, info.native_family, info.native_style, info.native_full_name];
+    for (var i = 0; i < names.length; i++) {
+      if (names[i] !== undefined && normF(names[i]).indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+
+  A.inventorySearchFonts = function (args) {
+    args = args || {};
+    var fonts = fontsApi();
+    if (!fonts) return { available: false, reason: noFontsReason(), fonts: [], total_matches: 0, scanned: 0 };
+    var all = null;
+    try { all = fonts.allFonts; } catch (e0) { all = null; }
+    if (!all) return { available: false, reason: "app.fonts.allFonts could not be read.", fonts: [], total_matches: 0, scanned: 0 };
+    var q = "";
+    if (typeof args.query === "string") q = normF(args.query);
+    var wantFamily = "";
+    if (typeof args.family === "string") wantFamily = normF(args.family);
+    var wantStyle = "";
+    if (typeof args.style === "string") wantStyle = normF(args.style);
+    var pageSize = 25;
+    if (typeof args.page_size === "number" && isFinite(args.page_size)) pageSize = Math.floor(args.page_size);
+    if (pageSize < 1) pageSize = 1;
+    if (pageSize > MAX_PAGE) pageSize = MAX_PAGE;
+    var page = 1;
+    if (typeof args.page === "number" && isFinite(args.page)) page = Math.floor(args.page);
+    if (page < 1) page = 1;
+    var skip = (page - 1) * pageSize;
+    var wantScript;
+    var scriptGiven = typeof args.writing_script === "string" && args.writing_script.length > 0;
+    if (scriptGiven) {
+      wantScript = ctScriptFromName(args.writing_script);
+      if (wantScript === undefined) fail("bad_args", "writing_script \"" + args.writing_script + "\" is not a CTScript name (for example roman, arabic, hebrew, cyrillic, greek, japanese, chinese_simplified).");
+    }
+    var variableOnly = args.variable_only === true;
+    var adobeOnly = args.adobe_only === true;
+    var started = new Date().getTime();
+    var scanned = 0;
+    var matches = 0;
+    var out = [];
+    var truncated = false;
+    var stop = false;
+    for (var i = 0; i < all.length && !stop; i++) {
+      var fam = all[i];
+      var famLen = 0;
+      try { famLen = fam.length; } catch (e1) { famLen = 0; }
+      for (var j = 0; j < famLen; j++) {
+        if (scanned >= MAX_FONT_SCAN || (scanned % 50 === 0 && scanned > 0 && new Date().getTime() - started > FONT_SCAN_MS)) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        scanned++;
+        var f = fam[j];
+        var info = fontSummary(f, false);
+        if (q !== "" && !matchesQuery(info, q)) continue;
+        if (wantFamily !== "") {
+          var fam1 = "";
+          if (info.family !== undefined) fam1 = normF(info.family);
+          var fam2 = "";
+          if (info.native_family !== undefined) fam2 = normF(info.native_family);
+          if (fam1.indexOf(wantFamily) < 0 && fam2.indexOf(wantFamily) < 0) continue;
+        }
+        if (wantStyle !== "") {
+          var sty = "";
+          if (info.style !== undefined) sty = normF(info.style);
+          if (sty.indexOf(wantStyle) < 0) continue;
+        }
+        if (variableOnly && info.has_design_axes !== true) continue;
+        if (adobeOnly && info.is_from_adobe_fonts !== true) continue;
+        if (scriptGiven) {
+          var has = false;
+          try {
+            var ws = f.writingScripts;
+            for (var w = 0; ws && w < ws.length; w++) {
+              if (ws[w] === wantScript) has = true;
+            }
+          } catch (e2) {}
+          if (!has) continue;
+        }
+        matches++;
+        if (matches > skip && out.length < pageSize) out.push(fontSummary(f, true));
+      }
+    }
+    var result = {
+      available: true,
+      fonts: out,
+      page: page,
+      page_size: pageSize,
+      total_matches: matches,
+      has_more: matches > skip + out.length,
+      scanned: scanned,
+      scan_truncated: truncated,
+      font_ids_session_only: true
+    };
+    if (truncated) result.note = "The font list was only partly scanned (" + scanned + " fonts); narrow the search for a complete answer.";
+    return result;
+  };
+
+  // ----- check -----
+
+  function fallbackFor(text) {
+    var fonts = fontsApi();
+    var out = { scripts: [], suggested_default: [] };
+    if (!fonts || typeof text !== "string" || text === "") return out;
+    if (fonts.getCTScriptForString === undefined) return out;
+    var preferred = null;
+    try { preferred = CTScript.CT_ROMAN_SCRIPT; } catch (e0) {}
+    try {
+      var s = text;
+      if (s.length > MAX_GLYPH_CHARS) s = s.substring(0, MAX_GLYPH_CHARS);
+      var runs = fonts.getCTScriptForString(s, preferred);
+      var done = {};
+      for (var r = 0; runs && r < runs.length && r < 50; r++) {
+        var name = ctScriptName(runs[r].ctScript);
+        out.scripts.push({ chars: clipStr(runs[r].chars, 200), ct_script: name });
+        if (done[name] !== true && fonts.getDefaultFontForCTScript !== undefined && out.suggested_default.length < 10) {
+          done[name] = true;
+          try {
+            var def = fonts.getDefaultFontForCTScript(runs[r].ctScript);
+            if (def) out.suggested_default.push({ ct_script: name, postscript: String(def.postScriptName) });
+          } catch (e1) {}
+        }
+      }
+    } catch (e2) {}
+    return out;
+  }
+
+  function projectMissingList() {
+    var fonts = fontsApi();
+    if (!fonts) return null;
+    var list = null;
+    try { list = fonts.missingOrSubstitutedFonts; } catch (e) { list = null; }
+    if (list === null || list === undefined) return null;
+    var out = [];
+    for (var i = 0; i < list.length && i < 500; i++) {
+      var n = readMember(list[i], "postScriptName");
+      if (n === undefined) n = readMember(list[i], "nativeFullName");
+      if (n !== undefined) out.push(String(n));
+    }
+    return out;
+  }
+
+  function checkOne(ref, text) {
+    var spec = toSpec(ref, "fonts[]");
+    var r = A.fontsResolve(spec);
+    var entry = { requested: specLabel(spec), exists: null, is_substitute: null, duplicates: 0, candidates: [] };
+    if (r.unchecked) {
+      entry.reason = r.reason;
+      return entry;
+    }
+    if (r.candidates) entry.candidates = r.candidates;
+    if (r.reason) entry.reason = r.reason;
+    if (!r.font) {
+      entry.exists = false;
+      entry.is_substitute = null;
+      if (text !== null) {
+        var fb = fallbackFor(text);
+        entry.fallback = fb;
+      }
+      return entry;
+    }
+    entry.exists = true;
+    entry.font = r.font;
+    entry.is_substitute = r.font.is_substitute === true;
+    entry.duplicates = r.duplicates;
+    var raw = rawFont(spec);
+    if (raw) {
+      var other = readMember(raw, "otherFontsWithSameDict");
+      if (other !== undefined) {
+        try { entry.other_fonts_with_same_dict = other.length; } catch (e1) {}
+      }
+      if (entry.font.has_design_axes === true) {
+        var variable = { axes: entry.font.axes };
+        var dv = readMember(raw, "designVector");
+        if (dv !== undefined) {
+          var vec = [];
+          try {
+            for (var v = 0; v < dv.length && v < 20; v++) vec.push(Number(dv[v]));
+            variable.design_vector = vec;
+            if (typeof raw.postScriptNameForDesignVector === "function") {
+              variable.instance_postscript = String(raw.postScriptNameForDesignVector(dv));
+            }
+          } catch (e2) {}
+        }
+        var fonts = fontsApi();
+        try {
+          var defaults = fonts.fontsWithDefaultDesignAxes;
+          if (defaults) {
+            var fam = String(entry.font.family);
+            for (var d = 0; d < defaults.length && d < 5000; d++) {
+              if (String(defaults[d].familyName) === fam) {
+                variable.default_instance_postscript = String(defaults[d].postScriptName);
+                break;
+              }
+            }
+          }
+        } catch (e3) {}
+        entry.variable = variable;
+      }
+    }
+    if (text !== null) {
+      var g = A.fontsGlyphCheck(r.font.postscript, glyphText(text), MAX_GLYPH_CHARS);
+      entry.glyphs = {
+        supported: g.supported,
+        missing: g.missing,
+        checked: g.checked,
+        truncated: g.truncated,
+        suggested_default: g.suggested_default
+      };
+      if (g.reason) entry.glyphs.reason = g.reason;
+      if (g.scripts && g.scripts.length) entry.glyphs.scripts = g.scripts;
+    }
+    return entry;
+  }
+
+  A.inventoryCheckFonts = function (args) {
+    args = args || {};
+    var fonts = fontsApi();
+    if (!fonts) return { available: false, reason: noFontsReason(), checked: [] };
+    var list = args.fonts;
+    if (!list || typeof list.length !== "number" || list.length < 1 || list.length > MAX_CHECK_FONTS) {
+      fail("bad_args", "fonts must list 1.." + MAX_CHECK_FONTS + " fonts");
+    }
+    var text = null;
+    if (typeof args.text === "string" && args.text.length > 0) text = args.text;
+    var out = [];
+    for (var i = 0; i < list.length; i++) out.push(checkOne(list[i], text));
+    var res = { available: true, checked: out, text_checked: text !== null };
+    if (text !== null && text.length > MAX_GLYPH_CHARS) res.text_truncated_to = MAX_GLYPH_CHARS;
+    var missing = projectMissingList();
+    if (missing !== null) res.project_missing_or_substituted = missing;
+    return res;
+  };
+
+  // ----- used fonts (AE 24.5) -----
+
+  // Project.usedFonts entries are read defensively: the member names of the layer records are not pinned down.
+  function locLayerId(loc) {
+    if (typeof loc === "number") return loc;
+    if (loc && typeof loc === "object") {
+      var idv = readMember(loc, "layerID");
+      if (idv === undefined) idv = readMember(loc, "layerId");
+      if (idv === undefined) idv = readMember(loc, "id");
+      if (typeof idv === "number") return idv;
+    }
+    return null;
+  }
+
+  function layerRecord(loc) {
+    var id = locLayerId(loc);
+    var times = [];
+    if (id !== null && typeof loc === "object") {
+      // layerTimeD is the documented member; the others are alternative spellings.
+      var tv = readMember(loc, "layerTimeD");
+      if (tv === undefined) tv = readMember(loc, "layerTimes");
+      if (tv === undefined) tv = readMember(loc, "times");
+      if (tv === undefined) tv = readMember(loc, "time");
+      if (typeof tv === "number") {
+        times.push(tv);
+      } else if (tv && typeof tv.length === "number") {
+        for (var t = 0; t < tv.length && t < 10; t++) {
+          if (typeof tv[t] === "number") times.push(tv[t]);
+        }
+      }
+    }
+    if (id === null) return null;
+    var rec = { layer_id: id, times: times };
+    var layer = null;
+    try { layer = app.project.layerByID(id); } catch (e1) { layer = null; }
+    if (layer) {
+      rec.layer = clipStr(layer.name, 200);
+      try { rec.layer_index = layer.index; } catch (e2) {}
+      try {
+        var comp = layer.containingComp;
+        if (comp) {
+          rec.comp_id = comp.id;
+          rec.comp = clipStr(comp.name, 200);
+        }
+      } catch (e3) {}
+      rec.resolved = true;
+    } else {
+      rec.resolved = false;
+    }
+    return rec;
+  }
+
+  // -> { supported, reason?, entries: [ { font (raw), postscript, family, style, is_substitute, uses, layer_count, layers } ], truncated }
+  // With specs, every used font is scanned and only the matching ones are kept (so a project with many fonts cannot cut
+  // off the wanted ones); without, the listing stops at MAX_LIST and says truncated.
+  // uses = layer-and-time uses (usedAt.length); layer_count = distinct layers; layers = per-use records (at most MAX_USED_LAYERS).
+  function readUsedFonts(specs) {
+    var uf;
+    try { uf = app.project.usedFonts; } catch (e0) { uf = undefined; }
+    if (uf === undefined || uf === null) {
+      return { supported: false, reason: "Project.usedFonts needs After Effects 24.5.", entries: [], truncated: false };
+    }
+    var entries = [];
+    var truncated = false;
+    for (var i = 0; i < uf.length; i++) {
+      if (entries.length >= MAX_LIST) {
+        truncated = specs ? false : true;
+        break;
+      }
+      var e = uf[i];
+      var font = readMember(e, "fontObject");
+      if (font === undefined) font = readMember(e, "font");
+      if (font === undefined && readMember(e, "postScriptName") !== undefined) font = e;
+      if (font === undefined) continue;
+      var info = fontSummary(font, false);
+      var entry = { font: font, postscript: info.postscript, family: info.family, style: info.style, is_substitute: info.is_substitute === true, uses: 0, layer_count: 0, layers: [] };
+      if (specs) {
+        var wanted = false;
+        for (var w = 0; w < specs.length; w++) {
+          if (entryMatches(entry, specs[w])) wanted = true;
+        }
+        if (!wanted) continue;
+      }
+      var locs = readMember(e, "usedAt");
+      if (locs === undefined) locs = readMember(e, "layers");
+      if (locs === undefined) locs = readMember(e, "locations");
+      if (locs === undefined) locs = readMember(e, "layerIDs");
+      if (locs === undefined) locs = readMember(e, "layerIds");
+      if (locs && typeof locs.length === "number") {
+        entry.uses = locs.length;
+        var seen = {};
+        var distinct = 0;
+        for (var k = 0; k < locs.length; k++) {
+          var lid = locLayerId(locs[k]);
+          if (lid !== null && seen["i" + lid] !== true) {
+            seen["i" + lid] = true;
+            distinct++;
+          }
+          if (entry.layers.length < MAX_USED_LAYERS) {
+            var rec = layerRecord(locs[k]);
+            if (rec) entry.layers.push(rec);
+          }
+        }
+        entry.layer_count = distinct;
+      }
+      entries.push(entry);
+    }
+    return { supported: true, entries: entries, truncated: truncated };
+  }
+
+  function publicEntry(en) {
+    return {
+      postscript: en.postscript,
+      family: en.family,
+      style: en.style,
+      is_substitute: en.is_substitute,
+      uses: en.uses,
+      layer_count: en.layer_count,
+      layers: en.layers
+    };
+  }
+
+  function entryMatches(en, spec) {
+    if (spec.postscript !== undefined) return en.postscript === spec.postscript;
+    return normF(en.family) === normF(spec.family) && normF(en.style) === normF(spec.style);
+  }
+
+  // args: { fonts?: [spec...] }  ->  the used fonts, or just those named
+  A.inventoryUsedFonts = function (args) {
+    args = args || {};
+    var specs = null;
+    if (args.fonts && typeof args.fonts.length === "number") {
+      specs = [];
+      for (var s = 0; s < args.fonts.length && s < MAX_CHECK_FONTS; s++) specs.push(toSpec(args.fonts[s], "fonts[]"));
+    }
+    var used = readUsedFonts(specs);
+    if (!used.supported) return { supported: false, reason: used.reason, fonts: [] };
+    var out = [];
+    for (var i = 0; i < used.entries.length; i++) out.push(publicEntry(used.entries[i]));
+    return { supported: true, fonts: out, truncated: used.truncated };
+  };
+
+  // ----- replace: the dry run, then the write -----
+
+  function textOfLayer(layer, time) {
+    try {
+      var tp = layer.property("ADBE Text Properties");
+      if (!tp) return null;
+      var st = tp.property("ADBE Text Document");
+      if (!st) return null;
+      // Project.usedFonts times are layer time; valueAtTime takes comp time.
+      var td = null;
+      if (st.numKeys > 0 && typeof time === "number") {
+        try {
+          var stretch = 100;
+          try { stretch = layer.stretch; } catch (eS) {}
+          if (typeof stretch !== "number" || !isFinite(stretch)) stretch = 100;
+          td = st.valueAtTime(layer.startTime + time * (stretch / 100), false);
+        } catch (eT) {
+          td = null;
+        }
+      }
+      if (td === null || td === undefined) td = st.value;
+      return String(td.text);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function describeSide(spec, used) {
+    var r = A.fontsResolve(spec);
+    if (r.unchecked) return { unchecked: true, reason: r.reason };
+    var side = { requested: specLabel(spec), exists: !!r.font, candidates: r.candidates || [] };
+    if (r.font) {
+      side.font = r.font;
+      side.is_substitute = r.font.is_substitute === true;
+    }
+    if (r.reason) side.reason = r.reason;
+    side.used = null;
+    for (var i = 0; used && i < used.entries.length; i++) {
+      if (entryMatches(used.entries[i], spec)) side.used = publicEntry(used.entries[i]);
+    }
+    return side;
+  }
+
+  // args: { from, to }
+  A.inventoryReplacePlan = function (args) {
+    args = args || {};
+    var fonts = fontsApi();
+    if (!fonts) return { ok: false, error: "unsupported", reason: noFontsReason() };
+    var fromSpec = toSpec(args.from, "from");
+    var toSpecV = toSpec(args.to, "to");
+    var used = readUsedFonts([fromSpec, toSpecV]);
+    if (!used.supported) return { ok: false, error: "unsupported", reason: used.reason };
+    var from = describeSide(fromSpec, used);
+    var to = describeSide(toSpecV, used);
+    var plan = { ok: true, from: from, to: to, used_fonts_truncated: used.truncated };
+    // A missing "from" font is the usual case: it is found by what the project uses, not by the installed list.
+    if (from.used === null) {
+      plan.from_used = false;
+      plan.affected_layers = 0;
+      plan.layers = [];
+      if (!from.exists) plan.reason = "\"" + from.requested + "\" is neither installed nor used by the project.";
+      else plan.reason = "No layer uses \"" + from.requested + "\"; there is nothing to replace.";
+    } else {
+      plan.from_used = true;
+      plan.affected_layers = from.used.layer_count;
+      plan.uses = from.used.uses;
+      plan.layers = from.used.layers;
+      plan.layers_truncated = from.used.uses > from.used.layers.length;
+    }
+    if (!to.exists) {
+      plan.ok = false;
+      plan.error = "font_not_found";
+      plan.reason = "The replacement font \"" + to.requested + "\" is not installed.";
+      return plan;
+    }
+    if (to.is_substitute === true) {
+      plan.ok = false;
+      plan.error = "font_substituted";
+      plan.reason = "The replacement font \"" + to.requested + "\" would itself be substituted by After Effects.";
+      return plan;
+    }
+    // Glyph coverage of the new font for the text of the affected layers (25.1).
+    var warnings = [];
+    var checked = 0;
+    var unchecked = 0;
+    var glyphReason = null;
+    var toRaw = rawFont(toSpecV);
+    var layers = plan.layers;
+    for (var i = 0; i < layers.length && i < MAX_PLAN_LAYERS; i++) {
+      var rec = layers[i];
+      if (rec.resolved !== true) {
+        unchecked++;
+        continue;
+      }
+      var layer = null;
+      try { layer = app.project.layerByID(rec.layer_id); } catch (e1) { layer = null; }
+      var t = null;
+      if (rec.times && rec.times.length > 0) t = rec.times[0];
+      var text = null;
+      if (layer) text = textOfLayer(layer, t);
+      if (text === null || !toRaw) {
+        unchecked++;
+        continue;
+      }
+      var g = A.fontsGlyphCheck(toRaw, glyphText(text), MAX_GLYPH_CHARS);
+      if (g.supported === null) {
+        unchecked++;
+        if (g.reason) glyphReason = g.reason;
+        continue;
+      }
+      checked++;
+      if (g.supported === false && warnings.length < 100) {
+        warnings.push({ layer_id: rec.layer_id, layer: rec.layer, comp_id: rec.comp_id, comp: rec.comp, missing: g.missing });
+      }
+    }
+    plan.glyphs = { checked_layers: checked, unchecked_layers: unchecked, warnings: warnings };
+    if (glyphReason) plan.glyphs.reason = glyphReason;
+    plan.glyphs.note = "Checked against each layer's whole text, so a mixed-font layer may report characters the replaced ranges do not use.";
+    return plan;
+  };
+
+  // args: { from, to, no_font_locking, expect }
+  A.inventoryReplaceFont = function (args) {
+    assertGuard(args.expect);
+    var fromSpec = toSpec(args.from, "from");
+    var toSpecV = toSpec(args.to, "to");
+    var noLock = args.no_font_locking === true;
+    var canReplace = false;
+    try { canReplace = typeof app.project.replaceFont === "function"; } catch (e0) {}
+    if (!canReplace) fail("unsupported", "Project.replaceFont needs After Effects 24.5.");
+    // Everything that can fail is checked before the call: replaceFont is not undoable.
+    var used = readUsedFonts([fromSpec]);
+    if (!used.supported) fail("unsupported", used.reason);
+    var fromEntry = null;
+    for (var i = 0; i < used.entries.length; i++) {
+      if (entryMatches(used.entries[i], fromSpec)) fromEntry = used.entries[i];
+    }
+    if (fromEntry === null) {
+      return { no_op: true, replaced: false, reason: "No layer uses \"" + specLabel(fromSpec) + "\"; nothing was changed." };
+    }
+    var toFont = rawFont(toSpecV);
+    if (!toFont) fail("not_found", "The replacement font \"" + specLabel(toSpecV) + "\" is not installed.");
+    var toSub = false;
+    try { toSub = toFont.isSubstitute === true; } catch (e1) {}
+    if (toSub) fail("bad_args", "The replacement font \"" + specLabel(toSpecV) + "\" would itself be substituted by After Effects.");
+    var toPs = "";
+    try { toPs = String(toFont.postScriptName); } catch (e2) {}
+    if (toPs !== "" && toPs === fromEntry.postscript) {
+      return { no_op: true, replaced: false, reason: "The font to replace and the new font are the same; nothing was changed." };
+    }
+    // The checkpoint the server made holds the saved file only: a project that went dirty since would lose those edits.
+    var dirty = false;
+    try { dirty = app.project.dirty === true; } catch (e3) {}
+    if (dirty) {
+      fail("checkpoint_required", "The project has unsaved changes the checkpoint does not hold, and replacing a font cannot be undone. Save it with ae_save first.");
+    }
+    var fromFont = fromEntry.font;
+    var affected = fromEntry.layer_count;
+    var fromPs = fromEntry.postscript;
+    return A.withUndo(args.label || "Replace font", function () {
+      // Project.replaceFont returns true when at least one layer changed.
+      var changed = app.project.replaceFont(fromFont, toFont, noLock);
+      if (changed === false) {
+        return {
+          no_op: true,
+          replaced: false,
+          layers_changed: false,
+          from: fromPs,
+          to: toPs,
+          warning: "After Effects reported that no layer changed (replaceFont returned false).",
+          undoable: false
+        };
+      }
+      return {
+        replaced: true,
+        from: fromPs,
+        to: toPs,
+        no_font_locking: noLock,
+        layers_affected: affected,
+        undoable: false
+      };
+    });
   };
 })($.global);

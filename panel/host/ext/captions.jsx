@@ -800,6 +800,55 @@
     return layer;
   }
 
+  // The font of style.font against what AE has installed (AE 24+) and the glyphs the caption text needs (AE 25.1+).
+  // Refuses an unknown font unless allowSubstitute; a missing glyph is a warning. Runs before the undo group.
+  function checkStyleFont(ps, caps, allowSubstitute, warnings) {
+    var info = { name: ps, checked: false };
+    if (typeof A.fontsResolve !== "function") {
+      info.reason = "This host cannot look fonts up.";
+      return info;
+    }
+    var r = A.fontsResolve({ postscript: ps });
+    if (r.unchecked) {
+      info.reason = r.reason;
+      warnings.push("The font \"" + ps + "\" was not checked: " + r.reason);
+      return info;
+    }
+    info.checked = true;
+    info.exists = !!r.font;
+    if (!r.font || r.ok === false) {
+      var why = r.reason || ("No installed font matches \"" + ps + "\".");
+      if (!allowSubstitute) {
+        fail("bad_args", why + " Pick an installed font (ae_fonts action search), or pass allow_substitute: true to write the name anyway; After Effects would substitute it silently.");
+      }
+      info.substitute = true;
+      warnings.push(why + " It is written anyway (allow_substitute); After Effects substitutes it.");
+      if (!r.font) return info;
+    }
+    if (typeof A.fontsGlyphCheck !== "function") return info;
+    var all = [];
+    var total = 0;
+    for (var i = 0; i < caps.length && total < 20000; i++) {
+      all.push(String(caps[i].text).replace(/[\r\n\t\u0003\u2028\u2029]+/g, " "));
+      total += String(caps[i].text).length + 1;
+    }
+    var g = A.fontsGlyphCheck(r.font.postscript, all.join(" "), 20000);
+    info.glyphs_checked = g.supported !== null;
+    if (g.supported === false) {
+      info.glyphs_missing = g.missing;
+      var msg = "The font \"" + ps + "\" has no glyph for: " + g.missing.join(" ") + " (in the caption text). After Effects will draw a fallback or an empty box.";
+      if (g.suggested_default && g.suggested_default.length > 0) {
+        var names = [];
+        for (var d = 0; d < g.suggested_default.length; d++) names.push(g.suggested_default[d].postscript);
+        msg += " AE's default for that script: " + names.join(", ") + ".";
+      }
+      warnings.push(msg);
+    } else if (g.supported === null && g.reason) {
+      info.glyphs_reason = g.reason;
+    }
+    return info;
+  }
+
   A.captionsApply = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
@@ -867,6 +916,8 @@
       place = { left: safe.left + box.padding, right: safe.right + box.padding, topY: safe.topY + box.padding, bottomY: safe.bottomY - box.padding, width: safe.width - box.padding * 2 };
       if (place.width < 1 || place.bottomY - place.topY < 1) fail("bad_args", "box.padding (" + box.padding + ") leaves no room inside the safe area; use a smaller padding or smaller margins");
     }
+    var fontCheck = null;
+    if (st.font) fontCheck = checkStyleFont(st.font, caps, args.allow_substitute === true, warnings);
     var restyle = args.restyle === true;
     var removeStale = args.remove_stale !== false;
 
@@ -1140,6 +1191,7 @@
         highlight_keys: highlightKeyCount,
         boxes: boxCount,
         font_size: st.fontSize,
+        font_check: fontCheck === null ? undefined : fontCheck,
         justification: st.justification,
         safe: { left: safe.left, right: safe.right, top: safe.top, bottom: comp.height - safe.bottomY, width: safe.width },
         warnings: warnings

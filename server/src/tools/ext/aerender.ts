@@ -31,10 +31,13 @@ export interface AerenderJobRecord {
   signal: string | null;
   cancelled: boolean;
   project_path: string;
+  /** The comp rendered; for an rq_index job the item's comp name, for whole_queue "<render queue>". */
   comp_name: string;
+  /** The -output path; for an rq_index / whole_queue job the first output module's path (the item brings its own). */
   output_path: string;
   output_module_template?: string;
   render_settings_template?: string;
+  /** For an rq_index job: the item's frame range read at launch (not passed to aerender). */
   start_frame?: number;
   end_frame?: number;
   aerender_path: string;
@@ -43,6 +46,16 @@ export interface AerenderJobRecord {
   started_at: string;
   finished_at: string | null;
   error?: string;
+  /** 1-based Render Queue index of the item rendered (-rqindex). */
+  rq_index?: number;
+  /** The CompItem id the item was guarded with. */
+  item_comp_id?: number;
+  /** The whole Render Queue was rendered (no -comp, no -rqindex). */
+  whole_queue?: boolean;
+  /** Every output module file the render is expected to write (rq_index / whole_queue jobs). */
+  output_paths?: string[];
+  /** CompItem id of the rendered comp, when known. */
+  comp_id?: number;
 }
 
 export interface AerenderProgressInfo {
@@ -170,28 +183,50 @@ export function resolveAerenderPath(options?: {
   return WINDOWS_FALLBACK_AERENDER;
 }
 
+export type AerenderLogLevel = "errors" | "errors_and_progress";
+
+/** Optional aerender flags that apply to every source (comp, rq_index, whole_queue). */
+export interface AerenderExtraFlags {
+  /** -continueOnMissingFootage: render on although footage is missing (aerender otherwise stops). */
+  continue_on_missing_footage?: boolean;
+  /** -mem_usage <image cache %> <max memory %>. */
+  mem_usage?: { image_cache_percent: number; max_mem_percent: number };
+  /** -v ERRORS | ERRORS_AND_PROGRESS. Left out: aerender's own default (ERRORS_AND_PROGRESS), which the progress parsing needs. */
+  log_level?: AerenderLogLevel;
+  /** -sound ON | OFF: play a sound when the render ends. */
+  sound?: boolean;
+}
+
 /**
- * Builds the CLI argument vector for `aerender`.
+ * Builds the CLI argument vector for `aerender`. Three sources: -comp (with
+ * -output), -rqindex N (one Render Queue item, its own outputs) or neither (the
+ * whole queue). Never adds -reuse: that would render inside the interactive After
+ * Effects and block the bridge.
  */
-export function buildAerenderArgs(params: {
-  project_path: string;
-  comp_name: string;
-  output_path: string;
-  output_module_template?: string;
-  render_settings_template?: string;
-  start_frame?: number;
-  end_frame?: number;
-  /** Adds -mfr ON <percent>: Multi-Frame Rendering capped at this share of the CPU (AE 22+). */
-  max_cpu_percent?: number;
-}): string[] {
-  const cliArgs: string[] = [
-    "-project",
-    params.project_path,
-    "-comp",
-    params.comp_name,
-    "-output",
-    params.output_path,
-  ];
+export function buildAerenderArgs(
+  params: {
+    project_path: string;
+    comp_name?: string;
+    output_path?: string;
+    output_module_template?: string;
+    render_settings_template?: string;
+    start_frame?: number;
+    end_frame?: number;
+    /** Adds -mfr ON <percent>: Multi-Frame Rendering capped at this share of the CPU (AE 22+). */
+    max_cpu_percent?: number;
+    /** Render this 1-based Render Queue item (-rqindex) instead of a comp. */
+    rq_index?: number;
+    /** Render the whole queue: neither -comp nor -rqindex. */
+    whole_queue?: boolean;
+  } & AerenderExtraFlags
+): string[] {
+  const cliArgs: string[] = ["-project", params.project_path];
+  if (params.rq_index !== undefined) {
+    cliArgs.push("-rqindex", String(params.rq_index));
+  } else if (params.whole_queue !== true) {
+    if (params.comp_name !== undefined) cliArgs.push("-comp", params.comp_name);
+    if (params.output_path !== undefined) cliArgs.push("-output", params.output_path);
+  }
   if (params.render_settings_template) {
     cliArgs.push("-RStemplate", params.render_settings_template);
   }
@@ -206,6 +241,18 @@ export function buildAerenderArgs(params: {
   }
   if (params.max_cpu_percent !== undefined) {
     cliArgs.push("-mfr", "ON", String(params.max_cpu_percent));
+  }
+  if (params.continue_on_missing_footage === true) {
+    cliArgs.push("-continueOnMissingFootage");
+  }
+  if (params.mem_usage !== undefined) {
+    cliArgs.push("-mem_usage", String(params.mem_usage.image_cache_percent), String(params.mem_usage.max_mem_percent));
+  }
+  if (params.log_level !== undefined) {
+    cliArgs.push("-v", params.log_level === "errors" ? "ERRORS" : "ERRORS_AND_PROGRESS");
+  }
+  if (params.sound !== undefined) {
+    cliArgs.push("-sound", params.sound ? "ON" : "OFF");
   }
   return cliArgs;
 }
@@ -495,19 +542,205 @@ export function getDefaultAerenderRegistry(): AerenderJobRegistry {
   return defaultRegistry;
 }
 
-export interface LaunchAerenderParams {
+// ---------- Render Queue sources (-rqindex / whole queue) ----------
+
+/** One output module of a Render Queue item, as rqeditRead reports it. */
+export interface RqOutputRead {
+  index: number;
+  name?: string | null;
+  file?: string | null;
+}
+
+/** A Render Queue item, as rqeditRead (or renderbatchRead) reports it. Status is a lower-case RQItemStatus name. */
+export interface RqItemRead {
+  index: number;
+  comp_id: number;
+  comp_name?: string;
+  status?: string;
+  render?: boolean;
+  comp_frame_rate?: number;
+  comp_duration?: number;
+  time_span_start?: number;
+  time_span_duration?: number;
+  skip_frames?: number;
+  num_output_modules?: number;
+  output_modules?: RqOutputRead[];
+  output_modules_truncated?: boolean;
+}
+
+export interface RqFrameRange {
+  start_frame: number;
+  end_frame: number;
+}
+
+/** What a rq_index / whole_queue start resolved to. */
+export interface RqSelection {
+  comp_name: string;
+  comp_id?: number;
+  comp_ids: number[];
+  item_indexes: number[];
+  outputs: string[];
+  frame_range?: RqFrameRange;
+  warnings: string[];
+}
+
+export type RqRefusal = { ok: false; code: string; message: string; expected?: unknown; actual?: unknown };
+
+/** Why an item in this status cannot be rendered by -rqindex, with the tool that fixes it. */
+export function rqStatusRefusal(index: number, status: string | undefined): string {
+  const head = `Render Queue item ${index} is ${(status ?? "unknown").toUpperCase()}`;
+  switch (status) {
+    case "unqueued":
+      return `${head}: its Render checkbox is off, so aerender would skip it. Queue it with ae_render_queue_edit (queued: true), save with ae_save, then start again.`;
+    case "needs_output":
+      return `${head}: it has no valid output file. Give it one with ae_render_queue_edit (output_modules[].file), queue it (queued: true), save with ae_save, then start again.`;
+    case "done":
+      return `${head}: it already rendered and After Effects locks it. Make a queued copy with ae_render_queue_duplicate, save with ae_save, then start again.`;
+    case "rendering":
+      return `${head}: the interactive After Effects is rendering it. Wait for it to finish or stop it there first.`;
+    default:
+      return `${head}, not QUEUED. Only a QUEUED item renders; queue it with ae_render_queue_edit (queued: true) and save with ae_save first.`;
+  }
+}
+
+/** The item's time span as aerender frame numbers, or undefined when it cannot be told (no frame rate, or skip frames change the count). */
+export function itemFrameRange(item: RqItemRead): RqFrameRange | undefined {
+  const fps = item.comp_frame_rate;
+  const start = item.time_span_start;
+  const dur = item.time_span_duration;
+  if (typeof fps !== "number" || !(fps > 0) || typeof start !== "number" || typeof dur !== "number" || !(dur > 0)) return undefined;
+  if (typeof item.skip_frames === "number" && item.skip_frames > 0) return undefined;
+  const s = Math.max(0, Math.round(start * fps));
+  const n = Math.max(1, Math.round(dur * fps));
+  return { start_frame: s, end_frame: s + n - 1 };
+}
+
+/** Every output module file of an item; modules without a file are listed in `missing`. */
+export function itemOutputs(item: RqItemRead): { paths: string[]; missing: number[] } {
+  const paths: string[] = [];
+  const missing: number[] = [];
+  for (const o of item.output_modules ?? []) {
+    if (typeof o.file === "string" && o.file.length > 0) paths.push(o.file);
+    else missing.push(o.index);
+  }
+  return { paths, missing };
+}
+
+/**
+ * Checks one Render Queue item against the guard before aerender -rqindex:
+ * it exists, is the comp the caller expected, passes the optional comp name
+ * guard, is QUEUED and has a file for every output module.
+ */
+export function selectRqItem(
+  read: { numItems?: number; items?: RqItemRead[] } | null | undefined,
+  want: { rq_index: number; item_comp_id: number; comp_name?: string }
+): { ok: true; selection: RqSelection } | RqRefusal {
+  const item = read?.items?.find((i) => i.index === want.rq_index);
+  if (!item) {
+    return { ok: false, code: "rq_item_not_found", message: `No Render Queue item ${want.rq_index} (the queue has ${read?.numItems ?? 0}). Read it with ae_render_queue_inspect.` };
+  }
+  if (item.comp_id !== want.item_comp_id) {
+    return {
+      ok: false,
+      code: "rq_item_comp_mismatch",
+      message: `Render Queue item ${want.rq_index} is comp ${item.comp_id} ("${item.comp_name ?? "?"}"), not ${want.item_comp_id}. The queue changed since you read it; read it again.`,
+      expected: want.item_comp_id,
+      actual: item.comp_id,
+    };
+  }
+  if (want.comp_name !== undefined && item.comp_name !== want.comp_name) {
+    return {
+      ok: false,
+      code: "rq_item_name_mismatch",
+      message: `Render Queue item ${want.rq_index} is comp "${item.comp_name ?? "?"}", but comp_name says "${want.comp_name}".`,
+      expected: want.comp_name,
+      actual: item.comp_name,
+    };
+  }
+  if (item.status !== "queued") return { ok: false, code: "rq_item_not_queued", message: rqStatusRefusal(item.index, item.status) };
+  const { paths, missing } = itemOutputs(item);
+  if (missing.length > 0 || paths.length === 0) {
+    return { ok: false, code: "rq_item_no_output", message: `Render Queue item ${want.rq_index} has no output file on output module(s) ${missing.join(", ") || "1"}. Give it one with ae_render_queue_edit first.` };
+  }
+  const warnings: string[] = [];
+  if (item.output_modules_truncated) warnings.push("The item has more output modules than were read; only the first ones are listed as expected outputs.");
+  const range = itemFrameRange(item);
+  return {
+    ok: true,
+    selection: {
+      comp_name: item.comp_name ?? "",
+      comp_id: item.comp_id,
+      comp_ids: [item.comp_id],
+      item_indexes: [item.index],
+      outputs: paths,
+      ...(range ? { frame_range: range } : {}),
+      warnings,
+    },
+  };
+}
+
+/** The QUEUED items a whole-queue aerender would render and the files they write; refuses when none are queued. */
+export function selectWholeQueue(read: { numItems?: number; items?: RqItemRead[]; truncated?: boolean } | null | undefined): { ok: true; selection: RqSelection } | RqRefusal {
+  const items = read?.items ?? [];
+  const queued = items.filter((i) => i.status === "queued");
+  if (queued.length === 0) {
+    const others = items.filter((i) => i.status !== "queued").length;
+    return {
+      ok: false,
+      code: "rq_queue_empty",
+      message: `No item in the Render Queue is QUEUED (${items.length} item(s), ${others} not queued), so aerender would render nothing. Queue items with ae_render_queue_edit (queued: true) and save with ae_save first.`,
+    };
+  }
+  const outputs: string[] = [];
+  const warnings: string[] = [];
+  for (const i of queued) {
+    const { paths, missing } = itemOutputs(i);
+    if (missing.length > 0 || paths.length === 0) {
+      return { ok: false, code: "rq_item_no_output", message: `Queued Render Queue item ${i.index} has no output file on output module(s) ${missing.join(", ") || "1"}. Give it one with ae_render_queue_edit first.` };
+    }
+    outputs.push(...paths);
+  }
+  const skipped = items.length - queued.length;
+  if (skipped > 0) warnings.push(`${skipped} item(s) are not QUEUED and will not render (UNQUEUED, DONE and the like are skipped by aerender).`);
+  if (read?.truncated) warnings.push("The Render Queue was read only up to its first 500 items.");
+  return {
+    ok: true,
+    selection: {
+      comp_name: "<render queue>",
+      comp_ids: Array.from(new Set(queued.map((i) => i.comp_id))),
+      item_indexes: queued.map((i) => i.index),
+      outputs: outputs.slice(0, 500),
+      warnings,
+    },
+  };
+}
+
+export interface LaunchAerenderParams extends AerenderExtraFlags {
   registry: AerenderJobRegistry;
   spawn: SpawnLike;
   aerender_path: string;
   project_path: string;
-  comp_name: string;
-  output_path: string;
+  /** Optional for an rq_index / whole_queue job (the record then names the item's comp, or "<render queue>"). */
+  comp_name?: string;
+  output_path?: string;
   output_module_template?: string;
   render_settings_template?: string;
   start_frame?: number;
   end_frame?: number;
   /** aerender -mfr ON <percent> (AE 22+): Multi-Frame Rendering capped at this share of the CPU. */
   max_cpu_percent?: number;
+  /** aerender -rqindex N: render this Render Queue item with its own outputs. */
+  rq_index?: number;
+  /** The comp id the rq_index was guarded with. */
+  item_comp_id?: number;
+  /** Render the whole queue (no -comp, no -rqindex). */
+  whole_queue?: boolean;
+  /** Every output file the render writes (rq_index / whole_queue); their folders are made first. */
+  output_paths?: string[];
+  /** CompItem id of the rendered comp, for the record. */
+  comp_id?: number;
+  /** The item's frame range, for the record and the progress only; not passed to aerender. */
+  frame_range?: RqFrameRange;
 }
 
 /**
@@ -521,12 +754,16 @@ export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
   const jobId = registry.newJobId();
   const rendersDir = registry.rendersDir;
   fs.mkdirSync(rendersDir, { recursive: true });
-  const outDir = path.dirname(p.output_path);
-  if (outDir && outDir !== ".") {
-    try {
-      fs.mkdirSync(outDir, { recursive: true });
-    } catch {
-      // Output dir may be on a virtual path in tests
+  // The output folders are made here (the -output folder, or every output module's folder of a queue item).
+  const outPaths = p.output_paths && p.output_paths.length > 0 ? p.output_paths : p.output_path !== undefined ? [p.output_path] : [];
+  for (const out of outPaths) {
+    const outDir = path.dirname(out);
+    if (outDir && outDir !== ".") {
+      try {
+        fs.mkdirSync(outDir, { recursive: true });
+      } catch {
+        // Output dir may be on a virtual path in tests
+      }
     }
   }
 
@@ -542,6 +779,12 @@ export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
     start_frame: p.start_frame,
     end_frame: p.end_frame,
     max_cpu_percent: p.max_cpu_percent,
+    rq_index: p.rq_index,
+    whole_queue: p.whole_queue,
+    continue_on_missing_footage: p.continue_on_missing_footage,
+    mem_usage: p.mem_usage,
+    log_level: p.log_level,
+    sound: p.sound,
   });
 
   let logFd: number | null = null;
@@ -596,8 +839,8 @@ export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
     signal: null,
     cancelled: false,
     project_path: p.project_path,
-    comp_name: p.comp_name,
-    output_path: p.output_path,
+    comp_name: p.comp_name ?? (p.whole_queue === true ? "<render queue>" : ""),
+    output_path: p.output_path ?? p.output_paths?.[0] ?? "",
     ...(p.output_module_template
       ? { output_module_template: p.output_module_template }
       : {}),
@@ -606,10 +849,19 @@ export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
       : {}),
     ...(p.start_frame !== undefined
       ? { start_frame: p.start_frame }
+      : p.frame_range
+      ? { start_frame: p.frame_range.start_frame }
       : {}),
     ...(p.end_frame !== undefined
       ? { end_frame: p.end_frame }
+      : p.frame_range
+      ? { end_frame: p.frame_range.end_frame }
       : {}),
+    ...(p.rq_index !== undefined ? { rq_index: p.rq_index } : {}),
+    ...(p.item_comp_id !== undefined ? { item_comp_id: p.item_comp_id } : {}),
+    ...(p.whole_queue === true ? { whole_queue: true } : {}),
+    ...(p.output_paths && p.output_paths.length > 0 ? { output_paths: p.output_paths } : {}),
+    ...(p.comp_id !== undefined ? { comp_id: p.comp_id } : {}),
     aerender_path: p.aerender_path,
     args: cliArgs,
     log_path: logPath,
@@ -821,51 +1073,105 @@ export const AeAerenderStartSchema = z
     comp_name: z
       .string()
       .min(1)
-      .describe("Name of the composition to render."),
+      .optional()
+      .describe(
+        "Name of the composition to render (aerender -comp). Needed, with output_path, unless rq_index or whole_queue picks the source. With rq_index it is an extra guard: it must equal the queue item's comp name."
+      ),
     output_path: z
       .string()
       .min(1)
-      .describe("Absolute output file path for aerender (-output)."),
+      .optional()
+      .describe("Absolute output file path for aerender (-output). Required with comp_name; refused with rq_index / whole_queue (the queue items bring their own output files)."),
+    rq_index: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        "Render this 1-based Render Queue item (aerender -rqindex) with all its output modules and its own render settings: the way to render items built with ae_render_queue_edit, ae_render_queue_duplicate or ae_render_queue_apply_spec. Needs item_comp_id. The project must be saved and not dirty (aerender reads the saved file, so items added since the last save are not in it), and the item must be QUEUED (ae_render_queue_edit queued: true, then ae_save). Indexes shift when items are added or removed: read the queue right before."
+      ),
+    item_comp_id: z
+      .number()
+      .int()
+      .optional()
+      .describe("With rq_index: the CompItem id the queue item at rq_index must have (ae_render_queue_inspect shows it). The tool refuses when the item at that index is another comp."),
+    whole_queue: z
+      .boolean()
+      .optional()
+      .describe("Render every QUEUED item of the Render Queue in one aerender run (no -comp, no -rqindex). Refused when nothing is queued. The project must be saved and not dirty."),
     output_module_template: z
       .string()
       .min(1)
       .optional()
-      .describe("Optional Output Module template name (-OMtemplate)."),
+      .describe("Optional Output Module template name (-OMtemplate). Not with rq_index / whole_queue: the queue item's own output modules are used."),
     render_settings_template: z
       .string()
       .min(1)
       .optional()
-      .describe("Optional Render Settings template name (-RStemplate)."),
+      .describe("Optional Render Settings template name (-RStemplate). Not with rq_index / whole_queue: the queue item's own render settings are used."),
     start_frame: z
       .number()
       .int()
       .min(0)
       .optional()
-      .describe("Optional start frame index (-s)."),
+      .describe("Optional start frame index (-s). Not with rq_index / whole_queue (the item's time span applies)."),
     end_frame: z
       .number()
       .int()
       .min(0)
       .optional()
-      .describe("Optional end frame index (-e)."),
+      .describe("Optional end frame index (-e). Not with rq_index / whole_queue (the item's time span applies)."),
     preflight: z
       .boolean()
       .optional()
       .describe(
-        "Run the ae_preflight delivery check on this comp (by name) and the comps it nests first, and refuse to start if it finds a blocker (missing footage or fonts, expressions in error, comp not found). Nothing is started when it refuses. Default false."
+        "Run the ae_preflight delivery check on this comp (by name; for rq_index / whole_queue the queue item's comp or comps, by id) and the comps it nests first, and refuse to start if it finds a blocker (missing footage or fonts, expressions in error, comp not found). Nothing is started when it refuses. Default false."
       ),
+    continue_on_missing_footage: z
+      .boolean()
+      .optional()
+      .describe("Pass -continueOnMissingFootage: render although footage is missing (aerender otherwise stops with an error). The missing footage shows as placeholder color bars in the output. Default false."),
+    mem_usage: z
+      .object({
+        image_cache_percent: z.number().int().min(1).max(100).describe("Share of RAM for the image cache, percent."),
+        max_mem_percent: z.number().int().min(1).max(100).describe("Share of RAM After Effects may use in all, percent."),
+      })
+      .optional()
+      .describe("Pass -mem_usage <image_cache_percent> <max_mem_percent>: caps the memory aerender uses."),
+    log_level: z
+      .enum(["errors", "errors_and_progress"])
+      .optional()
+      .describe("aerender -v: 'errors' logs only errors, 'errors_and_progress' (aerender's own default) also the PROGRESS lines that ae_aerender_status turns into a percent. Leave it out to keep the progress."),
+    sound: z.boolean().optional().describe("Pass -sound ON or OFF: play a sound when the render finishes. Leave out to keep aerender's default."),
   })
   .superRefine((val, ctx) => {
-    if (
-      val.start_frame !== undefined &&
-      val.end_frame !== undefined &&
-      val.end_frame < val.start_frame
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["end_frame"],
-        message: "`end_frame` must be >= `start_frame`.",
-      });
+    const issue = (p: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [p], message });
+    if (val.start_frame !== undefined && val.end_frame !== undefined && val.end_frame < val.start_frame) {
+      issue("end_frame", "`end_frame` must be >= `start_frame`.");
+    }
+    const fromQueue = val.rq_index !== undefined || val.whole_queue === true;
+    if (val.whole_queue === true && val.rq_index !== undefined) {
+      issue("whole_queue", "Give one source: `whole_queue` or `rq_index`, not both.");
+    }
+    if (val.whole_queue === true && val.comp_name !== undefined) {
+      issue("comp_name", "`comp_name` does not go with `whole_queue`: the whole queue is rendered. Give one source.");
+    }
+    if (val.item_comp_id !== undefined && val.rq_index === undefined) {
+      issue("item_comp_id", "`item_comp_id` goes with `rq_index`.");
+    }
+    if (val.rq_index !== undefined && val.item_comp_id === undefined) {
+      issue("item_comp_id", "`rq_index` needs `item_comp_id`, the comp id the item must have, so a shifted queue cannot render the wrong item (ae_render_queue_inspect shows it).");
+    }
+    if (fromQueue) {
+      for (const k of ["output_path", "output_module_template", "render_settings_template", "start_frame", "end_frame"] as const) {
+        if (val[k] !== undefined) {
+          issue(k, `\`${k}\` is refused with \`rq_index\` / \`whole_queue\`: it would override what the queue item holds. Change the item with ae_render_queue_edit instead.`);
+        }
+      }
+    } else {
+      if (val.comp_name === undefined) issue("comp_name", "Required: the comp to render, unless `rq_index` or `whole_queue` is given.");
+      if (val.output_path === undefined) issue("output_path", "Required with `comp_name`.");
     }
   });
 
@@ -910,16 +1216,23 @@ export function createAerenderTools(
       name: "ae_aerender_start",
       description:
         "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. " +
+        "Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). " +
+        "A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect's reader right before the spawn and refused with the reason otherwise. " +
+        "output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. " +
+        "Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args: AeAerenderStartArgs, ctx: ToolContext) => {
         ctx.quarantine.assertClear();
         const opId = ctx.bridge.newOpId();
         const registry = getRegistry();
+        const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
+        const compName = args.comp_name ?? "";
+        const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;
 
         try {
           return await ctx.queue.run(
-            `ae_aerender_start(${args.comp_name})`,
+            `ae_aerender_start(${labelOf})`,
             async () => {
               ctx.quarantine.assertClear();
 
@@ -987,7 +1300,9 @@ export function createAerenderTools(
                   kind: "guard",
                   op_id: opId,
                   message:
-                    "Cannot start aerender because the open project has unsaved changes (dirty: true). Call ae_save first so aerender renders the latest state on disk.",
+                    fromQueue
+                      ? "Cannot start aerender because the open project has unsaved changes (dirty: true). aerender reads the saved file, so Render Queue items added or queued since the last save are not in it: run ae_save first."
+                      : "Cannot start aerender because the open project has unsaved changes (dirty: true). Call ae_save first so aerender renders the latest state on disk.",
                   expected: {
                     project_path: args.expect.project_path,
                     dirty: false,
@@ -1003,15 +1318,46 @@ export function createAerenderTools(
                 await verifyTargetGuard(ctx, args.expect, opId);
               }
 
+              // A queue source: read the queue now, in its own evalScript, right before
+              // the spawn (indexes shift when items are added or removed).
+              let rq: RqSelection | undefined;
+              if (fromQueue) {
+                const queueResp = await ctx.bridge.evalRaw<{ numItems?: number; items?: RqItemRead[]; truncated?: boolean }>({
+                  id: `${opId}_rq`,
+                  script: buildJsxCall("rqeditRead", {
+                    item_indexes: args.rq_index !== undefined ? [args.rq_index] : undefined,
+                    settings: false,
+                  }),
+                  label: "ae_aerender_start (render queue)",
+                  mutates: false,
+                  toolName: "ae_aerender_start",
+                });
+                const picked =
+                  args.rq_index !== undefined
+                    ? selectRqItem(queueResp.result, { rq_index: args.rq_index, item_comp_id: args.item_comp_id as number, comp_name: args.comp_name })
+                    : selectWholeQueue(queueResp.result);
+                if (!picked.ok) {
+                  throw new BridgeError({
+                    kind: "guard",
+                    op_id: opId,
+                    message: `ae_aerender_start refused: ${picked.message}`,
+                    expected: picked.expected ?? { rq_index: args.rq_index, item_comp_id: args.item_comp_id, status: "queued" },
+                    actual: picked.actual ?? { code: picked.code },
+                  });
+                }
+                rq = picked.selection;
+              }
+
               // Read-only, before anything is created or spawned. The tool makes
               // the output folder itself, so the folder is not checked.
               let preflight: GateSummary | undefined;
               if (args.preflight) {
-                const gate = await runPreflightGate(ctx, {
-                  toolName: "ae_aerender_start",
-                  opId,
-                  comp_names: [args.comp_name],
-                });
+                const gate = await runPreflightGate(
+                  ctx,
+                  rq
+                    ? { toolName: "ae_aerender_start", opId, comp_ids: rq.comp_ids }
+                    : { toolName: "ae_aerender_start", opId, comp_names: [compName] }
+                );
                 if (gate.blocked) return preflightRefusal("ae_aerender_start", gate.summary);
                 preflight = gate.summary;
               }
@@ -1031,12 +1377,28 @@ export function createAerenderTools(
                 spawn: spawnFn,
                 aerender_path: aerenderBin,
                 project_path: actualProjectPath,
-                comp_name: args.comp_name,
-                output_path: args.output_path,
-                output_module_template: args.output_module_template,
-                render_settings_template: args.render_settings_template,
-                start_frame: args.start_frame,
-                end_frame: args.end_frame,
+                ...(rq
+                  ? {
+                      comp_name: rq.comp_name,
+                      rq_index: args.rq_index,
+                      item_comp_id: args.item_comp_id,
+                      whole_queue: args.whole_queue === true ? true : undefined,
+                      output_paths: rq.outputs,
+                      comp_id: rq.comp_id,
+                      frame_range: rq.frame_range,
+                    }
+                  : {
+                      comp_name: compName,
+                      output_path: args.output_path,
+                      output_module_template: args.output_module_template,
+                      render_settings_template: args.render_settings_template,
+                      start_frame: args.start_frame,
+                      end_frame: args.end_frame,
+                    }),
+                continue_on_missing_footage: args.continue_on_missing_footage,
+                mem_usage: args.mem_usage,
+                log_level: args.log_level,
+                sound: args.sound,
               });
 
               return {
@@ -1052,6 +1414,15 @@ export function createAerenderTools(
                 args: initialRecord.args,
                 log_path: initialRecord.log_path,
                 started_at: initialRecord.started_at,
+                ...(rq
+                  ? {
+                      source: args.whole_queue === true ? "whole_queue" : "rq_index",
+                      ...(args.rq_index !== undefined ? { rq_index: args.rq_index, item_comp_id: args.item_comp_id } : { queued_items: rq.item_indexes }),
+                      output_paths: rq.outputs,
+                      ...(rq.frame_range ? { frame_range: rq.frame_range } : {}),
+                      ...(rq.warnings.length > 0 ? { warnings: rq.warnings } : {}),
+                    }
+                  : {}),
                 ...(preflight ? { preflight } : {}),
               };
             }
@@ -1071,7 +1442,7 @@ export function createAerenderTools(
     {
       name: "ae_aerender_status",
       description:
-        "Check the status of a background `aerender` job (`running`, `succeeded`, `failed`), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. " +
+        "Check the status of a background `aerender` job (`running`, `succeeded`, `failed`), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. A job started with rq_index / whole_queue also reports rq_index, item_comp_id and output_paths; with several queue items rendering in a row the percent can be null while frames still count. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStatusSchema,
       handler: async (args: AeAerenderStatusArgs) => {
@@ -1104,6 +1475,11 @@ export function createAerenderTools(
           started_at: job.started_at,
           finished_at: job.finished_at,
           ...(job.error ? { error: job.error } : {}),
+          ...(job.rq_index !== undefined ? { rq_index: job.rq_index } : {}),
+          ...(job.item_comp_id !== undefined ? { item_comp_id: job.item_comp_id } : {}),
+          ...(job.whole_queue === true ? { whole_queue: true } : {}),
+          ...(job.comp_id !== undefined ? { comp_id: job.comp_id } : {}),
+          ...(job.output_paths ? { output_paths: job.output_paths } : {}),
           progress,
           current_frame: progress.current_frame,
           frames_completed: progress.frames_completed,

@@ -11,11 +11,14 @@ import {
   AeAddMarkersSchema,
   AeRemoveMarkersSchema,
   addMarkersMismatches,
+  editMarkersMismatches,
   markersTools,
   removeMarkersMismatches,
+  sameParams,
   selectForRemoval,
   type MarkerList,
 } from "../src/tools/ext/markers.js";
+import { zodToJsonSchema } from "../src/schema.js";
 import { AUTO_CHECKPOINT_TOOLS } from "../src/tools/ext/receipts.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
 
@@ -293,5 +296,146 @@ describe("ae_cue_keys", () => {
     const planned = planCueKeys([1], { attack: 0, decay: 0.2, frame: 0.04, peak: 50 });
     const after = { numKeys: 3, truncated: false, keys: [{ index: 1, time: 0.96, value: 0 }, { index: 2, time: 1, value: 40 }, { index: 3, time: 1.2, value: 0 }] };
     expect(cueKeysMismatches(planned, after, { base: 0 }).map((m) => m.path)).toEqual(["keys@1"]);
+  });
+});
+
+describe("ae_add_markers edit / move and the AE 16.0 fields", () => {
+  const edit = (extra: object = {}) => ({ comp_id: 1, edit: [{ index: 1, move_to: 4 }], expect: expectArg, ...extra });
+  const planned = { changed: true, target: "comp", numMarkers: 2, edits: [{ index: 1, from: 1, to: 4, moved: true }] };
+  const fields = { comment: "a", duration: 0.5, label: 2, chapter: "", url: "", frame_target: "", cue_point_name: "", event_cue_point: false, protected_region: false, params: {} };
+  const written = { target: "comp", edits: [{ index: 1, from: 1, to: 4, moved: true, fields }], frame_duration: 0.04, numMarkers: 2 };
+
+  it("the schema takes exactly one of markers, transcript and edit, and each edit needs a way to find the marker and something to do", () => {
+    expect(AeAddMarkersSchema.safeParse(edit()).success).toBe(true);
+    expect(AeAddMarkersSchema.safeParse(edit({ markers: [{ time: 1 }] })).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse({ comp_id: 1, expect: expectArg }).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse(edit({ edit: [{ move_to: 4 }] })).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse(edit({ edit: [{ index: 1, time: 1, move_to: 4 }] })).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse(edit({ edit: [{ index: 1 }] })).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse(edit({ edit: [{ time: 2, set: { protected_region: true, params: { a: "1" } } }] })).success).toBe(true);
+    expect(AeAddMarkersSchema.safeParse(edit({ expect: undefined })).success).toBe(false);
+    expect(AeAddMarkersSchema.safeParse(edit({ expect: undefined, dry_run: true })).success).toBe(true);
+  });
+
+  it("add accepts the new marker fields", () => {
+    const ok = AeAddMarkersSchema.safeParse({
+      comp_id: 1,
+      markers: [{ time: 1, protected_region: true, frame_target: "_top", cue_point_name: "x", event_cue_point: false, params: { a: "1", n: 2, b: true } }],
+      expect: expectArg,
+    });
+    expect(ok.success).toBe(true);
+    expect(AeAddMarkersSchema.safeParse({ comp_id: 1, markers: [{ time: 1, params: { a: { x: 1 } } }], expect: expectArg }).success).toBe(false);
+  });
+
+  it("converts to JSON schema", () => {
+    expect(() => zodToJsonSchema(AeAddMarkersSchema)).not.toThrow();
+  });
+
+  it("plans first, then guards, reads, edits and reads back; the receipt matches a faithful edit", async () => {
+    const before = list([{ ...mk(1, 1, "a"), duration: 0.5, label: 2 }, mk(2, 2, "b")]);
+    const after = list([mk(2, 2, "b"), { ...mk(1, 4, "a"), duration: 0.5, label: 2 }].map((m, i) => ({ ...m, index: i + 1 })));
+    const { ctx, calls } = fakeAe({ editMarkers: [planned, written], listMarkers: [before, after] });
+    const out: any = await markerTool("ae_add_markers").handler(AeAddMarkersSchema.parse(edit()), ctx);
+    // Guard first, so a wrong project fails with the guard error and not an error from another project's ids.
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "editMarkers", "checkGuard", "listMarkers", "editMarkers", "listMarkers"]);
+    expect(calls[1].script).toContain('"dry_run":true');
+    expect(calls[4].script).not.toContain('"dry_run"');
+    expect(out.applied).toBe(true);
+    expect(out.receipt.matches).toBe(true);
+    expect(out).toMatchObject({ edited: 1, numMarkers: 2, relative_to: "comp" });
+  });
+
+  it("dry run only plans", async () => {
+    const { ctx, calls } = fakeAe({ editMarkers: [planned] });
+    const out: any = await markerTool("ae_add_markers").handler(AeAddMarkersSchema.parse(edit({ dry_run: true })), ctx);
+    expect(calls.map((c) => c.fn)).toEqual(["editMarkers"]);
+    expect(out).toMatchObject({ ok: true, dry_run: true, changed: true });
+  });
+
+  it("a wrong project fails with the guard error before the plan is read", async () => {
+    const { ctx, calls } = fakeAe({ editMarkers: [planned] });
+    const bad = AeAddMarkersSchema.parse(edit({ expect: { project_path: "C:/other.aep" } }));
+    let seen: unknown;
+    try {
+      seen = await markerTool("ae_add_markers").handler(bad, ctx);
+    } catch (e) {
+      seen = e;
+    }
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard"]);
+    expect(String(seen) + JSON.stringify(seen)).toMatch(/guard/i);
+  });
+
+  it("an edit that changes nothing skips the write", async () => {
+    const { ctx, calls } = fakeAe({ editMarkers: [{ ...planned, changed: false }] });
+    const out: any = await markerTool("ae_add_markers").handler(AeAddMarkersSchema.parse(edit()), ctx);
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "editMarkers"]);
+    expect(out).toMatchObject({ ok: true, no_op: true });
+  });
+
+  it("passes a layer and layer-relative times to the host", async () => {
+    const { ctx, calls } = fakeAe({ editMarkers: [planned] });
+    await markerTool("ae_add_markers").handler(AeAddMarkersSchema.parse(edit({ layer: { name: "VO" }, relative_to: "layer", dry_run: true })), ctx);
+    expect(calls[0].script).toContain('"relative_to":"layer"');
+    expect(calls[0].script).toContain('"name":"VO"');
+  });
+
+  it("editMarkersMismatches checks the moved marker's fields, the old time and the untouched markers", () => {
+    const before = list([{ ...mk(1, 1, "a"), duration: 0.5, label: 2 }, mk(2, 2, "b")]);
+    const good = list([mk(1, 2, "b"), { ...mk(2, 4, "a"), duration: 0.5, label: 2 }]);
+    expect(editMarkersMismatches(before, good, written)).toEqual([]);
+    const wrongComment = list([mk(1, 2, "b"), { ...mk(2, 4, "zzz"), duration: 0.5, label: 2 }]);
+    expect(editMarkersMismatches(before, wrongComment, written).map((x) => x.path)).toEqual(["markers@4.comment"]);
+    const lostLabel = list([mk(1, 2, "b"), { ...mk(2, 4, "a"), duration: 0.5, label: 0 }]);
+    expect(editMarkersMismatches(before, lostLabel, written).map((x) => x.path)).toEqual(["markers@4.label"]);
+    const stillThere = list([mk(1, 1, "a"), mk(2, 2, "b"), { ...mk(3, 4, "a"), duration: 0.5, label: 2 }], {});
+    const m = editMarkersMismatches(before, stillThere, written);
+    expect(m.map((x) => x.path)).toEqual(["numMarkers", "markers@1"]);
+    const lostUntouched = list([mk(1, 3, "b"), { ...mk(2, 4, "a"), duration: 0.5, label: 2 }]);
+    expect(editMarkersMismatches(before, lostUntouched, written).map((x) => x.path)).toEqual(["markers@2"]);
+  });
+
+  it("editMarkersMismatches reports fields that could not be copied or set", () => {
+    const before = list([mk(1, 1, "a")]);
+    const after = list([mk(1, 1, "a")]);
+    const w = { edits: [{ index: 1, from: 1, to: 1, moved: false, fields: { comment: "a" }, copy_failed: ["chapter"], refused: ["label"] }] };
+    expect(editMarkersMismatches(before, after, w).map((x) => x.path)).toEqual(["markers@1.chapter", "markers@1.label"]);
+  });
+
+  it("editMarkersMismatches compares the AE 16.0 fields with the defaults an unset field reads back as", () => {
+    const f = { comment: "a", frame_target: "_top", cue_point_name: "cp", event_cue_point: true, protected_region: true, params: { a: "1", b: "2" } };
+    const w = { edits: [{ index: 1, from: 1, to: 1, moved: false, fields: f }] };
+    const before = list([mk(1, 1, "a")]);
+    const good = list([{ ...mk(1, 1, "a"), frame_target: "_top", cue_point_name: "cp", event_cue_point: true, protected_region: true, params: { b: "2", a: "1" } }]);
+    expect(editMarkersMismatches(before, good, w)).toEqual([]);
+    expect(editMarkersMismatches(before, list([mk(1, 1, "a")]), w).map((x) => x.path)).toEqual([
+      "markers@1.frame_target",
+      "markers@1.cue_point_name",
+      "markers@1.event_cue_point",
+      "markers@1.protected_region",
+      "markers@1.params",
+    ]);
+  });
+
+  it("addMarkersMismatches checks the new fields", () => {
+    const placed = [{ time: 1, comment: "a", protected_region: true, frame_target: "_top", cue_point_name: "cp", event_cue_point: true, params: { a: "1" } }];
+    const ok = list([{ ...mk(1, 1, "a"), protected_region: true, frame_target: "_top", cue_point_name: "cp", event_cue_point: true, params: { a: "1" } }]);
+    expect(addMarkersMismatches(list([]), ok, { placed })).toEqual([]);
+    expect(addMarkersMismatches(list([]), list([mk(1, 1, "a")]), { placed }).map((x) => x.path)).toEqual([
+      "markers@1.protected_region",
+      "markers@1.frame_target",
+      "markers@1.cue_point_name",
+      "markers@1.event_cue_point",
+      "markers@1.params",
+    ]);
+    const refused = addMarkersMismatches(list([]), ok, { placed: [{ ...placed[0], refused: ["protected_region"] }] });
+    expect(refused.map((x) => x.message)).toEqual(["AE refused protected_region at 1s"]);
+    expect(sameParams({ a: 1 }, { a: "1" })).toBe(true);
+    expect(sameParams({ a: "1" }, undefined)).toBe(false);
+  });
+
+  it("descriptions mention the edit and the new fields", () => {
+    expect(markerTool("ae_add_markers").description).toMatch(/edit instead of markers/);
+    expect(markerTool("ae_add_markers").description).toMatch(/protected_region/);
+    expect(markerTool("ae_get_markers").description).toMatch(/protected_region/);
   });
 });

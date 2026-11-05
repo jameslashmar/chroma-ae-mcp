@@ -1166,3 +1166,139 @@ describe("captions.jsx: box restyle and paragraph height guards", () => {
     expect(out.warnings.some((w: string) => w.includes("is point text"))).toBe(true);
   });
 });
+
+// ---------- font validation ----------
+
+describe("captions font check", () => {
+  const TURKISH = [cap(0.4, 2, ["Şehir çok güzel"]), cap(3.2, 4.4, ["İstanbul"])];
+
+  /** A scene whose AE has these installed fonts; `lacks` are characters the font has no glyph for (hasGlyphsFor, AE 25.1). */
+  function fontScene(installed: Array<{ ps: string; family: string; style: string; lacks?: string }>, withGlyphs = true) {
+    const make = (s: { ps: string; family: string; style: string; lacks?: string }) => {
+      const f: Record<string, unknown> = { postScriptName: s.ps, familyName: s.family, styleName: s.style, fullName: `${s.family} ${s.style}`, isSubstitute: false };
+      // Like a real font: no glyph for line breaks and other control characters.
+      if (withGlyphs) f.hasGlyphsFor = (str: string) => !/[\r\n\t\u0003\u2028\u2029]/.test(str) && (!s.lacks || ![...str].some((c) => s.lacks!.includes(c)));
+      return f;
+    };
+    const list = installed.map(make);
+    const fonts = {
+      allFonts: list.map((f) => [f]),
+      getFontsByPostScriptName: (ps: string) => list.filter((f) => f.postScriptName === ps),
+      getFontsByFamilyNameAndStyleName: (fa: string, st: string) => list.filter((f) => f.familyName === fa && f.styleName === st),
+      fontsDuplicateByPostScriptName: [],
+      getCTScriptForString: (s: string) => [{ chars: s, ctScript: 1 }],
+      getDefaultFontForCTScript: () => list[0],
+    };
+    const project = new FakeProject();
+    const comp = project.addComp("Vertical", 1080, 1920, 20);
+    comp.frameRate = 25;
+    const host = loadHost(project, ["captions.jsx"], { fonts });
+    host.G.ParagraphJustification = { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7414, RIGHT_JUSTIFY: 7415 };
+    host.G.CTScript = { CT_ROMAN_SCRIPT: 1 };
+    return { project, comp, ...host };
+  }
+
+  const INSTALLED = [
+    { ps: "ArialMT", family: "Arial", style: "Regular" },
+    { ps: "Impact", family: "Impact", style: "Regular", lacks: "şğıİ" },
+  ];
+
+  it("refuses an unknown font before the undo group, naming near matches", () => {
+    const { comp, A, undo } = fontScene(INSTALLED);
+    expect(() => apply(A, comp, { style: { font: "Arial-BoldMT" } })).toThrow(/No installed font matches "Arial-BoldMT"/);
+    expect(() => apply(A, comp, { style: { font: "Arial-BoldMT" } })).toThrow(/allow_substitute: true/);
+    let err: any;
+    try {
+      apply(A, comp, { style: { font: "Arial" } });
+    } catch (e) {
+      err = e;
+    }
+    expect(err.__kind).toBe("bad_args");
+    expect(err.message).toMatch(/Near matches: ArialMT/);
+    expect(undo.begun).toBe(0);
+    expect(comp.numLayers).toBe(0);
+  });
+
+  it("writes an unknown font anyway with allow_substitute, and warns", () => {
+    const { comp, A, undo } = fontScene(INSTALLED);
+    const out = apply(A, comp, { style: { font: "Arial-BoldMT" }, allow_substitute: true });
+    expect(out.created).toEqual(["Caption 001", "Caption 002"]);
+    expect(undo.begun).toBe(1);
+    expect(doc(comp.layer("Caption 001")!).font).toBe("Arial-BoldMT");
+    expect(out.font_check).toMatchObject({ checked: true, exists: false, substitute: true });
+    expect(out.warnings.join(" ")).toMatch(/written anyway/);
+  });
+
+  it("accepts an installed font and checks the caption text for glyphs", () => {
+    const { comp, A } = fontScene(INSTALLED);
+    const ok = apply(A, comp, { captions: TURKISH, style: { font: "ArialMT" } });
+    expect(ok.font_check).toMatchObject({ checked: true, exists: true, glyphs_checked: true });
+    expect(ok.font_check.glyphs_missing).toBeUndefined();
+    expect(ok.warnings.join(" ")).not.toMatch(/no glyph/);
+  });
+
+  it("does not warn about missing glyphs for the line breaks between captions or inside a caption", () => {
+    const { comp, A } = fontScene(INSTALLED);
+    const out = apply(A, comp, { captions: [cap(0.4, 2, ["Sehir", "ok"]), cap(3.2, 4.4, ["x"])], style: { font: "ArialMT" } });
+    expect(out.font_check).toMatchObject({ checked: true, glyphs_checked: true });
+    expect(out.font_check.glyphs_missing).toBeUndefined();
+    expect(out.warnings.join(" ")).not.toMatch(/no glyph/);
+    // A real gap is still named, and only that character.
+    const again = fontScene(INSTALLED);
+    const bad = apply(again.A, again.comp, { captions: TURKISH, style: { font: "Impact" } });
+    expect(bad.font_check.glyphs_missing).toEqual(["İ"]);
+  });
+
+  it("warns, but still writes, when the font lacks glyphs the text needs", () => {
+    const { comp, A } = fontScene(INSTALLED);
+    const out = apply(A, comp, { captions: TURKISH, style: { font: "Impact" } });
+    expect(out.created).toHaveLength(2);
+    expect(out.font_check.glyphs_missing).toEqual(["İ"]);
+    const warning = out.warnings.find((w: string) => w.includes("no glyph"));
+    expect(warning).toMatch(/Impact/);
+    expect(warning).toMatch(/AE's default for that script: ArialMT/);
+  });
+
+  it("keeps the unchecked path before AE 24 and before 25.1", () => {
+    const old = scene();
+    const out = apply(old.A, old.comp, { style: { font: "Arial-BoldMT" } });
+    expect(out.created).toHaveLength(2);
+    expect(out.warnings.join(" ")).toMatch(/was not checked/);
+    const noGlyphs = fontScene(INSTALLED, false);
+    const out2 = apply(noGlyphs.A, noGlyphs.comp, { captions: TURKISH, style: { font: "Impact" } });
+    expect(out2.created).toHaveLength(2);
+    expect(out2.font_check.glyphs_checked).toBe(false);
+    expect(out2.font_check.glyphs_reason).toMatch(/25\.1/);
+  });
+
+  it("checks nothing when no font is given", () => {
+    const { comp, A } = fontScene(INSTALLED);
+    const out = apply(A, comp);
+    expect(out.font_check).toBeUndefined();
+  });
+
+  it("the tool passes allow_substitute only when true and says so in its descriptions", async () => {
+    expect(AeCaptionsSchema.safeParse({ comp_id: 1, transcript: { text: WORDS_JSON }, allow_substitute: true, expect: expectArg }).success).toBe(true);
+    expect(tool("ae_captions").description).toContain("allow_substitute");
+    expect(tool("ae_captions").description).not.toContain("Font names are not checked");
+    const sent = async (extra: Record<string, unknown>) => {
+      const { ctx, calls } = fakeAe({ captionsRead: [readOf([]), readOf([])], captionsApply: [{ created: [], timings: [], warnings: [] }] });
+      await tool("ae_captions").handler(AeCaptionsSchema.parse({ comp_id: 1, transcript: { text: WORDS_JSON }, expect: expectArg, ...extra }), ctx);
+      return calls.find((c) => c.fn === "captionsApply")!.script;
+    };
+    expect(await sent({})).not.toContain("allow_substitute");
+    expect(await sent({ allow_substitute: true })).toContain('"allow_substitute":true');
+  });
+
+  it("flags the font in the read-back warnings when AE substituted it", async () => {
+    const plan = planCaptions(AeCaptionsSchema.parse({ comp_id: 1, transcript: { text: WORDS_JSON }, expect: expectArg }));
+    const after = readOf(plan.captions.map((c, i) => rc(i + 1, `Caption 00${i + 1}`, c.lines.join("\r"), c.start, c.end, { font_substituted: true })));
+    const { ctx } = fakeAe({
+      captionsRead: [readOf([]), after],
+      captionsApply: [{ created: [], timings: plan.captions.map((c) => [c.start, c.end]), warnings: [], font_check: { name: "X", checked: true } }],
+    });
+    const out = await tool("ae_captions").handler(AeCaptionsSchema.parse({ comp_id: 1, transcript: { text: WORDS_JSON }, expect: expectArg }), ctx);
+    expect(out.warnings.join(" ")).toMatch(/substituted/);
+    expect(out.font_check).toEqual({ name: "X", checked: true });
+  });
+});

@@ -271,7 +271,108 @@
     return null;
   }
 
-  // scan: { sizes: bool, budget: characters left for full scans in this call, capped: bool }
+  // ---------- composed lines (AE 24.3+; baselineLocs 13.6+) ----------
+  //
+  // The lines AE actually laid out. A snapshot: edits do not update it, so it is read in a call of its own.
+  // The member shapes are read defensively (a failed member is left out, never thrown).
+
+  var MAX_LINES = 200;
+  var MAX_LINE_TEXT = 400;
+  var BIG_FLOAT = 1e30;
+
+  function numberOrNull(v) {
+    if (typeof v !== "number" || !isFinite(v) || Math.abs(v) > BIG_FLOAT) return null;
+    return v;
+  }
+
+  // { start, end }, or null. ComposedLineRange.characterEnd is exclusive (last character + 1).
+  function lineRangeAt(doc, i) {
+    var r = null;
+    try {
+      if (typeof doc.composedLineRange === "function") r = doc.composedLineRange(i);
+    } catch (e0) { r = null; }
+    if (!r) return null;
+    var st = null;
+    var en = null;
+    try { st = r.characterStart; } catch (e2) {}
+    try { en = r.characterEnd; } catch (e3) {}
+    if (typeof st !== "number" || typeof en !== "number") {
+      try {
+        if (typeof r.length === "number" && r.length >= 2) {
+          st = r[0];
+          en = r[1];
+        }
+      } catch (e4) {}
+    }
+    if (typeof st !== "number" || typeof en !== "number" || !isFinite(st) || !isFinite(en)) return null;
+    return { start: st, end: en };
+  }
+
+  function composedLines(doc, text) {
+    var out = { supported: false };
+    var count = null;
+    try {
+      if (doc.composedLineCount !== undefined) count = Number(doc.composedLineCount);
+    } catch (e0) { count = null; }
+    if (count === null || !isFinite(count)) {
+      out.reason = "This After Effects has no composedLineCount (it needs 24.3).";
+      return out;
+    }
+    out.supported = true;
+    out.line_count = count;
+    try {
+      if (doc.paragraphCount !== undefined) out.paragraph_count = Number(doc.paragraphCount);
+    } catch (e1) {}
+    var shown = count;
+    if (shown > MAX_LINES) {
+      shown = MAX_LINES;
+      out.truncated = true;
+    }
+    var bl = null;
+    try { bl = doc.baselineLocs; } catch (e2) { bl = null; }
+    var per = 0;
+    if (bl && typeof bl.length === "number") {
+      if (bl.length >= count * 4) per = 4;
+      else if (bl.length >= count * 2) per = 2;
+    }
+    var ranges = [];
+    var i;
+    for (i = 0; i < shown; i++) ranges.push(lineRangeAt(doc, i));
+    var lines = [];
+    for (i = 0; i < shown; i++) {
+      var rg = ranges[i];
+      var ln = { index: i + 1 };
+      if (rg) {
+        var endEx = rg.end;
+        ln.char_start = rg.start;
+        ln.char_end = endEx;
+        var piece = text.substring(rg.start, endEx).replace(/[\r\n\u0003]+$/, "");
+        if (piece.length > MAX_LINE_TEXT) {
+          piece = piece.substring(0, MAX_LINE_TEXT);
+          ln.text_truncated = true;
+        }
+        ln.text = piece;
+      }
+      if (per >= 2) {
+        var x0 = numberOrNull(bl[i * per]);
+        var y0 = numberOrNull(bl[i * per + 1]);
+        if (x0 !== null && y0 !== null) ln.baseline_start = [x0, y0];
+        if (per === 4) {
+          var x1 = numberOrNull(bl[i * 4 + 2]);
+          var y1 = numberOrNull(bl[i * 4 + 3]);
+          if (x1 !== null && y1 !== null) ln.baseline_end = [x1, y1];
+          if (ln.baseline_start && ln.baseline_end) ln.width = Math.abs(x1 - x0);
+        }
+      }
+      lines.push(ln);
+    }
+    out.lines = lines;
+    out.char_end_is_exclusive = true;
+    if (per === 0 && count > 0) out.baselines = "unavailable";
+    return out;
+  }
+
+  // scan: { sizes: bool, budget: characters left for full scans in this call, capped: bool, lines: bool }
   function measureEntry(layer, time, scan) {
     var prop = requireTextProp(layer);
     var doc = documentAt(prop, time);
@@ -342,6 +443,7 @@
     var rect = layer.sourceRectAtTime(time, false);
     e.bounds = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     e.live_fit = liveState(layer);
+    if (scan.lines === true) e.composed = composedLines(doc, text);
     // Scale as evaluated at the time (percent): the safe area is on screen, the bounds are before Scale.
     try {
       var scv = scaleExpressionProp(layer).valueAtTime(time, false);
@@ -385,7 +487,7 @@
     var rangesSupported = false;
     // sizes: false skips the per-character size scan (a fit does not need it).
     // Otherwise the scan is capped per call: later layers get a two-character probe.
-    var scan = { sizes: args.sizes !== false, budget: MAX_SCAN_TOTAL, capped: false };
+    var scan = { sizes: args.sizes !== false, budget: MAX_SCAN_TOTAL, capped: false, lines: args.lines === true };
     for (i = 0; i < layers.length; i++) {
       var entry = measureEntry(layers[i], time, scan);
       out.push(entry);

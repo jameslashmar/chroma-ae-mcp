@@ -445,3 +445,39 @@ describe("mcp-rpc and panel-entry", () => {
     expect(parsedCall.id).toBe(77);
   });
 });
+
+describe("ae_run_jsx safety lint over RPC", () => {
+  it("returns isError with the findings and never reaches After Effects", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-rpc-lint-"));
+    try {
+      const evals: string[] = [];
+      const queue = new SingleWriterQueue();
+      const quarantine = new QuarantineStore(path.join(dataDir, "quarantine.json"));
+      const bridge = new PanelHost({
+        evalScript: async (script) => {
+          evals.push(script);
+          return { ok: true, result: {}, durationMs: 1 };
+        },
+        queue,
+        quarantine,
+      });
+      const ctx: ToolContext = { bridge, queue, quarantine };
+      const res = (await handleRpc(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "ae_run_jsx", arguments: { code: "alert('hi');\nreturn 1;", mutates: false, label: "x" } },
+        },
+        ctx
+      )) as JsonRpcSuccessResponse;
+      const result = res.result as { isError?: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("ae_ask_user");
+      expect(result.content[0].text).toContain("line 1");
+      expect(evals).toEqual([]);
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});

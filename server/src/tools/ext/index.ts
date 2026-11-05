@@ -28,6 +28,10 @@ import { inpaintTools } from "./inpaint.js";
 import { mattesTools } from "./mattes.js";
 import { patchfitTools } from "./patchfit.js";
 import { screenrepTools } from "./screenrep.js";
+import { projectitemsTools } from "./projectitems.js";
+import { projectsettingsTools } from "./projectsettings.js";
+import { viewTools } from "./view.js";
+import { timelineTools } from "./timeline.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { annotateTools } from "./annotate.js";
@@ -128,4 +132,8 @@ export const extTools: ToolDefinition<any>[] = [
   ...mattesTools,
   ...patchfitTools,
   ...screenrepTools,
+  ...projectitemsTools,
+  ...projectsettingsTools,
+  ...viewTools,
+  ...timelineTools,
 ];

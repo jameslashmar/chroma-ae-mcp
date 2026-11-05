@@ -39,7 +39,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { formatBackupTimestamp, mutateTools } from "../mutate.js";
+import { formatBackupTimestamp, mutateTools, registerProjectRetargetHook } from "../mutate.js";
 import { listBlockingDialogs } from "./dialogs.js";
 import { getSessionTracker, type AgentWrite, type UndoStep } from "./session.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
@@ -242,7 +242,7 @@ export function leaveVerdict(dirty: boolean | null, ifDirty: "ask" | "save" | "d
   if (policy === "discard") return { proceed: true };
   if (policy === "save") {
     if (projectPath === "<unsaved>") {
-      return { proceed: false, reason: "The project has never been saved, so it has no file to save to. Save it once in After Effects (File > Save As), or discard it." };
+      return { proceed: false, reason: "The project has never been saved, so it has no file to save to. Name it with ae_save and save_as: { path }, or discard it." };
     }
     return { proceed: true };
   }
@@ -641,6 +641,19 @@ export function disablePolicyForSwitch(): boolean {
   return true;
 }
 
+// ae_save save_as / increment points the open project at a new file; the timed save was for the old one.
+registerProjectRetargetHook((oldPath, newPath) => {
+  const target = policyState.policy.project_path;
+  if (!policyState.policy.enabled || !target || !pathsMatchForGuard(target, oldPath)) return null;
+  // Save As onto the same file (overwrite) did not move the project: the policy is still for it.
+  if (pathsMatchForGuard(oldPath, newPath)) return null;
+  if (policyState.timer) clearInterval(policyState.timer);
+  policyState.timer = null;
+  policyState.policy = { enabled: false };
+  policyState.last_skip = "Turned off: ae_save moved the open project to another file.";
+  return "The timed-save policy was turned off because ae_save moved the open project to another file; it only saves the project it was enabled for. Enable it again for the new file if the user still wants it.";
+});
+
 /** For tests and shutdown. */
 export function stopAutosavePolicy(): void {
   if (policyState.timer) clearInterval(policyState.timer);
@@ -876,7 +889,7 @@ async function autosave(ctx: ToolContext, args: AeProjectSessionArgs) {
         kind: "guard",
         message:
           state.project_path === "<unsaved>"
-            ? "The open project has never been saved, so a timed save has no file to write. Save it once in After Effects first."
+            ? "The open project has never been saved, so a timed save has no file to write. Name it first with ae_save and save_as: { path }."
             : "expect.project_path is not the open project. The timed save is tied to one project: re-read the state and try again.",
         expected: { project_path: target },
         actual: { project_path: state.project_path },
@@ -939,6 +952,7 @@ export const projectsessionTools: ToolDefinition<any>[] = [
       "After open, a separate read-back reports the open path, dirty flag, item count and missing footage (`missing_footage.count`, with paths), and the session tracker takes the project as its new baseline. Opening, creating or closing a project ends the undo history of the old one (Ctrl+Z cannot reach earlier steps), and these calls add no undo step. A file that fails to open leaves an untitled project; the host then re-opens the previous file when it was clean or just saved (`restored_previous`). `if_dirty: 'save'` first copies the .aep to `_mcp_backups` (`backup_path`) and then closes with a save (the host refuses to save without that copy). `if_dirty: 'discard'` also needs `user_confirmed: true`, set only after the user said yes. open and recover `path` and recover `project_dir` / `auto_save_dir` must be absolute; open and recover `path` must end in .aep or .aepx. The write may take up to 10 minutes (a very large project, or a dialog the user answers slowly) before it times out. " +
       "recover lists the newest .aep/.aepx files (by modified time) in AE's Auto-Save folder next to the project, `_mcp_backups` and `_mcp_checkpoints`; repeat with `path` to open one. A custom Auto-Save folder is passed as `auto_save_dir`. " +
       "autosave with no `set` or `policy` reads AE's Auto-Save preferences (the key names are undocumented: the host probes likely ones and says which it found; add `probe` to look up others) and `saveProjectOnCrash`. `set` changes found keys only after the user said yes (`user_confirmed: true`), and AE may apply them at its next launch. `policy` is an opt-in server timer (needs `expect.project_path`, the open saved project, which it is tied to; M is at least 5 minutes) that saves after N unsaved writes or M minutes (ae_save, backup first), only when that project is still open, has been saved before, is dirty, nothing is queued or running and no dialog is open. It overwrites the user's .aep while they edit and writes a full copy to `_mcp_backups` each time (it deletes its own oldest copies beyond 10, only those made since it was last enabled in this server session), so enable it only on request. It turns itself off when this tool opens, creates or closes a project (including re-opening the same one), stays in server memory, and reports `unsaved_writes` (the agent's writes since the last save, from the session write log when session tracking is on, else null) and `last_save_matched`; a timed save whose receipt does not match is not counted. " +
+      "A project made with `new` has no file yet: name and save it with ae_save and save_as: { path } (a plain ae_save cannot save it). " +
       "Mutating actions take `expect`. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeProjectSessionSchema,

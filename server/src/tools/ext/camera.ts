@@ -6,9 +6,14 @@
  *   drive it by expression (push-in, dolly, orbit, parallax), depth of field
  *   focused on a layer, and "make these layers 3D with a Z spread". A guarded
  *   write, read back in a separate evalScript.
+ *   With `camera` it retunes an existing camera instead: lens, depth of field
+ *   on or off, focus layer or distance, aperture, blur level, one or two nodes
+ *   and the 26.3 Advanced 3D focus options, with keyed values refused (or keyed
+ *   at `at_time`).
  * - ae_scene_3d_report (read only): the 3D layers sorted by camera-space
  *   depth, which are behind the camera or outside the frame, cameras that are
- *   not active, and depth of field with no target.
+ *   not active, depth of field with no target, the lights (type, environment
+ *   source, intensity, shadows) and the 3D model and mesh layers.
  *
  * ExtendScript has no toWorld/fromWorld, so the report's world positions are
  * worked out here in Node from each layer's transform at the time, with the
@@ -19,7 +24,7 @@
 
 import { z } from "zod";
 import type { ReceiptMismatch } from "../../receipts.js";
-import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolDefinition } from "../common.js";
+import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import {
   cameraModel,
   chainMatrix,
@@ -105,11 +110,30 @@ const FocusSchema = z
     distance: z.number().min(0).optional().describe("A fixed focus distance in pixels instead of a layer."),
     aperture: z.number().min(0).optional().describe("Camera Aperture in pixels (smaller is deeper focus)."),
     blur_level: z.number().min(0).max(1000).optional().describe("Camera Blur Level in percent."),
+    focus_area_width: z
+      .number()
+      .min(0)
+      .max(1e6)
+      .optional()
+      .describe("Retune only (`camera` given): the Advanced 3D focus area width (AE 26.3). Its match name is unconfirmed, so the host probes the camera's options and says in `warnings` when it finds none."),
+    near_far_blur_multiplier: z
+      .number()
+      .min(0)
+      .max(1e6)
+      .optional()
+      .describe("Retune only (`camera` given): the Advanced 3D near/far blur multiplier (AE 26.3). Probed like focus_area_width."),
   })
   .refine((f) => !(f.layer !== undefined && f.distance !== undefined), { message: "Give a focus layer or a distance, not both." })
-  .refine((f) => f.layer !== undefined || f.distance !== undefined || f.aperture !== undefined || f.blur_level !== undefined, {
-    message: "focus needs at least one of layer, distance, aperture, blur_level.",
-  })
+  .refine(
+    (f) =>
+      f.layer !== undefined ||
+      f.distance !== undefined ||
+      f.aperture !== undefined ||
+      f.blur_level !== undefined ||
+      f.focus_area_width !== undefined ||
+      f.near_far_blur_multiplier !== undefined,
+    { message: "focus needs at least one of layer, distance, aperture, blur_level, focus_area_width, near_far_blur_multiplier." }
+  )
   .describe("Turns depth of field on. Iris and highlight options differ per renderer and are left alone.");
 
 const SpreadSchema = z
@@ -144,10 +168,35 @@ export const AeCameraRigSchema = z
     motion: MotionSchema.optional(),
     focus: FocusSchema.optional(),
     spread: SpreadSchema.optional(),
+    camera: LayerSelectorSchema.optional().describe(
+      "RETUNE MODE: an existing camera layer to change instead of building a new one. Then only lens, nodes, focus, depth_of_field and at_time apply (name, preset, distance, controller_name, motion and spread are for new cameras and are refused). " +
+        "A Zoom, Focus Distance, Aperture or Blur Level that is already keyframed is refused, unless at_time keys the new value at that time; a Zoom driven by an expression is refused; a fixed focus distance replaces a Focus Distance expression. " +
+        "Values already at the asked state change nothing (no_op, no undo step)."
+    ),
+    depth_of_field: z.boolean().optional().describe("Retune only: turn the camera's Depth of Field on or off (`focus` turns it on by itself)."),
+    at_time: z.number().min(0).optional().describe("Retune only: comp seconds at which a keyframed Zoom, Focus Distance, Aperture or Blur Level gets the new value as a key. Without it, a keyframed property is refused."),
     expect: ExpectSchema,
   })
   .refine((v) => v.preset !== "orbit" || v.nodes !== "one", { message: "The orbit preset aims at the point of interest, so it needs two nodes." })
-  .refine((v) => v.motion === undefined || (v.preset !== undefined && v.preset !== "static"), { message: "motion needs a preset other than static." });
+  .refine((v) => v.motion === undefined || (v.preset !== undefined && v.preset !== "static"), { message: "motion needs a preset other than static." })
+  .refine(
+    (v) =>
+      v.camera === undefined ||
+      (v.name === undefined && v.preset === undefined && v.controller_name === undefined && v.motion === undefined && v.spread === undefined && v.distance === undefined),
+    { message: "With camera (retune) only lens, nodes, focus, depth_of_field and at_time apply; name, preset, distance, controller_name, motion and spread are for new cameras." }
+  )
+  .refine((v) => v.camera === undefined || v.lens !== undefined || v.nodes !== undefined || v.focus !== undefined || v.depth_of_field !== undefined, {
+    message: "Retuning a camera needs at least one of lens, nodes, focus, depth_of_field.",
+  })
+  .refine((v) => v.camera === undefined || !(v.depth_of_field === false && v.focus !== undefined), {
+    message: "focus turns depth of field on; it can't be combined with depth_of_field false.",
+  })
+  .refine(
+    (v) =>
+      v.camera !== undefined ||
+      (v.depth_of_field === undefined && v.at_time === undefined && v.focus?.focus_area_width === undefined && v.focus?.near_far_blur_multiplier === undefined),
+    { message: "depth_of_field, at_time, focus.focus_area_width and focus.near_far_blur_multiplier apply with camera (retune) only." }
+  );
 
 export const AeScene3dReportSchema = z.object({
   comp_id: z.number().int(),
@@ -173,6 +222,28 @@ export interface CameraInfo {
   in_point?: number;
   out_point?: number;
   is_active: boolean;
+  /** Keyframe counts of the properties a retune changes (null when the camera lacks the property). */
+  num_keys?: {
+    zoom: number | null;
+    focus_distance: number | null;
+    aperture: number | null;
+    blur_level: number | null;
+    focus_area_width?: number | null;
+    near_far_blur_multiplier?: number | null;
+  };
+  /** Stored (pre-expression) values at the time a retune keyed; only read when cameraRead got at_time. */
+  values_at?: {
+    time: number;
+    zoom: number | null;
+    focus_distance: number | null;
+    aperture: number | null;
+    blur_level: number | null;
+    focus_area_width: number | null;
+    near_far_blur_multiplier: number | null;
+  };
+  /** The 26.3 Advanced 3D focus options (null when the camera has none). */
+  focus_area_width?: number | null;
+  near_far_blur_multiplier?: number | null;
   expressions: Record<string, string>;
   expression_errors: Array<{ property: string; error: string }>;
 }
@@ -218,6 +289,25 @@ export interface RigWritten extends Record<string, unknown> {
   spread: Array<{ id: number; name: string; z: number; scale_factor: number }>;
   focus: { layer: { id: number; name: string } | null; distance: number | null; aperture: number | null; blur_level: number | null } | null;
   motion: { control: string; amount: number; start_time: number; duration: number; ease: boolean } | null;
+  warnings: string[];
+}
+
+/** What the host's cameraRig returns in retune mode. */
+export interface RetuneChange {
+  key: "zoom" | "depth_of_field" | "focus_expression" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_multiplier" | "nodes";
+  value: unknown;
+  keyed: boolean;
+  replaced_key: boolean;
+}
+
+export interface RetuneWritten extends Record<string, unknown> {
+  retune: true;
+  no_op?: boolean;
+  camera: { id: number; index: number; name: string };
+  controller: null;
+  changes: RetuneChange[];
+  keyed_at: number | null;
+  probe: { focus_area_width: string | null; near_far_blur_multiplier: string | null };
   warnings: string[];
 }
 
@@ -295,6 +385,73 @@ export function cameraRigMismatches(args: RigArgs, beforeRaw: unknown, afterRaw:
   return m;
 }
 
+/** The retune's receipt: each change the host made, against the camera read back in a separate evalScript. */
+export function cameraRetuneMismatches(beforeRaw: unknown, afterRaw: unknown, w: RetuneWritten): ReceiptMismatch[] {
+  const m: ReceiptMismatch[] = [];
+  const before = asRead(beforeRaw);
+  const after = asRead(afterRaw);
+  if (!after) return m;
+  if (w.no_op) return m;
+  if (before) expectThat(m, after.comp.numLayers === before.comp.numLayers, "numLayers", before.comp.numLayers, after.comp.numLayers, "A retune changed the layer count");
+  const cam = after.cameras.find((c) => c.id === w.camera.id);
+  if (!cam) {
+    m.push({ path: "camera", expected: w.camera.id, actual: undefined, message: "The camera is not in the read-back" });
+    return m;
+  }
+  const was = before?.cameras.find((c) => c.id === w.camera.id);
+  type KeyField = "zoom" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_multiplier";
+  const keyField: Record<string, KeyField | undefined> = {
+    zoom: "zoom",
+    focus_distance: "focus_distance",
+    aperture: "aperture",
+    blur_level: "blur_level",
+    focus_area_width: "focus_area_width",
+    near_far_blur_multiplier: "near_far_blur_multiplier",
+  };
+  const valueOf: Record<string, number | null | undefined> = {
+    zoom: cam.zoom,
+    focus_distance: cam.focus_distance,
+    aperture: cam.aperture,
+    blur_level: cam.blur_level,
+    focus_area_width: cam.focus_area_width,
+    near_far_blur_multiplier: cam.near_far_blur_multiplier,
+  };
+  for (const c of w.changes) {
+    const path = `camera.${c.key}`;
+    if (c.key === "depth_of_field") {
+      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path, c.value === 1, cam.dof, "Depth of field is not as asked");
+    } else if (c.key === "focus_expression") {
+      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
+    } else if (c.key === "nodes") {
+      expectThat(m, cam.two_node === (c.value === "two"), path, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
+    } else if (c.keyed) {
+      const field = keyField[c.key];
+      const nowKeys = field ? cam.num_keys?.[field] : undefined;
+      const wasKeys = field && was ? was.num_keys?.[field] : undefined;
+      if (typeof nowKeys === "number" && typeof wasKeys === "number") {
+        const want = wasKeys + (c.replaced_key ? 0 : 1);
+        expectThat(m, nowKeys === want, `${path}.num_keys`, want, nowKeys, "The new keyframe is not there");
+      }
+      const wantV = c.value as number;
+      const keyedV = field ? cam.values_at?.[field] : undefined;
+      if (typeof wantV === "number") {
+        expectThat(m, near(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
+      }
+    } else {
+      const got = valueOf[c.key];
+      const want = c.value as number;
+      expectThat(m, near(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path, want, got, `${c.key} differs from what was asked`);
+    }
+    if (c.key === "focus_distance" && !c.keyed) {
+      expectThat(m, cam.expressions.focus_distance === undefined, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
+    }
+  }
+  for (const e of cam.expression_errors) {
+    m.push({ path: `camera.expressions.${e.property}`, expected: "no error", actual: e.error, message: `The ${e.property} expression has an error` });
+  }
+  return m;
+}
+
 // ---------- the scene report ----------
 
 export interface SceneCameraState {
@@ -307,9 +464,26 @@ export interface SceneCameraState {
   blur_level?: number | null;
 }
 
+export interface SceneLightState {
+  type: string | null;
+  /** The layer an environment light draws its picture from. */
+  source: { id: number; name: string } | null;
+  intensity: number | null;
+  color: number[] | null;
+  casts_shadows: boolean | null;
+  cone_angle: number | null;
+  cone_feather: number | null;
+  shadow_darkness: number | null;
+  shadow_diffusion?: number | null;
+}
+
 export interface SceneLayer extends HostLayer {
   camera?: SceneCameraState;
+  light?: SceneLightState;
 }
+
+const MODEL_KINDS = ["model_3d", "parametric_mesh"];
+const isAdvanced3d = (renderer: string | null | undefined) => /calder/i.test(renderer ?? "");
 
 export interface SceneRead extends HostRead {
   layers: SceneLayer[];
@@ -406,6 +580,47 @@ export function analyseScene(read: SceneRead, cameraId?: number) {
   if (read.truncated) warnings.push(`The comp has ${read.total_layers} layers; only the first ${read.layers.length} were read.`);
   for (const u of unresolved) warnings.push(`"${u.name}" skipped: ${u.reason}`);
 
+  // The lights, and the 3D model and mesh layers.
+  const lights = read.layers
+    .filter((l) => l.kind === "light")
+    .map((l) => {
+      const st = l.light;
+      return {
+        id: l.id,
+        index: l.index,
+        name: l.name,
+        enabled: l.enabled,
+        active: l.enabled && read.time >= l.in_point && read.time < l.out_point,
+        type: st?.type ?? null,
+        source: st?.source ?? null,
+        intensity: st?.intensity ?? null,
+        color: st?.color ?? null,
+        casts_shadows: st?.casts_shadows ?? null,
+        cone_angle: st?.cone_angle ?? null,
+        cone_feather: st?.cone_feather ?? null,
+        shadow_darkness: st?.shadow_darkness ?? null,
+        shadow_diffusion: st?.shadow_diffusion ?? null,
+      };
+    });
+  const renderer = read.comp.renderer ?? null;
+  const advanced = renderer === null || renderer === "" ? null : isAdvanced3d(renderer);
+  for (const lt of lights) {
+    if (lt.type !== "environment") continue;
+    if (lt.source === null) {
+      warnings.push(`Environment light "${lt.name}" has no light source, so it lights nothing.`);
+    } else {
+      const src = byId.get(lt.source.id);
+      if (src?.three_d) warnings.push(`Environment light "${lt.name}" draws from "${lt.source.name}", which is a 3D layer; AE wants a 2D layer there.`);
+    }
+    if (lt.enabled && advanced === false) warnings.push(`Environment light "${lt.name}" is on, but the comp's renderer (${renderer}) is not Advanced 3D, where environment lights are likely to render.`);
+  }
+  const models = read.layers
+    .filter((l) => MODEL_KINDS.includes(l.kind))
+    .map((l) => ({ id: l.id, index: l.index, name: l.name, kind: l.kind, three_d: l.three_d, enabled: l.enabled, depth: entries.find((e) => e.id === l.id)?.depth ?? null }));
+  if (models.length && advanced === false) {
+    warnings.push(`The comp has ${models.length} 3D model / mesh layer(s), but its renderer (${renderer}) is not Advanced 3D, where they are likely to render.`);
+  }
+
   return {
     time: read.time,
     comp: { id: read.comp.id, name: read.comp.name, width, height, renderer: read.comp.renderer ?? null },
@@ -421,6 +636,8 @@ export function analyseScene(read: SceneRead, cameraId?: number) {
       focus_follows_layer: state?.focus_expression ?? null,
     },
     counts: { three_d: entries.length, two_d: twoD, cameras: cameras.length },
+    lights,
+    models,
     layers_by_depth: entries,
     behind_camera: behind,
     outside_frame: outside,
@@ -440,6 +657,42 @@ const rigIds = (w?: Record<string, unknown>): number[] => {
   return ids.filter((n): n is number => typeof n === "number");
 };
 
+/** Retune mode of ae_camera_rig: change an existing camera, with the same guard, checkpoint and separate read-back. */
+function retuneCamera(args: RigArgs, ctx: ToolContext) {
+  return runGuardedWrite<RetuneWritten>(ctx, {
+    toolName: "ae_camera_rig",
+    label: `ae_camera_rig(retune${args.camera?.name ? ` "${args.camera.name}"` : ""})`,
+    expect: args.expect,
+    compId: args.comp_id,
+    read: (phase, w) => {
+      const keyedAt = phase === "after" ? (w as Partial<RetuneWritten> | undefined)?.keyed_at : undefined;
+      return { host: "cameraRead", args: { comp_id: args.comp_id, ids: [], ...(typeof keyedAt === "number" ? { at_time: keyedAt } : {}) } };
+    },
+    write: {
+      host: "cameraRig",
+      args: {
+        comp_id: args.comp_id,
+        camera: args.camera,
+        nodes: args.nodes,
+        lens: args.lens,
+        focus: args.focus,
+        depth_of_field: args.depth_of_field,
+        at_time: args.at_time,
+        label: "Retune camera",
+      },
+    },
+    check: (before, after, w) => cameraRetuneMismatches(before, after, w),
+    present: (_before, after, w) => {
+      const read = asRead(after);
+      return {
+        ...w,
+        camera: read?.cameras.find((c) => c.id === w.camera.id) ?? w.camera,
+        is_active_camera: read ? read.active_camera_id === w.camera.id : null,
+      };
+    },
+  });
+}
+
 export const cameraTools: ToolDefinition<any>[] = [
   {
     name: "ae_camera_rig",
@@ -450,10 +703,13 @@ export const cameraTools: ToolDefinition<any>[] = [
       "If a later step fails, everything this call made is taken back. The new camera goes on top, so it becomes the active one. " +
       "The read-back (a separate evalScript) checks the camera, its lens, node type, depth of field, expression errors, the controller's sliders and keyframes, and the spread layers' depth. " +
       "Use ae_scene_3d_report to see the result by depth. " +
+      "RETUNE: pass `camera` (an existing camera layer) to change it instead: `lens` (focal length, angle of view or zoom), `depth_of_field` on or off, `focus` (a layer to keep sharp, a fixed distance, aperture, blur level, and on AE 26.3 the Advanced 3D focus_area_width and near_far_blur_multiplier, whose match names are probed and reported in `warnings` when absent), and `nodes` one or two. " +
+      "A keyframed Zoom, Focus Distance, Aperture or Blur Level is refused unless `at_time` keys the new value there; an expression-driven Zoom is refused. Everything is checked before the undo group; a failure part-way puts the camera back. Nothing to change returns no_op with no undo step. The same separate read-back checks each change. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCameraRigSchema,
-    handler: (args: RigArgs, ctx) =>
-      runGuardedWrite<RigWritten>(ctx, {
+    handler: (args: RigArgs, ctx) => {
+      if (args.camera !== undefined) return retuneCamera(args, ctx);
+      return runGuardedWrite<RigWritten>(ctx, {
         toolName: "ae_camera_rig",
         label: `ae_camera_rig(${args.preset ?? "static"}${args.name ? ` "${args.name}"` : ""})`,
         expect: args.expect,
@@ -485,13 +741,15 @@ export const cameraTools: ToolDefinition<any>[] = [
             controller_layer: read?.layers.find((l) => l.id === w.controller?.id) ?? w.controller,
           };
         },
-      }),
+      });
+    },
   },
   {
     name: "ae_scene_3d_report",
     description:
       "Read-only report on a comp's 3D scene at one time: the 3D layers sorted by depth along the camera's view axis (nearest first) with world position, where they land in the frame and how large they look, " +
       "which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. " +
+      "Also lists the lights (`lights`: type including environment, the environment light's source layer, intensity, colour, cone, shadows; warns about an environment light with no source, with a 3D source, or in a comp whose renderer is not Advanced 3D) and the 3D model and parametric mesh layers (`models`). " +
       "Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; " +
       "X/Y rotation signs and a parented camera's point of interest are unmeasured, so rotated or parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " +
       AGENT_SAFETY_GUIDANCE,

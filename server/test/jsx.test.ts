@@ -72,7 +72,7 @@ describe("JSX escaping and call-string builder", () => {
     expect(roundTripped).toEqual(tricky);
   });
 
-  it("builds __chromaAe.<fn>(...) calls for all 12 host functions", () => {
+  it("builds __chromaAe.<fn>(...) calls for all 14 host functions", () => {
     expect(HOST_FUNCTIONS).toEqual([
       "status",
       "getProject",
@@ -86,6 +86,8 @@ describe("JSX escaping and call-string builder", () => {
       "save",
       "snapshotForReceipt",
       "checkGuard",
+      "statusDetail",
+      "fontsResolve",
     ]);
 
     const callStr = buildJsxCall("setProperty", {

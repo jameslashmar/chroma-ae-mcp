@@ -75,6 +75,13 @@ const WRITES_WITH_CHECKPOINT = [
   "ae_patch_finish",
   "ae_screen_corners",
   "ae_screen_replace",
+  "ae_create_comp",
+  "ae_project_items",
+  "ae_project_settings",
+  "ae_keyframes_transform",
+  "ae_detect_cuts",
+  "ae_fonts",
+  "ae_validate_expressions",
 ];
 // No checkpoint of the open project: purge changes AE's caches, a batch renders
 // a frozen copy, and relink works on a collected copy of the project.
@@ -82,6 +89,7 @@ const WRITES_WITHOUT_CHECKPOINT = [
   "ae_memory_purge",
   "ae_render_batch", "ae_render_batch_resume", "ae_render_batch_cancel",
   "ae_collect_relink",
+  "ae_view",
 ];
 // Runs other write tools, which take their own checkpoints.
 const ORCHESTRATORS = ["ae_multi_comp_apply", "ae_deliver_step"];

@@ -9,7 +9,9 @@
 //   usage) and footage (missing file, placeholder, proxy, usage)
 // - preflightLayers: a slice of one comp's layers: counts of effects,
 //   expressions and keys, expressions in error, effects that are not
-//   installed, missing fonts, and the nested comps the layers use
+//   installed, missing fonts, glyphs a text's font lacks (AE 25.1), and the
+//   nested comps the layers use; layer kinds include model_3d (AE 24.4) and
+//   parametric_mesh (AE 26.3)
 //
 // The server calls these in slices so no single evalScript runs long, and
 // does the ranking, naming rules and severity in Node.
@@ -97,6 +99,11 @@
     if (reflectName === "TextLayer") return "text";
     if (reflectName === "ShapeLayer") return "shape";
     if (reflectName === "CameraLayer") return "camera";
+    // AE 24.4 (3D model) and 26.3 (parametric mesh): by class name, and by class where the build has it.
+    if (reflectName === "ThreeDModelLayer") return "model_3d";
+    if (reflectName === "ParametricMeshLayer") return "parametric_mesh";
+    try { if (typeof ThreeDModelLayer !== "undefined" && l instanceof ThreeDModelLayer) return "model_3d"; } catch (eM) {}
+    try { if (typeof ParametricMeshLayer !== "undefined" && l instanceof ParametricMeshLayer) return "parametric_mesh"; } catch (eP) {}
     if (reflectName === "LightLayer") return "light";
     try { if (l.nullLayer) return "null"; } catch (e1) {}
     try { if (l.adjustmentLayer) return "adjustment"; } catch (e2) {}
@@ -415,6 +422,84 @@
     }
   }
 
+  // ---------- glyph coverage (AE 25.1 FontObject.hasGlyphsFor, through core's A.fontsGlyphCheck) ----------
+
+  var GLYPH_RUN_MAX = 2000;
+  var GLYPH_SCAN_BUDGET = 1500;
+  var MAX_MISSING_LISTED = 20;
+
+  function glyphRangeMode(td, text) {
+    try {
+      var t = td.characterRange(0, 1).text;
+      if (t === undefined || t === null) return "exclusive";
+      if (String(t).replace(/\r\n?|\n/g, "\n") === text.substring(0, 1).replace(/\r\n?|\n/g, "\n")) return "exclusive";
+      if (text.length > 1) return "inclusive";
+    } catch (e) {}
+    return "exclusive";
+  }
+
+  // [{ font, text }]: runs of one font. Per character when the text is short and ranges exist, else the whole text in the document's font.
+  function fontRuns(td, text, font, S) {
+    var canRange = false;
+    try { canRange = typeof td.characterRange === "function"; } catch (e0) {}
+    var n = text.length;
+    while (n > 0 && (text.charAt(n - 1) === "\r" || text.charAt(n - 1) === "\n")) n--;
+    if (canRange && n > 0 && n <= S.glyph_budget) {
+      S.glyph_budget -= n;
+      var mode = glyphRangeMode(td, text);
+      var runs = [];
+      var ok = true;
+      for (var i = 0; i < n && ok; i++) {
+        var f1 = "";
+        try {
+          var rg;
+          if (mode === "inclusive") rg = td.characterRange(i, i);
+          else rg = td.characterRange(i, i + 1);
+          f1 = String(rg.font);
+        } catch (e1) {
+          ok = false;
+        }
+        if (!ok) break;
+        var lastRun = runs.length > 0 ? runs[runs.length - 1] : null;
+        if (lastRun && lastRun.font === f1) lastRun.text += text.charAt(i);
+        else runs.push({ font: f1, text: text.charAt(i) });
+      }
+      if (ok) return runs;
+    }
+    if (canRange && n > 0) S.glyphs_whole_only++;
+    return [{ font: font, text: text }];
+  }
+
+  function checkGlyphs(td, font, li, S, seen) {
+    if (typeof A.fontsGlyphCheck !== "function" || font.length === 0) return;
+    var text = "";
+    try { text = String(td.text); } catch (e0) { return; }
+    if (text.length === 0) return;
+    var runs = fontRuns(td, text, font, S);
+    for (var r = 0; r < runs.length; r++) {
+      var run = runs[r];
+      if (run.font.length === 0 || seen["g:" + run.font] === true) continue;
+      var g = A.fontsGlyphCheck(run.font, String(run.text).replace(/[\r\n\t\u0003\u2028\u2029]/g, ""), GLYPH_RUN_MAX);
+      if (g.supported === null) {
+        S.glyphs_unchecked++;
+        if (g.reason) S.glyphs_reason = g.reason;
+        continue;
+      }
+      S.glyphs_checked++;
+      if (g.truncated) S.glyphs_truncated++;
+      if (g.supported === false) {
+        seen["g:" + run.font] = true;
+        var issue = issueFor(li, "glyphs_missing", null, run.font);
+        issue.font = clip(run.font, 200);
+        issue.missing = [];
+        for (var m = 0; m < g.missing.length && m < MAX_MISSING_LISTED; m++) issue.missing.push(g.missing[m]);
+        issue.suggested = [];
+        for (var q = 0; g.suggested_default && q < g.suggested_default.length && q < 3; q++) issue.suggested.push(g.suggested_default[q].postscript);
+        addIssue(S, issue);
+      }
+    }
+  }
+
   // Source Text can be keyed: look at the value and the first few keys.
   function checkText(l, li, S) {
     var st = null;
@@ -450,6 +535,8 @@
         seen["f:" + font] = true;
         addIssue(S, issueFor(li, "font_missing", null, font));
       }
+      // A substituted font is already reported; its glyph coverage would be the stand-in's.
+      if (!substitute) checkGlyphs(td, font, li, S, seen);
     }
   }
 
@@ -479,6 +566,12 @@
       issues: [],
       overflow: 0,
       fonts_unchecked: 0,
+      glyph_budget: GLYPH_SCAN_BUDGET,
+      glyphs_checked: 0,
+      glyphs_unchecked: 0,
+      glyphs_truncated: 0,
+      glyphs_whole_only: 0,
+      glyphs_reason: null,
       counts: { layers: 0, effects: 0, expressions: 0, keys: 0, three_d: 0, text: 0, precomp: 0 }
     };
     var layers = [];
@@ -542,6 +635,11 @@
     out.forced_evals = S.forced;
     out.force_capped = S.capped;
     out.fonts_unchecked = S.fonts_unchecked;
+    out.glyphs_checked = S.glyphs_checked;
+    out.glyphs_unchecked = S.glyphs_unchecked;
+    out.glyphs_truncated = S.glyphs_truncated;
+    out.glyphs_whole_only = S.glyphs_whole_only;
+    if (S.glyphs_reason) out.glyphs_reason = S.glyphs_reason;
     out.effects_check = S.installed.ok ? "available" : "unavailable";
     return out;
   };

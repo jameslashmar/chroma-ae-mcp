@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
@@ -16,6 +16,7 @@ import {
   fitsRegion,
   fittextTools,
   liveExpressionText,
+  lineFlags,
   liveMismatches,
   passCap,
   planFit,
@@ -1372,5 +1373,124 @@ describe("fittext and setText: second review fixes", () => {
     expect(out.ranges[0].text.length).toBeLessThan(20100);
     const back = A.getTextDocument({ comp_id: comp.id, layer: { id: l.id }, ranges: [{ start: 0, end: 25000 }] });
     expect(back.ranges[0].text.length).toBeLessThan(20100);
+  });
+});
+
+// ---------- composed lines ----------
+
+describe("ae_measure_text composed lines", () => {
+  // The fake document learns the AE 24.3 line members for these tests only.
+  const proto = FakeDoc.prototype as any;
+  const LONG_AT = { n: 0 };
+  const countGetter = function (this: any) {
+    return LONG_AT.n > 0 ? LONG_AT.n : this.lines().length;
+  };
+  beforeAll(() => {
+    Object.defineProperty(proto, "composedLineCount", { get: countGetter, configurable: true });
+    Object.defineProperty(proto, "paragraphCount", { get() { return this.text.split(/\r|\n/).length; }, configurable: true });
+    Object.defineProperty(proto, "baselineLocs", {
+      get() {
+        const out: number[] = [];
+        this.lines().forEach(([a, b]: [number, number], i: number) => {
+          if (b === a) out.push(3.4e38, 3.4e38, 3.4e38, 3.4e38);
+          else out.push(0, i * 24, (b - a) * 10, i * 24);
+        });
+        return out;
+      },
+      configurable: true,
+    });
+    proto.composedLineRange = function (i: number) {
+      const ranges = this.lines();
+      const [a, b] = ranges[i % ranges.length];
+      return { characterStart: a, characterEnd: b };
+    };
+  });
+  afterAll(() => {
+    for (const k of ["composedLineCount", "paragraphCount", "baselineLocs", "composedLineRange"]) delete proto[k];
+  });
+  afterEach(() => {
+    LONG_AT.n = 0;
+  });
+
+  it("is off unless asked for, and changes nothing when on", () => {
+    const { comp, A, undo } = scene();
+    textLayer(comp, "Para", "alpha beta gamma delta", { size: 20, box: [100, 40] });
+    expect(A.fittextMeasure({ comp_id: comp.id }).layers[0].composed).toBeUndefined();
+    const res = A.fittextMeasure({ comp_id: comp.id, lines: true });
+    expect(res.layers[0].composed.supported).toBe(true);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("reads the composed lines of box text: text, character ranges, baselines and widths", () => {
+    const { comp, A } = scene();
+    textLayer(comp, "Para", "alpha beta gamma delta", { size: 20, box: [100, 40] });
+    const c = A.fittextMeasure({ comp_id: comp.id, lines: true }).layers[0].composed;
+    expect(c).toMatchObject({ supported: true, line_count: 4, paragraph_count: 1, char_end_is_exclusive: true });
+    expect(c.lines.map((l: any) => l.text.trim())).toEqual(["alpha", "beta", "gamma", "delta"]);
+    expect(c.lines[0]).toMatchObject({ index: 1, char_start: 0, char_end: 6, baseline_start: [0, 0], baseline_end: [60, 0], width: 60 });
+    expect(c.lines[3]).toMatchObject({ char_start: 17, char_end: 22 });
+    expect(c.lines[3].baseline_start).toEqual([0, 72]);
+  });
+
+  it("reads the character end as exclusive, and leaves out the sentinel baselines of an empty line", () => {
+    const { comp, A } = scene();
+    textLayer(comp, "Two", "ab\r\rcd", { size: 20 });
+    const c = A.fittextMeasure({ comp_id: comp.id, lines: true }).layers[0].composed;
+    expect(c.line_count).toBe(3);
+    expect(c.paragraph_count).toBe(3);
+    expect(c.lines[0]).toMatchObject({ char_start: 0, char_end: 2 });
+    expect(c.lines[2]).toMatchObject({ char_start: 4, char_end: 6, text: "cd" });
+    expect(c.lines[1].baseline_start).toBeUndefined();
+    expect(c.lines[1].width).toBeUndefined();
+  });
+
+  it("caps the lines it returns", () => {
+    const { comp, A } = scene();
+    textLayer(comp, "Many", "a b c", { size: 20, box: [10, 10] });
+    LONG_AT.n = 5000;
+    const c = A.fittextMeasure({ comp_id: comp.id, lines: true }).layers[0].composed;
+    expect(c.line_count).toBe(5000);
+    expect(c.truncated).toBe(true);
+    expect(c.lines).toHaveLength(200);
+  });
+
+  it("says so on an AE without composed lines (before 24.3)", () => {
+    const { comp, A } = scene();
+    textLayer(comp, "Para", "alpha beta", { size: 20, box: [100, 40] });
+    delete proto.composedLineCount;
+    try {
+      const c = A.fittextMeasure({ comp_id: comp.id, lines: true }).layers[0].composed;
+      expect(c.supported).toBe(false);
+      expect(c.reason).toMatch(/24\.3/);
+    } finally {
+      Object.defineProperty(proto, "composedLineCount", { get: countGetter, configurable: true });
+    }
+  });
+});
+
+describe("ae_measure_text line flags", () => {
+  const lines = (...texts: string[]) => texts.map((text, i) => ({ index: i + 1, text }));
+
+  it("flags a last line of one word and a line count over max_lines", () => {
+    expect(lineFlags({ supported: true, line_count: 3, lines: lines("The quick brown ", "fox jumps over ", "dogs") }, 2)).toEqual({ single_word_last_line: true, over_max_lines: true, max_lines: 2 });
+    expect(lineFlags({ supported: true, line_count: 2, lines: lines("The quick ", "brown fox") })).toEqual({ single_word_last_line: false, over_max_lines: false });
+    expect(lineFlags({ supported: true, line_count: 1, lines: lines("Single") }, 2)?.single_word_last_line).toBe(false);
+    expect(lineFlags({ supported: false })).toBeUndefined();
+    // A cut-short list cannot tell what the last line is.
+    expect(lineFlags({ supported: true, line_count: 300, truncated: true, lines: lines("a b", "c") }, 5)?.single_word_last_line).toBe(false);
+  });
+
+  it("the tool asks for the lines, adds the flags and keeps the fit verdict", async () => {
+    const composed = { supported: true, line_count: 2, lines: lines("The quick brown ", "fox") };
+    const { ctx, calls } = fakeAe({ fittextMeasure: [measured([M({ composed })])] });
+    const out: any = await tool("ae_measure_text").handler(AeMeasureTextSchema.parse({ comp_id: 1, lines: true, max_lines: 1, max_width: 400 }), ctx);
+    expect(calls[0].script).toContain('"lines":true');
+    expect(out.layers[0].composed.flags).toEqual({ single_word_last_line: true, over_max_lines: true, max_lines: 1 });
+    expect(out.layers[0].fits).toBe(false);
+    const plain = fakeAe({ fittextMeasure: [measured([M()])] });
+    await tool("ae_measure_text").handler(AeMeasureTextSchema.parse({ comp_id: 1 }), plain.ctx);
+    expect(plain.calls[0].script).not.toContain("lines");
+    expect(AeMeasureTextSchema.safeParse({ comp_id: 1, lines: true, max_lines: 0 }).success).toBe(false);
+    expect(tool("ae_measure_text").description).toContain("single_word_last_line");
   });
 });

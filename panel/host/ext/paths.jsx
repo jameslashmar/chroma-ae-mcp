@@ -429,6 +429,13 @@
     "ADBE Vector Filter - Trim": "trim",
     "ADBE Vector Filter - Offset": "offset",
     "ADBE Vector Filter - Repeater": "repeater",
+    "ADBE Vector Filter - Merge": "merge",
+    "ADBE Vector Filter - RC": "round_corners",
+    "ADBE Vector Filter - Zigzag": "zig_zag",
+    "ADBE Vector Filter - PB": "pucker_bloat",
+    "ADBE Vector Filter - Twist": "twist",
+    "ADBE Vector Filter - Roughen": "wiggle_paths",
+    "ADBE Vector Filter - Wiggler": "wiggle_transform",
     "ADBE Vector Shape - Group": "path",
     "ADBE Vector Shape - Rect": "rect",
     "ADBE Vector Shape - Ellipse": "ellipse",
@@ -474,6 +481,25 @@
           d.transform.push({ name: cp.name, matchName: cp.matchName, value: cv });
         }
       } catch (eT) {}
+    } else if (GENERIC_OPS.hasOwnProperty(kind)) {
+      var gdef = GENERIC_OPS[kind];
+      for (var gk in gdef.fields) {
+        if (gdef.fields.hasOwnProperty(gk)) d[gk] = numberOf(item, [gdef.fields[gk].name]);
+      }
+      if (gdef.transform) {
+        d.transform = [];
+        try {
+          var wt = child(item, WIGGLER_GROUP);
+          for (c = 1; wt && c <= wt.numProperties && d.transform.length < 20; c++) {
+            var wp = wt.property(c);
+            var wv = null;
+            try {
+              wv = numberOf(wt, [wp.matchName]);
+            } catch (eWv) {}
+            d.transform.push({ name: wp.name, matchName: wp.matchName, value: wv });
+          }
+        } catch (eWt) {}
+      }
     }
     return d;
   }
@@ -662,6 +688,115 @@
   var LINE_JOIN = { miter: 1, round: 2, bevel: 3 };
   var TRIM_TYPE = { simultaneously: 1, individually: 2 };
   var REPEATER_ORDER = { above: 1, below: 2 };
+
+  // Merge Paths modes in the order of AE's menu. The Points menus of Zig Zag
+  // and Wiggle Paths list Corner, then Smooth; the numbers are not in the
+  // Scripting Guide, so the result says they are unverified.
+  var MERGE_MODE = { merge: 1, add: 2, subtract: 3, intersect: 4, exclude: 5 };
+  var POINTS_TYPE = { corner: 1, smooth: 2 };
+
+  // The other path operators, by the name the tool uses. Match names are from
+  // the Scripting Guide's shape-layer match-name page.
+  var GENERIC_OPS = {
+    merge: {
+      match: "ADBE Vector Filter - Merge",
+      fields: { mode: { name: "ADBE Vector Merge Type", label: "Merge Paths Mode", kind: "enum", map: MERGE_MODE } }
+    },
+    round_corners: {
+      match: "ADBE Vector Filter - RC",
+      fields: { radius: { name: "ADBE Vector RoundCorner Radius", label: "Round Corners Radius", kind: "number", min: 0, max: 100000 } }
+    },
+    zig_zag: {
+      match: "ADBE Vector Filter - Zigzag",
+      fields: {
+        size: { name: "ADBE Vector Zigzag Size", label: "Zig Zag Size", kind: "number", min: -100000, max: 100000 },
+        ridges_per_segment: { name: "ADBE Vector Zigzag Detail", label: "Zig Zag Ridges per segment", kind: "int", min: 0, max: 1000 },
+        points: { name: "ADBE Vector Zigzag Points", label: "Zig Zag Points", kind: "enum", map: POINTS_TYPE }
+      }
+    },
+    pucker_bloat: {
+      match: "ADBE Vector Filter - PB",
+      fields: { amount: { name: "ADBE Vector PuckerBloat Amount", label: "Pucker & Bloat Amount", kind: "number", min: -100, max: 100 } }
+    },
+    twist: {
+      match: "ADBE Vector Filter - Twist",
+      fields: {
+        angle: { name: "ADBE Vector Twist Angle", label: "Twist Angle", kind: "number", min: -100000, max: 100000 },
+        center: { name: "ADBE Vector Twist Center", label: "Twist Center", kind: "point" }
+      }
+    },
+    wiggle_paths: {
+      match: "ADBE Vector Filter - Roughen",
+      fields: {
+        size: { name: "ADBE Vector Roughen Size", label: "Wiggle Paths Size", kind: "number", min: -100000, max: 100000 },
+        detail: { name: "ADBE Vector Roughen Detail", label: "Wiggle Paths Detail", kind: "int", min: 0, max: 1000 },
+        points: { name: "ADBE Vector Roughen Points", label: "Wiggle Paths Points", kind: "enum", map: POINTS_TYPE },
+        wiggles_per_second: { name: "ADBE Vector Temporal Freq", label: "Wiggles/Second", kind: "number", min: 0, max: 1000 },
+        correlation: { name: "ADBE Vector Correlation", label: "Correlation", kind: "number", min: 0, max: 100 },
+        temporal_phase: { name: "ADBE Vector Temporal Phase", label: "Temporal Phase", kind: "number", min: -100000, max: 100000 },
+        spatial_phase: { name: "ADBE Vector Spatial Phase", label: "Spatial Phase", kind: "number", min: -100000, max: 100000 },
+        random_seed: { name: "ADBE Vector Random Seed", label: "Random Seed", kind: "int", min: 0, max: 1000000 }
+      }
+    },
+    wiggle_transform: {
+      match: "ADBE Vector Filter - Wiggler",
+      transform: true,
+      fields: {
+        wiggles_per_second: { name: "ADBE Vector Xform Temporal Freq", label: "Wiggles/Second", kind: "number", min: 0, max: 1000 },
+        correlation: { name: "ADBE Vector Correlation", label: "Correlation", kind: "number", min: 0, max: 100 },
+        temporal_phase: { name: "ADBE Vector Temporal Phase", label: "Temporal Phase", kind: "number", min: -100000, max: 100000 },
+        spatial_phase: { name: "ADBE Vector Spatial Phase", label: "Spatial Phase", kind: "number", min: -100000, max: 100000 },
+        random_seed: { name: "ADBE Vector Random Seed", label: "Random Seed", kind: "int", min: 0, max: 1000000 }
+      }
+    }
+  };
+
+  // The Wiggle Transform's own Transform group has no documented children, so
+  // the lookup tries match names then display names, and the result lists them.
+  var WIGGLER_GROUP = ["ADBE Vector Wiggler Transform", "Transform"];
+  var WIGGLER_CHILD = {
+    anchor: ["ADBE Vector Wiggler Anchor", "Anchor Point"],
+    position: ["ADBE Vector Wiggler Position", "Position"],
+    scale: ["ADBE Vector Wiggler Scale", "Scale"],
+    rotation: ["ADBE Vector Wiggler Rotation", "Rotation"]
+  };
+
+  function checkGenericField(def, label, v) {
+    if (def.kind === "enum") {
+      if (typeof v !== "string" || !has(def.map[v])) {
+        var keys = [];
+        for (var mk in def.map) {
+          if (def.map.hasOwnProperty(mk)) keys.push(mk);
+        }
+        fail("bad_args", label + " must be one of " + keys.join(", "));
+      }
+    } else if (def.kind === "point") {
+      if (!point2(v)) fail("bad_args", label + " must be [x, y]");
+    } else {
+      if (!inRange(v, def.min, def.max)) fail("bad_args", label + " must be a number " + def.min + ".." + def.max);
+      if (def.kind === "int" && Math.floor(v) !== v) fail("bad_args", label + " must be a whole number");
+    }
+  }
+
+  function checkGeneric(op, s) {
+    var def = GENERIC_OPS[op];
+    var k;
+    for (k in s) {
+      if (!s.hasOwnProperty(k)) continue;
+      if (def.fields.hasOwnProperty(k)) {
+        if (has(s[k])) checkGenericField(def.fields[k], op + "." + k, s[k]);
+      } else if (!(def.transform && k === "transform")) {
+        fail("bad_args", op + "." + k + " is not a setting of this operator");
+      }
+    }
+    if (has(s.transform)) {
+      var t = s.transform;
+      if (has(t.position) && !point2(t.position)) fail("bad_args", op + ".transform.position must be [x, y]");
+      if (has(t.scale) && !point2(t.scale)) fail("bad_args", op + ".transform.scale must be [x, y] in percent");
+      if (has(t.anchor) && !point2(t.anchor)) fail("bad_args", op + ".transform.anchor must be [x, y]");
+      if (has(t.rotation) && !inRange(t.rotation, -100000, 100000)) fail("bad_args", op + ".transform.rotation must be degrees");
+    }
+  }
 
   function checkTrim(s) {
     if (has(s.start) && !inRange(s.start, 0, 100)) fail("bad_args", "trim.start must be 0..100");
@@ -873,6 +1008,42 @@
     }
   }
 
+  function applyGeneric(layer, gi, at, op, s, out) {
+    var def = GENERIC_OPS[op];
+    var it = function () { return vectorsOf(layer, gi).property(at); };
+    var k;
+    for (k in def.fields) {
+      if (def.fields.hasOwnProperty(k) && has(s[k])) {
+        var f = def.fields[k];
+        var v = s[k];
+        if (f.kind === "enum") v = f.map[v];
+        setNamed(it(), [f.name], v, f.label);
+        if (f.kind === "enum" && f.map === POINTS_TYPE) {
+          out.points_mapping = "unverified: corner=1, smooth=2 (the order of AE's Points menu); check the look in AE";
+        }
+      }
+    }
+    if (def.transform) {
+      var tr = function () { return child(it(), WIGGLER_GROUP); };
+      var keys = ["anchor", "position", "scale", "rotation"];
+      for (var n = 0; n < keys.length; n++) {
+        if (has(s.transform) && has(s.transform[keys[n]])) {
+          var grp = tr();
+          if (!grp) fail("bad_args", "The Wiggle Transform has no Transform group (looked for " + WIGGLER_GROUP.join(", ") + ")");
+          setNamed(grp, WIGGLER_CHILD[keys[n]], s.transform[keys[n]], "Wiggle Transform " + keys[n]);
+        }
+      }
+      // What the Transform group holds on this AE, for anyone who needs the names.
+      var g2 = tr();
+      out.transform_children = [];
+      if (g2) {
+        for (var c = 1; c <= g2.numProperties && out.transform_children.length < 20; c++) {
+          out.transform_children.push({ name: g2.property(c).name, matchName: g2.property(c).matchName });
+        }
+      }
+    }
+  }
+
   A.pathsOperator = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
@@ -880,7 +1051,10 @@
     var gi = resolveGroup(layer, args.group);
     var op = args.operator;
     var spec;
-    if (op === "trim") {
+    if (typeof op === "string" && GENERIC_OPS.hasOwnProperty(op)) {
+      spec = args[op] || {};
+      checkGeneric(op, spec);
+    } else if (op === "trim") {
       spec = args.trim || {};
       checkTrim(spec);
     } else if (op === "offset") {
@@ -890,7 +1064,7 @@
       spec = args.repeater || {};
       checkRepeater(spec);
     } else {
-      fail("bad_args", "operator must be trim, offset or repeater");
+      fail("bad_args", "operator must be trim, offset, repeater, merge, round_corners, zig_zag, pucker_bloat, twist, wiggle_paths or wiggle_transform");
     }
     if (has(args.name) && (typeof args.name !== "string" || args.name.length < 1 || args.name.length > 200)) fail("bad_args", "name must be 1..200 characters");
 
@@ -900,7 +1074,11 @@
       var out = { layer: layerInfo(layer), group: { index: gi, name: group.name }, operator: op, added: [] };
       pathsAdded = [];
       try {
-        if (op === "trim") {
+        if (GENERIC_OPS.hasOwnProperty(op)) {
+          var gen = addOperator(layer, gi, GENERIC_OPS[op].match, args.name);
+          applyGeneric(layer, gi, gen, op, spec, out);
+          out.added.push({ index: gen, name: vectorsOf(layer, gi).property(gen).name, matchName: GENERIC_OPS[op].match });
+        } else if (op === "trim") {
           var ti = addOperator(layer, gi, "ADBE Vector Filter - Trim", args.name);
           applyTrim(layer, gi, ti, spec, out);
           out.added.push({ index: ti, name: vectorsOf(layer, gi).property(ti).name, matchName: "ADBE Vector Filter - Trim" });

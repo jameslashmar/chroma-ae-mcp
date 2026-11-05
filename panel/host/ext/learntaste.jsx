@@ -120,6 +120,14 @@
     if (name === "ShapeLayer") return "shape";
     if (name === "CameraLayer") return "camera";
     if (name === "LightLayer") return "light";
+    if (name === "ThreeDModelLayer") return "model_3d";
+    if (name === "ParametricMeshLayer") return "parametric_mesh";
+    try {
+      if (typeof ThreeDModelLayer !== "undefined" && l instanceof ThreeDModelLayer) return "model_3d";
+    } catch (eM1) {}
+    try {
+      if (typeof ParametricMeshLayer !== "undefined" && l instanceof ParametricMeshLayer) return "parametric_mesh";
+    } catch (eM2) {}
     try {
       if (l.nullLayer) return "null";
     } catch (e1) {}

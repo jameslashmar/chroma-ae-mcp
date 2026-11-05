@@ -14,6 +14,8 @@ import {
   getSessionTracker,
   installSessionBridgeHook,
   installSessionTracking,
+  noteAfterWrite,
+  noteUiWrite,
   resetSessionTracking,
   SNAPSHOT_TIMEOUT_MS,
   SessionTracker,
@@ -420,6 +422,19 @@ describe("guarded write with session tracking", () => {
     // Only the guarded, non-no_op write is an undo step.
     expect(t.steps().map((s) => s.tool)).toEqual(["ae_create_layer"]);
     expect(t.agentWritesSince("<unsaved>", new Date(Date.now() + 60_000).toISOString())).toEqual([]);
+  });
+
+  it("a write Ctrl+Z cannot undo is logged as an agent write but adds no undo step", async () => {
+    const dir = tmp();
+    const { ctx } = fakeAe({ sessionSnapshot: () => unsavedSnap() }, dir);
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    const info = { opId: "op_r", toolName: "ae_fonts", label: "replace", expect: { project_path: "<unsaved>" }, checkpoint: null };
+    await noteAfterWrite(ctx, info, { undoable: false });
+    expect(t.steps()).toEqual([]);
+    expect(t.agentWritesSince("<unsaved>", null).map((w) => w.tool)).toEqual(["ae_fonts"]);
+    // A no_op is neither.
+    await noteAfterWrite(ctx, { ...info, opId: "op_n" }, { addStep: false });
+    expect(t.agentWritesSince("<unsaved>", null)).toHaveLength(1);
   });
 
   it("a write whose host returns no_op moves the baseline but adds no undo step", async () => {
@@ -1285,5 +1300,43 @@ describe("session.jsx, bounded lists and deterministic hashing", () => {
       expect(get(s, b.id).hash).toBe("");
     }
     expect(get(x, a.id).hash).toBe(get(y, a.id).hash);
+  });
+});
+
+describe("noteUiWrite", () => {
+  it("takes the post-write snapshot as the baseline, adds no undo step, and hides the agent's own time and selection change", async () => {
+    const dir = tmp();
+    // The agent moved the playhead and changed the selection (what ae_view does).
+    const moved = unsavedSnap({ comps: [comp(1, { name: "Main", selected: [7], time: 5 })] });
+    const { ctx, calls } = fakeAe({ sessionSnapshot: () => moved }, dir);
+    const t = installSessionTracking({ dataDir: dir, quarantine: ctx.quarantine });
+    t.record(unsavedSnap({ comps: [comp(1, { name: "Main", selected: [], time: 0 })] }), { op_id: "op_0", tool: "x" });
+
+    // Without the refresh the diff reports the selection change as the user's.
+    expect(diffSnapshots(t.lastBaseline()!, moved, t.serviceId).user_changed).toContain("selection changed");
+
+    await noteUiWrite(ctx, { opId: "op_ui", toolName: "ae_view", label: "ae_view", expect: { project_path: "<unsaved>", comp_id: 1 } });
+    expect(calls).toEqual(["sessionSnapshot"]);
+    expect(t.steps()).toEqual([]);
+    expect(t.lastBaseline()?.tool).toBe("ae_view");
+    expect(diffSnapshots(t.lastBaseline()!, moved, t.serviceId).user_changed).toBeNull();
+    // Nothing was logged as an agent write either: it is not a project edit.
+    expect(t.agentWritesSince("<unsaved>", new Date(Date.now() - 1000).toISOString())).toEqual([]);
+  });
+
+  it("never throws, with tracking off or a failed read", async () => {
+    const dir = tmp();
+    const off = fakeAe({}, dir);
+    await expect(noteUiWrite(off.ctx, { opId: "o", toolName: "ae_view", label: "x", expect: { project_path: "<unsaved>" } })).resolves.toBeUndefined();
+    const bad = fakeAe(
+      {
+        sessionSnapshot: () => {
+          throw new Error("AE busy");
+        },
+      },
+      dir
+    );
+    installSessionTracking({ dataDir: dir, quarantine: bad.ctx.quarantine });
+    await expect(noteUiWrite(bad.ctx, { opId: "o", toolName: "ae_view", label: "x", expect: { project_path: "<unsaved>" } })).resolves.toBeUndefined();
   });
 });

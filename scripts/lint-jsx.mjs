@@ -7,6 +7,8 @@
  * 1. Chained ternaries: '?' ... ':' ... '?' within one expression
  *    (ExtendScript parses chained ternaries left-associatively, producing silent logic corruption).
  * 2. ES5+ syntax: let, const, =>, backtick template strings, class.
+ * 3. Non-ASCII characters anywhere (ExtendScript may read the file in the
+ *    system code page, and U+2028/U+2029 end a string literal).
  *
  * Strips comments and strings first, preserving original line numbers.
  * Exits with code 1 if any findings are discovered.
@@ -377,6 +379,17 @@ function checkChainedTernaries(stripped, filePath) {
   }
 }
 
+function checkAscii(source, filePath) {
+  const lines = source.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /[^\x00-\x7F]/.exec(lines[i]);
+    if (m) {
+      const code = m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+      findings.push({ file: filePath, line: i + 1, message: `Non-ASCII character U+${code}: use a \\u escape or plain ASCII` });
+    }
+  }
+}
+
 function main() {
   const files = findJsxFiles(targetDir);
 
@@ -389,6 +402,7 @@ function main() {
     const relativePath = path.relative(repoRoot, file).replace(/\\/g, '/');
     const source = fs.readFileSync(file, 'utf8');
 
+    checkAscii(source, relativePath);
     const stripped = stripStringsAndComments(source, relativePath);
     checkEs5Syntax(stripped, relativePath);
     checkChainedTernaries(stripped, relativePath);

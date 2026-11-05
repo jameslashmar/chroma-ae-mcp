@@ -71,7 +71,7 @@ const MarginsSchema = z
 
 const StyleSchema = z
   .object({
-    font: z.string().min(1).max(200).optional().describe("PostScript font name, as ae_fonts lists it. A name AE doesn't have is substituted silently; the read-back says so."),
+    font: z.string().min(1).max(200).optional().describe("PostScript font name, as ae_fonts lists it (action search finds names). AE 24+: a name AE doesn't have is refused, with near matches, before anything is written, unless allow_substitute is true; the caption text is also checked for glyphs the font lacks (AE 25.1+; warned, not refused). Before AE 24 the name cannot be checked."),
     font_size: z.number().min(1).max(1296).optional().describe("Pixels. Default 6% of the comp's short side."),
     fill_color: Color.optional().describe("[r, g, b] in 0..1. Default white."),
     stroke_color: Color.optional().describe("Turns the stroke on."),
@@ -142,6 +142,10 @@ export const AeCaptionsSchema = z
       .boolean()
       .optional()
       .describe("Remove caption layers with this prefix whose number is past the new captions (an edited transcript with fewer lines); numbers below first_number are never removed. Default true when first_number is 1, else false."),
+    allow_substitute: z
+      .boolean()
+      .optional()
+      .describe("Write a style.font AE does not have anyway (AE then substitutes it silently; the read-back flags it). Default false: an unknown font is refused with candidates."),
     restyle: z
       .boolean()
       .optional()
@@ -441,7 +445,7 @@ export const captionsTools: ToolDefinition<any>[] = [
       "mode 'layers' makes one text layer per caption ('Caption 001'...), mode 'single' one layer with hold-keyed Source Text. " +
       "highlight colours the spoken word (a text animator keyed per word; SRT/VTT word times are estimates). box adds a background shape that follows the text through sourceRectAtTime. " +
       "Re-running with the same name_prefix updates the captions by name: text and timing change, your style, position and effects stay (restyle: true resets style and position), and layers past the new count are removed. " +
-      "Font names are not checked: use ae_fonts. Layers are made at the top of the stack. At most 500 captions per call (use from_s/to_s and first_number to continue). " +
+      "A style.font that AE does not have is refused before anything is written (AE 24+; allow_substitute: true writes it anyway), and the captions' text is checked for glyphs the font lacks (AE 25.1+; Turkish letters are the usual case): missing characters come back as a warning with AE's default font for the script. Layers are made at the top of the stack. At most 500 captions per call (use from_s/to_s and first_number to continue). " +
       "The read-back (a separate evalScript) checks text, timing, justification, highlight keys, stale layers and box expressions, and measures each caption's extents: `outside_safe` lists captions that run outside the safe area (re-run with a smaller max_chars_per_line or font_size). " +
       "Check the result with ae_frame or ae_contact_sheet. " +
       AGENT_SAFETY_GUIDANCE,
@@ -494,6 +498,7 @@ export const captionsTools: ToolDefinition<any>[] = [
               : undefined,
             remove_stale: removeStale,
             restyle: args.restyle === true,
+            ...(args.allow_substitute ? { allow_substitute: true } : {}),
             label: `Captions (${captions.length})`,
           },
         },
@@ -506,7 +511,7 @@ export const captionsTools: ToolDefinition<any>[] = [
           const substituted = (read?.captions ?? []).filter((e) => e.font_substituted).map((e) => e.name);
           const warnings = [...plan.warnings, ...(((w.warnings as string[] | undefined) ?? []))];
           if (outside.length) warnings.push(`${outside.length} caption${outside.length === 1 ? " runs" : "s run"} outside the safe area; re-run with a smaller max_chars_per_line or font_size.`);
-          if (substituted.length) warnings.push("The font is substituted (not installed under that name); check ae_fonts.");
+          if (substituted.length) warnings.push("The font is substituted (not installed under that name); find an installed one with ae_fonts action search.");
           return {
             comp_id: args.comp_id,
             mode,
@@ -518,6 +523,7 @@ export const captionsTools: ToolDefinition<any>[] = [
             highlight_keys: w.highlight_keys,
             boxes: w.boxes,
             font_size: w.font_size,
+            ...(w.font_check !== undefined ? { font_check: w.font_check } : {}),
             safe: w.safe,
             estimated_word_times: plan.estimated_word_times,
             outside_safe: outside,

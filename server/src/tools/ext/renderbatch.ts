@@ -14,6 +14,13 @@
  *   items whose output still verifies.
  * - ae_render_batch_cancel: stops the running aerender processes and the batch.
  *
+ * A job can also name existing Render Queue items (queue_items: { rq_index,
+ * item_comp_id }): each renders through aerender -rqindex with all its output
+ * modules and its own settings, and the plan and the governor count every
+ * output file. The frozen copy holds the queue as saved, so the project must be
+ * saved and not dirty; each index is checked (comp id, QUEUED, outputs) against
+ * the live queue of that clean project when the batch starts.
+ *
  * Nothing here changes the After Effects project: the renders run in aerender
  * child processes on the Node side and the runner never takes the eval queue.
  * The state lives in <renders dir>/batches/<batch id>/batch.json.
@@ -40,13 +47,16 @@ import {
   type CancelHooks,
   getDefaultAerenderRegistry,
   isAerenderProcess,
+  itemOutputs,
   pidHeldByLiveJob,
   launchAerenderJob,
   parseAerenderProgress,
   readLogTail,
   resolveAerenderPath,
+  selectRqItem,
   type AerenderJobRecord,
   type AerenderJobRegistry,
+  type RqItemRead,
   type SpawnLike,
 } from "./aerender.js";
 import { preflightRefusal, runPreflightGate, type GateSummary } from "./preflight.js";
@@ -96,13 +106,36 @@ export const BatchSpecSchema = z.object({
 
 export type BatchSpec = z.infer<typeof BatchSpecSchema>;
 
+export const BatchQueueItemSchema = z.object({
+  rq_index: z.number().int().min(1).max(500).describe("1-based Render Queue index of the item to render (aerender -rqindex). It renders with all its output modules and its own settings."),
+  item_comp_id: z.number().int().describe("The CompItem id the item at rq_index must have (ae_render_queue_inspect shows it). The plan and the start refuse when the item there is another comp: indexes shift when the queue changes."),
+  name: z
+    .string()
+    .min(1)
+    .max(60)
+    .regex(/^[A-Za-z0-9._-]+$/, "Names use letters, digits, '.', '_' and '-' only.")
+    .optional()
+    .describe("Label for this item in the plan and status (default 'rq<index>')."),
+});
+
+export type BatchQueueItem = z.infer<typeof BatchQueueItemSchema>;
+
 const jobFields = {
   comps: z
     .array(z.string().min(1).max(255))
     .min(1)
     .max(50)
+    .optional()
     .describe(
-      "Names of the comps to render. aerender selects a comp by name, so each name must belong to exactly one comp in the project. For other sizes, make the copies first with ae_reframe and list their names here: a size is just another comp."
+      "Names of the comps to render. aerender selects a comp by name, so each name must belong to exactly one comp in the project. For other sizes, make the copies first with ae_reframe and list their names here: a size is just another comp. Give comps, queue_items or both."
+    ),
+  queue_items: z
+    .array(BatchQueueItemSchema)
+    .min(1)
+    .max(50)
+    .optional()
+    .describe(
+      "Existing Render Queue items to render through aerender -rqindex, each with ALL its output modules (H.264 + ProRes + PNG built with ae_render_queue_edit / _duplicate / _apply_spec) and its own render settings; specs, name_template, extension and time_span do not apply to them (the item holds its output files and time span). Every output file is counted in the overwrite check, and free space is measured on the volume of each item's output modules (output_dir is not used for them). Needs a saved, not dirty project and each item QUEUED with its comp id matching item_comp_id. Item outputs may not sit in _mcp_backups / _mcp_checkpoints."
     ),
   specs: z
     .array(BatchSpecSchema)
@@ -163,11 +196,23 @@ const runFields = {
 };
 
 function refineJob(
-  val: { comps: string[]; specs?: BatchSpec[]; output_dir: string; name_template?: string },
+  val: { comps?: string[]; queue_items?: BatchQueueItem[]; specs?: BatchSpec[]; output_dir: string; name_template?: string },
   ctx: z.RefinementCtx
 ): void {
-  if (new Set(val.comps).size !== val.comps.length) {
+  const comps = val.comps ?? [];
+  const queueItems = val.queue_items ?? [];
+  if (comps.length === 0 && queueItems.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["comps"], message: "Give comps, queue_items or both." });
+  }
+  if (new Set(comps).size !== comps.length) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["comps"], message: "Comp names must be unique in the list." });
+  }
+  if (new Set(queueItems.map((q) => q.rq_index)).size !== queueItems.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["queue_items"], message: "A Render Queue index is listed twice." });
+  }
+  const queueNames = queueItems.map((q) => (q.name ?? `rq${q.rq_index}`).toLowerCase());
+  if (new Set(queueNames).size !== queueNames.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["queue_items"], message: "Queue item names must be unique." });
   }
   const specNames = (val.specs ?? []).map((s) => s.name.toLowerCase());
   if (new Set(specNames).size !== specNames.length) {
@@ -212,7 +257,7 @@ const BatchIdSchema = z.string().regex(BATCH_ID_RE, "batch_id must look like bat
 
 export const AeRenderBatchStatusSchema = z.object({
   batch_id: BatchIdSchema.optional().describe("Batch to report. Omit to list the most recent batches."),
-  include_free_space: z.boolean().optional().describe("Also measure the output volume's free space now (runs a PowerShell or df lookup). Default false."),
+  include_free_space: z.boolean().optional().describe("Also measure free space now on every volume the batch writes to (each Render Queue item's own output volumes, and output_dir only when the batch has comp items; runs a PowerShell or df lookup). Reports the worst as free_space, and free_space_volumes when there is more than one. Default false."),
 });
 export type AeRenderBatchStatusArgs = z.infer<typeof AeRenderBatchStatusSchema>;
 
@@ -249,6 +294,12 @@ export interface CompRead {
   queued_item?: { item_index: number; num_output_modules: number; output_files: Array<string | null> };
 }
 
+/** A Render Queue item the job names by index, as renderbatchRead reports it (index is the rq_index). */
+export interface QueueItemRead extends RqItemRead {
+  found?: boolean;
+  error?: string;
+}
+
 export interface RenderbatchRead {
   ae_version?: string;
   project_path: string;
@@ -257,10 +308,16 @@ export interface RenderbatchRead {
   comps: CompRead[];
   templates: { source: string; render_settings: string[]; output_modules: string[] };
   truncated?: boolean;
+  /** The Render Queue items named by queue_items (only read when the job names some). */
+  queue_items?: QueueItemRead[];
+  queue_total?: number;
+  queue_error?: string;
 }
 
 export interface JobInput {
   comps: string[];
+  /** Existing Render Queue items rendered through aerender -rqindex. */
+  queue_items: BatchQueueItem[];
   specs: BatchSpec[];
   output_dir: string;
   name_template: string;
@@ -281,6 +338,11 @@ export interface PlannedItem {
   end_frame?: number;
   /** Frames the item will render (an estimate for time_span 'template'); null when the comp couldn't be read. */
   frames: number | null;
+  /** Render Queue item rendered through aerender -rqindex (then output_path is its first output and output_paths lists them all). */
+  rq_index?: number;
+  item_comp_id?: number;
+  /** Every output file of a Render Queue item. */
+  output_paths?: string[];
 }
 
 export interface PlanProblem {
@@ -396,7 +458,8 @@ export function outputNameFor(job: JobInput, compName: string, spec: BatchSpec, 
 
 /** Fills the job's defaults. */
 export function normaliseJob(args: {
-  comps: string[];
+  comps?: string[];
+  queue_items?: BatchQueueItem[];
   specs?: BatchSpec[];
   output_dir: string;
   name_template?: string;
@@ -404,7 +467,8 @@ export function normaliseJob(args: {
   time_span?: JobInput["time_span"];
 }): JobInput {
   return {
-    comps: args.comps,
+    comps: args.comps ?? [],
+    queue_items: args.queue_items ?? [],
     specs: args.specs && args.specs.length > 0 ? args.specs : [{ name: "default" }],
     output_dir: args.output_dir,
     name_template: args.name_template ?? "{comp}_{spec}",
@@ -433,8 +497,87 @@ export function framesFor(info: CompRead | undefined, span: JobInput["time_span"
   return { start: 0, end: whole - 1, frames: whole };
 }
 
-/** Comps outer, specs inner. Items for a comp that couldn't be read still appear (frames null) so the plan can name the problem. */
-export function expandItems(job: JobInput, reads: CompRead[], now: number): PlannedItem[] {
+/** Every output file an item writes: its Render Queue item's modules, or its one output. */
+export function outputsOf(item: Pick<PlannedItem, "output_path" | "output_paths">): string[] {
+  if (item.output_paths && item.output_paths.length > 0) return item.output_paths;
+  return item.output_path ? [item.output_path] : [];
+}
+
+/** The folder of a file path (either separator); "" when there is none. A file at the root of a drive or of "/" keeps the root ("E:/", "/"). */
+export function folderOf(p: string): string {
+  const m = /^(.*)([\\/])[^\\/]*$/.exec(p);
+  if (!m) return "";
+  if (m[1] === "") return m[2];
+  if (/^[A-Za-z]:$/.test(m[1])) return m[1] + m[2];
+  return m[1];
+}
+
+/** One key per volume: the drive letter, or the folder itself for a UNC or POSIX path. */
+function volumeKeyOf(dir: string): string {
+  return driveLetterOf(dir + "/") ?? dir;
+}
+
+/**
+ * Whether two folders may share a volume. Only two different drive letters are known to be apart; a UNC or
+ * POSIX path cannot be placed on a volume from its text, so it stays conservative and counts as the same one.
+ */
+export function mayShareVolume(a: string, b: string): boolean {
+  const la = driveLetterOf(a + "/");
+  const lb = driveLetterOf(b + "/");
+  return la === null || lb === null || la === lb;
+}
+
+/**
+ * The folders whose volumes an item writes to. A Render Queue item writes to its own output-module
+ * paths (any volume); every other item writes under the batch output folder.
+ */
+export function spaceDirsOf(item: Pick<PlannedItem, "output_path" | "output_paths" | "rq_index">, outputDir: string): string[] {
+  if (item.rq_index === undefined) return [outputDir];
+  const seen: Record<string, boolean> = {};
+  const dirs: string[] = [];
+  for (const out of outputsOf(item)) {
+    const d = folderOf(out) || outputDir;
+    const k = volumeKeyOf(d);
+    if (seen[k]) continue;
+    seen[k] = true;
+    dirs.push(d);
+  }
+  return dirs.length > 0 ? dirs : [outputDir];
+}
+
+/**
+ * The distinct volumes a batch writes to, one folder each: every Render Queue item's own output
+ * volumes, plus the batch output folder only when some item (a comp item) writes under it, or when
+ * there are no items at all (so the list is never empty).
+ */
+export function batchSpaceDirs(items: Array<Pick<PlannedItem, "output_path" | "output_paths" | "rq_index">>, outputDir: string): string[] {
+  const seen: Record<string, boolean> = {};
+  const dirs: string[] = [];
+  const add = (d: string) => {
+    const k = volumeKeyOf(d);
+    if (seen[k]) return;
+    seen[k] = true;
+    dirs.push(d);
+  };
+  if (items.length === 0 || items.some((it) => it.rq_index === undefined)) add(outputDir);
+  for (const it of items) if (it.rq_index !== undefined) for (const d of spaceDirsOf(it, outputDir)) add(d);
+  return dirs;
+}
+
+/** Frames a Render Queue item renders, from its time span and frame rate (skip frames thin them); null when unknown. */
+export function queueItemFrames(q: RqItemRead | undefined): number | null {
+  if (!q || typeof q.comp_frame_rate !== "number" || !(q.comp_frame_rate > 0)) return null;
+  const dur = q.time_span_duration ?? q.comp_duration;
+  if (typeof dur !== "number" || !(dur > 0)) return null;
+  const skip = typeof q.skip_frames === "number" && q.skip_frames > 0 ? q.skip_frames + 1 : 1;
+  return Math.max(1, Math.round((dur * q.comp_frame_rate) / skip));
+}
+
+/**
+ * Comps outer, specs inner, then the Render Queue items. Items for a comp that couldn't be read still appear (frames null) so the plan can name the problem.
+ * A Render Queue item takes its comp name and output files from the queue read (queueReads); its index, not the comp name, selects it.
+ */
+export function expandItems(job: JobInput, reads: CompRead[], now: number, queueReads: QueueItemRead[] = []): PlannedItem[] {
   const byName = new Map(reads.map((c) => [c.name, c]));
   const items: PlannedItem[] = [];
   for (const comp of job.comps) {
@@ -454,6 +597,20 @@ export function expandItems(job: JobInput, reads: CompRead[], now: number): Plan
         frames: f.frames,
       });
     }
+  }
+  for (const q of job.queue_items) {
+    const rd = queueReads.find((r) => r.index === q.rq_index && r.found !== false);
+    const outs = rd ? itemOutputs(rd).paths : [];
+    items.push({
+      index: items.length + 1,
+      comp_name: rd?.comp_name ?? "",
+      spec_name: q.name ?? `rq${q.rq_index}`,
+      rq_index: q.rq_index,
+      item_comp_id: q.item_comp_id,
+      output_path: outs[0] ?? "",
+      output_paths: outs,
+      frames: queueItemFrames(rd),
+    });
   }
   return items;
 }
@@ -480,6 +637,28 @@ export function validatePlan(
   const errors: PlanProblem[] = [];
   const warnings: string[] = [];
   if (read) {
+    if (job.queue_items.length > 0) {
+      if (read.dirty) {
+        errors.push({
+          code: "queue_items_need_saved_project",
+          message: "The open project has unsaved changes. aerender reads the saved file, so Render Queue items added or queued since the last save are not in it: run ae_save, then plan again.",
+        });
+      }
+      if (read.queue_error) warnings.push(`The Render Queue items could not all be read: ${read.queue_error}`);
+      for (const q of job.queue_items) {
+        const rd = read.queue_items?.find((r) => r.index === q.rq_index && r.found !== false);
+        const picked = selectRqItem({ numItems: read.queue_total ?? 0, items: rd ? [rd] : [] }, { rq_index: q.rq_index, item_comp_id: q.item_comp_id });
+        if (!picked.ok) {
+          errors.push({ code: picked.code, comp: rd?.comp_name, message: `Queue item ${q.rq_index}: ${picked.message}` });
+          continue;
+        }
+        for (const w of picked.selection.warnings) warnings.push(`Queue item ${q.rq_index}: ${w}`);
+        for (const f of picked.selection.outputs) {
+          const why = protectedReason(f, projectPaths);
+          if (why) errors.push({ code: "output_protected", comp: rd?.comp_name, message: `Queue item ${q.rq_index} would write ${f}, but ${why}.` });
+        }
+      }
+    }
     for (const name of job.comps) {
       const c = read.comps.find((x) => x.name === name);
       if (!c || c.count === 0) errors.push({ code: "comp_not_found", comp: name, message: `No comp named "${name}" in the project.` });
@@ -529,7 +708,7 @@ export function validatePlan(
     }
     if (read.truncated) warnings.push("The comp list was capped; some names were not checked.");
   }
-  for (const spec of job.specs) {
+  for (const spec of job.comps.length === 0 ? [] : job.specs) {
     if (spec.extension !== undefined || job.extension_given) continue;
     if (!spec.output_module_template) {
       errors.push({
@@ -542,13 +721,19 @@ export function validatePlan(
   }
   const seen = new Map<string, number>();
   for (const it of items) {
-    const key = it.output_path.replace(/\\/g, "/").toLowerCase();
-    const prev = seen.get(key);
-    if (prev !== undefined) {
-      errors.push({ code: "output_collision", item: it.index, message: `Items ${prev} and ${it.index} write the same file (${it.output_path}). Add {comp}, {spec} or {n} to name_template.` });
-    } else seen.set(key, it.index);
-    const why = protectedReason(it.output_path, projectPaths);
-    if (why) errors.push({ code: "output_protected", item: it.index, message: `Item ${it.index} would write ${it.output_path}, but ${why}.` });
+    for (const out of outputsOf(it)) {
+      const key = out.replace(/\\/g, "/").toLowerCase();
+      const prev = seen.get(key);
+      if (prev !== undefined) {
+        const who = prev === it.index ? `Item ${it.index} writes the same file from two output modules` : `Items ${prev} and ${it.index} write the same file`;
+        errors.push({ code: "output_collision", item: it.index, message: `${who} (${out}). Add {comp}, {spec} or {n} to name_template, or give the queue items different output files.` });
+      } else seen.set(key, it.index);
+      // A Render Queue item's outputs are checked with its own message above.
+      if (it.rq_index === undefined) {
+        const why = protectedReason(out, projectPaths);
+        if (why) errors.push({ code: "output_protected", item: it.index, message: `Item ${it.index} would write ${out}, but ${why}.` });
+      }
+    }
   }
   if (job.time_span === "template") warnings.push("time_span 'template': no -s/-e is passed, so progress and ETA are estimated from the comp length.");
   return { errors, warnings };
@@ -602,6 +787,24 @@ export function inspectOutput(outputPath: string): ExistingOutput {
   return { exists: count > 0, bytes, newest_mtime_ms: newest, files };
 }
 
+/** The files of several outputs together (a Render Queue item writes one per output module). */
+export function inspectOutputs(paths: string[]): ExistingOutput {
+  if (paths.length === 1) return inspectOutput(paths[0]);
+  let bytes = 0;
+  let newest: number | null = null;
+  let any = false;
+  const files: ExistingOutput["files"] = [];
+  for (const p of paths) {
+    const o = inspectOutput(p);
+    if (!o.exists) continue;
+    any = true;
+    bytes += o.bytes;
+    files.push(...o.files);
+    if (o.newest_mtime_ms !== null && (newest === null || o.newest_mtime_ms > newest)) newest = o.newest_mtime_ms;
+  }
+  return { exists: any, bytes, newest_mtime_ms: newest, files };
+}
+
 /**
  * An output counts as rendered when it exists, has bytes, and (with sinceMs) was written after the item started.
  * For an image sequence only the frames written since then count, and with expectFrames their number must match it
@@ -626,6 +829,25 @@ export function verifyOutput(outputPath: string, sinceMs: number | null, expectF
     return { ok: false, bytes: o.bytes, reason: "the output file is older than the item's start (aerender did not write it)" };
   }
   return { ok: true, bytes: o.bytes };
+}
+
+/** verifyOutput for every output of an item: a Render Queue item is rendered only when each of its output modules' files is. */
+export function verifyOutputs(item: Pick<PlannedItem, "output_path" | "output_paths">, sinceMs: number | null, expectFrames: number | null = null): { ok: boolean; bytes: number; files?: number; reason?: string } {
+  const paths = outputsOf(item);
+  if (paths.length <= 1) return verifyOutput(paths[0] ?? item.output_path, sinceMs, expectFrames);
+  let bytes = 0;
+  let files = 0;
+  let sawFiles = false;
+  for (const p of paths) {
+    const v = verifyOutput(p, sinceMs, null);
+    if (!v.ok) return { ok: false, bytes, reason: `${p}: ${v.reason}` };
+    bytes += v.bytes;
+    if (v.files !== undefined) {
+      files += v.files;
+      sawFiles = true;
+    }
+  }
+  return { ok: true, bytes, ...(sawFiles ? { files } : {}) };
 }
 
 export function spaceStatus(freeBytes: number | null, neededBytes: number | null, minFreeGb: number): SpaceStatus {
@@ -855,10 +1077,12 @@ function refreshRunning(item: BatchItem, job: AerenderJobRecord, now: number, st
   item.percent = percent;
   item.frames_completed = p.frames_completed;
   let outBytes = 0;
-  try {
-    outBytes = fs.existsSync(item.output_path) && !isSequencePath(item.output_path) ? fs.statSync(item.output_path).size : 0;
-  } catch {
-    outBytes = 0;
+  for (const out of outputsOf(item)) {
+    try {
+      outBytes += fs.existsSync(out) && !isSequencePath(out) ? fs.statSync(out).size : 0;
+    } catch {
+      // a file that vanished counts as zero
+    }
   }
   const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
   if (!item.activity || item.activity.sig !== sig) item.activity = { sig, changed_ms: now };
@@ -966,7 +1190,7 @@ export class BatchRunner {
         item.state = "cancelled";
         item.error = "cancelled";
       } else if (job.state === "succeeded") {
-        const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+        const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
         if (v.ok) {
           item.state = "succeeded";
           item.output_bytes = v.bytes;
@@ -1020,10 +1244,12 @@ export class BatchRunner {
   /** The governor, then the launch. Any refusal fails the item with the reason; nothing is thrown. */
   private async startItem(b: BatchRecord, item: BatchItem, now: number): Promise<void> {
     const o = b.options;
-    const why = protectedReason(item.output_path, [b.project_path, b.frozen_project]);
-    if (why) return this.fail(item, `blocked: ${why}`, now);
+    for (const out of outputsOf(item)) {
+      const why = protectedReason(out, [b.project_path, b.frozen_project]);
+      if (why) return this.fail(item, `blocked: ${why}`, now);
+    }
 
-    const existing = inspectOutput(item.output_path);
+    const existing = inspectOutputs(outputsOf(item));
     if (existing.exists) {
       // A file an earlier attempt of this item left behind is this batch's own.
       const ours = item.attempts > 0;
@@ -1041,38 +1267,75 @@ export class BatchRunner {
       item.overwrote = true;
     }
 
-    const free = await this.deps.getFreeBytes(b.output_dir);
+    const spaceDirs = spaceDirsOf(item, b.output_dir);
+    const frees: Array<number | null> = [];
+    for (const d of spaceDirs) frees.push(await this.deps.getFreeBytes(d));
     // A cancel (or a stop) that landed during the await must not be followed by a launch.
     if (b.cancel_requested || b.state !== "running") return;
     const needed = estimateBytes(b.items, item);
-    // Items already running will still write: their estimated sizes are not free space either.
+    let status: SpaceCheck["status"] = "ok";
+    let free: number | null = null;
     let reserved = 0;
-    for (const r of b.items) if (r.state === "running" && r !== item) reserved += estimateBytes(b.items, r) ?? 0;
-    const status = spaceStatus(free === null ? null : Math.max(0, free - reserved), needed, o.min_free_gb);
-    b.free_space = { dir: b.output_dir, status, free_bytes: free, needed_bytes: needed, checked_at: new Date(now).toISOString() };
+    let shownDir = spaceDirs[0];
+    let worst = -1;
+    for (let di = 0; di < spaceDirs.length; di++) {
+      // Items already running will still write: their estimated sizes are not free space either.
+      let res = 0;
+      for (const r of b.items) {
+        if (r.state !== "running" || r === item) continue;
+        if (spaceDirsOf(r, b.output_dir).some((rd) => mayShareVolume(rd, spaceDirs[di]))) res += estimateBytes(b.items, r) ?? 0;
+      }
+      const f = frees[di];
+      const st = spaceStatus(f === null ? null : Math.max(0, f - res), needed, o.min_free_gb);
+      const rank = st === "low" ? 2 : st === "unknown" ? 1 : 0;
+      if (rank > worst) {
+        worst = rank;
+        status = st;
+        free = f;
+        reserved = res;
+        shownDir = spaceDirs[di];
+      }
+    }
+    b.free_space = { dir: shownDir, status, free_bytes: free, needed_bytes: needed, checked_at: new Date(now).toISOString() };
     if (status === "low") {
-      return this.fail(item, `blocked: only ${((free ?? 0) / GIB).toFixed(1)} GB free on the output volume${reserved > 0 ? ` (${(Math.max(0, (free ?? 0) - reserved) / GIB).toFixed(1)} GB after ${(reserved / GIB).toFixed(1)} GB reserved for running items)` : ""}; this item needs about ${(((needed ?? 0) / GIB)).toFixed(1)} GB plus ${o.min_free_gb} GB spare.`, now);
+      return this.fail(item, `blocked: only ${((free ?? 0) / GIB).toFixed(1)} GB free on the output volume of ${shownDir}${reserved > 0 ? ` (${(Math.max(0, (free ?? 0) - reserved) / GIB).toFixed(1)} GB after ${(reserved / GIB).toFixed(1)} GB reserved for running items)` : ""}; this item needs about ${(((needed ?? 0) / GIB)).toFixed(1)} GB plus ${o.min_free_gb} GB spare.`, now);
     }
     if (status === "unknown") {
       if (o.on_unknown_space === "stop") return this.fail(item, "blocked: free space on the output volume could not be measured (on_unknown_space: stop)", now);
-      const note = `Free space on ${b.output_dir} could not be measured (a network path or a failed lookup); rendering anyway. It is not known to be ok.`;
+      const note = `Free space on ${shownDir} could not be measured (a network path or a failed lookup); rendering anyway. It is not known to be ok.`;
       if (!b.notices.includes(note)) b.notices.push(note);
     }
 
     try {
-      const rec = launchAerenderJob({
-        registry: this.deps.registry,
-        spawn: this.deps.spawn,
-        aerender_path: o.aerender_path,
-        project_path: b.frozen_project,
-        comp_name: item.comp_name,
-        output_path: item.output_path,
-        output_module_template: item.output_module_template,
-        render_settings_template: item.render_settings_template,
-        start_frame: item.start_frame,
-        end_frame: item.end_frame,
-        max_cpu_percent: Math.max(1, Math.floor(o.max_cpu_percent / Math.max(1, o.concurrency))),
-      });
+      const cpu = Math.max(1, Math.floor(o.max_cpu_percent / Math.max(1, o.concurrency)));
+      // A Render Queue item renders through -rqindex with its own outputs and settings: no -comp, -output, templates or -s/-e.
+      const rec =
+        item.rq_index !== undefined
+          ? launchAerenderJob({
+              registry: this.deps.registry,
+              spawn: this.deps.spawn,
+              aerender_path: o.aerender_path,
+              project_path: b.frozen_project,
+              comp_name: item.comp_name,
+              rq_index: item.rq_index,
+              item_comp_id: item.item_comp_id,
+              comp_id: item.item_comp_id,
+              output_paths: outputsOf(item),
+              max_cpu_percent: cpu,
+            })
+          : launchAerenderJob({
+              registry: this.deps.registry,
+              spawn: this.deps.spawn,
+              aerender_path: o.aerender_path,
+              project_path: b.frozen_project,
+              comp_name: item.comp_name,
+              output_path: item.output_path,
+              output_module_template: item.output_module_template,
+              render_settings_template: item.render_settings_template,
+              start_frame: item.start_frame,
+              end_frame: item.end_frame,
+              max_cpu_percent: cpu,
+            });
       item.state = "running";
       item.attempts++;
       item.job_id = rec.job_id;
@@ -1141,14 +1404,14 @@ export class BatchRunner {
     }
     for (const item of b.items) {
       if (item.state === "succeeded") {
-        const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+        const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
         if (v.ok) {
           kept++;
           continue;
         }
         item.note = `rendered again: ${v.reason}`;
       } else if (item.state === "skipped") {
-        if (verifyOutput(item.output_path, null).ok) {
+        if (verifyOutputs(item, null).ok) {
           kept++;
           skippedKept++;
           continue;
@@ -1156,7 +1419,7 @@ export class BatchRunner {
         item.note = "rendered: the file it had left alone is gone";
       } else if (item.state === "running") {
         const job = item.job_id ? this.deps.registry.get(item.job_id) : undefined;
-        const v = verifyOutput(item.output_path, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+        const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
         // A clean exit (no 'aerender ERROR') is enough; the log wording is only the test for a job the dead runner never saw end.
         if (job && v.ok && (job.state === "succeeded" || (job.state === "running" && logFinished(job.log_path)))) {
           item.state = "succeeded";
@@ -1206,6 +1469,7 @@ function itemView(i: BatchItem) {
     spec: i.spec_name,
     state: i.state,
     output_path: i.output_path,
+    ...(i.rq_index !== undefined ? { rq_index: i.rq_index, output_paths: outputsOf(i) } : {}),
     frames: i.frames,
     ...(i.percent !== undefined ? { percent: i.percent } : {}),
     ...(i.job_id ? { job_id: i.job_id } : {}),
@@ -1286,6 +1550,21 @@ function resolveOptions(
   };
 }
 
+/** What renderbatchRead is asked: the comp names, and the Render Queue indexes when the job names some. */
+function readArgs(job: JobInput): Record<string, unknown> {
+  return { comp_names: job.comps, ...(job.queue_items.length > 0 ? { rq_items: job.queue_items.map((q) => ({ rq_index: q.rq_index })) } : {}) };
+}
+
+/** Modified time and size of a file, to notice that it changed between two looks. */
+function fileSig(p: string): string {
+  try {
+    const st = fs.statSync(p);
+    return `${st.mtimeMs}|${st.size}`;
+  } catch {
+    return "";
+  }
+}
+
 export function createRenderbatch(options: RenderbatchOptions = {}) {
   const getRegistry = (): AerenderJobRegistry => options.registry ?? getDefaultAerenderRegistry();
   const now = options.now ?? (() => Date.now());
@@ -1327,9 +1606,22 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
     return { dir, status: spaceStatus(free, null, minFreeGb), free_bytes: free, needed_bytes: null, checked_at: new Date(now()).toISOString() };
   };
 
+  /** Free space on every volume the items write to; `space` is the worst row (low, then unknown, then ok). */
+  const measureBatchSpace = async (
+    items: Array<Pick<PlannedItem, "output_path" | "output_paths" | "rq_index">>,
+    outputDir: string,
+    minFreeGb: number
+  ): Promise<{ space: SpaceCheck; rows: SpaceCheck[] }> => {
+    const rows: SpaceCheck[] = [];
+    for (const d of batchSpaceDirs(items, outputDir)) rows.push(await planSpace(d, minFreeGb));
+    let space = rows[0];
+    for (const r of rows) if (space.status !== "low" && (r.status === "low" || (r.status === "unknown" && space.status === "ok"))) space = r;
+    return { space, rows };
+  };
+
   const describeExisting = (items: PlannedItem[], policy: BatchOptions) =>
     items.map((it) => {
-      const ex = inspectOutput(it.output_path);
+      const ex = inspectOutputs(outputsOf(it));
       const age = ex.newest_mtime_ms === null ? null : Math.max(0, Math.round((now() - ex.newest_mtime_ms) / 60_000));
       const blocks = ex.exists && policy.if_output_exists === "protect_recent" && age !== null && age < policy.protect_recent_minutes;
       return { index: it.index, exists: ex.exists, bytes: ex.bytes, age_minutes: age, ...(blocks ? { would_block: true } : {}) };
@@ -1339,18 +1631,18 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
     {
       name: "ae_render_batch_plan",
       description:
-        "Dry run for a render batch. Expands comps x specs into items (comps outer, specs inner), names each output from name_template, and checks: every comp name exists exactly once (aerender selects by name), the template names exist (when the render queue has an item to read them from), no two items write the same file, no output sits in _mcp_backups / _mcp_checkpoints, which outputs already exist and would be protected, and the output volume's free space ('unknown' for a UNC path, never 'ok'). " +
+        "Dry run for a render batch. Expands comps x specs into items (comps outer, specs inner), names each output from name_template, and checks (queue_items are existing Render Queue items rendered through aerender -rqindex with all their output modules: each is checked for its comp id, QUEUED status and an output file on every module, the project must be saved and not dirty, and every output file is counted in the collision and overwrite checks, and free space is measured on each queue item's own output volumes): every comp name exists exactly once (aerender selects by name), the template names exist (when the render queue has an item to read them from), no two items write the same file, no output sits in _mcp_backups / _mcp_checkpoints, which outputs already exist and would be protected, and the output volume's free space ('unknown' for a UNC path, never 'ok'). " +
         "Changes nothing in After Effects or on disk. Run it before ae_render_batch; valid:false lists what to fix.",
       schema: AeRenderBatchPlanSchema,
       handler: async (args: AeRenderBatchPlanArgs, ctx: ToolContext) => {
         const job = normaliseJob(args);
         const read = (
-          await ctx.bridge.callHost<RenderbatchRead>("renderbatchRead", { comp_names: job.comps }, { label: "ae_render_batch_plan", mutates: false, toolName: "ae_render_batch_plan" })
+          await ctx.bridge.callHost<RenderbatchRead>("renderbatchRead", readArgs(job), { label: "ae_render_batch_plan", mutates: false, toolName: "ae_render_batch_plan" })
         ).result;
-        const items = expandItems(job, read.comps, now());
+        const items = expandItems(job, read.comps, now(), read.queue_items);
         const { errors, warnings } = validatePlan(job, read, items, [read.project_path]);
         const policy = resolveOptions(args, "");
-        const space = await planSpace(job.output_dir, policy.min_free_gb);
+        const { space, rows: spaceRows } = await measureBatchSpace(items, job.output_dir, policy.min_free_gb);
         if (space.status === "unknown") warnings.push("Free space on the output volume could not be measured; it is reported as unknown, not ok.");
         if (read.dirty) warnings.push("The open project has unsaved changes. ae_render_batch renders the saved file and asks for ae_save first.");
         if (read.project_path === "<unsaved>") errors.push({ code: "project_unsaved", message: "The project has never been saved; save it so there is a file to render." });
@@ -1365,6 +1657,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           errors,
           warnings,
           free_space: space,
+          ...(spaceRows.length > 1 ? { free_space_volumes: spaceRows } : {}),
           templates_checked: read.templates.source !== "none",
         };
       },
@@ -1372,7 +1665,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
     {
       name: "ae_render_batch",
       description:
-        "Start a render batch: comps x specs rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the concurrent processes) and one process at a time by default (the limit counts every aerender job this server runs). " +
+        "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the concurrent processes) and one process at a time by default (the limit counts every aerender job this server runs). " +
         "Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). " +
         "Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). " +
         "State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. " +
@@ -1385,10 +1678,10 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
         const job = normaliseJob(args);
         type Ready =
           | { ok: false; [k: string]: unknown }
-          | { ok: true; project_path: string; aerenderBin: string; items: PlannedItem[]; warnings: string[]; preflight?: GateSummary };
+          | { ok: true; project_path: string; aerenderBin: string; items: PlannedItem[]; warnings: string[]; preflight?: GateSummary; project_sig: string | null };
         let ready: Ready;
         try {
-          ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps)`, async (): Promise<Ready> => {
+          ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps${job.queue_items.length > 0 ? `, ${job.queue_items.length} queue items` : ""})`, async (): Promise<Ready> => {
             ctx.quarantine.assertClear();
             const statusResp = await ctx.bridge.evalRaw<{ aeVersion?: string; project_path?: string; dirty?: boolean; afterfx_path?: string; app_path?: string }>({
               id: `${opId}_status`,
@@ -1428,16 +1721,18 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
             }
             if (args.expect.comp_id !== undefined) await verifyTargetGuard(ctx, args.expect, opId);
 
+            // The queue indexes are checked against this live, clean project; the frozen copy must still be this file when it is made.
+            const projectSig = job.queue_items.length > 0 ? fileSig(projectPath) : null;
             const read = (
               await ctx.bridge.evalRaw<RenderbatchRead>({
                 id: `${opId}_read`,
-                script: buildJsxCall("renderbatchRead", { comp_names: job.comps }),
+                script: buildJsxCall("renderbatchRead", readArgs(job)),
                 label: "ae_render_batch (comps)",
                 mutates: false,
                 toolName: "ae_render_batch",
               })
             ).result as RenderbatchRead;
-            const items = expandItems(job, read.comps, now());
+            const items = expandItems(job, read.comps, now(), read.queue_items);
             const { errors, warnings } = validatePlan(job, read, items, [projectPath]);
             if (errors.length > 0) {
               return {
@@ -1451,7 +1746,13 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
             }
             let preflight: GateSummary | undefined;
             if (args.preflight !== false) {
-              const gate = await runPreflightGate(ctx, { toolName: "ae_render_batch", opId, comp_names: job.comps });
+              const queueCompIds = job.queue_items.map((q) => q.item_comp_id);
+              const gate = await runPreflightGate(ctx, {
+                toolName: "ae_render_batch",
+                opId,
+                comp_names: job.comps.length > 0 ? job.comps : undefined,
+                ...(queueCompIds.length > 0 ? { comp_ids: queueCompIds } : {}),
+              });
               if (gate.blocked) return preflightRefusal("ae_render_batch", gate.summary);
               preflight = gate.summary;
             }
@@ -1462,7 +1763,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
               existsSync: options.existsSync,
             });
             if (st.dirty === true) warnings.push("The project had unsaved changes; the batch renders the last saved file on disk.");
-            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight };
+            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig };
           });
         } catch (err) {
           return queued(err, opId);
@@ -1482,6 +1783,16 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           fs.copyFileSync(ready.project_path, frozen);
         } catch (err) {
           return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
+        }
+        // Render Queue indexes were read from the project as it was; a save between the read and the copy would put another queue in the frozen file.
+        if (ready.project_sig !== null && fileSig(ready.project_path) !== ready.project_sig) {
+          try {
+            if (beside) fs.rmSync(frozen, { force: true });
+          } catch {
+            // nothing more to clean up
+          }
+          store.forget(batchId);
+          return { ok: false, error: "project_changed", applied: false, message: "The project file was saved while the batch was starting, so the Render Queue indexes just checked may not match the frozen copy. Nothing was started; plan and start again." };
         }
         const batch: BatchRecord = {
           batch_id: batchId,
@@ -1559,7 +1870,8 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           if (job) refreshRunning(item, job, t, b.options.stall_minutes * 60_000);
         }
         const runnerActive = getRunner().isActive(b.batch_id);
-        const space = args.include_free_space ? await planSpace(b.output_dir, b.options.min_free_gb) : b.free_space;
+        const measured = args.include_free_space ? await measureBatchSpace(b.items, b.output_dir, b.options.min_free_gb) : null;
+        const space = measured ? measured.space : b.free_space;
         // A running item whose job has no process handle here and no live aerender behind its pid is orphaned (restart, reboot), not stalled.
         const orphaned = b.items.filter((i) => {
           if (i.state !== "running" || !i.job_id) return false;
@@ -1594,6 +1906,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           warnings: b.warnings,
           notices: b.notices.slice(-50),
           ...(space ? { free_space: space } : {}),
+          ...(measured && measured.rows.length > 1 ? { free_space_volumes: measured.rows } : {}),
           batch_json: store.jsonPath(b.batch_id),
         };
       },

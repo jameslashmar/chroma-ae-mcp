@@ -31,6 +31,35 @@ export interface Bounds {
   height: number;
 }
 
+export interface ComposedLine {
+  index: number;
+  text?: string;
+  char_start?: number;
+  /** Exclusive. */
+  char_end?: number;
+  baseline_start?: number[];
+  baseline_end?: number[];
+  width?: number;
+}
+
+export interface ComposedLines {
+  supported: boolean;
+  reason?: string;
+  line_count?: number;
+  paragraph_count?: number;
+  lines?: ComposedLine[];
+  truncated?: boolean;
+  baselines?: string;
+  /** Added by the server. */
+  flags?: LineFlags;
+}
+
+export interface LineFlags {
+  single_word_last_line: boolean;
+  over_max_lines: boolean;
+  max_lines?: number;
+}
+
 export interface TextMeasure {
   id: number;
   index: number;
@@ -64,6 +93,8 @@ export interface TextMeasure {
   /** "full" read every character; "probe" compared the first and last only (the scan cap was reached). */
   sizes_scan?: "full" | "probe";
   bounds: Bounds;
+  /** With lines: true — the lines AE composed (AE 24.3+). */
+  composed?: ComposedLines;
   /** ours: Scale has this tool's expression, on or off; installed: ours and switched on; foreign: an expression that is not this tool's. */
   live_fit?: { installed: boolean; ours?: boolean; enabled?: boolean; error: string | null; foreign?: boolean };
 }
@@ -81,6 +112,19 @@ export interface MeasureResult {
 }
 
 // ---------- pure logic ----------
+
+/** Measured line problems: a last line of one word (a widow), and more lines than the brief allows. */
+export function lineFlags(c: ComposedLines, maxLines?: number): LineFlags | undefined {
+  if (!c.supported) return undefined;
+  const lines = c.lines ?? [];
+  const count = c.line_count ?? lines.length;
+  let widow = false;
+  if (count >= 2 && !c.truncated && lines.length === count) {
+    const last = (lines[lines.length - 1].text ?? "").trim();
+    widow = last.length > 0 && last.split(/\s+/).length === 1;
+  }
+  return { single_word_last_line: widow, over_max_lines: maxLines !== undefined && count > maxLines, ...(maxLines !== undefined ? { max_lines: maxLines } : {}) };
+}
 
 export const MIN_FONT_SIZE = 0.1;
 export const MAX_FONT_SIZE = 1296;
@@ -222,6 +266,13 @@ export const AeMeasureTextSchema = z
     comp_id: z.number().int(),
     layers: z.array(LayerSelectorSchema).min(1).max(100).optional().describe("Text layers to measure. Default: every text layer in the comp (first 500)."),
     time: z.number().min(0).optional().describe("Comp time in seconds to measure at (sourceRectAtTime). Default the comp's current time. Reading never moves the playhead."),
+    lines: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also return the lines AE composed (AE 24.3+): per layer the line count, the paragraph count and per line its text, character range, baseline start and end and width, in layer space. Default false."
+      ),
+    max_lines: z.number().int().min(1).max(50).optional().describe("With lines: flag a layer whose composed line count is above this."),
     ...RegionFields,
   })
   .refine(regionExclusive, { message: "Give safe_area or max_width/max_height, not both." });
@@ -412,13 +463,15 @@ export const fittextTools: ToolDefinition<any>[] = [
     description:
       "Measure text layers without changing anything: bounds (sourceRectAtTime) at a time, font size, leading, justification, point or box text, box overflow (AE 24.6+), substituted font, whether the size varies per range, and whether a live-fit expression is on. " +
       "With max_width/max_height or safe_area it also says whether each layer fits (safe_area is on screen: the bounds are compared after the layer's evaluated Scale; position is not checked). Reading does not move the playhead or the selection. " +
-      "Source Text that is keyed is measured at `time` only.",
+      "Source Text that is keyed is measured at `time` only. " +
+      "lines: true adds the lines AE composed (AE 24.3+), measured rather than counted: per layer composed.line_count and paragraph_count, and per line its text, character range (char_end is exclusive), baseline start and end and width in layer space; " +
+      "composed.flags says whether the last line is a single word (single_word_last_line) and, with max_lines, whether there are more lines than that. Composed lines are a snapshot of the last layout, so read them in a separate call after any write.",
     schema: AeMeasureTextSchema,
     handler: async (args: z.infer<typeof AeMeasureTextSchema>, ctx) => {
       const res = await readHost<MeasureResult>(
         ctx,
         "fittextMeasure",
-        { comp_id: args.comp_id, layers: args.layers, time: args.time },
+        { comp_id: args.comp_id, layers: args.layers, time: args.time, ...(args.lines ? { lines: true } : {}) },
         "ae_measure_text",
         `ae_measure_text(comp ${args.comp_id})`
       );
@@ -427,7 +480,10 @@ export const fittextTools: ToolDefinition<any>[] = [
       return {
         ...res,
         region: has ? region : undefined,
-        layers: res.layers.map((l) => (has ? { ...l, fits: fitsRegion(l.bounds, regionFor(l, region)) && l.boxOverflow !== true } : l)),
+        layers: res.layers.map((l0) => {
+          const l: TextMeasure = l0.composed ? { ...l0, composed: { ...l0.composed, flags: lineFlags(l0.composed, args.max_lines) } } : l0;
+          return has ? { ...l, fits: fitsRegion(l.bounds, regionFor(l, region)) && l.boxOverflow !== true } : l;
+        }),
       };
     },
   },

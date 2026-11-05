@@ -648,18 +648,18 @@ export async function multiCompApply(args: AeMultiCompApplyArgs, ctx: ToolContex
     if (job.tool === "ae_batch_set" || job.tool === "ae_set_property") {
       for (const c of todo) {
         if (plan.get(c.comp_id)?.action !== "run") continue;
-        const parsedArgs = (parsedByComp.get(c.comp_id) ?? {}) as { ops?: unknown[]; chunk_size?: number; layer?: unknown; path?: unknown; value?: unknown; keyframes?: unknown; expression?: unknown };
+        const parsedArgs = (parsedByComp.get(c.comp_id) ?? {}) as { ops?: unknown[]; chunk_size?: number; layer?: unknown; path?: unknown; value?: unknown; keyframes?: unknown; expression?: unknown; expression_enabled?: unknown; allow_substitute?: unknown };
         // ae_set_property is a one-op batch: the same validation checks that the layer and the property path exist in this comp.
         const ops: unknown[] =
           job.tool === "ae_batch_set"
             ? parsedArgs.ops ?? []
-            : [{ layer: parsedArgs.layer, path: parsedArgs.path, ...(parsedArgs.value !== undefined ? { value: parsedArgs.value } : {}), ...(parsedArgs.keyframes !== undefined ? { keyframes: parsedArgs.keyframes } : {}), ...(parsedArgs.expression !== undefined ? { expression: parsedArgs.expression } : {}) }];
+            : [{ layer: parsedArgs.layer, path: parsedArgs.path, ...(parsedArgs.value !== undefined ? { value: parsedArgs.value } : {}), ...(parsedArgs.keyframes !== undefined ? { keyframes: parsedArgs.keyframes } : {}), ...(parsedArgs.expression !== undefined ? { expression: parsedArgs.expression } : {}), ...(parsedArgs.expression_enabled !== undefined ? { expression_enabled: parsedArgs.expression_enabled } : {}), ...(parsedArgs.allow_substitute !== undefined ? { allow_substitute: parsedArgs.allow_substitute } : {}) }];
         const size = parsedArgs.chunk_size ?? 500;
         for (let start = 0; start < ops.length; start += size) {
           const check = await call<{ ok: boolean; error?: string }>(
             ctx,
             "batchValidate",
-            { comp_id: c.comp_id, ops: ops.slice(start, start + size), base: start },
+            { comp_id: c.comp_id, ops: ops.slice(start, start + size), base: start, allow_substitute: parsedArgs.allow_substitute === true },
             `ae_multi_comp_apply (check ${c.name})`
           );
           if (check && check.ok === false) {

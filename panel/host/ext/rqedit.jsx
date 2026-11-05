@@ -4,8 +4,12 @@
 // - rqeditRead (read): queue items with time span, render settings and output
 //   modules (settings from getSettings(STRING_SETTABLE)), optionally templates
 // - rqeditEdit (guarded write): render settings template, time span, skip
-//   frames, log type, render settings; per output module: template, settings,
-//   file, post-render action, XMP; add and remove output modules
+//   frames, log type, render settings, the queued (Render checkbox) flag; per
+//   output module: template, settings, file, post-render action, XMP; add and
+//   remove output modules
+// - rqeditRemove (guarded write): take items out of the queue, by index (each
+//   guarded by its comp id) or by status filter, highest index first in one undo
+//   group; dry_run lists what would go and changes nothing
 // - rqeditDuplicate (guarded write): RenderQueueItem.duplicate() N times, each
 //   copy with its own output module template, file and settings
 // - rqeditApplySpec (guarded write): a delivery spec (template picked from the
@@ -413,6 +417,7 @@
       comp_width: comp.width,
       comp_height: comp.height,
       comp_duration: comp.duration,
+      comp_frame_rate: comp.frameRate,
       work_area_start: comp.workAreaStart,
       work_area_duration: comp.workAreaDuration,
       status: statusName(it.status),
@@ -624,6 +629,9 @@
       if (typeof plan.skip_frames !== "number" || plan.skip_frames < 0 || plan.skip_frames > 99 || plan.skip_frames !== Math.floor(plan.skip_frames)) {
         fail("bad_args", label + ": skip_frames is a whole number from 0 to 99");
       }
+    }
+    if (plan.queued !== undefined && plan.queued !== null && typeof plan.queued !== "boolean") {
+      fail("bad_args", label + ": queued is true or false");
     }
     if (plan.log_type !== undefined && plan.log_type !== null) {
       r.log_type = enumValue(logEnum(), LOG_NAMES, plan.log_type);
@@ -867,6 +875,13 @@
         });
       })(removes[i]);
     }
+    // The Render checkbox last: with the output files set above, a QUEUED item
+    // keeps a valid output (an item without one reads back NEEDS_OUTPUT).
+    if (plan.queued !== undefined && plan.queued !== null) {
+      step(rep, label + ": queued " + (plan.queued === true), function () {
+        getItem().render = plan.queued === true;
+      });
+    }
     return added;
   }
 
@@ -905,6 +920,7 @@
     if (r.time_span !== null) out.time_span = r.time_span;
     if (plan.skip_frames !== undefined && plan.skip_frames !== null) out.skip_frames = plan.skip_frames;
     if (plan.log_type) out.log_type = lc(plan.log_type);
+    if (plan.queued !== undefined && plan.queued !== null) out.queued = plan.queued === true;
     if (plan.render_settings) out.render_settings = plan.render_settings;
     var mods = plan.modules || [];
     for (i = 0; i < mods.length; i++) out.modules.push(moduleEcho(finalIndex(plan, mods[i].index), mods[i], mods[i].index));
@@ -914,6 +930,21 @@
   }
 
   // ---------- rqeditEdit ----------
+
+  function unset(v) {
+    return v === undefined || v === null;
+  }
+
+  function nonEmpty(v) {
+    return isArr(v) && v.length > 0;
+  }
+
+  // True when the queued flag is the only change asked for.
+  function onlyQueued(plan) {
+    if (unset(plan.queued)) return false;
+    if (!unset(plan.item_template) || !unset(plan.time_span) || !unset(plan.skip_frames) || !unset(plan.log_type) || !unset(plan.render_settings)) return false;
+    return !nonEmpty(plan.modules) && !nonEmpty(plan.add_modules) && !nonEmpty(plan.remove_modules);
+  }
 
   A.rqeditEdit = function (args) {
     assertGuard(args.expect);
@@ -933,6 +964,21 @@
     var baseCount = item.numOutputModules;
     // Read before the write: setSettings can invalidate the item object.
     var compId = item.comp.id;
+    // Only the queued flag asked for, and the item already has it: nothing to write, no undo group.
+    if (onlyQueued(args) && item.render === (args.queued === true)) {
+      return {
+        item_index: args.item_index,
+        comp_id: compId,
+        steps_done: [],
+        skipped: [],
+        errors: [],
+        warnings: [label + " is already " + (args.queued === true ? "queued" : "unqueued") + "; nothing changed."],
+        added_modules: [],
+        removed_modules: [],
+        no_op: true,
+        expect: planEcho(args, r, added, baseCount)
+      };
+    }
     A.withUndo(args.label || "Chroma AE MCP: edit render queue item", function () {
       added = doPlan(rq, args.item_index, args, r, rep, label);
     });
@@ -947,6 +993,117 @@
       added_modules: finalAdded(args, added),
       removed_modules: args.remove_modules || [],
       expect: planEcho(args, r, added, baseCount)
+    };
+  };
+
+  // ---------- rqeditRemove ----------
+
+  var REMOVE_STATUSES = ["done", "user_stopped", "err_stopped", "unqueued", "queued", "needs_output"];
+
+  function removalRow(it, index) {
+    return { index: index, comp_id: it.comp.id, comp_name: String(it.comp.name), status: statusName(it.status) };
+  }
+
+  // args: remove ([{ index, comp_id }]) or remove_filter ({ status, comp_id? }),
+  // dry_run, expect. Every index is resolved against the queue as it is now and
+  // the items are removed highest index first, so the numbers of the rest hold.
+  A.rqeditRemove = function (args) {
+    assertGuard(args.expect);
+    var rq = app.project.renderQueue;
+    requireIdle(rq);
+    var hasList = nonEmpty(args.remove);
+    var hasFilter = !unset(args.remove_filter);
+    if (hasList === hasFilter) {
+      fail("bad_args", "Give either remove (a list of { index, comp_id }) or remove_filter, not both and not neither.");
+    }
+    var total = rq.numItems;
+    var targets = [];
+    var isTarget = {};
+    var i;
+    if (hasList) {
+      if (args.remove.length > MAX_ITEMS) fail("bad_args", "At most " + MAX_ITEMS + " items can be removed at once");
+      for (i = 0; i < args.remove.length; i++) {
+        var r = args.remove[i];
+        if (!r || typeof r.comp_id !== "number") {
+          fail("bad_args", "Removal " + (i + 1) + ": give comp_id with index, so a queue that shifted cannot remove the wrong item");
+        }
+        var it = itemAt(rq, r.index, r.comp_id);
+        if (isTarget[r.index] === true) fail("bad_args", "Render queue item " + r.index + " is listed twice");
+        requireNotRendering(it, r.index);
+        isTarget[r.index] = true;
+        targets.push(removalRow(it, r.index));
+      }
+    } else {
+      var f = args.remove_filter;
+      var want = lc(f.status);
+      if (!inList(REMOVE_STATUSES, want)) {
+        fail("bad_args", "remove_filter.status \"" + f.status + "\" is not one of " + REMOVE_STATUSES.join(", "));
+      }
+      // The filter reads every item (a status read is cheap), so items past MAX_ITEMS are not skipped silently.
+      for (i = 1; i <= total; i++) {
+        var cand = rq.item(i);
+        if (statusName(cand.status) !== want) continue;
+        if (!unset(f.comp_id) && cand.comp.id !== f.comp_id) continue;
+        isTarget[i] = true;
+        targets.push(removalRow(cand, i));
+      }
+      if (targets.length > MAX_ITEMS) {
+        fail("bad_args", "remove_filter matches " + targets.length + " items; at most " + MAX_ITEMS + " can be removed at once. Narrow the filter (comp_id) or remove in steps.");
+      }
+    }
+    var survivors = [];
+    for (i = 1; i <= total && i <= MAX_ITEMS; i++) {
+      if (isTarget[i] !== true) survivors.push(rq.item(i).comp.id);
+    }
+    if (args.dry_run === true) {
+      return {
+        dry_run: true,
+        no_op: true,
+        would_remove: targets,
+        num_items: total,
+        num_items_after: total - targets.length,
+        removed: [],
+        errors: []
+      };
+    }
+    if (targets.length === 0) {
+      return {
+        no_op: true,
+        removed: [],
+        errors: [],
+        num_items_before: total,
+        warnings: ["No render queue item matched; nothing changed."],
+        expect: { num_items: total, survivor_comp_ids: survivors }
+      };
+    }
+    var order = targets.slice(0);
+    order.sort(function (a, b) {
+      return b.index - a.index;
+    });
+    var done = [];
+    var errors = [];
+    A.withUndo(args.label || "Chroma AE MCP: remove render queue items", function () {
+      var n;
+      for (n = 0; n < order.length; n++) {
+        try {
+          rq.item(order[n].index).remove();
+          done.push(order[n]);
+        } catch (e1) {
+          errors.push({ step: "Remove render queue item " + order[n].index, message: msgOf(e1) });
+        }
+      }
+    });
+    done.sort(function (a, b) {
+      return a.index - b.index;
+    });
+    // The surviving comps in order are only known exactly when every removal worked (a failed one stays in the queue).
+    var exactSurvivors = null;
+    if (errors.length === 0 && total <= MAX_ITEMS) exactSurvivors = survivors;
+    return {
+      removed: done,
+      errors: errors,
+      num_items_before: total,
+      expect: { num_items: total - done.length, survivor_comp_ids: exactSurvivors }
     };
   };
 

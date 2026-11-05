@@ -267,6 +267,48 @@ describe("ext/receipts (G1)", () => {
     });
   });
 
+  describe("guide fingerprints use stable words (compsettings group)", () => {
+    const fp = (guides: unknown[]): CompFingerprint => ({
+      comp_id: 10,
+      name: "G",
+      width: 1920,
+      height: 1080,
+      fps: 25,
+      duration: 4,
+      numLayers: 0,
+      propertyCount: 0,
+      truncated: false,
+      layers: [],
+      guides,
+    });
+
+    it("sees no difference between two reads that use the words, whatever integers AE used", () => {
+      const a = fp([{ orientation: "vertical", position: 300, position_kind: "pixel" }]);
+      const b = fp([{ orientation: "vertical", position: 300, position_kind: "pixel" }]);
+      expect(diffFingerprints(a, b)).toEqual({ changed: [], added: [], removed: [] });
+    });
+
+    it("reports a dropFrame change", () => {
+      const a = { ...fp([]), dropFrame: false };
+      const b = { ...fp([]), dropFrame: true };
+      expect(diffFingerprints(a, b).changed).toEqual([{ path: "comp.dropFrame", before: false, after: true }]);
+    });
+
+    it("reports a moved or re-oriented guide", () => {
+      const a = fp([{ orientation: "vertical", position: 300, position_kind: "pixel" }]);
+      const b = fp([{ orientation: "horizontal", position: 300, position_kind: "pixel" }]);
+      expect(diffFingerprints(a, b).changed.map((c) => c.path)).toEqual(["comp.guides"]);
+    });
+
+    it("shows a fingerprint stored before the change (raw integers) as a one-off guide difference", () => {
+      const old = fp([{ orientationType: 1, position: 300 }]);
+      const now = fp([{ orientation: "vertical", position: 300, position_kind: "pixel" }]);
+      const diff = diffFingerprints(old, now);
+      expect(diff.changed).toHaveLength(1);
+      expect(diff.changed[0]).toMatchObject({ path: "comp.guides", before: [{ orientationType: 1, position: 300 }] });
+    });
+  });
+
   describe("ae_comp_fingerprint and ae_comp_diff", () => {
     it("stores up to 20 fingerprints in server memory and diffs a stored fingerprint against a fresh eval", async () => {
       const fpTool = findTool("ae_comp_fingerprint");

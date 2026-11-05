@@ -413,8 +413,82 @@
   var COMP_SWITCHES = [
     "motionBlur", "shutterAngle", "shutterPhase", "motionBlurSamplesPerFrame", "motionBlurAdaptiveSampleLimit",
     "frameBlending", "renderer", "draft3d", "resolutionFactor", "hideShyLayers",
-    "preserveNestedFrameRate", "preserveNestedResolution", "displayStartTime", "displayStartFrame"
+    "preserveNestedFrameRate", "preserveNestedResolution", "displayStartTime", "displayStartFrame", "dropFrame"
   ];
+
+  // Guide orientation and position type as stable words. The raw integers differ
+  // between AE versions (26.5 renumbered them), so they are mapped through the
+  // enum constants when the build has them; without the enum the legacy meaning
+  // (0 horizontal / 1 vertical, 0 pixel / 1 percentage) applies. A value that maps
+  // to nothing falls back to the raw number under the old key.
+  function fpEnumValues(typeName, memberNames) {
+    var E = null;
+    try {
+      if (typeName === "GuideOrientationType") {
+        if (typeof GuideOrientationType !== "undefined") E = GuideOrientationType;
+      } else if (typeName === "GuidePositionType") {
+        if (typeof GuidePositionType !== "undefined") E = GuidePositionType;
+      }
+    } catch (e0) { E = null; }
+    if (E === null || E === undefined) {
+      try { E = $.global[typeName]; } catch (e1) { E = null; }
+    }
+    if (E === null || E === undefined) return null;
+    var out = [];
+    for (var i = 0; i < memberNames.length; i++) {
+      var v = null;
+      try { v = E[memberNames[i]]; } catch (e2) { v = null; }
+      if (typeof v === "number") out.push(v);
+      else out.push(null);
+    }
+    return out;
+  }
+
+  function fpGuideOrientation(raw) {
+    if (typeof raw !== "number") return null;
+    var en = fpEnumValues("GuideOrientationType", ["HORIZONTAL", "VERTICAL"]);
+    if (en) {
+      if (en[0] !== null && raw === en[0]) return "horizontal";
+      if (en[1] !== null && raw === en[1]) return "vertical";
+      return null;
+    }
+    if (raw === 0) return "horizontal";
+    if (raw === 1) return "vertical";
+    return null;
+  }
+
+  function fpGuidePositionKind(raw) {
+    if (typeof raw !== "number") return null;
+    var en = fpEnumValues("GuidePositionType", ["PIXEL", "PERCENTAGE", "PERCENT"]);
+    if (en) {
+      if (en[0] !== null && raw === en[0]) return "pixel";
+      if ((en[1] !== null && raw === en[1]) || (en[2] !== null && raw === en[2])) return "percentage";
+      return null;
+    }
+    if (raw === 0) return "pixel";
+    if (raw === 1) return "percentage";
+    return null;
+  }
+
+  function fpGuide(c, list, i) {
+    var g = null;
+    if (typeof c.getGuideAsObject === "function") {
+      try { g = c.getGuideAsObject(i); } catch (e0) { g = null; }
+    }
+    if (g === null || g === undefined || typeof g !== "object") g = list[i];
+    var oRaw;
+    var pRaw;
+    try { oRaw = g.orientationType; if (oRaw === undefined) oRaw = g.orientation; } catch (e1) { oRaw = undefined; }
+    try { pRaw = g.positionType; } catch (e2) { pRaw = undefined; }
+    var entry = {};
+    var oName = fpGuideOrientation(oRaw);
+    if (oName !== null) entry.orientation = oName;
+    else if (oRaw !== undefined) entry.orientationType = serialiseValue(oRaw);
+    try { entry.position = serialiseValue(g.position); } catch (e3) {}
+    var pName = fpGuidePositionKind(pRaw);
+    if (pName !== null) entry.position_kind = pName;
+    return entry;
+  }
 
   function fpCompSwitches(c, out) {
     for (var i = 0; i < COMP_SWITCHES.length; i++) {
@@ -423,14 +497,14 @@
         if (v !== undefined && v !== null) out[COMP_SWITCHES[i]] = serialiseValue(v);
       } catch (e) {}
     }
-    // Item guides: orientation and position of each, bounded.
+    // Item guides: orientation, position and position type of each, bounded.
     try {
       var gl = c.guides;
       if (gl && typeof gl.length === "number" && gl.length > 0) {
         var guides = [];
         if (gl.length > MAX_LIST) out.guides_truncated = true;
         for (var g = 0; g < gl.length && g < MAX_LIST; g++) {
-          guides.push({ orientationType: serialiseValue(gl[g].orientationType), position: serialiseValue(gl[g].position) });
+          guides.push(fpGuide(c, gl, g));
         }
         out.guides = guides;
       }

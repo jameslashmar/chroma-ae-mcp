@@ -401,6 +401,17 @@
     }
   }
 
+  // The key helpers, shared with ext/timeline.jsx (ae_keyframes_transform). Only exposed: ae_stagger
+  // behaves as before. snapshot(p, cap) reads every key; write(p, snap, dt, warnings, tag) removes the
+  // property's keys and puts the snapshot back dt seconds later; collisions(snap, dt, frameDuration, label)
+  // refuses two keys on one frame; describe(snap) turns a snapshot into plain data for a read-back.
+  A.__keys = {
+    snapshot: snapshotKeys,
+    write: writeKeys,
+    collisions: checkFrameCollisions,
+    describe: describeKeys
+  };
+
   // ---------- reads ----------
 
   function layerEntry(l) {

@@ -100,6 +100,7 @@ export interface CompFingerprint {
   preserveNestedResolution?: unknown;
   displayStartTime?: unknown;
   displayStartFrame?: unknown;
+  dropFrame?: unknown;
   guides?: unknown[];
   guides_truncated?: boolean;
   layers: FingerprintLayer[];
@@ -220,6 +221,7 @@ const COMP_SCALAR_FIELDS: Array<keyof CompFingerprint> = [
   "preserveNestedResolution",
   "displayStartTime",
   "displayStartFrame",
+  "dropFrame",
   "guides",
 ];
 
@@ -601,6 +603,13 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_patch_finish",
   "ae_screen_corners",
   "ae_screen_replace",
+  "ae_create_comp",
+  "ae_project_items",
+  "ae_project_settings",
+  "ae_keyframes_transform",
+  "ae_detect_cuts",
+  "ae_fonts",
+  "ae_validate_expressions",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

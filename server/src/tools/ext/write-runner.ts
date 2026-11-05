@@ -47,6 +47,8 @@ export interface GuardedWriteSpec<W extends Written = Written> {
   write: HostCall;
   check?: (before: unknown, after: unknown, written: W) => ReceiptMismatch[];
   present?: (before: unknown, after: unknown, written: W) => Record<string, unknown>;
+  /** False for a write Ctrl+Z cannot undo (Project.replaceFont): logged as an agent write, not listed as an undo step. */
+  undoable?: boolean;
 }
 
 export async function runGuardedWrite<W extends Written = Written>(ctx: ToolContext, spec: GuardedWriteSpec<W>) {
@@ -123,7 +125,7 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       const receipt = buildReceipt({ before, after, customMismatches: custom });
       // A failed read-back means AE is likely stuck: no session snapshot behind it.
       // A host that changed nothing returns no_op: true and opened no undo group.
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true });
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true, undoable: spec.undoable !== false });
       return {
         op_id: opId,
         applied: true as const,

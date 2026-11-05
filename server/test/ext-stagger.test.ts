@@ -1032,3 +1032,38 @@ describe("stagger.jsx: layout", () => {
 
 // Typing aid: the fake comp type is used by the helpers above.
 void (null as unknown as FakeComp);
+
+describe("stagger.jsx: key helpers exposed on A.__keys (for ae_keyframes_transform)", () => {
+  it("exposes snapshot, write, collisions and describe, and ae_stagger still works with them there", () => {
+    const { comp, A } = scene(1);
+    const l = comp.layer(1)!;
+    const p = prop(l, "Opacity");
+    enhance(p);
+    p.setValueAtTime(1, 0);
+    p.setValueAtTime(2, 100);
+    expect(Object.keys(A.__keys).sort()).toEqual(["collisions", "describe", "snapshot", "write"]);
+    expect(A.__keys.snapshot(p, 500).map((k: { time: number }) => k.time)).toEqual([1, 2]);
+    expect(fromJson(A.__keys.describe(A.__keys.snapshot(p, 500)))[1]).toMatchObject({ time: 2, value: 100 });
+    A.staggerApply({ comp_id: comp.id, mode: "keys", property_path: OPACITY, targets: [{ id: l.id, offset: 1, num_keys: 2, first_time: 1 }], expect: GUARD });
+    expect(times(p)).toEqual([2, 3]);
+  });
+
+  it("write puts a snapshot back at a new time, and collisions refuses two keys on one frame", () => {
+    const { comp, A } = scene(1);
+    const p = prop(comp.layer(1)!, "Opacity");
+    enhance(p);
+    p.setValueAtTime(1, 0);
+    p.setValueAtTime(2, 100);
+    const snap = A.__keys.snapshot(p, 500);
+    const warnings: string[] = [];
+    A.__keys.write(p, snap, 0.5, warnings, "test");
+    expect(times(p)).toEqual([1.5, 2.5]);
+    expect(values(p)).toEqual([0, 100]);
+    expect(() => A.__keys.collisions([{ time: 1 }, { time: 1.01 }], 0, 0.04, "x")).toThrow(/same frame/);
+    expect(() => A.__keys.collisions([{ time: 1 }, { time: 1.04 }], 0, 0.04, "x")).not.toThrow();
+  });
+});
+
+function values(p: FakeProperty) {
+  return p.keys.map((k) => k.value);
+}

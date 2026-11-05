@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
+import { zodToJsonSchema } from "../src/schema.js";
 import type { ToolContext } from "../src/tools/common.js";
 import { AerenderJobRegistry, buildAerenderArgs, cancelAerenderJob, isAerenderProcess, type AerenderJobRecord, type SpawnLike } from "../src/tools/ext/aerender.js";
 import {
@@ -15,6 +16,7 @@ import {
   AeRenderBatchStartSchema,
   AeRenderBatchStatusSchema,
   BatchStore,
+  batchSpaceDirs,
   computeEta,
   createRenderbatch,
   defaultIsPidAlive,
@@ -24,19 +26,26 @@ import {
   framesFor,
   getFreeBytes,
   inspectOutput,
+  inspectOutputs,
   joinOutput,
+  mayShareVolume,
   normaliseJob,
   outputNameFor,
+  outputsOf,
   parseDfAvailableBytes,
   protectedReason,
+  queueItemFrames,
   renderbatchTools,
   sanitizeFileToken,
+  spaceDirsOf,
   spaceStatus,
   validatePlan,
   verifyOutput,
+  verifyOutputs,
   type BatchItem,
   type BatchRecord,
   type CompRead,
+  type QueueItemRead,
   type RenderbatchRead,
 } from "../src/tools/ext/renderbatch.js";
 import { FakeProject, loadHost } from "./support/fake-ae.js";
@@ -297,6 +306,28 @@ describe("render batch pure logic", () => {
     ).toBeNull();
   });
 
+  it("measures an output at the root of a drive (and of /) through the real free-space lookup", async () => {
+    const calls: string[][] = [];
+    const run = async (file: string, args: string[]) => {
+      calls.push([file, ...args]);
+      return "987654321";
+    };
+    const bs = String.fromCharCode(92);
+    for (const out of ["E:" + bs + "hero.mov", "E:/hero.mov"]) {
+      const dirs = spaceDirsOf({ rq_index: 2, output_paths: [out] }, "C:" + bs + "batch");
+      expect(dirs).toHaveLength(1);
+      expect(typeof (await getFreeBytes(dirs[0], "win32", run))).toBe("number");
+    }
+    expect(calls.map((c) => c.join(" ")).every((c) => c.includes("(Get-PSDrive -Name E).Free"))).toBe(true);
+    expect(calls).toHaveLength(2);
+    // A file at the root of "/" is measured at "/", not at the batch output folder.
+    expect(spaceDirsOf({ rq_index: 2, output_paths: ["/hero.mov"] }, "/renders/batch")).toEqual(["/"]);
+    // Only the queue item's volume when the batch has no comp items; the output folder joins for a comp item.
+    expect(batchSpaceDirs([{ rq_index: 2, output_paths: ["E:/hero.mov"] }], "C:/batch")).toEqual(["E:/"]);
+    expect(batchSpaceDirs([{ rq_index: 2, output_paths: ["E:/hero.mov"] }, { output_path: "C:/batch/a.mp4" }], "C:/batch")).toEqual(["C:/batch", "E:/"]);
+    expect(batchSpaceDirs([], "C:/batch")).toEqual(["C:/batch"]);
+  });
+
   it("never reports unknown space as ok", () => {
     expect(spaceStatus(null, null, 2)).toBe("unknown");
     expect(spaceStatus(10 * GIB, 5 * GIB, 2)).toBe("ok");
@@ -434,16 +465,17 @@ function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; 
     return child as never;
   }) as SpawnLike;
   const clock = { t: Date.now() };
-  const space = { free: 500 * GIB as number | null };
+  const space = { free: 500 * GIB as number | null, by: undefined as undefined | ((dir: string) => number | null), asked: [] as string[] };
   const gate: { p?: Promise<void> } = {};
   const rb = createRenderbatch({
     registry,
     store: new BatchStore(path.join(dir, "renders", "batches")),
     spawn,
     now: () => clock.t,
-    getFreeBytes: async () => {
+    getFreeBytes: async (dir: string) => {
+      space.asked.push(dir);
       if (gate.p) await gate.p;
-      return space.free;
+      return space.by ? space.by(dir) : space.free;
     },
     isPidAlive: () => false,
     autoTick: false,
@@ -1181,5 +1213,461 @@ describe("renderbatch.jsx", () => {
     const { A } = loadHost(new FakeProject(), ["renderbatch.jsx"]);
     expect(A.renderbatchRead({ comp_names: [] })).toMatchObject({ comps: [], comp_total: 0 });
     expect(A.renderbatchRead({})).toMatchObject({ comps: [] });
+  });
+});
+
+// ---------- w5render: Render Queue items in a batch (-rqindex) ----------
+
+describe("w5render: batch schema for queue_items", () => {
+  const outputDir = path.join(os.tmpdir(), "out");
+  const q = { rq_index: 2, item_comp_id: 5 };
+
+  it("takes queue items alone, with comps, and needs one of the two", () => {
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [q], output_dir: outputDir }).success).toBe(true);
+    expect(AeRenderBatchPlanSchema.safeParse({ comps: ["Main"], queue_items: [q], output_dir: outputDir }).success).toBe(true);
+    expect(AeRenderBatchPlanSchema.safeParse({ output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ comps: [], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchStartSchema.safeParse({ queue_items: [q], output_dir: outputDir, expect: { project_path: "<unsaved>" } }).success).toBe(true);
+  });
+
+  it("guards each item with its comp id and keeps indexes and names unique", () => {
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [{ rq_index: 2 }], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [{ rq_index: 0, item_comp_id: 5 }], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [q, q], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [{ ...q, name: "a" }, { rq_index: 3, item_comp_id: 6, name: "A" }], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: [{ ...q, name: "has space" }], output_dir: outputDir }).success).toBe(false);
+    expect(AeRenderBatchPlanSchema.safeParse({ queue_items: Array.from({ length: 51 }, (_, i) => ({ rq_index: i + 1, item_comp_id: 5 })), output_dir: outputDir }).success).toBe(false);
+  });
+
+  it("describes queue_items and the tools say they take Render Queue items", () => {
+    const json = JSON.stringify(zodToJsonSchema(AeRenderBatchStartSchema));
+    expect(json).toMatch(/aerender -rqindex/);
+    expect(renderbatchTools.find((t) => t.name === "ae_render_batch")!.description).toMatch(/queue_items/);
+    expect(renderbatchTools.find((t) => t.name === "ae_render_batch_plan")!.description).toMatch(/queue_items/);
+  });
+});
+
+const rqRead = (index: number, extra: Partial<QueueItemRead> = {}): QueueItemRead => ({
+  index,
+  found: true,
+  comp_id: 5,
+  comp_name: "Hero",
+  status: "queued",
+  render: true,
+  comp_frame_rate: 25,
+  comp_duration: 2,
+  time_span_start: 0,
+  time_span_duration: 2,
+  skip_frames: 0,
+  num_output_modules: 2,
+  output_modules: [
+    { index: 1, name: "Output Module 1", file: "C:/deliver/hero.mp4" },
+    { index: 2, name: "Output Module 2", file: "C:/deliver/hero.mov" },
+  ],
+  ...extra,
+});
+
+describe("w5render: batch pure logic for queue items", () => {
+  const base = (over: Partial<RenderbatchRead> = {}): RenderbatchRead => ({
+    project_path: "C:/p/job.aep",
+    dirty: false,
+    comp_total: 1,
+    comps: [],
+    templates: { source: "none", render_settings: [], output_modules: [] },
+    queue_total: 3,
+    queue_items: [rqRead(2)],
+    ...over,
+  });
+  const job = normaliseJob({ queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: "C:/out" });
+
+  it("normaliseJob keeps comps as before and defaults the new list", () => {
+    expect(normaliseJob({ comps: ["A"], output_dir: "/o" })).toMatchObject({ comps: ["A"], queue_items: [] });
+    expect(job).toMatchObject({ comps: [], queue_items: [{ rq_index: 2, item_comp_id: 5 }] });
+  });
+
+  it("expands a queue item after the comp items: its outputs, label and frame estimate", () => {
+    const withComp = normaliseJob({ comps: ["Main"], queue_items: [{ rq_index: 2, item_comp_id: 5, name: "master" }, { rq_index: 4, item_comp_id: 6 }], output_dir: "C:/out", specs: [{ name: "x", extension: "mp4" }] });
+    const main: CompRead = { name: "Main", count: 1, id: 1, frame_rate: 25, duration: 4, work_area_start: 0, work_area_duration: 4 };
+    const items = expandItems(withComp, [main], 0, [rqRead(2), rqRead(4, { found: false, comp_name: undefined, output_modules: undefined })]);
+    expect(items.map((i) => i.index)).toEqual([1, 2, 3]);
+    expect(items[0]).toMatchObject({ comp_name: "Main", spec_name: "x" });
+    expect(items[0].rq_index).toBeUndefined();
+    expect(items[1]).toMatchObject({ comp_name: "Hero", spec_name: "master", rq_index: 2, item_comp_id: 5, output_path: "C:/deliver/hero.mp4", output_paths: ["C:/deliver/hero.mp4", "C:/deliver/hero.mov"], frames: 50 });
+    // An item the read did not find still appears, so the plan can name the problem.
+    expect(items[2]).toMatchObject({ spec_name: "rq4", rq_index: 4, output_path: "", output_paths: [], frames: null });
+    expect(outputsOf(items[1])).toEqual(["C:/deliver/hero.mp4", "C:/deliver/hero.mov"]);
+    expect(outputsOf({ output_path: "a.mov" })).toEqual(["a.mov"]);
+    expect(outputsOf({ output_path: "" })).toEqual([]);
+  });
+
+  it("estimates frames from the span and skip frames", () => {
+    expect(queueItemFrames(rqRead(1))).toBe(50);
+    expect(queueItemFrames(rqRead(1, { skip_frames: 1 }))).toBe(25);
+    expect(queueItemFrames(rqRead(1, { time_span_duration: undefined, comp_duration: 4 }))).toBe(100);
+    expect(queueItemFrames(rqRead(1, { comp_frame_rate: undefined }))).toBeNull();
+    expect(queueItemFrames(undefined)).toBeNull();
+  });
+
+  it("a valid queue item makes a valid plan, needs no comp and no extension", () => {
+    const read = base();
+    const items = expandItems(job, [], 0, read.queue_items);
+    const { errors, warnings } = validatePlan(job, read, items, ["C:/p/job.aep"]);
+    expect(errors).toEqual([]);
+    expect(warnings.join(" ")).not.toMatch(/extension/);
+  });
+
+  it("refuses a dirty project, another comp, a status that is not QUEUED, a missing item and an output module without a file", () => {
+    const run = (r: RenderbatchRead) => validatePlan(job, r, expandItems(job, [], 0, r.queue_items), ["C:/p/job.aep"]).errors;
+    expect(run(base({ dirty: true })).map((e) => e.code)).toEqual(["queue_items_need_saved_project"]);
+    expect(run(base({ queue_items: [rqRead(2, { comp_id: 9 })] })).map((e) => e.code)).toEqual(["rq_item_comp_mismatch"]);
+    expect(run(base({ queue_items: [rqRead(2, { status: "unqueued" })] })).map((e) => e.code)).toEqual(["rq_item_not_queued"]);
+    expect(run(base({ queue_items: [rqRead(2, { status: "unqueued" })] }))[0].message).toMatch(/queued: true/);
+    expect(run(base({ queue_items: [rqRead(2, { found: false })] })).map((e) => e.code)).toEqual(["rq_item_not_found"]);
+    expect(run(base({ queue_items: undefined })).map((e) => e.code)).toEqual(["rq_item_not_found"]);
+    expect(run(base({ queue_items: [rqRead(2, { output_modules: [{ index: 1, file: "C:/a.mp4" }, { index: 2, file: null }] })] })).map((e) => e.code)).toEqual(["rq_item_no_output"]);
+  });
+
+  it("an output of the item in _mcp_backups, or the project itself, is refused; the comp-name ambiguity check does not apply", () => {
+    const read = base({ queue_items: [rqRead(2, { output_modules: [{ index: 1, file: "C:/x/_mcp_backups/a.mov" }, { index: 2, file: "C:/p/job.aep" }] })] });
+    const codes = validatePlan(job, read, expandItems(job, [], 0, read.queue_items), ["C:/p/job.aep"]).errors.map((e) => e.code);
+    expect(codes).toEqual(["output_protected", "output_protected"]);
+    // A comp of the same name twice stays an error for a comp item and is no concern of a queue item.
+    const both = normaliseJob({ comps: ["Hero"], queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: "C:/out", specs: [{ name: "x", extension: "mp4" }] });
+    const r2 = base({ comps: [{ name: "Hero", count: 2 }] });
+    const errs = validatePlan(both, r2, expandItems(both, r2.comps, 0, r2.queue_items), []).errors;
+    expect(errs.map((e) => e.code)).toEqual(["comp_name_ambiguous"]);
+  });
+
+  it("two outputs on one file collide, inside an item and across items", () => {
+    const same = base({ queue_items: [rqRead(2, { output_modules: [{ index: 1, file: "C:/d/a.mov" }, { index: 2, file: "C:/D/A.mov" }] })] });
+    const e1 = validatePlan(job, same, expandItems(job, [], 0, same.queue_items), []).errors;
+    expect(e1).toHaveLength(1);
+    expect(e1[0]).toMatchObject({ code: "output_collision", item: 1 });
+    expect(e1[0].message).toMatch(/same file from two output modules/);
+    const two = normaliseJob({ queue_items: [{ rq_index: 2, item_comp_id: 5 }, { rq_index: 3, item_comp_id: 5 }], output_dir: "C:/out" });
+    const read = base({ queue_items: [rqRead(2), rqRead(3)] });
+    const e2 = validatePlan(two, read, expandItems(two, [], 0, read.queue_items), []).errors;
+    expect(e2.map((e) => e.code)).toEqual(["output_collision", "output_collision"]);
+    expect(e2[0].message).toMatch(/Items 1 and 2 write the same file/);
+  });
+
+  it("an item not found does not look like a collision on an empty path", () => {
+    const two = normaliseJob({ queue_items: [{ rq_index: 8, item_comp_id: 5 }, { rq_index: 9, item_comp_id: 5 }], output_dir: "C:/out" });
+    const read = base({ queue_items: [rqRead(8, { found: false }), rqRead(9, { found: false })] });
+    expect(validatePlan(two, read, expandItems(two, [], 0, read.queue_items), []).errors.map((e) => e.code)).toEqual(["rq_item_not_found", "rq_item_not_found"]);
+  });
+
+  it("inspectOutputs and verifyOutputs cover every output of an item", () => {
+    const dir = tmp();
+    const a = path.join(dir, "a.mp4");
+    const b = path.join(dir, "b.mov");
+    const item = { output_path: a, output_paths: [a, b] };
+    expect(inspectOutputs([a, b])).toMatchObject({ exists: false, bytes: 0 });
+    fs.writeFileSync(a, "x".repeat(10));
+    expect(inspectOutputs([a, b])).toMatchObject({ exists: true, bytes: 10 });
+    const miss = verifyOutputs(item, null);
+    expect(miss.ok).toBe(false);
+    expect(miss.reason).toContain(b);
+    fs.writeFileSync(b, "y".repeat(5));
+    expect(verifyOutputs(item, null)).toMatchObject({ ok: true, bytes: 15 });
+    // A file older than the item's start is not a fresh render.
+    const old = new Date(Date.now() - 3600_000);
+    fs.utimesSync(b, old, old);
+    expect(verifyOutputs(item, Date.now()).ok).toBe(false);
+    // A plain item behaves as verifyOutput did.
+    expect(verifyOutputs({ output_path: a }, null)).toEqual(verifyOutput(a, null));
+    expect(inspectOutputs([a])).toEqual(inspectOutput(a));
+  });
+});
+
+describe("w5render: batch with queue items through a fake bridge", () => {
+  const queueRig = (override: Partial<RenderbatchRead> = {}, opts: { dirty?: boolean } = {}) => {
+    // The item's files live in the rig's own folder; the read mock reads this object at call time.
+    const readOpts: Partial<RenderbatchRead> = {};
+    const r = rig({ dirty: opts.dirty, read: readOpts });
+    const hero = path.join(r.dir, "deliver", "hero.mp4");
+    const mov = path.join(r.dir, "deliver", "hero.mov");
+    Object.assign(readOpts, { queue_total: 3, queue_items: [rqRead(2, { output_modules: [{ index: 1, name: "OM1", file: hero }, { index: 2, name: "OM2", file: mov }] })], ...override });
+    return Object.assign(r, { files: [hero, mov] });
+  };
+  const args = (r: Rig, extra: Record<string, unknown> = {}) =>
+    AeRenderBatchStartSchema.parse({ expect: expectArg(r.project), queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir, preflight: false, ...extra });
+
+  it("the plan reads the queue items by index and counts every output", async () => {
+    const r = queueRig();
+    const out = await r.tool("ae_render_batch_plan").handler(AeRenderBatchPlanSchema.parse({ queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir }), r.ctx);
+    expect(r.calls).toEqual(["renderbatchRead"]);
+    expect(out).toMatchObject({ ok: true, valid: true, item_count: 1 });
+    expect(out.items[0]).toMatchObject({ rq_index: 2, item_comp_id: 5, comp_name: "Hero", frames: 50 });
+    expect(out.items[0].output_paths).toHaveLength(2);
+    expect(out.items[0].existing).toMatchObject({ exists: false });
+    expect(r.spawned).toHaveLength(0);
+  });
+
+  it("the plan counts an existing second output toward the overwrite check", async () => {
+    const r = queueRig();
+    fs.mkdirSync(path.dirname(r.files[1]), { recursive: true });
+    fs.writeFileSync(r.files[1], "recent");
+    const out = await r.tool("ae_render_batch_plan").handler(AeRenderBatchPlanSchema.parse({ queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir }), r.ctx);
+    expect(out.items[0].existing).toMatchObject({ exists: true, would_block: true });
+  });
+
+  it("starts the item with -rqindex and its outputs, no -comp, -output, templates or -s/-e", async () => {
+    const r = queueRig();
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    expect(r.calls).toEqual(["status", "renderbatchRead"]);
+    expect(out).toMatchObject({ ok: true, state: "running", counts: { running: 1 } });
+    expect(out.items[0]).toMatchObject({ rq_index: 2, output_paths: r.files, spec: "rq2", comp: "Hero" });
+    const a = r.spawned[0].args;
+    expect(a.slice(a.indexOf("-project"), a.indexOf("-project") + 4)).toEqual(["-project", out.frozen_project, "-rqindex", "2"]);
+    for (const flag of ["-comp", "-output", "-OMtemplate", "-RStemplate", "-s", "-e"]) expect(a).not.toContain(flag);
+    expect(a).toEqual(expect.arrayContaining(["-mfr", "ON", "50"]));
+    expect(a.some((x) => /reuse/i.test(x))).toBe(false);
+    const rec = r.registry.list()[0];
+    expect(rec).toMatchObject({ rq_index: 2, item_comp_id: 5, comp_name: "Hero", output_paths: r.files });
+    // The output folders of the item's modules are made by the launcher.
+    expect(fs.existsSync(path.dirname(r.files[0]))).toBe(true);
+    const saved = JSON.parse(fs.readFileSync(out.batch_json, "utf8"));
+    expect(saved.items[0]).toMatchObject({ rq_index: 2, item_comp_id: 5, output_paths: r.files });
+  });
+
+  it("measures free space on the volume of the queue item's own outputs, not output_dir", async () => {
+    const r = queueRig({ queue_items: [rqRead(2, { output_modules: [{ index: 1, name: "OM1", file: "Q:/deliver/hero.mp4" }, { index: 2, name: "OM2", file: "Q:/deliver/hero.mov" }] })] });
+    r.space.by = (dir) => (dir.startsWith("Q:") ? 1 * GIB : 500 * GIB);
+    const plan = await r.tool("ae_render_batch_plan").handler(AeRenderBatchPlanSchema.parse({ queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir }), r.ctx);
+    expect(plan.free_space).toMatchObject({ status: "low" });
+    expect(plan.free_space.dir.startsWith("Q:")).toBe(true);
+    // Both modules are on Q:, and a queue-only job writes nothing under output_dir: one row, and output_dir is not measured.
+    expect(plan.free_space_volumes).toBeUndefined();
+    expect(r.space.asked.every((d) => d.startsWith("Q:"))).toBe(true);
+    r.space.asked.length = 0;
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    expect(out.ok).toBe(true);
+    expect(r.spawned).toHaveLength(0);
+    const b = r.rb.getStore().get(out.batch_id)!;
+    expect(b.items[0].error).toContain("GB free");
+    expect(b.free_space).toMatchObject({ status: "low" });
+    expect(r.space.asked.some((d) => d.startsWith("Q:"))).toBe(true);
+  });
+
+  it("a mixed plan measures output_dir too, and a queue-only plan on a healthy output_dir is not blocked by it", async () => {
+    const r = queueRig({ queue_items: [rqRead(2, { output_modules: [{ index: 1, name: "OM1", file: "Q:/deliver/hero.mp4" }] })] });
+    r.space.by = (dir) => (dir.startsWith("Q:") ? 500 * GIB : 1 * GIB);
+    const queueOnly = await r.tool("ae_render_batch_plan").handler(AeRenderBatchPlanSchema.parse({ queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir }), r.ctx);
+    expect(queueOnly.free_space).toMatchObject({ status: "ok" });
+    expect(queueOnly.free_space_volumes).toBeUndefined();
+    const mixed = await r.tool("ae_render_batch_plan").handler(
+      AeRenderBatchPlanSchema.parse({ comps: ["Main"], specs: [{ name: "h264", output_module_template: "H.264", extension: "mp4" }], queue_items: [{ rq_index: 2, item_comp_id: 5 }], output_dir: r.outDir }),
+      r.ctx
+    );
+    expect(mixed.free_space_volumes).toHaveLength(2);
+    expect(mixed.free_space).toMatchObject({ status: "low", dir: r.outDir });
+  });
+
+  it("mayShareVolume separates only two different drive letters; a POSIX or UNC path stays conservative", () => {
+    expect(mayShareVolume("C:/a", "D:/b")).toBe(false);
+    expect(mayShareVolume("C:/a", "c:/b")).toBe(true);
+    expect(mayShareVolume("/Volumes/X/a", "/Volumes/X/b")).toBe(true);
+    expect(mayShareVolume("/Volumes/X/a", "C:/b")).toBe(true);
+    expect(mayShareVolume("//nas/share/a", "D:/b")).toBe(true);
+  });
+
+  it("reserves the estimated size of a running item for a queue item on a path whose volume cannot be identified", async () => {
+    // The queue item writes under /Volumes/X/b (no drive letter). The running comp item writes under output_dir.
+    // The two may share a disk, so the running item's estimated size is not free space for the queue item.
+    const posix = "/Volumes/X/b/chroma-test-hero.mp4";
+    const r = queueRig({ queue_items: [rqRead(2, { output_modules: [{ index: 1, name: "OM1", file: posix }] })] });
+    const out = await r.tool("ae_render_batch").handler(
+      args(r, { comps: ["Main", "Square"], specs: [{ name: "h264", output_module_template: "H.264", extension: "mp4" }], min_free_gb: 1 }),
+      r.ctx
+    );
+    expect(out.ok).toBe(true);
+    const id = out.batch_id as string;
+    const b = r.rb.getStore().get(id)!;
+    expect(b.items.map((i) => i.state)).toEqual(["running", "pending", "pending"]);
+    r.finish(b.items[0].job_id!, true);
+    await r.rb.getRunner().tick(id);
+    expect(b.items.map((i) => i.state)).toEqual(["succeeded", "running", "pending"]);
+    b.items[0].output_bytes = 5 * GIB; // ~5.5 GiB estimated for the running Square item
+    b.options.concurrency = 2;
+    r.space.by = (dir) => (dir.startsWith("/Volumes/X") ? 6 * GIB : 500 * GIB);
+    await r.rb.getRunner().tick(id);
+    expect(b.items[2].state).toBe("failed");
+    expect(b.items[2].error).toContain("reserved for running items");
+    expect(r.spawned).toHaveLength(2);
+  });
+
+  it("status with include_free_space measures the batch's real volumes, not output_dir", async () => {
+    const r = queueRig({ queue_items: [rqRead(2, { output_modules: [{ index: 1, name: "OM1", file: "Q:/deliver/hero.mp4" }] })] });
+    r.space.by = (dir) => (dir.startsWith("Q:") ? 1 * GIB : 500 * GIB);
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    expect(out.ok).toBe(true);
+    r.space.asked.length = 0;
+    const s = await r.tool("ae_render_batch_status").handler({ batch_id: out.batch_id, include_free_space: true }, r.ctx);
+    expect(s.free_space).toMatchObject({ status: "low" });
+    expect(s.free_space.dir.startsWith("Q:")).toBe(true);
+    expect(s.free_space_volumes).toBeUndefined();
+    expect(r.space.asked.length).toBeGreaterThan(0);
+    expect(r.space.asked.every((d) => d.startsWith("Q:"))).toBe(true);
+  });
+
+  it("mixes comp items and queue items; comp items still use -comp", async () => {
+    const r = queueRig();
+    const out = await r.tool("ae_render_batch").handler(
+      args(r, { comps: ["Main"], specs: [{ name: "h264", output_module_template: "H.264", extension: "mp4" }], concurrency: 2 }),
+      r.ctx
+    );
+    expect(out.ok).toBe(true);
+    expect(r.spawned).toHaveLength(2);
+    expect(r.spawned[0].args).toEqual(expect.arrayContaining(["-comp", "Main", "-OMtemplate", "H.264"]));
+    expect(r.spawned[1].args).toEqual(expect.arrayContaining(["-rqindex", "2"]));
+    expect(out.items.map((i: { rq_index?: number }) => i.rq_index)).toEqual([undefined, 2]);
+  });
+
+  it("refuses with plan_invalid and starts nothing: dirty with allow_dirty, another comp, not queued", async () => {
+    const dirty = queueRig({}, { dirty: true });
+    const d = await dirty.tool("ae_render_batch").handler(args(dirty, { allow_dirty: true }), dirty.ctx);
+    expect(d).toMatchObject({ ok: false, error: "plan_invalid", applied: false });
+    expect(d.errors.map((e: { code: string }) => e.code)).toEqual(["queue_items_need_saved_project"]);
+    expect(dirty.spawned).toHaveLength(0);
+
+    const other = queueRig({ queue_items: [rqRead(2, { comp_id: 9 })] });
+    const o = await other.tool("ae_render_batch").handler(args(other), other.ctx);
+    expect(o.errors.map((e: { code: string }) => e.code)).toEqual(["rq_item_comp_mismatch"]);
+    expect(other.spawned).toHaveLength(0);
+
+    const unq = queueRig({ queue_items: [rqRead(2, { status: "unqueued" })] });
+    const u = await unq.tool("ae_render_batch").handler(args(unq), unq.ctx);
+    expect(u.errors.map((e: { code: string }) => e.code)).toEqual(["rq_item_not_queued"]);
+    expect(unq.spawned).toHaveLength(0);
+  });
+
+  it("refuses when the project file changed between the read and the freeze, and cleans up", async () => {
+    const r = queueRig();
+    const store = r.rb.getStore();
+    // The read of the queue is where the file is saved over, as a save by the user would.
+    const realCall = r.ctx.bridge.evalRaw.bind(r.ctx.bridge);
+    (r.ctx.bridge as unknown as { evalRaw: typeof r.ctx.bridge.evalRaw }).evalRaw = (async (req: Parameters<typeof realCall>[0]) => {
+      const res = await realCall(req);
+      if (req.script.includes("renderbatchRead")) fs.writeFileSync(r.project, "aep-bytes-saved-again-and-longer");
+      return res;
+    }) as typeof r.ctx.bridge.evalRaw;
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    expect(out).toMatchObject({ ok: false, error: "project_changed", applied: false });
+    expect(r.spawned).toHaveLength(0);
+    expect(store.list()).toHaveLength(0);
+  });
+
+  it("an item is succeeded only when every output module's file is fresh and not empty", async () => {
+    const r = queueRig();
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    const id = out.batch_id as string;
+    const jobId = r.rb.getStore().get(id)!.items[0].job_id!;
+    fs.writeFileSync(r.files[0], "x".repeat(100));
+    registryDone(r, jobId);
+    const failed = await r.rb.getRunner().tick(id);
+    expect(failed!.items[0].state).toBe("failed");
+    expect(failed!.items[0].error).toContain(r.files[1]);
+    expect(failed!.state).toBe("failed");
+
+    // Resume renders it again; with both files written it passes and the sizes add up.
+    const again = await r.tool("ae_render_batch_resume").handler(AeRenderBatchResumeSchema.parse({ expect: expectArg(r.project), batch_id: id, if_output_exists: "overwrite" }), r.ctx);
+    expect(again).toMatchObject({ ok: true, reset: 1 });
+    const job2 = r.rb.getStore().get(id)!.items[0].job_id!;
+    fs.writeFileSync(r.files[0], "x".repeat(100));
+    fs.writeFileSync(r.files[1], "y".repeat(50));
+    registryDone(r, job2);
+    const done = await r.rb.getRunner().tick(id);
+    expect(done!.items[0]).toMatchObject({ state: "succeeded", output_bytes: 150 });
+    expect(done!.state).toBe("succeeded");
+  });
+
+  it("protects a recent second output (protect_recent) and skips the item when the outputs exist (skip)", async () => {
+    const r = queueRig();
+    fs.mkdirSync(path.dirname(r.files[1]), { recursive: true });
+    fs.writeFileSync(r.files[1], "recent");
+    const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
+    expect(r.spawned).toHaveLength(0);
+    const b = r.rb.getStore().get(out.batch_id)!;
+    expect(b.items[0].state).toBe("failed");
+    expect(b.items[0].error).toMatch(/blocked: .*was written/);
+
+    const s = queueRig();
+    fs.mkdirSync(path.dirname(s.files[0]), { recursive: true });
+    fs.writeFileSync(s.files[0], "a");
+    fs.writeFileSync(s.files[1], "b");
+    const skipped = await s.tool("ae_render_batch").handler(args(s, { if_output_exists: "skip" }), s.ctx);
+    expect(s.spawned).toHaveLength(0);
+    expect(s.rb.getStore().get(skipped.batch_id)!.items[0]).toMatchObject({ state: "skipped", output_bytes: 2 });
+  });
+});
+
+describe("renderbatch.jsx: Render Queue items", () => {
+  const STATUS = { QUEUED: 3015, DONE: 3016, UNQUEUED: 3014 };
+
+  function sceneWithQueue() {
+    const project = new FakeProject();
+    const hero = project.addComp("Hero", 1920, 1080, 4);
+    hero.workAreaStart = 0;
+    const other = project.addComp("Other", 640, 360, 2);
+    const first = project.renderQueue.items.add(other);
+    Object.assign(first, { status: STATUS.DONE, render: false, timeSpanStart: 0, timeSpanDuration: 2, skipFrames: 0, numOutputModules: 1, outputModule: () => ({ name: "Lossless", templates: [], file: { fsName: "C:/old/other.mov" } }) });
+    const second = project.renderQueue.items.add(hero);
+    Object.assign(second, {
+      status: STATUS.QUEUED,
+      render: true,
+      timeSpanStart: 1,
+      timeSpanDuration: 2,
+      skipFrames: 1,
+      numOutputModules: 2,
+      outputModule: (j: number) => ({ name: `Output Module ${j}`, templates: [], file: j === 2 ? null : { fsName: "C:/deliver/hero.mp4" } }),
+    });
+    const { A, G, undo } = loadHost(project, ["renderbatch.jsx"]);
+    G.RQItemStatus = STATUS;
+    return { project, A, undo, hero };
+  }
+
+  it("reads the named Render Queue items: status, comp, span, rate and every output module, changing nothing", () => {
+    const { A, undo, project, hero } = sceneWithQueue();
+    const r = A.renderbatchRead({ comp_names: [], rq_items: [{ rq_index: 2 }, { rq_index: 1 }, { rq_index: 7 }] });
+    expect(r.queue_total).toBe(2);
+    expect(r.queue_items).toHaveLength(3);
+    expect(r.queue_items[0]).toMatchObject({
+      index: 2,
+      found: true,
+      comp_id: hero.id,
+      comp_name: "Hero",
+      status: "queued",
+      render: true,
+      comp_frame_rate: 25,
+      comp_duration: 4,
+      time_span_start: 1,
+      time_span_duration: 2,
+      skip_frames: 1,
+      num_output_modules: 2,
+    });
+    expect(r.queue_items[0].output_modules).toEqual([
+      { index: 1, name: "Output Module 1", file: "C:/deliver/hero.mp4" },
+      { index: 2, name: "Output Module 2", file: null },
+    ]);
+    expect(r.queue_items[1]).toMatchObject({ index: 1, status: "done", render: false });
+    expect(r.queue_items[2]).toEqual({ index: 7, found: false });
+    expect(project.renderQueue.numItems).toBe(2);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("leaves queue_items out when none are asked for, and a comp-only read is unchanged", () => {
+    const { A } = sceneWithQueue();
+    const r = A.renderbatchRead({ comp_names: ["Hero"] });
+    expect(r.queue_items).toBeUndefined();
+    expect(r.comps[0]).toMatchObject({ name: "Hero", count: 1 });
+  });
+
+  it("feeds the plan: the host's read through selectRqItem accepts the queued item only when its outputs are complete", () => {
+    const { A, hero } = sceneWithQueue();
+    const r = JSON.parse(JSON.stringify(A.renderbatchRead({ comp_names: [], rq_items: [{ rq_index: 2 }] }))) as RenderbatchRead;
+    const job = normaliseJob({ queue_items: [{ rq_index: 2, item_comp_id: hero.id }], output_dir: "C:/out" });
+    const errs = validatePlan(job, r, expandItems(job, [], 0, r.queue_items), []).errors;
+    expect(errs.map((e) => e.code)).toEqual(["rq_item_no_output"]);
   });
 });

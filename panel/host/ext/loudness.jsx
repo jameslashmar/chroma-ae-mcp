@@ -179,6 +179,19 @@
   }
 
   function layerKind(layer) {
+    var l = layer;
+    var rn = "";
+    try {
+      if (l.reflect && l.reflect.name) rn = String(l.reflect.name);
+    } catch (eR) {}
+    if (rn === "ThreeDModelLayer") return "model_3d";
+    if (rn === "ParametricMeshLayer") return "parametric_mesh";
+    try {
+      if (typeof ThreeDModelLayer !== "undefined" && l instanceof ThreeDModelLayer) return "model_3d";
+    } catch (eM1) {}
+    try {
+      if (typeof ParametricMeshLayer !== "undefined" && l instanceof ParametricMeshLayer) return "parametric_mesh";
+    } catch (eM2) {}
     try {
       if (layer.source && layer.source instanceof CompItem) return "precomp";
     } catch (e1) {}

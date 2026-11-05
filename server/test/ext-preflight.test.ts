@@ -38,6 +38,7 @@ import {
   FakeGroup,
   FakeProperty,
   FakeComp,
+  FakeLayer,
   FakeFootage,
   FakeProject,
   FileSource,
@@ -1092,5 +1093,220 @@ describe("preflight.jsx", () => {
     expect(second.precomp_ids).toEqual([]);
     expect(first.counts.precomp).toBe(2);
     expect(() => A.preflightLayers({ comp_id: 999999 })).toThrow(/No CompItem/);
+  });
+});
+
+// ---------- glyph coverage, fix hints, 3D layer kinds ----------
+
+describe("ae_preflight glyph findings and fix hints", () => {
+  const glyphIssue = (layer: string, id: number, over: Partial<HostLayerIssue> = {}): HostLayerIssue => ({
+    type: "glyphs_missing",
+    index: id,
+    layer_id: id,
+    layer,
+    kind: "text",
+    detail: "Impact",
+    font: "Impact",
+    missing: ["\u015f", "\u011f"],
+    suggested: ["ArialMT"],
+    ...over,
+  });
+
+  it("groups missing glyphs per font into one warning with the characters and AE's default font", async () => {
+    const issues = [glyphIssue("Title", 1), glyphIssue("Sub", 2, { missing: ["\u0131", "\u015f"] }), glyphIssue("Other", 3, { font: "Brand", detail: "Brand", missing: ["\u00fc"], suggested: [] })];
+    const { ctx } = fakeAe(world({ comps: [{ info: comp(1, "Main"), layers: ["Title", "Sub", "Other"], issues }] }));
+    const r = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), ctx)) as any;
+    const hits = find(r, "glyphs_missing");
+    expect(hits).toHaveLength(2);
+    const impact = hits.find((f) => f.message.includes('"Impact"'))!;
+    expect(impact.severity).toBe("warning");
+    expect(impact.count).toBe(2);
+    expect(impact.message).toContain("\u015f \u011f \u0131");
+    expect(impact.message).toContain("Main > Title");
+    expect(impact.message).toContain("ArialMT");
+    expect(impact.fix).toMatchObject({ tool: "ae_fonts", args: { action: "check", fonts: ["Impact"], text: "\u015f\u011f\u0131" } });
+    expect(impact.fix!.hint).toContain("ae_set_text");
+    // A warning does not block the delivery gate.
+    expect(r.findings.filter((f: Finding) => f.severity === "blocker")).toEqual([]);
+  });
+
+  it("says when glyph coverage could not be checked, and when it was checked only in part", async () => {
+    const h = world({ comps: [{ info: comp(1, "Main"), layers: ["Title"] }] });
+    const base = h.preflightLayers;
+    h.preflightLayers = (a) => ({ ...(base(a) as LayersPage), glyphs_checked: 0, glyphs_unchecked: 3, glyphs_reason: "This After Effects cannot check glyph coverage (font.hasGlyphsFor needs 25.1)." });
+    const skipped = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), fakeAe(h).ctx)) as any;
+    expect(find(skipped, "glyphs_check_skipped")[0]).toMatchObject({ severity: "note", count: 3 });
+    expect(find(skipped, "glyphs_check_skipped")[0].message).toContain("25.1");
+    expect(skipped.checked.glyphs).toMatch(/not checked/);
+
+    const h2 = world({ comps: [{ info: comp(1, "Main"), layers: ["Title"] }] });
+    const base2 = h2.preflightLayers;
+    h2.preflightLayers = (a) => ({ ...(base2(a) as LayersPage), glyphs_checked: 4, glyphs_whole_only: 1, glyphs_truncated: 2 });
+    const partial = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), fakeAe(h2).ctx)) as any;
+    expect(find(partial, "glyphs_check_partial")[0]).toMatchObject({ severity: "note", count: 3 });
+    expect(find(partial, "glyphs_check_skipped")).toEqual([]);
+    expect(partial.checked.glyphs).toContain("4 runs");
+  });
+
+  it("reports nothing about glyphs from a host that predates the check", async () => {
+    const { ctx } = fakeAe(world({ comps: [{ info: comp(1, "Main"), layers: ["Title"] }] }));
+    const r = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), ctx)) as any;
+    expect(codes(r).filter((c) => c.startsWith("glyphs_"))).toEqual([]);
+  });
+
+  it("points an unsaved project at ae_save with save_as", async () => {
+    const { ctx } = fakeAe(world({ project: project({ saved: false, project_path: "<unsaved>", dirty: true }), comps: [{ info: comp(1, "Main"), layers: ["BG"] }] }));
+    const r = (await tool.handler(AePreflightSchema.parse({ naming: { allow_default_names: true } }), ctx)) as any;
+    const f = find(r, "project_unsaved")[0];
+    expect(f.fix).toMatchObject({ tool: "ae_save" });
+    expect(f.fix!.hint).toContain("save_as: { path }");
+    expect(f.fix!.hint).not.toContain("File > Save As");
+  });
+
+  it("points project setting differences at ae_project_settings with the argument it takes", async () => {
+    const { ctx } = fakeAe(world({ comps: [{ info: comp(1, "Main"), layers: ["BG"] }] }));
+    const r = (await tool.handler(
+      AePreflightSchema.parse({
+        naming: { allow_default_names: true },
+        project_spec: { bits_per_channel: 16, working_space: "ACEScg", linear_blending: true, expression_engine: "extendscript" },
+      }),
+      ctx
+    )) as any;
+    const diffs = find(r, "project_setting_differs");
+    expect(diffs).toHaveLength(4);
+    const fixOf = (needle: string) => diffs.find((f) => f.message.includes(needle))!.fix!;
+    expect(fixOf("Bit depth")).toMatchObject({ tool: "ae_project_settings", args: { set: { bits_per_channel: 16 }, expect: { project_path: "C:/Projects/Demo.aep" } } });
+    expect(fixOf("Working colour space")).toMatchObject({ tool: "ae_project_settings", args: { set: { working_space: "ACEScg" } } });
+    expect(fixOf("Expression engine")).toMatchObject({ tool: "ae_project_settings", args: { set: { expression_engine: "extendscript" } } });
+    expect(fixOf("Linearize blending")).toMatchObject({ tool: "ae_project_settings", args: { set: { linear_blending: true } } });
+    expect(fixOf("Bit depth").hint).toContain("set: { bits_per_channel: 16 }");
+  });
+
+  it("the description names the glyph check", () => {
+    expect(tool.description).toContain("glyphs_missing");
+  });
+});
+
+describe("preflight.jsx glyph coverage and layer kinds", () => {
+  const TURKISH = "\u015eehir \u00e7ok g\u00fczel \u0131\u015f\u0131k";
+
+  function glyphHost(opts: { withGlyphs?: boolean } = {}) {
+    const withGlyphs = opts.withGlyphs !== false;
+    const make = (ps: string, lacks: string, substitute = false) => {
+      const f: Record<string, unknown> = { postScriptName: ps, familyName: ps, styleName: "Regular", isSubstitute: substitute };
+      // Like a real font: no glyph for line breaks and other control characters.
+      if (withGlyphs) f.hasGlyphsFor = (s: string) => !/[\r\n\t\u0003\u2028\u2029]/.test(s) && ![...s].some((c) => lacks.includes(c));
+      return f;
+    };
+    const list = [make("ArialMT", ""), make("Impact", "\u015f\u011f\u0131\u0130")];
+    const fonts = {
+      getFontsByPostScriptName: (ps: string) => list.filter((f) => f.postScriptName === ps),
+      getFontsByFamilyNameAndStyleName: () => [],
+      allFonts: list.map((f) => [f]),
+      missingOrSubstitutedFonts: [],
+      getCTScriptForString: (s: string) => [{ chars: s, ctScript: 1 }],
+      getDefaultFontForCTScript: () => list[0],
+    };
+    const proj = new FakeProject();
+    const main = proj.addComp("Main", 1000, 500, 4) as Any;
+    const loaded = loadHost(proj, ["preflight.jsx"], { effects: [{ matchName: "ADBE Fill" }], fonts });
+    loaded.G.CTScript = { CT_ROMAN_SCRIPT: 1 };
+    return { proj, main, ...loaded };
+  }
+
+  const textLayer = (main: Any, text: string, font: string, substitute = false) => {
+    const t = main.layers.addText(text) as Any;
+    const td = t.property("ADBE Text Properties").property("ADBE Text Document").staticValue as TextDocument & Any;
+    td.text = text;
+    td.font = font;
+    td.fontObject = { isSubstitute: substitute };
+    return { t, td };
+  };
+
+  it("flags the characters a text's font lacks, with AE's default font, and not a font that has them", () => {
+    const { main, A, undo } = glyphHost();
+    textLayer(main, TURKISH, "Impact");
+    textLayer(main, TURKISH, "ArialMT");
+    const r = A.preflightLayers({ comp_id: main.id });
+    const hits = r.issues.filter((i: Any) => i.type === "glyphs_missing");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ kind: "text", font: "Impact", suggested: ["ArialMT"] });
+    expect(hits[0].layer).toBe(TURKISH);
+    expect(hits[0].missing).toEqual(expect.arrayContaining(["\u015f", "\u0131"]));
+    expect(hits[0].missing).not.toContain("\u00e7");
+    expect(r.glyphs_checked).toBe(2);
+    expect(r.glyphs_unchecked).toBe(0);
+    expect(undo.begun).toBe(0);
+  });
+
+  it("does not report line breaks inside a text layer as missing glyphs", () => {
+    const { main, A } = glyphHost();
+    textLayer(main, "Sehir\rok\nx", "ArialMT");
+    textLayer(main, "\u015f\rok", "Impact");
+    const r = A.preflightLayers({ comp_id: main.id });
+    const hits = r.issues.filter((i: Any) => i.type === "glyphs_missing");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ font: "Impact", missing: ["\u015f"] });
+  });
+
+  it("checks each run of one font on its own in mixed-font text", () => {
+    const { main, A } = glyphHost();
+    const { td } = textLayer(main, "ab\u015fcd", "ArialMT");
+    // Characters 2 and 3 are Impact: the \u015f falls in an Impact run.
+    const fontAt = ["ArialMT", "ArialMT", "Impact", "Impact", "ArialMT"];
+    (td as Any).characterRange = (s: number, e: number) => ({ text: td.text.substring(s, e), font: fontAt[s] });
+    const r = A.preflightLayers({ comp_id: main.id });
+    const hits = r.issues.filter((i: Any) => i.type === "glyphs_missing");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ font: "Impact", missing: ["\u015f"] });
+    expect(r.glyphs_checked).toBe(3);
+    expect(r.glyphs_whole_only).toBe(0);
+    // The same text with the whole text in ArialMT would have passed: the run is what failed.
+  });
+
+  it("falls back to the whole text when it is too long to scan per character, and says so", () => {
+    const { main, A } = glyphHost();
+    const long = "\u015f".repeat(2000);
+    const { td } = textLayer(main, long, "Impact");
+    (td as Any).characterRange = (s: number, e: number) => ({ text: td.text.substring(s, e), font: "Impact" });
+    const r = A.preflightLayers({ comp_id: main.id });
+    expect(r.glyphs_whole_only).toBe(1);
+    expect(r.issues.filter((i: Any) => i.type === "glyphs_missing")).toHaveLength(1);
+  });
+
+  it("does not check the glyphs of a substituted font (it is reported as missing already)", () => {
+    const { main, A } = glyphHost();
+    textLayer(main, TURKISH, "Brand-Bold", true);
+    const r = A.preflightLayers({ comp_id: main.id });
+    expect(r.issues.map((i: Any) => i.type)).toEqual(["font_missing"]);
+    expect(r.glyphs_checked).toBe(0);
+  });
+
+  it("reports a font it cannot check (AE before 25.1) instead of guessing", () => {
+    const { main, A } = glyphHost({ withGlyphs: false });
+    textLayer(main, TURKISH, "Impact");
+    const r = A.preflightLayers({ comp_id: main.id });
+    expect(r.issues.filter((i: Any) => i.type === "glyphs_missing")).toEqual([]);
+    expect(r.glyphs_checked).toBe(0);
+    expect(r.glyphs_unchecked).toBe(1);
+    expect(r.glyphs_reason).toMatch(/25\.1/);
+  });
+
+  it("classifies 3D model and parametric mesh layers, and leaves the old kinds alone", () => {
+    const { proj, main, A } = glyphHost();
+    main.stack.unshift(new FakeLayer(main, "Model", "ThreeDModelLayer"));
+    main.stack.unshift(new FakeLayer(main, "Mesh", "ParametricMeshLayer"));
+    main.layers.addText("Hello");
+    main.layers.addCamera("Cam");
+    main.layers.addSolid([1, 1, 1], "Solid", 100, 100, 1);
+    void proj;
+    const kinds = A.preflightLayers({ comp_id: main.id }).layers.map((l: Any) => [l.name, l.kind]);
+    expect(kinds).toEqual([
+      ["Solid", "solid"],
+      ["Cam", "camera"],
+      ["Hello", "text"],
+      ["Mesh", "parametric_mesh"],
+      ["Model", "model_3d"],
+    ]);
   });
 });

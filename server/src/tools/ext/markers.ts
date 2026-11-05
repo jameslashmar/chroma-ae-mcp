@@ -8,7 +8,9 @@
  *   segment, sentence or word, a label colour per speaker
  * - ae_remove_markers: all, a time range, a comment match, or indexes
  *
- * Both writes have a dry run that touches nothing in AE.
+ * ae_add_markers also edits and moves existing markers (edit), keeping every
+ * field, and sets protected regions, frame targets, cue points and parameters.
+ * Every write has a dry run that touches nothing in AE.
  */
 
 import * as fs from "node:fs";
@@ -16,7 +18,8 @@ import * as path from "node:path";
 import { z } from "zod";
 import type { ReceiptMismatch } from "../../receipts.js";
 import { parseTranscript, detectFormat, transcriptCues, TranscriptError, type MarkerCue } from "../../transcript.js";
-import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolDefinition } from "../common.js";
+import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolContext, type ToolDefinition } from "../common.js";
+import { verifyTargetGuard } from "../mutate.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 export const MAX_MARKERS_PER_CALL = 500;
@@ -31,6 +34,21 @@ const READ_CLIP_SUFFIX = " ...[truncated]";
 
 // ---------- schemas ----------
 
+/** The marker fields beyond comment/duration/label/chapter/url (MarkerValue members from AE 16.0 on; the host says when one is missing). */
+const MarkerExtraFields = {
+  protected_region: z
+    .boolean()
+    .optional()
+    .describe("Mark this composition marker as a protected region (AE 16.0+; responsive MOGRT templates use it). Composition markers only: a layer marker is refused."),
+  frame_target: z.string().max(2000).optional().describe("The frame target of a web-link marker."),
+  cue_point_name: z.string().max(2000).optional().describe("Cue point name (legacy Flash cue points)."),
+  event_cue_point: z.boolean().optional().describe("True for an event cue point, false for a navigation one."),
+  params: z
+    .record(z.union([z.string().max(2000), z.number(), z.boolean()]))
+    .optional()
+    .describe("Cue point parameters (name to value), set with MarkerValue.setParameters. Replaces the marker's parameters. At most 50."),
+};
+
 export const MarkerInputSchema = z.object({
   time: z.number().min(0).describe("Seconds, in comp time (or the layer's own time with relative_to 'layer')."),
   comment: z.string().max(5000).optional(),
@@ -42,7 +60,28 @@ export const MarkerInputSchema = z.object({
   label: z.number().int().min(0).max(16).optional().describe("Label colour 0..16 (0 none)."),
   chapter: z.string().max(500).optional(),
   url: z.string().max(2000).optional(),
+  ...MarkerExtraFields,
 });
+
+/** The fields an edit can change; the ones left out stay as they are. */
+export const MarkerSetSchema = z.object({
+  comment: z.string().max(5000).optional(),
+  duration: z.number().min(0).optional().describe("Marker length in seconds (scaled by the layer's stretch with relative_to 'layer')."),
+  label: z.number().int().min(0).max(16).optional().describe("Label colour 0..16 (0 none)."),
+  chapter: z.string().max(500).optional(),
+  url: z.string().max(2000).optional(),
+  ...MarkerExtraFields,
+});
+
+export const MarkerEditSchema = z
+  .object({
+    index: z.number().int().positive().optional().describe("1-based index of the marker to edit (as ae_get_markers lists it)."),
+    time: z.number().min(0).optional().describe("Or the time of the marker to edit (it must sit within a millisecond of a marker)."),
+    set: MarkerSetSchema.optional().describe("Fields to change; every other field is kept."),
+    move_to: z.number().min(0).optional().describe("Move the marker to this time. The marker keeps every field (comment, duration, chapter, URL, label, protected region, cue point, parameters)."),
+  })
+  .refine((v) => (v.index === undefined) !== (v.time === undefined), { message: "Give index or time, not both." })
+  .refine((v) => v.set !== undefined || v.move_to !== undefined, { message: "Give set and/or move_to." });
 
 export const TranscriptInputSchema = z
   .object({
@@ -67,14 +106,20 @@ export const AeAddMarkersSchema = z
     ...TargetFields,
     markers: z.array(MarkerInputSchema).min(1).max(MAX_MARKERS_PER_CALL).optional(),
     transcript: TranscriptInputSchema.optional(),
+    edit: z
+      .array(MarkerEditSchema)
+      .min(1)
+      .max(MAX_MARKERS_PER_CALL)
+      .optional()
+      .describe("Instead of markers: edit or move existing markers, [{index | time, set?: {fields}, move_to?: time}]. All edits happen in one undo group; a moved marker keeps every field."),
     relative_to: z
       .enum(["comp", "layer"])
       .optional()
-      .describe("'layer': times are in the layer's own time (startTime and stretch applied; time remapping is not). Default 'layer' for a transcript on a layer, else 'comp'."),
+      .describe("'layer': times are in the layer's own time (startTime and stretch applied; time remapping is not); for edit it applies to time, move_to and set.duration. Default 'layer' for a transcript on a layer, else 'comp'."),
     dry_run: z.boolean().optional().describe("Return the markers that would be added without touching AE."),
     expect: ExpectSchema.optional().describe((ExpectSchema.description ?? "") + " Required unless dry_run."),
   })
-  .refine((v) => (v.markers === undefined) !== (v.transcript === undefined), { message: "Give markers or a transcript." })
+  .refine((v) => [v.markers, v.transcript, v.edit].filter((x) => x !== undefined).length === 1, { message: "Give markers, a transcript or edit (exactly one of them)." })
   .refine((v) => v.relative_to !== "layer" || v.layer !== undefined, { message: "relative_to 'layer' needs a layer." })
   .refine((v) => v.dry_run === true || v.expect !== undefined, { message: "Adding needs expect; pass dry_run to only preview." });
 
@@ -104,6 +149,12 @@ export interface MarkerEntry {
   label?: number;
   chapter?: string;
   url?: string;
+  /** Set only when the marker has them (cuePointName and protectedRegion are the older camelCase twins). */
+  frame_target?: string;
+  cue_point_name?: string;
+  event_cue_point?: boolean;
+  protected_region?: boolean;
+  params?: Record<string, string>;
 }
 
 export interface MarkerList {
@@ -150,6 +201,12 @@ interface PlacedMarker {
   label_failed?: boolean;
   chapter?: string;
   url?: string;
+  protected_region?: boolean;
+  frame_target?: string;
+  cue_point_name?: string;
+  event_cue_point?: boolean;
+  params?: Record<string, string | number | boolean>;
+  refused?: string[];
 }
 
 export function addMarkersMismatches(beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
@@ -216,6 +273,96 @@ export function addMarkersMismatches(beforeRaw: unknown, afterRaw: unknown, writ
     }
     if (p.chapter) expectThat(m, got.chapter === p.chapter, `markers@${time}.chapter`, p.chapter, got.chapter, `Marker at ${time}s has another chapter`);
     if (p.url) expectThat(m, got.url === p.url, `markers@${time}.url`, p.url, got.url, `Marker at ${time}s has another URL`);
+    if (p.protected_region !== undefined) {
+      expectThat(m, (got.protected_region ?? false) === p.protected_region, `markers@${time}.protected_region`, p.protected_region, got.protected_region ?? false, `Marker at ${time}s has another protected region setting`);
+    }
+    if (p.frame_target) expectThat(m, got.frame_target === asReadBack(p.frame_target), `markers@${time}.frame_target`, p.frame_target, got.frame_target, `Marker at ${time}s has another frame target`);
+    if (p.cue_point_name) expectThat(m, got.cue_point_name === asReadBack(p.cue_point_name), `markers@${time}.cue_point_name`, p.cue_point_name, got.cue_point_name, `Marker at ${time}s has another cue point name`);
+    if (p.event_cue_point !== undefined) {
+      expectThat(m, (got.event_cue_point ?? false) === p.event_cue_point, `markers@${time}.event_cue_point`, p.event_cue_point, got.event_cue_point ?? false, `Marker at ${time}s has another event cue point setting`);
+    }
+    if (p.params) expectThat(m, sameParams(p.params, got.params), `markers@${time}.params`, p.params, got.params, `Marker at ${time}s has other parameters`);
+    for (const field of p.refused ?? []) m.push({ path: `markers@${time}.${field}`, expected: "set", actual: "refused", message: `AE refused ${field} at ${time}s` });
+  }
+  return m;
+}
+
+/** Parameter objects match when they hold the same names and (as text) the same values. */
+export function sameParams(want: Record<string, unknown> | undefined, got: Record<string, unknown> | undefined): boolean {
+  const a = Object.entries(want ?? {}).map(([k, v]) => [k, String(v)]).sort();
+  const b = Object.entries(got ?? {}).map(([k, v]) => [k, String(v)]).sort();
+  return a.length === b.length && a.every(([k, v], i) => k === b[i][0] && v === b[i][1]);
+}
+
+// ---------- edit / move ----------
+
+export interface EditRecord {
+  index: number;
+  from: number;
+  to: number;
+  moved: boolean;
+  fields: {
+    comment?: string;
+    duration?: number;
+    label?: number;
+    chapter?: string;
+    url?: string;
+    frame_target?: string;
+    cue_point_name?: string;
+    event_cue_point?: boolean;
+    protected_region?: boolean;
+    params?: Record<string, string>;
+  };
+  copy_failed?: string[];
+  refused?: string[];
+}
+
+/** Compares the markers read before and after an edit with what the host says it wrote. */
+export function editMarkersMismatches(beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
+  const m: ReceiptMismatch[] = [];
+  const before = listOf(beforeRaw);
+  const after = listOf(afterRaw);
+  const edits = (written.edits as EditRecord[] | undefined) ?? [];
+  if (!before || !after || written.no_op) return m;
+  expectThat(m, after.numMarkers === before.numMarkers, "numMarkers", before.numMarkers, after.numMarkers, "Marker count changed during an edit");
+  if (before.truncated || after.truncated) return m;
+  const frame = typeof written.frame_duration === "number" && written.frame_duration > 0 ? written.frame_duration : 0;
+  const durTol = Math.max(TIME_TOLERANCE, frame / 2) + 1e-9;
+  const edited = new Set(edits.map((e) => e.index));
+  const nearest = (time: number) => {
+    let best: MarkerEntry | undefined;
+    for (const x of after.markers) if (near(x.time, time) && (!best || Math.abs(x.time - time) < Math.abs(best.time - time))) best = x;
+    return best;
+  };
+  for (const e of edits) {
+    const at = `markers@${e.to}`;
+    const got = nearest(e.to);
+    if (!got) {
+      m.push({ path: at, expected: "a marker", actual: undefined, message: `No marker at ${e.to}s after editing marker ${e.index}` });
+      continue;
+    }
+    const f = e.fields;
+    if (f.comment !== undefined) expectThat(m, got.comment === f.comment, `${at}.comment`, f.comment, got.comment, `Marker at ${e.to}s has another comment`);
+    if (f.duration !== undefined) expectThat(m, Math.abs((got.duration ?? 0) - f.duration) <= durTol, `${at}.duration`, f.duration, got.duration, `Marker at ${e.to}s has another duration`);
+    if (f.label !== undefined && got.label !== undefined) expectThat(m, got.label === f.label, `${at}.label`, f.label, got.label, `Marker at ${e.to}s has another label colour`);
+    if (f.chapter !== undefined) expectThat(m, (got.chapter ?? "") === f.chapter, `${at}.chapter`, f.chapter, got.chapter ?? "", `Marker at ${e.to}s has another chapter`);
+    if (f.url !== undefined) expectThat(m, (got.url ?? "") === f.url, `${at}.url`, f.url, got.url ?? "", `Marker at ${e.to}s has another URL`);
+    if (f.frame_target !== undefined) expectThat(m, (got.frame_target ?? "") === f.frame_target, `${at}.frame_target`, f.frame_target, got.frame_target ?? "", `Marker at ${e.to}s has another frame target`);
+    if (f.cue_point_name !== undefined) expectThat(m, (got.cue_point_name ?? "") === f.cue_point_name, `${at}.cue_point_name`, f.cue_point_name, got.cue_point_name ?? "", `Marker at ${e.to}s has another cue point name`);
+    if (f.event_cue_point !== undefined) expectThat(m, (got.event_cue_point ?? false) === f.event_cue_point, `${at}.event_cue_point`, f.event_cue_point, got.event_cue_point ?? false, `Marker at ${e.to}s has another event cue point setting`);
+    if (f.protected_region !== undefined) expectThat(m, (got.protected_region ?? false) === f.protected_region, `${at}.protected_region`, f.protected_region, got.protected_region ?? false, `Marker at ${e.to}s has another protected region setting`);
+    if (f.params !== undefined) expectThat(m, sameParams(f.params, got.params), `${at}.params`, f.params, got.params, `Marker at ${e.to}s has other parameters`);
+    for (const field of e.copy_failed ?? []) m.push({ path: `${at}.${field}`, expected: "copied", actual: "failed", message: `${field} of marker ${e.index} could not be copied, so it may have been lost` });
+    for (const field of e.refused ?? []) m.push({ path: `${at}.${field}`, expected: "set", actual: "refused", message: `AE refused ${field} at ${e.to}s` });
+    if (e.moved && !edits.some((o) => o !== e && near(o.to, e.from)) && after.markers.some((x) => near(x.time, e.from))) {
+      m.push({ path: `markers@${e.from}`, expected: "moved away", actual: "present", message: `A marker is still at ${e.from}s` });
+    }
+  }
+  // Markers nobody edited stay where they were, with their comment.
+  for (const b of before.markers) {
+    if (edited.has(b.index)) continue;
+    const got = nearest(b.time);
+    if (!got || got.comment !== b.comment) m.push({ path: `markers@${b.time}`, expected: b.comment, actual: got?.comment, message: `The untouched marker at ${b.time}s changed` });
   }
   return m;
 }
@@ -259,13 +406,48 @@ export function selectForRemoval(list: MarkerEntry[], args: z.infer<typeof AeRem
 
 // ---------- tools ----------
 
+async function editMarkers(args: z.infer<typeof AeAddMarkersSchema>, ctx: ToolContext) {
+  if (!args.dry_run) {
+    // Guard before the plan read, so a wrong project fails with the guard error and not a misleading error from another project's ids.
+    ctx.quarantine.assertClear();
+    await verifyTargetGuard(ctx, { project_path: args.expect!.project_path, comp_id: args.expect!.comp_id ?? args.comp_id }, ctx.bridge.newOpId());
+  }
+  const relativeTo = args.relative_to ?? "comp";
+  const hostArgs = { comp_id: args.comp_id, layer: args.layer, edits: args.edit, relative_to: relativeTo };
+  const plan = (
+    await ctx.bridge.callHost<{ changed: boolean; edits: unknown[]; numMarkers: number; target: string }>(
+      "editMarkers",
+      { ...hostArgs, dry_run: true },
+      { label: "ae_add_markers (edit plan)", mutates: false, toolName: "ae_add_markers" }
+    )
+  ).result;
+  if (args.dry_run) return { ok: true, dry_run: true, relative_to: relativeTo, ...plan };
+  if (!plan.changed) return { ok: true, no_op: true, relative_to: relativeTo, ...plan, message: "Every edit leaves its marker as it is; nothing was changed." };
+  return runGuardedWrite(ctx, {
+    toolName: "ae_add_markers",
+    label: `ae_add_markers(edit ${args.edit!.length})`,
+    expect: args.expect!,
+    compId: args.comp_id,
+    read: () => listRead(args.comp_id, args.layer),
+    write: { host: "editMarkers", args: { ...hostArgs, label: `Edit ${args.edit!.length} markers` } },
+    check: editMarkersMismatches,
+    present: (_before, after, w) => ({
+      target: w.target,
+      relative_to: relativeTo,
+      edited: ((w.edits as unknown[]) ?? []).length,
+      edits: w.edits,
+      numMarkers: listOf(after)?.numMarkers,
+    }),
+  });
+}
+
 const listRead = (compId: number, layer: unknown) => ({ host: "listMarkers", args: layer ? { comp_id: compId, layer } : { comp_id: compId } });
 
 export const markersTools: ToolDefinition<any>[] = [
   {
     name: "ae_get_markers",
     description:
-      "List a comp's markers, or a layer's (time, duration, comment, label colour, chapter, URL). Read-only; at most 500, with truncated: true beyond.",
+      "List a comp's markers, or a layer's (time, duration, comment, label colour, chapter, URL, and when set: frame_target, cue_point_name, event_cue_point, params, protected_region). Read-only; at most 500, with truncated: true beyond.",
     schema: AeGetMarkersSchema,
     handler: async (args: z.infer<typeof AeGetMarkersSchema>, ctx) => {
       const res = await ctx.bridge.callHost("listMarkers", args.layer ? { comp_id: args.comp_id, layer: args.layer } : { comp_id: args.comp_id }, {
@@ -284,10 +466,14 @@ export const markersTools: ToolDefinition<any>[] = [
       "with the text as the comment, the spoken length as the duration and a label colour per speaker. Transcript times are taken as the layer's own time when a layer is given. " +
       "The beats and onsets from ae_audio_analyze go in as a list. A marker at a time that already has one replaces it, as in AE. " +
       "dry_run returns the markers without touching AE. The read-back (a separate evalScript) checks the count and each marker's comment, label colour, duration, chapter and URL. " +
-      "With relative_to 'layer' the duration is scaled by the layer's stretch, like the time. expect is required unless dry_run. " +
+      "With relative_to 'layer' the duration is scaled by the layer's stretch, like the time. " +
+      "Markers can also carry protected_region (composition markers only, AE 16.0+; responsive templates need it), frame_target, cue_point_name, event_cue_point and params (cue point parameters); a member this AE lacks is refused up front. " +
+      "To change or move markers that already exist, pass edit instead of markers: [{index | time, set?: {fields to change}, move_to?: time}] (one undo group; a moved marker keeps every field; two markers can't end on one time; dry_run plans it). " +
+      "expect is required unless dry_run. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeAddMarkersSchema,
     handler: async (args: z.infer<typeof AeAddMarkersSchema>, ctx) => {
+      if (args.edit) return editMarkers(args, ctx);
       let cues: Array<z.infer<typeof MarkerInputSchema>>;
       try {
         cues = args.markers ?? cuesFromTranscript(args.transcript!).map(({ speaker, ...c }) => c);
@@ -311,6 +497,10 @@ export const markersTools: ToolDefinition<any>[] = [
           error: "too_many",
           message: `${cues.length} markers; at most ${MAX_MARKERS_PER_CALL} per call. Use unit 'segment' or 'sentence', or split the transcript.`,
         };
+      }
+      // Same refusal as the host's checkExtras, so the dry run and the write agree.
+      if (args.layer && cues.some((c) => c.protected_region === true)) {
+        return { ok: false, error: "bad_args", message: "protected_region is for composition markers only; a layer marker cannot be a protected region. Nothing was added." };
       }
       const relativeTo = args.relative_to ?? (args.transcript && args.layer ? "layer" : "comp");
       if (args.dry_run) {

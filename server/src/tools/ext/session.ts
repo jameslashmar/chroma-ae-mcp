@@ -677,6 +677,17 @@ export class SessionTracker {
     return this.state.touched[keyOf(projectPath)] ?? [];
   }
 
+  /** After Save As / increment: the comps touched under the old path are tracked under the new one too. */
+  carryTouched(fromPath: string, toPath: string): void {
+    const from = this.state.touched[keyOf(fromPath)] ?? [];
+    if (from.length === 0) return;
+    const key = keyOf(toPath);
+    const merged = new Set<number>(this.state.touched[key] ?? []);
+    for (const id of from) merged.add(id);
+    this.state.touched[key] = [...merged].slice(-MAX_TOUCHED);
+    this.save();
+  }
+
   /** Comp ids for a snapshot: the given ones plus those already tracked for the project. */
   compsToRead(projectPath: string | null, extra: Array<number | undefined | null>): number[] {
     return this.compsToReadDetailed(projectPath, extra).ids;
@@ -950,12 +961,22 @@ export function endInflight(opId: string): void {
   }
 }
 
+/** The open project moved to another file (Save As, increment): carry its touched comps along. Never throws. */
+export function noteProjectRetarget(oldPath: string, newPath: string): void {
+  try {
+    tracker?.carryTouched(oldPath, newPath);
+  } catch {
+    // Bookkeeping only.
+  }
+}
+
 /**
  * After an applied write (and its read-back), inside the queue lease: the
  * new baseline and the undo step (none when `addStep` is false: the write
- * changed nothing, so it opened no undo group). Never throws.
+ * changed nothing, so it opened no undo group; none when `undoable` is false
+ * either, but that write is still logged as an agent write). Never throws.
  */
-export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean; addStep?: boolean } = {}): Promise<void> {
+export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean; addStep?: boolean; undoable?: boolean } = {}): Promise<void> {
   if (!tracker) return;
   const t = tracker;
   try {
@@ -979,7 +1000,7 @@ export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { 
     const snap = await readSnapshot(ctx, info.opId, "after", info.toolName, compIds);
     if (!snap) return;
     t.record(snap, { op_id: info.opId, tool: info.toolName });
-    if (opts.addStep === false) return;
+    if (opts.addStep === false || opts.undoable === false) return;
     t.addStep({
       op_id: info.opId,
       tool: info.toolName,
@@ -996,6 +1017,18 @@ export async function noteAfterWrite(ctx: ToolContext, info: WriteInfo, opts: { 
   } catch {
     // see above
   }
+}
+
+/**
+ * After a write to the UI state only (current time, selection, the active
+ * viewer, the work area view): takes the post-write snapshot as the new
+ * baseline without adding an undo step, so ae_session_changes and the next
+ * write's user_changed do not report the agent's own time or selection
+ * change as the user's. Built on noteAfterWrite(ctx, info, { addStep: false }).
+ * Call it inside the queue lease after the write's read-back. Never throws.
+ */
+export async function noteUiWrite(ctx: ToolContext, info: WriteInfo, opts: { skipRead?: boolean } = {}): Promise<void> {
+  await noteAfterWrite(ctx, info, { addStep: false, skipRead: opts.skipRead });
 }
 
 /**

@@ -170,6 +170,45 @@
     });
   };
 
+  // keyframesSelection (read): the property's selected keys, for ae_remove_keyframes keys: "selected".
+  // Property.selectedKeys lists the 1-based indexes; without it each key is asked (keySelected).
+  // Changes nothing in AE.
+  A.keyframesSelection = function (args) {
+    var comp = requireComp(args.comp_id);
+    var prop = resolvePath(findLayer(comp, args.layer), args.path);
+    var out = { numKeys: prop.numKeys, selected_keys: [], times: [], source: "none" };
+    var idx = [];
+    var viaList = false;
+    try {
+      var list = prop.selectedKeys;
+      if (list && list.length !== undefined) {
+        for (var a = 0; a < list.length; a++) idx.push(list[a]);
+        viaList = true;
+        out.source = "selectedKeys";
+      }
+    } catch (eList) {
+      viaList = false;
+    }
+    if (!viaList) {
+      for (var k = 1; k <= prop.numKeys; k++) {
+        try {
+          if (prop.keySelected(k) === true) idx.push(k);
+          out.source = "keySelected";
+        } catch (eKey) {
+          break;
+        }
+      }
+    }
+    idx.sort(function (x, y) { return x - y; });
+    for (var i = 0; i < idx.length && i < 500; i++) {
+      if (idx[i] < 1 || idx[i] > prop.numKeys) continue;
+      out.selected_keys.push(idx[i]);
+      out.times.push(prop.keyTime(idx[i]));
+    }
+    if (idx.length > 500) out.truncated = true;
+    return out;
+  };
+
   // keysSnapshot for the read-backs of removeKeys: with no keys left, `value`
   // is the one before any expression, which is what removeKeys wrote with
   // setValue (prop.value would carry a wiggle on top). Read-only.

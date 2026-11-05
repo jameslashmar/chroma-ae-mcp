@@ -183,6 +183,161 @@
     return String(v);
   }
 
+  // ---------- layer input stage (AE 26.5+) and popup labels (AE 26.0+) ----------
+
+  var LAYER_STAGES = { source: 0, effects: -1, masks: -2 };
+  var MAX_OPTIONS = 100;
+
+  function stageValue(name) {
+    var t = null;
+    try {
+      if (typeof LayerInputStageType !== "undefined") t = LayerInputStageType;
+    } catch (eT) {
+      t = null;
+    }
+    if (t) {
+      if (name === "source" && t.SOURCE !== undefined) return t.SOURCE;
+      if (name === "effects" && t.ALL_EFFECTS !== undefined) return t.ALL_EFFECTS;
+      if (name === "masks" && t.ONLY_MASKS !== undefined) return t.ONLY_MASKS;
+    }
+    return LAYER_STAGES[name];
+  }
+
+  function stageName(n) {
+    if (n === stageValue("source")) return "source";
+    if (n === stageValue("effects")) return "effects";
+    if (n === stageValue("masks")) return "masks";
+    return "stage " + n;
+  }
+
+  function supportsInputStage(p) {
+    try {
+      return typeof p.setInputLayerAndStage === "function";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Reports the picked layer and stage of a layer picker where AE has them (26.5+).
+  function addLayerInputInfo(p, entry) {
+    entry.input_stage_supported = supportsInputStage(p);
+    if (!entry.input_stage_supported) return;
+    try {
+      var pair = p.inputLayerAndStage;
+      if (pair && typeof pair.length === "number" && pair.length >= 2) {
+        entry.input_layer = pair[0];
+        entry.input_stage = stageName(pair[1]);
+      } else if (pair !== undefined && pair !== null) {
+        entry.input_layer_and_stage = plainValue(pair);
+      }
+    } catch (eP) {}
+    try {
+      var st = p.layerInputStage;
+      if (typeof st === "number" && entry.input_stage === undefined) entry.input_stage = stageName(st);
+    } catch (eS) {}
+  }
+
+  function popupOptions(p) {
+    try {
+      var o = p.propertyParameters;
+      if (o && typeof o.length === "number" && o.length > 0 && typeof o[0] === "string") {
+        var out = [];
+        for (var i = 0; i < o.length && i < MAX_OPTIONS; i++) out.push(String(o[i]).substring(0, 200));
+        return out;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function addPopupInfo(p, entry) {
+    var opts = popupOptions(p);
+    if (!opts) return;
+    entry.options = opts;
+    try {
+      var vt = p.valueText;
+      if (typeof vt === "string") entry.value_text = vt.substring(0, 200);
+    } catch (eV) {}
+  }
+
+  function trimText(s) {
+    return String(s).replace(/^\s+|\s+$/g, "");
+  }
+
+  // 1-based menu item for a label (case-insensitive, trimmed).
+  function popupIndex(p, label) {
+    var opts = popupOptions(p);
+    if (!opts) {
+      fail(
+        "bad_args",
+        "Parameter \"" + p.name + "\" reports no menu labels on this AE (needs 26.0+, and not every effect popup exposes them); give the 1-based item number instead"
+      );
+    }
+    var want = trimText(label).toLowerCase();
+    for (var i = 0; i < opts.length; i++) {
+      if (trimText(opts[i]).toLowerCase() === want) return i + 1;
+    }
+    fail("bad_args", "No menu item \"" + label + "\" on \"" + p.name + "\". Items: " + opts.slice(0, 40).join(" | "));
+    return -1;
+  }
+
+  // ---------- expression references that effect order or count changes retarget ----------
+
+  var EXPR_VISIT_LIMIT = 6000;
+
+  function collectExpressions(group, path, out, state, depth) {
+    for (var i = 1; i <= group.numProperties; i++) {
+      if (state.visited >= EXPR_VISIT_LIMIT) {
+        state.truncated = true;
+        return;
+      }
+      state.visited++;
+      var p = group.property(i);
+      if (!p) continue;
+      var np = path.concat([p.name]);
+      if (p.propertyType === PropertyType.PROPERTY) {
+        try {
+          if (p.expressionEnabled && p.expression) out.push({ path: np, text: String(p.expression) });
+        } catch (eE) {}
+      } else if (depth < 8) {
+        collectExpressions(p, np, out, state, depth + 1);
+      }
+    }
+  }
+
+  // Scans this comp's layers only (up to 300); other comps' expressions are not looked at.
+  // Expressions with effect(<number>) on this layer, or on layers that mention it,
+  // read an effect by position: they silently retarget when the stack changes.
+  function findEffectIndexRefs(comp, layer) {
+    var warnings = [];
+    var re = /effect\(\s*\d+\s*\)/;
+    var layerRe = new RegExp("layer\\(\\s*" + layer.index + "\\s*\\)");
+    var state = { visited: 0, truncated: false };
+    for (var i = 1; i <= comp.numLayers && i <= 300; i++) {
+      var x = comp.layer(i);
+      var found = [];
+      try {
+        collectExpressions(x, [], found, state, 0);
+      } catch (eC) {}
+      for (var k = 0; k < found.length; k++) {
+        var t = found[k].text;
+        if (!re.test(t)) continue;
+        if (x.id !== layer.id) {
+          var mentions = t.indexOf("\"" + layer.name + "\"") >= 0 || t.indexOf("'" + layer.name + "'") >= 0 || layerRe.test(t);
+          if (!mentions) continue;
+        }
+        if (warnings.length < 20) {
+          warnings.push({
+            layer: x.name,
+            property: found[k].path.join(" > "),
+            expression: t.length > 200 ? t.substring(0, 200) + " ..." : t,
+            note: "reads an effect by position; it may point at a different effect after this change"
+          });
+        }
+      }
+    }
+    return { warnings: warnings, truncated: state.truncated };
+  }
+
   function describeParams(group, prefix, depth, out, state) {
     for (var i = 1; i <= group.numProperties; i++) {
       if (state.count >= MAX_PARAMS) {
@@ -215,6 +370,8 @@
             entry.linkable_by_expression = p.canSetExpression === true;
           } catch (eLink) {}
         }
+        if (typeName === "layer") addLayerInputInfo(p, entry);
+        if (typeName === "1d") addPopupInfo(p, entry);
         try {
           if (p.numKeys > 0) entry.numKeys = p.numKeys;
         } catch (eKeys) {}
@@ -244,6 +401,30 @@
     return out;
   }
 
+  // The layer style slots ('<style>/enabled') with their enabled state; empty when the layer has none.
+  function layerStyleSlots(l) {
+    var slots = [];
+    try {
+      var g = l.property("ADBE Layer Styles");
+      if (!g) return slots;
+      for (var i = 1; i <= g.numProperties && slots.length < 20; i++) {
+        var sp = g.property(i);
+        if (!sp) continue;
+        var mn = String(sp.matchName);
+        if (mn.length > 8 && mn.substring(mn.length - 8) === "/enabled") {
+          var on = null;
+          try {
+            on = sp.enabled === true;
+          } catch (eEn) {
+            on = null;
+          }
+          slots.push({ slot: mn, enabled: on });
+        }
+      }
+    } catch (eG) {}
+    return slots;
+  }
+
   function describeLayerEffects(c, l) {
     var parade = effectParade(l);
     var effects = [];
@@ -252,6 +433,8 @@
     }
     var out = { comp_id: c.id, layer_id: l.id, layer_index: l.index, layer_name: l.name, effects: effects };
     if (parade.numProperties > MAX_EFFECTS) out.truncated = true;
+    var slots = layerStyleSlots(l);
+    if (slots.length > 0) out.layer_styles = slots;
     return out;
   }
 
@@ -293,11 +476,12 @@
     return value;
   }
 
-  // Sets static parameter values. Animated parameters get the value at the
-  // comp's current time, as ae_set_property does.
-  function applyParams(c, fx, params) {
-    var done = [];
-    if (!params) return done;
+  // Resolves every parameter of a call to what will be written, so that
+  // everything that can fail fails before an undo group opens (or, for a new
+  // effect, before its values are written).
+  function planParams(c, l, fx, params) {
+    var plans = [];
+    if (!params) return plans;
     for (var i = 0; i < params.length; i++) {
       var p = findParam(fx, params[i].param);
       if (p.propertyType !== PropertyType.PROPERTY) fail("bad_args", "\"" + params[i].param + "\" is a group, not a parameter");
@@ -312,13 +496,101 @@
             "or use the effect's own preset menu if it has one (Colorama: Use Preset Palette)."
         );
       }
-      var v = coerceValue(p, typeName, params[i].value);
-      if (p.numKeys > 0) {
-        p.setValueAtTime(c.time, v);
-        done.push({ param: p.name, how: "value_at_current_time" });
+      var v = params[i].value;
+      var plan = { i: i, prop: p, typeName: typeName, kind: "value", value: null, label: null, stage: null, resolved: false };
+      if (typeof v === "string") {
+        if (typeName !== "1d") fail("bad_args", "Parameter \"" + p.name + "\" is not a popup: a text value only picks a menu item by its label");
+        plan.value = popupIndex(p, v);
+        plan.label = v;
+        plan.resolved = true;
+      } else if (v !== null && typeof v === "object" && typeof v.length !== "number") {
+        if (typeName !== "layer") fail("bad_args", "Parameter \"" + p.name + "\" is not a layer picker: {layer, stage} only goes to layer parameters");
+        var li = 0;
+        if (v.layer !== 0) li = findLayer(c, v.layer).index;
+        plan.value = li;
+        plan.resolved = true;
+        if (v.stage !== undefined && v.stage !== null) {
+          if (!LAYER_STAGES.hasOwnProperty(v.stage)) fail("bad_args", "stage must be source, masks or effects");
+          if (!supportsInputStage(p)) {
+            fail("bad_args", "Choosing an input stage needs After Effects 26.5 or later (this AE has no setInputLayerAndStage); leave stage out to pick the layer only");
+          }
+          if (li === 0 && v.stage !== "source") fail("bad_args", "A stage needs a layer: layer 0 means none");
+          if (li === l.index && v.stage !== "source") {
+            fail("bad_args", "Layer " + li + " is the layer the effect sits on: taking its " + v.stage + " as input is a cycle. Use stage source or another layer");
+          }
+          if (p.numKeys > 0) fail("bad_args", "Parameter \"" + p.name + "\" is keyframed; an input stage can't be set on it");
+          if (l.locked) fail("bad_args", "Layer \"" + l.name + "\" is locked; unlock it first");
+          plan.kind = "stage";
+          plan.stage = v.stage;
+          plan.prev = null;
+          try {
+            var pv = p.inputLayerAndStage;
+            if (pv && typeof pv.length === "number" && pv.length >= 2) plan.prev = [pv[0], pv[1]];
+          } catch (ePv) {
+            plan.prev = null;
+          }
+        }
       } else {
-        p.setValue(v);
-        done.push({ param: p.name, how: "value" });
+        plan.value = coerceValue(p, typeName, v);
+      }
+      plans.push(plan);
+    }
+    return plans;
+  }
+
+  // Puts the layer and stage back that earlier stage plans of this call replaced.
+  function undoStagePlans(applied) {
+    for (var u = applied.length - 1; u >= 0; u--) {
+      var pl = applied[u];
+      if (!pl.prev) continue;
+      try {
+        pl.prop.setInputLayerAndStage(pl.prev[0], pl.prev[1]);
+      } catch (eU) {}
+    }
+  }
+
+  // Writes the plans: input-stage picks first, then values. Animated
+  // parameters get the value at the comp's current time, as ae_set_property does.
+  // only: "stage" or "value" runs just that kind (setEffect runs stages first and undoes them if a later step throws).
+  function runPlans(c, plans, only) {
+    var done = [];
+    var applied = [];
+    var pass;
+    var n;
+    var limit;
+    for (pass = 0; pass < 2; pass++) {
+      for (n = 0; n < plans.length; n++) {
+        var plan = plans[n];
+        var isStage = plan.kind === "stage";
+        if ((pass === 0) !== isStage) continue;
+        if (only === "stage" && !isStage) continue;
+        if (only === "value" && isStage) continue;
+        var p = plan.prop;
+        if (isStage) {
+          // The safe limit changes with effects and sources, so it is read once, right before the write, and only reported (AE itself refuses a cycle).
+          limit = null;
+          try {
+            limit = p.getInputStageCycleSafeLimit();
+          } catch (eLim) {
+            limit = null;
+          }
+          try {
+            p.setInputLayerAndStage(plan.value, stageValue(plan.stage));
+          } catch (eSet) {
+            undoStagePlans(applied);
+            fail("bad_args", "AE refused layer " + plan.value + " with stage " + plan.stage + " for \"" + p.name + "\" (a cycle, or a stage this layer does not have): " + String(eSet.message || eSet));
+          }
+          applied.push(plan);
+          done[plan.i] = { param: p.name, how: "layer_and_stage", resolved_value: plan.value, stage: plan.stage, cycle_safe_limit: limit };
+        } else if (p.numKeys > 0) {
+          p.setValueAtTime(c.time, plan.value);
+          done[plan.i] = { param: p.name, how: "value_at_current_time" };
+        } else {
+          p.setValue(plan.value);
+          done[plan.i] = { param: p.name, how: "value" };
+          if (plan.resolved) done[plan.i].resolved_value = plan.value;
+          if (plan.label !== null) done[plan.i].label = plan.label;
+        }
       }
     }
     return done;
@@ -330,18 +602,72 @@
     return describeLayerEffects(c, l);
   };
 
+  // ---------- Layer styles (probe: not yet measured on a live AE) ----------
+
+  var LAYER_STYLES = {
+    dropShadow: 1, innerShadow: 1, outerGlow: 1, innerGlow: 1, bevelEmboss: 1,
+    chromeFX: 1, solidFill: 1, gradientFill: 1, patternFill: 1, frameFX: 1
+  };
+
+  var STYLE_NOT_ADDABLE =
+    "not addable by script, use a preset: save the layer style as an .ffx animation preset in AE and apply it with ae_apply_preset; " +
+    "once it exists, edit its parameters with ae_set_property on ['ADBE Layer Styles', '<style>/enabled', ...]";
+
+  function addLayerStyle(c, l, args) {
+    if (args.params && args.params.length > 0) {
+      fail("bad_args", "params do not apply to a layer style; set its parameters afterwards with ae_set_property on ['ADBE Layer Styles', '" + args.effect + "/enabled', ...]");
+    }
+    if (args.name) fail("bad_args", "A layer style can't be renamed");
+    if (l.locked) fail("bad_args", "Layer \"" + l.name + "\" is locked; unlock it first");
+    var styles = null;
+    try {
+      styles = l.property("ADBE Layer Styles");
+    } catch (eS) {
+      styles = null;
+    }
+    if (!styles) fail("bad_args", "Layer \"" + l.name + "\" has no Layer Styles group");
+    // The style slots' match names are '<style>/enabled' (the slots are listed whether or not a style is applied).
+    var slotName = args.effect + "/enabled";
+    var can = false;
+    try {
+      can = styles.canAddProperty(slotName) === true;
+    } catch (eCan) {
+      can = false;
+    }
+    if (!can) fail("bad_args", "Layer style " + args.effect + " is " + STYLE_NOT_ADDABLE);
+    return A.withUndo("Chroma AE MCP: add layer style " + args.effect, function () {
+      try {
+        styles.addProperty(slotName);
+      } catch (eAdd) {
+        fail("bad_args", "Layer style " + args.effect + " is " + STYLE_NOT_ADDABLE + " (AE said: " + String(eAdd.message || eAdd) + ")");
+      }
+      return { comp_id: c.id, layer_id: l.id, layer_style: true, style: args.effect, slot: slotName };
+    });
+  }
+
   A.addEffect = function (args) {
     assertGuard(args.expect);
     var c = requireComp(args.comp_id);
     var l = findLayer(c, args.layer);
+    if (LAYER_STYLES.hasOwnProperty(args.effect)) return addLayerStyle(c, l, args);
     var parade = effectParade(l);
     if (!parade.canAddProperty(args.effect)) {
       fail("not_found", "AE has no effect \"" + args.effect + "\" (use a match name or display name from ae_list_effects)");
     }
     return A.withUndo("Chroma AE MCP: add effect " + args.effect, function () {
       var fx = parade.addProperty(args.effect);
-      if (args.name) fx.name = args.name;
-      var done = applyParams(c, fx, args.params);
+      var at = fx.propertyIndex;
+      var done;
+      try {
+        if (args.name) fx.name = args.name;
+        done = runPlans(c, planParams(c, l, fx, args.params));
+      } catch (ePar) {
+        // A value AE or the checks refused: take the half-made effect back out in this group.
+        try {
+          effectParade(l).property(at).remove();
+        } catch (eRm) {}
+        throw ePar;
+      }
       return {
         comp_id: c.id,
         layer_id: l.id,
@@ -353,24 +679,132 @@
     });
   };
 
+  function has(v) {
+    return v !== undefined && v !== null;
+  }
+
   A.setEffect = function (args) {
     assertGuard(args.expect);
     var c = requireComp(args.comp_id);
     var l = findLayer(c, args.layer);
-    var fx = findEffect(effectParade(l), args.effect);
+    var parade = effectParade(l);
+    var fx = findEffect(parade, args.effect);
+    var from = fx.propertyIndex;
+    var count = parade.numProperties;
+    var wantMove = has(args.move_to);
+    var wantDup = has(args.duplicate);
+    if (wantMove && wantDup) fail("bad_args", "Give move_to or duplicate, not both: after a duplicate the effect positions are not predictable");
+    if (wantMove) {
+      if (typeof args.move_to !== "number" || Math.floor(args.move_to) !== args.move_to || args.move_to < 1 || args.move_to > count) {
+        fail("bad_args", "move_to must be a whole number 1.." + count);
+      }
+    }
+    if (wantDup) {
+      if (typeof args.duplicate !== "number" || Math.floor(args.duplicate) !== args.duplicate || args.duplicate < 1 || args.duplicate > 20) {
+        fail("bad_args", "duplicate must be a whole number 1..20");
+      }
+      if (count + args.duplicate > MAX_EFFECTS) fail("bad_args", "The layer would hold more than " + MAX_EFFECTS + " effects");
+    }
+    var reorders = (wantMove && args.move_to !== from) || wantDup;
+    if (reorders && l.locked) fail("bad_args", "Layer \"" + l.name + "\" is locked; unlock it first");
+    var plans = planParams(c, l, fx, args.params);
+    var hasEnabled = has(args.enabled);
+    var result = {
+      comp_id: c.id,
+      layer_id: l.id,
+      index: from,
+      name: fx.name,
+      matchName: fx.matchName,
+      enabled: fx.enabled,
+      params_set: []
+    };
+    if (!hasEnabled && !args.name && plans.length === 0 && !reorders) {
+      result.no_op = true;
+      result.note = "Nothing to change: the effect is already at index " + from;
+      return result;
+    }
+    var refs = null;
+    if (reorders) refs = findEffectIndexRefs(c, l);
+    var matchName = fx.matchName;
+    // No pre-check against getInputStageCycleSafeLimit: what it counts is not settled; AE's own throw is caught in runPlans.
+    var prevEnabled = fx.enabled;
+    var prevName = fx.name;
     return A.withUndo("Chroma AE MCP: set effect " + fx.name, function () {
-      if (args.enabled !== undefined && args.enabled !== null) fx.enabled = args.enabled === true;
-      if (args.name) fx.name = args.name;
-      var done = applyParams(c, fx, args.params);
-      return {
-        comp_id: c.id,
-        layer_id: l.id,
-        index: fx.propertyIndex,
-        name: fx.name,
-        matchName: fx.matchName,
-        enabled: fx.enabled,
-        params_set: done
-      };
+      var stageDone = runPlans(c, plans, "stage");
+      var valueDone;
+      try {
+        if (hasEnabled) fx.enabled = args.enabled === true;
+        if (args.name) fx.name = args.name;
+        valueDone = runPlans(c, plans, "value");
+      } catch (eVal) {
+        var applied2 = [];
+        for (var sj = 0; sj < plans.length; sj++) {
+          if (plans[sj].kind === "stage") applied2.push(plans[sj]);
+        }
+        undoStagePlans(applied2);
+        try {
+          fx.enabled = prevEnabled;
+          fx.name = prevName;
+        } catch (eBack) {}
+        throw eVal;
+      }
+      var done = [];
+      for (var dj = 0; dj < plans.length; dj++) {
+        if (plans[dj].kind === "stage") done[plans[dj].i] = stageDone[plans[dj].i];
+        else done[plans[dj].i] = valueDone[plans[dj].i];
+      }
+      result.params_set = done;
+      result.name = fx.name;
+      result.enabled = fx.enabled;
+      var p2 = effectParade(l);
+      var at = from;
+      var n;
+      if (wantMove) {
+        if (args.move_to !== from) {
+          p2.property(from).moveTo(args.move_to);
+          at = args.move_to;
+        }
+        result.move = { from: from, to: args.move_to, matched: effectParade(l).property(at).matchName === matchName };
+      }
+      if (wantDup) {
+        var copies = [];
+        var located = true;
+        var made = 0;
+        for (n = 0; n < args.duplicate && located; n++) {
+          var dup = effectParade(l).property(at).duplicate();
+          made++;
+          var di = -1;
+          try {
+            di = dup.propertyIndex;
+          } catch (eDi) {
+            di = -1;
+          }
+          if (typeof di !== "number" || di < 1) {
+            located = false;
+          } else {
+            for (var q = 0; q < copies.length; q++) {
+              if (copies[q] >= di) copies[q] = copies[q] + 1;
+            }
+            if (di <= at) at = at + 1;
+            copies.push(di);
+          }
+        }
+        result.duplicates = [];
+        var parade3 = effectParade(l);
+        for (n = 0; n < copies.length; n++) {
+          var cp = parade3.property(copies[n]);
+          result.duplicates.push({ index: copies[n], name: cp.name, matchName: cp.matchName });
+        }
+        result.duplicate_made = made;
+        result.duplicate_located = located;
+      }
+      result.index = at;
+      if (refs && refs.warnings.length > 0) {
+        result.expression_warnings = refs.warnings;
+      }
+      if (refs && refs.truncated) result.expression_scan_truncated = true;
+      if (refs) result.expression_scan_scope = "this comp's layers only (up to 300); expressions in other comps that reach this layer by comp(\"X\").layer(...).effect(n) are not scanned";
+      return result;
     });
   };
 

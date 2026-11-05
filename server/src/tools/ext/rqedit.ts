@@ -6,8 +6,9 @@
  * - ae_render_queue_inspect: items with time span, render settings, output
  *   modules, their settings and the installed templates (read only)
  * - ae_render_queue_edit: time span, skip frames, log type, render settings,
- *   and per output module template, settings, file, post-render action; add
- *   and remove output modules
+ *   the queued (Render checkbox) flag, and per output module template,
+ *   settings, file, post-render action; add and remove output modules; or
+ *   remove items from the queue (by index and comp id, or by status filter)
  * - ae_render_queue_duplicate: RenderQueueItem.duplicate() N times, each copy
  *   with its own template, file and settings
  * - ae_delivery_specs: the spec library (YouTube, Instagram, TikTok, LinkedIn,
@@ -55,6 +56,7 @@ export interface ItemRead {
   comp_width?: number;
   comp_height?: number;
   comp_duration?: number;
+  comp_frame_rate?: number;
   work_area_start?: number;
   work_area_duration?: number;
   status?: string;
@@ -85,6 +87,8 @@ export interface PlanEcho {
   time_span?: { start: number; duration: number };
   skip_frames?: number;
   log_type?: string;
+  /** The Render checkbox the item should read back with. */
+  queued?: boolean;
   render_settings?: Record<string, unknown>;
   modules: Array<{
     index: number;
@@ -444,6 +448,18 @@ export function itemMismatches(where: string, echo: PlanEcho | undefined, item: 
   }
   if (echo.skip_frames !== undefined) ne(item.skip_frames === echo.skip_frames, "skip_frames", echo.skip_frames, item.skip_frames, "Skip frames differs");
   if (echo.log_type !== undefined) ne(item.log_type === echo.log_type, "log_type", echo.log_type, item.log_type, "Log type differs");
+  if (echo.queued !== undefined) {
+    if (echo.queued && item.status === "needs_output") {
+      m.push({
+        path: `${where}.queued`,
+        expected: "status queued",
+        actual: item.status,
+        message: "The Render checkbox was set but the item reads NEEDS_OUTPUT: it has no valid output file. Give it one (output_modules[].file) and queue it again",
+      });
+    } else {
+      ne(item.render === echo.queued, "queued", echo.queued, item.render, `The item's Render checkbox reads ${String(item.render)} (status ${item.status ?? "unknown"})`);
+    }
+  }
   m.push(...settingsMismatches(`${where}.render_settings`, echo.render_settings, item.render_settings, skipAt(" render settings")));
   ne(item.num_output_modules === echo.num_output_modules, "num_output_modules", echo.num_output_modules, item.num_output_modules, "Output module count differs");
   for (const e of echo.modules) {
@@ -535,6 +551,18 @@ const ModuleEditSchema = z
 
 const ModuleAddSchema = z.object(ModuleBase).describe("A new output module (AE starts it from the default template).");
 
+export const REMOVE_STATUSES = ["done", "user_stopped", "err_stopped", "unqueued", "queued", "needs_output"] as const;
+
+const RemoveRowSchema = z.object({
+  index: ItemIndexSchema,
+  comp_id: z.number().int().describe("The CompItem id the item at index must have. The tool refuses the whole removal when any index holds another comp (the queue shifted)."),
+});
+
+const RemoveFilterSchema = z.object({
+  status: z.enum(REMOVE_STATUSES).describe("Remove every item with this status ('done' clears finished renders, 'unqueued' the ones switched off). An item that is rendering is never removed."),
+  comp_id: z.number().int().optional().describe("Only items of this comp."),
+});
+
 export const AeRenderQueueInspectSchema = z.object({
   item_index: ItemIndexSchema.optional().describe("One item, with its render settings and output module settings. Without it: every item, briefly."),
   settings: z.boolean().optional().describe("Dump the render settings and each output module's settings (the keys ae_render_queue_edit accepts). Default true with item_index, false without."),
@@ -543,8 +571,24 @@ export const AeRenderQueueInspectSchema = z.object({
 
 export const AeRenderQueueEditSchema = z
   .object({
-    item_index: ItemIndexSchema,
+    item_index: ItemIndexSchema.optional().describe(
+      "1-based position in the Render Queue (see ae_render_queue_inspect). Required for every edit; not used with remove / remove_filter. The queue shifts when items are added or removed, so re-read it first."
+    ),
     comp_id: ItemCompSchema,
+    queued: z
+      .boolean()
+      .optional()
+      .describe(
+        "Set the item's Render checkbox (RenderQueueItem.render): true queues it (needed before ae_aerender_start rq_index can render it, and ae_save so the file holds it), false unqueues it. A DONE or RENDERING item is refused. Queueing an item without a valid output file leaves it NEEDS_OUTPUT: the read-back reports that as a mismatch. Applied after the other changes of the same call."
+      ),
+    remove: z
+      .array(RemoveRowSchema)
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("Take these items out of the Render Queue: [{ index, comp_id }], each guarded by its comp. Exclusive: no other change in the same call. Done highest index first in one undo group; refused while the queue is rendering or when an item is rendering."),
+    remove_filter: RemoveFilterSchema.optional().describe("Take out every item with this status (and comp_id), scanning the whole queue; more than 500 matches is refused. Exclusive like remove. Use dry_run first to see what goes."),
+    dry_run: z.boolean().optional().describe("With remove / remove_filter: list the items that would be removed and change nothing."),
     render_settings_template: z.string().min(1).max(200).optional().describe("Render settings template to apply first."),
     time_span: TimeSpanSchema.optional(),
     skip_frames: z.number().int().min(0).max(99).optional().describe("Frames to skip between rendered frames (0 renders every frame)."),
@@ -560,11 +604,31 @@ export const AeRenderQueueEditSchema = z
   })
   .refine(
     (v) =>
-      [v.render_settings_template, v.time_span, v.skip_frames, v.log_type, v.render_settings, v.output_modules, v.add_output_modules, v.remove_output_modules].some(
+      [v.render_settings_template, v.time_span, v.skip_frames, v.log_type, v.render_settings, v.output_modules, v.add_output_modules, v.remove_output_modules, v.queued, v.remove, v.remove_filter].some(
         (x) => x !== undefined
       ),
     { message: "Nothing to change: give at least one of the settings." }
-  );
+  )
+  .superRefine((v, ctx) => {
+    const removing = v.remove !== undefined || v.remove_filter !== undefined;
+    if (v.remove !== undefined && v.remove_filter !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["remove_filter"], message: "Give remove or remove_filter, not both." });
+    }
+    if (removing) {
+      const others = (
+        ["item_index", "render_settings_template", "time_span", "skip_frames", "log_type", "render_settings", "output_modules", "add_output_modules", "remove_output_modules", "queued", "allow_overwrite", "comp_id"] as const
+      ).filter((k) => v[k] !== undefined);
+      if (others.length > 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [others[0]], message: `Removing items is a call of its own (indexes shift): drop ${others.join(", ")}.${others.includes("comp_id") ? " To limit a removal to one comp use remove[].comp_id or remove_filter.comp_id." : ""}` });
+      }
+      if (v.remove !== undefined && new Set(v.remove.map((r) => r.index)).size !== v.remove.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["remove"], message: "An index is listed twice." });
+      }
+    } else {
+      if (v.item_index === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["item_index"], message: "item_index is required to edit an item." });
+      if (v.dry_run !== undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dry_run"], message: "dry_run goes with remove / remove_filter." });
+    }
+  });
 
 const CopySchema = z
   .object({
@@ -646,6 +710,7 @@ const asArray = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 export function editMismatches(args: EditArgs, _before: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
   const after = queueOf(afterRaw);
   const where = `item[${args.item_index}]`;
+  if (args.item_index === undefined) return [];
   const m = stepMismatches(where, asArray<StepError>(written.errors), asArray<Skipped>(written.skipped));
   if (!after) return m;
   m.push(...itemMismatches(where, written.expect as PlanEcho | undefined, itemOf(after, args.item_index), asArray<Skipped>(written.skipped)));
@@ -741,9 +806,34 @@ export function checkDeliveryFile(spec: DeliverySpec, filePath: string): { ok: b
   return { ok: issues.length === 0, exists, size_bytes: size, size_mb: Math.round((size / 1048576) * 100) / 100, issues };
 }
 
+/** What removing items should leave behind, for the receipt: the queue shrank by the removed count and the survivors are the expected comps. */
+export function removeMismatches(beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
+  const m = stepMismatches("remove", asArray<StepError>(written.errors), []);
+  const after = queueOf(afterRaw);
+  if (!after) return m;
+  const removed = asArray<Record<string, unknown>>(written.removed);
+  const echo = (written.expect ?? {}) as { num_items?: number; survivor_comp_ids?: number[] | null };
+  const before = queueOf(beforeRaw);
+  if (before && removed.length > 0 && after.numItems !== before.numItems - removed.length) {
+    m.push({ path: "numItems", expected: before.numItems - removed.length, actual: after.numItems, message: "The queue did not shrink by the number of removed items" });
+  } else if (typeof echo.num_items === "number" && after.numItems !== echo.num_items) {
+    m.push({ path: "numItems", expected: echo.num_items, actual: after.numItems, message: "The queue holds a different number of items than expected" });
+  }
+  const want = echo.survivor_comp_ids;
+  if (Array.isArray(want) && !after.truncated && after.items.length === want.length) {
+    after.items.forEach((it, i) => {
+      if (it.comp_id !== want[i]) {
+        m.push({ path: `items[${i + 1}].comp_id`, expected: want[i], actual: it.comp_id, message: "A surviving item is another comp than expected" });
+      }
+    });
+  }
+  return m;
+}
+
 const editHostArgs = (a: EditArgs) => ({
   item_index: a.item_index,
   item_comp_id: a.comp_id,
+  queued: a.queued,
   item_template: a.render_settings_template,
   time_span: a.time_span,
   skip_frames: a.skip_frames,
@@ -760,7 +850,7 @@ export const rqeditTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_inspect",
     description:
-      "Read Render Queue items: comp, status, time span, skip frames, log type, output modules (file, post-render action) and, with settings, the render settings and each output module's settings by their STRING_SETTABLE key (the keys ae_render_queue_edit takes), with include_templates the installed templates. Changes nothing. " +
+      "Read Render Queue items: comp, status, the render (queued) flag, time span, skip frames, log type, output modules (file, post-render action) and, with settings, the render settings and each output module's settings by their STRING_SETTABLE key (the keys ae_render_queue_edit takes), with include_templates the installed templates. Changes nothing. " +
       "The output module Format is shown but cannot be set by script; only a template changes it.",
     schema: AeRenderQueueInspectSchema,
     handler: async (args: z.infer<typeof AeRenderQueueInspectSchema>, ctx) => {
@@ -779,30 +869,63 @@ export const rqeditTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_edit",
     description:
-      "Edit an item already in the Render Queue, in one undo group guarded by `expect`: render settings template, time span (comp, work area or start/duration), skip frames, log type, render settings, and per output module the template, settings, output file, post-render action and XMP; add or remove output modules. " +
+      "Edit an item already in the Render Queue, in one undo group guarded by `expect`: render settings template, time span (comp, work area or start/duration), skip frames, log type, render settings, the queued flag (queued: true/false, the item's Render checkbox: an item must be queued, then saved, before ae_aerender_start rq_index can render it), and per output module the template, settings, output file, post-render action and XMP; add or remove output modules. " +
+      "Or take items out of the queue: remove ([{ index, comp_id }], each guarded by its comp) or remove_filter ({ status: done | user_stopped | err_stopped | unqueued | queued | needs_output, comp_id? }) in a call of their own, highest index first in one undo group, refused while the queue is rendering; dry_run lists what would go. The read-back checks the queue shrank by the count and the survivors are the expected comps. " +
       "A DONE item is refused (AE locks its settings; duplicate it instead). Everything is checked before AE changes: templates must be installed, setting keys must be ones the item offers (ae_render_queue_inspect lists them), \"Format\" is read-only (use a template), the time span must fit the comp, and an output file must not be another queued item's or already on disk (allow_overwrite). A step that fails inside AE is reported in `errors`, not thrown. " +
       "The read-back (a separate evalScript) compares every change; a format can adjust a size or rate it can't take, and that shows as a mismatch. A template itself can't be read back. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueEditSchema,
-    handler: (args: EditArgs, ctx) =>
-      runGuardedWrite(ctx, {
+    handler: async (args: EditArgs, ctx) => {
+      if (args.remove !== undefined || args.remove_filter !== undefined) {
+        const removeArgs = { remove: args.remove, remove_filter: args.remove_filter };
+        if (args.dry_run === true) {
+          // A read: nothing is changed, so no checkpoint and no undo step.
+          ctx.quarantine.assertClear();
+          const res = await ctx.bridge.callHost(
+            "rqeditRemove",
+            { ...removeArgs, dry_run: true, expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id } },
+            { label: "ae_render_queue_edit (dry run)", mutates: false, toolName: "ae_render_queue_edit" }
+          );
+          return { applied: false, ...((res.result ?? {}) as Record<string, unknown>) };
+        }
+        return runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_edit",
+          label: `ae_render_queue_edit(remove ${args.remove !== undefined ? args.remove.length + " items" : "by status " + args.remove_filter?.status})`,
+          expect: args.expect,
+          read: () => readCall(undefined, false),
+          write: { host: "rqeditRemove", args: { ...removeArgs, label: "Remove render queue items" } },
+          check: (before, after, w) => removeMismatches(before, after, w),
+          present: (_b, after, w) => ({
+            removed: w.removed,
+            errors: w.errors,
+            warnings: w.warnings,
+            num_items_before: w.num_items_before,
+            num_items: queueOf(after)?.numItems,
+            ...(w.no_op === true ? { no_op: true } : {}),
+          }),
+        });
+      }
+      const itemIndex = args.item_index as number;
+      return runGuardedWrite(ctx, {
         toolName: "ae_render_queue_edit",
-        label: `ae_render_queue_edit(item ${args.item_index})`,
+        label: `ae_render_queue_edit(item ${itemIndex})`,
         expect: args.expect,
-        read: () => readCall([args.item_index], true),
+        read: () => readCall([itemIndex], true),
         write: { host: "rqeditEdit", args: editHostArgs(args) },
         check: (before, after, w) => editMismatches(args, before, after, w),
         present: (_b, after, w) => ({
-          item_index: args.item_index,
-          item: itemOf(queueOf(after), args.item_index),
+          item_index: itemIndex,
+          item: itemOf(queueOf(after), itemIndex),
           steps_done: w.steps_done,
           skipped: w.skipped,
           errors: w.errors,
           warnings: w.warnings,
           added_modules: w.added_modules,
           removed_modules: w.removed_modules,
+          ...(w.no_op === true ? { no_op: true } : {}),
         }),
-      }),
+      });
+    },
   },
   {
     name: "ae_render_queue_duplicate",

@@ -119,6 +119,10 @@ export interface HostLayerIssue {
   detail?: string;
   effect?: string;
   match_name?: string;
+  /** glyphs_missing: the font, the characters it lacks (at most 20) and AE's default font for their script. */
+  font?: string;
+  missing?: string[];
+  suggested?: string[];
 }
 
 export interface LayersPage {
@@ -142,6 +146,12 @@ export interface LayersPage {
   /** Expressions the host did not force because it hit its per-slice cap. */
   force_capped?: number;
   fonts_unchecked: number;
+  /** Glyph coverage (AE 25.1): runs of one font checked, runs that could not be, runs cut at the character cap, texts checked whole against one font. Absent from older hosts. */
+  glyphs_checked?: number;
+  glyphs_unchecked?: number;
+  glyphs_truncated?: number;
+  glyphs_whole_only?: number;
+  glyphs_reason?: string;
   effects_check: "available" | "unavailable";
 }
 
@@ -409,6 +419,11 @@ export interface ScanState {
   duplicate_roots: string[];
   skipped_comps: string[];
   fonts_unchecked: number;
+  glyphs_checked: number;
+  glyphs_unchecked: number;
+  glyphs_truncated: number;
+  glyphs_whole_only: number;
+  glyphs_reason: string | null;
   forced_evals: number;
   force_capped: number;
   slices: number;
@@ -447,6 +462,11 @@ export function newScanState(opts: ScanOptions, now = Date.now()): ScanState {
     duplicate_roots: [],
     skipped_comps: [],
     fonts_unchecked: 0,
+    glyphs_checked: 0,
+    glyphs_unchecked: 0,
+    glyphs_truncated: 0,
+    glyphs_whole_only: 0,
+    glyphs_reason: null,
     forced_evals: 0,
     force_capped: 0,
     slices: 0,
@@ -604,6 +624,11 @@ function absorbLayers(s: ScanState, head: { comp_id: number; force: boolean }, p
   st.num_layers = page.num_layers;
   s.stats.set(page.comp_id, st);
   s.fonts_unchecked += page.fonts_unchecked;
+  s.glyphs_checked += page.glyphs_checked ?? 0;
+  s.glyphs_unchecked += page.glyphs_unchecked ?? 0;
+  s.glyphs_truncated += page.glyphs_truncated ?? 0;
+  s.glyphs_whole_only += page.glyphs_whole_only ?? 0;
+  if (page.glyphs_reason) s.glyphs_reason = page.glyphs_reason;
   s.forced_evals += page.forced_evals;
   s.force_capped += page.force_capped ?? 0;
   s.issues_dropped += page.issues_overflow;
@@ -675,7 +700,7 @@ function projectFindings(s: ScanState): Finding[] {
       severity: "warning",
       code: "project_unsaved",
       message: "The project has never been saved. aerender and Collect Files need a file on disk.",
-      fix: { hint: "Save it once in After Effects (File > Save As); ae_save needs an existing file." },
+      fix: { tool: "ae_save", hint: "Give it a name once: ae_save with save_as: { path } (an absolute path ending in .aep). A plain ae_save needs a project that already has a file." },
     });
   } else if (p.dirty === true) {
     out.push({
@@ -687,22 +712,36 @@ function projectFindings(s: ScanState): Finding[] {
   }
   const spec = s.opts.project_spec;
   if (spec) {
-    const diff = (what: string, want: unknown, have: unknown) => {
+    // key: the field of ae_project_settings `set` that changes it; absent where that tool has no setter.
+    const diff = (what: string, want: unknown, have: unknown, key?: "bits_per_channel" | "working_space" | "linear_blending" | "expression_engine") => {
       if (want !== undefined && want !== have) {
         out.push({
           severity: "warning",
           code: "project_setting_differs",
           message: `${what} is ${JSON.stringify(have)}; the spec says ${JSON.stringify(want)}.`,
-          fix: { hint: "Change it in Project Settings. AE's scripting API has no setter for this that is safe to run from here." },
+          fix: key
+            ? {
+                tool: "ae_project_settings",
+                hint: `Set it with ae_project_settings and set: { ${key}: ${JSON.stringify(want)} } (add expect).`,
+                args: { set: { [key]: want }, expect: { project_path: p.project_path } },
+              }
+            : { hint: "Change it in Project Settings (File > Project Settings)." },
         });
       }
     };
-    diff("Bit depth (bits per channel)", spec.bits_per_channel, p.bits_per_channel);
-    diff("Working colour space", spec.working_space, p.working_space);
-    diff("Linearize blending", spec.linear_blending, p.linear_blending);
-    diff("Expression engine", spec.expression_engine, p.expression_engine);
+    diff("Bit depth (bits per channel)", spec.bits_per_channel, p.bits_per_channel, "bits_per_channel");
+    diff("Working colour space", spec.working_space, p.working_space, "working_space");
+    diff("Linearize blending", spec.linear_blending, p.linear_blending, "linear_blending");
+    diff("Expression engine", spec.expression_engine, p.expression_engine, "expression_engine");
   }
   return out;
+}
+
+/** What the glyph check covered, from its counts and the reason it gave. */
+function glyphsCheckedText(s: ScanState): string {
+  if (s.glyphs_checked > 0) return `${s.glyphs_checked} runs of text checked against their font's glyphs (AE 25.1)`;
+  if (s.glyphs_unchecked > 0) return `not checked: ${s.glyphs_reason ?? "this After Effects cannot check it (FontObject.hasGlyphsFor needs 25.1)"}`;
+  return "no text checked (the scanned comps have no text layers to check)";
 }
 
 /** Writable is best effort: Node's access() ignores Windows ACLs. */
@@ -864,6 +903,7 @@ function footageFindings(s: ScanState): Finding[] {
 function layerIssueFindings(s: ScanState): Finding[] {
   const out: Finding[] = [];
   const fontLayers = new Map<string, StoredIssue[]>();
+  const glyphLayers = new Map<string, StoredIssue[]>();
   const effectLayers = new Map<string, StoredIssue[]>();
   const errors: Finding[] = [];
   const disabled: Finding[] = [];
@@ -874,6 +914,9 @@ function layerIssueFindings(s: ScanState): Finding[] {
     if (i.type === "font_missing") {
       const key = i.detail ?? "?";
       fontLayers.set(key, [...(fontLayers.get(key) ?? []), i]);
+    } else if (i.type === "glyphs_missing") {
+      const key = i.font ?? i.detail ?? "?";
+      glyphLayers.set(key, [...(glyphLayers.get(key) ?? []), i]);
     } else if (i.type === "effect_unavailable") {
       const key = i.match_name ?? i.effect ?? "?";
       effectLayers.set(key, [...(effectLayers.get(key) ?? []), i]);
@@ -908,6 +951,28 @@ function layerIssueFindings(s: ScanState): Finding[] {
       where,
       count: list.length,
       fix: { tool: "ae_fonts", hint: "List the fonts in use, install the missing one, or change the text layers' font." },
+    });
+  }
+  for (const [font, list] of glyphLayers) {
+    const chars: string[] = [];
+    const suggested: string[] = [];
+    for (const l of list) {
+      for (const c of l.missing ?? []) if (!chars.includes(c) && chars.length < 20) chars.push(c);
+      for (const g of l.suggested ?? []) if (!suggested.includes(g) && suggested.length < 3) suggested.push(g);
+    }
+    const where = list.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ") + (list.length > 5 ? ", ..." : "");
+    const alt = suggested.length ? `; AE's default font for that script is ${suggested.join(", ")}` : "";
+    out.push({
+      severity: "warning",
+      code: "glyphs_missing",
+      message: `Font "${font}" has no glyph for ${chars.join(" ") || "some characters"} used on ${list.length} layer${list.length === 1 ? "" : "s"}: ${where}. They render as empty boxes or fallback glyphs${alt}.`,
+      where: { comp_id: list[0].comp_id, comp: list[0].comp, layer_index: list[0].index, layer_id: list[0].layer_id, layer: list[0].layer },
+      count: list.length,
+      fix: {
+        tool: "ae_fonts",
+        hint: "Check the real text with ae_fonts action check and text, then switch the layers to a font that has the glyphs (ae_set_text with style.font).",
+        args: { action: "check", fonts: [font], text: chars.join("") },
+      },
     });
   }
   const seenFonts = new Set(fontLayers.keys());
@@ -1143,6 +1208,21 @@ export function buildFindings(s: ScanState): Finding[] {
   if (s.project && s.project.effects_check === "unavailable") {
     all.push({ severity: "note", code: "effects_check_skipped", message: "The installed-effects list could not be read, so effects that are not installed were not looked for." });
   }
+  if (s.glyphs_checked === 0 && s.glyphs_unchecked > 0) {
+    all.push({
+      severity: "note",
+      code: "glyphs_check_skipped",
+      message: `Glyph coverage was not checked: ${s.glyphs_reason ?? "this After Effects cannot check it (FontObject.hasGlyphsFor needs 25.1)"}`,
+      count: s.glyphs_unchecked,
+    });
+  } else if (s.glyphs_whole_only > 0 || s.glyphs_truncated > 0) {
+    all.push({
+      severity: "note",
+      code: "glyphs_check_partial",
+      message: `Glyph coverage was checked in part: ${s.glyphs_whole_only} text(s) against the first font only (mixed fonts not told apart) and ${s.glyphs_truncated} cut at the character cap.`,
+      count: s.glyphs_whole_only + s.glyphs_truncated,
+    });
+  }
   if (s.fonts_unchecked > 0 && s.project?.fonts_check === "unavailable") {
     all.push({ severity: "note", code: "fonts_check_skipped", message: "This AE has no font object on text (before AE 24), so missing fonts were not checked.", count: s.fonts_unchecked });
   }
@@ -1241,6 +1321,7 @@ export function buildReport(s: ScanState, complete: boolean, slicesThisCall: num
         ? `forced evaluation at each comp's current time (valueAtTime), then expressionError: ${s.forced_evals} of ${s.forced_evals + s.force_capped} expressions in the forced comps were forced` + (s.force_capped > 0 ? `; ${s.force_capped} were only read the cheap way (per-read cap)` : "")
         : "the error state AE already holds (expressionError). Expressions AE has not evaluated yet can be missed: pass force_eval for the comps in the render queue.",
       effects: s.project?.effects_check === "available" ? "matched against app.effects (heuristic, unconfirmed against a live uninstalled plug-in)" : "skipped: app.effects was not readable",
+      glyphs: glyphsCheckedText(s),
       fonts: s.project?.fonts_check === "available" ? "text layers' font objects plus app.fonts.missingOrSubstitutedFonts" : "text layers' font objects only",
       output_folders: "existence checked in ExtendScript; writability is best effort (Node ignores Windows permissions)",
       title_safe: s.opts.check_title_safe ? `text layers of the final comps, at each comp's current time, ${Math.round(s.opts.title_safe * 100)}% margin` : "skipped",
@@ -1421,7 +1502,7 @@ export const preflightTools: ToolDefinition<any>[] = [
   {
     name: "ae_preflight",
     description:
-      "One read-only check before a render. scope 'delivery' (default) is the gate: missing or placeholder footage, proxies left on, missing fonts, effects that are not installed (heuristic, low confidence), expressions in error, text outside title safe, " +
+      "One read-only check before a render. scope 'delivery' (default) is the gate: missing or placeholder footage, proxies left on, missing fonts, glyphs a text's font lacks (code glyphs_missing, a warning: missing characters such as Turkish letters would render as empty boxes; AE 25.1+, otherwise reported as not checked), effects that are not installed (heuristic, low confidence), expressions in error, text outside title safe, " +
       "default or badly named comps, footage and layers (AE's English defaults like 'Comp 1', or your template/pattern), duplicate comp names, render-queue items without an output file or whose folder is missing, and unsaved changes. " +
       "Each finding is a blocker, warning or note with the layer/item it is on and the tool that fixes it. scope 'health' is the scale map: counts per comp, the heaviest comps, nesting depth, duplicate footage paths, huge comps, the renderer per comp, " +
       "the project's colour settings (checked against project_spec when given). It reads in slices and keeps going under a cursor, so a 5000-item project never runs one long script; if the result has a cursor, call again with it. " +

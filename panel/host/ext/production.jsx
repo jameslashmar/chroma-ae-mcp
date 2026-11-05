@@ -10,11 +10,15 @@
 // - footageFiles (read): footage items with their files, for versioning
 // - versionFootage (guarded write): replace several footage items' files
 // - batchRead (read) / batchSet (guarded write): many property writes in
-//   one undo group, checked before anything changes
+//   one undo group, checked before anything changes (Shape and Marker values,
+//   expression_enabled; the read-back reports expression errors)
+// - exploreRqTemplates (read) / exploreSaveTemplate (guarded write): save a
+//   render queue item's render settings or output module as a named template
 //
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
-// - All mutations check the target guard first and wrap changes in A.withUndo.
+// - All mutations check the target guard first and wrap changes in A.withUndo (exploreSaveTemplate has no undo group:
+//   a saved template is a machine-wide preference, not a project change).
 // - Before and after reads run in separate evalScript calls from the server.
 
 (function (G) {
@@ -119,6 +123,12 @@
     try {
       if (v instanceof TextDocument) return { text: v.text };
     } catch (eT) {}
+    try {
+      if (typeof Shape !== "undefined" && v instanceof Shape && typeof A.serialiseShape === "function") return A.serialiseShape(v);
+    } catch (eS) {}
+    try {
+      if (typeof MarkerValue !== "undefined" && v instanceof MarkerValue && typeof A.serialiseMarker === "function") return A.serialiseMarker(v);
+    } catch (eM) {}
     return String(v);
   }
 
@@ -128,6 +138,107 @@
     var g = null;
     try { g = layer.property("ADBE Layer Overrides"); } catch (e) { g = null; }
     return g;
+  }
+
+  var MAX_OVERRIDE_DEPTH = 6;
+
+  // Where an Essential Property's value comes from. essentialPropertySource (AE 22) can be a Property, an AVLayer or
+  // null: it is described, never returned raw. undefined means this AE has no such member.
+  function describeEssentialSource(p) {
+    var src;
+    try { src = p.essentialPropertySource; } catch (e0) { return undefined; }
+    if (src === undefined) return undefined;
+    if (src === null) return null;
+    var out = {};
+    // A Layer is a PropertyGroup too, so it has propertyType: test for a layer (depth 0 or a containing comp) first.
+    var isLayer = false;
+    try { isLayer = src.propertyDepth === 0; } catch (eL0) {}
+    if (!isLayer) {
+      try { isLayer = typeof src.containingComp !== "undefined"; } catch (eL1) {}
+    }
+    if (!isLayer) {
+      try { isLayer = src instanceof AVLayer; } catch (eL2) {}
+    }
+    var isProp = false;
+    if (!isLayer) {
+      try { isProp = src.propertyType !== undefined; } catch (e1) {}
+    }
+    if (isProp) {
+      out.kind = "property";
+      try { out.name = String(src.name); } catch (e2) {}
+      try { out.match_name = String(src.matchName); } catch (e3) {}
+      try {
+        var lay = src.propertyGroup(src.propertyDepth);
+        if (lay) {
+          out.layer_id = lay.id;
+          out.layer_name = String(lay.name);
+        }
+      } catch (e4) {}
+      try {
+        if (typeof A.propertyPath === "function") out.path = A.propertyPath(src).path;
+      } catch (e5) {}
+    } else {
+      out.kind = "layer";
+      try { out.layer_id = src.id; } catch (e6) {}
+      try { out.layer_name = String(src.name); } catch (e7) {}
+    }
+    return out;
+  }
+
+  function overrideEntries(g, depth, counter) {
+    var list = [];
+    for (var k = 1; k <= g.numProperties; k++) {
+      if (counter.n >= MAX_LIST) {
+        counter.truncated = true;
+        break;
+      }
+      var p = g.property(k);
+      if (!p) continue;
+      counter.n++;
+      var entry = { index: k, name: p.name };
+      var isLeaf = false;
+      try { isLeaf = p.propertyType === PropertyType.PROPERTY; } catch (eT) {}
+      if (isLeaf) {
+        // A property keeps the shape it has always had ({index, name, value}); only groups say what they are.
+        try { entry.value = plain(p.value); } catch (e3) {}
+        var src = describeEssentialSource(p);
+        if (src !== undefined) entry.source = src;
+        try {
+          if (p.canSetAlternateSource === true) {
+            entry.can_set_alternate_source = true;
+          }
+        } catch (eC) {}
+        try {
+          if (p.alternateSource) entry.alternate_source_id = p.alternateSource.id;
+        } catch (eA) {}
+      } else {
+        entry.kind = "group";
+        if (depth < MAX_OVERRIDE_DEPTH) {
+          try { entry.children = overrideEntries(p, depth + 1, counter); } catch (eG) {}
+        }
+      }
+      list.push(entry);
+    }
+    return list;
+  }
+
+  // An Essential Property by name: the layer's own list first (what set_override has always searched), then groups.
+  function findOverride(g, name, depth) {
+    var direct = null;
+    try { direct = g.property(name); } catch (e0) { direct = null; }
+    if (direct) return direct;
+    if (depth >= MAX_OVERRIDE_DEPTH) return null;
+    for (var k = 1; k <= g.numProperties; k++) {
+      var child = null;
+      try { child = g.property(k); } catch (e1) { child = null; }
+      if (!child) continue;
+      var isGroup = false;
+      try { isGroup = child.propertyType !== PropertyType.PROPERTY; } catch (e2) {}
+      if (!isGroup) continue;
+      var hit = findOverride(child, name, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   A.egpRead = function (args) {
@@ -149,16 +260,11 @@
       var layer = findLayer(comp, args.layer);
       var g = overridesOf(layer);
       var list = [];
-      if (g) {
-        for (var k = 1; k <= g.numProperties && list.length < MAX_LIST; k++) {
-          var p = g.property(k);
-          var entry = { index: k, name: p.name };
-          try { if (p.propertyType === PropertyType.PROPERTY) entry.value = plain(p.value); } catch (e3) {}
-          list.push(entry);
-        }
-      }
+      var counter = { n: 0, truncated: false };
+      if (g) list = overrideEntries(g, 0, counter);
       out.layer = { index: layer.index, id: layer.id, name: layer.name, has_overrides: g !== null };
       out.overrides = list;
+      if (counter.truncated) out.overrides_truncated = true;
     }
     return out;
   };
@@ -169,12 +275,48 @@
     var action = args.action;
     var target = null;
     var layer = null;
+    var itemForMedia = null;
+    var mediaNote = null;
     if (action === "add") {
       layer = findLayer(comp, args.layer);
-      target = resolvePath(layer, args.path);
+      var addWhat = "the layer";
+      if (args.path && args.path.length > 0) {
+        target = resolvePath(layer, args.path);
+        addWhat = "\"" + args.path.join(" > ") + "\"";
+      } else {
+        // No path: the layer's own media slot (media replacement), when this AE offers it on layers.
+        target = layer;
+        if (typeof layer.canAddToMotionGraphicsTemplate !== "function") {
+          fail("bad_args", "This After Effects cannot add a layer's media to the template (Layer.canAddToMotionGraphicsTemplate is missing); give the property's path.");
+        }
+      }
       var can = true;
       try { can = target.canAddToMotionGraphicsTemplate(comp); } catch (eCan) { can = false; }
-      if (!can) fail("bad_args", "AE won't add \"" + args.path.join(" > ") + "\" to the Essential Graphics template");
+      if (!can) fail("bad_args", "AE won't add " + addWhat + " to the Essential Graphics template");
+    } else if (action === "set_media") {
+      layer = findLayer(comp, args.layer);
+      var gm = overridesOf(layer);
+      if (!gm) fail("bad_args", "\"" + layer.name + "\" has no Essential Properties (it must be a precomp layer of a comp with a template)");
+      target = findOverride(gm, args.name, 0);
+      if (!target) fail("not_found", "No Essential Property \"" + args.name + "\" on \"" + layer.name + "\"");
+      if (typeof target.setAlternateSource !== "function" || typeof target.canSetAlternateSource === "undefined") {
+        fail("bad_args", "This After Effects has no Property.setAlternateSource (media replacement needs AE 18 or later).");
+      }
+      if (target.canSetAlternateSource !== true) {
+        fail("bad_args", "\"" + args.name + "\" is not a media-replacement slot (canSetAlternateSource is false). Use set_override for values.");
+      }
+      try { itemForMedia = app.project.itemByID(args.item_id); } catch (eIt) { itemForMedia = null; }
+      if (!itemForMedia) fail("not_found", "No project item with id " + args.item_id);
+      if (!(itemForMedia instanceof FootageItem) && !(itemForMedia instanceof CompItem)) {
+        fail("bad_args", "Item " + args.item_id + " is a folder; a media slot takes footage or a comp");
+      }
+      // AVItem.isMediaReplacementCompatible (AE 18) is a Boolean attribute of the candidate item itself.
+      var compatible;
+      try { compatible = itemForMedia.isMediaReplacementCompatible; } catch (eCmp) { compatible = undefined; }
+      if (compatible === false) {
+        fail("bad_args", "\"" + itemForMedia.name + "\" is not compatible with media replacement (isMediaReplacementCompatible is false).");
+      }
+      if (compatible === undefined) mediaNote = "Compatibility was not checked: this After Effects has no AVItem.isMediaReplacementCompatible.";
     } else if (action === "rename") {
       var count = 0;
       try { count = comp.motionGraphicsTemplateControllerCount; } catch (eCount) {}
@@ -183,7 +325,7 @@
       layer = findLayer(comp, args.layer);
       var g = overridesOf(layer);
       if (!g) fail("bad_args", "\"" + layer.name + "\" has no Essential Properties (it must be a precomp layer of a comp with a template)");
-      target = g.property(args.name);
+      target = findOverride(g, args.name, 0);
       if (!target) fail("not_found", "No Essential Property \"" + args.name + "\" on \"" + layer.name + "\"");
     } else if (action !== "template_name") {
       fail("bad_args", "Unknown action \"" + action + "\"");
@@ -193,6 +335,12 @@
         if (args.name) target.addToMotionGraphicsTemplateAs(comp, args.name);
         else target.addToMotionGraphicsTemplate(comp);
         return { action: action, count: comp.motionGraphicsTemplateControllerCount };
+      }
+      if (action === "set_media") {
+        target.setAlternateSource(itemForMedia);
+        var mediaOut = { action: action, layer: { index: layer.index, id: layer.id, name: layer.name }, name: args.name, item_id: itemForMedia.id };
+        if (mediaNote) mediaOut.note = mediaNote;
+        return mediaOut;
       }
       if (action === "rename") {
         comp.setMotionGraphicsControllerName(args.index, args.name);
@@ -261,6 +409,113 @@
       out.source = "temporary_item";
       return out;
     });
+  };
+
+  // ---------- saving render templates ----------
+
+  function rqTarget(args) {
+    var rq = app.project.renderQueue;
+    var n = rq.numItems;
+    if (typeof args.item_index !== "number" || args.item_index < 1 || args.item_index > n) {
+      fail("not_found", "Render queue item " + args.item_index + " is out of range (the queue has " + n + ")");
+    }
+    var item = rq.item(args.item_index);
+    var cid = null;
+    var cname = null;
+    try { cid = item.comp.id; cname = String(item.comp.name); } catch (e0) {}
+    if (cid !== args.item_comp_id) {
+      fail("guard", "Render queue item " + args.item_index + " renders comp " + cid + ", not " + args.item_comp_id + ": the queue changed. Read it again.", {
+        expected: { item_index: args.item_index, comp_id: args.item_comp_id },
+        actual: { item_index: args.item_index, comp_id: cid }
+      });
+    }
+    var status = null;
+    try { status = String(item.status); } catch (e1) {}
+    var rendering = false;
+    try { rendering = typeof RQItemStatus !== "undefined" && item.status === RQItemStatus.RENDERING; } catch (e2) {}
+    var target = item;
+    var om = 0;
+    if (args.kind === "output_module") {
+      var count = 0;
+      try { count = item.numOutputModules; } catch (e3) {}
+      om = args.om_index;
+      if (typeof om !== "number" || om < 1 || om > count) fail("not_found", "Output module " + om + " is out of range (the item has " + count + ")");
+      target = item.outputModule(om);
+    } else if (args.kind !== "render_settings") {
+      fail("bad_args", "kind must be render_settings or output_module");
+    }
+    return { item: item, target: target, comp_id: cid, comp_name: cname, status: status, rendering: rendering, om_index: om };
+  }
+
+  function templateNames(target) {
+    var names = [];
+    var truncated = false;
+    try {
+      var t = target.templates;
+      for (var i = 0; i < t.length; i++) {
+        if (names.length >= MAX_LIST) {
+          truncated = true;
+          break;
+        }
+        names.push(String(t[i]));
+      }
+    } catch (e) {}
+    return { names: names, truncated: truncated };
+  }
+
+  function lowerIndex(names, name) {
+    var want = name.toLowerCase();
+    for (var i = 0; i < names.length; i++) {
+      if (names[i].toLowerCase() === want) return i;
+    }
+    return -1;
+  }
+
+  // Read-only: the template names a queue item's render settings or output module offers, and whether `name` is one.
+  A.exploreRqTemplates = function (args) {
+    var t = rqTarget(args);
+    var list = templateNames(t.target);
+    var out = {
+      item: { index: args.item_index, comp_id: t.comp_id, comp_name: t.comp_name, status: t.status },
+      kind: args.kind,
+      templates: list.names,
+      count: list.names.length,
+      truncated: list.truncated
+    };
+    if (t.om_index > 0) out.om_index = t.om_index;
+    if (typeof args.name === "string") {
+      out.name = args.name;
+      out.exists = lowerIndex(list.names, args.name) !== -1;
+    }
+    return out;
+  };
+
+  // RenderQueueItem.saveAsTemplate / OutputModule.saveAsTemplate: templates are machine-wide preferences, not part of
+  // the project. Everything that can fail is checked before the save; there is no undo group (Ctrl+Z cannot undo it).
+  A.exploreSaveTemplate = function (args) {
+    assertGuard(args.expect);
+    var name = args.name;
+    if (typeof name !== "string" || name.replace(/^\s+|\s+$/g, "").length === 0) fail("bad_args", "The template name can't be empty.");
+    if (name.length > 255) fail("bad_args", "The template name is limited to 255 characters.");
+    if (/[\u0000-\u001f]/.test(name)) fail("bad_args", "The template name can't contain control characters.");
+    var t = rqTarget(args);
+    if (t.rendering) fail("bad_args", "Render queue item " + args.item_index + " is rendering; wait for it to finish.");
+    if (typeof t.target.saveAsTemplate !== "function") {
+      fail("bad_args", "This After Effects has no saveAsTemplate on " + (args.kind === "output_module" ? "output modules" : "render queue items") + ".");
+    }
+    // The collision check scans every template; only the returned list is capped.
+    var all = [];
+    try {
+      var tl = t.target.templates;
+      for (var ti = 0; ti < tl.length; ti++) all.push(String(tl[ti]));
+    } catch (eTl) {}
+    var hit = lowerIndex(all, name);
+    if (hit !== -1 && args.allow_replace !== true) {
+      fail("bad_args", "A " + (args.kind === "output_module" ? "output module" : "render settings") + " template named \"" + all[hit] + "\" already exists. Pick another name, or pass allow_replace to overwrite it (templates cannot be deleted or restored by script).");
+    }
+    // A machine-wide preference, not a project change: no undo group (it would be empty and Ctrl+Z cannot reach the template).
+    t.target.saveAsTemplate(name);
+    return { saved: name, kind: args.kind, replaced: hit !== -1, item_index: args.item_index, comp_id: t.comp_id };
   };
 
   // ---------- footage files and versions ----------
@@ -337,7 +592,118 @@
 
   // Every op's layer and property, found before anything is written. base is
   // the number of ops in earlier chunks, so messages name the op's place in the whole batch.
-  function resolveOps(comp, ops, base) {
+  function isNumberList(v) {
+    if (!(v instanceof Array)) return false;
+    for (var i = 0; i < v.length; i++) {
+      if (typeof v[i] !== "number" || isNaN(v[i])) return false;
+    }
+    return true;
+  }
+
+  // Refuses, before anything is written, what AE would throw on half way through a chunk: a value of the wrong kind,
+  // an array of the wrong length, a number outside the property's own min and max, a separated Position, a path or
+  // marker value the core builders refuse.
+  function checkOpValue(op, prop, n, allowSub) {
+    var hasValue = op.value !== undefined && op.value !== null;
+    var hasKeys = op.keyframes && op.keyframes.length > 0;
+    var hasEnabled = op.expression_enabled === true || op.expression_enabled === false;
+    var name = String(prop.name);
+    // The batch-level flag (resolveOps) or the op's own flag lets a font that is not installed through.
+    if (op.allow_substitute === true) allowSub = true;
+    if (hasEnabled && !prop.canSetExpression) fail("bad_args", "Op " + n + ": " + name + " can't take an expression");
+    if (op.expression_enabled === true && (op.expression === undefined || op.expression === null) && String(prop.expression) === "") {
+      fail("bad_args", "Op " + n + ": " + name + " has no expression to switch on; give `expression` too");
+    }
+    if (!hasValue && !hasKeys) return;
+    var vt = null;
+    try { vt = prop.propertyValueType; } catch (e0) {}
+    var separated = false;
+    try { separated = prop.dimensionsSeparated === true; } catch (e1) {}
+    if (separated) fail("bad_args", "Op " + n + ": " + name + " has separated dimensions; write its X / Y / Z followers instead");
+    if (vt === PropertyValueType.CUSTOM_VALUE || vt === PropertyValueType.NO_VALUE) {
+      fail("bad_args", "Op " + n + ": " + name + " has no value a script can set; use an expression or a preset");
+    }
+    var values = [];
+    var i;
+    if (hasValue) values.push({ v: op.value, what: "value" });
+    if (hasKeys) {
+      for (i = 0; i < op.keyframes.length; i++) values.push({ v: op.keyframes[i].value, what: "keyframes[" + i + "].value" });
+    }
+    if (vt === PropertyValueType.MARKER && hasValue && !hasKeys) {
+      fail("bad_args", "Op " + n + ": markers are keys; pass keyframes: [{ time, value: { comment, duration, ... } }]");
+    }
+    var dims = null;
+    if (vt === PropertyValueType.OneD) dims = [1, 1];
+    else if (vt === PropertyValueType.TwoD || vt === PropertyValueType.TwoD_SPATIAL) dims = [2, 2];
+    else if (vt === PropertyValueType.ThreeD || vt === PropertyValueType.ThreeD_SPATIAL) dims = [2, 3];
+    else if (vt === PropertyValueType.COLOR) dims = [3, 4];
+    var shapeCounts = [];
+    for (i = 0; i < values.length; i++) {
+      var v = values[i].v;
+      if (vt === PropertyValueType.TEXT_DOCUMENT) {
+        // A font that is not installed would be substituted silently: setProperty refuses it, so refuse it here too.
+        if (allowSub !== true && v && typeof v === "object" && v.font !== undefined && v.font !== null && typeof A.fontsResolve === "function") {
+          var fr = A.fontsResolve({ postscript: String(v.font) });
+          if (!fr.ok && !fr.unchecked) {
+            fail("bad_args", "Op " + n + ": " + values[i].what + ": font \"" + v.font + "\" is not available. " + (fr.reason ? fr.reason + " " : "") + "Pick an installed font, or pass allow_substitute: true to write the name as it is (After Effects then substitutes).");
+          }
+        }
+      }
+      if (vt === PropertyValueType.SHAPE) {
+        // The core builder throws a clear message for a bad vertex list; the Shape is thrown away here.
+        var built = null;
+        try {
+          built = A.toShapeValue(v);
+        } catch (eShape) {
+          fail("bad_args", "Op " + n + ": " + values[i].what + ": " + String(eShape.message ? eShape.message : eShape));
+        }
+        var cnt = -1;
+        try { cnt = built.vertices.length; } catch (eCnt) {}
+        shapeCounts.push(cnt);
+      } else if (vt === PropertyValueType.MARKER) {
+        try {
+          A.toMarkerValue(v);
+        } catch (eMark) {
+          fail("bad_args", "Op " + n + ": " + values[i].what + ": " + String(eMark.message ? eMark.message : eMark));
+        }
+      } else if (dims !== null) {
+        var list;
+        if (dims[1] === 1) {
+          if (typeof v !== "number" || isNaN(v)) fail("bad_args", "Op " + n + ": " + values[i].what + " for " + name + " must be one number");
+          list = [v];
+        } else {
+          if (!isNumberList(v) || v.length < dims[0] || v.length > dims[1]) {
+            fail("bad_args", "Op " + n + ": " + values[i].what + " for " + name + " must be an array of " + (dims[0] === dims[1] ? String(dims[0]) : dims[0] + " or " + dims[1]) + " numbers");
+          }
+          list = v;
+        }
+        var hasMin = false;
+        var hasMax = false;
+        try { hasMin = prop.hasMin === true; } catch (e2) {}
+        try { hasMax = prop.hasMax === true; } catch (e3) {}
+        for (var j = 0; j < list.length; j++) {
+          if (hasMin && list[j] < prop.minValue) fail("bad_args", "Op " + n + ": " + name + " accepts " + prop.minValue + " at the lowest, got " + list[j]);
+          if (hasMax && list[j] > prop.maxValue) fail("bad_args", "Op " + n + ": " + name + " accepts " + prop.maxValue + " at the highest, got " + list[j]);
+        }
+      }
+    }
+    if (vt === PropertyValueType.SHAPE && shapeCounts.length > 0) {
+      for (i = 1; i < shapeCounts.length; i++) {
+        if (shapeCounts[i] !== shapeCounts[0]) {
+          fail("bad_args", "Op " + n + ": path keyframes must all have the same number of vertices (" + shapeCounts[0] + " and " + shapeCounts[i] + " given). Use ae_path_write to change the vertex count.");
+        }
+      }
+      var existing = -1;
+      try {
+        if (prop.numKeys > 0) existing = prop.keyValue(1).vertices.length;
+      } catch (eEx) {}
+      if (existing > 0 && shapeCounts[0] !== existing) {
+        fail("bad_args", "Op " + n + ": this path is keyframed with " + existing + " vertices; the new shape has " + shapeCounts[0] + ". All path keys need the same vertex count: use ae_path_write.");
+      }
+    }
+  }
+
+  function resolveOps(comp, ops, base, allowSub) {
     var out = [];
     var skip = base || 0;
     for (var i = 0; i < ops.length; i++) {
@@ -355,6 +721,7 @@
       if (op.expression !== undefined && op.expression !== null && !prop.canSetExpression) {
         fail("bad_args", "Op " + n + ": " + prop.name + " can't take an expression");
       }
+      checkOpValue(op, prop, n, allowSub);
       out.push({ layer: layer, prop: prop });
     }
     return out;
@@ -367,7 +734,7 @@
     var ops = args.ops || [];
     if (ops.length > MAX_LIST) fail("bad_args", "At most " + MAX_LIST + " ops per check");
     try {
-      resolveOps(comp, ops, args.base);
+      resolveOps(comp, ops, args.base, args.allow_substitute === true);
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -383,8 +750,13 @@
       try {
         var p = resolvePath(findLayer(comp, ops[i].layer), ops[i].path);
         entry.numKeys = p.numKeys;
-        if (p.numKeys > 0) entry.value = plain(p.valueAtTime(comp.time, true));
-        else entry.value = plain(p.value);
+        // A marker property has no value at a time: its keys are read below.
+        try {
+          if (p.numKeys > 0) entry.value = plain(p.valueAtTime(comp.time, true));
+          else entry.value = plain(p.value);
+        } catch (eVal) {
+          if (ops[i].times === undefined) throw eVal;
+        }
         if (ops[i].times) {
           entry.keys = [];
           for (var t = 0; t < ops[i].times.length; t++) {
@@ -395,6 +767,21 @@
           }
         }
         try { entry.expression = p.canSetExpression ? p.expression : ""; } catch (eE) {}
+        if (ops[i].check_expression === true) {
+          // Only the properties this batch wrote an expression on: one evaluation (valueAtTime(t, false) changes
+          // nothing), then the error AE keeps. A broken expression reads back as applied otherwise.
+          try { entry.expression_enabled = p.canSetExpression ? p.expressionEnabled === true : false; } catch (eEn) {}
+          var caught = "";
+          try {
+            if (p.canSetExpression && String(p.expression) !== "") p.valueAtTime(comp.time, false);
+          } catch (eEv) {
+            try { caught = String(eEv.message ? eEv.message : eEv); } catch (eMsg) { caught = "The expression threw an error"; }
+          }
+          var perr = "";
+          try { if (p.canSetExpression && p.expressionError) perr = String(p.expressionError); } catch (eEr) {}
+          if (perr !== "") entry.expression_error = perr.length > 2000 ? perr.substring(0, 2000) : perr;
+          else if (caught !== "") entry.expression_error = caught;
+        }
       } catch (e) {
         entry.error = e.message;
       }
@@ -408,7 +795,7 @@
     var comp = requireComp(args.comp_id);
     var ops = args.ops || [];
     if (ops.length > MAX_LIST) fail("bad_args", "At most " + MAX_LIST + " ops in one undo group");
-    resolveOps(comp, ops, args.base);
+    resolveOps(comp, ops, args.base, args.allow_substitute === true);
     return A.withUndo(args.label || "Batch set", function () {
       var done = 0;
       for (var i = 0; i < ops.length; i++) {
@@ -420,6 +807,8 @@
             value: ops[i].value,
             keyframes: ops[i].keyframes,
             expression: ops[i].expression,
+            expression_enabled: ops[i].expression_enabled,
+            allow_substitute: args.allow_substitute === true || ops[i].allow_substitute === true,
             expect: args.expect
           });
         } catch (e) {

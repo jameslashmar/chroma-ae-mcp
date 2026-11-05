@@ -1053,7 +1053,7 @@ const sleep = (ms: number) =>
 
 /** Refuses to carry on when the project hasn't been saved or has changed since: the .aep on disk is what gets copied. */
 function savedProblem(state: { project_path: string; dirty: boolean | null }): string | null {
-  if (state.project_path === "<unsaved>") return "The project has never been saved, so there is no .aep to copy. Save it first (ae_save).";
+  if (state.project_path === "<unsaved>") return "The project has never been saved, so there is no .aep to copy. Name it first with ae_save and save_as: { path }.";
   if (state.dirty !== false) return "The project has unsaved changes (or After Effects would not say). The .aep on disk is what gets copied, so save first (ae_save) and call again.";
   return null;
 }
