@@ -79,6 +79,8 @@ describe("mcp-rpc and panel-entry", () => {
           protocolVersion: supported,
           capabilities: {
             tools: { listChanged: false },
+            prompts: { listChanged: false },
+            resources: { subscribe: false, listChanged: false },
           },
           serverInfo: {
             name: "chroma-ae-mcp",
@@ -312,7 +314,7 @@ describe("mcp-rpc and panel-entry", () => {
       {
         jsonrpc: "2.0",
         id: 404,
-        method: "resources/list",
+        method: "completion/complete",
       },
       ctx
     )) as JsonRpcErrorResponse;
@@ -322,7 +324,7 @@ describe("mcp-rpc and panel-entry", () => {
       id: 404,
       error: {
         code: -32601,
-        message: expect.stringContaining("resources/list"),
+        message: expect.stringContaining("completion/complete"),
       },
     });
 

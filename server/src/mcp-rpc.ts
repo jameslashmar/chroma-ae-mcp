@@ -7,8 +7,32 @@ import {
   type ToolDefinition,
 } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
+import { listGuidanceResources, readGuidance, reviewBody, skillBody } from "./guidance/index.js";
 
 export { ALL_TOOLS };
+
+interface PromptDef {
+  name: string;
+  description: string;
+  arguments: Array<{ name: string; description: string; required: boolean }>;
+  build: (arg: string | undefined) => string;
+}
+
+const PROMPTS: PromptDef[] = [
+  {
+    name: "motion_director",
+    description:
+      "Motion director guidance: brief, numeric spec, stills, choreography, sound, review and delivery, with measured timing, easing and stagger rules.",
+    arguments: [{ name: "task", description: "What you are about to make or fix (optional).", required: false }],
+    build: (task) => skillBody() + (task && task.trim() ? `\n\nTask: ${task.trim()}\n` : ""),
+  },
+  {
+    name: "motion_review",
+    description: "Motion review checklist: measure the comp first, then judge by eye.",
+    arguments: [{ name: "comp", description: "Name or id of the comp to review (optional).", required: false }],
+    build: (comp) => reviewBody() + (comp && comp.trim() ? `\n\nComp to review: ${comp.trim()}\n` : ""),
+  },
+];
 
 const TOOL_MAP = new Map<string, ToolDefinition<any>>(
   ALL_TOOLS.map((t) => [t.name, t])
@@ -126,6 +150,13 @@ async function handleSingleRpc(
             tools: {
               listChanged: false,
             },
+            prompts: {
+              listChanged: false,
+            },
+            resources: {
+              subscribe: false,
+              listChanged: false,
+            },
           },
           serverInfo: {
             name: SERVER_NAME,
@@ -223,6 +254,58 @@ async function handleSingleRpc(
           result: formatToolError(err),
         };
       }
+    }
+
+    case "prompts/list": {
+      return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) } };
+    }
+
+    case "prompts/get": {
+      const name = params.name;
+      const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : undefined;
+      if (!prompt) {
+        return makeErrorResponse(id, -32602, `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}`);
+      }
+      const rawArgs = params.arguments;
+      if (rawArgs !== undefined && !isPlainObject(rawArgs)) {
+        return makeErrorResponse(id, -32602, "Invalid params: `arguments` must be an object");
+      }
+      const arg = rawArgs?.[prompt.arguments[0].name];
+      if (arg !== undefined && typeof arg !== "string") {
+        return makeErrorResponse(id, -32602, `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string`);
+      }
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          description: prompt.description,
+          messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }],
+        },
+      };
+    }
+
+    case "resources/list": {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resources: listGuidanceResources().map((r) => ({
+            uri: r.uri,
+            name: r.name,
+            description: r.description,
+            mimeType: r.mimeType,
+          })),
+        },
+      };
+    }
+
+    case "resources/read": {
+      const uri = params.uri;
+      const res = typeof uri === "string" ? readGuidance(uri) : undefined;
+      if (!res) {
+        return makeErrorResponse(id, -32602, `Invalid params: unknown resource ${JSON.stringify(uri)}. Use resources/list.`);
+      }
+      return { jsonrpc: "2.0", id, result: { contents: [{ uri: res.uri, mimeType: res.mimeType, text: res.text }] } };
     }
 
     default: {
