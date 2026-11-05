@@ -210,6 +210,16 @@ function chainedTernaries(stripped: string, findings: Es3Finding[]): void {
   }
 }
 
+/**
+ * The source with comments, strings and regex literals blanked to spaces
+ * (newlines kept), so the result has the same length and line numbers as the
+ * input. Other static checks (jsx-safety-lint.ts) match against it so a name
+ * inside a string or comment never triggers.
+ */
+export function stripForLint(source: string): string {
+  return strip(source, []);
+}
+
 export function lintEs3(source: string): Es3Finding[] {
   const findings: Es3Finding[] = [];
   const stripped = strip(source, findings);

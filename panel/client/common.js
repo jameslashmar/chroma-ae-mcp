@@ -561,7 +561,110 @@
     };
   }
 
+  // ---------- Host boot script (core.jsx plus host/ext/*.jsx) ----------
+  // The boot script runs as ExtendScript (ES3). Every ext file is loaded in its own
+  // try/catch so one file that fails to parse cannot stop the files after it. The result
+  // is "<aeVersion>|ok" and, when ext files failed, "<aeVersion>|ok|<records>" where each
+  // record is "file<TAB>line<TAB>message" and records are joined with a newline.
+  function buildBootScript(coreJsxPath, extDirJsx, extFiles) {
+    var loads = (extFiles || []).map(function (n) {
+      return (
+        "try{$.evalFile(" + JSON.stringify(path.join(extDirJsx, n)) + ");}catch(e){" +
+        "__f.push(" + JSON.stringify(n) + "+'\\t'+(e&&e.line?e.line:'')+'\\t'+" +
+        "String((e&&e.message)?e.message:e).replace(/[\\t\\r\\n]+/g,' '));}"
+      );
+    }).join("");
+    return (
+      "(function(){" +
+      "var __f=[];" +
+      "if(typeof __chromaAe==='undefined'||!__chromaAe){" +
+      "$.evalFile(" + JSON.stringify(coreJsxPath) + ");" +
+      "}" +
+      loads +
+      "if(typeof __chromaAe==='object'&&__chromaAe){" +
+      "return String(app.version||'')+'|ok'+(__f.length?'|'+__f.join('\\n'):'');" +
+      "}" +
+      "return 'missing';" +
+      "})()"
+    );
+  }
+
+  // Parses the boot script result. Returns null when core did not load, otherwise
+  // { aeVersion, failures: [{ file, line, message }] }.
+  function parseBootResult(raw) {
+    var str = String(raw || "");
+    var m = /^([^|]*)\|ok(?:\|([\s\S]*))?$/.exec(str);
+    if (!m) return null;
+    var failures = [];
+    if (m[2]) {
+      m[2].split("\n").forEach(function (rec) {
+        if (!rec) return;
+        var parts = rec.split("\t");
+        failures.push({
+          file: parts[0],
+          line: parts[1] ? Number(parts[1]) : null,
+          message: parts.slice(2).join(" ")
+        });
+      });
+    }
+    return { aeVersion: m[1], failures: failures };
+  }
+
+  // ---------- Render-engine guard ----------
+  // The service extension starts on ApplicationActivate, and aerender's headless AfterFX.com
+  // engine loads CEP extensions too. In a render engine the service must do nothing: no token
+  // file, no port, no core.jsx / host/ext/*.jsx boot, no MCP bundle (whose asset watcher polls
+  // evalScript). CSInterface has no render-engine flag (getHostEnvironment returns only the
+  // app name, id, version and skin), so the check is one cheap evalScript of app.isRenderEngine.
+  //
+  // The probe is ES3 text. It answers one of three fixed strings and never throws.
+  var GUARD_PROBE_SCRIPT =
+    "(function(){try{" +
+    "if(typeof app==='undefined'||!app){return 'chroma-guard:unknown';}" +
+    "var v=app.isRenderEngine;" +
+    "if(v===true||v==='true'){return 'chroma-guard:render-engine';}" +
+    "if(v===false||v==='false'){return 'chroma-guard:interactive';}" +
+    "return 'chroma-guard:unknown';" +
+    "}catch(e){return 'chroma-guard:unknown';}})()";
+  // Longest the service waits for the probe before carrying on as before (fail open). The
+  // probe is never aborted; a late answer of "render engine" still stops the service.
+  var GUARD_TIMEOUT_MS = 30 * 1000;
+  var GUARD_FORCE_ENV = "CHROMA_AE_MCP_FORCE_START";
+
+  // True when the user forced the service to start (escape hatch if the guard ever misfires).
+  function isGuardOverridden(env) {
+    return Boolean(env) && String(env[GUARD_FORCE_ENV] || "") === "1";
+  }
+
+  // Pure decision. input: { probe: raw evalScript result or null/undefined, env: process.env }.
+  // Returns { start: boolean, kind: "render-engine"|"interactive"|"unknown"|"forced", reason }.
+  // Only the exact render-engine answer stops the service: anything else (empty, undefined,
+  // "EvalScript error.", an unknown string) means the check told us nothing, so it starts.
+  function decideServiceStart(input) {
+    var inp = input || {};
+    if (isGuardOverridden(inp.env)) {
+      return { start: true, kind: "forced", reason: GUARD_FORCE_ENV + "=1 set, guard skipped" };
+    }
+    var raw = "";
+    if (inp.probe !== undefined && inp.probe !== null) raw = String(inp.probe).trim();
+    if (raw === "chroma-guard:render-engine") {
+      return { start: false, kind: "render-engine", reason: "app.isRenderEngine is true" };
+    }
+    if (raw === "chroma-guard:interactive") {
+      return { start: true, kind: "interactive", reason: "app.isRenderEngine is false" };
+    }
+    if (raw === "") {
+      return { start: true, kind: "unknown", reason: "the render-engine check returned nothing" };
+    }
+    return { start: true, kind: "unknown", reason: "the render-engine check was inconclusive (" + raw.slice(0, 60) + ")" };
+  }
+
   var api = {
+    GUARD_PROBE_SCRIPT: GUARD_PROBE_SCRIPT,
+    GUARD_TIMEOUT_MS: GUARD_TIMEOUT_MS,
+    GUARD_FORCE_ENV: GUARD_FORCE_ENV,
+    isGuardOverridden: isGuardOverridden,
+    decideServiceStart: decideServiceStart,
     PANEL_VERSION: PANEL_VERSION,
     RELEASES_API: RELEASES_API,
     parseVersion: parseVersion,
@@ -591,7 +694,9 @@
     formatLogLine: formatLogLine,
     parseLogLine: parseLogLine,
     rotateLogIfNeeded: rotateLogIfNeeded,
-    appendServiceLog: appendServiceLog
+    appendServiceLog: appendServiceLog,
+    buildBootScript: buildBootScript,
+    parseBootResult: parseBootResult
   };
 
   if (typeof window !== "undefined") {

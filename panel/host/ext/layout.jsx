@@ -6,7 +6,9 @@
 //   layers' own box, or distribute their centres evenly
 // - unusedItems (read) / purgeItems (guarded write): footage, solids and
 //   placeholders no comp uses, and empty folders
-// - exportMogrt (no undo group: it writes a file, not the project)
+// - exploreConsolidatePlan / exploreConsolidateFootage and exploreReducePlan / exploreReduceProject:
+//   duplicate footage and a project reduced to chosen comps (plan = read, the others guarded writes)
+// - exportMogrt (no undo group: it writes a file, not the project; refuses fonts not from Adobe Fonts unless allow_font_dialog)
 // - styleScan (read): fonts, sizes and colours used by text, shape and solid
 //   layers, for the house style check
 //
@@ -372,7 +374,349 @@
     });
   };
 
+  // ---------- consolidate duplicate footage / reduce to comps ----------
+
+  var INTERPRETATION_FIELDS = [
+    "alphaMode", "premulColor", "invertAlpha", "fieldSeparationType", "highQualityFieldSeparation",
+    "removePulldown", "loop", "conformFrameRate", "nativeFrameRate"
+  ];
+
+  function pathKey(p) {
+    return String(p).replace(/\\/g, "/").toLowerCase();
+  }
+
+  // The file and interpretation of a footage item, as one string; null for an item that has no file.
+  function duplicateKey(it) {
+    var f = null;
+    try { if (it.mainSource instanceof SolidSource || it.mainSource instanceof PlaceholderSource) return null; } catch (e0) {}
+    try { if (it.file) f = it.file.fsName; } catch (e1) {}
+    if (!f) return null;
+    var key = pathKey(f);
+    var src = null;
+    try { src = it.mainSource; } catch (e2) {}
+    for (var i = 0; i < INTERPRETATION_FIELDS.length; i++) {
+      var v = "";
+      try { v = String(src[INTERPRETATION_FIELDS[i]]); } catch (e3) { v = "?"; }
+      key += "|" + v;
+    }
+    // AE's Consolidate keeps items apart that differ in pixel aspect, still vs sequence, or length / frame rate.
+    var extra = [];
+    try { extra.push(String(it.pixelAspect)); } catch (e4) { extra.push("?"); }
+    try { extra.push(String(src.isStill)); } catch (e5) { extra.push("?"); }
+    try { extra.push(String(it.duration)); } catch (e6) { extra.push("?"); }
+    try { extra.push(String(it.frameRate)); } catch (e7) { extra.push("?"); }
+    key += "|" + extra.join("|");
+    return key;
+  }
+
+  function usedInCount(it) {
+    try { return it.usedIn.length; } catch (e) { return 0; }
+  }
+
+  // Read-only: footage items with a file that share a file and an interpretation. Which one After Effects keeps, and
+  // whether it also merges items this rule does not group (solids, other interpretations), is its own undocumented rule.
+  A.exploreConsolidatePlan = function () {
+    var byKey = {};
+    var order = [];
+    var footageWithFile = 0;
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var it = app.project.item(i);
+      if (!(it instanceof FootageItem)) continue;
+      var key = duplicateKey(it);
+      if (key === null) continue;
+      footageWithFile++;
+      if (!byKey[key]) {
+        byKey[key] = [];
+        order.push(key);
+      }
+      byKey[key].push(it);
+    }
+    var groups = [];
+    var groupTotal = 0;
+    var removable = 0;
+    for (var g = 0; g < order.length; g++) {
+      var list = byKey[order[g]];
+      if (list.length < 2) continue;
+      groupTotal++;
+      removable += list.length - 1;
+      if (groups.length >= MAX_LIST) continue;
+      var members = [];
+      for (var m = 0; m < list.length && m < 50; m++) {
+        members.push({ id: list[m].id, name: list[m].name, used_in: usedInCount(list[m]) });
+      }
+      var file = null;
+      try { file = list[0].file.fsName; } catch (eF) {}
+      groups.push({ file: file, count: list.length, items: members, items_truncated: list.length > 50 });
+    }
+    return {
+      numItems: app.project.numItems,
+      footage_with_file: footageWithFile,
+      group_total: groupTotal,
+      removable: removable,
+      groups: groups,
+      truncated: groupTotal > groups.length
+    };
+  };
+
+  A.exploreConsolidateFootage = function (args) {
+    assertGuard(args.expect);
+    if (typeof app.project.consolidateFootage !== "function") {
+      fail("bad_args", "This After Effects has no Project.consolidateFootage; duplicate footage cannot be merged by script here.");
+    }
+    var plan = A.exploreConsolidatePlan();
+    if (plan.group_total === 0) {
+      return { no_op: true, removed: 0, planned_groups: 0, planned_removals: 0, numItems: app.project.numItems, note: "No footage items share a file and an interpretation. Nothing was changed." };
+    }
+    return A.withUndo(args.label || "Consolidate duplicate footage", function () {
+      var n = app.project.consolidateFootage();
+      var removed = null;
+      if (typeof n === "number") removed = n;
+      return {
+        removed: removed,
+        planned_groups: plan.group_total,
+        planned_removals: plan.removable,
+        items_before: plan.numItems,
+        numItems: app.project.numItems
+      };
+    });
+  };
+
+  // Items a set of comps depends on, through layer sources and nested comps (not through expressions).
+  function reachedFrom(comps) {
+    var reached = {};
+    var queue = [];
+    var i;
+    for (i = 0; i < comps.length; i++) {
+      reached["I" + comps[i].id] = true;
+      queue.push(comps[i]);
+    }
+    var guardCount = 0;
+    while (queue.length > 0 && guardCount < 100000) {
+      guardCount++;
+      var comp = queue.shift();
+      for (var li = 1; li <= comp.numLayers; li++) {
+        var src = null;
+        try { src = comp.layer(li).source; } catch (e0) { src = null; }
+        if (!src) continue;
+        if (reached["I" + src.id]) continue;
+        reached["I" + src.id] = true;
+        if (src instanceof CompItem) queue.push(src);
+      }
+    }
+    return reached;
+  }
+
+  function keepComps(ids) {
+    var comps = [];
+    var seen = {};
+    for (var i = 0; i < ids.length; i++) {
+      var it = null;
+      try { it = app.project.itemByID(ids[i]); } catch (e) { it = null; }
+      if (!it) fail("not_found", "No project item with id " + ids[i]);
+      if (!(it instanceof CompItem)) fail("bad_args", "\"" + it.name + "\" (id " + ids[i] + ") is not a comp; reduce_to_comp_ids takes comps");
+      if (seen["I" + it.id]) continue;
+      seen["I" + it.id] = true;
+      comps.push(it);
+    }
+    return comps;
+  }
+
+  function itemKind(it) {
+    if (it instanceof CompItem) return "comp";
+    if (it instanceof FootageItem) return footageKind(it);
+    return "other";
+  }
+
+  // Read-only: what reduceProject would leave out, by the same comp-tree walk. Folders are counted, not listed.
+  A.exploreReducePlan = function (args) {
+    var comps = keepComps(args.comp_ids || []);
+    if (comps.length === 0) fail("bad_args", "reduce_to_comp_ids needs at least one comp");
+    var reached = reachedFrom(comps);
+    var remove = [];
+    var removeTotal = 0;
+    var keptItems = 0;
+    var folders = 0;
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var it = app.project.item(i);
+      if (it instanceof FolderItem) {
+        folders++;
+        continue;
+      }
+      if (reached["I" + it.id]) {
+        keptItems++;
+        continue;
+      }
+      removeTotal++;
+      if (remove.length < MAX_LIST) remove.push({ id: it.id, name: it.name, kind: itemKind(it) });
+    }
+    var keep = [];
+    for (var k = 0; k < comps.length; k++) keep.push({ id: comps[k].id, name: comps[k].name });
+    return {
+      numItems: app.project.numItems,
+      keep_comps: keep,
+      kept_items: keptItems,
+      remove: remove,
+      remove_total: removeTotal,
+      truncated: removeTotal > remove.length,
+      folders_total: folders
+    };
+  };
+
+  A.exploreReduceProject = function (args) {
+    assertGuard(args.expect);
+    if (typeof app.project.reduceProject !== "function") {
+      fail("bad_args", "This After Effects has no Project.reduceProject; the project cannot be reduced by script here.");
+    }
+    var plan = A.exploreReducePlan({ comp_ids: args.comp_ids });
+    if (plan.remove_total === 0) {
+      return { no_op: true, removed: 0, planned_removals: 0, numItems: app.project.numItems, note: "Everything in the project is reached from those comps. Nothing was changed." };
+    }
+    var comps = keepComps(args.comp_ids);
+    return A.withUndo(args.label || "Reduce project to comps", function () {
+      var n = app.project.reduceProject(comps);
+      var removed = null;
+      if (typeof n === "number") removed = n;
+      return { removed: removed, planned_removals: plan.remove_total, items_before: plan.numItems, numItems: app.project.numItems };
+    });
+  };
+
   // ---------- MOGRT ----------
+
+  // Where a text document's font comes from: "adobe" (Adobe Fonts), "local" (installed on this
+  // machine) or "unknown" (this AE does not say: before AE 24, or a Font without isFromAdobeFonts).
+  function fontOrigin(td) {
+    var fo = null;
+    try { fo = td.fontObject; } catch (e1) {}
+    if (!fo) return "unknown";
+    var flag;
+    try { flag = fo.isFromAdobeFonts; } catch (e2) { return "unknown"; }
+    if (flag === true) return "adobe";
+    if (flag === false) return "local";
+    return "unknown";
+  }
+
+  function noteFont(found, layer, comp, td) {
+    var origin = fontOrigin(td);
+    var name = "";
+    try { name = String(td.font); } catch (e1) {}
+    var family = "";
+    try { family = String(td.fontFamily); } catch (e2) {}
+    var style = "";
+    try { style = String(td.fontStyle); } catch (e3) {}
+    var label = family;
+    if (style) label = family + " " + style;
+    if (!label) label = name;
+    var where = comp.name + " > " + layer.name;
+    var i;
+    for (i = 0; i < found.fonts.length; i++) {
+      if (found.fonts[i].font === name) {
+        var ls = found.fonts[i].layers;
+        if (ls[ls.length - 1] !== where) ls.push(where);
+        return;
+      }
+    }
+    found.fonts.push({ font: name, label: label, origin: origin, layers: [where] });
+  }
+
+  function gap(found, why) {
+    var i;
+    for (i = 0; i < found.gaps.length; i++) {
+      if (found.gaps[i] === why) return;
+    }
+    found.gaps.push(why);
+  }
+
+  // A text document's td.font is only the font of its first run. Live (AE 26.2.1): a text whose
+  // characters 6-11 are ArialMT and the rest SpaceGrotesk-Regular reports td.font = SpaceGrotesk-Regular,
+  // while td.characterRange(0, n).font is undefined for a mixed range and a name for a uniform one.
+  // So split the range in halves until each piece is uniform (a few dozen calls for a text with a
+  // handful of runs; measured 39 calls for 2000 characters and 2 mixed spots). The budget bounds a
+  // text with very many runs; the rest is reported as a gap and the export is refused.
+  var RUN_BUDGET = 400;
+
+  function noteDoc(found, layer, comp, td) {
+    var n = -1;
+    try { n = String(td.text).length; } catch (e0) {}
+    if (n < 2 || typeof td.characterRange !== "function") {
+      noteFont(found, layer, comp, td);
+      return;
+    }
+    var calls = 0;
+    var walk = function (a, b) {
+      if (calls >= RUN_BUDGET) {
+        gap(found, "a text layer with more font runs than the scan follows (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      calls++;
+      var r = null;
+      var f;
+      try {
+        r = td.characterRange(a, b);
+        f = r.font;
+      } catch (e1) {
+        gap(found, "a text range AE would not read (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      if (typeof f === "string" && f !== "") {
+        noteFont(found, layer, comp, r);
+        return;
+      }
+      if (b - a <= 1) {
+        gap(found, "a character whose font AE does not report (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      var mid = Math.floor((a + b) / 2);
+      walk(a, mid);
+      walk(mid, b);
+    };
+    walk(0, n);
+  }
+
+  // The fonts of the text layers of a comp and of the comps nested in it (an exported template
+  // carries them): each layer's text document now and at each of its keys, run by run. Anything the
+  // scan could not cover is added to found.gaps.
+  var MAX_SCAN_LAYERS = 5000;
+  var MAX_FONT_KEYS = 50;
+
+  function scanFonts(comp, found, seen, depth) {
+    if (seen[comp.id] === true) return;
+    if (depth > MAX_DEPTH) {
+      gap(found, "comps nested more than " + MAX_DEPTH + " levels deep (" + comp.name + ")");
+      return;
+    }
+    seen[comp.id] = true;
+    var i;
+    for (i = 1; i <= comp.numLayers; i++) {
+      if (found.layers_examined >= MAX_SCAN_LAYERS) {
+        gap(found, "more than " + MAX_SCAN_LAYERS + " layers (stopped in " + comp.name + ")");
+        return;
+      }
+      found.layers_examined++;
+      var l = comp.layer(i);
+      var kind = "";
+      try { kind = String(l.reflect.name); } catch (e0) {}
+      if (kind === "TextLayer") {
+        if (found.layers_read >= MAX_LIST) {
+          gap(found, "more than " + MAX_LIST + " text layers (stopped in " + comp.name + ")");
+          continue;
+        }
+        found.layers_read++;
+        try {
+          var prop = l.property("ADBE Text Properties").property("ADBE Text Document");
+          noteDoc(found, l, comp, prop.value);
+          var k;
+          for (k = 1; k <= prop.numKeys && k <= MAX_FONT_KEYS; k++) noteDoc(found, l, comp, prop.keyValue(k));
+          if (prop.numKeys > MAX_FONT_KEYS) gap(found, "more than " + MAX_FONT_KEYS + " text keyframes (" + comp.name + " > " + l.name + ")");
+        } catch (e1) {
+          gap(found, "a text layer AE would not read (" + comp.name + " > " + l.name + ")");
+        }
+      } else {
+        var src = null;
+        try { src = l.source; } catch (e2) {}
+        if (src && src instanceof CompItem) scanFonts(src, found, seen, depth + 1);
+      }
+    }
+  }
 
   A.exportMogrt = function (args) {
     assertGuard(args.expect);
@@ -382,10 +726,42 @@
     if (n === 0) fail("bad_args", "\"" + comp.name + "\" has no Essential Graphics controllers to export (ae_set_essential_graphics adds them)");
     if (!app.project.file) fail("bad_args", "Save the project first: AE exports templates from a saved project");
     if (app.project.dirty) fail("bad_args", "The project has unsaved changes; ae_save first so the template matches what you see");
+    // A font that is not from Adobe Fonts makes AE open a modal "fonts were not synced" dialog during
+    // the export and block everything until someone answers it (it did, for 40 minutes). Refuse before
+    // the export unless the caller says a person is there to answer.
+    var found = { fonts: [], layers_read: 0, layers_examined: 0, gaps: [] };
+    scanFonts(comp, found, {}, 0);
+    var local = [];
+    var unknownOrigin = 0;
+    var f;
+    for (f = 0; f < found.fonts.length; f++) {
+      if (found.fonts[f].origin === "local") local.push(found.fonts[f]);
+      else if (found.fonts[f].origin === "unknown") unknownOrigin++;
+    }
+    if (local.length > 0 && args.allow_font_dialog !== true) {
+      var names = [];
+      for (f = 0; f < local.length; f++) names.push(local[f].label + " (" + local[f].layers[0] + ")");
+      fail(
+        "bad_args",
+        "Not exporting: the template uses font(s) that are not from Adobe Fonts: " + names.join("; ") +
+          ". AE opens a modal dialog during the export (\"fonts were not synced from Adobe\") and the whole queue waits until someone answers it. " +
+          "Use Adobe Fonts for these text layers, or pass allow_font_dialog: true when the user is at the machine to click OK or Cancel in that dialog."
+      );
+    }
+    if (found.gaps.length > 0 && args.allow_font_dialog !== true) {
+      fail(
+        "bad_args",
+        "Not exporting: the font check could not cover everything (" + found.gaps.join("; ") + "), so a font that is not from Adobe Fonts could be hiding there and would block the queue behind a modal dialog. " +
+          "Pass allow_font_dialog: true when the user is at the machine."
+      );
+    }
     var ok;
     if (args.path) ok = comp.exportAsMotionGraphicsTemplate(args.overwrite === true, args.path);
     else ok = comp.exportAsMotionGraphicsTemplate(args.overwrite === true);
-    return { exported: ok === true, controllers: n, template_name: comp.motionGraphicsTemplateName };
+    var res = { exported: ok === true, controllers: n, template_name: comp.motionGraphicsTemplateName, fonts_checked: found.fonts.length, fonts_origin_unknown: unknownOrigin, fonts_scan_complete: found.gaps.length === 0 };
+    if (found.gaps.length > 0) res.fonts_scan_gaps = found.gaps;
+    if (local.length > 0) res.fonts_not_from_adobe = local;
+    return res;
   };
 
   // ---------- style scan ----------

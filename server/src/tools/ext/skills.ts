@@ -12,6 +12,7 @@
 import { z } from "zod";
 import { BridgeError } from "../../host.js";
 import { lintEs3 } from "../../es3-lint.js";
+import { lintJsxSafety, describeSafetyFinding } from "../../jsx-safety-lint.js";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
 import { buildReceipt } from "../../receipts.js";
@@ -145,6 +146,19 @@ export function lintSteps(steps: Array<{ file: string; code: string }>): string[
   return problems;
 }
 
+/**
+ * Hard-limit problems in a skill's steps (see jsx-safety-lint.ts), as
+ * "2.jsx line 4: ..." strings. `mutates` is whether the skill runs as a
+ * writing skill: a step that writes in a read-only skill is a problem.
+ */
+export function lintStepsSafety(steps: Array<{ file: string; code: string }>, mutates: boolean): string[] {
+  const problems: string[] = [];
+  for (const step of steps) {
+    for (const f of lintJsxSafety(step.code, { mutates })) problems.push(`${step.file} ${describeSafetyFinding(f)}`);
+  }
+  return problems;
+}
+
 export const skillsTools: ToolDefinition<any>[] = [
   {
     name: "ae_skill_list",
@@ -192,6 +206,7 @@ export const skillsTools: ToolDefinition<any>[] = [
       "Save an AE skill: a description, instructions, and ExtendScript steps that run in order. Steps come from `steps` (function bodies, as for ae_run_jsx) or from `from_op_ids`, the op_ids of ae_run_jsx calls that worked in this session, so a script that did the job is kept exactly as it ran. " +
       "Each step sees `args` (the run's arguments), `prev` (what the previous step returned) and `results`. Write steps that take what varies (text, colours, comp_id, layer names) from `args`, not hard-coded. " +
       "Steps are checked for ES3 (no let, const, arrow functions, template strings, class, or chained ternaries) and refused with the line if they break it. " +
+      "They also pass the same best-effort safety lint as ae_run_jsx (a guard rail, not a sandbox): steps that call system.callSystem, File.execute, file writes or deletes, dialogs, ScriptUI, $.sleep, app.quit, renderQueue.render, project open/close and the like are refused with the dedicated tool to use instead, and in a skill with mutates false so are writes (setValue, addProperty, ...). " +
       "Save only when the user asks for it or agrees. Never touches the AE project.",
     schema: AeSkillSaveSchema,
     handler: async (args: z.infer<typeof AeSkillSaveSchema>, ctx) => {
@@ -219,6 +234,10 @@ export const skillsTools: ToolDefinition<any>[] = [
       const problems = lintSteps(steps.map((code, i) => ({ file: `${i + 1}.jsx`, code })));
       if (problems.length > 0) {
         return { ok: false, error: "not_es3", message: "Steps use syntax After Effects' ExtendScript (ES3) can't run. Nothing was saved.", problems };
+      }
+      const unsafe = lintStepsSafety(steps.map((code, i) => ({ file: `${i + 1}.jsx`, code })), mutates ?? true);
+      if (unsafe.length > 0) {
+        return { ok: false, error: "unsafe_jsx", message: "Steps call members the safety lint refuses (a guard rail, not a sandbox). Nothing was saved.", problems: unsafe };
       }
 
       let root: string;
@@ -260,6 +279,7 @@ export const skillsTools: ToolDefinition<any>[] = [
       "Run an AE skill: its numbered steps run in order in one evalScript, so a writing skill is a single undo step (Edit > Undo takes it all back). " +
       "Writing skills need `expect` (guarded like every write, with an auto checkpoint and a before/after receipt of expect.comp_id read back separately). " +
       "Pass `expect` unless you have read the steps and they only read: with `expect` the skill always runs guarded, even if its SKILL.md says it only reads. " +
+      "The steps pass the same best-effort safety lint as ae_run_jsx at run time (a guard rail, not a sandbox); a saved skill that now fails it is refused with the list, and needs editing. " +
       "Pass what varies in `args`; read the skill first with ae_skill_list { name } to see its instructions. Each step's return value comes back in `results`. " +
       "If a step fails, the error names the step and line; steps before it have already run inside the undo group. " +
       AGENT_SAFETY_GUIDANCE,
@@ -277,6 +297,11 @@ export const skillsTools: ToolDefinition<any>[] = [
       const problems = lintSteps(skill.steps);
       if (problems.length > 0) {
         return { ok: false, error: "not_es3", message: "The skill's steps use syntax ExtendScript (ES3) can't run. Nothing ran.", problems };
+      }
+      // A skill that says it only reads still runs guarded when the caller gives expect.
+      const unsafe = lintStepsSafety(skill.steps, skill.mutates || args.expect !== undefined);
+      if (unsafe.length > 0) {
+        return { ok: false, error: "unsafe_jsx", message: `The skill's steps call members the safety lint refuses (a guard rail, not a sandbox). Nothing ran. Edit the skill (ae_skill_save with overwrite).`, problems: unsafe };
       }
       const label = `Chroma AE MCP: skill ${skill.name}`;
       // A skill that says it only reads still runs guarded when the caller gives expect.

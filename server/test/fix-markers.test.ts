@@ -22,7 +22,7 @@ import {
 } from "../src/tools/ext/markers.js";
 import { zodToJsonSchema } from "../src/schema.js";
 import { parseTranscript, transcriptCues } from "../src/transcript.js";
-import { FakeProject, GUARD, loadHost, type FakeProperty } from "./support/fake-ae.js";
+import { FakeProject, GUARD, loadHost, MarkerValue, type FakeProperty } from "./support/fake-ae.js";
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -290,5 +290,193 @@ describe("expect schema description keeps the guard wording", () => {
       expect(desc).toContain("Target guard verified before any mutation runs");
       expect(desc).toContain("Required unless dry_run.");
     }
+  });
+});
+
+// ---------- editMarkers and the AE 16.0 marker fields ----------
+
+/** The MarkerValue members this fake lacks (AE 16.0+); returns a function that takes them away again. */
+function modernMarkers() {
+  const proto = MarkerValue.prototype as any;
+  const store = new WeakMap<object, Record<string, string>>();
+  const added: Record<string, unknown> = { frameTarget: "", eventCuePoint: false, protectedRegion: false };
+  Object.assign(proto, added);
+  proto.getParameters = function () {
+    return { ...(store.get(this) ?? {}) };
+  };
+  proto.setParameters = function (p: Record<string, string>) {
+    store.set(this, { ...p });
+  };
+  return () => {
+    for (const k of [...Object.keys(added), "getParameters", "setParameters"]) delete proto[k];
+  };
+}
+
+describe("editMarkers on the host", () => {
+  let restore: (() => void) | undefined;
+  afterEach(() => {
+    restore?.();
+    restore = undefined;
+  });
+
+  function setup(modern = true) {
+    if (modern) restore = modernMarkers();
+    const project = new FakeProject();
+    const comp = project.addComp("Main", 640, 360, 10);
+    comp.frameRate = 25;
+    const { A, undo } = loadHost(project, ["layers.jsx", "markers.jsx"]);
+    return { project, comp, A, undo, prop: comp.markerProperty as FakeProperty };
+  }
+  const full = {
+    time: 1,
+    comment: "hello",
+    duration: 0.5,
+    label: 3,
+    chapter: "Ch 1",
+    url: "https://example.com",
+    frame_target: "_blank",
+    cue_point_name: "cp",
+    event_cue_point: true,
+    protected_region: true,
+    params: { a: "1", b: "two" },
+  };
+  const json = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+  it("adds the new marker fields and lists them back in snake_case", () => {
+    const { comp, A } = setup();
+    const r = json(A.addMarkers({ comp_id: comp.id, markers: [full, { time: 5, comment: "plain" }], expect: GUARD }));
+    expect(r.placed[0]).toMatchObject({ protected_region: true, frame_target: "_blank", cue_point_name: "cp", event_cue_point: true, params: { a: "1", b: "two" } });
+    const l = json(A.listMarkers({ comp_id: comp.id }));
+    expect(l.markers[0]).toMatchObject({ comment: "hello", chapter: "Ch 1", frame_target: "_blank", cue_point_name: "cp", event_cue_point: true, protected_region: true, params: { a: "1", b: "two" } });
+    // The older camelCase fields stay.
+    expect(l.markers[0]).toMatchObject({ cuePointName: "cp", protectedRegion: true });
+    expect(l.markers[1]).toEqual({ index: 2, time: 5, duration: 0, comment: "plain", label: 0 });
+  });
+
+  it("refuses a protected region on a layer marker, and a field this AE lacks, before placing anything", () => {
+    const { comp, A, prop } = setup();
+    A.createLayer({ comp_id: comp.id, type: "solid", name: "VO", expect: GUARD });
+    expect(() => A.addMarkers({ comp_id: comp.id, layer: { name: "VO" }, markers: [{ time: 1, protected_region: true }], expect: GUARD })).toThrow(/composition markers only/);
+    expect(() => A.addMarkers({ comp_id: comp.id, markers: [{ time: 1 }, { time: 2, params: { a: { x: 1 } } }], expect: GUARD })).toThrow(/params\.a/);
+    expect(prop.numKeys).toBe(0);
+    restore?.();
+    restore = undefined;
+    expect(() => A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, protected_region: true }], expect: GUARD })).toThrow(/no MarkerValue\.protectedRegion/);
+    expect(() => A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, params: { a: "1" } }], expect: GUARD })).toThrow(/setParameters/);
+    // Without the new fields the old call still works.
+    expect(json(A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, comment: "ok" }], expect: GUARD })).placed).toHaveLength(1);
+  });
+
+  it("changes one field and keeps every other, in place", () => {
+    const { comp, A, undo } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [full, { time: 5, comment: "other" }], expect: GUARD });
+    const begun = undo.begun;
+    const r = json(A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, set: { comment: "changed" } }], expect: GUARD }));
+    expect(undo.begun).toBe(begun + 1);
+    expect(r.edits[0]).toMatchObject({ index: 1, from: 1, to: 1, moved: false });
+    expect(r.edits[0].fields).toMatchObject({
+      comment: "changed",
+      duration: 0.5,
+      label: 3,
+      chapter: "Ch 1",
+      url: "https://example.com",
+      frame_target: "_blank",
+      cue_point_name: "cp",
+      event_cue_point: true,
+      protected_region: true,
+      params: { a: "1", b: "two" },
+    });
+    const l = json(A.listMarkers({ comp_id: comp.id }));
+    expect(l.numMarkers).toBe(2);
+    expect(l.markers[0]).toMatchObject({ comment: "changed", duration: 0.5, label: 3, chapter: "Ch 1", protected_region: true, params: { a: "1", b: "two" } });
+    expect(l.markers[1].comment).toBe("other");
+  });
+
+  it("keeps every cue point parameter of a marker it edits, past 50 entries and 2000 characters", () => {
+    const { comp, A, prop } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, comment: "cp" }, { time: 5, comment: "other" }], expect: GUARD });
+    const params: Record<string, string> = {};
+    for (let i = 0; i < 60; i++) params["k" + (i < 10 ? "0" : "") + i] = "v" + i;
+    params.long = "x".repeat(3000);
+    (prop as any).keyValue(1).setParameters(params);
+    A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, set: { comment: "changed" } }], expect: GUARD });
+    const kept = (prop as any).keyValue(1).getParameters();
+    expect(Object.keys(kept)).toHaveLength(61);
+    expect(kept.long).toHaveLength(3000);
+    A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 2 }], expect: GUARD });
+    const moved = (prop as any).keyValue(1).getParameters();
+    expect(Object.keys(moved)).toHaveLength(61);
+    expect(moved.long).toHaveLength(3000);
+  });
+
+  it("moves a marker with every field, by index and by time, and the old time is empty", () => {
+    const { comp, A } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [full, { time: 5, comment: "other" }, { time: 8, comment: "last" }], expect: GUARD });
+    const r = json(A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 6 }, { time: 8, move_to: 2, set: { label: 7 } }], expect: GUARD }));
+    expect(r.edits.map((e: { from: number; to: number; moved: boolean }) => [e.from, e.to, e.moved])).toEqual([
+      [1, 6, true],
+      [8, 2, true],
+    ]);
+    const l = json(A.listMarkers({ comp_id: comp.id }));
+    expect(l.markers.map((m: { time: number; comment: string }) => [m.time, m.comment])).toEqual([
+      [2, "last"],
+      [5, "other"],
+      [6, "hello"],
+    ]);
+    expect(l.markers[2]).toMatchObject({ duration: 0.5, label: 3, chapter: "Ch 1", url: "https://example.com", frame_target: "_blank", protected_region: true, params: { a: "1", b: "two" } });
+    expect(l.markers[0].label).toBe(7);
+  });
+
+  it("lets two markers swap places, and refuses a move onto a marker that stays", () => {
+    const { comp, A } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, comment: "a" }, { time: 2, comment: "b" }], expect: GUARD });
+    expect(() => A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 2 }], expect: GUARD })).toThrow(/Two markers would end up/);
+    A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 2 }, { index: 2, move_to: 1 }], expect: GUARD });
+    expect(json(A.listMarkers({ comp_id: comp.id })).markers.map((m: { comment: string }) => m.comment)).toEqual(["b", "a"]);
+  });
+
+  it("plans in a dry run without a guard or an undo group, and returns no_op for nothing to do", () => {
+    const { comp, A, undo, prop } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, comment: "a" }], expect: GUARD });
+    const begun = undo.begun;
+    const plan = json(A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 4 }], dry_run: true }));
+    expect(plan).toMatchObject({ dry_run: true, changed: true, edits: [{ index: 1, from: 1, to: 4, moved: true }] });
+    expect(prop.keyTime(1)).toBe(1);
+    const same = json(A.editMarkers({ comp_id: comp.id, edits: [{ index: 1, move_to: 1 }], expect: GUARD }));
+    expect(same.no_op).toBe(true);
+    expect(undo.begun).toBe(begun);
+  });
+
+  it("validates everything before the undo group", () => {
+    const { comp, A, undo, prop } = setup();
+    A.addMarkers({ comp_id: comp.id, markers: [{ time: 1, comment: "a" }, { time: 2, comment: "b" }], expect: GUARD });
+    const begun = undo.begun;
+    const e = (edits: unknown[], extra: object = {}) => () => A.editMarkers({ comp_id: comp.id, edits, expect: GUARD, ...extra });
+    expect(e([{ index: 3, set: { comment: "x" } }])).toThrow(/out of range/);
+    expect(e([{ set: { comment: "x" } }])).toThrow(/index or time/);
+    expect(e([{ index: 1, time: 1, set: { comment: "x" } }])).toThrow(/index or time/);
+    expect(e([{ time: 1.5, set: { comment: "x" } }])).toThrow(/no marker at/);
+    expect(e([{ index: 1 }])).toThrow(/nothing to change/);
+    expect(e([{ index: 1, set: { comment: "x" } }, { index: 1, move_to: 5 }])).toThrow(/edited twice/);
+    expect(e([{ index: 1, set: { duration: -1 } }])).toThrow(/bad duration/);
+    expect(e([{ index: 1, set: { label: 20 } }])).toThrow(/label/);
+    expect(e([{ index: 1, move_to: 99999 }])).toThrow(/AE can't use/);
+    expect(e([{ index: 1, set: { comment: "x" } }], { expect: { project_path: "C:/other.aep" } })).toThrow(/Target guard refused/);
+    expect(e([])).toThrow(/No edits/);
+    expect(prop.numKeys).toBe(2);
+    expect(undo.begun).toBe(begun);
+  });
+
+  it("refuses a protected region on a layer's markers and reads layer times with relative_to", () => {
+    const { comp, A } = setup();
+    A.createLayer({ comp_id: comp.id, type: "solid", name: "VO", expect: GUARD });
+    const vo = comp.layer("VO")!;
+    vo.startTime = 2;
+    vo.stretch = 50;
+    A.addMarkers({ comp_id: comp.id, layer: { name: "VO" }, markers: [{ time: 1, comment: "hi", duration: 2 }], relative_to: "layer", expect: GUARD });
+    expect(() => A.editMarkers({ comp_id: comp.id, layer: { name: "VO" }, edits: [{ index: 1, set: { protected_region: true } }], expect: GUARD })).toThrow(/composition markers only/);
+    const r = json(A.editMarkers({ comp_id: comp.id, layer: { name: "VO" }, relative_to: "layer", edits: [{ time: 1, move_to: 3, set: { duration: 4 } }], expect: GUARD }));
+    expect(r.edits[0]).toMatchObject({ from: 2.5, to: 3.5, moved: true });
+    expect(r.edits[0].fields.duration).toBe(2);
   });
 });

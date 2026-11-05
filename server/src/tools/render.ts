@@ -15,6 +15,7 @@ import {
 import { readAfterWrite } from "./read-back.js";
 import { writeScaledCopy } from "./ext/png-utils.js";
 import { autoCheckpoint, verifyTargetGuard } from "./mutate.js";
+import { preflightRefusal, runPreflightGate } from "./ext/preflight.js";
 
 export const AeSnapshotFrameSchema = z.object({
   comp_id: z.number().int().describe("The CompItem ID to snapshot."),
@@ -56,6 +57,12 @@ export const AeRenderQueueAddSchema = z.object({
     .string()
     .optional()
     .describe("Optional Render Settings template name."),
+  preflight: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run the ae_preflight delivery check on this comp (and the comps it nests) first, and refuse to add it to the queue if it finds a blocker (missing footage or fonts, expressions in error). A missing output folder is only a warning and does not refuse. Nothing is changed when it refuses. Default false."
+    ),
   expect: ExpectSchema,
 });
 
@@ -268,7 +275,7 @@ export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_add",
     description:
-      "Add a composition to the After Effects Render Queue with an output path and optional templates, guarded by `expect`, returning the RQ item index and a before/after receipt. " +
+      "Add a composition to the After Effects Render Queue with an output path and optional templates, guarded by `expect`, returning the RQ item index and a before/after receipt. With preflight: true it first runs the ae_preflight delivery check on the comp and refuses on a blocker. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueAddSchema,
     handler: async (args, ctx) => {
@@ -286,6 +293,15 @@ export const renderTools: ToolDefinition<any>[] = [
             ctx.quarantine.assertClear();
 
             const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+
+            // Read-only, before the checkpoint: a refusal leaves no trace.
+            let preflight: Awaited<ReturnType<typeof runPreflightGate>>["summary"] | undefined;
+            if (args.preflight) {
+              const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId, comp_ids: [args.comp_id], planned_output: args.output_path });
+              if (gate.blocked) return preflightRefusal("ae_render_queue_add", gate.summary);
+              preflight = gate.summary;
+            }
+
             const checkpoint = await autoCheckpoint(ctx, guard, "ae_render_queue_add");
 
             const beforeRq = await ctx.bridge.evalRaw({
@@ -360,6 +376,7 @@ export const renderTools: ToolDefinition<any>[] = [
               index: rqIndex,
               result: addResp.result,
               checkpoint,
+              ...(preflight ? { preflight } : {}),
               receipt,
             };
           }

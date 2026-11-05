@@ -84,13 +84,77 @@ export function alignMismatches(args: z.infer<typeof AeAlignSchema>, afterRaw: u
 
 // ---------- purge ----------
 
-export const AePurgeUnusedSchema = z.object({
-  kinds: z.array(z.enum(["footage", "solid", "placeholder"])).min(1).optional().describe("Which unused items. Default all three."),
-  empty_folders: z.boolean().optional().describe("Also remove folders that are already empty when scanned. Default false. A folder this purge empties stays; run it again to remove that too."),
-  keep: z.array(z.number().int()).max(500).optional().describe("Item ids to leave alone."),
-  apply: z.boolean().optional().describe("Remove them. Default false: list what would go. Needs expect."),
-  expect: ExpectSchema.optional(),
-});
+export const AePurgeUnusedSchema = z
+  .object({
+    kinds: z.array(z.enum(["footage", "solid", "placeholder"])).min(1).optional().describe("Which unused items. Default all three."),
+    empty_folders: z.boolean().optional().describe("Also remove folders that are already empty when scanned. Default false. A folder this purge empties stays; run it again to remove that too."),
+    keep: z.array(z.number().int()).max(500).optional().describe("Item ids to leave alone."),
+    consolidate: z
+      .boolean()
+      .optional()
+      .describe(
+        "Instead of removing unused items: merge duplicate footage with Project.consolidateFootage. The dry run lists the groups of footage items that share a file and an interpretation; " +
+          "apply runs consolidateFootage (project-wide) and reports the count After Effects returns next to that plan, because its own duplicate rule is undocumented (it may also merge items this list does not show). Cannot be combined with kinds, empty_folders, keep or reduce_to_comp_ids."
+      ),
+    reduce_to_comp_ids: z
+      .array(z.number().int())
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        "Instead of removing unused items: reduce the LIVE project to these comps and everything they use (Project.reduceProject). The dry run lists every comp, footage item and solid not reached through layers and nested comps; " +
+          "apply removes them (expressions that reference other items by name, and the render queue entries of removed comps, are not followed). Cannot be combined with kinds, empty_folders, keep or consolidate."
+      ),
+    apply: z.boolean().optional().describe("Remove / merge them. Default false: list what would go. Needs expect."),
+    expect: ExpectSchema.optional(),
+  })
+  .refine((v) => !(v.consolidate === true && v.reduce_to_comp_ids !== undefined), { message: "Give consolidate or reduce_to_comp_ids, not both." })
+  .refine((v) => (v.consolidate !== true && v.reduce_to_comp_ids === undefined) || (v.kinds === undefined && v.empty_folders === undefined && v.keep === undefined), {
+    message: "consolidate and reduce_to_comp_ids do not take kinds, empty_folders or keep.",
+  });
+
+interface ConsolidatePlan {
+  numItems: number;
+  footage_with_file: number;
+  group_total: number;
+  removable: number;
+  groups: Array<{ file: string | null; count: number; items: Array<{ id: number; name: string; used_in: number }>; items_truncated?: boolean }>;
+  truncated?: boolean;
+}
+
+interface ReducePlan {
+  numItems: number;
+  keep_comps: Array<{ id: number; name: string }>;
+  kept_items: number;
+  remove: Array<{ id: number; name: string; kind: string }>;
+  remove_total: number;
+  truncated?: boolean;
+  folders_total: number;
+}
+
+export const CONSOLIDATE_NOTE =
+  "Groups are footage items with the same file and interpretation. Which item After Effects keeps, and whether consolidateFootage also merges items outside these groups, is its own undocumented rule; the apply reports its returned count next to this plan.";
+export const REDUCE_NOTE =
+  "Reached means used by a layer of a kept comp or of a comp nested in it. Expressions that look an item up by name (comp(\"X\"), footage(\"X\")) are not followed, and folders are left to After Effects. Removed comps take their render-queue items with them.";
+
+export function consolidateMismatches(before: ConsolidatePlan | null, after: ConsolidatePlan | null, written: Record<string, unknown>): ReceiptMismatch[] {
+  const m: ReceiptMismatch[] = [];
+  if (!after || written.no_op === true) return m;
+  // Groups left over are not a mismatch: the plan's duplicate key is a guess at AE's undocumented rule (Interpret Footage settings may keep copies apart).
+  if (typeof written.removed === "number" && before) {
+    expectThat(m, before.numItems - written.removed === after.numItems, "numItems", before.numItems - written.removed, after.numItems, "The item count does not match the number consolidateFootage returned");
+  }
+  return m;
+}
+
+export function reduceMismatches(ids: number[], after: ReducePlan | null, written: Record<string, unknown>): ReceiptMismatch[] {
+  const m: ReceiptMismatch[] = [];
+  if (!after || written.no_op === true) return m;
+  expectThat(m, after.remove_total === 0, "unreached_items", 0, after.remove_total, `${after.remove_total} item${after.remove_total === 1 ? " is" : "s are"} still in the project that the kept comps do not reach`);
+  const kept = new Set(after.keep_comps.map((c) => c.id));
+  for (const id of ids) expectThat(m, kept.has(id), `keep_comps[${id}]`, "present", "missing", `Comp ${id} is no longer in the project`);
+  return m;
+}
 
 interface Unused {
   items: Array<{ id: number; name: string; kind: string; file: string | null }>;
@@ -106,6 +170,12 @@ export const AeExportMogrtSchema = z.object({
   comp_id: z.number().int().describe("A comp with Essential Graphics controllers."),
   path: z.string().min(1).optional().describe("Absolute .mogrt path. Default: AE's own Essential Graphics folder."),
   overwrite: z.boolean().optional().describe("Replace an existing file. Default false."),
+  allow_font_dialog: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default false: refuse when a text layer uses a font that is not from Adobe Fonts (or the font check could not cover everything), because AE then opens a modal \"fonts were not synced from Adobe\" dialog during the export and blocks every call until someone answers it. Pass true only when the user is at the machine to answer that dialog."
+    ),
   expect: ExpectSchema,
 });
 
@@ -247,6 +317,83 @@ export function cleanBriefStyle(brief: { brand_colors?: unknown; fonts?: unknown
 
 const SAFE_AREA_MAX = 50;
 
+// ---------- purge modes ----------
+
+async function consolidateFootageMode(args: z.infer<typeof AePurgeUnusedSchema>, ctx: ToolContext) {
+  const read = { host: "exploreConsolidatePlan", args: {} };
+  const plan = (await ctx.bridge.callHost<ConsolidatePlan>(read.host, read.args, { label: "ae_purge_unused (duplicate footage)", mutates: false, toolName: "ae_purge_unused" })).result;
+  if (!args.apply || plan.group_total === 0) {
+    return {
+      ok: true,
+      dry_run: !args.apply,
+      mode: "consolidate",
+      group_count: plan.group_total,
+      removable_estimate: plan.removable,
+      ...(plan.truncated ? { truncated: true, note: "Only the first 500 groups are listed." } : {}),
+      groups: plan.groups,
+      rule_note: CONSOLIDATE_NOTE,
+    };
+  }
+  if (!args.expect) return { ok: false, error: "bad_args", message: "apply needs expect." };
+  return runGuardedWrite(ctx, {
+    toolName: "ae_purge_unused",
+    label: `ae_purge_unused(consolidate ${plan.group_total} group${plan.group_total === 1 ? "" : "s"})`,
+    expect: args.expect,
+    read: () => read,
+    write: { host: "exploreConsolidateFootage", args: { label: "Consolidate duplicate footage" } },
+    check: (before, after, w) => consolidateMismatches(before as ConsolidatePlan | null, after as ConsolidatePlan | null, w),
+    present: (before, after, w) => ({
+      mode: "consolidate",
+      planned: { groups: plan.group_total, removable_estimate: plan.removable },
+      removed: w.removed,
+      items_before: (before as ConsolidatePlan | null)?.numItems,
+      numItems: (after as ConsolidatePlan | null)?.numItems,
+      groups_left: (after as ConsolidatePlan | null)?.group_total,
+      ...(((after as ConsolidatePlan | null)?.group_total ?? 0) > 0 ? { groups_left_note: "Groups left over are not an error: this plan's duplicate key is a guess, and After Effects may keep copies apart (for example by Interpret Footage settings)." } : {}),
+      rule_note: CONSOLIDATE_NOTE,
+      ...(typeof w.removed === "number" && w.removed !== plan.removable ? { count_note: `consolidateFootage reported ${w.removed} removed; the plan expected ${plan.removable}. Its duplicate rule differs from this plan's.` } : {}),
+    }),
+  });
+}
+
+async function reduceProjectMode(args: z.infer<typeof AePurgeUnusedSchema>, ctx: ToolContext) {
+  const ids = args.reduce_to_comp_ids as number[];
+  const read = { host: "exploreReducePlan", args: { comp_ids: ids } };
+  const plan = (await ctx.bridge.callHost<ReducePlan>(read.host, read.args, { label: "ae_purge_unused (reduce plan)", mutates: false, toolName: "ae_purge_unused" })).result;
+  if (!args.apply || plan.remove_total === 0) {
+    return {
+      ok: true,
+      dry_run: !args.apply,
+      mode: "reduce",
+      keep_comps: plan.keep_comps,
+      kept_items: plan.kept_items,
+      remove_count: plan.remove_total,
+      ...(plan.truncated ? { truncated: true, note: "Only the first 500 items to remove are listed." } : {}),
+      remove: plan.remove,
+      folders_total: plan.folders_total,
+      rule_note: REDUCE_NOTE,
+    };
+  }
+  if (!args.expect) return { ok: false, error: "bad_args", message: "apply needs expect." };
+  return runGuardedWrite(ctx, {
+    toolName: "ae_purge_unused",
+    label: `ae_purge_unused(reduce to ${ids.length} comp${ids.length === 1 ? "" : "s"})`,
+    expect: args.expect,
+    read: () => read,
+    write: { host: "exploreReduceProject", args: { comp_ids: ids, label: "Reduce project to comps" } },
+    check: (_before, after, w) => reduceMismatches(ids, after as ReducePlan | null, w),
+    present: (before, after, w) => ({
+      mode: "reduce",
+      planned_removals: plan.remove_total,
+      removed: w.removed,
+      items_before: (before as ReducePlan | null)?.numItems,
+      numItems: (after as ReducePlan | null)?.numItems,
+      rule_note: REDUCE_NOTE,
+      ...(typeof w.removed === "number" && w.removed !== plan.remove_total ? { count_note: `reduceProject reported ${w.removed} removed; the plan listed ${plan.remove_total} (folders and other items count differently).` } : {}),
+    }),
+  });
+}
+
 // ---------- tools ----------
 
 export const layoutTools: ToolDefinition<any>[] = [
@@ -279,10 +426,14 @@ export const layoutTools: ToolDefinition<any>[] = [
     name: "ae_purge_unused",
     description:
       "Find project items nothing uses: footage, solids and placeholders in no comp, and optionally empty folders. By default it only lists them; with apply (and expect) it removes them in one undo group, " +
-      "re-checking each is still unused first. Comps are never removed. The read-back (a separate evalScript) checks they are gone. " +
+      "re-checking each is still unused first. In the default mode comps are never removed; reduce_to_comp_ids removes every comp the kept comps do not reach. The read-back (a separate evalScript) checks they are gone. " +
+      "Two other modes, both dry-run first and both after an automatic checkpoint: consolidate (merge duplicate footage, Project.consolidateFootage) and reduce_to_comp_ids " +
+      "(reduce the live project to the chosen comps and what they use, Project.reduceProject). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AePurgeUnusedSchema,
     handler: async (args: z.infer<typeof AePurgeUnusedSchema>, ctx: ToolContext) => {
+      if (args.consolidate === true) return consolidateFootageMode(args, ctx);
+      if (args.reduce_to_comp_ids !== undefined) return reduceProjectMode(args, ctx);
       const read = { host: "unusedItems", args: { kinds: args.kinds, empty_folders: args.empty_folders } };
       const found = (await ctx.bridge.callHost<Unused>(read.host, read.args, { label: "ae_purge_unused (scan)", mutates: false, toolName: "ae_purge_unused" })).result;
       const keep = new Set(args.keep ?? []);
@@ -311,6 +462,7 @@ export const layoutTools: ToolDefinition<any>[] = [
     description:
       "Export a comp's Essential Graphics template as a .mogrt, from the saved project (ae_save first; AE exports what is on disk), to `path` or AE's own Essential Graphics folder. " +
       "Guarded by `expect`; no undo group, since it writes a file, not the project. Dialogs are never suppressed: if AE asks something, the call says so and ae_dialogs shows it. " +
+      "Before exporting it reads the fonts of the comp's text layers (and of comps nested in it, at the current value and at each key, run by run, since a layer's own font is only its first run's; AE 24+ reports whether a font is from Adobe Fonts). A font that is not from Adobe Fonts makes AE open a modal dialog (\"The following fonts were not synced from Adobe ... Click OK to continue. Click Cancel to stop the export\") during the export that blocks the whole queue until a person answers it, so unattended the call refuses and names the fonts; pass allow_font_dialog: true only when the user is at the machine to answer. A font whose origin AE does not report is not refused (the result counts them in fonts_origin_unknown). If the check could not cover everything (more than 500 text layers, 5000 layers, 50 keyframes on one text, 6 levels of nesting, a text with very many font runs), the call refuses too and lists the gaps, unless allow_font_dialog is true; the result carries fonts_scan_complete and fonts_scan_gaps. " +
       "With a path, the file is checked on disk (new, not empty). Pairs with premiere-pro-mcp, which can place the template in a sequence. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeExportMogrtSchema,
@@ -329,9 +481,9 @@ export const layoutTools: ToolDefinition<any>[] = [
           const createdDir = args.path !== undefined ? fs.mkdirSync(path.dirname(args.path), { recursive: true }) : undefined;
           let res;
           try {
-            res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string }>({
+            res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string; fonts_checked?: number; fonts_origin_unknown?: number; fonts_scan_complete?: boolean; fonts_scan_gaps?: string[]; fonts_not_from_adobe?: unknown[] }>({
               id: opId,
-              script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
+              script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, allow_font_dialog: args.allow_font_dialog, expect: args.expect }),
               label: `ae_export_mogrt(${args.comp_id})`,
               mutates: false,
               toolName: "ae_export_mogrt",
@@ -360,6 +512,11 @@ export const layoutTools: ToolDefinition<any>[] = [
             exported: r.exported,
             controllers: r.controllers,
             template_name: r.template_name,
+            fonts_checked: r.fonts_checked,
+            fonts_origin_unknown: r.fonts_origin_unknown,
+            fonts_scan_complete: r.fonts_scan_complete,
+            ...(r.fonts_scan_gaps ? { fonts_scan_gaps: r.fonts_scan_gaps } : {}),
+            ...(r.fonts_not_from_adobe ? { fonts_not_from_adobe: r.fonts_not_from_adobe } : {}),
             file,
             ...(args.path && !verified ? { message: "AE reported an export but the file is missing, empty or old." } : {}),
           };

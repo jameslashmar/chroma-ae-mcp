@@ -5,7 +5,14 @@ import {
   type ToolDefinition,
 } from "./common.js";
 
-export const AeStatusSchema = z.object({});
+export const AeStatusSchema = z.object({
+  detail: z
+    .boolean()
+    .optional()
+    .describe(
+      "Also read what the user is working with and the environment, under `detail`: the active item of any kind, the Project panel selection, the active comp's time and frame, the selected properties (each with a path ae_set_property accepts, and its selected keys), the viewer, tool, build, UI language, GPU, OS, project revision and whether rendering is disabled. Default false: the reply is then unchanged."
+    ),
+});
 
 export const AeGetProjectSchema = z.object({
   folder_id: z
@@ -52,7 +59,7 @@ export const AeGetLayerPropsSchema = z.object({
     .describe("The CompItem ID containing the layer."),
   layer: LayerSelectorSchema,
   path: z
-    .array(z.string())
+    .array(z.union([z.string(), z.number().int().min(1)]))
     .optional()
     .describe(
       "Optional property group path (e.g. ['ADBE Transform Group', 'ADBE Opacity'] or ['Transform', 'Opacity'])."
@@ -65,6 +72,18 @@ export const AeGetLayerPropsSchema = z.object({
     .default(2)
     .optional()
     .describe("Depth of property tree traversal (default: 2)."),
+  meta: z
+    .boolean()
+    .optional()
+    .describe(
+      "Add `meta` to every property: value_type, units, min and max, spatial, can_vary, can_expression, is_modified, separation (is_leader, dimensions_separated, is_follower, followers), and on AE 26 the dropdown items and value_text. Also gives Shape and MarkerValue values as data, and the full TextDocument (every attribute, with `mixed` listing the ones that read as mixed). Default false: payloads stay small."
+    ),
+  shape_values: z
+    .boolean()
+    .optional()
+    .describe(
+      "Give mask/shape path values (vertices, inTangents, outTangents, closed; at most 500 vertices, with the feather point count) and marker values (comment, duration, chapter, url, frameTarget, cuePointName, label, protectedRegion, params) as data instead of '[Shape]' / '[MarkerValue]'. Default false."
+    ),
 });
 
 export const readTools: ToolDefinition<any>[] = [
@@ -72,9 +91,10 @@ export const readTools: ToolDefinition<any>[] = [
     name: "ae_status",
     description:
       "Read panel health (/health), AE version, current project path (or '<unsaved>'), dirty flag, active comp {id, name}, selected layers, and the server quarantine list. " +
+      "With `detail: true` it adds `detail`: the active item of any kind (a footage or folder too), the Project panel selection, the active comp's time and frame and work area, the selected properties as {layer_id, layer_index, path, name, match_name, is_group, selected_keys} (path is the format ae_set_property takes), the viewer, tool, build, UI language, GPU, OS and project revision, plus warnings (rendering disabled makes ae_snapshot_frame, ae_contact_sheet and ae_ui_screenshot show stale or blank frames) and `missing` (members this AE version does not have). Selection can change between this read and a write: act on explicit ids and indexes with `expect`. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeStatusSchema,
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       const health = ctx.bridge.health
         ? await ctx.bridge.health()
         : { ok: true, transport: "panel" as const };
@@ -87,10 +107,25 @@ export const readTools: ToolDefinition<any>[] = [
           toolName: "ae_status",
         }
       );
+      let detail: Record<string, unknown> | undefined;
+      if (args.detail === true) {
+        // A second, separate read; the base reply must not depend on it.
+        try {
+          const d = await ctx.bridge.callHost<Record<string, unknown>>(
+            "statusDetail",
+            {},
+            { label: "ae_status (detail)", mutates: false, toolName: "ae_status" }
+          );
+          detail = d.result ?? {};
+        } catch (err) {
+          detail = { error: err instanceof Error ? err.message : String(err) };
+        }
+      }
       return {
         health,
         ...(hostStatus.result ?? {}),
         quarantine: ctx.quarantine.list(),
+        ...(detail ? { detail } : {}),
       };
     },
   },
@@ -150,6 +185,9 @@ export const readTools: ToolDefinition<any>[] = [
     name: "ae_get_layer_props",
     description:
       "Read a layer's property tree with matchName, name, value (serialised), numKeys, expression, and expressionEnabled. " +
+      "`meta: true` adds what each property accepts (value type, units, min/max, spatial, separation, dropdown items), full text documents and path/marker values; `shape_values: true` gives just the path and marker values. " +
+      "Mask and shape path keys are written with ae_set_property as { vertices, inTangents?, outTangents?, closed? } (ae_path_write keeps feather points and can change the vertex count). " +
+      "Text path options live under 'ADBE Text Path Options' (Path is a mask-index dropdown, 0 = none, the mask must be on the same text layer; also Reverse Path, Perpendicular To Path, Force Alignment, First Margin, Last Margin): check the exact child match names with meta before writing. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeGetLayerPropsSchema,
     handler: async (args, ctx) => {
@@ -161,6 +199,8 @@ export const readTools: ToolDefinition<any>[] = [
           layer: args.layer,
           path: args.path,
           depth,
+          meta: args.meta,
+          shape_values: args.shape_values,
         },
         {
           label: `ae_get_layer_props(${args.comp_id})`,

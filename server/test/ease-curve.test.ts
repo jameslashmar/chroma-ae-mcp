@@ -184,3 +184,115 @@ describe("ae_set_keyframe_ease schema", () => {
     expect(AeSetKeyframeEaseSchema.safeParse({ ...base, ease: { curve: [0.2, 0, 0] } }).success).toBe(false);
   });
 });
+
+describe("ae_set_keyframe_ease with a curve and per-key settings", () => {
+  async function run(extra: Record<string, unknown>, afterKeys: Array<Record<string, unknown>>) {
+    const before = { isSpatial: false, keyframes: [key(1, 0.5, 100, { selected: true }), key(2, 1.5, 0, { selected: true }), key(3, 2.5, 5, { selected: false })] };
+    const after = {
+      isSpatial: false,
+      keyframes: [
+        key(1, 0.5, 100, { outInterp: "bezier", easeOut: [{ speed: -40, influence: 25 }], ...(afterKeys[0] ?? {}) }),
+        key(2, 1.5, 0, { inInterp: "bezier", easeIn: [{ speed: 0, influence: 75 }], ...(afterKeys[1] ?? {}) }),
+        key(3, 2.5, 5),
+      ],
+    };
+    const reads = [before, after];
+    const scripts: string[] = [];
+    const queue = new SingleWriterQueue();
+    const quarantine = new QuarantineStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "chroma-curve-x-")), "q.json"));
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        scripts.push(script);
+        if (script.startsWith("__chromaAe.checkGuard(")) {
+          return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: 1, comp_is_valid: true }, durationMs: 1 };
+        }
+        if (script.startsWith("__chromaAe.getKeyframeEase(")) return { ok: true, result: reads.shift(), durationMs: 1 };
+        if (script.startsWith("__chromaAe.setKeyframeEaseSides(")) {
+          return { ok: true, result: { keysUpdated: [1, 2], mode: "curve", extras: { applied: ["label"], roving: [], roving_failed: [] } }, durationMs: 1 };
+        }
+        throw new Error(`Unexpected script: ${script}`);
+      },
+      queue,
+      quarantine,
+    });
+    const ctx: ToolContext = { bridge: host, queue, quarantine };
+    const tool = animateTools.find((t) => t.name === "ae_set_keyframe_ease")!;
+    const out: any = await tool.handler(
+      AeSetKeyframeEaseSchema.parse({
+        comp_id: 1,
+        layer: { index: 1 },
+        path: ["ADBE Transform Group", "ADBE Opacity"],
+        keys: "selected",
+        ease: { curve: [0.25, 0.1, 0.25, 1] },
+        ...extra,
+        expect: { project_path: "<unsaved>" },
+      }),
+      ctx
+    );
+    return { out, scripts };
+  }
+
+  it("sends the extras with the sides, curves only the selected keys, and verifies the extras", async () => {
+    const { out, scripts } = await run({ label: 4 }, [{ label: 4 }, { label: 4 }]);
+    const write = scripts.find((s) => s.startsWith("__chromaAe.setKeyframeEaseSides("))!;
+    expect(write).toContain('"extras":{"label":4}');
+    expect(out.segments).toEqual([[1, 2]]);
+    expect(out.keys_resolved).toEqual([1, 2]);
+    expect(out.receipt.matches).toBe(true);
+  });
+
+  it("flags an extra that did not take on a key the curve touched", async () => {
+    const { out } = await run({ label: 4 }, [{ label: 4 }, { label: 0 }]);
+    expect(out.receipt.matches).toBe(false);
+    expect(out.receipt.mismatches.map((m: any) => m.path)).toEqual(["keyframes[2].label"]);
+  });
+});
+
+describe("ae_set_keyframe_ease with a curve and temporal continuity", () => {
+  it("does not flag the ease AE recomputed when temporal_continuous is on", async () => {
+    // The shared run() helper lives in the describe above; this one reads back eases that differ from the curve.
+    const before = { isSpatial: false, keyframes: [key(1, 0.5, 100, { selected: true }), key(2, 1.5, 0, { selected: true })] };
+    const recomputed = [{ speed: -3, influence: 60 }];
+    const after = {
+      isSpatial: false,
+      keyframes: [
+        key(1, 0.5, 100, { outInterp: "bezier", easeOut: recomputed, temporalContinuous: true }),
+        key(2, 1.5, 0, { inInterp: "bezier", easeIn: recomputed, temporalContinuous: true }),
+      ],
+    };
+    const reads = [before, after];
+    const queue = new SingleWriterQueue();
+    const quarantine = new QuarantineStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "chroma-curve-tc-")), "q.json"));
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        if (script.startsWith("__chromaAe.checkGuard(")) {
+          return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: 1, comp_is_valid: true }, durationMs: 1 };
+        }
+        if (script.startsWith("__chromaAe.getKeyframeEase(")) return { ok: true, result: reads.shift(), durationMs: 1 };
+        if (script.startsWith("__chromaAe.setKeyframeEaseSides(")) {
+          return { ok: true, result: { keysUpdated: [1, 2], mode: "curve", extras: { applied: ["temporal_continuous"], roving: [], roving_failed: [] } }, durationMs: 1 };
+        }
+        throw new Error(`Unexpected script: ${script}`);
+      },
+      queue,
+      quarantine,
+    });
+    const ctx: ToolContext = { bridge: host, queue, quarantine };
+    const tool = animateTools.find((t) => t.name === "ae_set_keyframe_ease")!;
+    const out: any = await tool.handler(
+      AeSetKeyframeEaseSchema.parse({
+        comp_id: 1,
+        layer: { index: 1 },
+        path: ["ADBE Transform Group", "ADBE Opacity"],
+        keys: "selected",
+        ease: { curve: [0.25, 0.1, 0.25, 1] },
+        temporal_continuous: true,
+        expect: { project_path: "<unsaved>" },
+      }),
+      ctx
+    );
+    expect(out.receipt.matches).toBe(true);
+    expect(out.receipt.mismatches).toEqual([]);
+    expect(out.notes.join(" ")).toContain("not checked");
+  });
+});

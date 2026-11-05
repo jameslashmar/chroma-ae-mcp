@@ -23,7 +23,14 @@ import { getDefaultAerenderRegistry, type AerenderJobRecord } from "./aerender.j
 export const AeVerifyRenderSchema = z
   .object({
     path: z.string().min(1).optional().describe("Absolute path of the render: a movie, or one frame of an image sequence."),
-    job_id: z.string().min(1).optional().describe("Or an ae_aerender_start job: its output, comp and frame range."),
+    job_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Or an ae_aerender_start job: its output, comp and frame range. For a job started with rq_index every output module's file is checked first (exists, not empty, written after the job started) and the one picked by output_index is imported and compared with the item's comp (by its stored comp id); the frame range is the item's time span read at launch, so a render-settings frame rate override can show as a frames mismatch. For a whole_queue job give comp_id and output_index of the output to compare."
+      ),
+    output_index: z.number().int().min(1).max(500).optional().describe("With a job_id that has several outputs (rq_index / whole_queue): which output_paths entry to import and compare, 1-based. Default 1. Every entry is still checked for existence."),
     comp_id: z.number().int().optional().describe("The comp it should match. Default: the job's comp."),
     sequence: z.boolean().optional().describe("Import as an image sequence. Default: yes when other frames with the same numbering sit beside it (name.0001.png, name.0002.png), or for an aerender [####] output."),
     keep_imported: z.boolean().optional().describe("Leave the imported render in the project. Default false: it is removed again."),
@@ -135,6 +142,37 @@ export function renderChecks(r: RenderInfo, c: CompInfo, jobFrames?: number, seq
   return out;
 }
 
+export interface JobOutputCheck {
+  path: string;
+  file: string | null;
+  exists: boolean;
+  size_bytes: number;
+  fresh: boolean;
+  problem?: string;
+}
+
+/** Every output file of an rq_index / whole_queue job: it exists (the first frame of a sequence), is not empty and was written since the job started. */
+export function checkJobOutputs(paths: string[], startedAt: string | undefined): { ok: boolean; outputs: JobOutputCheck[] } {
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+  const outputs: JobOutputCheck[] = paths.slice(0, 500).map((p) => {
+    const file = firstFrameOf(p);
+    if (!file) return { path: p, file: null, exists: false, size_bytes: 0, fresh: false, problem: "the output does not exist" };
+    let size = 0;
+    let mtime = 0;
+    try {
+      const st = fs.statSync(file);
+      size = st.size;
+      mtime = st.mtimeMs;
+    } catch {
+      return { path: p, file, exists: false, size_bytes: 0, fresh: false, problem: "the output could not be read" };
+    }
+    const fresh = Number.isNaN(startedMs) || mtime >= startedMs - 2000;
+    const problem = size === 0 ? "the output is empty" : !fresh ? "the output is older than the job's start (aerender did not write it)" : undefined;
+    return { path: p, file, exists: true, size_bytes: size, fresh, ...(problem ? { problem } : {}) };
+  });
+  return { ok: outputs.length > 0 && outputs.every((o) => o.problem === undefined), outputs };
+}
+
 export interface VerifyOptions {
   getJob?: (id: string) => AerenderJobRecord | undefined;
 }
@@ -146,7 +184,7 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
       name: "ae_verify_render",
       description:
         "Check a finished render by importing it back into After Effects: its frame count, frame rate, size and audio are read by AE (any format AE can open, image sequences too) and compared with the comp, " +
-        "or with the aerender job's frame range when given a job_id. The imported item is removed again unless keep_imported; the import and removal are two undo steps and mark the project changed. " +
+        "or with the aerender job's frame range when given a job_id. A job started with ae_aerender_start rq_index / whole_queue has several output files: all of them are checked for existence before the import, and output_index picks the one imported and compared (job_outputs lists them all). The imported item is removed again unless keep_imported; the import and removal are two undo steps and mark the project changed. " +
         "Guarded by `expect`, with an automatic checkpoint. No outside tools (no ffprobe). " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeVerifyRenderSchema,
@@ -155,20 +193,49 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
         let compName: string | undefined;
         let jobFrames: number | undefined;
         let jobIsSequence = false;
+        let jobCompId: number | undefined;
+        let jobOutputs: JobOutputCheck[] | undefined;
+        let renderQueue: { rq_index?: number; item_comp_id?: number; whole_queue?: boolean } | undefined;
         if (args.job_id) {
           const job = getJob(args.job_id);
           if (!job) return { ok: false, error: "unknown_job", message: `No aerender job ${args.job_id}` };
           if (job.state !== "succeeded") return { ok: false, error: "not_finished", message: `The job is ${job.state}${job.error ? `: ${job.error}` : ""}.` };
-          file = firstFrameOf(job.output_path) ?? undefined;
-          if (!file) return { ok: false, error: "no_output", message: `No render found at ${job.output_path}` };
-          compName = job.comp_name;
-          jobIsSequence = /\[#+\]/.test(job.output_path);
+          let outputPath = job.output_path;
+          if (job.output_paths && job.output_paths.length > 0) {
+            // A Render Queue job: every output module's file counts, not only the first.
+            const checked = checkJobOutputs(job.output_paths, job.started_at);
+            jobOutputs = checked.outputs;
+            if (!checked.ok) {
+              return {
+                ok: false,
+                error: "output_missing",
+                message: `${checked.outputs.filter((o) => o.problem).length} of the job's ${checked.outputs.length} output(s) are missing, empty or stale: ${checked.outputs
+                  .filter((o) => o.problem)
+                  .slice(0, 5)
+                  .map((o) => `${o.path} (${o.problem})`)
+                  .join("; ")}`,
+                outputs: checked.outputs,
+              };
+            }
+            const pick = args.output_index ?? 1;
+            if (pick > job.output_paths.length) return { ok: false, error: "bad_args", message: `output_index ${pick} is past the job's ${job.output_paths.length} output(s).` };
+            outputPath = job.output_paths[pick - 1];
+            jobCompId = job.comp_id ?? job.item_comp_id;
+            renderQueue = { ...(job.rq_index !== undefined ? { rq_index: job.rq_index, item_comp_id: job.item_comp_id } : {}), ...(job.whole_queue ? { whole_queue: true } : {}) };
+          }
+          file = firstFrameOf(outputPath) ?? undefined;
+          if (!file) return { ok: false, error: "no_output", message: `No render found at ${outputPath}` };
+          // A whole-queue job renders several comps: its "<render queue>" name is no comp to look up.
+          compName = job.whole_queue ? undefined : job.comp_name;
+          jobIsSequence = /\[#+\]/.test(outputPath);
           if (job.start_frame !== undefined && job.end_frame !== undefined) jobFrames = job.end_frame - job.start_frame + 1;
         }
         if (!file || !path.isAbsolute(file) || !fs.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
         const stat = fs.statSync(file);
         if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
-        if (args.comp_id === undefined && !compName) return { ok: false, error: "bad_args", message: "Give comp_id to compare with." };
+        if (args.comp_id === undefined && jobCompId === undefined && !compName) {
+          return { ok: false, error: "bad_args", message: "Give comp_id to compare with (a whole-queue job renders several comps)." };
+        }
         // Only a still can be an image sequence; a movie keeps its own rate.
         const sequence = (args.sequence ?? (jobIsSequence || looksLikeSequence(file))) && STILL.test(file);
         const jsxPath = file.replace(/\\/g, "/");
@@ -183,7 +250,7 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
             const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
             const guard = await verifyTargetGuard(ctx, expect, opId);
             const checkpoint = await autoCheckpoint(ctx, guard, "ae_verify_render");
-            const comp = (await call<CompInfo>("comp", "verifyCompInfo", { comp_id: args.comp_id, comp_name: compName }, false)).result;
+            const comp = (await call<CompInfo>("comp", "verifyCompInfo", { comp_id: args.comp_id ?? jobCompId, comp_name: compName }, false)).result;
             const imported = (await call<{ item_id: number }>("import", "verifyImport", { path: jsxPath, sequence, fps: sequence ? comp.fps : undefined, expect, label: "Verify render: import" }, true)).result;
             // The render is in the project from here on: nothing below throws. Failures are
             // reported with what happened to the imported item, so a caller never imports twice.
@@ -250,6 +317,7 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
               render,
               comp: { comp_id: comp.comp_id, name: comp.name },
               checks,
+              ...(jobOutputs ? { job_outputs: jobOutputs, ...(renderQueue ? { render_queue: renderQueue } : {}) } : {}),
               imported_item: leftover,
               imported_item_state: itemState,
               ...(problems.length ? { problems } : {}),

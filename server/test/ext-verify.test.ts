@@ -7,7 +7,7 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import type { ToolContext } from "../src/tools/common.js";
 import { AUTO_CHECKPOINT_TOOLS } from "../src/tools/ext/receipts.js";
-import { AeVerifyRenderSchema, createVerifyTools, firstFrameOf, looksLikeSequence, renderChecks } from "../src/tools/ext/verify.js";
+import { AeVerifyRenderSchema, checkJobOutputs, createVerifyTools, firstFrameOf, looksLikeSequence, renderChecks } from "../src/tools/ext/verify.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
 import { FakeProject, GUARD, loadHost } from "./support/fake-ae.js";
 
@@ -121,5 +121,141 @@ describe("verify.jsx in the simulated AE", () => {
     A.verifyRemove({ item_id: imp.item_id, expect: GUARD });
     expect(project.itemByID(imp.item_id)).toBeNull();
     expect(() => A.verifyImport({ path: file + ".gone", expect: GUARD })).toThrow(/No render/);
+  });
+});
+
+// ---------- w5render: jobs started with rq_index / whole_queue ----------
+
+describe("w5render: ae_verify_render for Render Queue jobs", () => {
+  function fakeAe(answer: (fn: string) => unknown) {
+    const calls: Array<{ fn: string; script: string }> = [];
+    const queue = new SingleWriterQueue();
+    const quarantine = new QuarantineStore(path.join(tempDir("chroma-verify-rq-q-"), "quarantine.json"));
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        const fn = script.slice("__chromaAe.".length, script.indexOf("("));
+        calls.push({ fn, script });
+        if (fn === "checkGuard") return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: null, comp_is_valid: true }, durationMs: 1 };
+        const r = answer(fn);
+        if (r instanceof Error) return { ok: false, error: { kind: "host_error", message: r.message }, durationMs: 1 } as any;
+        return { ok: true, result: r, durationMs: 1 };
+      },
+      queue,
+      quarantine,
+    });
+    const ctx: ToolContext = { bridge: host, queue, quarantine };
+    return { ctx, calls };
+  }
+  const answers = () => {
+    let gone = false;
+    return (fn: string) => {
+      if (fn === "verifyCompInfo") return comp;
+      if (fn === "verifyImport") return { item_id: 9 };
+      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      gone = true;
+      return { removed: 9 };
+    };
+  };
+  const job = (dir: string, extra: object = {}) => {
+    const a = path.join(dir, "edit.mov");
+    const b = path.join(dir, "edit_audio.mov");
+    return {
+      files: [a, b],
+      rec: { state: "succeeded", comp_name: "Edit", output_path: a, output_paths: [a, b], comp_id: 1, item_comp_id: 1, rq_index: 2, start_frame: 0, end_frame: 49, started_at: new Date(Date.now() - 60_000).toISOString(), ...extra } as any,
+    };
+  };
+
+  it("checkJobOutputs finds missing, empty and stale outputs and resolves a sequence to its first frame", () => {
+    const dir = tempDir("chroma-verify-rq-out-");
+    const ok = path.join(dir, "a.mov");
+    const empty = path.join(dir, "b.mov");
+    const stale = path.join(dir, "c.mov");
+    fs.writeFileSync(ok, "x");
+    fs.writeFileSync(empty, "");
+    fs.writeFileSync(stale, "x");
+    const old = new Date(Date.now() - 3600_000);
+    fs.utimesSync(stale, old, old);
+    fs.writeFileSync(path.join(dir, "s_0001.png"), "x");
+    const started = new Date(Date.now() - 60_000).toISOString();
+    const r = checkJobOutputs([ok, empty, stale, path.join(dir, "gone.mov"), path.join(dir, "s_[####].png")], started);
+    expect(r.ok).toBe(false);
+    expect(r.outputs.map((o) => o.problem)).toEqual([undefined, "the output is empty", expect.stringContaining("older than the job"), "the output does not exist", undefined]);
+    expect(r.outputs[4].file).toBe(path.join(dir, "s_0001.png"));
+    expect(checkJobOutputs([ok], started).ok).toBe(true);
+    expect(checkJobOutputs([], started).ok).toBe(false);
+  });
+
+  it("checks every output, imports the first, and compares with the item's comp by its stored id", async () => {
+    const dir = tempDir("chroma-verify-rq-");
+    const j = job(dir);
+    j.files.forEach((f) => fs.writeFileSync(f, "movie"));
+    const tool = createVerifyTools({ getJob: () => j.rec })[0];
+    const { ctx, calls } = fakeAe(answers());
+    const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_rq", expect: GUARD }), ctx);
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyRead"]);
+    expect(calls[1].script).toContain('"comp_id":1');
+    expect(calls[2].script).toContain(j.files[0].replace(/\\/g, "/"));
+    expect(res).toMatchObject({ ok: true, matches: true, render_queue: { rq_index: 2, item_comp_id: 1 } });
+    expect(res.job_outputs).toHaveLength(2);
+    expect(res.job_outputs.every((o: { problem?: string }) => o.problem === undefined)).toBe(true);
+    expect(res.checks.find((c: { what: string }) => c.what === "frames")).toMatchObject({ expected: 50, ok: true });
+  });
+
+  it("output_index picks which file is imported; one past the list is refused before AE is touched", async () => {
+    const dir = tempDir("chroma-verify-rq-idx-");
+    const j = job(dir);
+    j.files.forEach((f) => fs.writeFileSync(f, "movie"));
+    const tool = createVerifyTools({ getJob: () => j.rec })[0];
+    const { ctx, calls } = fakeAe(answers());
+    await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", output_index: 2, expect: GUARD }), ctx);
+    expect(calls.find((c) => c.fn === "verifyImport")!.script).toContain(j.files[1].replace(/\\/g, "/"));
+    const { ctx: ctx2, calls: calls2 } = fakeAe(answers());
+    expect(await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", output_index: 3, expect: GUARD }), ctx2)).toMatchObject({ ok: false, error: "bad_args" });
+    expect(calls2).toEqual([]);
+  });
+
+  it("a missing or empty output module file fails the verification before AE imports anything", async () => {
+    const dir = tempDir("chroma-verify-rq-miss-");
+    const j = job(dir);
+    fs.writeFileSync(j.files[0], "movie");
+    const tool = createVerifyTools({ getJob: () => j.rec })[0];
+    const { ctx, calls } = fakeAe(answers());
+    const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", expect: GUARD }), ctx);
+    expect(res).toMatchObject({ ok: false, error: "output_missing" });
+    expect(res.message).toContain(j.files[1]);
+    expect(res.outputs).toHaveLength(2);
+    expect(calls).toEqual([]);
+  });
+
+  it("a whole-queue job needs comp_id; its render queue name is never looked up as a comp", async () => {
+    const dir = tempDir("chroma-verify-rq-whole-");
+    const j = job(dir, { whole_queue: true, rq_index: undefined, item_comp_id: undefined, comp_id: undefined, comp_name: "<render queue>", start_frame: undefined, end_frame: undefined });
+    j.files.forEach((f) => fs.writeFileSync(f, "movie"));
+    const tool = createVerifyTools({ getJob: () => j.rec })[0];
+    const { ctx, calls } = fakeAe(answers());
+    expect(await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", expect: GUARD }), ctx)).toMatchObject({ ok: false, error: "bad_args" });
+    expect(calls).toEqual([]);
+    const { ctx: ctx2, calls: calls2 } = fakeAe(answers());
+    const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", comp_id: 1, expect: GUARD }), ctx2);
+    expect(res).toMatchObject({ ok: true, render_queue: { whole_queue: true } });
+    expect(calls2.find((c) => c.fn === "verifyCompInfo")!.script).not.toContain("render queue");
+  });
+
+  it("a plain job is untouched: no job_outputs, the comp is found by name as before", async () => {
+    const dir = tempDir("chroma-verify-plain-");
+    const out = path.join(dir, "edit.mov");
+    fs.writeFileSync(out, "movie");
+    const tool = createVerifyTools({ getJob: () => ({ state: "succeeded", output_path: out, comp_name: "Edit", start_frame: 0, end_frame: 49 } as any) })[0];
+    const { ctx, calls } = fakeAe(answers());
+    const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "j", expect: GUARD }), ctx);
+    expect(res.job_outputs).toBeUndefined();
+    expect(res.render_queue).toBeUndefined();
+    expect(calls[1].script).toContain('"comp_name":"Edit"');
+  });
+
+  it("output_index is bounded and described", () => {
+    expect(AeVerifyRenderSchema.safeParse({ job_id: "j", output_index: 0, expect: GUARD }).success).toBe(false);
+    expect(AeVerifyRenderSchema.safeParse({ job_id: "j", output_index: 2, expect: GUARD }).success).toBe(true);
+    expect(createVerifyTools()[0].description).toMatch(/output_index/);
   });
 });

@@ -85,6 +85,24 @@ export interface CompFingerprint {
   markers?: unknown[];
   propertyCount?: number;
   truncated?: boolean;
+  // Comp switches (ae_comp_settings), so ae_comp_diff sees them change.
+  motionBlur?: unknown;
+  shutterAngle?: unknown;
+  shutterPhase?: unknown;
+  motionBlurSamplesPerFrame?: unknown;
+  motionBlurAdaptiveSampleLimit?: unknown;
+  frameBlending?: unknown;
+  renderer?: unknown;
+  draft3d?: unknown;
+  resolutionFactor?: unknown;
+  hideShyLayers?: unknown;
+  preserveNestedFrameRate?: unknown;
+  preserveNestedResolution?: unknown;
+  displayStartTime?: unknown;
+  displayStartFrame?: unknown;
+  dropFrame?: unknown;
+  guides?: unknown[];
+  guides_truncated?: boolean;
   layers: FingerprintLayer[];
 }
 
@@ -189,6 +207,22 @@ const COMP_SCALAR_FIELDS: Array<keyof CompFingerprint> = [
   "workAreaDuration",
   "bgColor",
   "markers",
+  "motionBlur",
+  "shutterAngle",
+  "shutterPhase",
+  "motionBlurSamplesPerFrame",
+  "motionBlurAdaptiveSampleLimit",
+  "frameBlending",
+  "renderer",
+  "draft3d",
+  "resolutionFactor",
+  "hideShyLayers",
+  "preserveNestedFrameRate",
+  "preserveNestedResolution",
+  "displayStartTime",
+  "displayStartFrame",
+  "dropFrame",
+  "guides",
 ];
 
 const LAYER_SCALAR_FIELDS: Array<keyof FingerprintLayer> = [
@@ -521,6 +555,61 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_align",
   "ae_purge_unused",
   "ae_verify_render",
+  "ae_layer_ops",
+  "ae_comp_settings",
+  "ae_captions",
+  "ae_rig_add_controls",
+  "ae_rig_link",
+  "ae_rig_unlink",
+  "ae_rig_rename",
+  "ae_expr_recipe",
+  "ae_fit_text",
+  "ae_text_backdrop",
+  "ae_stagger",
+  "ae_stagger_layout",
+  "ae_time_remap",
+  "ae_camera_rig",
+  "ae_explain_layer_proof",
+  "ae_scrub_check",
+  "ae_set_footage_interpretation",
+  "ae_footage_proxy",
+  "ae_path_write",
+  "ae_path_operator",
+  "ae_path_link",
+  "ae_path_connector",
+  "ae_render_queue_edit",
+  "ae_render_queue_duplicate",
+  "ae_render_queue_apply_spec",
+  "ae_loudness_apply",
+  "ae_check_legibility",
+  "ae_variants",
+  "ae_variants_pick",
+  "ae_variants_discard",
+  "ae_project_session",
+  "ae_track_multi",
+  "ae_cleanplate_pick",
+  "ae_track_apply",
+  "ae_patch_check",
+  "ae_region_stats",
+  "ae_stabilize",
+  "ae_stabilize_roundtrip",
+  "ae_cleanplate_setup",
+  "ae_inpaint_plate",
+  "ae_mask_follow",
+  "ae_garbage_matte",
+  "ae_caf_prep",
+  "ae_patch_color_match",
+  "ae_patch_grain",
+  "ae_patch_finish",
+  "ae_screen_corners",
+  "ae_screen_replace",
+  "ae_create_comp",
+  "ae_project_items",
+  "ae_project_settings",
+  "ae_keyframes_transform",
+  "ae_detect_cuts",
+  "ae_fonts",
+  "ae_validate_expressions",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

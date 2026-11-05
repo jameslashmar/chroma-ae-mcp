@@ -12,6 +12,8 @@
  * - save
  * - snapshotForReceipt
  * - checkGuard
+ * - statusDetail (selection, active item, viewer and environment; ae_status detail)
+ * - fontsResolve (a font by PostScript name, or family and style, with near matches)
  */
 
 export const HOST_FUNCTIONS = [
@@ -27,7 +29,12 @@ export const HOST_FUNCTIONS = [
   "save",
   "snapshotForReceipt",
   "checkGuard",
+  "statusDetail",
+  "fontsResolve",
 ] as const;
+
+/** The core host functions wave 5 added (also in HOST_FUNCTIONS). */
+export const CORE_HOST_FUNCTIONS_WAVE5 = ["statusDetail", "fontsResolve"] as const;
 
 export type HostFunctionName = (typeof HOST_FUNCTIONS)[number] | (string & {});
 

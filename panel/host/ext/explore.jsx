@@ -7,8 +7,9 @@
 // Rules (see docs/BUILDERS.md):
 // - ES3 only: no let, const, arrow functions, template strings, or classes.
 // - Never use chained ternaries (ExtendScript parses them left-associatively). Use if/else.
-// - Strictly READ-ONLY: must not change any project, comp, or layer state (never touch comp.time,
-//   resolutionFactor, selection, solo, or expressionEnabled).
+// - Every reader is strictly READ-ONLY: it must not change any project, comp, or layer state (never touch comp.time,
+//   resolutionFactor, selection, solo, or expressionEnabled). The one write is exploreAutoFixExpressions
+//   (Project.autoFixExpressions, guarded, one undo group).
 
 (function (G) {
   if (!G.__chromaAe) {
@@ -34,6 +35,27 @@
 
   function isArray(v) {
     return v instanceof Array;
+  }
+
+  // Options of the getLayerFull call that is running (the only reader that sets them): meta adds property
+  // metadata and a fresh expression error, textFull the whole TextDocument. Reset when the call ends.
+  var RUN = { meta: false, textFull: false, time: 0, metaMissing: false };
+
+  function assertGuard(expect) {
+    if (!expect || expect.project_path === undefined) {
+      fail("guard", "Mutation refused: no expect.project_path given.");
+    }
+    var g = A.checkGuard({ expect: expect });
+    if (!g.ok) {
+      fail(
+        "guard",
+        "Target guard refused mutation: the open project or comp does not match expect. Stop and re-read state.",
+        {
+          expected: expect,
+          actual: { project_path: g.project_path, comp_id: g.comp_id, comp_is_valid: g.comp_is_valid }
+        }
+      );
+    }
   }
 
   function truncateString(s, maxLen) {
@@ -154,6 +176,19 @@
     try { td.boxText = v.boxText; } catch (e12) {}
     try { if (v.boxText) td.boxTextSize = v.boxTextSize; } catch (e13) {}
     try { if (v.boxText) td.boxTextPos = v.boxTextPos; } catch (e14) {}
+    if (RUN.textFull) {
+      if (typeof A.textDocSerialise === "function") {
+        // Additive: every field above stays as it was; the rest of what AE gives is added beside it.
+        try {
+          var more = A.textDocSerialise(v, { full: true });
+          for (var mk in more) {
+            if (more.hasOwnProperty(mk) && td[mk] === undefined) td[mk] = more[mk];
+          }
+        } catch (e15) {}
+      } else {
+        RUN.metaMissing = true;
+      }
+    }
     return td;
   }
 
@@ -210,6 +245,7 @@
     } catch (e1) {}
     try {
       if (v instanceof Shape) {
+        if (RUN.meta && typeof A.serialiseShape === "function") return A.serialiseShape(v);
         return serialiseShape(v);
       }
     } catch (e2) {}
@@ -241,6 +277,15 @@
     if (reflectName === "ShapeLayer") return "shape";
     if (reflectName === "CameraLayer") return "camera";
     if (reflectName === "LightLayer") return "light";
+    // Newer layer types: a class this AE lacks is simply never matched.
+    if (reflectName === "ThreeDModelLayer") return "model_3d";
+    if (reflectName === "ParametricMeshLayer") return "parametric_mesh";
+    try {
+      if (typeof ThreeDModelLayer !== "undefined" && l instanceof ThreeDModelLayer) return "model_3d";
+    } catch (e00) {}
+    try {
+      if (typeof ParametricMeshLayer !== "undefined" && l instanceof ParametricMeshLayer) return "parametric_mesh";
+    } catch (e01) {}
 
     try {
       if (l.nullLayer) return "null";
@@ -375,6 +420,12 @@
     var nk = 0;
     try { nk = p.numKeys || 0; } catch (e2) { nk = 0; }
     d.numKeys = nk;
+    if (RUN.meta) {
+      // Read-only: one evaluation so expressionError is current (valueAtTime(t, false) never changes the property).
+      try {
+        if (p.canSetExpression && p.expression && String(p.expression).length > 0) p.valueAtTime(RUN.time, false);
+      } catch (eEv) {}
+    }
     try {
       if (p.canSetExpression) {
         d.expression = truncateString(p.expression || "", MAX_STRING);
@@ -392,6 +443,13 @@
         d.dimensionsSeparated = Boolean(p.dimensionsSeparated);
       }
     } catch (e4) {}
+    if (RUN.meta) {
+      if (typeof A.propMeta === "function") {
+        try { d.meta = A.propMeta(p); } catch (eMeta) {}
+      } else {
+        RUN.metaMissing = true;
+      }
+    }
     if (includeKeyframes && nk > 0) {
       var kfInfo = readPropertyKeyframes(p, maxKeyframes);
       d.keyframes = kfInfo.keyframes;
@@ -774,10 +832,139 @@
 
   // ---------- 1. getLayerFull ----------
 
+  var MAX_POINTS = 100;
+
+  function pointCopy(v) {
+    var out = [];
+    try {
+      for (var i = 0; i < v.length && i < 3; i++) out.push(v[i]);
+    } catch (e) {}
+    return out;
+  }
+
+  function isPoint(pt) {
+    return isArray(pt) && pt.length >= 2 && typeof pt[0] === "number" && typeof pt[1] === "number" && !isNaN(pt[0]) && !isNaN(pt[1]);
+  }
+
+  // Opt-in `bounds`: the layer's source rectangle at a time, its width and height, the four corners in comp
+  // space (AVLayer.sourcePointToComp, 13.2) and optional point conversions. Read-only.
+  function readBounds(c, l, spec) {
+    var res = { warnings: [] };
+    var t = c.time;
+    if (spec && typeof spec.time === "number" && !isNaN(spec.time)) t = spec.time;
+    res.time = t;
+    var isText = false;
+    try { isText = String(l.reflect.name) === "TextLayer"; } catch (e0) {}
+    try { res.width = l.width; res.height = l.height; } catch (e1) {}
+    var rect = null;
+    if (typeof l.sourceRectAtTime === "function") {
+      try {
+        rect = l.sourceRectAtTime(t, false);
+      } catch (e2) {
+        res.warnings.push("sourceRectAtTime failed on this layer: " + String(e2.message ? e2.message : e2));
+      }
+    } else {
+      res.warnings.push("This layer has no source rectangle (camera, light and some 3D layers do not).");
+    }
+    if (rect) {
+      res.rect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    var hasToComp = typeof l.sourcePointToComp === "function";
+    var hasToSource = typeof l.compPointToSource === "function";
+    var wantCorners = !(spec && spec.corners === false);
+    var i;
+    if (wantCorners && rect) {
+      if (hasToComp) {
+        var cs = [
+          [rect.left, rect.top],
+          [rect.left + rect.width, rect.top],
+          [rect.left + rect.width, rect.top + rect.height],
+          [rect.left, rect.top + rect.height]
+        ];
+        var corners = [];
+        try {
+          for (i = 0; i < cs.length; i++) corners.push(pointCopy(l.sourcePointToComp(cs[i])));
+          res.corners_comp = corners;
+        } catch (e3) {
+          res.warnings.push("sourcePointToComp failed: " + String(e3.message ? e3.message : e3));
+        }
+      } else {
+        res.warnings.push("This After Effects has no AVLayer.sourcePointToComp (added in 13.2); corners in comp space are not available.");
+      }
+    }
+    var toComp = null;
+    var toLayer = null;
+    if (spec && isArray(spec.points_to_comp)) toComp = spec.points_to_comp;
+    if (spec && isArray(spec.points_to_layer)) toLayer = spec.points_to_layer;
+    var used = false;
+    if (toComp) {
+      used = true;
+      if (!hasToComp) {
+        res.warnings.push("points_to_comp needs AVLayer.sourcePointToComp, which this After Effects lacks.");
+      } else {
+        res.points_to_comp = [];
+        for (i = 0; i < toComp.length && i < MAX_POINTS; i++) {
+          if (!isPoint(toComp[i])) {
+            res.points_to_comp.push(null);
+            res.warnings.push("points_to_comp[" + i + "] is not an [x, y] pair.");
+            continue;
+          }
+          try { res.points_to_comp.push(pointCopy(l.sourcePointToComp(toComp[i]))); } catch (e4) { res.points_to_comp.push(null); }
+        }
+        if (toComp.length > MAX_POINTS) res.warnings.push("points_to_comp was cut to the first " + MAX_POINTS + " points.");
+      }
+    }
+    if (toLayer) {
+      used = true;
+      if (!hasToSource) {
+        res.warnings.push("points_to_layer needs AVLayer.compPointToSource, which this After Effects lacks.");
+      } else {
+        res.points_to_layer = [];
+        for (i = 0; i < toLayer.length && i < MAX_POINTS; i++) {
+          if (!isPoint(toLayer[i])) {
+            res.points_to_layer.push(null);
+            res.warnings.push("points_to_layer[" + i + "] is not an [x, y] pair.");
+            continue;
+          }
+          try { res.points_to_layer.push(pointCopy(l.compPointToSource(toLayer[i]))); } catch (e5) { res.points_to_layer.push(null); }
+        }
+        if (toLayer.length > MAX_POINTS) res.warnings.push("points_to_layer was cut to the first " + MAX_POINTS + " points.");
+      }
+    }
+    if (res.corners_comp !== undefined || used) {
+      // The conversion methods take no time: they use the comp's current time, which a read must not change.
+      res.conversion_time = c.time;
+      if (Math.abs(t - c.time) > 0.000001) {
+        res.warnings.push("sourceRectAtTime was read at " + t + " s but sourcePointToComp / compPointToSource convert at the comp's current time (" + c.time + " s); a read cannot move the time. Park the comp there, or pass that time.");
+      }
+      if (isText) {
+        res.warnings.push("On text layers sourcePointToComp / compPointToSource reflect only the first character, not the whole text block.");
+      }
+    }
+    return res;
+  }
+
   A.getLayerFull = function (args) {
     if (!args) fail("bad_args", "getLayerFull requires args");
+    // The opt-in extras are set for the length of this call only.
+    RUN.meta = args.meta === true;
+    RUN.textFull = args.text_full === true;
+    RUN.metaMissing = false;
+    RUN.time = 0;
+    var result = null;
+    try {
+      result = getLayerFullCore(args);
+    } finally {
+      RUN.meta = false;
+      RUN.textFull = false;
+    }
+    return result;
+  };
+
+  function getLayerFullCore(args) {
     var c = requireComp(args.comp_id);
     var l = findLayer(c, args.layer);
+    RUN.time = c.time;
     var include = args.include;
     var maxKeyframes = (args.max_keyframes !== undefined && args.max_keyframes !== null) ? Number(args.max_keyframes) : 100;
     if (isNaN(maxKeyframes) || maxKeyframes < 1) maxKeyframes = 100;
@@ -825,9 +1012,15 @@
     if (wantMarkers) {
       out.markers = readMarkersSection(l, maxKeyframes);
     }
+    if (args.bounds) {
+      out.bounds = readBounds(c, l, args.bounds);
+    }
+    if (RUN.metaMissing) {
+      out.warnings = ["This panel's core.jsx lacks the property-metadata helpers (A.propMeta / A.textDocSerialise); the meta and text_full extras were left out."];
+    }
 
     return out;
-  };
+  }
 
   // ---------- 2. findLayers ----------
 
@@ -885,6 +1078,8 @@
     if (target === "cameralayer" && reflectName === "cameralayer") return true;
     if (target === "lightlayer" && reflectName === "lightlayer") return true;
     if (target === "footage" && kind === "av") return true;
+    if ((target === "model3d" || target === "3d_model" || target === "threedmodel") && kind === "model_3d") return true;
+    if ((target === "mesh" || target === "parametricmesh") && kind === "parametric_mesh") return true;
     return false;
   }
 
@@ -1059,6 +1254,10 @@
     var results = [];
     var errorCount = 0;
     var truncated = false;
+    // Optional `find`: each result says whether its whole expression (not the 500-character preview) contains it.
+    var findText = null;
+    if (args.find !== undefined && args.find !== null && String(args.find).length > 0) findText = String(args.find);
+    var findMatches = 0;
 
     function walkProps(group, lInfo, pathPrefix, depth) {
       if (depth > 14 || truncated) return;
@@ -1119,13 +1318,18 @@
               errorCount++;
             }
 
-            results.push({
+            var entry = {
               layer: lInfo,
               path: curPath,
               expression: truncateString(exprStr, MAX_EXPR_PREVIEW),
               expressionEnabled: enabled,
               error: finalErr.length > 0 ? truncateString(finalErr, MAX_STRING) : ""
-            });
+            };
+            if (findText !== null) {
+              entry.contains_find = exprStr.indexOf(findText) !== -1;
+              if (entry.contains_find && finalErr.length > 0) findMatches++;
+            }
+            results.push(entry);
           }
         } else {
           walkProps(p, lInfo, curPath, depth + 1);
@@ -1144,7 +1348,7 @@
       walkProps(l, lRef, [], 0);
     }
 
-    return {
+    var report = {
       comp_id: c.id,
       comp_name: c.name,
       time: evalTime,
@@ -1153,5 +1357,92 @@
       truncated: truncated,
       results: results
     };
+    if (findText !== null) report.find_matches = findMatches;
+    return report;
+  };
+
+  // ---------- 5. exploreAutoFixExpressions (guarded write) ----------
+
+  var MAX_FIX_VISITS = 200000;
+
+  // Counts the broken expressions that contain `text` in every comp of the project (read-only: valueAtTime(t, false)
+  // forces an evaluation, expressionError says whether it failed). autoFixExpressions works on the whole project, so
+  // the count has to as well.
+  function countBrokenWith(text) {
+    var out = { matched: 0, broken: 0, comps: 0, visits: 0, truncated: false };
+    function walk(group, t, depth) {
+      if (depth > 14 || out.truncated) return;
+      var n = 0;
+      try { n = group.numProperties || 0; } catch (e0) { n = 0; }
+      for (var i = 1; i <= n; i++) {
+        if (out.truncated) return;
+        out.visits++;
+        if (out.visits > MAX_FIX_VISITS) {
+          out.truncated = true;
+          return;
+        }
+        var p = null;
+        try { p = group.property(i); } catch (e1) { p = null; }
+        if (!p) continue;
+        if (p.propertyType === PropertyType.PROPERTY) {
+          var expr = "";
+          try { if (p.canSetExpression && p.expression) expr = String(p.expression); } catch (e2) {}
+          if (expr.length === 0) continue;
+          var caught = false;
+          try { p.valueAtTime(t, false); } catch (e3) { caught = true; }
+          var err = "";
+          try { if (p.expressionError) err = String(p.expressionError); } catch (e4) {}
+          if (caught || err.length > 0) {
+            out.broken++;
+            if (expr.indexOf(text) !== -1) out.matched++;
+          }
+        } else {
+          walk(p, t, depth + 1);
+        }
+      }
+    }
+    for (var ci = 1; ci <= app.project.numItems; ci++) {
+      var it = null;
+      try { it = app.project.item(ci); } catch (e5) { it = null; }
+      if (!it || !(it instanceof CompItem)) continue;
+      out.comps++;
+      for (var li = 1; li <= it.numLayers; li++) {
+        if (out.truncated) break;
+        var lay = null;
+        try { lay = it.layer(li); } catch (e6) { lay = null; }
+        if (lay) walk(lay, it.time, 0);
+      }
+    }
+    return out;
+  }
+
+  // Project.autoFixExpressions(oldText, newText): rewrites oldText in the expressions that are broken, in every comp
+  // of the project (never only the one the caller looked at). Returns nothing useful, so the caller scans before
+  // and after in separate evalScripts.
+  A.exploreAutoFixExpressions = function (args) {
+    assertGuard(args.expect);
+    var find = args.find;
+    var replace = args.replace;
+    if (typeof find !== "string" || find.length === 0) fail("bad_args", "find must be a non-empty string.");
+    if (typeof replace !== "string") fail("bad_args", "replace must be a string (it may be empty to delete the old text).");
+    if (find.length > 2000 || replace.length > 2000) fail("bad_args", "find and replace are limited to 2000 characters.");
+    if (typeof app.project.autoFixExpressions !== "function") {
+      fail("bad_args", "This After Effects has no Project.autoFixExpressions; broken expressions cannot be repaired by script here.");
+    }
+    var scan = countBrokenWith(find);
+    if (scan.matched === 0 && !scan.truncated) {
+      return { no_op: true, matched_before: 0, broken_before: scan.broken, comps_scanned: scan.comps, scope: "project", note: "No broken expression in the project contains that text. Nothing was changed." };
+    }
+    return A.withUndo(args.label || "Fix expressions", function () {
+      app.project.autoFixExpressions(find, replace);
+      return {
+        matched_before: scan.matched,
+        broken_before: scan.broken,
+        comps_scanned: scan.comps,
+        scan_truncated: scan.truncated,
+        scope: "project",
+        note: "autoFixExpressions acts on the whole project: every broken expression containing the text was rewritten, in every comp."
+      };
+    });
   };
 })($.global);

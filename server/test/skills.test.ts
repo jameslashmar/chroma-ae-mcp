@@ -292,3 +292,58 @@ describe("skill tools", () => {
     expect(listed.error).toBe("unreadable_skill");
   });
 });
+
+describe("ae_skill_run safety lint", () => {
+  it("refuses a saved skill whose steps call a hard-limit member, and runs nothing", async () => {
+    const project = path.join(tempDir("chroma-skill-p-"), "Show.aep");
+    const { ctx, calls, dataDir } = fakeAe(project, { runSkill: [{ steps_run: 1, results: [] }] });
+    const root = path.join(dataDir, "skills");
+    writeSkill(root, { name: "danger", description: "Edited later.", mutates: true }, "", ["return 1;"], false);
+    fs.writeFileSync(path.join(root, "danger", "1.jsx"), "var f = new File('c:/x.txt');\nf.remove();\nreturn 1;\n");
+    const out: any = await tool("ae_skill_run").handler(
+      AeSkillRunSchema.parse({ name: "danger", expect: { project_path: project, comp_id: 1 } }),
+      ctx
+    );
+    expect(out.ok).toBe(false);
+    expect(out.error).toBe("unsafe_jsx");
+    expect(out.message).toContain("Edit the skill");
+    expect(out.problems[0]).toMatch(/^1\.jsx line 2: File\.remove/);
+    expect(calls.map((c) => c.fn)).toEqual(["status"]);
+  });
+
+  it("refuses writes in a skill that says it only reads, unless expect makes it a guarded run", async () => {
+    const project = path.join(tempDir("chroma-skill-p-"), "Show.aep");
+    const { ctx, dataDir } = fakeAe(project, { runSkill: [{ steps_run: 1, results: [] }], snapshotForReceipt: [{}, {}] });
+    const root = path.join(dataDir, "skills");
+    writeSkill(root, { name: "reader", description: "Reads.", mutates: false }, "", ["comp.layer(1).remove();\nreturn 1;"], false);
+    const refused: any = await tool("ae_skill_run").handler(AeSkillRunSchema.parse({ name: "reader" }), ctx);
+    expect(refused.error).toBe("unsafe_jsx");
+    expect(refused.problems[0]).toContain("mutates: true");
+    const guarded: any = await tool("ae_skill_run").handler(
+      AeSkillRunSchema.parse({ name: "reader", expect: { project_path: project, comp_id: 1 } }),
+      ctx
+    );
+    expect(guarded.ok).toBe(true);
+  });
+
+  it("ae_skill_save keeps a skill that only uses allowed members", async () => {
+    const project = path.join(tempDir("chroma-skill-p-"), "Show.aep");
+    const { ctx } = fakeAe(project, {});
+    const out: any = await tool("ae_skill_save").handler(
+      AeSkillSaveSchema.parse({
+        name: "fine-skill",
+        description: "Removes a layer and logs.",
+        steps: ["$.writeln('x'); var l = comp.layer(1); l.remove(); return 1;"],
+        scope: "global",
+      }),
+      ctx
+    );
+    expect(out.ok).toBe(true);
+    const unsafe: any = await tool("ae_skill_save").handler(
+      AeSkillSaveSchema.parse({ name: "bad-skill", description: "x", steps: ["system.callSystem('dir');"], scope: "global", overwrite: true }),
+      ctx
+    );
+    expect(unsafe.error).toBe("unsafe_jsx");
+    expect(unsafe.problems[0]).toContain("system.callSystem");
+  });
+});

@@ -9,7 +9,7 @@ import { SingleWriterQueue } from "../src/queue.js";
 import { SettingsStore } from "../src/settings.js";
 import type { ToolContext } from "../src/tools/common.js";
 import { AeImportAssetsSchema, AssetWatcher, SETTLE_MS, assetsTools } from "../src/tools/ext/assets.js";
-import { redact, tailLines, writeDiagnostics } from "../src/tools/ext/diagnostics.js";
+import { pickEnvironment, redact, tailLines, writeDiagnostics } from "../src/tools/ext/diagnostics.js";
 import { AUTO_CHECKPOINT_TOOLS } from "../src/tools/ext/receipts.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
 
@@ -268,5 +268,66 @@ describe("ae_diagnostics", () => {
     expect(again.path).not.toBe(res.path);
     expect(fs.existsSync(res.path)).toBe(true);
     expect(path.extname(again.path)).toBe(".md");
+  });
+});
+
+describe("ae_diagnostics environment", () => {
+  it("picks the environment fields and never a user or machine name", () => {
+    const env = pickEnvironment({
+      active_item: { id: 1 },
+      build: { name: "26.2", number: 7 },
+      iso_language: "de_DE",
+      rendering_disabled: true,
+      gpu: { available: ["METAL"], project: "METAL" },
+      os: "Windows 11",
+      userName: "someone",
+      machineName: "HOST",
+      warnings: ["w"],
+    });
+    expect(Object.keys(env).sort()).toEqual(["build", "gpu", "iso_language", "os", "rendering_disabled", "warnings"]);
+    expect(pickEnvironment(null)).toEqual({});
+  });
+
+  it("asks AE for the environment after its status and writes it into the file", async () => {
+    const dataDir = tempDir("chroma-diag-env-");
+    const quarantine = new QuarantineStore(path.join(dataDir, "quarantine.json"));
+    const queue = new SingleWriterQueue();
+    const seen: string[] = [];
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        seen.push(script.slice("__chromaAe.".length, script.indexOf("(")));
+        if (script.startsWith("__chromaAe.statusDetail(")) {
+          return { ok: true, result: { build: { name: "26.2" }, iso_language: "fr_FR", rendering_disabled: true, gpu: { available: [] }, os: "Windows 11", userName: "no" }, durationMs: 1 };
+        }
+        return { ok: true, result: { project_path: "<unsaved>" }, durationMs: 1 };
+      },
+      queue,
+      quarantine,
+    });
+    const ctx: ToolContext = { bridge: host, queue, quarantine, dataDir, settings: new SettingsStore(path.join(dataDir, "settings.json")) };
+    const res = await writeDiagnostics(ctx, undefined, { includeDialogs: false });
+    expect(seen).toEqual(["status", "statusDetail"]);
+    const text = fs.readFileSync(res.path, "utf8");
+    expect(text).toContain('"iso_language": "fr_FR"');
+    expect(text).toContain('"rendering_disabled": true');
+    expect(text).not.toContain("userName");
+  });
+
+  it("still writes the file when the environment read fails", async () => {
+    const dataDir = tempDir("chroma-diag-env-");
+    const quarantine = new QuarantineStore(path.join(dataDir, "quarantine.json"));
+    const queue = new SingleWriterQueue();
+    const host = new PanelHost({
+      evalScript: async (script) => {
+        if (script.startsWith("__chromaAe.statusDetail(")) throw new Error("no such function");
+        return { ok: true, result: { project_path: "<unsaved>" }, durationMs: 1 };
+      },
+      queue,
+      quarantine,
+    });
+    const ctx: ToolContext = { bridge: host, queue, quarantine, dataDir, settings: new SettingsStore(path.join(dataDir, "settings.json")) };
+    const res = await writeDiagnostics(ctx, undefined, { includeDialogs: false });
+    expect(res.summary.ae_answered).toBe(true);
+    expect(fs.readFileSync(res.path, "utf8")).toContain("no such function");
   });
 });

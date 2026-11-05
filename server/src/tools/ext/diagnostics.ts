@@ -54,11 +54,23 @@ function readIfExists(p: string | undefined): string {
   }
 }
 
+type AeStatusAnswer = { answered: boolean; status?: unknown; environment?: unknown; environmentPending?: Promise<unknown>; error?: string };
+
 /** One outstanding status eval per context: a stuck AE doesn't collect a queue of them. */
-const pendingStatus = new WeakMap<ToolContext, Promise<{ answered: boolean; status?: unknown; error?: string }>>();
+const pendingStatus = new WeakMap<ToolContext, Promise<AeStatusAnswer>>();
+
+/** The environment block of AE's statusDetail: build, UI language, rendering switch, GPU, OS (never a user or machine name). */
+export function pickEnvironment(detail: unknown): Record<string, unknown> {
+  const d = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : {};
+  const out: Record<string, unknown> = {};
+  for (const key of ["build", "iso_language", "rendering_disabled", "gpu", "os", "revision", "warnings", "missing"]) {
+    if (d[key] !== undefined) out[key] = d[key];
+  }
+  return out;
+}
 
 /** Waits for AE's status up to `ms`; the eval is never aborted, only no longer waited for. */
-async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<{ answered: boolean; status?: unknown; error?: string }> {
+async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<AeStatusAnswer> {
   let call = pendingStatus.get(ctx);
   if (!call) {
     call = ctx.bridge
@@ -69,7 +81,20 @@ async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<{ answered:
       mutates: false,
       toolName: "ae_diagnostics",
     })
-    .then((r) => ({ answered: true, status: r.result }))
+    .then((r): AeStatusAnswer => {
+      // AE answered; the environment is asked for separately so a slow one never costs the status.
+      const environment = ctx.bridge
+        .evalRaw({
+          id: `${ctx.bridge.newOpId()}_diag_env`,
+          script: buildJsxCall("statusDetail", { environment_only: true }),
+          label: "ae_diagnostics (environment)",
+          mutates: false,
+          toolName: "ae_diagnostics",
+        })
+        .then((env): unknown => pickEnvironment(env.result))
+        .catch((err: unknown): unknown => ({ error: err instanceof Error ? err.message : String(err) }));
+      return { answered: true, status: r.result, environmentPending: environment };
+    })
     .catch((err: unknown) => ({ answered: true, error: err instanceof Error ? err.message : String(err) }));
     const mine = call;
     pendingStatus.set(ctx, mine);
@@ -84,8 +109,24 @@ async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<{ answered:
       ms
     );
   });
+  const startedAt = Date.now();
   try {
-    return await Promise.race([call, late]);
+    const answer: AeStatusAnswer = await Promise.race([call, late]);
+    if (answer.environmentPending) {
+      // Race the environment alone against the time left; a late one is reported, the status is kept.
+      const left = Math.max(0, ms - (Date.now() - startedAt));
+      let envTimer: ReturnType<typeof setTimeout> | undefined;
+      const envLate = new Promise<unknown>((resolve) => {
+        envTimer = setTimeout(() => resolve({ error: "did not answer" }), left);
+      });
+      try {
+        answer.environment = await Promise.race([answer.environmentPending, envLate]);
+      } finally {
+        if (envTimer) clearTimeout(envTimer);
+      }
+      delete answer.environmentPending;
+    }
+    return answer;
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -161,7 +202,7 @@ export const diagnosticsTools: ToolDefinition<any>[] = [
   {
     name: "ae_diagnostics",
     description:
-      "Write a diagnostics file for triage when automation is stuck or failing: versions, the service's eval queue and what is in flight (and for how long), the write queue, quarantine, settings, AE's status (if AE answers within 5 s; nothing is aborted), AE's open popups, and the end of the service log. " +
+      "Write a diagnostics file for triage when automation is stuck or failing: versions, the service's eval queue and what is in flight (and for how long), the write queue, quarantine, settings, AE's status and environment (build, UI language, whether rendering is disabled, GPU, OS; if AE answers within 5 s; nothing is aborted), AE's open popups, and the end of the service log. " +
       "The token is redacted. Returns the file's path and a summary; the user can attach the file to a bug report. Never touches the AE project.",
     schema: AeDiagnosticsSchema,
     handler: async (args: z.infer<typeof AeDiagnosticsSchema>, ctx) => {

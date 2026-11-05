@@ -37,7 +37,16 @@ export interface StackLayer {
   adjustment?: boolean;
   sourceId?: number;
   lightType?: string;
+  /** An environment light's source layer (null when it has none). */
+  lightSource?: { index: number; id: number; name: string } | null;
+  /** A light's options as read: intensity, color, cone_angle, cone_feather, casts_shadows, shadow_darkness, shadow_diffusion (the ones the light has). */
+  lightOptions?: Record<string, number | boolean | number[]>;
+  /** A parametric mesh layer's type, options and bevel options as read. */
+  mesh?: { type: string | null; options: Record<string, number | boolean>; bevel: Record<string, number | boolean> };
   text?: string;
+  /** A text layer's PostScript font name and whether AE substitutes it. */
+  font?: string;
+  fontIsSubstitute?: boolean;
   trackMatte?: { type: string; layer: { index: number; id: number; name: string } | null };
   isTrackMatte?: boolean;
 }
@@ -70,7 +79,9 @@ export function resolveInStack(stack: LayerStack | null, sel: LayerSelector | un
 
 // ---------- schemas ----------
 
-const LAYER_TYPES = ["solid", "null", "adjustment", "text", "shape", "camera", "light", "footage", "precomp"] as const;
+const LAYER_TYPES = ["solid", "null", "adjustment", "text", "shape", "camera", "light", "footage", "precomp", "mesh"] as const;
+const LIGHT_TYPES = ["parallel", "spot", "point", "ambient", "environment"] as const;
+export const MESH_TYPES = ["cube", "sphere", "plane", "torus", "cone", "cylinder"] as const;
 const MATTE_TYPES = ["alpha", "alpha_inverted", "luma", "luma_inverted", "none"] as const;
 
 export const PlacementSchema = z
@@ -87,6 +98,72 @@ export const PlacementSchema = z
 
 const Color = z.array(z.number().min(0).max(1)).length(3);
 
+// ---------- parametric meshes (AE 26.3) ----------
+
+// Field names exactly as the ParametricMeshLayer page spells them. Value ranges
+// and units are not documented (smoothingAngle and slice* are probably degrees):
+// the read-back shows what AE took.
+const MeshNum = z.number().min(-1e6).max(1e6);
+const MeshCount = z.number().int().min(1).max(100000);
+const MeshFlag = z.boolean();
+
+const CubeOptions = z.object({ width: MeshNum, height: MeshNum, depth: MeshNum, smoothingAngle: MeshNum }).partial().strict();
+const SphereOptions = z.object({ radius: MeshNum, sides: MeshCount, sliceCaps: MeshFlag, sliceStart: MeshNum, sliceEnd: MeshNum, smoothingAngle: MeshNum }).partial().strict();
+const PlaneOptions = z.object({ width: MeshNum, length: MeshNum, cornerRadius: MeshNum, cornerSides: MeshCount }).partial().strict();
+const TorusOptions = z
+  .object({ ringRadius: MeshNum, pipeRadius: MeshNum, ringSides: MeshCount, pipeSides: MeshCount, caps: MeshFlag, sliceStart: MeshNum, sliceEnd: MeshNum, smoothingAngle: MeshNum })
+  .partial()
+  .strict();
+const ConeOptions = z
+  .object({ topRadius: MeshNum, bottomRadius: MeshNum, height: MeshNum, sides: MeshCount, topCap: MeshFlag, bottomCap: MeshFlag, sliceCaps: MeshFlag, sliceStart: MeshNum, sliceEnd: MeshNum, smoothingAngle: MeshNum })
+  .partial()
+  .strict();
+const CylinderOptions = z
+  .object({ radius: MeshNum, height: MeshNum, sides: MeshCount, topCap: MeshFlag, bottomCap: MeshFlag, sliceCaps: MeshFlag, sliceStart: MeshNum, sliceEnd: MeshNum, smoothingAngle: MeshNum })
+  .partial()
+  .strict();
+const CubeBevel = z.object({ radius: MeshNum, sides: MeshCount }).partial().strict();
+const ConeBevel = z.object({ topRadius: MeshNum, topSides: MeshCount, bottomRadius: MeshNum, bottomSides: MeshCount }).partial().strict();
+const CylinderBevel = z.object({ radius: MeshNum, sides: MeshCount }).partial().strict();
+
+/**
+ * The mesh part of a create request, discriminated by mesh_type: each type
+ * takes only its own fields, and only a cube, cone or cylinder has bevel
+ * options (a sphere, plane or torus given any is refused here, before AE).
+ */
+export const MeshSpecSchema = z.discriminatedUnion("mesh_type", [
+  z.object({ mesh_type: z.literal("cube"), mesh_options: CubeOptions.optional(), bevel_options: CubeBevel.optional() }).strict(),
+  z.object({ mesh_type: z.literal("sphere"), mesh_options: SphereOptions.optional() }).strict(),
+  z.object({ mesh_type: z.literal("plane"), mesh_options: PlaneOptions.optional() }).strict(),
+  z.object({ mesh_type: z.literal("torus"), mesh_options: TorusOptions.optional() }).strict(),
+  z.object({ mesh_type: z.literal("cone"), mesh_options: ConeOptions.optional(), bevel_options: ConeBevel.optional() }).strict(),
+  z.object({ mesh_type: z.literal("cylinder"), mesh_options: CylinderOptions.optional(), bevel_options: CylinderBevel.optional() }).strict(),
+]);
+
+export const LightOptionsSchema = z
+  .object({
+    intensity: z.number().min(-10000).max(10000).optional().describe("Intensity in percent."),
+    color: Color.optional().describe("Light colour [r, g, b] in 0..1."),
+    cone_angle: z.number().min(0).max(180).optional().describe("Spot lights only: cone angle in degrees."),
+    cone_feather: z.number().min(0).max(100).optional().describe("Spot lights only: cone feather in percent."),
+    casts_shadows: z.boolean().optional().describe("Spot, point, parallel and environment lights only."),
+    shadow_darkness: z.number().min(0).max(100).optional().describe("Casts-shadows lights only: shadow darkness in percent."),
+    shadow_diffusion: z.number().min(0).max(10000).optional().describe("Casts-shadows lights only: shadow diffusion in pixels."),
+  })
+  .strict()
+  .refine((o) => Object.values(o).some((v) => v !== undefined), { message: "light_options needs at least one option." })
+  .describe(
+    "Light Options set when the light is created, through 'ADBE Light Options Group'. Cone options are for spot lights; shadow options for spot, point, parallel and environment lights (an ambient light has none, and is refused; an option AE does not expose on the light is skipped with a warning). " +
+      "An option the light does not expose is skipped and named in `warnings`."
+  );
+
+const FontSchema = z
+  .union([
+    z.string().min(1).max(200).describe("A PostScript name, e.g. 'ArialMT'."),
+    z.object({ family: z.string().min(1).max(200), style: z.string().min(1).max(200) }).strict().describe("A family and style, e.g. {family: 'Arial', style: 'Bold'}."),
+  ])
+  .describe("The text layer's font. Checked against the installed fonts first: an unknown or substituted font is refused with near matches, instead of silently falling back.");
+
 export const AeCreateLayerSchema = z
   .object({
     comp_id: z.number().int(),
@@ -97,7 +174,30 @@ export const AeCreateLayerSchema = z
     height: z.number().int().min(1).max(30000).optional().describe("Solid height in pixels. Default the comp's."),
     text: z.string().max(20000).optional().describe("Text layer content."),
     box_size: z.array(z.number().positive()).length(2).optional().describe("Paragraph (box) text of [width, height] instead of point text."),
-    light_type: z.enum(["parallel", "spot", "point", "ambient"]).optional(),
+    light_type: z
+      .enum(LIGHT_TYPES)
+      .optional()
+      .describe("Light type. Left out, a plain light keeps the type After Effects makes; when light_options is given without a type the light is made a point light. 'environment' (AE 24.3+) lights a scene (3D models, Advanced 3D renderer) from the image in `light_source`."),
+    light_source: LayerSelectorSchema.optional().describe(
+      "Environment lights only: the layer whose picture lights the scene. It must be a 2D layer in the same comp (a 3D layer is refused: AE answers 'Invalid light source specified'). " +
+        "On AE 24.3 to 25.1 only an HDR or EXR footage layer works; from 25.2 any 2D video, still or precomp layer. Left out, the light has no image and a warning says so."
+    ),
+    light_options: LightOptionsSchema.optional(),
+    mesh_type: z.enum(MESH_TYPES).optional().describe("Mesh layers (AE 26.3): the primitive. Required for type 'mesh'."),
+    mesh_options: z
+      .record(z.union([z.number(), z.boolean()]))
+      .optional()
+      .describe(
+        "Mesh layers: the primitive's fields, exactly the Guide's names. cube: width, height, depth, smoothingAngle. sphere: radius, sides, sliceCaps, sliceStart, sliceEnd, smoothingAngle. plane: width, length, cornerRadius, cornerSides. " +
+          "torus: ringRadius, pipeRadius, ringSides, pipeSides, caps, sliceStart, sliceEnd, smoothingAngle. cone: topRadius, bottomRadius, height, sides, topCap, bottomCap, sliceCaps, sliceStart, sliceEnd, smoothingAngle. " +
+          "cylinder: radius, height, sides, topCap, bottomCap, sliceCaps, sliceStart, sliceEnd, smoothingAngle. Units and ranges are not documented; the read-back shows what AE took."
+      ),
+    bevel_options: z
+      .record(z.union([z.number(), z.boolean()]))
+      .optional()
+      .describe("Mesh layers: bevel fields. cube: radius, sides. cone: topRadius, topSides, bottomRadius, bottomSides. cylinder: radius, sides. Sphere, plane and torus have no bevel and are refused."),
+    orientation: z.enum(["horizontal", "vertical"]).optional().describe("Text layers: 'vertical' makes vertical text (AE 24.2+; with box_size, vertical box text). Default horizontal."),
+    font: FontSchema.optional(),
     item_id: z.number().int().optional().describe("Project item for footage (a FootageItem) or precomp (a CompItem) layers."),
     duration: z.number().positive().optional().describe("Layer length in seconds. Default the comp's."),
     start_time: z.number().optional().describe("Layer start time in comp seconds. Default 0."),
@@ -119,7 +219,42 @@ export const AeCreateLayerSchema = z
   .refine(
     (v) => (v.color === undefined && v.width === undefined && v.height === undefined) || v.type === "solid" || v.type === "adjustment",
     { message: "color, width and height apply to solid and adjustment layers only." }
-  );
+  )
+  .refine((v) => v.type !== "mesh" || v.mesh_type !== undefined, { message: "mesh layers need mesh_type." })
+  .refine((v) => v.type === "mesh" || (v.mesh_type === undefined && v.mesh_options === undefined && v.bevel_options === undefined), {
+    message: "mesh_type, mesh_options and bevel_options apply to mesh layers only.",
+  })
+  .refine((v) => v.type === "light" || (v.light_source === undefined && v.light_options === undefined), {
+    message: "light_source and light_options apply to light layers only.",
+  })
+  .refine((v) => v.light_source === undefined || v.light_type === "environment", { message: "light_source applies to environment lights only (light_type 'environment')." })
+  .refine((v) => v.type === "text" || (v.orientation === undefined && v.font === undefined), { message: "orientation and font apply to text layers only." })
+  .superRefine((v, ctx) => {
+    if (v.type === "light" && v.light_options) {
+      const o = v.light_options;
+      const lt = v.light_type ?? "point";
+      if ((o.cone_angle !== undefined || o.cone_feather !== undefined) && lt !== "spot") {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["light_options"], message: `cone_angle and cone_feather apply to spot lights only (this is a ${lt} light).` });
+      }
+      if ((o.casts_shadows !== undefined || o.shadow_darkness !== undefined || o.shadow_diffusion !== undefined) && !["spot", "point", "parallel", "environment"].includes(lt)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["light_options"], message: `Shadow options apply to spot, point, parallel and environment lights only (this is a ${lt} light).` });
+      }
+    }
+    if (v.type === "mesh" && v.mesh_type !== undefined) {
+      // strict() flags a key that is present even when undefined, so only pass the ones given.
+      const spec: Record<string, unknown> = { mesh_type: v.mesh_type };
+      if (v.mesh_options !== undefined) spec.mesh_options = v.mesh_options;
+      if (v.bevel_options !== undefined) spec.bevel_options = v.bevel_options;
+      const r = MeshSpecSchema.safeParse(spec);
+      if (!r.success) {
+        for (const issue of r.error.issues) {
+          const key = String(issue.path[0] ?? "mesh_options");
+          const hint = issue.code === "unrecognized_keys" ? ` (not a field of a ${v.mesh_type}; a sphere, plane or torus has no bevel_options)` : "";
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key, ...issue.path.slice(1)], message: `${issue.message}${hint}` });
+        }
+      }
+    }
+  });
 
 export const AePrecomposeSchema = z.object({
   comp_id: z.number().int(),
@@ -153,8 +288,55 @@ type CreateArgs = z.infer<typeof AeCreateLayerSchema>;
 
 /** The layer kinds layerStack can report for each created type. */
 function kindsFor(type: CreateArgs["type"]): string[] {
-  if (type === "footage") return ["footage", "audio", "solid"];
+  // A GLB / glTF / OBJ item placed as footage becomes a 3D model layer (AE 24.4).
+  if (type === "footage") return ["footage", "audio", "solid", "model_3d"];
+  if (type === "mesh") return ["parametric_mesh"];
   return [type];
+}
+
+const closeTo = (a: unknown, b: unknown) => typeof a === "number" && typeof b === "number" && Math.abs(a - b) <= 0.01 + Math.abs(b) * 1e-6;
+
+/** Environment light source and options, mesh fields and font, against what the separate read-back found. */
+function checkThreeDExtras(m: ReceiptMismatch[], args: CreateArgs, made: StackLayer, written: Record<string, unknown>): void {
+  if (args.type === "light") {
+    if (args.light_type === "environment" && args.light_source !== undefined && typeof written.light_source_id === "number") {
+      expectThat(m, made.lightSource?.id === written.light_source_id, "layer.lightSource", written.light_source_id, made.lightSource?.id, "Environment light source differs");
+    }
+    const skipped = new Set(((written.light_options_skipped as string[] | undefined) ?? []).map(String));
+    const opts = (args.light_options ?? {}) as Record<string, unknown>;
+    for (const [key, want] of Object.entries(opts)) {
+      if (want === undefined || skipped.has(key)) continue;
+      const got = made.lightOptions?.[key];
+      if (key === "color") {
+        const c = got as number[] | undefined;
+        const w = want as number[];
+        expectThat(m, Array.isArray(c) && w.every((x, i) => closeTo(c[i], x)), "layer.lightOptions.color", w, c, "Light colour differs");
+      } else if (key === "casts_shadows") {
+        expectThat(m, got === want, "layer.lightOptions.casts_shadows", want, got, "Casts Shadows differs");
+      } else {
+        expectThat(m, closeTo(got, want), `layer.lightOptions.${key}`, want, got, `Light option ${key} differs`);
+      }
+    }
+  }
+  if (args.type === "mesh") {
+    expectThat(m, made.mesh?.type === args.mesh_type, "layer.mesh.type", args.mesh_type, made.mesh?.type, "Mesh type differs");
+    const groups: Array<[string, Record<string, unknown> | undefined, Record<string, number | boolean> | undefined]> = [
+      ["options", args.mesh_options as Record<string, unknown> | undefined, made.mesh?.options],
+      ["bevel", args.bevel_options as Record<string, unknown> | undefined, made.mesh?.bevel],
+    ];
+    for (const [label, want, got] of groups) {
+      for (const [key, w] of Object.entries(want ?? {})) {
+        const g = got?.[key];
+        if (typeof w === "boolean") expectThat(m, g === w, `layer.mesh.${label}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back)`);
+        else expectThat(m, closeTo(g, w), `layer.mesh.${label}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back); units and ranges are not documented`);
+      }
+    }
+  }
+  if (args.type === "text" && args.font !== undefined) {
+    const ps = (written.font as { postscript?: string } | undefined)?.postscript;
+    if (ps !== undefined && made.font !== undefined) expectThat(m, made.font === ps, "layer.font", ps, made.font, "Font differs");
+    if (made.fontIsSubstitute !== undefined) expectThat(m, made.fontIsSubstitute === false, "layer.fontIsSubstitute", false, made.fontIsSubstitute, "After Effects substitutes this font");
+  }
 }
 
 export function createLayerMismatches(args: CreateArgs, beforeRaw: unknown, afterRaw: unknown, written: Record<string, unknown>): ReceiptMismatch[] {
@@ -181,7 +363,11 @@ export function createLayerMismatches(args: CreateArgs, beforeRaw: unknown, afte
     expectThat(m, made.threeD === true, "layer.threeD", true, made.threeD, "Layer is not 3D");
   }
   if (args.type === "adjustment") expectThat(m, made.adjustment === true, "layer.adjustment", true, made.adjustment, "Not an adjustment layer");
-  if (args.type === "light" && args.light_type) expectThat(m, made.lightType === args.light_type, "layer.lightType", args.light_type, made.lightType, "Light type differs");
+  if (args.type === "light") {
+    const wantType = args.light_type ?? (args.light_options ? "point" : undefined);
+    if (wantType) expectThat(m, made.lightType === wantType, "layer.lightType", wantType, made.lightType, "Light type differs");
+  }
+  checkThreeDExtras(m, args, made, written);
   // Layer start and length, within a frame (AE snaps times to frames).
   const tol = (after.frameDuration ?? 0.05) * 1.01 + 1e-6;
   if (args.start_time !== undefined && made.inPoint !== undefined) {
@@ -320,9 +506,13 @@ export const layersTools: ToolDefinition<any>[] = [
   {
     name: "ae_create_layer",
     description:
-      "Create a layer in a comp: solid, null, adjustment, text (point or box), shape (empty), camera, light, footage or precomp (from a project item), " +
+      "Create a layer in a comp: solid, null, adjustment, text (point or box, horizontal or vertical), shape (empty), camera, light, footage or precomp (from a project item), or a parametric mesh, " +
       "with a name, length, start time, 3D switch, parent and place in the stack, in one undo group guarded by `expect`. " +
-      "The read-back (a separate evalScript) checks the layer count, kind, name, text, start time, length, parent and index. A video or precomp layer can only be shortened, not made longer than its source. Solids add a solid item to the project, as in AE. " +
+      "Lights: light_type includes 'environment' (AE 24.3+), which lights 3D scenes from `light_source` (a 2D layer in the same comp; a warning appears when the comp's renderer is not Advanced 3D), and `light_options` set intensity, colour, cone and shadows at creation. " +
+      "Meshes (type 'mesh', AE 26.3+): mesh_type cube, sphere, plane, torus, cone or cylinder, with mesh_options and bevel_options named exactly as the Guide names them (a sphere, plane or torus has no bevel); units and ranges are not documented, so check the read-back. " +
+      "Text: orientation 'vertical' (AE 24.2+) and `font` (a PostScript name or family and style, checked against the installed fonts: an unknown or substituted font is refused with near matches). " +
+      "A member the open AE version lacks is refused before anything changes, saying which version it needs. A GLB / glTF / OBJ item placed as footage reads back as a model_3d layer. " +
+      "The read-back (a separate evalScript) checks the layer count, kind, name, text, start time, length, parent and index, and for the options above the light source and options, the mesh type and fields, and the font. A video or precomp layer can only be shortened, not made longer than its source. Solids add a solid item to the project, as in AE. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCreateLayerSchema,
     handler: (args: CreateArgs, ctx) =>
@@ -349,6 +539,13 @@ export const layersTools: ToolDefinition<any>[] = [
             text: args.text,
             box_size: args.box_size,
             light_type: args.light_type,
+            light_source: args.light_source,
+            light_options: args.light_options,
+            mesh_type: args.mesh_type,
+            mesh_options: args.mesh_options,
+            bevel_options: args.bevel_options,
+            orientation: args.orientation,
+            font: args.font,
             item_id: args.item_id,
             duration: args.duration,
             start_time: args.start_time,
@@ -359,7 +556,11 @@ export const layersTools: ToolDefinition<any>[] = [
           },
         },
         check: (before, after, w) => createLayerMismatches(args, before, after, w),
-        present: (_before, after, w) => ({ layer: byId(stackOf(after), w.id) ?? w }),
+        present: (_before, after, w) => {
+          const layer = byId(stackOf(after), w.id) ?? w;
+          const warnings = w.warnings as string[] | undefined;
+          return warnings && warnings.length ? { layer, warnings } : { layer };
+        },
       }),
   },
   {

@@ -9,6 +9,7 @@ import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
 import { SettingsStore } from "./settings.js";
+import { installSessionBridgeHook, installSessionTracking } from "./tools/ext/session.js";
 import type { CepBridge, ToolContext } from "./tools/common.js";
 
 export { handleRpc, PanelHost, type JsonRpcResponse, type PanelEvalScriptFn };
@@ -22,6 +23,8 @@ export interface CreatePanelMcpOptions {
   watchAssets?: boolean;
   /** The service's own state for ae_diagnostics (versions, eval queue, log paths). */
   serviceInfo?: () => Record<string, unknown>;
+  /** Track what the user changes between the agent's writes (ae_session_changes). Default true. */
+  sessionTracking?: boolean;
 }
 
 export interface HttpRequestLike {
@@ -89,6 +92,8 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   /** Questions for the panel: service.js serves them on GET /ask and POST /ask/answer. */
   asks: AskStore;
   assetWatcher: AssetWatcher;
+  /** Stops what keeps running on its own (the asset watcher's evalScript polling); the service calls it when it shuts down. */
+  stop: () => void;
   /** For the panel's Save diagnostics button (POST /admin/diagnostics). */
   saveDiagnostics: () => Promise<{ path: string; summary: Record<string, unknown> }>;
 } {
@@ -114,6 +119,17 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     serviceInfo: opts.serviceInfo,
     log: opts.log,
   };
+
+  // What the user changed between the agent's writes, and a write-ahead record
+  // so a write cut short by an AE crash is reported rather than retried.
+  if (opts.sessionTracking !== false) {
+    try {
+      installSessionTracking({ dataDir: resolvedDataDir, quarantine });
+      installSessionBridgeHook(host);
+    } catch (err) {
+      opts.log?.("WARN", `Session tracking is off: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   const log = opts.log;
   // Polls only while ae_import_assets { watch: true } has turned it on.
@@ -221,6 +237,9 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     host,
     asks: ctx.asks as AskStore,
     assetWatcher,
+    stop: () => {
+      assetWatcher.stop();
+    },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
   };
 }
