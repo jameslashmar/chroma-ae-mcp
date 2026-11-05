@@ -9,7 +9,7 @@
 // - exploreConsolidatePlan / exploreConsolidateFootage and exploreReducePlan / exploreReduceProject:
 //   duplicate footage and a project reduced to chosen comps (plan = read, the others guarded writes)
 // - exportMogrt (no undo group: it writes a file, not the project; refuses fonts not from Adobe Fonts unless allow_font_dialog)
-// - styleScan (read): fonts, sizes and colours used by text, shape and solid
+// - styleScan (read): fonts, sizes and colours used by text, shape and solid (plus footage/precomp layers named logo, kind "logo")
 //   layers, for the house style check
 //
 // Rules:
@@ -786,6 +786,15 @@
     }
   }
 
+  // "logo" as a word ("Logo", "Brand logo", "logo_white"), not inside "catalogue" or "Dialogue";
+  // backings ("Logo BG", "logo backing") are not logos.
+  function isLogoLayerName(name) {
+    var n = String(name);
+    if (!/(^|[^a-z])logo([^a-z]|$)/i.test(n)) return false;
+    if (/(^|[^a-z])logo[\s_.\-]*(bg|back|backing|background|plate|shadow|glow|mask|matte)([^a-z]|$)/i.test(n)) return false;
+    return true;
+  }
+
   A.styleScan = function (args) {
     var comp = requireComp(args.comp_id);
     // The check time: the caller's, else the comp's current time.
@@ -839,6 +848,13 @@
             entry.colours.push({ where: "solid", role: "fill", rgb: rgb(l.source.mainSource.color) });
           }
         } catch (e3) {}
+        // Footage, image and precomp layers named like a logo: emitted for the platform safe-box check only
+        // ("logo" kind has no colours or font, so the colour and font checks skip it). Read-only.
+        try {
+          if (entry.kind === "other" && isLogoLayerName(l.name) && l.source && !l.nullLayer && !l.adjustmentLayer && l.hasVideo !== false && !(l.source.mainSource instanceof SolidSource)) {
+            entry.kind = "logo";
+          }
+        } catch (e4) {}
       }
       if (entry.kind !== "other") out.push(entry);
     }
