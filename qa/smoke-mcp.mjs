@@ -123,14 +123,68 @@ function skip(tool, why) {
   console.log(`SKIP  ${tool.padEnd(30)} ${why}`);
 }
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-const brief = (r) => JSON.stringify(r).slice(0, 220);
+const brief = (r) => String(JSON.stringify(r) ?? "none").slice(0, 220);
 /** A guarded write that was applied and read back clean. */
 const okWrite = (r) => r.applied === true && r.receipt?.matches === true;
 /** The tool refused: a schema error, a typed refusal (ok false) or a call that applied nothing. */
 const refused = (r) => r.__isError === true || Boolean(r.__error) || r.ok === false || r.applied === false;
 /** Why a call failed, for the note column. */
 const why = (r) =>
-  String(r.message ?? r.__error ?? ((r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ") || r.error || ""));
+  String(r.message ?? r.__error ?? r.__text ?? ((r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ") || r.error || ""));
+/** A refusal of an unknown font names it and lists near matches (core.jsx checkTextFont, findFont, captions.jsx). */
+const FONT_REFUSAL = /No installed font|not available|candidates|Near matches/i;
+
+// ---- helpers for the waves 4-5 steps ----
+/**
+ * A step that only some After Effects builds can do (a version-gated API, a font, a plug-in). It passes when `ok(r)` holds,
+ * is logged as SKIP when the tool or AE refused and the refusal TEXT matches `reason` (the host's own words for a missing version or API;
+ * keep each pattern narrow, or a real bug reads as SKIP), and FAILS otherwise.
+ */
+function reasonText(r) {
+  const strings = (v) => (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string");
+  return [...strings(r.message), ...strings(r.__error), ...strings(r.__text), ...strings(r.error), ...strings(r.reason), ...(r.receipt?.mismatches ?? []).flatMap((m) => strings(m?.message)), ...strings(r.warnings)].join(" | ");
+}
+function gated(tool, r, ok, reason, note = "") {
+  if (ok(r)) check(tool, true, note || brief(r).slice(0, 160));
+  else if (refused(r) && reason.test(reasonText(r))) skip(tool, `refused on this AE: ${(why(r) || brief(r)).slice(0, 150)}`);
+  else check(tool, false, `${note}${note ? "; " : ""}${why(r) || brief(r).slice(0, 160)}`);
+}
+
+/** JSON for a note column, safe on undefined. */
+const js = (v, n = 160) => String(JSON.stringify(v) ?? "none").slice(0, n);
+
+/** A minimal Adobe Swatch Exchange file with one global RGB colour per entry ([r, g, b] in 0..1), for ae_brief import_swatches. */
+function aseFile(colors) {
+  const head = Buffer.alloc(12);
+  head.write("ASEF", 0, "latin1");
+  head.writeUInt16BE(1, 4);
+  head.writeUInt16BE(0, 6);
+  head.writeUInt32BE(colors.length, 8);
+  const parts = [head];
+  colors.forEach((c, i) => {
+    const name = `Colour ${i + 1}`;
+    const nameBuf = Buffer.alloc((name.length + 1) * 2);
+    for (let k = 0; k < name.length; k++) nameBuf.writeUInt16BE(name.charCodeAt(k), k * 2);
+    const body = Buffer.alloc(2 + nameBuf.length + 4 + 12 + 2);
+    let o = 0;
+    body.writeUInt16BE(name.length + 1, o);
+    o += 2;
+    nameBuf.copy(body, o);
+    o += nameBuf.length;
+    body.write("RGB ", o, "latin1");
+    o += 4;
+    for (const v of c) {
+      body.writeFloatBE(v, o);
+      o += 4;
+    }
+    body.writeUInt16BE(0, o);
+    const block = Buffer.alloc(6);
+    block.writeUInt16BE(0x0001, 0);
+    block.writeUInt32BE(body.length, 2);
+    parts.push(block, body);
+  });
+  return Buffer.concat(parts);
+}
 
 async function main() {
   const client = createClient();
@@ -188,13 +242,18 @@ async function main() {
   const AUDIO_COMP = scene.result?.audio_comp_id;
   if (typeof COMP !== "number") throw new Error("Could not build the smoke scene: " + JSON.stringify(scene));
 
-  let r = await call("ae_run_jsx", {
-    mutates: true,
-    label: "qa smoke: save as",
-    expect: { project_path: "<unsaved>" },
-    code: `app.project.save(new File(${JSON.stringify(AEP.replace(/\\/g, "/"))})); return app.project.file.fsName;`,
-  });
-  check("ae_run_jsx (unsaved project)", r.applied && r.checkpoint?.status === "skipped", cpNote(r));
+  // The scene above was a write on an unsaved project, so it took no checkpoint.
+  check("ae_run_jsx (unsaved project)", scene.applied === true && scene.checkpoint?.status === "skipped", cpNote(scene));
+  // ae_run_jsx now refuses project.save (its safety lint names ae_save), so the untitled project is named with ae_save save_as.
+  // overwrite: true, because a second run into the same --dir finds Smoke.aep already there (save_as refuses an existing file otherwise).
+  let r = await call("ae_save", { expect: { project_path: "<unsaved>" }, save_as: { path: AEP, overwrite: true } });
+  check(
+    "ae_save (save_as, untitled project)",
+    r.applied === true && r.receipt?.matches !== false && r.previous_project_path === "<unsaved>" && /Smoke\.aep$/i.test(String(r.project_path)) && fs.existsSync(AEP),
+    `${path.basename(String(r.project_path))}; ${why(r)}`
+  );
+  // Without a named project every later write is refused by the guard, so stop here instead of failing hundreds of steps.
+  if (r.applied !== true) throw new Error("Could not name the smoke project with ae_save save_as: " + (why(r) || brief(r)));
   const expect = { project_path: AEP };
 
   // ---------- writes, each with its checkpoint ----------
@@ -1032,6 +1091,759 @@ async function main() {
     check("ae_taste_rules (list)", r.ok === true && Array.isArray(r.saved), `${r.saved?.length} saved rule(s), ${r.proposals?.length} proposal(s)`);
   }
 
+  // ======================================================================
+  // Waves 4 and 5 (167 tools after wave 4, 173 after wave 5). NONE of these steps has run in a live After Effects yet;
+  // the arguments and checks come from the tools' current zod schemas and results (the build handoffs were only a start).
+  // They run before the first plain ae_save of this script (the save_as at the top takes no checkpoint), so they take no new auto checkpoint (the checkpoint list check below counts them).
+  // Each group works in comps of its own. The compositing groups share one textured, moving plate: fractal noise and twelve
+  // bright or dark squares, 640 x 360, panning 16 px over half a second inside a 480 x 270 shot. Tracks cover 0 to 0.2 s (6 frames).
+  // ======================================================================
+  const w45 = await call("ae_run_jsx", {
+    mutates: true,
+    label: "qa smoke: waves 4-5 scene",
+    expect,
+    code: [
+      "function mk(n, w, h, d) { return app.project.items.addComp(n, w, h, 1, d, 25); }",
+      "var ids = {};",
+      'var src = mk("W4 Plate Src", 640, 360, 2); ids.src = src.id;',
+      'var tex = src.layers.addSolid([0.5, 0.5, 0.5], "Texture", 640, 360, 1);',
+      'try { var nz = tex.property("ADBE Effect Parade").addProperty("ADBE Fractal Noise"); try { nz.property("Contrast").setValue(220); } catch (e1) {} try { nz.property("Scale").setValue(30); } catch (e2) {} try { nz.property("Complexity").setValue(6); } catch (e3) {} } catch (e0) {}',
+      "for (var i = 0; i < 12; i++) {",
+      '  var sq = src.layers.addSolid(i % 2 === 0 ? [1, 1, 1] : [0.05, 0.05, 0.05], "Mark" + i, 28, 28, 1);',
+      '  sq.property("ADBE Transform Group").property("ADBE Position").setValue([60 + (i % 4) * 150 + (i * 13) % 40, 50 + Math.floor(i / 4) * 120 + (i * 29) % 30]);',
+      "}",
+      // A 480 x 270 shot: the plate pans [240,135] -> [256,141] in half a second (linear keys).
+      "function shot(n) {",
+      "  var c = mk(n, 480, 270, 2);",
+      '  var p = c.layers.add(src); p.name = "Plate";',
+      '  var pos = p.property("ADBE Transform Group").property("ADBE Position");',
+      "  pos.setValueAtTime(0, [240, 135]); pos.setValueAtTime(0.5, [256, 141]);",
+      "  pos.setInterpolationTypeAtKey(1, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      "  pos.setInterpolationTypeAtKey(2, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      "  return c;",
+      "}",
+      'ids.planar = shot("W4 Planar").id;',
+      // Stabilize: Plate (moving) is the track source; five plates with no keys or effects are the targets (each ae_stabilize call needs a fresh one).
+      'var st = shot("W4 Stab"); ids.stab = st.id;',
+      'var sn = ["StabA", "StabB", "StabC", "StabD", "StabR"];',
+      "for (var s = 0; s < sn.length; s++) { var q = st.layers.add(src); q.name = sn[s]; }",
+      'ids.clean = shot("W4 Clean").id;',
+      // clone_offset refuses a plate with animated transform keys, so it gets a comp with an unkeyed plate.
+      'var cc = mk("W4 CloneSrc", 480, 270, 2); var cl = cc.layers.add(src); cl.name = "Plate"; ids.clone = cc.id;',
+      // The residual check needs motion in the picture itself, not in the layer's keys: a precomp that pans, placed on an unkeyed layer.
+      'var mvs = mk("W4 Moving Src", 640, 360, 2); var mvp = mvs.layers.add(src);',
+      'var mpos = mvp.property("ADBE Transform Group").property("ADBE Position");',
+      "mpos.setValueAtTime(0, [320, 180]); mpos.setValueAtTime(0.5, [336, 186]);",
+      "mpos.setInterpolationTypeAtKey(1, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      "mpos.setInterpolationTypeAtKey(2, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      'var sv = mk("W4 StabV", 480, 270, 2); var svl = sv.layers.add(mvs); svl.name = "Plate"; ids.stabv = sv.id;',
+      'ids.inpaint = shot("W4 Inpaint").id;',
+      'ids.inp_out = mk("W4 Inpaint Out", 480, 270, 2).id;',
+      'ids.matte = shot("W4 Matte").id;',
+      'var lc = shot("W4 Locked"); lc.layer("Plate").locked = true; ids.locked = lc.id;',
+      // Screen replacement: a dark plate, a lighter 160 x 90 screen that pans, an insert comp of the same 16:9 shape.
+      'var sc = mk("W4 Screen", 480, 270, 2); ids.screen = sc.id;',
+      'sc.layers.addSolid([0.08, 0.08, 0.1], "SR Plate", 480, 270, 1);',
+      'var scr = sc.layers.addSolid([0.55, 0.6, 0.7], "SR Screen", 160, 90, 1);',
+      'var sp = scr.property("ADBE Transform Group").property("ADBE Position");',
+      "sp.setValueAtTime(0, [240, 135]); sp.setValueAtTime(0.4, [256, 141]);",
+      "sp.setInterpolationTypeAtKey(1, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      "sp.setInterpolationTypeAtKey(2, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);",
+      'var ins = mk("W4 Insert", 640, 360, 2); ins.layers.addSolid([0.9, 0.2, 0.2], "Insert Fill", 640, 360, 1); ids.insert = ins.id;',
+      // Wave 5 fixtures.
+      'var ops = mk("W5 Ops", 640, 360, 4); ids.ops = ops.id;',
+      'var on = ["OpA", "OpB", "OpC", "OpD", "OpE", "OpM"];',
+      "for (var j = 0; j < on.length; j++) ops.layers.addSolid([0.4, 0.5, 0.6], on[j], 100, 100, 1);",
+      'var alt = mk("W5 Alt", 320, 180, 2); var al = alt.layers.addSolid([0.9, 0.3, 0.3], "Alt", 100, 100, 1); ids.alt_item = al.source.id;',
+      'var fxc = mk("W5 FX", 640, 360, 2); fxc.layers.addSolid([0.3, 0.3, 0.4], "Backdrop", 640, 360, 1); ids.fx = fxc.id;',
+      'var kc = mk("W5 Key", 640, 360, 4); kc.layers.addSolid([1, 0.5, 0], "Keys", 80, 80, 1); kc.layers.addSolid([0, 0.5, 1], "Keys2", 80, 80, 1); ids.key = kc.id;',
+      'var tc = mk("W5 Text", 640, 360, 4); var tl = tc.layers.addText("W5 text"); tl.name = "W5Text"; ids.text = tc.id;',
+      'ids.d3 = mk("W5 3D", 640, 360, 4).id;',
+      'var sg = mk("W5 Settings", 640, 360, 4); sg.layers.addSolid([0.2, 0.2, 0.25], "Fill", 640, 360, 1); ids.settings = sg.id;',
+      "return ids;",
+    ].join("\n"),
+  });
+  const WS = w45.result ?? {};
+  if (typeof WS.planar !== "number" || typeof WS.ops !== "number") throw new Error("Could not build the waves 4-5 scene: " + brief(w45));
+  const compCount = async () => (await call("ae_get_project", { type: "comp", limit: 1 })).total;
+
+  // ---------- wave 4: planar tracking (ae_track_multi, ae_track_read, ae_track_apply) ----------
+  {
+    const PL = WS.planar;
+    const wholePlate = { rect: [0, 0, 480, 270] };
+    r = await call("ae_track_multi", { comp_id: PL, auto_points: { region: wholePlate, count: 4 }, ref_time: 0, start: 0, end: 0.2, model: "similarity", preview: true });
+    check(
+      "ae_track_multi (auto points)",
+      r.ok === true && r.complete === true && r.frames >= 5 && r.frames_ok >= r.frames - 1 && fs.existsSync(String(r.preview_path)) && fs.existsSync(String(r.track_path)),
+      `${r.frames_ok}/${r.frames} frames, ${r.points?.length} points, rms ${JSON.stringify(r.rms_px)}; ${r.message ?? ""}`
+    );
+    const planarTrack = r.track_id;
+    // A small budget stops with a continue id; the continue finishes the track.
+    r = await call("ae_track_multi", { comp_id: PL, auto_points: { region: wholePlate, count: 4 }, ref_time: 0, start: 0, end: 0.2, max_frames: 3, preview: false });
+    if (r.ok && r.complete === false && r.continue_track_id) {
+      const cont = await call("ae_track_multi", { comp_id: PL, continue_track_id: r.continue_track_id, preview: false });
+      check("ae_track_multi (continue after a small budget)", cont.ok === true && cont.complete === true, `${cont.frames} frames after the continue`);
+    } else {
+      check("ae_track_multi (small budget)", r.ok === true && r.complete === true, "finished inside the budget");
+    }
+    // isolate_layers renders a temporary copy with only the plate on, and removes it in the same call.
+    r = await call("ae_track_multi", { comp_id: PL, auto_points: { region: wholePlate, count: 4 }, ref_time: 0, start: 0, end: 0.08, isolate_layers: [{ name: "Plate" }], preview: false, expect });
+    check("ae_track_multi (isolate_layers, expect)", r.ok === true && r.temp_comp?.copy_removed === true && r.receipt?.matches === true, `${r.frames_ok}/${r.frames} frames; ${why(r)}`);
+    r = await call("ae_track_multi", { comp_id: PL, auto_points: { region: wholePlate, count: 4 }, ref_time: 0, start: 0, end: 0.08, model: "perspective", preview: false });
+    check("ae_track_multi (perspective with 4 points is allowed, with a note)", r.ok === true || /needs 4|bad_args/.test(JSON.stringify(r)), `${r.ok} ${(r.notes ?? []).length} note(s); ${r.message ?? ""}`.slice(0, 160));
+
+    // Write the track as nulls, then read the nulls back as a track and compare.
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "nulls", null_prefix: "W4 Plate", solved_null: true, expect });
+    check("ae_track_apply (nulls, solved null)", r.ok === true && r.applied === true && r.receipt?.matches === true && (r.nulls?.length ?? 0) >= 2, `${r.nulls?.length} nulls, ${r.frames_written} frames; ${why(r)}`);
+    const nullNames = (r.nulls ?? []).map((n) => n.name).filter((n) => !/solved/i.test(String(n)));
+    if (nullNames.length > 0) {
+      r = await call("ae_track_read", { comp_id: PL, source: { nulls: nullNames.map((name) => ({ name })), model: "similarity" }, preview: false });
+      check("ae_track_read (nulls)", r.ok === true && r.frames >= 2 && r.rms_px?.max < 2, `${r.frames} frames, rms ${JSON.stringify(r.rms_px)}; ${r.message ?? ""}`);
+    } else {
+      skip("ae_track_read (nulls)", "ae_track_apply nulls returned no point nulls to read back");
+    }
+    r = await call("ae_track_read", { comp_id: PL, source: { track_id: planarTrack }, preview: false });
+    check("ae_track_read (a stored track_id)", r.ok === true && r.track_id === planarTrack, `${r.frames} frames`);
+    r = await call("ae_track_read", { comp_id: PL, source: { transform: { layer: { name: "Plate" } } }, preview: false });
+    check("ae_track_read (transform: the plate's own keys)", r.ok === true && r.frames >= 5 && r.model === "similarity", `${r.frames} frames, model ${r.model}; ${r.message ?? ""}`);
+
+    // A Corner Pin on a solid, then the same track as a layer transform, CC Power Pin and transform + residual pin on others.
+    for (const [nm, size] of [["W4 Pin", [200, 120]], ["W4 Pin2", [200, 120]], ["W4 Pin3", [200, 120]], ["W4 Pin4", [200, 120]]]) {
+      await call("ae_create_layer", { comp_id: PL, type: "solid", name: nm, color: [1, 0, 0], width: size[0], height: size[1], expect });
+    }
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "corner_pin", layer: { name: "W4 Pin" }, expect });
+    check("ae_track_apply (corner_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames, effect index ${r.written?.[0]?.effect_index}; ${why(r)}`);
+    r = await call("ae_track_read", { comp_id: PL, source: { corner_pin: { layer: { name: "W4 Pin" } } }, preview: false });
+    check("ae_track_read (corner_pin)", r.ok === true && r.model === "perspective" && Array.isArray(r.source_info?.param_table), `param table: ${JSON.stringify(r.source_info?.param_table)}`);
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin" }, replace_keys: true, expect });
+    check("ae_track_apply (transform)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames; ${why(r)}`);
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "power_pin", layer: { name: "W4 Pin2" }, expect });
+    check("ae_track_apply (power_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames; ${why(r)}`);
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform_pin", layer: { name: "W4 Pin3" }, expect });
+    check("ae_track_apply (transform_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames; ${why(r)}`);
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin4" }, range: { start: 0, end: 0.08 }, expect });
+    check("ae_track_apply (transform, a time range)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.frames_written <= 4, `${r.frames_written} frames; ${why(r)}`);
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin" }, expect });
+    check("ae_track_apply (keys already on the layer refuse the write without replace_keys)", refused(r), why(r).slice(0, 120));
+    await call("ae_run_jsx", {
+      mutates: true,
+      label: "qa smoke: remove planar layers",
+      expect: { ...expect, comp_id: PL },
+      code: `var c = app.project.itemByID(${PL}); for (var i = c.numLayers; i >= 1; i--) { var n = c.layer(i).name; if (n.indexOf("W4 Plate ") === 0 || n.indexOf("W4 Pin") === 0) c.layer(i).remove(); } return c.numLayers;`,
+    });
+    skip("ae_track_read (tracker: AE Tracker points)", "the scratch project has no AE Tracker data, and a script cannot make any");
+    skip("ae_track_apply / ae_track_multi on a 3D layer, a separated Position or non-square pixels", "these are refusals of the host; the scratch scene has none of them");
+  }
+
+  // ---------- wave 4: stabilize (ae_stabilize, ae_stabilize_roundtrip) ----------
+  {
+    const ST = WS.stab;
+    // FIRST wave 4 live check: does a guide layer inside a nested comp stay out of the parent's render and of saveFrameToPng?
+    const stabTrack = { transform: { layer: { name: "Plate" } }, model: "translate", ref_time: 0 };
+    r = await call("ae_stabilize_roundtrip", { comp_id: ST, plate: { name: "StabR" }, track: stabTrack, pad_px: 40, expect });
+    check("ae_stabilize_roundtrip (build)", r.ok === true && r.applied === true && r.receipt?.matches === true && typeof r.roundtrip_error_px === "number" && r.roundtrip_error_px < 0.05, `error ${r.roundtrip_error_px} px; ${why(r)}`);
+    const rigWork = r.work_comp?.id;
+    const rigOuter = r.outer_layer?.id;
+    if (Array.isArray(r.picture_change)) {
+      check(
+        "ae_stabilize_roundtrip (the guide layer stays out of the shot: picture_change is 0)",
+        r.guide_plate_renders_suspected !== true && r.picture_change.every((p) => p.mean_abs_diff !== null && p.mean_abs_diff < 1),
+        `picture_change ${JSON.stringify(r.picture_change)}; suspected ${r.guide_plate_renders_suspected}`
+      );
+    } else {
+      skip("ae_stabilize_roundtrip (picture_change)", `the build returned no picture_change (${r.sheet_error ?? "no renders were made"})`);
+    }
+    r = await call("ae_stabilize_roundtrip", { comp_id: ST, action: "remove", rig_layer: { id: rigOuter }, expect });
+    check("ae_stabilize_roundtrip (remove)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.removed?.work_comp?.id === rigWork, `removed ${JSON.stringify(r.removed)}; ${why(r)}`);
+
+    r = await call("ae_stabilize", { comp_id: ST, layer: { name: "StabA" }, track: stabTrack, verify: false, sheets: false, expect });
+    check("ae_stabilize (layer_transform, lock)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.target === "layer_transform" && r.frames_written >= 2, `${r.frames_written} keys; ${why(r)}`);
+    r = await call("ae_stabilize", { comp_id: ST, layer: { name: "StabB" }, track: stabTrack, target: "transform_effect", edges: "motion_tile", shutter_angle: 90, verify: false, sheets: false, expect });
+    check(
+      "ae_stabilize (transform_effect + motion_tile): LIVE CHECK the param_tables",
+      r.ok === true && r.applied === true && r.receipt?.matches === true && (r.param_tables?.transform_effect ?? []).some((p) => p.role === "rotation"),
+      `${JSON.stringify(r.param_tables)}; ${why(r)}`
+    );
+    r = await call("ae_stabilize", { comp_id: ST, layer: { name: "StabB" }, track: stabTrack, target: "transform_effect", expect });
+    check("ae_stabilize (a plate that already has a Stabilize Transform is refused)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_stabilize", { comp_id: ST, layer: { name: "StabC" }, track: stabTrack, target: "transform_effect", edges: "scale_to_fill", mode: "smooth", verify: false, sheets: false, expect });
+    check("ae_stabilize (smooth, scale_to_fill)", r.ok === true && r.applied === true && r.receipt?.matches === true && (r.zoom === undefined || r.zoom >= 1), `zoom ${r.zoom}; ${why(r)}`);
+    r = await call("ae_stabilize", { comp_id: ST, layer: { name: "StabD" }, track: stabTrack, target: "corner_pin", verify: false, sheets: false, expect });
+    check("ae_stabilize (corner_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.target === "corner_pin", `${r.frames_written} keys; ${why(r)}`);
+    // The residual check (verify: true) renders and measures at the track's points, so the picture must really move inside the frame.
+    // W4 StabV holds a panning precomp on an unkeyed layer; ae_track_multi tracks it, and ae_stabilize locks it with that track.
+    const vt = await call("ae_track_multi", { comp_id: WS.stabv, auto_points: { region: { rect: [0, 0, 480, 270] }, count: 4 }, ref_time: 0, start: 0, end: 0.2, model: "similarity", preview: false });
+    r = await call("ae_stabilize", { comp_id: WS.stabv, layer: { name: "Plate" }, track: { track_id: vt.track_id }, verify: true, verify_frames: 3, sheets: false, max_renders: 8, expect });
+    check(
+      "ae_stabilize (verify: residual motion measured at the track's points, under 2 px)",
+      vt.ok === true && r.ok === true && r.applied === true && typeof r.residual?.rms_px === "number" && r.residual.rms_px < 2,
+      `track ${vt.ok} (${vt.message ?? "ok"}); residual ${JSON.stringify(r.residual)?.slice(0, 140)}; meets the 0.5 px target: ${r.residual?.meets_target}; ${r.verify_error ?? why(r)}`
+    );
+  }
+
+  // ---------- wave 4: clean plate, patch checks and fits, inpaint ----------
+  {
+    const CL = WS.clean;
+    const hole = { rect: [160, 90, 80, 60] }; // [x, y, w, h], planar's region form
+    const holeBox = { kind: "rect", rect: [160, 90, 240, 150] }; // [x0, y0, x1, y1], the patch tools' form
+    const pick = await call("ae_cleanplate_pick", { comp_id: CL, region: hole, mode: "static", start: 0, end: 0.4, every_n: 4, max_renders: 12, contact_sheet: true });
+    check("ae_cleanplate_pick", pick.ok === true && typeof pick.recommended_ref_time === "number" && /^sampled \d+ of \d+$/.test(String(pick.sampled)), `ref ${pick.recommended_ref_time}, ${pick.sampled}; ${pick.message ?? ""}`);
+    check("ae_cleanplate_pick (contact sheet)", fs.existsSync(String(pick.contact_sheet_path)), String(pick.contact_sheet_path ?? "no sheet").slice(-40));
+    const refT = typeof pick.recommended_ref_time === "number" ? pick.recommended_ref_time : 0;
+    const setup = await call("ae_cleanplate_setup", { comp_id: CL, plate: { name: "Plate" }, source: "freeze", ref_time: refT, region: hole, name: "W4 Patch", expect });
+    check("ae_cleanplate_setup (freeze)", setup.ok === true && setup.applied === true && setup.receipt?.matches === true && typeof setup.patch_layer?.id === "number", `${why(setup)}`);
+    check("ae_cleanplate_setup (freeze: needs_fix until the hole is cleaned)", setup.needs_fix === true && (setup.fixes_in_order ?? []).length >= 2, `${(setup.fixes_in_order ?? []).length} fixes in order`);
+    check("ae_cleanplate_setup (the patch comp is comp-sized, the sheet is written)", setup.patch_comp?.width === 480 && setup.patch_comp?.height === 270 && typeof setup.before_after_sheet === "string", `${setup.patch_comp?.name} ${setup.patch_comp?.width}x${setup.patch_comp?.height}`);
+    const patchId = setup.patch_layer?.id;
+    const clone = await call("ae_cleanplate_setup", { comp_id: WS.clone, plate: { name: "Plate" }, source: "clone_offset", offset: { dx: 120, dy: 0, frames: 0 }, ref_time: 0, region: hole, feather_px: 10, expansion_px: 1, name: "W4 Clone", expect });
+    check("ae_cleanplate_setup (clone_offset: no fix needed, expansion raised to half the feather)", clone.ok === true && clone.applied === true && clone.needs_fix === false && clone.mask?.expansion_px === 5, `needs_fix ${clone.needs_fix}, expansion ${clone.mask?.expansion_px}; ${why(clone)}`);
+    r = await call("ae_cleanplate_setup", { comp_id: WS.locked, plate: { name: "Plate" }, source: "freeze", ref_time: 0, region: hole, expect });
+    check("ae_cleanplate_setup (a locked plate is refused before anything changes)", r.ok === false, why(r).slice(0, 120));
+    skip("ae_cleanplate_setup (source still, action reload)", "they need a painted PNG of the cleaned frame, which the scratch project cannot make");
+
+    // patch_check and region_stats on the freeze patch, few frames (neighbours 0.04 s apart, so pops are measurable).
+    if (typeof patchId === "number") {
+      const compsBefore = await compCount();
+      r = await call("ae_patch_check", { comp_id: CL, patch_layers: [{ id: patchId }], times: [0, 0.04, 0.08, 0.12], grain_probes: 1, max_renders: 40, expect });
+      check("ae_patch_check (footprint from the patch layer's masks)", r.applied === true && r.temp_comp?.copy_removed === true && r.receipt?.matches === true && Array.isArray(r.checks) && r.checks.length >= 3 && Boolean(r.series_path), `verdict ${r.verdict}, ${r.checks?.length} checks; ${r.sampled?.note}; ${why(r)}`);
+      check("ae_patch_check (leaves no copy)", (await compCount()) === compsBefore, `${compsBefore} comps`);
+      r = await call("ae_patch_check", { comp_id: CL, patch_layers: [{ id: patchId }], region: holeBox, times: [0, 0.04, 0.08, 0.12], grain_probes: 0, max_renders: 4, expect });
+      check("ae_patch_check (a render budget cuts the run and says so)", r.applied === true && r.temp_comp?.copy_removed === true && r.render_budget?.cut === true && r.sampled?.frames_measured < r.sampled?.frames_sampled, `budget ${JSON.stringify(r.render_budget)}; measured ${r.sampled?.frames_measured} of ${r.sampled?.frames_sampled}; ${r.sampled?.note}`);
+      r = await call("ae_region_stats", { comp_id: CL, regions: [{ name: "centre", shape: holeBox }], times: [0, 0.04, 0.08], max_samples: 4 });
+      check("ae_region_stats (read-only)", r.ok === true && r.read_only === true && (r.regions?.[0]?.frames?.length ?? 0) >= 2, `${r.regions?.[0]?.frames?.length} frames; ${r.sampled?.note}; ${r.message ?? ""}`);
+      check("ae_region_stats (series, graph and region image are written)", fs.existsSync(String(r.series_path)) && fs.existsSync(String(r.graph_path)) && fs.existsSync(String(r.regions_png)), `${String(r.graph_path ?? "").slice(-30)}`);
+      const trkRead = await call("ae_track_read", { comp_id: CL, source: { transform: { layer: { name: "Plate" } } }, preview: false });
+      r = await call("ae_region_stats", { comp_id: CL, regions: [{ name: "tracked", shape: holeBox, track: { track_id: trkRead.track_id } }], times: [0, 0.04, 0.08], max_samples: 4 });
+      check("ae_region_stats (a region that follows a track)", r.ok === true && r.regions?.[0]?.tracked === true, `${r.regions?.[0]?.frames?.length} frames; ${r.message ?? ""}`);
+      r = await call("ae_region_stats", { comp_id: CL, regions: [{ shape: holeBox }], hide_layers: [{ id: patchId }], times: [0, 0.08], max_samples: 2, expect });
+      check("ae_region_stats (hide_layers: a temporary copy, removed again)", r.applied === true && r.temp_comp?.copy_removed === true && r.receipt?.matches === true, why(r));
+
+      const fit = { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, expect };
+      r = await call("ae_patch_color_match", { ...fit, start: 0, end: 0.2, step: 2, dry_run: true });
+      check("ae_patch_color_match (dry_run)", r.ok !== false && r.complete === true && r.temp_comp?.copy_removed === true && r.receipt?.matches === true, `${r.curves?.samples?.length} samples; swing ${r.drift?.flicker_luma_swing}; ${r.message ?? ""}`);
+      r = await call("ae_patch_color_match", { ...fit, start: 0, end: 0.2, step: 2 });
+      check("ae_patch_color_match (levels)", r.ok !== false && r.complete === true && (r.applied === false || (r.write?.applied === true && r.write?.receipt?.matches === true)), `applied ${r.applied}; ${(r.write?.receipt?.mismatches ?? []).map((m) => m.message).join("; ")}; ${r.message ?? ""}`);
+      r = await call("ae_patch_color_match", { ...fit, start: 0, end: 0.2, step: 1, max_renders: 4, dry_run: true });
+      check("ae_patch_color_match (max_renders gives a continue_id or finishes)", r.ok !== false && (r.complete === true || typeof r.continue_id === "string"), `complete ${r.complete}, continue ${r.continue_id}`);
+      r = await call("ae_patch_grain", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 2, dry_run: true, expect });
+      check("ae_patch_grain (dry_run: measure only)", r.ok !== false && r.sigma_before?.plate_ring?.spatial?.length === 3, `ring ${JSON.stringify(r.sigma_before?.plate_ring?.spatial)}, patch ${JSON.stringify(r.sigma_before?.patch?.spatial)}, frozen ${r.sigma_before?.frozen_grain}; ${r.message ?? ""}`);
+      r = await call("ae_patch_grain", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 2, rounds: 1, expect });
+      check("ae_patch_grain (add and tune)", r.ok !== false && (r.grain_added === false || (r.write?.applied === true && r.write?.receipt?.matches === true)), `intensity ${r.start_intensity} -> ${r.final_intensity}; mode index ${r.write?.grain?.viewing_mode_index}; converged ${r.converged}; ${r.message ?? ""}`);
+      r = await call("ae_patch_finish", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 3, dry_run: true, expect });
+      check("ae_patch_finish (dry_run: the plan)", r.ok !== false && r.applied === false && typeof r.measured === "object", `plan ${JSON.stringify(Object.keys(r.plan ?? {}))}; ${r.message ?? ""}`);
+      r = await call("ae_patch_finish", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 3, expect });
+      check("ae_patch_finish", r.ok !== false && (r.applied === false || (r.write?.applied === true && r.write?.receipt?.matches === true)), `${(r.write?.receipt?.mismatches ?? []).map((m) => m.message).join("; ")}; ${r.message ?? ""}`);
+    } else {
+      skip("ae_patch_check / ae_region_stats / ae_patch_color_match / ae_patch_grain / ae_patch_finish", "ae_cleanplate_setup made no patch layer to measure");
+    }
+
+    // inpaint: spatial first (one render of the isolated plate), then temporal with an object that moves, placed masked in a scratch comp.
+    const IP = WS.inpaint;
+    const inp = await call("ae_inpaint_plate", { comp_id: IP, plate_layer: { name: "Plate" }, regions: [{ rect: [160, 90, 60, 60] }], method: "spatial", spatial: "diffuse", grow_px: 4, expect });
+    check("ae_inpaint_plate (spatial: applied, clean receipt, still imported)", inp.applied === true && inp.receipt?.matches === true && typeof inp.item?.id === "number", `${why(inp)}; ${inp.message ?? ""}`);
+    check("ae_inpaint_plate (spatial: the whole hole is spatial, png in the plates folder, plate copy removed)", (inp.fill?.filled?.spatial_share ?? 0) >= 0.99 && /chroma plates/.test(String(inp.fill?.png_path)) && inp.fill?.plate_copy?.removed === true, `spatial ${inp.fill?.filled?.spatial_share}; ${String(inp.fill?.png_path).slice(-40)}`);
+    const inp2 = await call("ae_inpaint_plate", { comp_id: IP, plate_layer: { name: "Plate" }, regions: [{ rect: [160, 90, 60, 60] }], method: "auto", object_moves: true, ref_time: 0.1, start: 0, end: 0.2, max_frames: 6, place_in_comp: { comp_id: WS.inp_out, mode: "masked" }, expect });
+    check("ae_inpaint_plate (temporal, placed masked in another comp)", inp2.applied === true && inp2.receipt?.matches === true && Boolean(inp2.layer), `${why(inp2)}; ${inp2.message ?? ""}`);
+    check("ae_inpaint_plate (a second still does not overwrite the first)", Boolean(inp2.fill?.png_path) && inp2.fill?.png_path !== inp.fill?.png_path, String(inp2.fill?.png_path).slice(-40));
+    r = await call("ae_inpaint_plate", { comp_id: IP, plate_layer: { name: "Plate" }, regions: [{ rect: [0, 0, 100000, 100000] }], expect });
+    check("ae_inpaint_plate (a hole over 25% of the frame is refused)", r.ok === false && r.error === "refused", `${r.error}: ${String(r.message ?? "").slice(0, 100)}`);
+  }
+
+  // ---------- wave 4: mattes (ae_mask_follow, ae_garbage_matte, ae_caf_prep) ----------
+  {
+    const MT = WS.matte;
+    const tr0 = await call("ae_track_read", { comp_id: MT, source: { transform: { layer: { name: "Plate" } } }, preview: false });
+    const trk = tr0.track_id;
+    check("ae_track_read (transform, for the mattes)", tr0.ok === true && typeof trk === "string", `${tr0.frames} frames`);
+    r = await call("ae_mask_follow", { comp_id: MT, layer: { name: "Plate" }, new_mask: { region: { rect: [100, 60, 120, 80] }, name: "Smoke follow" }, track: { track_id: trk }, mode: "subtract", expansion: 3, expect });
+    check("ae_mask_follow (new mask, tracked)", r.applied === true && r.receipt?.matches === true && r.mask !== undefined && r.frames?.keyed >= 2, `${r.frames?.keyed}/${r.frames?.solved} keys, bezier err ${r.max_bezier_error_px}; ${why(r)}`);
+    r = await call("ae_mask_follow", { comp_id: MT, layer: { name: "Plate" }, mask: { name: "Smoke follow" }, track: { track_id: trk }, replace_keys: true, scale_feather: true, feather: 8, expect });
+    check("ae_mask_follow (existing mask, replace keys, scaled feather)", r.applied === true && r.receipt?.matches === true && !r.feather_fallback && !r.path_error && !r.work_area_error, `${why(r)}`);
+    r = await call("ae_garbage_matte", { comp_id: MT, targets: [{ name: "Plate" }], region: { ellipse: [240, 135, 60, 40] }, track: { track_id: trk }, matte_type: "alpha", name: "Smoke GM", feather: 6, choke: 2, replace_existing_matte: true, expect });
+    check("ae_garbage_matte (tracked, hidden, choke)", r.applied === true && r.receipt?.matches === true, `choke ${JSON.stringify(r.choke)}; keys ${JSON.stringify(r.frames)}; ${why(r)}`);
+    r = await call("ae_caf_prep", { comp_id: MT, layer: { name: "Plate" }, new_mask: { region: { rect: [200, 150, 80, 60] }, name: "Smoke CAF" }, track: { track_id: trk }, expansion: 6, expect });
+    check("ae_caf_prep (tracked Subtract mask, work area)", r.applied === true && r.receipt?.matches === true && Array.isArray(r.instructions) && r.instructions.length >= 5 && r.open_panel?.tool === "ae_open_panel", `work area ${JSON.stringify(r.work_area)}; ${why(r)}`);
+    r = await call("ae_caf_prep", { comp_id: MT, layer: { name: "Plate" }, find_fill: true });
+    check("ae_caf_prep (find_fill, read only)", r.ok === true && r.find_fill === true && Array.isArray(r.candidates), `${r.candidates?.length} candidate(s)`);
+    skip("ae_caf_prep (the Content-Aware Fill itself)", "Generate Fill Layer has no scripting API; only the prep and find_fill are covered");
+  }
+
+  // ---------- wave 4: screen replacement (ae_screen_corners, ae_screen_replace) ----------
+  {
+    const SR = WS.screen;
+    const trueCorners = [[160, 90], [320, 90], [320, 180], [160, 180]];
+    const guess = [[164, 86], [324, 93], [322, 184], [157, 177]];
+    r = await call("ae_screen_corners", { comp_id: SR, ref_time: 0, corners: guess, search_px: 14, preview: true });
+    const snapped = r.corners_snapped;
+    check(
+      "ae_screen_corners (snaps rough corners onto a step edge)",
+      r.ok === true && r.read_only === true && r.corners?.length === 4 && Array.isArray(snapped) && trueCorners.every((t, i) => Math.hypot(snapped[i][0] - t[0], snapped[i][1] - t[1]) < 2) && fs.existsSync(String(r.preview_path)),
+      `${(r.corners ?? []).map((c) => `${c.name}:${c.method}/${c.confidence}`).join(" ")}; aspect ${r.aspect?.estimate} (${r.aspect?.method}); ${r.message ?? ""}`
+    );
+    const trS = await call("ae_track_read", { comp_id: SR, source: { transform: { layer: { name: "SR Screen" } } }, preview: false });
+    check("ae_track_read (transform, for the screen)", trS.ok === true && trS.frames >= 5, `${trS.frames} frames`);
+    if (Array.isArray(snapped) && typeof trS.track_id === "string") {
+      r = await call("ae_screen_replace", {
+        comp_id: SR,
+        track: { track_id: trS.track_id },
+        corners: snapped,
+        ref_time: 0,
+        insert: { item_id: WS.insert },
+        plate: { name: "SR Plate" },
+        name: "SR",
+        insert_aspect: 16 / 9,
+        max_samples: 4,
+        contact_sheet: true,
+        expect,
+      });
+      check("ae_screen_replace (CC Power Pin)", r.applied === true && r.receipt?.matches === true && Boolean(r.insert?.comp) && /power_pin|corner_pin/.test(String(r.pin?.kind)) && Boolean(r.sheet_path), `pin ${r.pin?.kind} (${r.pin?.values_used}); skipped ${JSON.stringify((r.look_skipped ?? []).map((s) => s.step))}; ${why(r)}`);
+      // LIVE-ONLY facts to read off the result: pin.param_table (CC Power Pin point names and order), pin.expansion.mode, look.levels.unit, look.blur, measured.edge.sigma_px.
+      r = await call("ae_screen_replace", {
+        comp_id: SR,
+        track: { track_id: trS.track_id },
+        corners: snapped,
+        ref_time: 0,
+        insert: { item_id: WS.insert },
+        plate: { name: "SR Plate" },
+        name: "SR2",
+        insert_aspect: 16 / 9,
+        pin: "corner_pin",
+        motion_blur: "transform_pin",
+        reflections: true,
+        match_look: true,
+        contact_sheet: false,
+        max_samples: 3,
+        expect,
+      });
+      check("ae_screen_replace (corner pin, transform_pin blur, reflections)", r.applied === true && r.receipt?.matches === true && r.motion_blur?.mode === "transform_pin", `skipped ${JSON.stringify((r.look_skipped ?? []).map((s) => s.step))}; ${why(r)}`);
+      r = await call("ae_screen_replace", { comp_id: SR, track: { track_id: trS.track_id }, corners: snapped, ref_time: 0, insert: { item_id: WS.screen }, name: "SR3", expect });
+      check("ae_screen_replace (an insert that is the target comp is refused)", refused(r), why(r).slice(0, 120));
+    } else {
+      skip("ae_screen_replace", "ae_screen_corners or ae_track_read gave no corners or track to use");
+    }
+  }
+
+  // ---------- wave 5: ae_run_jsx and skill safety lint, ae_status detail, property metadata ----------
+  const OPS = WS.ops;
+  const TRN = "ADBE Transform Group";
+  const OPAC = [TRN, "ADBE Opacity"];
+  {
+    r = await call("ae_run_jsx", { code: "system.callSystem('cmd /c dir');", mutates: false, label: "lint callSystem" });
+    check("ae_run_jsx (safety lint: an outside program)", r.__isError === true && /system\.callSystem/.test(JSON.stringify(r)), brief(r).slice(0, 120));
+    r = await call("ae_run_jsx", { code: "app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);", mutates: true, label: "lint close", expect });
+    check("ae_run_jsx (safety lint: project.close names ae_project_session)", r.__isError === true && /ae_project_session/.test(JSON.stringify(r)), brief(r).slice(0, 120));
+    r = await call("ae_run_jsx", { code: "app.project.save(new File('x.aep'));", mutates: true, label: "lint save", expect });
+    check("ae_run_jsx (safety lint: project.save names ae_save)", r.__isError === true && /ae_save/.test(JSON.stringify(r)), brief(r).slice(0, 120));
+    r = await call("ae_run_jsx", { code: "app.project.item(1).remove();", mutates: false, label: "lint write as read" });
+    check("ae_run_jsx (safety lint: a write with mutates false)", r.__isError === true && /mutates: true/.test(JSON.stringify(r)), brief(r).slice(0, 120));
+    r = await call("ae_run_jsx", { code: "return app.version;", mutates: false, label: "lint allows reads" });
+    check("ae_run_jsx (safety lint: a plain read passes)", !r.__isError && Boolean(r.result), brief(r).slice(0, 80));
+    r = await call("ae_skill_save", { name: "smoke-unsafe", description: "Must be refused.", steps: ["system.callSystem('cmd /c dir');"], scope: "project", overwrite: true, expect });
+    check("ae_skill_save (safety lint: a step with an outside program is refused)", refused(r) && /callSystem/.test(JSON.stringify(r)), why(r).slice(0, 120) || brief(r).slice(0, 120));
+
+    r = await call("ae_status", { detail: true });
+    const d = r.detail ?? {};
+    check("ae_status (detail)", Array.isArray(d.selected_properties) && Array.isArray(d.project_selection) && d.build !== undefined && Array.isArray(d.missing), `viewer ${d.viewer?.type ?? "none"}, lang ${d.iso_language}, rendering_disabled ${d.rendering_disabled}, missing ${(d.missing ?? []).join("; ")}`);
+    check("ae_status (detail has no user or machine name)", !/userName|machineName/.test(JSON.stringify(r)));
+    check("ae_status (default unchanged)", (await call("ae_status")).detail === undefined);
+
+    r = await call("ae_get_layer_props", { comp_id: OPS, layer: { name: "OpA" }, path: OPAC, depth: 1, meta: true });
+    check("ae_get_layer_props (meta: what the property accepts)", r.property?.meta?.value_type === "OneD" && r.property.meta.max === 100, brief(r.property?.meta ?? r).slice(0, 140));
+    r = await call("ae_set_property", { comp_id: OPS, layer: { name: "OpA" }, path: OPAC, value: 140, expect });
+    check("ae_set_property (a value over the property's maximum is refused before the undo group)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_set_property", { comp_id: OPS, layer: { name: "OpA" }, path: OPAC, expression: "thisIsNotDefined(", expect });
+    check("ae_set_property (a broken expression is a receipt mismatch with expression_error)", r.applied === true && r.receipt?.matches === false && String(r.expression_error ?? "").length > 0, `expression_error ${String(r.expression_error).slice(0, 80)}`);
+    r = await call("ae_set_property", { comp_id: OPS, layer: { name: "OpA" }, path: OPAC, expression: "", expression_enabled: false, expect });
+    check("ae_set_property (clear the expression)", r.applied === true && r.receipt?.matches !== false, why(r));
+
+    r = await call("ae_run_jsx", { code: "var l = app.project.itemByID(" + OPS + ").layer('OpM'); var m = l.property('ADBE Mask Parade').addProperty('ADBE Mask Atom'); return m.name;", mutates: true, label: "qa smoke: w5 mask", expect });
+    const maskPath = ["ADBE Mask Parade", String(r.result), "ADBE Mask Shape"];
+    r = await call("ae_set_property", { comp_id: OPS, layer: { name: "OpM" }, path: maskPath, value: { vertices: [[0, 0], [100, 0], [100, 100]], closed: true }, expect });
+    check("ae_set_property (a mask path value)", okWrite(r), why(r));
+    r = await call("ae_get_layer_props", { comp_id: OPS, layer: { name: "OpM" }, path: maskPath, depth: 1, shape_values: true });
+    check("ae_get_layer_props (shape_values: the path reads back)", r.property?.value?.num_vertices === 3, brief(r.property?.value ?? r).slice(0, 120));
+    r = await call("ae_set_property", { comp_id: WS.text, layer: { name: "W5Text" }, path: ["ADBE Text Properties", "ADBE Text Document"], value: { text: "w5", font: "NoSuchFont-Regular" }, expect });
+    if (refused(r)) check("ae_set_property (an unknown font is refused with candidates)", /not available|candidates|No installed font/i.test(JSON.stringify(r)), why(r).slice(0, 140));
+    else skip("ae_set_property (an unknown font is refused with candidates)", "this AE did not check the font (it has no app.fonts, which needs AE 24.0)");
+  }
+
+  // ---------- wave 5: ae_layer_ops (split, stretch, replace source, solid settings, the missing switches, separate dimensions) ----------
+  {
+    const wops = (args) => call("ae_layer_ops", { comp_id: OPS, expect, ...args });
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], effects_active: false, preserve_transparency: true, comment: "smoke", stretch: 200 });
+    check("ae_layer_ops (switches: effects_active, preserve_transparency, comment, stretch 200)", okWrite(r), why(r));
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], stretch: 100, effects_active: true, preserve_transparency: false, comment: "" });
+    check("ae_layer_ops (switches back, stretch 100)", okWrite(r), why(r));
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], stretch: 0.5 });
+    check("ae_layer_ops (a stretch between -1 and 1 is refused)", refused(r), why(r).slice(0, 120));
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], frame_blending: "frame_mix", auto_orient: "along_path" });
+    check("ae_layer_ops (frame blending and auto-orient)", okWrite(r), why(r));
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], frame_blending: "none", auto_orient: "off" });
+    check("ae_layer_ops (frame blending and auto-orient reset)", okWrite(r), why(r));
+    r = await wops({ action: "switches", layers: [{ name: "OpA" }], environment: true, dry_run: true });
+    check("ae_layer_ops (environment layer dry run lists its renderer warning or a skip)", !r.__isError && r.dry_run === true, brief(r).slice(0, 140));
+    r = await wops({ action: "split", layers: [{ name: "OpB" }], time: 1.5, dry_run: true });
+    check("ae_layer_ops (split dry run)", r.dry_run === true && !r.__isError, brief(r.splits ?? r).slice(0, 140));
+    r = await wops({ action: "split", layers: [{ name: "OpB" }], time: 1.5 });
+    check("ae_layer_ops (split)", okWrite(r) && r.duplicates_total === 1, why(r));
+    r = await wops({ action: "split", layers: [{ name: "OpC" }], time: 9999 });
+    check("ae_layer_ops (a split outside the layer changes nothing)", !r.__isError && (r.no_op === true || r.applied === true), brief(r.skipped ?? r).slice(0, 120));
+    r = await wops({ action: "separate_dimensions", layers: [{ name: "OpC" }], enable: true });
+    check("ae_layer_ops (separate Position)", okWrite(r), why(r));
+    r = await wops({ action: "separate_dimensions", layers: [{ name: "OpC" }], enable: false });
+    check("ae_layer_ops (unify Position)", okWrite(r), why(r));
+    r = await wops({ action: "replace_source", layers: [{ name: "OpD" }], item_id: WS.alt_item, keep_size: true, dry_run: true });
+    check("ae_layer_ops (replace_source dry run)", r.dry_run === true && Array.isArray(r.replacements), brief(r.replacements ?? r).slice(0, 140));
+    r = await wops({ action: "replace_source", layers: [{ name: "OpD" }], item_id: WS.alt_item, keep_size: true });
+    check("ae_layer_ops (replace_source)", okWrite(r), why(r));
+    r = await wops({ action: "replace_source", layers: [{ name: "OpD" }], item_id: OPS });
+    check("ae_layer_ops (replace_source with the comp itself is refused)", refused(r), why(r).slice(0, 120));
+    r = await wops({ action: "solid_settings", layers: [{ name: "OpE" }], color: [0.2, 0.4, 0.6], dry_run: true });
+    check("ae_layer_ops (solid_settings dry run lists the layers that use the solid)", r.dry_run === true && !r.__isError, brief(r.solids ?? r).slice(0, 140));
+    r = await wops({ action: "solid_settings", layers: [{ name: "OpE" }], color: [0.2, 0.4, 0.6], width: 120, scope: "layer_only" });
+    check("ae_layer_ops (solid_settings, this layer only)", okWrite(r), why(r));
+  }
+
+  // ---------- wave 5: ae_comp_settings (name, size around an anchor, frame rate, duration, trim to work area, guides) ----------
+  {
+    const SG = WS.settings;
+    const g0 = await call("ae_get_comp_settings", { comp_id: SG });
+    check("ae_get_comp_settings (guides carry their direction)", Array.isArray(g0.guides) && g0.guides.every((g) => g.orientation === undefined || g.orientation === "horizontal" || g.orientation === "vertical"), `${g0.guide_count} guide(s)`);
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { name: "W5 Settings renamed", pixel_aspect: 1 }, expect });
+    check("ae_comp_settings (rename, pixel aspect)", okWrite(r), why(r));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { size: { width: g0.width + 200, height: g0.height + 100, anchor: "center" } }, expect });
+    check("ae_comp_settings (anchored resize: the layer keeps its place, no doubled shift)", okWrite(r) && (r.resize?.layers_moved ?? 0) >= 1, `moved ${r.resize?.layers_moved}; ${why(r)}`);
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { size: { width: g0.width, height: g0.height, anchor: "center" } }, expect });
+    check("ae_comp_settings (resize back)", okWrite(r), why(r));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { name: "W5 Settings renamed" }, expect });
+    check("ae_comp_settings (setting what is already set is a no-op)", r.no_op === true, brief(r).slice(0, 100));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { drop_frame: true }, expect });
+    check("ae_comp_settings (drop frame at 25 fps is refused)", refused(r) && /29\.97|59\.94/.test(JSON.stringify(r)), why(r).slice(0, 120));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { frame_rate: 29.97, drop_frame: true }, expect });
+    check("ae_comp_settings (29.97 drop frame)", okWrite(r) && r.settings?.drop_frame === true, why(r));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { frame_rate: g0.fps, drop_frame: false }, expect });
+    check("ae_comp_settings (frame rate back to the original)", okWrite(r), why(r));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { duration: { seconds: g0.duration + 4 } }, expect });
+    check("ae_comp_settings (duration longer: the layer follows)", okWrite(r) && (r.duration_change?.extended_count ?? 0) >= 1, `extended ${r.duration_change?.extended_count}; ${why(r)}`);
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { work_area: { start: 1, duration: 2 } }, expect });
+    check("ae_comp_settings (work area for the trim)", okWrite(r), why(r));
+    r = await call("ae_comp_settings", { comp_id: SG, settings: { trim_to_work_area: true }, expect });
+    check("ae_comp_settings (trim to work area: the comp is 2 s)", okWrite(r) && r.settings?.duration > 1.9 && r.settings?.duration < 2.1, `duration ${r.settings?.duration}; ${why(r)}`);
+    r = await call("ae_comp_settings", { comp_id: SG, guides: [{ action: "add", orientation: "vertical", position: 25, position_type: "percentage", color: [1, 0, 0], pinned: true }], expect });
+    gated("ae_comp_settings (26.5 guide colour, pinned and percentage position read back)", r, (x) => okWrite(x) && x.settings?.guides?.some((g) => g.position_kind === "percentage" && g.pinned === true), /After Effects 26\.5|no GuideOptions/i, why(r).slice(0, 120));
+  }
+
+  // ---------- wave 5: ae_create_comp, ae_project_items, ae_project_settings ----------
+  {
+    const made = await call("ae_create_comp", { mode: "new", name: "smoke_pi_comp", width: 640, height: 360, fps: 25, duration_frames: 50, bg_color: "#102030", unique_name: true, expect });
+    check("ae_create_comp (new: applied, receipt matches)", made.applied === true && made.receipt?.matches === true, why(made));
+    const compId = made.comps?.[0]?.id;
+    check("ae_create_comp (read back as 2 s, 640x360)", made.comps?.[0]?.duration === 2 && made.comps?.[0]?.width === 640, `${made.comps?.[0]?.duration} s, ${made.comps?.[0]?.width}x${made.comps?.[0]?.height}`);
+    const wide = await call("ae_create_comp", { mode: "new", name: "smoke_pi_par", width: 640, height: 360, fps: 25, duration: 2, pixel_aspect: 2, unique_name: true, expect });
+    check("ae_create_comp (a valid pixel aspect of 2)", wide.applied === true && wide.receipt?.matches === true, why(wide));
+    r = await call("ae_create_comp", { mode: "new", name: "smoke_pi_bad", width: 640, height: 360, fps: 25, duration: 2, pixel_aspect: 500, expect });
+    check("ae_create_comp (a pixel aspect of 500 is refused before anything changes)", refused(r), why(r).slice(0, 100));
+    const pngItem = (await call("ae_import_footage", { paths: [path.join(MEDIA, "a.png")], expect })).item_ids?.[0];
+    const fromFoot = await call("ae_create_comp", { mode: "from_footage", item_id: pngItem, duration: 2, fps: 25, add_layer: true, unique_name: true, expect });
+    check("ae_create_comp (from_footage: a still needs a duration and a frame rate, the footage becomes a layer)", fromFoot.applied === true && fromFoot.receipt?.matches === true, `${fromFoot.comps?.[0]?.name}; ${why(fromFoot)}`);
+    const deepDry = await call("ae_create_comp", { mode: "duplicate", comp_id: compId, deep: true, expect });
+    check("ae_create_comp (a deep duplicate is a dry run by default)", deepDry.dry_run === true && deepDry.would_create_total === 1, brief(deepDry).slice(0, 120));
+    const dup = await call("ae_create_comp", { mode: "duplicate", comp_id: compId, deep: true, dry_run: false, expect });
+    check("ae_create_comp (deep duplicate applied)", dup.applied === true && dup.receipt?.matches === true, why(dup));
+    const planDry = await call("ae_project_items", { ops: [{ action: "create_folder", name: "smoke_pi_bin" }, { action: "move", item_ids: [compId], folder_path: "smoke_pi_bin/inner" }], expect });
+    check("ae_project_items (a dry run by default)", planDry.dry_run === true && planDry.applied === false, brief(planDry).slice(0, 120));
+    const applied = await call("ae_project_items", { ops: [{ action: "move", item_ids: [compId], folder_path: "smoke_pi_bin/inner" }, { action: "label", item_ids: [compId], label: 5 }, { action: "comment", item_ids: [compId], text: "smoke" }], dry_run: false, expect });
+    check("ae_project_items (move into a new folder path, label, comment)", applied.applied === true && applied.receipt?.matches === true, why(applied));
+    const renamed = await call("ae_project_items", { action: "rename", item_id: compId, name: "smoke_pi_renamed", dry_run: false, expect });
+    check("ae_project_items (rename)", renamed.applied === true && renamed.receipt?.matches === true, why(renamed));
+    r = await call("ae_project_items", { action: "organize", preset: "by_kind", dry_run: true, expect });
+    check("ae_project_items (organize by kind, dry run)", r.dry_run === true && !r.__isError, brief(r).slice(0, 120));
+    r = await call("ae_project_items", { action: "delete", item_ids: [OPS], dry_run: true, expect });
+    check("ae_project_items (a comp used by nothing is deletable; the dry run lists it)", r.dry_run === true && !r.__isError, brief(r).slice(0, 120));
+    const doomed = [compId, wide.comps?.[0]?.id, fromFoot.comps?.[0]?.id, ...(dup.comps ?? []).map((c) => c.id)].filter((x) => typeof x === "number");
+    // remove_empty_folders from the project root would also delete __chroma_qa__ (the empty ownership folder qa/runner.js adds), so it works inside smoke_pi_bin only; the bin itself is then deleted by id.
+    const binId = (applied.created_folders ?? []).find((fo) => fo.name === "smoke_pi_bin")?.id;
+    const binOps = typeof binId === "number" ? [{ action: "remove_empty_folders", parent_id: binId }, { action: "delete", item_ids: [binId] }] : [];
+    const cleanup = await call("ae_project_items", { ops: [{ action: "delete", item_ids: doomed }, ...binOps], dry_run: false, expect });
+    check("ae_project_items (delete the comps made here, remove the empty folders inside the smoke bin, then the bin)", cleanup.applied === true && cleanup.receipt?.matches === true && typeof binId === "number", `bin ${binId}; ${why(cleanup)}`);
+
+    const ps = await call("ae_project_settings", {});
+    check("ae_project_settings (read)", ps.ok === true && typeof ps.bits_per_channel === "number" && Array.isArray(ps.list_color_profiles) && Array.isArray(ps.available_gpu_types) && Array.isArray(ps.probed?.not_found), `${ps.bits_per_channel} bpc, ${ps.list_color_profiles?.length} profiles, gpu ${(ps.available_gpu_types ?? []).join("/")}`);
+    r = await call("ae_project_settings", { set: { bits_per_channel: ps.bits_per_channel }, expect });
+    check("ae_project_settings (setting the current value is a no-op)", r.applied === true && r.no_op === true && r.receipt?.matches === true, brief(r).slice(0, 100));
+    r = await call("ae_project_settings", { set: { working_space: "definitely not a profile" }, expect });
+    check("ae_project_settings (a colour profile that is not in the list is refused)", refused(r), why(r).slice(0, 100));
+  }
+
+  // ---------- wave 5: ae_view (UI state: the playhead, selection, viewer options; no undo step, no checkpoint) ----------
+  {
+    const FX = WS.fx;
+    r = await call("ae_view", { comp_id: FX, open: { in: "viewer" }, time: { time: 1 }, select: { layers: [{ name: "Backdrop" }] }, expect });
+    const before = r.previous_state;
+    check("ae_view (open in the viewer, playhead, select a layer)", r.applied === true && r.receipt?.matches === true, `${why(r)}; skipped ${JSON.stringify(r.skipped ?? [])}`);
+    check("ae_view (the result carries the previous and the new state)", before !== undefined && r.state !== undefined, `dirty ${r.dirty_before} -> ${r.dirty_after}`);
+    r = await call("ae_view", { comp_id: FX, time: { frame: 5 }, expect });
+    check("ae_view (playhead by frame)", r.applied === true && r.receipt?.matches === true, why(r));
+    r = await call("ae_view", { comp_id: FX, viewer_options: { checkerboards: true }, expect });
+    gated("ae_view (viewer options)", r, (x) => x.applied === true && x.receipt?.matches === true, /no active viewer/i, why(r).slice(0, 120));
+    r = await call("ae_view", { comp_id: FX, viewer_options: { checkerboards: false }, expect });
+    gated("ae_view (viewer options back)", r, (x) => x.applied === true && x.receipt?.matches === true, /no active viewer/i, why(r).slice(0, 120));
+    if (before) {
+      r = await call("ae_view", { restore: before, expect });
+      check("ae_view (restore the earlier state)", r.applied === true, `${why(r)}; skipped ${JSON.stringify(r.skipped ?? [])}`);
+    } else {
+      skip("ae_view (restore)", "the first call returned no previous_state");
+    }
+    r = await call("ae_view", { comp_id: FX, time: { time: 1, frame: 25 }, expect });
+    check("ae_view (time and frame together are refused)", refused(r), why(r).slice(0, 100));
+  }
+
+  // ---------- wave 5: keyframes (ae_keyframes_transform, ae_detect_cuts, ae_get_keyframes), markers, per-key ease extras ----------
+  {
+    const K = WS.key;
+    const POSK = [TRN, "ADBE Position"];
+    r = await call("ae_set_property", {
+      comp_id: K,
+      layer: { name: "Keys" },
+      path: POSK,
+      keyframes: [{ time: 0, value: [100, 180], interp: "bezier" }, { time: 1, value: [300, 120], interp: "bezier" }, { time: 2, value: [500, 180], interp: "bezier" }],
+      expect,
+    });
+    check("ae_set_property (three position keys for the keyframe tools)", okWrite(r), why(r));
+    r = await call("ae_set_keyframe_ease", { comp_id: K, layer: { name: "Keys" }, path: POSK, ease: "easy_ease", expect });
+    check("ae_set_keyframe_ease (easy ease before the transforms)", r.applied === true && r.receipt?.matches === true, why(r));
+    const KT = { comp_id: K, targets: [{ layer: { name: "Keys" }, path: POSK }] };
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "shift", frames: 6 }, dry_run: true });
+    check("ae_keyframes_transform (dry run)", r.ok === true && r.dry_run === true && (r.targets?.[0]?.moves?.length ?? 0) >= 3, `${r.targets?.[0]?.moves?.length} keys planned`);
+    const kBefore = await call("ae_get_keyframes", { comp_id: K, layer: { name: "Keys" }, path: POSK });
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "shift", frames: 6 }, expect });
+    check("ae_keyframes_transform (shift by 6 frames)", r.applied === true && r.receipt?.matches === true && r.keys_selected >= 3, `${r.keys_selected} keys moved; ${why(r)}`);
+    const kAfter = await call("ae_get_keyframes", { comp_id: K, layer: { name: "Keys" }, path: POSK });
+    check("ae_keyframes_transform (a shift keeps every key's ease)", kBefore.numKeys === kAfter.numKeys && JSON.stringify((kBefore.keys ?? []).map((k) => [k.in, k.out])) === JSON.stringify((kAfter.keys ?? []).map((k) => [k.in, k.out])), `${kAfter.numKeys} keys`);
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "reverse" }, expect });
+    check("ae_keyframes_transform (reverse)", r.applied === true && r.receipt?.matches === true, why(r));
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "scale", factor: 1.5 }, expect });
+    check("ae_keyframes_transform (scale time by 1.5)", r.applied === true && r.receipt?.matches === true, why(r));
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "move_to", time: 0.5 }, expect });
+    check("ae_keyframes_transform (move the first key to 0.5 s)", r.applied === true && r.receipt?.matches === true, why(r));
+    r = await call("ae_keyframes_transform", { ...KT, operation: { type: "copy_to", layer: { name: "Keys2" }, path: POSK, relative_value: true, at_time: 0.2 }, expect });
+    check("ae_keyframes_transform (copy to another layer, relative value)", r.applied === true && r.receipt?.matches === true, why(r));
+    r = await call("ae_keyframes_transform", { comp_id: K, keys: "selected", operation: { type: "reverse" }, dry_run: true });
+    check("ae_keyframes_transform (keys: selected, with none selected, says so and touches nothing)", r.error === "no_match" || r.ok === true, String(r.error ?? "a selection was found"));
+    r = await call("ae_remove_keyframes", { comp_id: K, layer: { name: "Keys" }, path: POSK, keys: "selected", dry_run: true, expect });
+    check("ae_remove_keyframes (keys: selected, dry run)", r.error === "no_match" || r.dry_run === true || r.ok === true, String(r.error ?? `${r.count} selected`));
+    // A real selection, made with ae_view: two keys selected, then the keyframe tools act on exactly those.
+    r = await call("ae_view", { comp_id: K, select: { keys: [{ layer: { name: "Keys" }, path: POSK, indexes: [1, 2] }], deselect_others: true }, expect });
+    check("ae_view (select two keys)", r.applied === true && r.receipt?.matches === true, `${why(r)}; skipped ${js(r.skipped)}`);
+    r = await call("ae_keyframes_transform", { comp_id: K, keys: "selected", operation: { type: "shift", frames: 2 }, dry_run: true });
+    gated("ae_keyframes_transform (keys: selected plans the two keys ae_view selected)", r, (x) => x.ok === true && x.keys_selected === 2, /No keys match that selection|keySelected/i, `keys_selected ${r.keys_selected}; ${r.error ?? ""}`);
+    r = await call("ae_view", { comp_id: K, select: { properties: [{ layer: { name: "Keys2" }, path: POSK }], deselect_others: true }, expect });
+    check("ae_view (select a property)", r.applied === true && r.receipt?.matches === true, `${why(r)}; skipped ${js(r.skipped)}`);
+    r = await call("ae_view", { comp_id: K, open: { in: "layer", layer: { name: "Keys" } }, expect });
+    gated("ae_view (open a layer in the layer panel)", r, (x) => x.applied === true && x.receipt?.matches === true, /no openInViewer|Layer panel|no active viewer/i, `${why(r)}; skipped ${js(r.skipped)}`);
+    r = await call("ae_view", { select: { items: [WS.fx], deselect_others: true }, expect });
+    check("ae_view (select a project item)", r.applied === true && r.receipt?.matches === true, `${why(r)}; skipped ${js(r.skipped)}`);
+
+    // Per-key interpolation and label on the Keys2 copy.
+    r = await call("ae_set_keyframe_ease", { comp_id: K, layer: { name: "Keys2" }, path: POSK, keys: [1], in_interp: "linear", out_interp: "bezier", label: 3, expect });
+    gated("ae_set_keyframe_ease (per-key in and out interpolation, key label)", r, (x) => x.applied === true && x.receipt?.matches === true, /After Effects 22\.6|setLabelAtKey/i, js(r.receipt?.mismatches ?? why(r)));
+
+    // Scene Edit Detection needs footage with cuts. A pre-comp layer is an AV layer with video and no cuts; a text layer is not one.
+    r = await call("ae_detect_cuts", { comp_id: W.remap, layer: { name: "Clip" } });
+    gated("ae_detect_cuts (list, on a pre-comp layer: no cuts)", r, (x) => x.ok === true && Array.isArray(x.cuts) && x.cut_count === 0, /doSceneEditDetection|SceneEditDetectionMode|AE 22\.3/i, `${r.cut_count} cuts in ${r.clip_duration}s`);
+    r = await call("ae_detect_cuts", { comp_id: COMP, layer: { name: "Title" } });
+    check("ae_detect_cuts (a text layer is refused: not an AV layer)", refused(r), why(r).slice(0, 120));
+    skip("ae_detect_cuts (markers, split, split_precomp)", "the scratch project has no video footage with cuts, so these modes would find nothing to write");
+
+    // Markers: edit, move, and the 16.0 fields (on the Layers comp, after its earlier marker checks).
+    r = await call("ae_add_markers", { comp_id: LC, markers: [{ time: 2, comment: "edit me", duration: 0.5, label: 4, chapter: "Ch", url: "https://example.com" }], expect });
+    check("ae_add_markers (setup for the edit)", okWrite(r), `${r.numMarkers} markers; ${why(r)}`);
+    r = await call("ae_add_markers", { comp_id: LC, edit: [{ time: 2, move_to: 2.4, set: { comment: "moved" } }], dry_run: true });
+    check("ae_add_markers (edit dry run)", r.ok === true && r.dry_run === true && r.edits?.[0]?.moved === true, js(r.edits?.[0], 140));
+    r = await call("ae_add_markers", { comp_id: LC, edit: [{ time: 2, move_to: 2.4, set: { comment: "moved" } }], expect });
+    check("ae_add_markers (edit and move)", okWrite(r) && r.edited === 1, why(r));
+    const mk = await call("ae_get_markers", { comp_id: LC });
+    const moved = (mk.markers ?? []).find((m) => Math.abs(m.time - 2.4) < 0.01);
+    check("ae_add_markers (an edited marker keeps its other fields, the old time is empty)", Boolean(moved) && moved.comment === "moved" && moved.label === 4 && moved.chapter === "Ch" && moved.url === "https://example.com" && !(mk.markers ?? []).some((m) => Math.abs(m.time - 2) < 0.01), js(moved));
+    r = await call("ae_add_markers", { comp_id: LC, markers: [{ time: 0.2, comment: "region", duration: 0.2, protected_region: true, frame_target: "_blank", params: { k: "v" } }], expect });
+    check("ae_add_markers (protected_region, frame_target, params)", okWrite(r), why(r));
+    const mk2 = await call("ae_get_markers", { comp_id: LC });
+    const reg = (mk2.markers ?? []).find((m) => Math.abs(m.time - 0.2) < 0.01);
+    check("ae_get_markers (the 16.0 fields read back)", Boolean(reg) && reg.protected_region === true && reg.frame_target === "_blank" && reg.params?.k === "v", js(reg));
+  }
+
+  // ---------- wave 5: text (ae_set_text typography, ae_text_animator selectors), masks, effects, shapes ----------
+  {
+    const T = WS.text;
+    const tl = { name: "W5Text" };
+    r = await call("ae_set_text", { comp_id: T, layer: tl, style: { caps: "all", kerning: "optical", ligature: false }, paragraph: { justify: "full_center", space_after: 6 }, expect });
+    check("ae_set_text (typography and paragraph options)", okWrite(r), why(r));
+    r = await call("ae_set_text", { comp_id: T, layer: tl, style: { font: "NoSuchFont-Regular" }, expect });
+    if (refused(r)) check("ae_set_text (an unknown font is refused with near matches)", FONT_REFUSAL.test(JSON.stringify(r)), why(r).slice(0, 140));
+    else skip("ae_set_text (an unknown font is refused with near matches)", "this AE did not check the font (it has no app.fonts, which needs AE 24.0)");
+    r = await call("ae_set_text", { comp_id: T, layer: tl, paragraphs: [{ index: 0, style: { fillColor: [1, 0, 0] } }], expect });
+    check("ae_set_text (a paragraph's character style)", okWrite(r), why(r));
+
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, name: "Wiggle", properties: { position: [0, 20, 0], rotation: 8, stroke_width: 2, skew: 10 }, selector: { type: "wiggly", max_amount: 100, min_amount: -100, wiggles_per_second: 3, correlation: 40, lock_dimensions: false, based_on: "characters" }, expect });
+    check("ae_text_animator (wiggly selector): LIVE CHECK the child match names", r.applied === true && r.receipt?.matches === true, `${JSON.stringify(r.selectors?.[0]?.fields)}; ${why(r)}`);
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 0 }, selector: { type: "range", units: "index", start: 0, end: 3, mode: "add", shape: "round", smoothness: 50 }, more_selectors: [{ type: "expression", expression: "Math.sin(textIndex * 0.8) * 50 + 50" }], reveal: { property: "end", from: 0, to: 12, start_time: 0, duration: 1 }, expect });
+    check("ae_text_animator (range selector in index units plus an expression selector)", r.applied === true && r.receipt?.matches === true, `${JSON.stringify(r.selectors?.map((s) => s.type))}; ${why(r)}`);
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 100 }, grouping: { anchor_point_grouping: "word", grouping_alignment: [0, 0] }, expect });
+    check("ae_text_animator (More Options: grouping)", r.applied === true && r.receipt?.matches === true, JSON.stringify(r.grouping));
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, variable_axes: [{ tag: "wght", value: 700 }], expect });
+    gated("ae_text_animator (a variable font axis, AE 26)", r, (x) => x.applied === true && x.receipt?.matches === true, /After Effects 26\.0|addVariableFontAxis|not a variable font/i, js(r.variable_axes ?? r.message ?? r.error));
+
+    // Masks: a second mask, its attributes, a duplicate and a move in one call.
+    r = await call("ae_mask", { comp_id: OPS, layer: { name: "OpA" }, add: [{ name: "First", shape: "ellipse", box: [0, 0, 80, 80] }, { name: "Edge", shape: "rect", box: [0, 0, 60, 60] }], expect });
+    check("ae_mask (add two)", okWrite(r) && (r.masks ?? []).length >= 2, JSON.stringify(r.masks?.map((m) => m.name)));
+    r = await call("ae_mask", { comp_id: OPS, layer: { name: "OpA" }, set: [{ mask: { name: "Edge" }, feather_falloff: "linear", motion_blur: "on", color: [0, 1, 0], locked: false }], duplicate: [{ mask: { name: "Edge" }, count: 1 }], move_to: [{ mask: { name: "Edge" }, index: 1 }], expect });
+    check("ae_mask (attributes, duplicate, move_to)", okWrite(r) && (r.duplicated ?? []).length === 1, `${JSON.stringify(r.duplicated)} order ${JSON.stringify(r.masks?.map((m) => m.name))} unsupported ${JSON.stringify(r.unsupported)} warnings ${JSON.stringify(r.warnings)}`);
+
+    // Effects: stack order, duplicate, a popup by label, a layer style.
+    const FX = WS.fx;
+    await call("ae_create_layer", { comp_id: FX, type: "solid", name: "FxPlate", color: [0.6, 0.6, 0.6], expect });
+    r = await call("ae_add_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: "ADBE Gaussian Blur 2", name: "Blur A", params: [{ param: "Blurriness", value: 3 }], expect });
+    check("ae_add_effect (Blur A)", okWrite(r), why(r));
+    r = await call("ae_add_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: "ADBE Tint", name: "Tint B", expect });
+    check("ae_add_effect (Tint B)", okWrite(r), why(r));
+    r = await call("ae_set_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: { name: "Tint B" }, move_to: 1, expect });
+    check("ae_set_effect (move_to: Tint B to the top of the stack)", okWrite(r) && r.effect?.index === 1, `index ${r.effect?.index}; ${why(r)}`);
+    r = await call("ae_set_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: { name: "Blur A" }, duplicate: 1, expect });
+    check("ae_set_effect (duplicate: the copy is located)", okWrite(r) && r.duplicate_located === true, `located ${r.duplicate_located}; scope ${r.expression_scan_scope}; ${why(r)}`);
+    r = await call("ae_add_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: "ADBE Gaussian Blur 2", name: "Blur H", params: [{ param: "Blur Dimensions", value: "Horizontal" }], expect });
+    gated("ae_add_effect (a popup set by its label, AE 26.0)", r, (x) => okWrite(x), /reports no menu labels/i, why(r).slice(0, 140));
+    r = await call("ae_add_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: "dropShadow", expect });
+    gated("ae_add_effect (a layer style, or told to use a preset)", r, (x) => x.applied === true, /not addable by script/i, why(r).slice(0, 140));
+
+    // Shapes: stroke details and gradient fills, duplicate, move, then the path operators.
+    await call("ae_create_layer", { comp_id: FX, type: "shape", name: "Shapes", expect });
+    r = await call("ae_shape", { comp_id: FX, layer: { name: "Shapes" }, add: [{ type: "rect", name: "Dashed", size: [200, 80], stroke: { color: [1, 1, 1], width: 6, line_cap: "round", line_join: "round", dashes: [{ dash: 12, gap: 8 }], taper: { start_length: 20 } }, gradient_fill: { type: "radial", start_point: [0, 0], end_point: [100, 0] } }], expect });
+    check("ae_shape (stroke cap, join, dashes, taper and a radial gradient fill)", okWrite(r), why(r));
+    r = await call("ae_shape", { comp_id: FX, layer: { name: "Shapes" }, duplicate: [{ name: "Dashed", count: 2 }], expect });
+    check("ae_shape (duplicate a group twice, located)", okWrite(r) && r.duplicate_located === true, `located ${r.duplicate_located}; ${why(r)}`);
+    r = await call("ae_shape", { comp_id: FX, layer: { name: "Shapes" }, move: [{ index: 1, to: 2 }], expect });
+    check("ae_shape (move a group)", okWrite(r), why(r));
+    for (const [operator, extra] of [
+      ["merge", { merge: { mode: "add" } }],
+      ["round_corners", { round_corners: { radius: 20 } }],
+      ["zig_zag", { zig_zag: { size: 6, ridges_per_segment: 4 } }],
+      ["pucker_bloat", { pucker_bloat: { amount: 25 } }],
+      ["twist", { twist: { angle: 45 } }],
+      ["wiggle_paths", { wiggle_paths: { size: 5, random_seed: 3 } }],
+      ["wiggle_transform", { wiggle_transform: { wiggles_per_second: 2 } }],
+    ]) {
+      r = await call("ae_path_operator", { comp_id: FX, layer: { name: "Shapes" }, group: { index: 1 }, operator, ...extra, expect });
+      check(`ae_path_operator (${operator})`, okWrite(r), why(r));
+    }
+    r = await call("ae_add_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: "ADBE Set Matte3", name: "Matte S", expect });
+    check("ae_add_effect (Set Matte, for the layer picker)", okWrite(r), why(r));
+    r = await call("ae_set_effect", { comp_id: FX, layer: { name: "FxPlate" }, effect: { name: "Matte S" }, params: [{ param: 1, value: { layer: { name: "Backdrop" }, stage: "masks" } }], expect });
+    gated("ae_set_effect (a layer picker with a stage, AE 26.5)", r, (x) => okWrite(x), /After Effects 26\.5|setInputLayerAndStage/i, why(r).slice(0, 140));
+  }
+
+  // ---------- wave 5: 3D layers and cameras (lights, meshes, vertical text, focus options) ----------
+  {
+    const D = WS.d3;
+    r = await call("ae_create_layer", { comp_id: D, type: "solid", name: "W5 HDRI", color: [0.5, 0.5, 0.5], expect });
+    check("ae_create_layer (a solid to use as the light source)", okWrite(r), why(r));
+    r = await call("ae_create_layer", { comp_id: D, type: "light", name: "W5 Env", light_type: "environment", light_source: { name: "W5 HDRI" }, light_options: { intensity: 80 }, expect });
+    gated("ae_create_layer (environment light with a source layer)", r, (x) => x.applied === true && Array.isArray(x.receipt?.mismatches), /Environment lights need After Effects 24\.3/i, why(r).slice(0, 140));
+    r = await call("ae_create_layer", { comp_id: D, type: "light", name: "W5 Spot", light_type: "spot", light_options: { cone_angle: 40, casts_shadows: true, shadow_darkness: 50 }, expect });
+    check("ae_create_layer (spot light options read back)", okWrite(r), why(r));
+    r = await call("ae_create_layer", { comp_id: D, type: "mesh", name: "W5 Cube", mesh_type: "cube", mesh_options: { width: 300, height: 200, depth: 100 }, bevel_options: { radius: 5, sides: 3 }, expect });
+    gated("ae_create_layer (a cube mesh, AE 26.3)", r, (x) => okWrite(x), /Parametric mesh layers need After Effects 26\.3|ParametricMeshType/i, why(r).slice(0, 140));
+    r = await call("ae_create_layer", { comp_id: D, type: "text", name: "W5 Vertical", text: "ABC", orientation: "vertical", font: "ArialMT", expect });
+    gated("ae_create_layer (vertical text with a checked font, AE 24.2)", r, (x) => x.applied === true, /Vertical (box )?text needs After Effects 24\.2/i, why(r).slice(0, 140));
+    r = await call("ae_create_layer", { comp_id: D, type: "text", name: "W5 BadFont", text: "x", font: "NoSuchFont-Regular", expect });
+    if (refused(r)) check("ae_create_layer (an unknown font is refused before anything changes)", FONT_REFUSAL.test(JSON.stringify(r)), why(r).slice(0, 140));
+    else skip("ae_create_layer (an unknown font is refused before anything changes)", "this AE did not check the font (it has no app.fonts, which needs AE 24.0)");
+    r = await call("ae_camera_rig", { comp_id: D, name: "W5 Cam", expect });
+    check("ae_camera_rig (a new camera)", okWrite(r), why(r));
+    r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, lens: { focal_length: 35 }, depth_of_field: true, focus: { aperture: 20 }, expect });
+    check("ae_camera_rig (retune an existing camera: lens, depth of field, aperture)", okWrite(r), why(r));
+    r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, lens: { focal_length: 35 }, expect });
+    check("ae_camera_rig (the same retune again is a no-op)", r.no_op === true, brief(r).slice(0, 100));
+    r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, focus: { focus_area_width: 40, near_far_blur_multiplier: 2 }, expect });
+    gated("ae_camera_rig (26.3 focus options, or reported absent in the warnings)", r, (x) => x.applied === true && (x.probe?.focus_area_width !== undefined || /focus_area_width property/.test(JSON.stringify(x.warnings))), /26\.3|focus_area_width/i, JSON.stringify({ probe: r.probe, warnings: r.warnings }).slice(0, 160));
+    r = await call("ae_scene_3d_report", { comp_id: D });
+    check("ae_scene_3d_report (lights and models are listed)", Array.isArray(r.lights) && r.lights.some((l) => l.name === "W5 Spot") && Array.isArray(r.models), `${(r.lights ?? []).length} light(s), ${(r.models ?? []).length} model(s); ${JSON.stringify(r.warnings)?.slice(0, 80)}`);
+    r = await call("ae_describe_comp", { comp_id: D });
+    check("ae_describe_comp (a 3D comp with lights, a camera and text)", r.ok === true && r.read_only === true, `${r.comp?.num_layers} layers; ${r.summary?.slice(0, 80)}`);
+    r = await call("ae_annotate_frame", { comp_id: D, time: 0 });
+    check("ae_annotate_frame (a 3D comp)", r.ok === true && fs.existsSync(String(r.path)), `${r.frames?.[0]?.layer_count} layer(s) drawn`);
+  }
+
+  // ---------- wave 5: reads, expressions, fonts, footage (ae_get_layer_full, ae_find_layers, ae_validate_expressions, ae_purge_unused, ae_fonts, ae_import_footage, ae_replace_footage, ae_brief) ----------
+  {
+    const T = WS.text;
+    r = await call("ae_get_layer_full", { comp_id: T, layer: { name: "W5Text" }, include: ["transform", "text"], meta: true, text_full: true, bounds: { points_to_comp: [[0, 0]] } });
+    check("ae_get_layer_full (meta: the transform properties carry their value type)", /value_type/.test(JSON.stringify(r.transform ?? {})), JSON.stringify(r.transform ?? {}).slice(0, 100));
+    check("ae_get_layer_full (bounds: the rectangle and four corners)", Boolean(r.bounds?.rect) && (r.bounds?.corners_comp ?? []).length === 4, js(r.bounds, 140));
+    r = await call("ae_find_layers", { comp_id: WS.d3, type: "model_3d" });
+    check("ae_find_layers (type model_3d is accepted)", typeof r.total_matched === "number", `matched ${r.total_matched}`);
+    r = await call("ae_validate_expressions", { comp_id: OPS, fix: { find: "__no_such_text__", replace: "x" } });
+    check("ae_validate_expressions (fix without apply is a project-wide dry run)", r.dry_run === true && /whole project/.test(String(r.scope_note)), String(r.scope_note).slice(0, 100));
+    r = await call("ae_purge_unused", { consolidate: true });
+    check("ae_purge_unused (consolidate duplicate footage: a dry run lists the groups)", r.mode === "consolidate" && typeof r.group_count === "number", `${r.group_count} group(s)`);
+    r = await call("ae_purge_unused", { reduce_to_comp_ids: [WS.fx] });
+    check("ae_purge_unused (reduce the project to one comp: a dry run)", r.mode === "reduce" && r.keep_comps?.[0]?.id === WS.fx, `${r.remove_count} item(s) would go`);
+    r = await call("ae_get_essential_graphics", { comp_id: WS.fx });
+    check("ae_get_essential_graphics (a comp with no controllers)", Array.isArray(r.controllers), `${r.controllers?.length} controllers`);
+    skip("ae_set_essential_graphics (set_media, and add of a media slot)", "needs a template comp with a footage layer, a parent comp and AE 22 media replacement; the scratch project has no such pair");
+    r = await call("ae_batch_set", { comp_id: OPS, ops: [{ layer: { name: "OpE" }, path: OPAC, expression: "wiggle(1, 5)" }], expect });
+    check("ae_batch_set (an expression that evaluates clean)", r.ok === true && r.matches === true, (r.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; "));
+    r = await call("ae_batch_set", { comp_id: OPS, ops: [{ layer: { name: "OpE" }, path: OPAC, expression: "wigle(1, 5)" }], expect });
+    check("ae_batch_set (a broken expression is a mismatch)", r.matches === false && (r.mismatches ?? []).some((m) => /expression_error/.test(String(m.path))), (r.mismatches ?? []).slice(0, 2).map((m) => m.path).join("; "));
+    await call("ae_set_property", { comp_id: OPS, layer: { name: "OpE" }, path: OPAC, expression: "", expression_enabled: false, expect });
+    r = await call("ae_render_templates", { action: "save", kind: "render_settings", name: "chroma-smoke-w5", expect });
+    check("ae_render_templates (save without an item is refused)", refused(r), why(r).slice(0, 100));
+    skip("ae_render_templates (save, a real template)", "a saved template goes into the user's After Effects preferences, which the smoke does not touch");
+
+    // Fonts: search, check (with glyphs), a replace dry run, the composed lines, a captions font check, the preflight glyph check.
+    r = await call("ae_fonts", { action: "search", query: "arial", page_size: 5 });
+    check("ae_fonts (search)", r.available === true && Array.isArray(r.fonts) && r.fonts.length >= 1 && typeof r.total_matches === "number", `${r.total_matches} matches, scanned ${r.scanned}${r.scan_truncated ? " (cut short)" : ""}`);
+    const psName = r.fonts?.[0]?.postscript;
+    if (psName) {
+      r = await call("ae_fonts", { action: "check", fonts: [psName, "No-Such-Font-Xyz"], text: "Sehir ğıİ" });
+      check("ae_fonts (check: exists, near matches for a missing one, glyph coverage)", r.available === true && r.checked?.[0]?.exists === true && r.checked?.[1]?.exists === false && Array.isArray(r.checked?.[1]?.candidates), `problems ${r.problems}; glyphs ${JSON.stringify(r.checked?.[0]?.glyphs?.supported)}`);
+      r = await call("ae_fonts", { action: "replace", from: psName, to: psName });
+      check("ae_fonts (replace, dry run)", r.dry_run === true && r.applied === false && (r.ok !== false || r.error === "unsupported"), `${r.affected_layers ?? "-"} layers; ${r.reason ?? ""}`);
+      r = await call("ae_fonts", { action: "replace", from: psName, to: "ArialMT", dry_run: false, expect });
+      check("ae_fonts (replace on an unsaved or dirty project is refused for want of a checkpoint)", r.error === "checkpoint_required" || r.no_op === true || r.ok === false, `${r.error ?? (r.applied ? "applied" : "no-op")}: ${String(r.message ?? "").slice(0, 100)}`);
+    } else {
+      skip("ae_fonts (check, replace)", "ae_fonts search found no Arial to use (no app.fonts, which needs AE 24.0)");
+    }
+    r = await call("ae_measure_text", { comp_id: W.caps, lines: true, max_lines: 2 });
+    check("ae_measure_text (lines: AE's composed lines)", (r.layers ?? []).length >= 1 && r.layers.every((l) => l.composed && (l.composed.supported === false || (Array.isArray(l.composed.lines) && l.composed.flags))), `${r.layers?.[0]?.composed?.line_count ?? "n/a"} lines on ${r.layers?.[0]?.name}`);
+    r = await call("ae_captions", { comp_id: WS.text, name_prefix: "FontProbe", transcript: { text: "1\n00:00:00,400 --> 00:00:01,000\nHi\n" }, style: { font: "No-Such-Font-Xyz" }, expect });
+    if (refused(r)) check("ae_captions (an unknown font is refused before anything is written)", FONT_REFUSAL.test(JSON.stringify(r)), why(r).slice(0, 100));
+    else skip("ae_captions (an unknown font is refused before anything is written)", "this AE did not check the font (it has no app.fonts, which needs AE 24.0)");
+    r = await call("ae_preflight", { comp_ids: [WS.text] });
+    check("ae_preflight (the glyph check ran, or says why not)", r.ok !== false && r.checked?.glyphs !== undefined, `${r.checked?.glyphs}`);
+
+    // Footage: reload, placeholders, import_as on a file that is not layered.
+    const fi = await call("ae_import_footage", { paths: [path.join(MEDIA, "b.png")], expect });
+    const footId = fi.item_ids?.[0];
+    r = await call("ae_replace_footage", { action: "reload", item_ids: [footId], expect });
+    check("ae_replace_footage (reload)", r.applied === true && Array.isArray(r.reloaded) && r.reloaded.includes(footId), brief(r).slice(0, 160));
+    r = await call("ae_import_footage", { placeholders: [{ name: "QA Plate", width: 320, height: 180, fps: 24, duration: 2 }], expect });
+    check("ae_import_footage (a placeholder)", r.applied === true && Array.isArray(r.placeholder_ids) && r.placeholder_ids.length === 1 && r.receipt?.matches === true, brief(r).slice(0, 160));
+    // A placeholder is missing footage: take it out so the preflight, collect and relink steps later see a clean project.
+    if ((r.placeholder_ids ?? []).length > 0) {
+      const del = await call("ae_project_items", { action: "delete", item_ids: r.placeholder_ids, dry_run: false, expect });
+      check("ae_project_items (delete the placeholder again)", del.applied === true && del.receipt?.matches === true, why(del));
+    }
+    r = await call("ae_import_footage", { paths: [path.join(MEDIA, "a.png")], import_as: "comp", expect });
+    check("ae_import_footage (import_as comp on a PNG is refused, nothing is imported)", refused(r) || /can't be imported as|canImportAs/.test(JSON.stringify(r)), brief(r).slice(0, 160));
+    skip("ae_import_footage (import_as comp from a PSD or AI file, and a whole project)", "the scratch project has no layered file, and a script cannot write a PSD");
+
+    // Brief swatches: a generated .ase, preview only (nothing is saved without confirm).
+    const ase = path.join(MEDIA, "swatches.ase");
+    fs.writeFileSync(ase, aseFile([[1, 0, 0], [0, 0.5, 1]]));
+    r = await call("ae_brief", { import_swatches: { path: ase } });
+    check("ae_brief (import_swatches: the colours are listed, nothing is saved)", r.ok === true && r.saved === false && (r.swatch_import?.colors ?? []).map((c) => String(c).toLowerCase()).includes("#ff0000"), JSON.stringify(r.swatch_import?.colors));
+  }
+
   // The agent's own guarded writes above must not show up as the user's changes.
   r = await call("ae_session_changes", {});
   if (r.tracking_enabled === false) skip("ae_session_changes (lists)", "session tracking is off on this server (tracking_enabled is false)");
@@ -1189,11 +2001,29 @@ async function main() {
   // Waves 1-3, late block (not run live yet, see the note above the first waves 1-3 step).
   // These steps rewrite the render queue, render for a while, close and reopen the project or drop the undo history,
   // so they go last, in this order. Each one leaves the project saved and open for the next, or is the last of its kind.
+  // Wave 5 adds to it: ae_fonts replace (right after the first save), a batch plan with queue items (in the render queue block),
+  // the queue item flag, aerender -rqindex and queue item removal (before the render batch), and ae_save save_as / increment
+  // (last, between ae_project_session new and close: they move the open project, so nothing after them may use Smoke.aep).
   // ======================================================================
   const smokeKey = (await call("ae_get_project", { type: "comp", name_contains: "Smoke Key" })).items?.find((i) => i.name === "Smoke Key");
   const firstFrame = job.state === "succeeded" && pngTemplate ? frames.slice().sort()[0] : undefined; // smoke_00000.png of the aerender step
   r = await call("ae_save", { expect });
   check("ae_save (before the late block)", r.applied && r.receipt?.matches !== false, path.basename(String(r.backup_path)));
+
+  // ---------- wave 5: ae_fonts replace for real (Project.replaceFont is not undoable; the project is saved and clean here) ----------
+  {
+    const used = await call("ae_fonts", {});
+    const fromFont = (used.fonts ?? []).find((f) => f.font && !f.missing)?.font;
+    const found = await call("ae_fonts", { action: "search", query: "a", page_size: 25 });
+    const toFont = (found.fonts ?? []).map((f) => f.postscript).find((p) => p && p !== fromFont);
+    if (!fromFont || !toFont) {
+      skip("ae_fonts (replace, applied)", `no used font to replace (${fromFont ?? "none"}) or no other installed font to replace it with (${toFont ?? "none"}); needs AE 24.5`);
+    } else {
+      r = await call("ae_fonts", { action: "replace", from: fromFont, to: toFont, dry_run: false, expect });
+      gated("ae_fonts (replace, applied after a checkpoint, read back)", r, (x) => (x.applied === true && x.receipt?.matches === true) || x.no_op === true, /24\.5|unsupported|replaceFont/i, `${fromFont} -> ${toFont}; ${why(r)}`);
+      await call("ae_save", { expect });
+    }
+  }
 
   // ---------- wave 2: scrub check on a render file (imports it, checks it, removes it again) ----------
   if (firstFrame) {
@@ -1243,6 +2073,12 @@ async function main() {
     } else {
       skip("ae_check_delivery_file (a real frame)", "no rendered frame to check");
     }
+    // A batch can name queue items as well (plan only here; the batch step below renders). The plan wants a saved, clean project.
+    await call("ae_save", { expect });
+    r = await call("ae_render_batch_plan", { queue_items: [{ rq_index: rqIdx, item_comp_id: COMP, name: "rqitem" }], output_dir: path.join(ROOT, "batch_out_rq") });
+    check("ae_render_batch_plan (a Render Queue item)", r.ok === true && r.valid === true && r.item_count === 1, `${r.item_count} item(s); errors ${js(r.errors)}`);
+    r = await call("ae_render_batch_plan", { queue_items: [{ rq_index: rqIdx, item_comp_id: 999999 }], output_dir: path.join(ROOT, "batch_out_rq") });
+    check("ae_render_batch_plan (a Render Queue item of another comp is invalid)", r.valid === false || refused(r), js(r.errors?.[0]));
     r = await call("ae_run_jsx", {
       mutates: true,
       label: "qa smoke: remove the queue items the edit steps added",
@@ -1250,6 +2086,69 @@ async function main() {
       code: "var q = app.project.renderQueue; for (var i = q.numItems; i >= 2; i--) q.item(i).remove(); return q.numItems;",
     });
     check("ae_render_queue_* (cleanup, the first item is left)", r.applied !== false && r.result === 1, `${r.result} item(s) in the queue`);
+    await call("ae_save", { expect });
+  }
+
+  // ---------- wave 5: queue item flag, aerender -rqindex, queue item removal (a short PNG item; the project is saved and clean) ----------
+  {
+    r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "w5_rq.mov"), expect });
+    const idx = r.index;
+    check("ae_render_queue_add (item for the wave 5 steps)", r.applied && typeof idx === "number", `index ${idx}`);
+    let q = await call("ae_render_queue_inspect", { item_index: idx });
+    const qComp = q.items?.[0]?.comp_id;
+    r = await call("ae_render_queue_edit", {
+      item_index: idx,
+      comp_id: qComp,
+      time_span: { start: 0, duration: 0.2 },
+      ...(pngTemplate ? { output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, "w5rq_[#####].png") }] } : {}),
+      expect,
+    });
+    check("ae_render_queue_edit (a short time span" + (pngTemplate ? ", PNG sequence output" : "") + ")", okWrite(r), why(r));
+    r = await call("ae_render_queue_edit", { item_index: idx, comp_id: qComp, queued: false, expect });
+    q = await call("ae_render_queue_inspect", { item_index: idx });
+    check("ae_render_queue_edit (queued false: the Render checkbox is off)", okWrite(r) && q.items?.[0]?.render === false, `${q.items?.[0]?.status}; ${why(r)}`);
+    r = await call("ae_render_queue_edit", { item_index: idx, comp_id: qComp, queued: true, expect });
+    q = await call("ae_render_queue_inspect", { item_index: idx });
+    check("ae_render_queue_edit (queued true)", okWrite(r) && q.items?.[0]?.render === true, `${q.items?.[0]?.status}; ${why(r)}`);
+    r = await call("ae_render_queue_edit", { item_index: idx, comp_id: qComp, queued: true, expect });
+    check("ae_render_queue_edit (queued again is a no-op)", r.applied && r.no_op === true, brief(r).slice(0, 120));
+
+    // The edits left the project dirty: rq_index must refuse until it is saved. Then the wrong comp, an output_path, and the real run.
+    r = await call("ae_aerender_start", { rq_index: idx, item_comp_id: qComp, expect });
+    check("ae_aerender_start (rq_index on a dirty project is refused, naming ae_save)", refused(r) && /ae_save|save/i.test(why(r) + JSON.stringify(r)), why(r).slice(0, 120));
+    await call("ae_save", { expect });
+    r = await call("ae_aerender_start", { rq_index: idx, item_comp_id: 999999, expect });
+    check("ae_aerender_start (rq_index with another comp's id is refused)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_aerender_start", { rq_index: idx, item_comp_id: qComp, output_path: path.join(RENDER, "x.mov"), expect });
+    check("ae_aerender_start (rq_index with output_path is refused: the item brings its own)", refused(r), why(r).slice(0, 120));
+    if (pngTemplate) {
+      r = await call("ae_aerender_start", { rq_index: idx, item_comp_id: qComp, expect });
+      check("ae_aerender_start (rq_index)", r.ok && r.state === "running" && !JSON.stringify(r.args ?? []).includes("-comp") && JSON.stringify(r.args ?? []).includes("-rqindex") && (r.output_paths ?? []).length >= 1, brief(r).slice(0, 200));
+      const rqJob = r.job_id;
+      for (let i = 0; i < 120 && rqJob; i++) {
+        await sleep(2000);
+        r = await call("ae_aerender_status", { job_id: rqJob });
+        if (r.state !== "running") break;
+      }
+      check("ae_aerender_status (rq_index job)", r.state === "succeeded" && r.rq_index === idx && (r.output_paths ?? []).length >= 1, `${r.state} ${r.percent ?? ""}%`);
+      if (r.state === "succeeded") {
+        r = await call("ae_verify_render", { job_id: rqJob, expect: { ...expect, comp_id: COMP } });
+        check("ae_verify_render (a Render Queue job: every output is checked, the import is removed)", r.ok === true && (r.job_outputs ?? []).length >= 1 && r.imported_item_state === "removed", brief(r).slice(0, 200));
+      }
+    } else {
+      skip("ae_aerender_start (rq_index) / ae_aerender_status / ae_verify_render (rq job)", "no PNG output module template to keep the render to a few frames");
+    }
+
+    // Removal: a dry run (a plan), then the item itself, then a row that names the wrong comp.
+    r = await call("ae_render_queue_edit", { remove_filter: { status: "done" }, dry_run: true, expect });
+    check("ae_render_queue_edit (remove_filter dry run)", r.dry_run === true && !r.__isError, js(r.would_remove ?? r, 120));
+    q = await call("ae_render_queue_inspect", {});
+    const before = q.numItems;
+    const last = q.items?.[before - 1];
+    r = await call("ae_render_queue_edit", { remove: [{ index: before, comp_id: last?.comp_id }], expect });
+    check("ae_render_queue_edit (remove an item)", okWrite(r) && r.num_items === before - 1, `${before} -> ${r.num_items}; ${cpNote(r)}; ${why(r)}`);
+    r = await call("ae_render_queue_edit", { remove: [{ index: 1, comp_id: 999999 }], expect });
+    check("ae_render_queue_edit (remove with the wrong comp id is refused)", refused(r), why(r).slice(0, 120));
     await call("ae_save", { expect });
   }
 
@@ -1409,9 +2308,32 @@ async function main() {
       r = await call("ae_project_session", { action: "new", expect, if_dirty: "discard", user_confirmed: true });
     }
     check("ae_project_session (new)", okWrite(r) && r.created === true, why(r));
-    r = await call("ae_project_session", { action: "close", expect: { project_path: "<unsaved>" } });
+
+    // ae_save save_as and increment move the open project to a new file, so nothing after them may use Smoke.aep.
+    // The untitled project ae_project_session new just made can only be named with save_as; increment then saves the next _vNNN beside it.
+    const same = (a, b) => String(a).split("\\").join("/").toLowerCase() === String(b).split("\\").join("/").toLowerCase();
+    let openAt = "<unsaved>";
+    // A folder of its own per run: save_as refuses an existing file, and a re-run into the same --dir would find SmokeSaveAs.aep (and its _v002, _v003).
+    const saveAsDir = path.join(ROOT, `saveas_${Date.now()}`);
+    fs.mkdirSync(saveAsDir, { recursive: true });
+    const savedAs = path.join(saveAsDir, "SmokeSaveAs.aep");
+    r = await call("ae_save", { expect: { project_path: "<unsaved>" }, save_as: { path: savedAs } });
+    check("ae_save (save_as: an untitled project gets its first file)", r.applied === true && r.receipt?.matches !== false && r.previous_project_path === "<unsaved>" && fs.existsSync(savedAs), `${path.basename(String(r.project_path))}; ${why(r)}`);
+    if (r.applied === true) openAt = String(r.project_path);
+    r = await call("ae_save", { expect: { project_path: openAt }, save_as: { path: savedAs } });
+    check("ae_save (save_as onto an existing file is refused unless overwrite)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_save", { expect: { project_path: openAt }, increment: true });
+    check("ae_save (increment: the next _vNNN beside it, the old file stays)", r.applied === true && /SmokeSaveAs_v002\.aep$/i.test(String(r.project_path)) && fs.existsSync(savedAs) && fs.existsSync(String(r.project_path)), `${path.basename(String(r.project_path))}; ${why(r)}`);
+    if (r.applied === true) openAt = String(r.project_path);
+    r = await call("ae_status");
+    check("ae_status (the open project is the incremented file)", same(r.project_path, openAt), String(r.project_path));
+    r = await call("ae_save", { expect: { project_path: openAt }, increment: true });
+    check("ae_save (a second increment gives _v003)", r.applied === true && /SmokeSaveAs_v003\.aep$/i.test(String(r.project_path)), path.basename(String(r.project_path)));
+    if (r.applied === true) openAt = String(r.project_path);
+
+    r = await call("ae_project_session", { action: "close", expect: { project_path: openAt } });
     if (r.needs_user === true && r.dirty === null) {
-      r = await call("ae_project_session", { action: "close", expect: { project_path: "<unsaved>" }, if_dirty: "discard", user_confirmed: true });
+      r = await call("ae_project_session", { action: "close", expect: { project_path: openAt }, if_dirty: "discard", user_confirmed: true });
     }
     check("ae_project_session (close leaves an empty untitled project)", okWrite(r) && r.closed === true, why(r));
   }

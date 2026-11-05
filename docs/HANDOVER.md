@@ -1,4 +1,338 @@
+# Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
+
+After wave 3, Emre asked for compositing tools: remove something from a shot, track it, fix a single frame and track the fix back. That became wave 4. A coverage audit of the AE Scripting Guide against the tools then found 28 gaps (6 new tools, 22 extensions; its first two defect fixes, `eea1e63`, were committed before the wave 4 commit); Emre chose to build all of them as wave 5. Same branch `feat/roadmap-0.4`, one commit per wave. Emre again decided against a live After Effects test for now. **None of the wave 4 or wave 5 tools has run in After Effects**, and the live smoke run that is coming has never happened: expect to adjust some arguments and checks on the first pass. This section covers:
+- what was added;
+- how it was checked;
+- the AE behaviours the code relies on that nobody has measured;
+- what is impossible by script, and what the `ae_run_jsx` lint refuses on purpose;
+- what was not done, and what to do next.
+
+Nothing from waves 1 to 5 is pushed or released. The waves 1-3 section below is still right for those waves; its counts stop at 149 tools.
+
+## Where it is
+
+| Commit | What | Tools |
+|---|---|---|
+| `eea1e63` | Two defects the audit found, committed before wave 4: `ae_mask` told agents to animate a mask path with `ae_set_property` (it does not turn vertex lists into a Shape; it now points to `ae_path_write` with `time`), and the AE 26.5 guide fallback passed a plain object instead of `new GuideOptions()` | - |
+| `0db20b2` | Wave 4: compositing, 8 groups | 149 -> 167 |
+| `13acae2` | Wave 5: the audit's gaps, 14 groups | 167 -> 173 |
+
+Unit tests: 2406 (78 files) -> 4373 (96 files).
+
+Each wave 4 group has the usual three files (`panel/host/ext/<group>.jsx`, `server/src/tools/ext/<group>.ts`, `server/test/ext-<group>.test.ts`). The wave 5 groups mostly extend files that already exist.
+
+**Wave 4** (`planar`, `patchcheck`, `stabilize`, `cleanplate`, `inpaint`, `mattes`, `patchfit`, `screenrep`)
+
+| Group | Tools |
+|---|---|
+| planar | `ae_track_multi`, `ae_track_read`, `ae_track_apply` |
+| patchcheck | `ae_patch_check`, `ae_region_stats` |
+| stabilize | `ae_stabilize`, `ae_stabilize_roundtrip` |
+| cleanplate | `ae_cleanplate_pick`, `ae_cleanplate_setup` |
+| inpaint | `ae_inpaint_plate` |
+| mattes | `ae_mask_follow`, `ae_garbage_matte`, `ae_caf_prep` |
+| patchfit | `ae_patch_color_match`, `ae_patch_grain`, `ae_patch_finish` |
+| screenrep | `ae_screen_corners`, `ae_screen_replace` |
+
+`ae_track_point` keeps its behaviour. `planar` and `patchcheck` were built first because the rest use their tracker, track store and region maths.
+
+**Wave 5: new tools**
+
+| Group | Tools |
+|---|---|
+| projectitems | `ae_create_comp`, `ae_project_items` |
+| projectsettings | `ae_project_settings` (and `import_swatches` on `ae_brief`) |
+| view | `ae_view` |
+| timeline | `ae_keyframes_transform`, `ae_detect_cuts` (and extensions of `ae_get_keyframes`, `ae_remove_keyframes`, markers) |
+
+**Wave 5: extensions** (no new tool)
+
+| Group | What changed |
+|---|---|
+| w5core | `ae_run_jsx` and skills get a safety lint; `ae_save` gets `save_as` and `increment`; `ae_status` gets `detail`; `ae_get_layer_props` gets `meta`; `ae_set_property` takes path and marker values, checks fonts and puts expression errors in the receipt |
+| w5render | `ae_aerender_start` renders a queue item (`rq_index`) or the whole queue; `ae_render_queue_edit` sets the queued flag and removes items; batches take `queue_items` |
+| w5layerops | `ae_layer_ops`: split, replace source, separate or unify Position, solid changes, more switches |
+| w5compsettings | `ae_comp_settings`: name, anchored resize, pixel aspect, frame rate, drop frame, length, trim to work area, guides on 26.5 |
+| w5animate | `ae_set_text` typography, paragraphs and box options; `ae_import_footage` `import_as` and `range`; `ae_set_keyframe_ease` per-key flags; `ae_replace_footage` `reload` |
+| w5fonts | `ae_fonts` search, check, replace; font and glyph checks in the text tools and `ae_preflight`; `ae_measure_text` lines |
+| w5masks | `ae_mask` and `ae_text_animator` options |
+| w5shapefx | `ae_set_effect` move, duplicate, popups by label, input layer and stage; `ae_shape` strokes, gradients, groups; `ae_path_operator` operators; layer-style route in `ae_add_effect` |
+| w5scene3d | `ae_create_layer` lights and parametric meshes; `ae_camera_rig` retunes a camera; `ae_scene_3d_report` lights and models |
+| w5props | `ae_get_layer_full` opt-ins; `ae_validate_expressions` `fix`; `ae_purge_unused` `consolidate` and `reduce_to_comp_ids`; Essential Graphics media slots; `ae_render_templates` `save`; `ae_batch_set` paths and markers |
+
+**Shared pieces these waves added or lean on:**
+- `server/src/tools/ext/planar.ts`, `planar-math.ts`, `region-math.ts`: the track store (`loadTrack`, `saveTrack`, `resolveTrackSource`), `withIsolatedPlate`, `resolveEffectParams`, `blurrinessFromSigma`, `platesFolderFor`, `createRenderBudget`, `layerSpaceMatrices`, `trackSummary`, `drawTrackSheet`, the homography, region, ring and noise maths. All the wave 4 groups import them. Rules for using them are in `docs/BUILDERS.md`.
+- `panel/host/ext/planar.jsx`: `planarIsolateBegin` / `planarIsolateEnd`, `planarLayerSpace`, `planarWriteRaw`, `planarApply`, `planarRead`, `planarEffectSlot` (colour, degrain, blur, pin, motion blur order on a patch layer), `planarKeys`, `planarComp`.
+- `runGuardedWrite` takes `undoable: false`: the write is logged as an agent write, but `ae_session_changes` does not list it as an undo step. Used by `ae_fonts` replace and `ae_render_templates` save.
+- `scripts/lint-jsx.mjs` also refuses any non-ASCII character in `panel/host/**/*.jsx`.
+- `core.jsx` has `statusDetail` and `fontsResolve`, and the helpers `propertyPath` / `resolvePropertyPath` that give `ae_status`, `ae_view`, `ae_keyframes_transform` and `ae_set_property` the same property paths. `session.ts` has `noteUiWrite` for UI-only writes (`ae_view`).
+- `ae_save` `save_as` and `increment` move the open project to another file; the session tracker is told.
+
+## What the tools keep on disk
+
+- Data dir `tracks/`: the planar track store, `<track_id>.json`, newest 200 kept. Re-basing never overwrites a stored track (a track re-based on another `ref_time` is saved under a new id); `continue_track_id` adds frames to its own file.
+- Data dir `patchfit/`: the state of a chunked `ae_patch_color_match` (`continue_id`), newest 50 kept.
+- Data dir `frames/`: the contact sheets, previews and graphs the compositing tools render (as the older frame tools do).
+- Next to a saved project, `<name> chroma plates/`: the stills `ae_cleanplate_setup` renders and the PNGs `ae_inpaint_plate` writes (and its preview). Never over an existing file (` 2`, `_2` is added). Needs a saved project; the folder is made only after the guard has passed.
+- Temporary comps while a tool runs: `_chroma_plate_...` (the isolated plate) and `chroma-patchcheck-copy ...`. Removed in the same call; if a removal fails the result says so and names the comp.
+- `<project>_vNNN.aep` from `ae_save` `increment`; `_mcp_backups/` also holds the copy `ae_save` makes before a `save_as` overwrite.
+
+## How it was checked
+
+- **Builds:** Sonnet agents, one per group, from a written spec each. The specs for wave 5 came from the Scripting Guide audit. Each group came with a handoff (tools, smoke steps, README rows, unmeasured behaviours, edits outside its files).
+- **Wave 4 reviews:** Opus checked each group through an AE lens and a server lens, then the groups together with an end-to-end chain check and a shared-code check. 123 issues, 5 of them high. They were fixed, checked again, repaired and confirmed by Opus.
+- **Wave 5 reviews:** the same pattern plus a backward-compatibility check of the extended tools: 65 issues, 1 high. Fixed, checked, repaired, confirmed.
+- **A repair report claimed tests that were not on disk.** An Opus confirm round caught it. Treat a repair report as a claim, and look at the diff.
+- **Tests:** 4373 in 96 files, with the host code run under `node:vm` against `server/test/support/fake-ae.ts`. Many wave 4 and 5 tests patch the fake locally for the members they need (selection, fonts, enums, guides, effects); the fake follows the Scripting Guide, and it is not AE.
+- **JSX lint:** `node scripts/lint-jsx.mjs`, 0 issues (61 files, run for this update).
+- **Bundle:** `scripts/check-bundle.cjs` over the in-panel MCP at 173 tools, on Node 22 and on AE's Node 17.7.2.
+- **Not run in After Effects.** The result fields that exist to show a wrong guess: `read_back` mismatches, `unverified`, `limits_unverified`, `param_table` / `param_tables` (the effect parameter names a tool used and how it found them), `needs_fix`, `sampled N of M frames`.
+- **Smoke test:** at the time of writing `qa/smoke-mcp.mjs` has steps for waves 1-3 (144 of 149 tools) and none for waves 4 and 5; those are written as a separate step (see `git log` and `qa/README.md`). Like the earlier ones, they are written from the schemas and have never run.
+
+## AE behaviours relied on but not measured
+
+Each line is a guess the code makes or works around. Where the code can work either way it does, and the read-back reports a mismatch. Deduplicated, and only what the code in `13acae2` still relies on. Grouped by tool group.
+
+**Shared by the wave 4 tools (rendering, effects, keys)**
+- `saveFrameToPng` at full size returns the comp's size (the tools scale by image width over comp width; a different size is refused), and writes sRGB display values with colour management on (OCIO, 16 / 32 bpc, linear blending). Bit depth and linear blending are read and reported.
+- A render of a fresh `comp.duplicate()` is not a cached frame (`captureCompFrame` retries once with a time nudge). A guide layer, or a layer switched off, is left out of the render.
+- Render speed per frame at 1080p / 4K, and every render budget default (track 250 frames / 90 s, patch check 160 / 90 s, region stats 100 / 90 s, clean-plate pick 80 / 120 s, colour match 150 / 90 s), are guesses.
+- Tracker settings on real footage: `pre_blur`, the RANSAC distance, the 75% lost threshold for a cut, the search radius capped at 100 px (no pyramid).
+- Every threshold in the measuring tools (seam, noise, frozen grain, slip search 16 px, pops, clean-plate scoring) was tuned on synthetic images. Pops report `not_measurable` on shots over about 72 frames unless neighbouring frames are sampled: `every_n: 1` over a short `start` / `end` stretch, or a higher `max_samples`.
+- Node 17.7.2 handles the 512 MB inpaint sample budget; run time of inpaint at 1080p / 4K and for holes near the 25% cap; event-loop yields keep the panel responsive.
+- `Property.moveTo(index)` exists on effect groups and takes the final 1-based index; `addProperty` appends an effect at the bottom. If `moveTo` is missing the effect stays where it was put and the result says so.
+- `setValuesAtTimes` takes `[x, y]` for a 2D Position / Scale and for pin points, and arrays of Shape objects on Mask Shape (about 1000, with feather arrays; without them the tool retries and reports `feather_points_dropped`). New keys are set linear explicitly.
+- Hard limits (`hasMin` / `hasMax`) of Position, Scale, Rotation, pin points, Mask Feather and Expansion; a freshly added pin point's limits cannot be read first (`limits_unverified`).
+- `Position.dimensionsSeparated` is readable and `ADBE Position_0/_1` exist; separated Position is refused by freeze and clone.
+- The `Gaussian Blur` Blurriness is 2.5 per pixel of sigma (`BLURRINESS_PER_SIGMA`), a first estimate to calibrate.
+
+**planar**
+- The AE Tracker's match names (`ADBE MTrackers` > `ADBE MTracker` > `ADBE MTracker Pt` > `ADBE MTracker Pt Feature Center` / `... Confidence`), Feature Center in layer space with a top-left origin, Confidence 0 to 100.
+- Corner Pin point order (`ADBE Corner Pin-0001..0004` = UL, UR, LL, LR is inferred) and CC Power Pin's point names (Top Left, Top Right, Bottom Left, Bottom Right) with an index fallback; the table used is returned.
+- Setting `layer.enabled` on audio-only, camera and light layers (the code skips layers without video).
+- A time-remapped or nested-frame-rate plate gives frames on the track's time grid.
+
+**patchcheck**
+- `Mask Path` `valueAtTime` returns a Shape (vertices, tangents, closed) in layer space; `maskMode` equals `MaskMode.ADD`; `mask.inverted` exists; sampling 8 steps per segment matches what renders (feather and expansion are not included).
+- `sourceRectAtTime` through transforms and parents matches the patch's visible pixels (masked or 3D patches need an explicit `region`).
+- A track's `H` maps reference-frame comp px to the frame's comp px, so the region is given as it looks at `ref_time` (tested against stored tracks, not a real Corner Pin).
+- `comp.duplicate()` keeps layer indexes (the copy's layer names are checked, a half-made copy is removed); image sizes at lower resolution factors scale the polygons correctly.
+- The similarity-fitted slip stays accurate on strongly perspective shots.
+
+**stabilize**
+- The Transform effect (`ADBE Geometry2`) and Motion Tile (`ADBE Tile`) parameter names and order (mapped by English display name with an index fallback; the table is returned in `param_tables`), and that a Motion Tile with output above 100% keeps the layer's pixel coordinates.
+- A guide layer inside a nested comp is left out of the parent's render and of `saveFrameToPng`. This decides `ae_stabilize_roundtrip`; the fallback `guide_mode: "opacity_switch"` uses a Checkbox Control and an opacity expression `comp(...).layer(...).effect(...)("Checkbox")` that is also unmeasured. Check this first.
+- `Layer.copyToComp` returns void and puts the copy at layer 1 of the work comp; undo after `copyToComp` on a layer with effects has crashed AE before.
+- `comp.layers.add(workComp)` defaults (start, in, out are set explicitly); Anchor Point on a 2D layer reads `[x, y, z]`; a Stabilize effect keeps its custom name through save and load.
+- The residual-motion check is accurate to a few tenths of a pixel on half-size snapshots.
+
+**cleanplate and inpaint**
+- Precomposing a time-remapped duplicate keeps its single hold key, and removing every other Time Remap key leaves Time Remap on with one key.
+- `importFile` of the rendered or written PNG gets an sRGB interpretation with no premultiply surprise in 8 / 16 / 32 bpc and linear-blending projects.
+- A precomp made by `precompose` is centred (the host resets anchor and position); `LayerSamplingQuality.BICUBIC`, `FrameBlendingType.NO_FRAME_BLEND` and `layer.motionBlur` are settable on it (each in a try).
+- The index a script-added mask receives (re-resolved by `propertyIndex`); setting `inPoint` / `outPoint` after shifting `startTime` restores a shifted clone's extent.
+- The motion-compensated time clone stays aligned on a pan (only the region-centre shift is compensated, not rotation or zoom).
+- `FileSource.reload()` raises no dialog and clears `footageMissing`; `FileSource.isStill` is true for an imported single PNG; `Layer.enabled = false` on an unlocked holdout succeeds.
+- `saveFrameToPng` of the isolated copy has straight alpha where the plate does not cover the frame (alpha below 250 counts as invalid); `comp.layers.add(footageItem)` of a PNG keeps the source rect equal to the PNG size so mask vertices line up.
+- `place_in_comp` `mode: "auto"` only guesses a patch precomp from the word PATCH anywhere in the comp name (set off by spaces, underscores, dots or dashes); use `mode` and `offset_px` for padded work comps and read the rig's pad offset first.
+- The temporal fill on real parallax and moving objects (ring gain / offset fit, tolerance 10 gray levels, spread 12) is first-guess.
+
+**mattes**
+- A track-matte layer with its video switch off still mattes (documented for 23.0+), one matte layer can feed several targets, a locked matte accepts `setTrackMatte`, and `setTrackMatte` may switch the matte's video off itself (the host sets `enabled` afterwards either way).
+- Simple Choker's match names (`ADBE Simple Choker-0002`, then `Choke Matte` by name); `app.effects` lists `matchName` in this host (otherwise the choke is attempted).
+- `addSolid` with `comp.pixelAspect` and `moveBefore` put the matte exactly above the topmost target; `Layer.isTrackMatte` reads.
+- A script-set work area (shrink, set start, set duration) snaps as expected, and `workAreaDuration` accepts start + duration at exactly `comp.duration` (clamped, restored on failure).
+- `MaskMotionBlur` enum names and mask `locked`; `featherTypes` assignment on an existing mask.
+- The speed of one `setValuesAtTimes` with up to 100k vertex keys (the cap is 300k points per call).
+- Content-Aware Fill's generated layer and folder names ("Fill"; `find_fill` matches loosely and says so).
+
+**patchfit**
+- Levels (`ADBE Pro Levels2`) and Exposure (`ADBE Exposure2`) parameter names, mapped by display name (no index fallback for Levels, so a renamed or non-English parameter fails with the list the effect has); the unit of Levels values (0..1, 0..255 or 0..32768 by bit depth, found by reading Red Input White); Exposure `Channels` 2 is Individual Channels and `Bypass Linear Light Conversion` takes 1.
+- Add Grain (`VISINF Grain Implant`), Match Grain (`VISINF Grain Duplication`) and Remove Grain (`VISINF Grain Removal`): parameter names, the Viewing Mode menu index of Final Output (guessed 3, 5 and 4; `viewing_mode_index` overrides Add and Match Grain, `degrain_viewing_mode_index` overrides Remove Grain), Match Grain's input layer (`setInputLayerAndStage` on 26.5, else `setValue(layer index)`), and Add Grain's noise per unit of Intensity (placeholder 20 gray levels per 1.0, corrected by the tuning rounds).
+- CC Force Motion Blur's `Override Shutter Angle` and `Shutter Angle`; `CompItem.shutterAngle` rounds to whole degrees; Median `Radius`.
+- `setTrackMatte(patch, ALPHA)` on the new adjustment layer leaves the patch's video on (the host switches it back on); a solid's `startTime` / `outPoint` / `inPoint` setters accept the order used; a checkbox reads 0/1 or a boolean.
+- A 3000-frame colour match takes one render per frame (about 0.3 to 1 s at 1080p) plus 8 + 8 verification renders.
+
+**screenrep**
+- CC Power Pin has an `Expansion` parameter that takes a percentage (else the corners are pushed out in the keys, `pin.expansion.mode: "values"`); a failed `addProperty('CC Power Pin')` throws, which triggers the Corner Pin fallback.
+- Levels (`ADBE Pro Levels2`, then `ADBE Easy Levels2`) parameter names and whether it works on linear values with linear blending on (`app.project.linearizeWorkingSpace` readable; unreadable counts as false); how `saveFrameToPng` encodes frames with a linearized working space.
+- `comp.layers.add(precomp)` anchor and position (set explicitly); `Layer.duplicate()` puts the copy directly above and carries the plate's audio (moved and muted explicitly); `layers.add(footageItem, duration)` applies the duration to stills only; `setTrackMatte` leaves the insert visible; a `startTime` set before keys keeps comp-time keys.
+- Setting `comp.motionBlur = true` for `transform_pin` is acceptable on the user's comp (reported as `comp_switch_turned_on`).
+- The aspect estimate from one perspective view (square pixels, principal point at the comp centre) is accurate on real noisy corners; edge softness and the competing-edge threshold were tuned on synthetic images.
+
+**w5core**
+- A top-level property group (Transform) has `parentProperty === null` and `propertyDepth` 0 only for the layer; two fetched references to one Property compare equal (else `A.resolvePropertyPath` matches by `matchName` and `propertyIndex`).
+- `selectedProperties` on the comp and on layers, `selectedKeys` as 1-based key indexes, whether group nodes are included; `app.activeViewer`'s shape and whether reading it moves focus.
+- Enum names: AE's enum objects may list no keys for `for..in`, so `enumNameOf` also tries a list of known names and falls back to the raw value.
+- Font APIs: `designAxesData` member names, `writingScripts`, the shape of `getCTScriptForString` and `getDefaultFontForCTScript`, `fontsDuplicateByPostScriptName`, what `getFontsByPostScriptName` returns for an uninstalled font, the 6000-font / 1500 ms near-match scan, `'name' in doc` on a TextDocument.
+- `Property.propertyParameters` / `valueText` return shape; separation leader and follower indexes; `hasMin` on colour and 3D properties; AE rejects path keys with different vertex counts.
+- `Project.save(File)` into a read-only folder raises a dialog, and AE does not append `.aep` itself (the server requires it).
+- A broken expression leaves `expressionError` populated after `expressionEnabled = false` and `valueAtTime(comp.time, false)`.
+- `core.jsx` loads live now that it is ASCII.
+
+**w5render**
+- `aerender -rqindex` renders an item (never an unqueued one: the tool refuses), accepts `-output`, `-OMtemplate`, `-RStemplate`, `-s`, `-e` alongside it (the schema refuses them until measured), and what the log, exit code and `PROGRESS` numbering look like with several output modules or items.
+- The flag spellings `-mem_usage`, `-continueOnMissingFootage`, `-v ERRORS`, `-sound ON|OFF`.
+- aerender creates missing output folders (the launcher makes every module's folder); a frame-rate override in render settings does not change the frame count `ae_verify_render` expects.
+- `RenderQueueItem.render = true` without a valid output reads back `NEEDS_OUTPUT`; `RenderQueueItem.remove()` is one undo step.
+- The frozen project copy keeps the queue items exactly as the live project had them.
+
+**projectitems**
+- `CompItem.duplicate()` names the copy and keeps its folder (the host sets both for deep copies); `AVLayer.replaceSource(copy, false)` may rename a layer (the host restores the name).
+- New Comp from Footage strips the extension (the tool strips a 2 to 5 character one); `FootageItem.frameRate` and `duration` are 0 for stills.
+- `FolderItem.remove()` deletes the folder's contents; `Project.autoFixExpressions` takes quoted old and new names and rewrites single-quoted references too; `ItemCollection.addFolder` creates in the root and `parentFolder = rootFolder` works; `Item.usedIn` is right for comps nested through comps; `Item.label` and `Item.comment` exist.
+- A long ops list (about 50 ops x 500 ids) stays under the bridge's response size after bounding.
+
+**w5layerops**
+- `Layer.stretch` accepts -9900..9900 on cameras, lights and nulls, and a negative stretch moves in and out points as assumed.
+- `environmentLayer` on a non-Advanced-3D comp throws, is ignored or is accepted (the code probes and the receipt checks); `AutoOrientType.CHARACTERS_TOWARD_CAMERA` exists and needs `threeDPerChar`; `frameBlendingType` is writable on solids, text and shape layers.
+- `Layer.duplicate()` keeps an explicit track matte and lands directly above the original.
+- `dimensionsSeparated` writes keep the followers' keys; `getSeparationFollower` is 0-based.
+- `SolidSource.color`, `FootageItem.width` / `height` / `name` are writable on a solid; `addSolid` + `remove()` + `replaceSource` leaves the new solid in the Solids folder; `replaceSource` keeps the anchor point numbers, and fails for nulls, text, shape, camera, light and model layers; renaming a shared solid renames layers that follow its name; `usedIn` exists on solids.
+
+**w5compsettings**
+- A scripted `comp.width` / `height` change keeps layers at the same pixel position from the top-left (the anchored shift assumes it); `setValueAtKey` on a spatial Position key keeps the key's tangents.
+- A camera's or light's point of interest is `ADBE Anchor Point`; point lights hide it as ambient lights do.
+- Writing `layer.startTime` on a locked layer needs the unlock (the code unlocks and relocks); AE's own Trim Comp to Work Area leaves `displayStartTime` as old + `workAreaStart` (the menu command cannot run through CEP, so only a live comparison shows it).
+- `GuideOptions` field names (`orientation`, `position`, `positionType`, `color`, `pinned`), the `GuidePositionType` members (`PIXEL`, `PERCENTAGE`), `addGuide(opts)` and `setGuide(index, opts)` argument order, `getGuideAsObject` field names, bare identifiers resolving; legacy position-type meaning (0 pixel, 1 percentage); pinned guides stay put on a scripted resize.
+- `comp.markerProperty` keeps comment, duration, chapter and URL when markers are re-added; a `comp.duration` shorter than the work area is clamped by AE; `comp.frameRate` takes 29.97 exactly or snaps to 30000/1001 (tolerance 0.001); the work-area order shrink, move, shrink works.
+
+**projectsettings**
+- Project settings can be undone with Ctrl+Z through `beginUndoGroup` (this is why a checkpoint is taken first when auto checkpoints are on).
+- `for..in` over `TimeDisplayType`, `FramesCountType`, `FeetFramesFilmType`, `FootageTimecodeDisplayStartType` and `GpuAccelType` lists their members (the Guide's spelling is added as a fallback); `FeetFramesFilmType` is the right global; what `availableGPUAccelTypes` holds.
+- The expression engines are exactly `extendscript` and `javascript-1.0`, and switching re-evaluates existing expressions at once.
+- Which colour-management members exist (`ocioConfigFile`, `displayColorSpace`, `lutInterpolationMethod`); a bad `working_space` or `working_gamma` really throws; `displayStartFrame` takes only 0 or 1; `workingGamma` reads back as float32.
+- `app.parseSwatchFile` returns the object the Guide describes, with LAB L in 0..1.
+
+**view**
+- `openInViewer`, `Viewer.setActive` and `View.setActive` steal keyboard focus through CEP; `app.activeViewer` is null or stale while a panel has focus (the tool then reports "no active viewer" and skips the options).
+- After `openInViewer`, `app.project.activeItem` is the opened item; what `AVLayer.openInViewer` returns for footage, text and shape layers; `openInEssentialGraphics` returns nothing.
+- `Viewer.views` and `activeViewIndex` are 0-based; the `ViewOptions` members (`channels`, `fastPreview`, guides, rulers) are writable with the `ChannelType` and `FastPreviewType` enums; reading `fastPreview` throws in the Layer and Footage panels (skipped and listed in `missing`); fast preview "draft" is refused on `ADBE Advanced 3d`.
+- `CompItem.time` writes mark the project dirty and may land on the undo stack (`dirty_before` / `dirty_after` are returned).
+- Selecting a property, `setSelectedAtKey` or `Item.selected` leaves the layer selection and `activeItem` alone (project items are applied first, then `open`), and `setSelectedAtKey` works when the layer is not selected or the comp is not open.
+- `noteUiWrite` stops `ae_session_changes` from reporting the selection and time change; the Viewer returned by `openInViewer` compares `===` to `app.activeViewer` (else `options_verifiable` reads false).
+
+**timeline**
+- `AVLayer.doSceneEditDetection` returns an array of floats in comp time, may show a progress dialog, blocks the bridge for as long as it takes (`SLOW_TIMEOUT_MS`, 600 s), may push its own undo step when it finds nothing, and `SPLIT` / `SPLIT_PRECOMP` keep the original layer's id for the first shot.
+- `Layer.selectedProperties` lists leaf properties with selected keys, and `Property.selectedKeys` returns 1-based indexes; `A.propertyPath` paths resolve for them.
+- `getSeparationFollower(dim)` for separated Position: dimension indexes 0..2, the leader has no keys, a Z follower on a 2D layer is keyless or null.
+- AE's sign convention for `KeyframeEase.speed`: the reverse negates and swaps non-spatial speeds and only swaps spatial ones; a scale divides speed by the factor and keeps influence. A wrong convention shows as ease mismatches in the read-back.
+- Label and selection survive `removeKey` + `setValueAtTime`; AE retimes roving keys when other keys move.
+- `MarkerValue` has `frameTarget`, `eventCuePoint`, `protectedRegion`, `getParameters` / `setParameters`; `setValueAtTime` at the same time replaces a marker in place.
+- `timeline.jsx` reads `A.__keys` from `stagger.jsx` at call time and relies on the name-order load.
+
+**w5animate**
+- `TextDocument.tsume`, `horizontalScale` and `verticalScale` take 0-1 or 0-100 (values are sent as given; the typed read-back shows which).
+- The 24.x enum constant names (`FontBaselineOption`, `DigitSet`, `BaselineDirection`, `Direction`, `LineOrientation`, `BoxVerticalAlignment`, `BoxAutoFitPolicy`, `BoxFirstBaselineAlignment`, `LeadingType`) are found by exact name, then by pattern, then loosely; a miss is refused with the members the build has.
+- Writing `leading` switches `autoLeading` off and a numeric `kerning` switches `autoKernType` to none; `boxInsetSpacing` is a 4-number array (order unknown); `doc.fontObject = FontObject` sticks on a copy (else `doc.font` is used); `boxText` / `pointText` read on the copy.
+- Paragraph-wide attributes through `paragraphRange()` were not attempted: spacing, indents and justification are whole-document only.
+- `ImportOptions.rangeStart` / `rangeEnd` (undocumented) work; a PSD imported as a comp may raise a layer-options dialog, an .aep may raise missing-font, footage or conversion dialogs (reported, never suppressed); `canImportAs(ImportAsType.COMP)` is true for PSD and AI; what `COMP_CROPPED_LAYERS` builds.
+- `keyLabel` (22.6), `setLabelAtKey` and `setSpatialTangentsAtKey` (with auto-bezier switched off first, other side untouched); roving works only on spatial properties; AE leaves a roving key's ease alone.
+- `FileSource.reload()` on a missing file throws or leaves `footageMissing` true, and may dirty the project.
+- Limits: text with very many paragraphs or ranges fits the bridge (50 paragraph entries, 200 spans).
+
+**w5fonts**
+- `Project.usedFonts` entry shape (read defensively: font, locations as numbers or `{layerID, layerTimeD | layerTimes | times | time}`); `Project.layerByID` and `Layer.containingComp`.
+- `Project.replaceFont(from, to, noFontLocking)` takes the FontObject from `usedFonts` for a missing from-font, returns exactly `false` when nothing changed, and `usedFonts` is refreshed by the next evalScript.
+- `TextDocument.composedLineRange(i)` is zero-based with `characterStart` / `characterEnd` (end exclusive), `baselineLocs` has 4 floats per line with max-float sentinels for empty lines.
+- `FontObject.writingScripts` holds `CTScript` values; `app.fonts.allFonts` scan speed (bounded at 8000 fonts or 2.5 s, then `scan_truncated`); `fontID`, `location` and native names per build.
+- `characterRange(i, i+1).font` gives the PostScript name for one character (per-run glyph check, 1500 characters per 30-layer slice); `hasGlyphsFor` counts line breaks as present; `fontsWithDefaultDesignAxes` and `postScriptNameForDesignVector`; `app.project.dirty` is readable.
+
+**w5masks**
+- The wiggly selector's child match names (`ADBE Text Wiggly Mode`, `... Max Amount`, `... Min Amount`, `... Temporal Freq`, `... Character Correlation`, `... Temporal Phase`, `... Spatial Phase`, `... Wiggly Lock Dim`, `... Wiggly Random Seed`) and the expression selector's (`ADBE Text Expressible Amount`) were written from memory; resolved by match name, then display name; a miss lists the real children and rolls the animator back. Needs a live probe.
+- The range selector's Advanced match names (`ADBE Text Selector Mode`, `... Max Amount`, `... Smoothness`, `... Random Seed`), the animator's character alignment / range / value / offset, `ADBE Text Variable Font Spacing`, `ADBE Text Track Type`, `ADBE Text Character Change Type`, and `ADBE Text Index Start / End / Offset` once Units is Index.
+- Menu orders: selector Mode (add, subtract, intersect, min, max, difference = 1..6), Units (percentage, index), Anchor Point Grouping (character, word, line, all); Fill & Stroke, Inter-Character Blending and Tracking Type are exposed as raw menu indexes.
+- A new `ADBE Text Animator` comes with no range selector (the code uses the index of the one it adds).
+- `PropertyBase.duplicate` on a mask: where the copy lands and what it is named; `moveTo` semantics on masks; a locked mask or layer refuses script writes (refused before the undo group anyway).
+- `MaskFeatherFalloff.FFO_LINEAR` / `FFO_SMOOTH`, `MaskMotionBlur.SAME_AS_LAYER` / `ON` / `OFF`; setting `rotoBezier` recomputes tangents.
+- `addVariableFontAxis(tag)`: its return value, where the property lands, and that it works only on the animator Properties group; an expression on the expression selector's Amount reports `expressionError`.
+
+**w5shapefx**
+- `PropertyBase.duplicate()` returns an object whose `propertyIndex` says where the copy landed (else `duplicate_located: false`); `moveTo(newIndex)` on an effect or shape content means the position after the move.
+- `Property.inputLayerAndStage` returns `[layerIndex, stage]`; `getInputStageCycleSafeLimit` is the highest layer index allowed (only recorded and used to refuse a layer above it); the stage values 0 / -1 / -2 match `LayerInputStageType`; restoring the previous pair works.
+- `propertyParameters` returns strings for built-in effect popups, not only for Dropdown Menu Control (else the tool asks for the number).
+- `canAddProperty` / `addProperty` on `ADBE Layer Styles` works for the ten style names (likely menu-only), and the slot match names end in `/enabled`.
+- Stroke dashes: `addProperty('ADBE Vector Stroke Dash 1')` on `ADBE Vector Stroke Dashes`, with Gap and Offset added separately.
+- Enum values: Line Cap (1 butt, 2 round, 3 projecting), Line Join (1 miter, 2 round, 3 bevel), Fill Rule (1 non-zero, 2 even-odd), gradient type (1 linear, 2 radial), Merge mode order, Points menus (corner 1, smooth 2); ranges taper 0..100, highlight length -100..100, miter limit at least 1 (other values are not range-checked).
+- Wiggle Transform's own Transform group children; a gradient's colour stops are writable (left at the default ramp); AE inserts new stroke, fill and operator items at the end of a group.
+
+**w5scene3d**
+- Light option match names beyond the Guide's list (`ADBE Light Cone Feather 2`, `ADBE Casts Shadows`, `ADBE Light Shadow Darkness`, `ADBE Light Shadow Diffusion`); Casts Shadows is set with 1/0; an option not found is skipped and named in `warnings`.
+- `LightType.ENVIRONMENT` needs `lightSource` in the same call; the comp renderer strings (`ADBE Calder` = Advanced 3D, `ADBE Advanced 3d` = Classic 3D, tested as a substring "advanced"); environment lights and model layers render only in Advanced 3D (the warnings say "likely"); the AE 24.3-25.1 environment source must be a .hdr or .exr (checked by file name).
+- `ParametricMeshType` members (cube, sphere, plane, torus, cone, cylinder), `parametricMeshOptions` and `parametricBevelOptions` are read, changed and reassigned whole, their units and ranges, and whether `threeDLayer` must be set on a mesh.
+- `ThreeDModelLayer` / `ParametricMeshLayer` report `reflect.name` equal to the class name; `addVerticalText` / `addVerticalBoxText` (24.2) signatures, with no orientation to read back.
+- The 26.3 Advanced 3D camera options (`ADBE Camera Focus Area Width`, `ADBE Camera Near Far Blur Multiplier`), with a display-name scan fallback; Depth of Field `setValue(1)`; `autoOrient` switching one and two node on an existing camera and what happens to the point of interest.
+- An environment light exposes shadow options; `addLight` with no type is a point light.
+
+**w5props**
+- `AVLayer.sourcePointToComp` / `compPointToSource` take no time argument and convert at the comp's current time (the reply warns when `bounds.time` differs and never moves `comp.time`); on text layers it returns the first character's corner only.
+- `Property.essentialPropertySource` returns a Property, an AVLayer or null; `propertyGroup(propertyDepth)` reaches the layer.
+- `Project.consolidateFootage` merges only what the plan lists (file-based footage with identical interpretation; pixel aspect, `isStill`, duration and frame rate keep items apart), and returns the removed count; `Project.reduceProject` keeps exactly the dependencies the comp-tree walk finds (expression name lookups, proxies and folders are not traced) and is one undo step.
+- `Project.autoFixExpressions` registers an undo step inside `A.withUndo` and touches only broken expressions.
+- `isMediaReplacementCompatible` takes the new item and reads as a Boolean; `setAlternateSource` accepts a comp as well as footage; `Layer.canAddToMotionGraphicsTemplate` / `addToMotionGraphicsTemplate` exist for media slots and may open a dialog (never suppressed).
+- `saveAsTemplate`: a built-in name may be overwritten silently (the tool requires `allow_replace`), it dirties the project, and when the preferences reach aerender in `ae_render_batch`.
+
+## Impossible by script, and what is used instead
+
+| Cannot be done by script | What is used instead |
+|---|---|
+| Content-Aware Fill (the panel: method, lighting correction, range, Generate) | `ae_inpaint_plate` makes a clean plate in Node (temporal median over tracked frames, diffusion or patch fill). `ae_caf_prep` sets up what a script can (a tracked Subtract mask, expansion, work area), gives the exact panel steps for the one click only the user can make, and `find_fill` finds the layer CAF generated |
+| Roto Brush and Track Mask (strokes, propagation, Freeze) | `ae_mask_follow` and `ae_garbage_matte` follow planar motion only. A moving person or hand needs the user's own roto layer, used as `matte_layer` or a holdout. Screens are keyed with `ae_key_greenscreen` |
+| Mocha AE (running it, reading its project data) | The user tracks in Mocha and uses Create Track Data; `ae_track_read` reads the Corner Pin or CC Power Pin keys that leaves. `ae_track_multi` tracks planes inside the MCP |
+| Warp Stabilizer VFX (starting, waiting for or reading the analysis) | `ae_stabilize` from a track made by `ae_track_multi` or read by `ae_track_read` |
+| The 3D Camera Tracker solve | `ae_track_read` reads keys made from it; nothing reads the solve itself |
+| AE's Tracker panel and Track Motion (driving them) | `ae_track_point` and `ae_track_multi`; `ae_track_read` reads the points an AE Tracker already made |
+| Clone Stamp and other paint strokes | `ae_cleanplate_setup` builds a freeze, still, spatial or time clone patch; the user paints inside the PATCH precomp and `action: "reload"` takes a painted still |
+| Menu commands such as Trim Comp to Work Area through `app.executeCommand` (it does nothing through CEP except Window-menu panels) | Native DOM methods; `ae_comp_settings` trims to the work area itself |
+| Custom-data effect parameters (Colorama's Output Cycle, the Curves curve) | An expression link, a saved .ffx preset, or the effect's own preset menu (older finding) |
+| A mask path from a vertex list through `ae_set_property` (it does not make a Shape) | `ae_path_write` with `time` |
+| A protected region on a layer marker | Comp markers only; the host refuses it up front |
+| Writing a gradient's colour stops in `ae_shape` | Not known to be possible; the stops stay at the default ramp |
+| Layer styles through `addProperty` | Unproven: the route is tried and, if AE refuses, the tool says to apply an .ffx preset saved from AE |
+
+## Refused on purpose by the `ae_run_jsx` lint
+
+These calls exist in ExtendScript. `server/src/jsx-safety-lint.ts` refuses them in `ae_run_jsx` because they block the bridge, leave After Effects, or have a safer dedicated tool. This is policy, not a missing API.
+
+| Refused call | Why, and what is used instead |
+|---|---|
+| `RenderQueue.render` (and pause / stop, Media Encoder queueing) | `ae_aerender_start` (a comp, `rq_index` or `whole_queue`) and `ae_render_batch` render in the background. Refused because `render()` blocks the bridge and Media Encoder queueing leaves AE |
+| Opening, closing and creating projects, `Project.save(file)` from `ae_run_jsx` | `ae_project_session`, and `ae_save` with `save_as` or `increment`. Refused because they swap the project without the unsaved-changes check, can open a dialog, and skip the backup copy, the overwrite checks and the session record |
+| Dialogs, file writes and deletes, sockets, running programs, quitting, `$.sleep`, `app.purge`, Team Project calls from `ae_run_jsx` | Refused because they block the bridge, leave AE or need the user's yes. The lint names the tool: `ae_ask_user`, `ae_dialogs`, `ae_memory_purge`, the dedicated tools. Not a sandbox: `eval()` of a built string and `obj['member']` get through |
+
+## Not done, and why
+
+- **A live AE run:** Emre's call; the smoke run is coming, and the first run will likely need adjusted arguments.
+- **Smoke steps for waves 4 and 5:** see the check list above.
+- **`ae_comp_diff` and the guide format:** `ae_comp_fingerprint` now stores guides as words (`horizontal` / `vertical`, `pixel` / `percentage`). A diff against a fingerprint taken before the change shows one `comp.guides` difference that is only the format. Take a fresh "before". A note in the `ae_comp_diff` output was suggested and not added.
+- **`ae_keyframes_transform` in `ae_multi_comp_apply`:** not added. `keys: "selected"` resolves against the active comp only.
+- **A moving person or hand as a holdout, and a deforming mask:** needs the user's own roto (see above).
+- **Calibration:** every threshold and first estimate in the measuring tools (Blurriness per sigma, grain noise per intensity, seam and slip thresholds, budgets) waits for real footage.
+- **Optional `fake-ae.ts` additions** the builders listed (selection, fonts, enums, guides, effect factories). The tests patch the fake locally, so nothing is missing; moving the patches into the shared fake would let the next group reuse them.
+- **Deadline submission and the Premiere round trip:** unchanged, out of scope.
+
+## Suggested next steps
+
+1. Run the live smoke in a scratch project (a copy of a real one is better) on AE 26.2.1: `node qa/smoke-mcp.mjs --dir <fresh dir under a /_work/qa/ path>`. Fix what fails, add each measured behaviour to `docs/BUILDERS.md`, and put the facts an agent needs into the tool descriptions.
+2. Check these first, because other tools build on them or a wrong guess does damage:
+   - **the guide layer in a nested comp** (`ae_stabilize_roundtrip`): whether it stays out of the parent's render and of `saveFrameToPng`. Do this before the other wave 4 steps; it decides `guide_mode`.
+   - **`saveFrameToPng` size and colour** on a 1080p comp: every compositing tool maps pixels through it.
+   - **effect parameter tables** (`param_table`, `param_tables`) of Corner Pin, CC Power Pin, Levels, Exposure, Transform, Motion Tile, Add / Match / Remove Grain: eyeball them once; the match names are guesses.
+   - **`ae_track_multi` then `ae_track_apply`** onto a Corner Pin on a shot you know: the point order, and that the preview sheet agrees.
+   - **the temporary comps** (`ae_track_multi` with `isolate_layers`, `ae_region_stats` with `hide_layers`, `ae_patch_check`): two undo entries, the copy gone, a fresh render each time.
+   - **`ae_save` `save_as` and `increment`:** the session tracker after the project moved, and no dialog.
+   - **`ae_fonts` replace:** `Project.replaceFont` with a substituted from-font, and that `ae_session_changes` does not list it as an undo step.
+   - **`ae_project_settings`:** whether Ctrl+Z undoes a bit-depth or colour-space change (the checkpoint is the safety net when it was taken; the result's `checkpoint` is null if it was skipped).
+   - **`ae_aerender_start` `rq_index`:** `-rqindex` with a queued item, then the whole queue.
+   - **`ae_view`:** that it takes no focus, and that `restore` puts the state back.
+   - **`ae_detect_cuts`** on a short flattened clip first; a long one blocks AE.
+3. Then the 0.4 steps below (push to the private copy for CI, decide on 0.4.0, bump versions together).
+
+---
+
 # Handover: 0.4 waves 1-3, 2026-11-03 onward
+
+> Waves 4 and 5 came after this section: see the section above it (`# Handover: 0.4 waves 4 and 5`). The counts below (149 tools, 2406 tests) stop at wave 3.
 
 After the 0.4 roadmap work below, Emre asked for about 27 more tool groups, ranked from research, built in three waves on the same branch `feat/roadmap-0.4`. One commit per wave, and one more for waves 1 and 2 for the fixes an Opus re-check found. Emre again decided against a live After Effects test. **None of the wave 1-3 tools has run in After Effects.** This section covers:
 - what was added;
