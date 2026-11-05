@@ -781,15 +781,19 @@ export function remapMismatches(plan: RemapPlan, beforeRaw: unknown, afterRaw: u
         const e = plan.keys[i].ease;
         if (!e) continue;
         const k = after.keys[i];
-        const sides: Array<[string, number | undefined, number | undefined, RemapEase | undefined]> = [
-          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0]],
-          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0]],
+        // Measured in After Effects 26.2: the in side of the first key and the out side of
+        // the last key border no segment, and AE reads their speed back as 0 whatever was
+        // written (the influence stays). Only their speed is left out of the comparison;
+        // every side between two keys is still compared exactly.
+        const sides: Array<[string, number | undefined, number | undefined, RemapEase | undefined, boolean]> = [
+          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0], i === 0],
+          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0], i === plan.keys.length - 1],
         ];
-        for (const [nm, speed, infl, got] of sides) {
+        for (const [nm, speed, infl, got, outer] of sides) {
           if (speed === undefined && infl === undefined) continue;
           const bad =
             !got ||
-            (speed !== undefined && !(Math.abs(got.speed - speed) <= 1e-3)) ||
+            (speed !== undefined && !outer && !(Math.abs(got.speed - speed) <= 1e-3)) ||
             (infl !== undefined && !(Math.abs(got.influence - infl) <= 0.01));
           if (bad && shown < 5) {
             shown++;

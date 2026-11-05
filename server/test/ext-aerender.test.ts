@@ -30,6 +30,8 @@ import {
 } from "../src/tools/ext/aerender.js";
 import { AGENT_SAFETY_GUIDANCE } from "../src/tools/common.js";
 
+const NO_GATE = { cool_down_ms: 0, list_engines: () => [] };
+
 class FakeChildProcess extends EventEmitter {
   pid: number;
   stdout = new PassThrough();
@@ -154,7 +156,7 @@ describe("ext/aerender (background aerender jobs)", () => {
 
   it("refuses ae_aerender_start when the project is unsaved, mismatched, or dirty", async () => {
     const dir = makeTempDir();
-    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"));
+    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"), NO_GATE);
     const tools = createAerenderTools({ registry });
     const startTool = tools.find((t) => t.name === "ae_aerender_start")!;
     const queue = new SingleWriterQueue();
@@ -232,7 +234,7 @@ describe("ext/aerender (background aerender jobs)", () => {
   it("spawns aerender detached with windowsHide:true, mirrors job to JSON, tracks status, and cancels", async () => {
     const dir = makeTempDir();
     const jobsJsonPath = path.join(dir, "renders", "jobs.json");
-    const registry = new AerenderJobRegistry(jobsJsonPath);
+    const registry = new AerenderJobRegistry(jobsJsonPath, NO_GATE);
 
     let spawnedCmd = "";
     let spawnedArgs: readonly string[] = [];
@@ -315,7 +317,7 @@ describe("ext/aerender (background aerender jobs)", () => {
 
     // Verify JSON mirror was written on disk and reloads in a fresh registry
     expect(fs.existsSync(jobsJsonPath)).toBe(true);
-    const reloadedRegistry = new AerenderJobRegistry(jobsJsonPath);
+    const reloadedRegistry = new AerenderJobRegistry(jobsJsonPath, NO_GATE);
     expect(reloadedRegistry.get(started.job_id)).toMatchObject({
       job_id: started.job_id,
       state: "running",
@@ -360,7 +362,7 @@ describe("ext/aerender (background aerender jobs)", () => {
 
   it("marks job as succeeded when aerender exits with code 0", async () => {
     const dir = makeTempDir();
-    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"));
+    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"), NO_GATE);
     const fakeChild = new FakeChildProcess(1111);
 
     const tools = createAerenderTools({
@@ -580,7 +582,7 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
   function setup(opts: { items?: RqItemRead[] | ((dir: string) => RqItemRead[]); dirty?: boolean; project?: string } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-aerender-rq-"));
     dirs.push(dir);
-    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"));
+    const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"), NO_GATE);
     const child = new FakeChildProcess(777);
     let spawned: { cmd: string; args: readonly string[] } | null = null;
     const tools = createAerenderTools({

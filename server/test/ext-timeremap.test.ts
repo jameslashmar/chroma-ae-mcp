@@ -542,6 +542,34 @@ describe("remapMismatches", () => {
     expect(dropped.map((x) => x.path)).toEqual(["keys[1].ease", "keys[1].ease"]);
   });
 
+  it("accepts the 0 speed After Effects reads on the outer sides of the first and last key, but still checks those sides' influence and every inner side", () => {
+    // Measured live: the first key's in speed and the last key's out speed read back as 0.
+    const plan = planOf({ operation: "ramp", method: "bezier", points: [{ time: 0, speed: 100 }, { time: 1, speed: 150 }, { time: 2, speed: 50 }, { time: 3, speed: 100 }] }, info({ comp_duration: 6, out_point: 6, source: { ...INFO.source!, duration: 10 } }));
+    expect(plan.keys!.length).toBeGreaterThanOrEqual(4);
+    const last = plan.keys!.length - 1;
+    const good = plan.expected_samples.map((s) => ({ time: s.time, value: s.value }));
+    type E = { speed: number; influence: number };
+    const readBack = (tweak?: (i: number, side: "in" | "out", e: E) => E) =>
+      info({
+        remap_enabled: true,
+        num_keys: plan.keys!.length,
+        samples: good,
+        keys: plan.keys!.map((k, i) => {
+          const side = (nm: "in" | "out"): E[] => {
+            let e: E = { speed: nm === "in" ? k.ease!.in_speed! : k.ease!.out_speed!, influence: nm === "in" ? k.ease!.in_influence! : k.ease!.out_influence! };
+            if ((i === 0 && nm === "in") || (i === last && nm === "out")) e = { ...e, speed: 0 };
+            return [tweak ? tweak(i, nm, e) : e];
+          };
+          return key(i + 1, k.time, k.value, { in_interp: "bezier", out_interp: "bezier", in_ease: side("in"), out_ease: side("out") });
+        }),
+      });
+    expect(remapMismatches(plan, INFO, readBack())).toEqual([]);
+    const innerWrong = remapMismatches(plan, INFO, readBack((i, nm, e) => (i === 1 && nm === "in" ? { ...e, speed: e.speed + 0.5 } : e)));
+    expect(innerWrong.map((x) => x.path)).toEqual(["keys[2].ease"]);
+    const outerInfluence = remapMismatches(plan, INFO, readBack((i, nm, e) => (i === 0 && nm === "in" ? { ...e, influence: 16.67 } : e)));
+    expect(outerInfluence.map((x) => x.path)).toEqual(["keys[1].ease"]);
+  });
+
   it("refuses to freeze at the layer's out point and reports the requested time", () => {
     const r = planTimeRemap(parse({ operation: "freeze", at_time: 4 }), INFO);
     expect(r.ok).toBe(false);

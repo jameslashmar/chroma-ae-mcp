@@ -50,6 +50,8 @@ import {
 } from "../src/tools/ext/renderbatch.js";
 import { FakeProject, loadHost } from "./support/fake-ae.js";
 
+const NO_GATE = { cool_down_ms: 0, list_engines: () => [], max_running: 8 };
+
 const GIB = 1024 * 1024 * 1024;
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -365,6 +367,22 @@ describe("render batch pure logic", () => {
     expect(buildAerenderArgs({ project_path: "p", comp_name: "c", output_path: "o" })).not.toContain("-mfr");
   });
 
+  it("counts the start gate in the ETA: only the gate's concurrency, and the cool-down before every pending item", () => {
+    const t0 = Date.parse("2026-11-03T10:00:00Z");
+    const item = (o: Partial<BatchItem>): BatchItem => ({ index: 1, comp_name: "A", spec_name: "x", output_path: "o", frames: 100, state: "pending", attempts: 0, ...o }) as BatchItem;
+    const b = {
+      options: { concurrency: 4 },
+      items: [
+        item({ state: "succeeded", started_at: "2026-11-03T10:00:00Z", finished_at: "2026-11-03T10:01:40Z" }),
+        item({ state: "pending" }),
+        item({ state: "pending" }),
+        item({ state: "pending" }),
+      ],
+    } as unknown as BatchRecord;
+    // 1 s per frame, 300 frames left, one at a time, 20 s before each of the 3 items.
+    expect(computeEta(b, t0 + 200_000, { concurrency: 1, gap_s: 20 }).eta_seconds).toBe(360);
+  });
+
   it("computes an ETA from running progress and seconds per finished frame", () => {
     const t0 = Date.parse("2026-11-03T10:00:00Z");
     const item = (o: Partial<BatchItem>): BatchItem => ({ index: 1, comp_name: "A", spec_name: "x", output_path: "o", frames: 100, state: "pending", attempts: 0, ...o }) as BatchItem;
@@ -419,7 +437,7 @@ interface Rig {
   gate: { p?: Promise<void> };
 }
 
-function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; read?: Partial<RenderbatchRead> } = {}): Rig {
+function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; read?: Partial<RenderbatchRead>; gateOpts?: ConstructorParameters<typeof AerenderJobRegistry>[1] } = {}): Rig {
   const dir = tmp();
   const project = path.join(dir, "job.aep");
   fs.writeFileSync(project, "aep-bytes");
@@ -456,7 +474,7 @@ function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; 
     quarantine,
   });
   const ctx: ToolContext = { bridge: host, queue, quarantine };
-  const registry = new AerenderJobRegistry(path.join(dir, "renders", "jobs.json"));
+  const registry = new AerenderJobRegistry(path.join(dir, "renders", "jobs.json"), opts.gateOpts ?? NO_GATE);
   const spawned: Rig["spawned"] = [];
   let pid = 1000;
   const spawn: SpawnLike = ((command: string, args: readonly string[]) => {
@@ -679,6 +697,36 @@ describe("the batch runner", () => {
     const r = rig();
     await started(r, { concurrency: 2 });
     expect(r.spawned).toHaveLength(2);
+  });
+
+  it("caps concurrency at the start gate's limit: one item at a time, the whole CPU share for it, and the descriptions say so", async () => {
+    const r = rig({ gateOpts: { cool_down_ms: 0, list_engines: () => [], max_running: 1 } });
+    const id = await started(r, { concurrency: 4, max_cpu_percent: 50 });
+    // The default gate runs one aerender at a time: the second item is not started (and queued behind the gate), the first is not starved.
+    expect(r.spawned).toHaveLength(1);
+    expect(states(r, id)).toEqual(["running", "pending"]);
+    expect(r.spawned[0].args.slice(-3)).toEqual(["-mfr", "ON", "50"]);
+    const text = r.tool("ae_render_batch").description + JSON.stringify(zodToJsonSchema(AeRenderBatchStartSchema));
+    expect(text).toContain("only one aerender at a time");
+    expect(text).toContain("capped to 1");
+    expect(text).toContain("20 s");
+  });
+
+  it("does not flag an item the start gate still holds back as stalled", async () => {
+    const g = { t: 1_000_000 };
+    const r = rig({ gateOpts: { cool_down_ms: 20_000, list_engines: () => [], max_running: 1, now: () => g.t, set_timer: () => 0, clear_timer: () => {} } });
+    const id = await started(r, { stall_minutes: 1 });
+    const runner = r.rb.getRunner();
+    r.finish(r.rb.getStore().get(id)!.items[0].job_id!, true);
+    await runner.tick(id); // the second item is launched, and the gate holds it for the cool-down
+    const second = r.rb.getStore().get(id)!.items[1];
+    expect(r.registry.get(second.job_id!)!.phase).toBe("queued");
+    r.clock.t += 10 * 60_000;
+    await runner.tick(id);
+    r.clock.t += 10 * 60_000;
+    const b = await runner.tick(id);
+    expect(b!.items[1].stalled).toBe(false);
+    expect(b!.notices.join(" ")).not.toContain("ae_aerender_cancel");
   });
 
   it("an exit 0 without an output file is a failure, and on_error stop leaves the rest pending", async () => {
@@ -1024,7 +1072,7 @@ describe("the batch runner, review fixes", () => {
     const id = await started(r);
     const jobId = r.rb.getStore().get(id)!.items[0].job_id!;
     // A new server process: the registry loads from disk and holds no process handle.
-    const reloaded = new AerenderJobRegistry(r.registry.path);
+    const reloaded = new AerenderJobRegistry(r.registry.path, NO_GATE);
     expect(reloaded.get(jobId)).toMatchObject({ state: "running", pid: 1000 });
     const kill = vi.spyOn(process, "kill").mockImplementation((() => true) as never);
     try {
@@ -1040,7 +1088,7 @@ describe("the batch runner, review fixes", () => {
       kill.mockRestore();
     }
     // Resume on yet another process: the stale 'running' job is closed in the registry instead of left to a later cancel.
-    const again = new AerenderJobRegistry(r.registry.path);
+    const again = new AerenderJobRegistry(r.registry.path, NO_GATE);
     const rb2 = createRenderbatch({ registry: again, store: new BatchStore(r.rb.getStore().dir), spawn: (() => new FakeChild(2)) as never, isPidAlive: () => false, autoTick: false, now: () => r.clock.t });
     const b = rb2.getStore().get(id)!;
     b.state = "stopped";
@@ -1101,7 +1149,7 @@ describe("the batch runner, review fixes", () => {
     const r = rig();
     const id = await started(r);
     const jobId = r.rb.getStore().get(id)!.items[0].job_id!;
-    const reloaded = new AerenderJobRegistry(r.registry.path); // a restart: no process handle
+    const reloaded = new AerenderJobRegistry(r.registry.path, NO_GATE); // a restart: no process handle
     reloaded.update(jobId, { pid: process.pid }); // a pid that exists, so only the identity decides
     const signals: number[] = [];
     const fresh = createRenderbatch({
@@ -1127,7 +1175,7 @@ describe("the batch runner, review fixes", () => {
     const r = rig();
     const id = await started(r);
     const jobId = r.rb.getStore().get(id)!.items[0].job_id!;
-    const reloaded = new AerenderJobRegistry(r.registry.path);
+    const reloaded = new AerenderJobRegistry(r.registry.path, NO_GATE);
     const { createAerenderTools } = await import("../src/tools/ext/aerender.js");
     const tools = createAerenderTools({ registry: reloaded, cancelHooks: { identify: () => null } } as never);
     const out = await tools.find((t) => t.name === "ae_aerender_cancel")!.handler({ job_id: jobId }, r.ctx);

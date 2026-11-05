@@ -92,6 +92,8 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   /** Questions for the panel: service.js serves them on GET /ask and POST /ask/answer. */
   asks: AskStore;
   assetWatcher: AssetWatcher;
+  /** Stops what keeps running on its own (the asset watcher's evalScript polling); the service calls it when it shuts down. */
+  stop: () => void;
   /** For the panel's Save diagnostics button (POST /admin/diagnostics). */
   saveDiagnostics: () => Promise<{ path: string; summary: Record<string, unknown> }>;
 } {
@@ -234,6 +236,9 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     host,
     asks: ctx.asks as AskStore,
     assetWatcher,
+    stop: () => {
+      assetWatcher.stop();
+    },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
   };
 }

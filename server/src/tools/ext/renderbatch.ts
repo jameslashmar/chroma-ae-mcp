@@ -181,7 +181,7 @@ const policyFields = {
 };
 
 const runFields = {
-  concurrency: z.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
+  concurrency: z.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The start gate lets only ONE aerender of this server run at a time (the last one's After Effects engine must be gone and 20 s must have passed), so a value above 1 is capped to 1: items still go one after another, with a 20 s gap between them. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
   max_cpu_percent: z
     .number()
     .int()
@@ -189,7 +189,7 @@ const runFields = {
     .max(100)
     .optional()
     .describe(
-      "Share of the CPU for the whole batch, split evenly over the concurrent aerender processes (each gets floor(max_cpu_percent / concurrency), at least 1, as aerender -mfr ON <percent>, After Effects 22+). Default 50. How far -mfr limits the CPU is not measured."
+      "Share of the CPU for the whole batch, split evenly over the aerender processes that can really run at once (each gets floor(max_cpu_percent / that number), at least 1, as aerender -mfr ON <percent>, After Effects 22+). The start gate runs one aerender at a time, so with the default gate the one running render gets the whole share. Default 50. How far -mfr limits the CPU is not measured."
     ),
   on_error: z.enum(["stop", "continue"]).optional().describe("A failed item stops the batch ('stop', default; resume retries it) or the batch goes on with the next item ('continue')."),
   stall_minutes: z.number().int().min(1).max(10_000).optional().describe("Minutes without log or output growth before a running item is flagged as stalled (advice only, nothing is cancelled). Default 15."),
@@ -924,8 +924,16 @@ export interface Eta {
   basis: string;
 }
 
-/** Seconds left: running items by their own progress, pending ones by this batch's seconds-per-frame so far. */
-export function computeEta(b: BatchRecord, nowMs: number): Eta {
+/** How many aerender jobs of a batch can really run at once: the batch's concurrency, capped by the registry's start gate (default 1). */
+export function effectiveConcurrency(requested: number, registry: AerenderJobRegistry): number {
+  return Math.max(1, Math.min(requested, registry.gate.opts.max_running));
+}
+
+/**
+ * Seconds left: running items by their own progress, pending ones by this batch's seconds-per-frame so far.
+ * gap_s: the seconds the start gate holds back each item after the one before it ended (its cool-down).
+ */
+export function computeEta(b: BatchRecord, nowMs: number, gate: { concurrency?: number; gap_s?: number } = {}): Eta {
   let secs = 0;
   let frames = 0;
   for (const i of b.items) {
@@ -957,7 +965,8 @@ export function computeEta(b: BatchRecord, nowMs: number): Eta {
     else unknown = true;
   }
   if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
-  const total = Math.round(longestRunning + pendingSecs / Math.max(1, b.options.concurrency));
+  const conc = Math.max(1, Math.min(b.options.concurrency, gate.concurrency ?? b.options.concurrency));
+  const total = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
   return { eta_seconds: total, eta_at: new Date(nowMs + total * 1000).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
 }
 
@@ -1085,8 +1094,9 @@ function refreshRunning(item: BatchItem, job: AerenderJobRecord, now: number, st
     }
   }
   const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
-  if (!item.activity || item.activity.sig !== sig) item.activity = { sig, changed_ms: now };
-  item.stalled = job.state === "running" && now - item.activity.changed_ms >= stallMs;
+  // A job the start gate still holds back (queued) has not started: its stall clock starts at the spawn.
+  if (!item.activity || item.activity.sig !== sig || job.phase === "queued") item.activity = { sig, changed_ms: now };
+  item.stalled = job.state === "running" && job.phase !== "queued" && now - item.activity.changed_ms >= stallMs;
   if (!item.stalled) item.stall_noted = false;
 }
 
@@ -1207,7 +1217,7 @@ export class BatchRunner {
     while (!this.stopping(b)) {
       const own = b.items.filter((i) => i.state === "running").length;
       const others = this.othersRunning(b);
-      if (own + others >= b.options.concurrency) {
+      if (own + others >= effectiveConcurrency(b.options.concurrency, this.deps.registry)) {
         waitingForOthers = own === 0 && others > 0 && b.items.some((i) => i.state === "pending");
         break;
       }
@@ -1232,7 +1242,7 @@ export class BatchRunner {
   /** Running aerender jobs of this process that no item of this batch owns (other batches, ae_aerender_start). */
   private othersRunning(b: BatchRecord): number {
     const own = new Set(b.items.map((i) => i.job_id).filter((j): j is string => typeof j === "string"));
-    return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && this.deps.registry.getProcess(j.job_id) !== undefined).length;
+    return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && (this.deps.registry.getProcess(j.job_id) !== undefined || j.phase === "queued")).length;
   }
 
   private fail(item: BatchItem, why: string, now: number): void {
@@ -1307,7 +1317,7 @@ export class BatchRunner {
     }
 
     try {
-      const cpu = Math.max(1, Math.floor(o.max_cpu_percent / Math.max(1, o.concurrency)));
+      const cpu = Math.max(1, Math.floor(o.max_cpu_percent / effectiveConcurrency(o.concurrency, this.deps.registry)));
       // A Render Queue item renders through -rqindex with its own outputs and settings: no -comp, -output, templates or -s/-e.
       const rec =
         item.rq_index !== undefined
@@ -1665,7 +1675,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
     {
       name: "ae_render_batch",
       description:
-        "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the concurrent processes) and one process at a time by default (the limit counts every aerender job this server runs). " +
+        "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the processes that can run at once) and one process at a time (the limit counts every aerender job this server runs; the start gate allows only one aerender at a time, so concurrency above 1 is capped to 1, and each item starts 20 s after the one before it ended and not while that one's After Effects engine is still alive; that gap is in the ETA). " +
         "Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). " +
         "Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). " +
         "State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. " +
@@ -1876,7 +1886,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
         const orphaned = b.items.filter((i) => {
           if (i.state !== "running" || !i.job_id) return false;
           const job = registry.get(i.job_id);
-          return job !== undefined && job.state === "running" && registry.getProcess(job.job_id) === undefined && !(typeof job.pid === "number" && pidAlive(job.pid, job.job_id));
+          return job !== undefined && job.state === "running" && job.phase !== "queued" && registry.getProcess(job.job_id) === undefined && !(typeof job.pid === "number" && pidAlive(job.pid, job.job_id));
         });
         const orphanIdx = new Set(orphaned.map((i) => i.index));
         const stalled = b.items
@@ -1897,7 +1907,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           output_dir: b.output_dir,
           options: b.options,
           counts: countStates(b.items),
-          eta: computeEta(b, t),
+          eta: computeEta(b, t, { concurrency: effectiveConcurrency(b.options.concurrency, registry), gap_s: registry.gate.opts.cool_down_ms / 1000 }),
           items: b.items.slice(0, MAX_ITEMS).map(itemView),
           stalled,
           ...(orphaned.length > 0

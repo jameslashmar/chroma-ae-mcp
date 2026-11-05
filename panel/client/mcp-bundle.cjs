@@ -6736,6 +6736,12 @@ __export(aerender_exports, {
   AeAerenderStartSchema: () => AeAerenderStartSchema,
   AeAerenderStatusSchema: () => AeAerenderStatusSchema,
   AerenderJobRegistry: () => AerenderJobRegistry,
+  AerenderStartGate: () => AerenderStartGate,
+  DEFAULT_GATE_COOL_DOWN_MS: () => DEFAULT_GATE_COOL_DOWN_MS,
+  DEFAULT_GATE_DEAD_ENGINE_MS: () => DEFAULT_GATE_DEAD_ENGINE_MS,
+  DEFAULT_GATE_SAMPLE_GAP_MS: () => DEFAULT_GATE_SAMPLE_GAP_MS,
+  DEFAULT_GATE_SLOW_CHECK_MS: () => DEFAULT_GATE_SLOW_CHECK_MS,
+  DEFAULT_GATE_STARTUP_LIMIT_MS: () => DEFAULT_GATE_STARTUP_LIMIT_MS,
   MACOS_FALLBACK_AERENDER: () => MACOS_FALLBACK_AERENDER,
   WINDOWS_FALLBACK_AERENDER: () => WINDOWS_FALLBACK_AERENDER,
   aerenderTools: () => aerenderTools,
@@ -6749,6 +6755,7 @@ __export(aerender_exports, {
   itemFrameRange: () => itemFrameRange,
   itemOutputs: () => itemOutputs,
   launchAerenderJob: () => launchAerenderJob,
+  listEnginesAsync: () => listEnginesAsync,
   parseAerenderProgress: () => parseAerenderProgress,
   pidHeldByLiveJob: () => pidHeldByLiveJob,
   readLogTail: () => readLogTail,
@@ -7083,9 +7090,71 @@ function selectWholeQueue(read3) {
     }
   };
 }
+function execFileText(file, args, timeoutMs) {
+  return new Promise((resolve4, reject) => {
+    const cp = childProcess.execFile(file, args, { windowsHide: true, timeout: timeoutMs, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve4(String(stdout));
+    });
+    try {
+      cp.stdin?.end();
+    } catch {
+    }
+  });
+}
+async function listEnginesAsync(run = execFileText, platform = process.platform) {
+  if (platform !== "win32") return null;
+  try {
+    const quick = await run("tasklist", ["/FI", "IMAGENAME eq AfterFX.com", "/FO", "CSV", "/NH"], 5e3);
+    if (!/"AfterFX\.com"/i.test(quick)) return [];
+    const script = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='AfterFX.com'" | ForEach-Object { $_.ProcessId.ToString() + [char]9 + $_.ParentProcessId.ToString() + [char]9 + ([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime).ToString() + [char]9 + $_.CommandLine }`;
+    const out = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], 15e3);
+    const list = [];
+    for (const line of out.split(String.fromCharCode(10))) {
+      const parts = line.replace(/\r$/, "").split(String.fromCharCode(9));
+      const pid = parseInt(parts[0] ?? "", 10);
+      const ppid = parseInt(parts[1] ?? "", 10);
+      if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+      const ticks = Number(parts[2] ?? "");
+      list.push({ pid, ppid, cpu_ms: Number.isFinite(ticks) && (parts[2] ?? "") !== "" ? ticks / 1e4 : null, command: parts.slice(3).join(String.fromCharCode(9)) });
+    }
+    return list;
+  } catch {
+    return null;
+  }
+}
+function defaultGateOptions() {
+  return {
+    max_running: 1,
+    cool_down_ms: DEFAULT_GATE_COOL_DOWN_MS,
+    startup_limit_ms: DEFAULT_GATE_STARTUP_LIMIT_MS,
+    sample_gap_ms: DEFAULT_GATE_SAMPLE_GAP_MS,
+    idle_cpu_ratio: 0.01,
+    slow_check_ms: DEFAULT_GATE_SLOW_CHECK_MS,
+    dead_engine_ms: DEFAULT_GATE_DEAD_ENGINE_MS,
+    max_start_retries: 2,
+    engine_wait_ms: 12e4,
+    poll_ms: 1e3,
+    engine_cache_ms: 5e3,
+    now: () => Date.now(),
+    set_timer: (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      if (typeof t === "object" && t !== null && typeof t.unref === "function") t.unref();
+      return t;
+    },
+    clear_timer: (h) => clearTimeout(h),
+    list_engines: () => listEnginesAsync(),
+    engines_known: process.platform === "win32",
+    kill_pid: (pid) => {
+      process.kill(pid);
+    }
+  };
+}
+function normPath2(s) {
+  return s.toLowerCase().split(String.fromCharCode(92, 92)).join("/").split(String.fromCharCode(92)).join("/");
+}
 function launchAerenderJob(p) {
   const registry = p.registry;
-  const spawnFn = p.spawn;
   const jobId = registry.newJobId();
   const rendersDir = registry.rendersDir;
   fs6.mkdirSync(rendersDir, { recursive: true });
@@ -7117,43 +7186,9 @@ function launchAerenderJob(p) {
     log_level: p.log_level,
     sound: p.sound
   });
-  let logFd = null;
-  try {
-    logFd = fs6.openSync(logPath, "a");
-  } catch {
-    logFd = null;
-  }
-  const stdioConfig = logFd !== null ? ["ignore", logFd, logFd] : "pipe";
-  const child = spawnFn(p.aerender_path, cliArgs, {
-    windowsHide: true,
-    detached: true,
-    stdio: stdioConfig
-  });
-  if (logFd !== null) {
-    try {
-      fs6.closeSync(logFd);
-    } catch {
-    }
-  }
-  if (child.stdout) {
-    child.stdout.on("data", (chunk) => {
-      try {
-        fs6.appendFileSync(logPath, chunk);
-      } catch {
-      }
-    });
-  }
-  if (child.stderr) {
-    child.stderr.on("data", (chunk) => {
-      try {
-        fs6.appendFileSync(logPath, chunk);
-      } catch {
-      }
-    });
-  }
   const initialRecord = {
     job_id: jobId,
-    pid: typeof child.pid === "number" ? child.pid : null,
+    pid: null,
     state: "running",
     exit_code: null,
     signal: null,
@@ -7176,61 +7211,7 @@ function launchAerenderJob(p) {
     started_at: (/* @__PURE__ */ new Date()).toISOString(),
     finished_at: null
   };
-  registry.register(initialRecord, child);
-  child.on("error", (err) => {
-    try {
-      fs6.appendFileSync(
-        logPath,
-        `
-AERENDER SPAWN ERROR: ${err.message}
-`
-      );
-    } catch {
-    }
-    const current = registry.get(jobId);
-    registry.update(jobId, {
-      state: "failed",
-      exit_code: current?.exit_code ?? -1,
-      error: err.message,
-      finished_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-  });
-  child.on(
-    "exit",
-    (code, signal) => {
-      const current = registry.get(jobId);
-      if (current?.cancelled) {
-        registry.update(jobId, {
-          state: "failed",
-          exit_code: code ?? current.exit_code,
-          signal: signal ?? current.signal,
-          finished_at: current.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
-        });
-        return;
-      }
-      let logError = null;
-      try {
-        const m = /^aerender ERROR:?\s*(.*)$/im.exec(
-          fs6.readFileSync(logPath, "utf8")
-        );
-        if (m) logError = m[1].trim() || "aerender ERROR";
-      } catch {
-        logError = null;
-      }
-      const succeeded = code === 0 && logError === null;
-      registry.update(jobId, {
-        state: succeeded ? "succeeded" : "failed",
-        ...logError ? { error: logError } : {},
-        exit_code: code,
-        signal: signal ?? null,
-        finished_at: (/* @__PURE__ */ new Date()).toISOString()
-      });
-    }
-  );
-  if (typeof child.unref === "function") {
-    child.unref();
-  }
-  return initialRecord;
+  return registry.gate.start(p, jobId, logPath, cliArgs, initialRecord);
 }
 function isAerenderProcess(pid, platform = process.platform, run = (file, args) => String(childProcess.execFileSync(file, args, { windowsHide: true, timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }))) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -7262,6 +7243,7 @@ function pidHeldByLiveJob(registry, pid, exceptJobId) {
 function cancelAerenderJob(registry, job, killProcess, by = "ae_aerender_cancel", hooks = {}) {
   const proc = registry.getProcess(job.job_id);
   if (proc) {
+    registry.gate.stopEnginesOf(typeof proc.pid === "number" ? proc.pid : job.pid, job.log_path);
     try {
       proc.kill("SIGTERM");
     } catch {
@@ -7322,7 +7304,7 @@ function createAerenderTools(options = {}) {
   return [
     {
       name: "ae_aerender_start",
-      description: "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect's reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. " + AGENT_SAFETY_GUIDANCE,
+      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
@@ -7464,6 +7446,8 @@ function createAerenderTools(options = {}) {
                 job_id: initialRecord.job_id,
                 pid: initialRecord.pid,
                 state: initialRecord.state,
+                ...initialRecord.phase ? { phase: initialRecord.phase } : {},
+                ...initialRecord.queued_reason ? { queued_reason: initialRecord.queued_reason } : {},
                 project_path: initialRecord.project_path,
                 comp_name: initialRecord.comp_name,
                 output_path: initialRecord.output_path,
@@ -7496,7 +7480,7 @@ function createAerenderTools(options = {}) {
     },
     {
       name: "ae_aerender_status",
-      description: "Check the status of a background `aerender` job (`running`, `succeeded`, `failed`), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. A job started with rq_index / whole_queue also reports rq_index, item_comp_id and output_paths; with several queue items rendering in a row the percent can be null while frames still count. " + AGENT_SAFETY_GUIDANCE,
+      description: 'Check the status of a background `aerender` job (`running`, `succeeded`, `failed`; a running job with phase "queued" has not been spawned yet and says why in queued_reason, start_attempts counts the spawns the startup watchdog made), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. A job started with rq_index / whole_queue also reports rq_index, item_comp_id and output_paths; with several queue items rendering in a row the percent can be null while frames still count. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStatusSchema,
       handler: async (args) => {
         const registry = getRegistry();
@@ -7525,6 +7509,9 @@ function createAerenderTools(options = {}) {
           log_path: job.log_path,
           started_at: job.started_at,
           finished_at: job.finished_at,
+          ...job.phase ? { phase: job.phase } : {},
+          ...job.queued_reason ? { queued_reason: job.queued_reason } : {},
+          ...job.start_attempts !== void 0 ? { start_attempts: job.start_attempts } : {},
           ...job.error ? { error: job.error } : {},
           ...job.rq_index !== void 0 ? { rq_index: job.rq_index } : {},
           ...job.item_comp_id !== void 0 ? { item_comp_id: job.item_comp_id } : {},
@@ -7542,7 +7529,7 @@ function createAerenderTools(options = {}) {
     },
     {
       name: "ae_aerender_cancel",
-      description: "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`). After a restart only a pid that is positively an aerender is killed; when the process lookup cannot tell, nothing is killed, the job stays running and the result says `kill_unconfirmed: true`. " + AGENT_SAFETY_GUIDANCE,
+      description: "Cancel a running background `aerender` job by `job_id`, terminating the process and marking the job as `failed` (`cancelled: true`); the AfterFX.com engine whose parent is that aerender is ended too, so a leftover engine does not hold up later jobs. After a restart only a pid that is positively an aerender is killed; when the process lookup cannot tell, nothing is killed, the job stays running and the result says `kill_unconfirmed: true`. " + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderCancelSchema,
       handler: async (args) => {
         const registry = getRegistry();
@@ -7586,7 +7573,7 @@ function createAerenderTools(options = {}) {
     }
   ];
 }
-var childProcess, crypto2, fs6, path7, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
+var childProcess, crypto2, fs6, path7, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, DEFAULT_GATE_COOL_DOWN_MS, DEFAULT_GATE_STARTUP_LIMIT_MS, DEFAULT_GATE_SAMPLE_GAP_MS, DEFAULT_GATE_SLOW_CHECK_MS, DEFAULT_GATE_DEAD_ENGINE_MS, AerenderStartGate, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
 var init_aerender = __esm({
   "src/tools/ext/aerender.ts"() {
     "use strict";
@@ -7608,8 +7595,11 @@ var init_aerender = __esm({
       filePath;
       jobs = /* @__PURE__ */ new Map();
       procs = /* @__PURE__ */ new Map();
-      constructor(filePath = defaultAerenderJobsFilePath()) {
+      /** The start gate and startup watchdog of this registry's jobs (see AerenderStartGate). */
+      gate;
+      constructor(filePath = defaultAerenderJobsFilePath(), gate) {
         this.filePath = filePath;
+        this.gate = new AerenderStartGate(this, gate);
         this.loadFromDisk();
       }
       get path() {
@@ -7638,6 +7628,11 @@ var init_aerender = __esm({
         this.saveToDisk();
         return this.jobs.get(record.job_id);
       }
+      /** Replaces (or, with undefined, drops) the live process handle of a job; the startup watchdog uses it between attempts. */
+      setProcess(jobId, proc) {
+        if (proc) this.procs.set(jobId, proc);
+        else this.procs.delete(jobId);
+      }
       update(jobId, patch) {
         const existing = this.jobs.get(jobId);
         if (!existing) {
@@ -7653,6 +7648,7 @@ var init_aerender = __esm({
           this.procs.delete(jobId);
         }
         this.saveToDisk();
+        if (existing.state === "running" && updated.state !== "running") this.gate.noteEnded(jobId);
         return updated;
       }
       loadFromDisk() {
@@ -7666,6 +7662,15 @@ var init_aerender = __esm({
           for (const item of list) {
             if (item && typeof item === "object" && typeof item.job_id === "string") {
               const rec = item;
+              if (rec.state === "running" && rec.phase === "queued") {
+                this.jobs.set(rec.job_id, {
+                  ...rec,
+                  state: "failed",
+                  error: "the server stopped while this job was queued; aerender was never started for it",
+                  finished_at: rec.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
+                });
+                continue;
+              }
               this.jobs.set(rec.job_id, { ...rec });
             }
           }
@@ -7690,6 +7695,630 @@ var init_aerender = __esm({
       }
     };
     defaultRegistry = null;
+    DEFAULT_GATE_COOL_DOWN_MS = 2e4;
+    DEFAULT_GATE_STARTUP_LIMIT_MS = 45e3;
+    DEFAULT_GATE_SAMPLE_GAP_MS = 1e4;
+    DEFAULT_GATE_SLOW_CHECK_MS = 6e4;
+    DEFAULT_GATE_DEAD_ENGINE_MS = 3e5;
+    AerenderStartGate = class {
+      constructor(registry, opts) {
+        this.registry = registry;
+        this.opts = { ...defaultGateOptions(), ...opts ?? {} };
+      }
+      opts;
+      ctls = /* @__PURE__ */ new Map();
+      queue = [];
+      pumpTimer = null;
+      lastEndMs = Number.NEGATIVE_INFINITY;
+      latest = null;
+      queryBusy = false;
+      sampleWaiters = [];
+      pumpRefreshing = false;
+      /** The answer a pump asked for, kept for the pump that follows it (whatever its age). */
+      arrived = null;
+      /** Jobs of this process that wait for their start. */
+      queuedJobIds() {
+        return this.queue.map((c) => c.jobId);
+      }
+      /** Called by the registry when a job leaves "running", however it ended. */
+      noteEnded(jobId) {
+        const ctl = this.ctls.get(jobId);
+        if (!ctl) return;
+        if (ctl.spawned) this.lastEndMs = this.opts.now();
+        this.clearWatch(ctl);
+        ctl.child = null;
+        this.ctls.delete(jobId);
+        const qi = this.queue.indexOf(ctl);
+        if (qi >= 0) this.queue.splice(qi, 1);
+        if (this.queue.length === 0) this.stopPump();
+      }
+      // ---------- Process-list queries (asynchronous, one at a time, cached) ----------
+      /** Runs a process-list query that starts now (or after the one in flight) and hands its answer to cb. */
+      queryEngines(cb) {
+        this.sampleWaiters.push({ since: this.opts.now(), cb });
+        this.runQuery();
+      }
+      runQuery() {
+        if (this.queryBusy || this.sampleWaiters.length === 0) return;
+        this.queryBusy = true;
+        const startedMs = this.opts.now();
+        const done = (list) => {
+          this.queryBusy = false;
+          const sample = { list, startedMs, atMs: this.opts.now() };
+          this.latest = sample;
+          const ready = this.sampleWaiters.filter((w) => w.since <= startedMs);
+          this.sampleWaiters = this.sampleWaiters.filter((w) => w.since > startedMs);
+          for (const w of ready) {
+            try {
+              w.cb(sample);
+            } catch {
+            }
+          }
+          if (this.sampleWaiters.length > 0) this.runQuery();
+        };
+        let result;
+        try {
+          result = this.opts.list_engines();
+        } catch {
+          result = null;
+        }
+        if (result !== null && !Array.isArray(result) && typeof result.then === "function") {
+          result.then(
+            (list) => done(Array.isArray(list) ? list : null),
+            () => done(null)
+          );
+        } else {
+          done(Array.isArray(result) ? result : null);
+        }
+      }
+      /**
+       * The latest process-list answer when it is younger than engine_cache_ms; otherwise asks
+       * for a new one in the background (at most one request waits at a time) and returns null.
+       * The queue poll calls this once a second and never waits for, or repeats, the query.
+       */
+      freshSample() {
+        const take = () => {
+          const s = this.arrived;
+          this.arrived = null;
+          return s !== null && this.opts.now() - s.atMs <= Math.max(this.opts.engine_cache_ms, 5e3) ? s : null;
+        };
+        const fromRequest = take();
+        if (fromRequest !== null) return fromRequest;
+        const latest = this.latest;
+        if (latest !== null && this.opts.now() - latest.atMs < this.opts.engine_cache_ms) return latest;
+        if (!this.pumpRefreshing) {
+          this.pumpRefreshing = true;
+          this.queryEngines((sample) => {
+            this.pumpRefreshing = false;
+            this.arrived = sample;
+            if (this.queue.length > 0) this.schedulePump(0);
+          });
+          return take();
+        }
+        return null;
+      }
+      /** Whether an engine of an earlier job could be alive: only then does the gate look at the process list. */
+      enginesRelevant() {
+        if (!this.opts.engines_known) return false;
+        if (Number.isFinite(this.lastEndMs)) return true;
+        for (const c of this.ctls.values()) if (c.pastPids.length > 0) return true;
+        const horizon = Date.now() - 6e5;
+        for (const j of this.registry.list()) {
+          if (typeof j.pid !== "number") continue;
+          if (j.state === "running") return true;
+          const fin = j.finished_at ? Date.parse(j.finished_at) : Number.NaN;
+          if (!Number.isNaN(fin) && fin >= horizon) return true;
+        }
+        return false;
+      }
+      blocker() {
+        let running = 0;
+        let firstRunning = "";
+        for (const c of this.ctls.values()) {
+          if (c.child !== null) {
+            running++;
+            if (firstRunning === "") firstRunning = c.jobId;
+          }
+        }
+        if (running >= this.opts.max_running) return { text: `aerender job ${firstRunning} is still running` };
+        const sinceEnd = this.opts.now() - this.lastEndMs;
+        if (sinceEnd < this.opts.cool_down_ms) {
+          return { text: `cool-down after the last aerender exit (${Math.ceil((this.opts.cool_down_ms - sinceEnd) / 1e3)} s left)` };
+        }
+        if (!this.enginesRelevant()) return null;
+        const sample = this.freshSample();
+        if (sample === null) return { text: "checking whether an AfterFX.com engine of an earlier job is still alive", pending: true };
+        if (sample.list === null) {
+          return { text: "could not read the process list to tell whether an AfterFX.com engine of an earlier job is still alive; waiting", unknown: true };
+        }
+        const jobs = this.registry.list();
+        for (const e of sample.list) {
+          for (const j of jobs) {
+            if (j.pid !== e.ppid) continue;
+            const live = this.registry.getProcess(j.job_id) !== void 0;
+            if (live && j.state === "running") continue;
+            if (!live && e.command !== "" && !normPath2(e.command).includes(normPath2(j.project_path))) continue;
+            if (j.state === "running") {
+              return { text: `the AfterFX.com engine (pid ${e.pid}) of job ${j.job_id} is still alive (that job is still running)`, engine: e, engineJob: j.job_id, kind: "running" };
+            }
+            return { text: `the AfterFX.com engine (pid ${e.pid}) of job ${j.job_id} is still alive`, engine: e, engineJob: j.job_id, kind: "ended" };
+          }
+          for (const c of this.ctls.values()) {
+            if (c.pastPids.indexOf(e.ppid) >= 0) {
+              return { text: `the AfterFX.com engine (pid ${e.pid}) of an earlier attempt of job ${c.jobId} is still alive`, engine: e, engineJob: c.jobId, kind: "attempt" };
+            }
+          }
+        }
+        return null;
+      }
+      note(ctl, text) {
+        try {
+          fs6.appendFileSync(ctl.logPath, `
+${text}
+`);
+        } catch {
+        }
+      }
+      /** Spawns one attempt. Throws what spawn throws. */
+      spawnProcess(ctl) {
+        let size = 0;
+        try {
+          size = fs6.statSync(ctl.logPath).size;
+        } catch {
+          size = 0;
+        }
+        let logFd = null;
+        try {
+          logFd = fs6.openSync(ctl.logPath, "a");
+        } catch {
+          logFd = null;
+        }
+        const stdioConfig = logFd !== null ? ["ignore", logFd, logFd] : "pipe";
+        let child;
+        try {
+          child = ctl.p.spawn(ctl.p.aerender_path, ctl.cliArgs, { windowsHide: true, detached: true, stdio: stdioConfig });
+        } finally {
+          if (logFd !== null) {
+            try {
+              fs6.closeSync(logFd);
+            } catch {
+            }
+          }
+        }
+        ctl.attempt++;
+        ctl.spawned = true;
+        ctl.logOffset = size;
+        ctl.attemptStartMs = this.opts.now();
+        const logPath = ctl.logPath;
+        if (child.stdout) {
+          child.stdout.on("data", (chunk) => {
+            try {
+              fs6.appendFileSync(logPath, chunk);
+            } catch {
+            }
+          });
+        }
+        if (child.stderr) {
+          child.stderr.on("data", (chunk) => {
+            try {
+              fs6.appendFileSync(logPath, chunk);
+            } catch {
+            }
+          });
+        }
+        return child;
+      }
+      /** Wires the exit handling and the watchdog of a spawned attempt. */
+      attach(ctl, child) {
+        const registry = this.registry;
+        const jobId = ctl.jobId;
+        const logPath = ctl.logPath;
+        const att = { stopped: false };
+        ctl.child = child;
+        ctl.att = att;
+        child.on("error", (err) => {
+          if (att.stopped) return;
+          try {
+            fs6.appendFileSync(logPath, `
+AERENDER SPAWN ERROR: ${err.message}
+`);
+          } catch {
+          }
+          const current = registry.get(jobId);
+          registry.update(jobId, {
+            state: "failed",
+            exit_code: current?.exit_code ?? -1,
+            error: err.message,
+            finished_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        });
+        child.on("exit", (code, signal) => {
+          if (att.stopped) return;
+          const current = registry.get(jobId);
+          if (current?.cancelled) {
+            registry.update(jobId, {
+              state: "failed",
+              exit_code: code ?? current.exit_code,
+              signal: signal ?? current.signal,
+              finished_at: current.finished_at ?? (/* @__PURE__ */ new Date()).toISOString()
+            });
+            return;
+          }
+          let logError = null;
+          try {
+            const m = /^aerender ERROR:?\s*(.*)$/im.exec(fs6.readFileSync(logPath, "utf8"));
+            if (m) logError = m[1].trim() || "aerender ERROR";
+          } catch {
+            logError = null;
+          }
+          const succeeded = code === 0 && logError === null;
+          registry.update(jobId, {
+            state: succeeded ? "succeeded" : "failed",
+            ...logError ? { error: logError } : {},
+            exit_code: code,
+            signal: signal ?? null,
+            finished_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        });
+        this.clearWatch(ctl);
+        ctl.first = null;
+        ctl.deadSinceMs = null;
+        ctl.slowLogSize = -1;
+        ctl.startPhase = ctl.p.log_level !== "errors";
+        if (this.opts.engines_known) this.armWatch(ctl, att, ctl.startPhase ? this.opts.startup_limit_ms : this.opts.slow_check_ms);
+        if (typeof child.unref === "function") {
+          child.unref();
+        }
+      }
+      clearWatch(ctl) {
+        if (ctl.watchTimer !== null) {
+          this.opts.clear_timer(ctl.watchTimer);
+          ctl.watchTimer = null;
+        }
+      }
+      armWatch(ctl, att, ms) {
+        this.clearWatch(ctl);
+        ctl.watchTimer = this.opts.set_timer(() => this.onWatch(ctl, att), ms);
+      }
+      watchValid(ctl, att) {
+        return !att.stopped && ctl.att === att && ctl.child !== null && this.registry.get(ctl.jobId)?.state === "running";
+      }
+      /** What this attempt's log shows: nothing, only the launch line, or a render PROGRESS line. */
+      progressState(ctl) {
+        let text = "";
+        try {
+          text = fs6.readFileSync(ctl.logPath).subarray(ctl.logOffset).toString("utf8");
+        } catch {
+          return "none";
+        }
+        let state = "none";
+        for (const line of text.split(String.fromCharCode(10))) {
+          if (!/^PROGRESS:/i.test(line)) continue;
+          if (/^PROGRESS:\s*Launching After Effects/i.test(line)) state = "launching";
+          else return "rendering";
+        }
+        return state;
+      }
+      /** The job shows render progress: from now on only the slow check applies. */
+      toSlow(ctl, att) {
+        ctl.startPhase = false;
+        ctl.first = null;
+        this.armWatch(ctl, att, this.opts.slow_check_ms);
+      }
+      /** A watch timer fired: ask for a fresh process list and judge the job with it. */
+      onWatch(ctl, att) {
+        ctl.watchTimer = null;
+        if (!this.watchValid(ctl, att)) return;
+        if (ctl.startPhase && ctl.first === null && this.progressState(ctl) === "rendering") {
+          this.toSlow(ctl, att);
+          return;
+        }
+        this.queryEngines((s) => this.judge(ctl, att, s));
+      }
+      judge(ctl, att, s) {
+        if (!this.watchValid(ctl, att)) return;
+        const child = ctl.child;
+        const pid = child !== null && typeof child.pid === "number" ? child.pid : null;
+        if (child === null || pid === null || s.list === null) {
+          ctl.first = null;
+          this.armWatch(ctl, att, ctl.startPhase ? this.opts.sample_gap_ms : this.opts.slow_check_ms);
+          return;
+        }
+        const own = s.list.filter((e) => e.ppid === pid);
+        if (ctl.startPhase) this.judgeStart(ctl, att, child, pid, own, s);
+        else this.judgeSlow(ctl, att, child, pid, own, s);
+      }
+      cpuVerdict(first, now, atMs) {
+        if (now.length === 0) return first.engines.length === 0 ? "none" : "gone";
+        if (first.engines.length === 0) return "working";
+        const elapsed = atMs - first.atMs;
+        if (elapsed <= 0) return "unknown";
+        for (const e of now) {
+          const before = first.engines.find((f) => f.pid === e.pid);
+          if (!before) return "working";
+          if (e.cpu_ms === null || before.cpu_ms === null) return "unknown";
+          const delta = e.cpu_ms - before.cpu_ms;
+          if (delta < 0) return "unknown";
+          if (delta > this.opts.idle_cpu_ratio * elapsed) return "working";
+        }
+        return "idle";
+      }
+      /**
+       * The start check: no render PROGRESS line yet. Two looks at the job's own engine, sample_gap_ms
+       * apart. Stopped only when the engine is absent, gone or idle in both; anything else keeps waiting.
+       */
+      judgeStart(ctl, att, child, pid, own, s) {
+        if (this.progressState(ctl) === "rendering") {
+          this.toSlow(ctl, att);
+          return;
+        }
+        const mine = own.map((e) => ({ pid: e.pid, cpu_ms: typeof e.cpu_ms === "number" ? e.cpu_ms : null }));
+        const first = ctl.first;
+        if (first === null) {
+          ctl.first = { atMs: s.atMs, engines: mine };
+          this.armWatch(ctl, att, this.opts.sample_gap_ms);
+          return;
+        }
+        ctl.first = null;
+        const verdict = this.cpuVerdict(first, mine, s.atMs);
+        if (verdict === "none" || verdict === "gone" || verdict === "idle") {
+          const elapsedS = Math.round((s.atMs - first.atMs) / 1e3);
+          let why = "it had no AfterFX.com engine";
+          if (verdict === "gone") why = "its AfterFX.com engine had exited";
+          else if (verdict === "idle") why = `its AfterFX.com engine was idle (its CPU time did not grow over ${elapsedS} s)`;
+          this.stopAttempt(ctl, att, child, pid, own, why);
+          return;
+        }
+        this.armWatch(ctl, att, Math.max(this.opts.sample_gap_ms, this.opts.startup_limit_ms / 2));
+      }
+      /**
+       * The slow check, after the start (or for log_level "errors"): an engine that is gone while
+       * aerender neither exits nor logs for dead_engine_ms would hold the only slot for ever.
+       */
+      judgeSlow(ctl, att, child, pid, own, s) {
+        let size = -1;
+        try {
+          size = fs6.statSync(ctl.logPath).size;
+        } catch {
+          size = -1;
+        }
+        const grew = ctl.slowLogSize >= 0 && size !== ctl.slowLogSize;
+        ctl.slowLogSize = size;
+        if (own.length > 0 || grew) ctl.deadSinceMs = null;
+        else if (ctl.deadSinceMs === null) ctl.deadSinceMs = s.atMs;
+        if (ctl.deadSinceMs !== null && s.atMs - ctl.deadSinceMs >= this.opts.dead_engine_ms) {
+          const minutes = Math.max(1, Math.round((s.atMs - ctl.deadSinceMs) / 6e4));
+          att.stopped = true;
+          ctl.child = null;
+          ctl.pastPids.push(pid);
+          try {
+            child.kill("SIGTERM");
+          } catch {
+          }
+          this.lastEndMs = this.opts.now();
+          const message = `aerender stopped working: its own AfterFX.com engine has been gone for ${minutes} min while aerender (pid ${pid}) neither exited nor wrote to its log. It was stopped so it no longer holds the render slot. The render is incomplete; check the output and start it again.`;
+          this.note(ctl, `AERENDER WATCHDOG: ${message}`);
+          this.registry.update(ctl.jobId, { state: "failed", error: message, finished_at: (/* @__PURE__ */ new Date()).toISOString() });
+          return;
+        }
+        this.armWatch(ctl, att, this.opts.slow_check_ms);
+      }
+      /**
+       * The engine is gone or idle and no render PROGRESS line came: this attempt's aerender is
+       * stopped together with the AfterFX.com process whose parent pid is that aerender (never
+       * another engine, never AfterFX.exe), and the job is queued for another attempt, or failed
+       * after the last.
+       */
+      stopAttempt(ctl, att, child, pid, own, why) {
+        att.stopped = true;
+        ctl.child = null;
+        ctl.pastPids.push(pid);
+        const killedEngines = [];
+        for (const e of own) {
+          try {
+            this.opts.kill_pid(e.pid);
+            killedEngines.push(e.pid);
+          } catch {
+          }
+        }
+        try {
+          child.kill("SIGTERM");
+        } catch {
+        }
+        this.lastEndMs = this.opts.now();
+        const waitedS = Math.round((this.opts.now() - ctl.attemptStartMs) / 1e3);
+        const what = `stopped aerender pid ${pid}${killedEngines.length > 0 ? ` and its AfterFX.com engine pid ${killedEngines.join(", ")}` : " (no AfterFX.com engine of its own was left to stop)"}`;
+        const attempts = ctl.attempt;
+        if (attempts <= this.opts.max_start_retries) {
+          this.note(ctl, `AERENDER WATCHDOG: no render PROGRESS line ${waitedS} s after attempt ${attempts} was spawned and ${why}; ${what}; starting again (attempt ${attempts + 1} of ${this.opts.max_start_retries + 1}) after the cool-down.`);
+          this.registry.setProcess(ctl.jobId, void 0);
+          this.registry.update(ctl.jobId, {
+            pid: null,
+            phase: "queued",
+            queued_reason: `attempt ${attempts} showed no render PROGRESS line after ${waitedS} s and ${why}; it was stopped; waiting to start again`,
+            start_attempts: attempts
+          });
+          ctl.blockKey = null;
+          this.queue.unshift(ctl);
+          this.schedulePump(0);
+          return;
+        }
+        const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again.`;
+        this.note(ctl, `AERENDER WATCHDOG: ${message}`);
+        this.registry.update(ctl.jobId, {
+          state: "failed",
+          error: message,
+          start_attempts: attempts,
+          finished_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      /**
+       * Ends the AfterFX.com engines whose parent is `pid` (a cancelled job's aerender), so a
+       * leftover engine does not block every later job. Asks for a fresh process list in the
+       * background; "could not tell" ends nothing.
+       */
+      stopEnginesOf(pid, logPath) {
+        if (typeof pid !== "number" || pid <= 0 || !this.opts.engines_known) return;
+        this.queryEngines((s) => {
+          if (s.list === null) return;
+          const killed = [];
+          for (const e of s.list) {
+            if (e.ppid !== pid) continue;
+            try {
+              this.opts.kill_pid(e.pid);
+              killed.push(e.pid);
+            } catch {
+            }
+          }
+          if (killed.length > 0) {
+            try {
+              fs6.appendFileSync(logPath, `
+AERENDER CANCEL: also ended its AfterFX.com engine pid ${killed.join(", ")}
+`);
+            } catch {
+            }
+          }
+        });
+      }
+      stopPump() {
+        if (this.pumpTimer !== null) {
+          this.opts.clear_timer(this.pumpTimer);
+          this.pumpTimer = null;
+        }
+      }
+      schedulePump(ms) {
+        this.stopPump();
+        this.pumpTimer = this.opts.set_timer(() => {
+          this.pumpTimer = null;
+          this.pump();
+        }, ms);
+      }
+      /** Starts the head of the queue when the gate is clear; the rest wait their turn. */
+      pump() {
+        while (this.queue.length > 0) {
+          const head3 = this.queue[0];
+          const now = this.opts.now();
+          const b = this.blocker();
+          let key = null;
+          if (b !== null && b.engine) key = `engine:${b.engine.pid}:${b.kind ?? ""}:${b.engineJob ?? ""}`;
+          else if (b !== null && b.unknown) key = "unknown";
+          if (!(b !== null && b.pending) && key !== head3.blockKey) {
+            head3.blockKey = key;
+            head3.blockSinceMs = now;
+          }
+          if (b === null) {
+            this.queue.shift();
+            this.startQueued(head3);
+            continue;
+          }
+          const waitedMs = now - head3.blockSinceMs;
+          if (b.engine && b.kind !== "running" && waitedMs > this.opts.engine_wait_ms) {
+            this.queue.shift();
+            const message = this.engineWaitMessage(head3, b, Math.round(waitedMs / 1e3));
+            this.note(head3, `AERENDER QUEUE: ${message}`);
+            this.registry.update(head3.jobId, { state: "failed", error: message, finished_at: (/* @__PURE__ */ new Date()).toISOString() });
+            continue;
+          }
+          if (b.unknown && waitedMs > this.opts.engine_wait_ms) {
+            this.note(head3, `AERENDER QUEUE: the process list could not be read for ${Math.round(waitedMs / 1e3)} s; starting without knowing whether an earlier engine is alive.`);
+            this.queue.shift();
+            this.startQueued(head3);
+            continue;
+          }
+          const job = this.registry.get(head3.jobId);
+          const keepKnown = b.pending === true && !!job && /AfterFX\.com engine|process list/.test(job.queued_reason ?? "");
+          if (job && !keepKnown && job.queued_reason !== b.text && !/waiting to start again/.test(job.queued_reason ?? "")) {
+            this.registry.update(head3.jobId, { queued_reason: b.text });
+          }
+          break;
+        }
+        if (this.queue.length > 0) this.schedulePump(this.opts.poll_ms);
+      }
+      engineWaitMessage(head3, b, waitedS) {
+        const pid = b.engine?.pid ?? 0;
+        const tail = "end it yourself (Task Manager), then start the render again.";
+        if (b.kind === "attempt" && b.engineJob === head3.jobId) {
+          return `aerender was not started: the AfterFX.com engine (pid ${pid}) of an earlier attempt of this job is still alive ${waitedS} s after the watchdog stopped that attempt (its engine was ended then and survived). It is not ended again; ${tail}`;
+        }
+        if (b.kind === "attempt") {
+          return `aerender was not started: ${b.text}, ${waitedS} s after this job began to wait for it. That process belongs to another job and is not touched; ${tail}`;
+        }
+        return `aerender was not started: ${b.text}, ${waitedS} s after this job began to wait for it. That process is not this job's and is not touched; ${tail}`;
+      }
+      startQueued(ctl) {
+        let child;
+        try {
+          child = this.spawnProcess(ctl);
+        } catch (err) {
+          const message = `could not start aerender: ${err instanceof Error ? err.message : String(err)}`;
+          this.note(ctl, `AERENDER SPAWN ERROR: ${message}`);
+          this.registry.update(ctl.jobId, { state: "failed", error: message, finished_at: (/* @__PURE__ */ new Date()).toISOString() });
+          return;
+        }
+        this.registry.setProcess(ctl.jobId, child);
+        const first = (this.registry.get(ctl.jobId)?.start_attempts ?? 0) === 0;
+        this.registry.update(ctl.jobId, {
+          pid: typeof child.pid === "number" ? child.pid : null,
+          phase: "spawned",
+          queued_reason: void 0,
+          start_attempts: ctl.attempt,
+          ...first ? { started_at: (/* @__PURE__ */ new Date()).toISOString() } : {}
+        });
+        this.attach(ctl, child);
+      }
+      /**
+       * Starts the job now when the gate is clear and nothing is queued ahead of it (the
+       * spawn happens before this returns, as it always did); otherwise registers it as
+       * queued and lets the pump start it. A spawn that throws on the immediate path
+       * throws from here with nothing registered.
+       */
+      start(p, jobId, logPath, cliArgs, record) {
+        const ctl = {
+          jobId,
+          p,
+          cliArgs,
+          logPath,
+          attempt: 0,
+          child: null,
+          att: null,
+          logOffset: 0,
+          attemptStartMs: 0,
+          watchTimer: null,
+          spawned: false,
+          pastPids: [],
+          startPhase: true,
+          first: null,
+          deadSinceMs: null,
+          slowLogSize: -1,
+          blockKey: null,
+          blockSinceMs: 0
+        };
+        const blocker = this.queue.length === 0 ? this.blocker() : { text: "waiting for earlier queued aerender jobs" };
+        if (blocker === null) {
+          const child = this.spawnProcess(ctl);
+          const registered2 = this.registry.register(
+            { ...record, pid: typeof child.pid === "number" ? child.pid : null, phase: "spawned", start_attempts: ctl.attempt },
+            child
+          );
+          this.ctls.set(jobId, ctl);
+          this.attach(ctl, child);
+          return registered2;
+        }
+        const registered = this.registry.register({
+          ...record,
+          pid: null,
+          phase: "queued",
+          queued_reason: blocker.text,
+          queued_at: (/* @__PURE__ */ new Date()).toISOString(),
+          start_attempts: 0
+        });
+        this.ctls.set(jobId, ctl);
+        this.queue.push(ctl);
+        this.note(ctl, `AERENDER QUEUED: ${blocker.text}. It starts when aerender can start safely (one job at a time, ${Math.round(this.opts.cool_down_ms / 1e3)} s after the last one, no AfterFX.com engine of an earlier job alive).`);
+        this.schedulePump(this.opts.poll_ms);
+        return registered;
+      }
+    };
     AeAerenderStartSchema = external_exports.object({
       expect: ExpectSchema,
       comp_name: external_exports.string().min(1).optional().describe(
@@ -7713,7 +8342,7 @@ var init_aerender = __esm({
         image_cache_percent: external_exports.number().int().min(1).max(100).describe("Share of RAM for the image cache, percent."),
         max_mem_percent: external_exports.number().int().min(1).max(100).describe("Share of RAM After Effects may use in all, percent.")
       }).optional().describe("Pass -mem_usage <image_cache_percent> <max_mem_percent>: caps the memory aerender uses."),
-      log_level: external_exports.enum(["errors", "errors_and_progress"]).optional().describe("aerender -v: 'errors' logs only errors, 'errors_and_progress' (aerender's own default) also the PROGRESS lines that ae_aerender_status turns into a percent. Leave it out to keep the progress."),
+      log_level: external_exports.enum(["errors", "errors_and_progress"]).optional().describe("aerender -v: 'errors' logs only errors, 'errors_and_progress' (aerender's own default) also the PROGRESS lines that ae_aerender_status turns into a percent. Leave it out to keep the progress. With 'errors' there are no PROGRESS lines, so ae_aerender_status shows no percent and the startup watchdog (which restarts a hung start) is off for that job; only the slow dead-engine check applies."),
       sound: external_exports.boolean().optional().describe("Pass -sound ON or OFF: play a sound when the render finishes. Leave out to keep aerender's default.")
     }).superRefine((val, ctx) => {
       const issue = (p, message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: [p], message });
@@ -13461,12 +14090,12 @@ function remapMismatches(plan2, beforeRaw, afterRaw) {
         if (!e) continue;
         const k = after.keys[i];
         const sides = [
-          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0]],
-          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0]]
+          ["in_ease", e.in_speed, e.in_influence, k.in_ease?.[0], i === 0],
+          ["out_ease", e.out_speed, e.out_influence, k.out_ease?.[0], i === plan2.keys.length - 1]
         ];
-        for (const [nm, speed, infl, got] of sides) {
+        for (const [nm, speed, infl, got, outer] of sides) {
           if (speed === void 0 && infl === void 0) continue;
-          const bad4 = !got || speed !== void 0 && !(Math.abs(got.speed - speed) <= 1e-3) || infl !== void 0 && !(Math.abs(got.influence - infl) <= 0.01);
+          const bad4 = !got || speed !== void 0 && !outer && !(Math.abs(got.speed - speed) <= 1e-3) || infl !== void 0 && !(Math.abs(got.influence - infl) <= 0.01);
           if (bad4 && shown < 5) {
             shown++;
             m.push({
@@ -21065,7 +21694,7 @@ function proxyMismatches(args, beforeRaw, afterRaw) {
       } else {
         expectThat(m, now.proxy?.kind === "file", `items[${id}].proxy.kind`, "file", now.proxy?.kind, "The item has no file proxy");
         if (args.action === "set_file" && now.proxy?.file !== void 0) {
-          expectThat(m, normPath2(now.proxy.file) === normPath2(args.file), `items[${id}].proxy.file`, args.file, now.proxy.file, "The proxy is another file");
+          expectThat(m, normPath3(now.proxy.file) === normPath3(args.file), `items[${id}].proxy.file`, args.file, now.proxy.file, "The proxy is another file");
         }
       }
       const wantUse = args.use_proxy !== void 0 ? args.use_proxy : true;
@@ -21077,7 +21706,7 @@ function proxyMismatches(args, beforeRaw, afterRaw) {
   }
   return m;
 }
-var readOf3, itemOf, ROUNDED_RATES, near3, SQUARE_SIZES, rendersWithProxies, compsOnly, WILL_RENDER, ALPHA_MODES, FIELD_MODES, PULLDOWN_PHASES, PULLDOWN_CHOICES, PROXY_ACTIONS, Color2, AeGetFootageInterpretationSchema, AlphaSchema, AeSetFootageInterpretationSchema, AeFootageProxySchema, sameColor, normPath2, readCall, interpretTools;
+var readOf3, itemOf, ROUNDED_RATES, near3, SQUARE_SIZES, rendersWithProxies, compsOnly, WILL_RENDER, ALPHA_MODES, FIELD_MODES, PULLDOWN_PHASES, PULLDOWN_CHOICES, PROXY_ACTIONS, Color2, AeGetFootageInterpretationSchema, AlphaSchema, AeSetFootageInterpretationSchema, AeFootageProxySchema, sameColor, normPath3, readCall, interpretTools;
 var init_interpret = __esm({
   "src/tools/ext/interpret.ts"() {
     "use strict";
@@ -21162,7 +21791,7 @@ var init_interpret = __esm({
       expect: ExpectSchema
     }).refine((v) => v.action === "set_file" || v.action === "set_sequence" ? v.file !== void 0 : true, { message: "set_file and set_sequence need file." }).refine((v) => v.action !== "set_solid" || v.solid !== void 0, { message: "set_solid needs solid." }).refine((v) => v.file === void 0 || v.action === "set_file" || v.action === "set_sequence", { message: "file applies to set_file and set_sequence only." }).refine((v) => v.solid === void 0 || v.action === "set_solid", { message: "solid applies to set_solid only." }).refine((v) => v.action.startsWith("set_") ? v.item_ids.length === 1 : true, { message: "A proxy is set on one item at a time." }).refine((v) => v.use_proxy === void 0 || v.action.startsWith("set_"), { message: "use_proxy goes with a set_ action; use use_on / use_off otherwise." });
     sameColor = (a, b) => !!a && a.length >= 3 && b.every((v, i) => Math.abs(a[i] - v) <= 1e-3);
-    normPath2 = (p) => (p ?? "").replace(/\\/g, "/").toLowerCase();
+    normPath3 = (p) => (p ?? "").replace(/\\/g, "/").toLowerCase();
     readCall = (itemIds) => ({ host: "interpretRead", args: { item_ids: itemIds, include_render_queue: false } });
     interpretTools = [
       {
@@ -23485,7 +24114,10 @@ async function getFreeBytes(dir, platform = process.platform, run = defaultRunFi
     return null;
   }
 }
-function computeEta(b, nowMs) {
+function effectiveConcurrency(requested, registry) {
+  return Math.max(1, Math.min(requested, registry.gate.opts.max_running));
+}
+function computeEta(b, nowMs, gate = {}) {
   let secs2 = 0;
   let frames = 0;
   for (const i of b.items) {
@@ -23517,7 +24149,8 @@ function computeEta(b, nowMs) {
     else unknown = true;
   }
   if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
-  const total = Math.round(longestRunning + pendingSecs / Math.max(1, b.options.concurrency));
+  const conc = Math.max(1, Math.min(b.options.concurrency, gate.concurrency ?? b.options.concurrency));
+  const total = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
   return { eta_seconds: total, eta_at: new Date(nowMs + total * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
 }
 function countStates(items) {
@@ -23544,8 +24177,8 @@ function refreshRunning(item, job, now, stallMs) {
     }
   }
   const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
-  if (!item.activity || item.activity.sig !== sig) item.activity = { sig, changed_ms: now };
-  item.stalled = job.state === "running" && now - item.activity.changed_ms >= stallMs;
+  if (!item.activity || item.activity.sig !== sig || job.phase === "queued") item.activity = { sig, changed_ms: now };
+  item.stalled = job.state === "running" && job.phase !== "queued" && now - item.activity.changed_ms >= stallMs;
   if (!item.stalled) item.stall_noted = false;
 }
 function expectedFrames(item) {
@@ -23689,7 +24322,7 @@ function createRenderbatch(options = {}) {
     },
     {
       name: "ae_render_batch",
-      description: "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the concurrent processes) and one process at a time by default (the limit counts every aerender job this server runs). Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. Not measured yet: whether footage paths resolve from the frozen copy, how far the -mfr cap limits the CPU, and whether aerender overwrites an existing file silently. A comp with a queued render-queue item renders with that item's settings when a spec leaves out its templates, and extra output modules on it are refused. " + AGENT_SAFETY_GUIDANCE,
+      description: "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the processes that can run at once) and one process at a time (the limit counts every aerender job this server runs; the start gate allows only one aerender at a time, so concurrency above 1 is capped to 1, and each item starts 20 s after the one before it ended and not while that one's After Effects engine is still alive; that gap is in the ETA). Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. Not measured yet: whether footage paths resolve from the frozen copy, how far the -mfr cap limits the CPU, and whether aerender overwrites an existing file silently. A comp with a queued render-queue item renders with that item's settings when a spec leaves out its templates, and extra output modules on it are refused. " + AGENT_SAFETY_GUIDANCE,
       schema: AeRenderBatchStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
@@ -23879,7 +24512,7 @@ function createRenderbatch(options = {}) {
         const orphaned = b.items.filter((i) => {
           if (i.state !== "running" || !i.job_id) return false;
           const job = registry.get(i.job_id);
-          return job !== void 0 && job.state === "running" && registry.getProcess(job.job_id) === void 0 && !(typeof job.pid === "number" && pidAlive2(job.pid, job.job_id));
+          return job !== void 0 && job.state === "running" && job.phase !== "queued" && registry.getProcess(job.job_id) === void 0 && !(typeof job.pid === "number" && pidAlive2(job.pid, job.job_id));
         });
         const orphanIdx = new Set(orphaned.map((i) => i.index));
         const stalled = b.items.filter((i) => i.state === "running" && i.stalled && !orphanIdx.has(i.index)).map((i) => ({ index: i.index, job_id: i.job_id, advice: "No progress for a while: check ae_aerender_status, then ae_aerender_cancel if it is stuck." }));
@@ -23896,7 +24529,7 @@ function createRenderbatch(options = {}) {
           output_dir: b.output_dir,
           options: b.options,
           counts: countStates(b.items),
-          eta: computeEta(b, t),
+          eta: computeEta(b, t, { concurrency: effectiveConcurrency(b.options.concurrency, registry), gap_s: registry.gate.opts.cool_down_ms / 1e3 }),
           items: b.items.slice(0, MAX_ITEMS).map(itemView),
           stalled,
           ...orphaned.length > 0 ? { orphaned: orphaned.map((i) => ({ index: i.index, job_id: i.job_id, advice: "Its aerender process is gone (the server or the machine restarted). Call ae_render_batch_resume; do not cancel it by pid." })) } : {},
@@ -24060,9 +24693,9 @@ var init_renderbatch = __esm({
       on_unknown_space: external_exports.enum(["continue", "stop"]).optional().describe("When free space can't be measured (a UNC path or a failed lookup): 'continue' (default) renders and flags it, 'stop' blocks the item. Unknown is never reported as ok.")
     };
     runFields = {
-      concurrency: external_exports.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
+      concurrency: external_exports.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The start gate lets only ONE aerender of this server run at a time (the last one's After Effects engine must be gone and 20 s must have passed), so a value above 1 is capped to 1: items still go one after another, with a 20 s gap between them. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
       max_cpu_percent: external_exports.number().int().min(1).max(100).optional().describe(
-        "Share of the CPU for the whole batch, split evenly over the concurrent aerender processes (each gets floor(max_cpu_percent / concurrency), at least 1, as aerender -mfr ON <percent>, After Effects 22+). Default 50. How far -mfr limits the CPU is not measured."
+        "Share of the CPU for the whole batch, split evenly over the aerender processes that can really run at once (each gets floor(max_cpu_percent / that number), at least 1, as aerender -mfr ON <percent>, After Effects 22+). The start gate runs one aerender at a time, so with the default gate the one running render gets the whole share. Default 50. How far -mfr limits the CPU is not measured."
       ),
       on_error: external_exports.enum(["stop", "continue"]).optional().describe("A failed item stops the batch ('stop', default; resume retries it) or the batch goes on with the next item ('continue')."),
       stall_minutes: external_exports.number().int().min(1).max(1e4).optional().describe("Minutes without log or output growth before a running item is flagged as stalled (advice only, nothing is cancelled). Default 15.")
@@ -24282,7 +24915,7 @@ var init_renderbatch = __esm({
         while (!this.stopping(b)) {
           const own = b.items.filter((i) => i.state === "running").length;
           const others = this.othersRunning(b);
-          if (own + others >= b.options.concurrency) {
+          if (own + others >= effectiveConcurrency(b.options.concurrency, this.deps.registry)) {
             waitingForOthers = own === 0 && others > 0 && b.items.some((i) => i.state === "pending");
             break;
           }
@@ -24305,7 +24938,7 @@ var init_renderbatch = __esm({
       /** Running aerender jobs of this process that no item of this batch owns (other batches, ae_aerender_start). */
       othersRunning(b) {
         const own = new Set(b.items.map((i) => i.job_id).filter((j) => typeof j === "string"));
-        return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && this.deps.registry.getProcess(j.job_id) !== void 0).length;
+        return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && (this.deps.registry.getProcess(j.job_id) !== void 0 || j.phase === "queued")).length;
       }
       fail(item, why, now) {
         item.state = "failed";
@@ -24372,7 +25005,7 @@ var init_renderbatch = __esm({
           if (!b.notices.includes(note)) b.notices.push(note);
         }
         try {
-          const cpu = Math.max(1, Math.floor(o.max_cpu_percent / Math.max(1, o.concurrency)));
+          const cpu = Math.max(1, Math.floor(o.max_cpu_percent / effectiveConcurrency(o.concurrency, this.deps.registry)));
           const rec = item.rq_index !== void 0 ? launchAerenderJob({
             registry: this.deps.registry,
             spawn: this.deps.spawn,
@@ -58968,6 +59601,9 @@ function createPanelMcp(opts) {
     host,
     asks: ctx.asks,
     assetWatcher,
+    stop: () => {
+      assetWatcher.stop();
+    },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.())
   };
 }

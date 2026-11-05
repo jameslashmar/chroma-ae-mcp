@@ -439,6 +439,7 @@
   var isBinding = false;
   var isShuttingDown = false;
   var retryTimer = null;
+  var lastBindErrorKey = "";
 
   function handleRequest(req, res) {
     var headers = req.headers || {};
@@ -692,21 +693,27 @@
         candidate.close();
       } catch (e) {}
 
-      if (err && err.code === "EADDRINUSE") {
-        log(
-          "warn",
-          "Port 127.0.0.1:" + boundPort + " is already in use (EADDRINUSE); retrying in 5s"
-        );
-      } else {
-        log(
-          "err",
-          "HTTP server error on 127.0.0.1:" +
-            boundPort +
-            " — " +
-            (err && err.message ? err.message : String(err)) +
-            "; retrying in 5s"
-        );
+      // Log a failure once, not on every 5 s retry (a second AE can hold the port for hours).
+      var errKey = String((err && (err.code || err.message)) || "error");
+      if (errKey !== lastBindErrorKey) {
+        lastBindErrorKey = errKey;
+        if (err && err.code === "EADDRINUSE") {
+          log(
+            "warn",
+            "Port 127.0.0.1:" + boundPort + " is already in use (EADDRINUSE); retrying every 5s without logging again"
+          );
+        } else {
+          log(
+            "err",
+            "HTTP server error on 127.0.0.1:" +
+              boundPort +
+              " — " +
+              (err && err.message ? err.message : String(err)) +
+              "; retrying every 5s without logging again"
+          );
+        }
       }
+      // Binding retries only create a new listener. They never touch evalScript.
       scheduleBindRetry();
     });
 
@@ -719,11 +726,16 @@
       }
       isBinding = false;
       isListening = true;
+      lastBindErrorKey = "";
       var addr = candidate.address();
       if (addr && typeof addr.port === "number") {
         boundPort = addr.port;
       }
       log("ok", "Listening on http://127.0.0.1:" + boundPort);
+      // Load the MCP bundle only once this instance owns the port. Creating it starts the asset
+      // watcher, which polls evalScript every 5 s while asset_watch is on in the shared
+      // settings.json; an instance that never got the port must not poll or import.
+      if (!isShuttingDown) getPanelMcp();
     });
   }
 
@@ -789,6 +801,13 @@
       } catch (e) {}
       server = null;
     }
+    // Closing the port is not enough: the MCP bundle's asset watcher polls evalScript on its own timer.
+    if (panelMcp !== null) {
+      try {
+        if (typeof panelMcp.stop === "function") panelMcp.stop();
+        else if (panelMcp.assetWatcher && typeof panelMcp.assetWatcher.stop === "function") panelMcp.assetWatcher.stop();
+      } catch (e) {}
+    }
     isListening = false;
     isBinding = false;
   }
@@ -801,10 +820,62 @@
   // ---------- Boot ----------
   var booted = false;
 
+  // Render-engine guard. aerender's headless AfterFX.com engine loads CEP extensions, so this
+  // runs before anything else: no token file, no icacls, no port, no core.jsx / host/ext boot,
+  // no MCP bundle. One cheap evalScript asks app.isRenderEngine. Fail open: anything but an
+  // exact "render engine" answer (empty, error, timeout, no host) starts the service as before.
+  // The probe is never aborted. A late "render engine" answer after the timeout still stops us.
+  var guardSettled = false;
+  var guardTimer = null;
+
+  function stopForRenderEngine(reason) {
+    log("", "Render engine detected (" + reason + "): Chroma AE MCP service not started");
+    shutdown();
+  }
+
+  function settleGuard(probe, fromTimeout) {
+    var verdict = common.decideServiceStart({ probe: probe, env: process.env });
+    if (guardSettled) {
+      // Late answer after the timeout already let the service start.
+      if (!fromTimeout && !verdict.start) stopForRenderEngine(verdict.reason + ", answered late");
+      return;
+    }
+    guardSettled = true;
+    if (guardTimer !== null) {
+      clearTimeout(guardTimer);
+      guardTimer = null;
+    }
+    if (!verdict.start) {
+      stopForRenderEngine(verdict.reason);
+      return;
+    }
+    if (verdict.kind !== "interactive") log("", "Render-engine check: " + verdict.reason + "; starting");
+    startService();
+  }
+
   function boot() {
     if (booted) return;
     booted = true;
 
+    if (!host || common.isGuardOverridden(process.env)) {
+      settleGuard(null, false);
+      return;
+    }
+    guardTimer = setTimeout(function () {
+      guardTimer = null;
+      settleGuard(null, true);
+    }, common.GUARD_TIMEOUT_MS);
+    try {
+      host.evalScript(common.GUARD_PROBE_SCRIPT, function (raw) {
+        settleGuard(raw, false);
+      });
+    } catch (probeErr) {
+      settleGuard(null, false);
+    }
+  }
+
+  function startService() {
+    if (isShuttingDown) return;
     if (host) {
       var env = host.getHostEnvironment();
       if (env && env.appVersion) {
@@ -825,8 +896,6 @@
       log("err", "Failed to initialize private token storage: " + storageErr.message);
       return;
     }
-
-    getPanelMcp();
 
     ensureCoreJsxLoaded()
       .then(function () {
