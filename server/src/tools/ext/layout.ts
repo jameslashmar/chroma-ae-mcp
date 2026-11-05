@@ -21,8 +21,8 @@ import type { ReceiptMismatch } from "../../receipts.js";
 import { fontMatches, isNeutral, nearestBrand, rgbToHex, type Rgb } from "../../style.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
-import { briefPath, loadMotionSpec, readBrief } from "./brief.js";
-import { minTextPx, PLATFORM_PRESET_IDS, PLATFORM_PRESETS, safeRect, type PlatformPreset } from "../../motion-spec.js";
+import { briefPath, readBrief, salvageMotionSpec, type Brief } from "./brief.js";
+import { minTextPx, PLATFORM_PRESET_IDS, PLATFORM_PRESETS, resolveMotionSpec, safeRect, type PlatformPreset, type ResolvedMotionSpec } from "../../motion-spec.js";
 import { reviewBounds, type LayerBounds } from "./motion.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
@@ -188,10 +188,10 @@ export const AeHouseStyleCheckSchema = z.object({
   fonts: z.array(z.string().min(1)).max(20).optional().describe("Instead of the brief's fonts."),
   color_tolerance: z.number().min(0).max(100).optional().describe("Delta E (CIE76) within which a colour counts as the brand colour. Default 12."),
   neutrals_ok: z.boolean().optional().describe("Black, white and greys pass the palette check. Default true."),
-  min_font_size: z.number().positive().optional().describe("Default: the relative floor, 2.6 % of the comp's short side (or the brief's motion.min_text_pct). Flag text smaller than this, in pixels on screen: the text size times the layer's and its parents' Scale at the check time. Text-animator scale, 3D depth and nested-comp scale are not counted."),
+  min_font_size: z.number().positive().optional().describe("Flag text smaller than this, in pixels on screen. Without it there is no size check, unless the brief's motion spec sets min_text_pct or platform, or platform is passed: then the relative floor applies (min_text_pct, default 2.6, % of the comp's short side). On screen means the text size times the layer's and its parents' Scale at the check time. Text-animator scale, 3D depth and nested-comp scale are not counted."),
   safe_area: z.boolean().optional().describe("Check text layers against title safe at the check time. Default true."),
   title_safe: z.number().min(0).max(0.5).optional().describe("Default 0.2, AE's. Used when no platform preset applies."),
-  platform: z.enum(PLATFORM_PRESET_IDS as [PlatformPreset, ...PlatformPreset[]]).optional().describe("Safe-zone preset for text and logo layers. Default: the brief's motion.platform if it sets one, else title safe."),
+  platform: z.enum(PLATFORM_PRESET_IDS as [PlatformPreset, ...PlatformPreset[]]).optional().describe("Safe-zone preset for text and logo layers (footage, image, precomp, shape or solid layers named logo). Default: the brief's motion.platform if it sets one, else title safe. Passing it (or a brief platform) also turns on the relative text-size floor."),
   time: z.number().optional().describe("When to check the safe area. Default the comp's current time."),
 });
 
@@ -207,7 +207,7 @@ interface StyleLayer {
   index: number;
   id: number;
   name: string;
-  kind: "text" | "shape" | "solid";
+  kind: "text" | "shape" | "solid" | "logo";
   enabled: boolean;
   font?: string;
   family?: string;
@@ -225,6 +225,18 @@ export interface StyleFinding {
   layer: { index: number; id: number; name: string };
   message: string;
   [k: string]: unknown;
+}
+
+/**
+ * Layer names that count as a logo: "logo" as a word ("Logo", "Brand logo", "logo_white", "Logo 2"),
+ * not inside another word ("catalogue", "Dialogue", "Analogous"). Backing layers ("Logo BG", "logo backing")
+ * and background solids are not logos.
+ */
+const LOGO_WORD = /(^|[^a-z])logo([^a-z]|$)/i;
+const BACKGROUND_NAME = /(^|[^a-z])(bg|background)([^a-z]|$)/i;
+const LOGO_BACKING = /(^|[^a-z])logo[\s_.-]*(bg|back|backing|background|plate|shadow|glow|mask|matte)([^a-z]|$)/i;
+export function isLogoName(name: string): boolean {
+  return LOGO_WORD.test(name) && !LOGO_BACKING.test(name);
 }
 
 export function styleFindings(
@@ -344,15 +356,17 @@ export function platformAspectWarning(preset: PlatformPreset, width: number, hei
 /**
  * Text and logo layers against a platform preset's safe box, at the sampled time. Each layer gives
  * findings naming the preset and the edges crossed with their pixel overlap. For reels_9_16 the bottom
- * crossing is "below the platform UI line" and the right one "in the right action rail".
+ * crossing is "below the platform UI line" and the right one "in the right action rail". Layers in
+ * skipLayerIds (those already reported as cut_off by the frame-edge test) are left out, so one layer
+ * is not reported twice for the same overhang.
  */
-export function platformFindings(bounds: LayerBounds[], comp: { width: number; height: number }, preset: PlatformPreset): StyleFinding[] {
+export function platformFindings(bounds: LayerBounds[], comp: { width: number; height: number }, preset: PlatformPreset, skipLayerIds: ReadonlySet<number> = new Set()): StyleFinding[] {
   const out: StyleFinding[] = [];
   const box = safeRect(preset, comp.width, comp.height);
   const label = PLATFORM_PRESETS[preset].label;
   const reels = preset === "reels_9_16";
   for (const b of bounds) {
-    if (!b.checkable) continue;
+    if (!b.checkable || skipLayerIds.has(b.layer.id)) continue;
     for (const s of b.samples) {
       if (!s.visible || !s.rect) continue;
       const [l, t, r, bt] = s.rect;
@@ -597,39 +611,34 @@ export const layoutTools: ToolDefinition<any>[] = [
     name: "ae_house_style_check",
     description:
       "Check a comp against the house style: text in the brief's fonts (ae_brief) and not missing, colours of text, shapes and solids within color_tolerance (delta E) of a brand colour, " +
-      "text above a minimum size (default 2.6 % of the comp's short side, or the brief's motion.min_text_pct; min_font_size overrides), and text inside title safe at the check time. " +
-      "platform (or the brief's motion.platform) swaps title safe for a preset box (reels_9_16, promo_9_16, feed_4_5, square_1_1, landscape_16_9) for text and layers named logo, naming the edge crossed and the pixels; reels_9_16 also flags the bottom UI band and the right action rail, and a comp of another shape gets one warning. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. " +
+      "text above a minimum size, and text inside title safe at the check time. " +
+      "The size check runs only when asked for: min_font_size (pixels on screen) always wins; otherwise a relative floor (the brief's motion.min_text_pct, default 2.6 % of the comp's short side) applies only when the brief's motion spec sets min_text_pct or platform, or the call passes platform; with none of those there is no size check. The result's min_text says which: { px, source: argument | brief | platform | off }. " +
+      "platform (or the brief's motion.platform) swaps title safe for a preset box (reels_9_16, promo_9_16, feed_4_5, square_1_1, landscape_16_9) for text and for logo layers (footage, image, precomp, shape or solid layers whose name has the word logo; \"Logo BG\" backings and full-frame layers are skipped), naming the edge crossed and the pixels; reels_9_16 also flags the bottom UI band and the right action rail, and a comp of another shape gets one warning. A layer already reported cut_off by the frame-edge test is not reported again for the platform box. promo_9_16 applies the 22 % title line (bottom 22 % kept clear), not the 15 % CTA line. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. " +
       "Nested comps are checked by running it on them.",
     schema: AeHouseStyleCheckSchema,
     handler: async (args: z.infer<typeof AeHouseStyleCheckSchema>, ctx: ToolContext) => {
       const opId = ctx.bridge.newOpId();
       const label = "ae_house_style_check";
-      // Thresholds from the brief's motion spec (defaults when there is none or it cannot be read).
-      let motion: Awaited<ReturnType<typeof loadMotionSpec>> | null = null;
-      try {
-        motion = await loadMotionSpec(ctx);
-      } catch (err) {
-        if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-        motion = null;
-      }
-      const platformFromBrief = motion && motion.from_brief.includes("platform") ? motion.platform : undefined;
-      const platform: PlatformPreset | undefined = args.platform ?? platformFromBrief;
-      const platformSource = args.platform ? "argument" : platformFromBrief ? "brief" : "default";
-      // title_safe keeps the legacy path (and its title_safe argument); any other preset gets its own box.
-      const presetActive = platform !== undefined && platform !== "title_safe";
-      // One lease for the whole scan, so no other tool runs between the layers' reads.
-      let gathered: { status: { project_path: string }; scan: StyleScan; bounds: LayerBounds[]; safeTotal: number; unchecked: Array<{ layer: string; reason: string }> };
+      // One lease for the whole scan, so no other tool runs between the layers' reads. The one status eval
+      // gives the project path; the brief (and its motion spec) is read from that path inside the lease, so a
+      // bridge failure surfaces here (and QueueWaitError maps below) instead of being swallowed.
+      let gathered: { brief: Brief | null; motion: ResolvedMotionSpec & { warning?: string }; platform: PlatformPreset | undefined; scan: StyleScan; bounds: LayerBounds[]; safeTotal: number; unchecked: Array<{ layer: string; reason: string }> };
       try {
         gathered = await ctx.queue.run(`ae_house_style_check(${args.comp_id})`, async () => {
           let n = 0;
           const read = <T,>(fn: string, hostArgs: unknown, what: string) =>
             ctx.bridge.evalRaw<T>({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs), label: `${label} (${what})`, mutates: false, toolName: label });
           const status = (await read<{ project_path: string }>("status", {}, "status")).result;
+          const brief = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
+          // The same salvage as loadMotionSpec: valid fields of a malformed stored spec are kept.
+          const salvaged = salvageMotionSpec(brief?.motion);
+          const motion = { ...resolveMotionSpec(salvaged.spec), ...(salvaged.warning ? { warning: salvaged.warning } : {}) };
+          const platform: PlatformPreset | undefined = args.platform ?? (motion.from_brief.includes("platform") ? motion.platform : undefined);
           const scan = (await read<StyleScan>("styleScan", { comp_id: args.comp_id, time: args.time }, "scan")).result;
           const bounds: LayerBounds[] = [];
           const unchecked: Array<{ layer: string; reason: string }> = [];
           const texts = scan.layers.filter((x) => x.kind === "text" && x.enabled);
-          const logos = presetActive ? scan.layers.filter((x) => x.kind !== "text" && x.enabled && /logo/i.test(x.name)) : [];
+          const logos = platform !== undefined && platform !== "title_safe" ? scan.layers.filter((x) => x.kind !== "text" && x.enabled && isLogoName(x.name) && !(x.kind === "solid" && BACKGROUND_NAME.test(x.name))) : [];
           if (args.safe_area !== false) {
             const t = args.time ?? scan.time;
             for (const l of [...texts.slice(0, SAFE_AREA_MAX), ...logos.slice(0, SAFE_AREA_MAX)]) {
@@ -643,41 +652,54 @@ export const layoutTools: ToolDefinition<any>[] = [
               }
             }
           }
-          return { status, scan, bounds, safeTotal: texts.length, unchecked };
+          return { brief, motion, platform, scan, bounds, safeTotal: texts.length, unchecked };
         });
       } catch (err) {
         if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
         throw err;
       }
-      const { status, scan, bounds, safeTotal, unchecked } = gathered;
-      const brief = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
+      const { brief, motion, platform, scan, bounds, safeTotal, unchecked } = gathered;
+      const platformSource = args.platform ? "argument" : platform ? "brief" : "default";
+      // title_safe keeps the legacy path (and its title_safe argument); any other preset gets its own box.
+      const presetActive = platform !== undefined && platform !== "title_safe";
       const cleaned = cleanBriefStyle(brief);
       const brandColors = args.brand_colors ?? cleaned.colors;
       const fonts = args.fonts ?? cleaned.fonts;
       const ignored = [...(args.brand_colors ? [] : cleaned.ignored.filter((x) => x.startsWith("brand colour"))), ...(args.fonts ? [] : cleaned.ignored.filter((x) => x.startsWith("font")))];
-      const relativeFloor = minTextPx(motion ?? { min_text_pct: 2.6 }, scan.width, scan.height);
-      const floorPct = motion?.min_text_pct ?? 2.6;
+      // Size check: explicit min_font_size wins; else the relative floor only when the brief sets min_text_pct or
+      // platform, or the call passes platform; else none (as before the motion spec existed).
+      const relativeFloor = minTextPx(motion, scan.width, scan.height);
+      let minText: { px: number | null; source: "argument" | "brief" | "platform" | "off" } = { px: null, source: "off" };
+      if (args.min_font_size !== undefined) minText = { px: args.min_font_size, source: "argument" };
+      else if (motion.from_brief.includes("min_text_pct")) minText = { px: relativeFloor, source: "brief" };
+      else if (platform !== undefined) minText = { px: relativeFloor, source: "platform" };
       const findings: StyleFinding[] = styleFindings(scan.layers, {
         brand_colors: brandColors,
         fonts,
         tolerance: args.color_tolerance ?? 12,
         neutrals_ok: args.neutrals_ok !== false,
-        min_font_size: args.min_font_size ?? relativeFloor,
-        ...(args.min_font_size ? {} : { min_font_note: `${floorPct} % of the ${Math.min(scan.width, scan.height)} px short side` }),
+        ...(minText.px !== null ? { min_font_size: minText.px } : {}),
+        ...(minText.source !== "argument" && minText.px !== null ? { min_font_note: `${motion.min_text_pct} % of the ${Math.min(scan.width, scan.height)} px short side` } : {}),
       });
-      if (presetActive && platform) {
-        const warn = platformAspectWarning(platform, scan.width, scan.height);
-        if (warn) findings.push(warn);
-        if (args.safe_area !== false) findings.push(...platformFindings(bounds, { width: scan.width, height: scan.height }, platform));
-      }
+      // Frame-edge (cut_off) first: a layer reported there is not reported again for the platform box.
+      const cutOff = new Set<number>();
+      const edge: StyleFinding[] = [];
       for (const b of bounds) {
-        if (presetActive && b.kind !== "text") continue;
+        // Without a preset only text is judged (as before); with one, logos get the frame-edge test too.
+        if (!presetActive && b.kind !== "text") continue;
         for (const f of reviewBounds(b, { width: scan.width, height: scan.height }, { action: 0.1, title: args.title_safe ?? 0.2 })) {
           // A preset replaces the title-safe test; the frame-edge (cut_off) finding stays.
           if (presetActive && f.kind === "outside_safe") continue;
-          findings.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind as StyleFinding["kind"], layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
+          if (f.kind === "cut_off") cutOff.add(f.layer.id);
+          edge.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind as StyleFinding["kind"], layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
         }
       }
+      if (presetActive && platform) {
+        const warn = platformAspectWarning(platform, scan.width, scan.height);
+        if (warn) findings.push(warn);
+        if (args.safe_area !== false) findings.push(...platformFindings(bounds, { width: scan.width, height: scan.height }, platform, cutOff));
+      }
+      findings.push(...edge);
       const safeCut = args.safe_area !== false && safeTotal > SAFE_AREA_MAX;
       const counts = { medium: 0, low: 0, info: 0 };
       for (const f of findings) counts[f.severity]++;
@@ -686,10 +708,10 @@ export const layoutTools: ToolDefinition<any>[] = [
         clean: findings.length === 0,
         used: { brand_colors: brandColors, fonts, from_brief: Boolean(brief) && !args.brand_colors && !args.fonts },
         ...(ignored.length ? { ignored_brief_entries: ignored } : {}),
-        ...(motion?.warning ? { motion_warning: motion.warning } : {}),
-        min_text: { px: Math.round((args.min_font_size ?? relativeFloor) * 10) / 10, source: args.min_font_size ? "argument" : motion?.from_brief.includes("min_text_pct") ? "brief" : "default" },
+        ...(motion.warning ? { motion_warning: motion.warning } : {}),
+        min_text: { px: minText.px === null ? null : Math.round(minText.px * 10) / 10, source: minText.source },
         platform: presetActive && platform ? { preset: platform, label: PLATFORM_PRESETS[platform].label, source: platformSource, box: Object.values(safeRect(platform, scan.width, scan.height)).map((n) => Math.round(n)) } : { preset: "title_safe", source: platform ? platformSource : "default", title_safe: args.title_safe ?? 0.2 },
-        ...(scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape and solid layers; later layers were not checked." } : {}),
+        ...(scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape, solid and logo layers; later layers were not checked." } : {}),
         ...(safeCut ? { safe_area_truncated: true, safe_area_checked: SAFE_AREA_MAX, safe_area_note: `Title safe was checked on the first ${SAFE_AREA_MAX} of ${safeTotal} text layers.` } : {}),
         ...(unchecked.length ? { safe_area_unchecked: unchecked } : {}),
         ...(brandColors.length === 0 || fonts.length === 0

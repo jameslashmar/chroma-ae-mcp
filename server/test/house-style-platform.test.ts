@@ -7,7 +7,7 @@ import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AeHouseStyleCheckSchema, layoutTools, platformAspectWarning } from "../src/tools/ext/layout.js";
+import { AeHouseStyleCheckSchema, isLogoName, layoutTools, platformAspectWarning } from "../src/tools/ext/layout.js";
 
 const tmpDirs: string[] = [];
 function tempDir(prefix: string): string {
@@ -40,7 +40,8 @@ type Rect = [number, number, number, number];
 interface L {
   name: string;
   rect: Rect;
-  kind?: "text" | "shape";
+  /** footage and precomp are AV layers: the scan reports them as kind "logo", the bounds as "av". */
+  kind?: "text" | "shape" | "footage" | "precomp";
   size?: number;
 }
 
@@ -53,17 +54,21 @@ async function run(w: number, h: number, layers: L[], args: Record<string, unkno
     index: i + 1,
     id: i + 1,
     name: l.name,
-    kind: l.kind ?? "text",
+    kind: l.kind === "footage" || l.kind === "precomp" ? "logo" : (l.kind ?? "text"),
     enabled: true,
     ...((l.kind ?? "text") === "text" ? { font: "Gotham-Book", family: "Gotham", font_size: l.size ?? 60, colours: [] } : { colours: [] }),
   }));
+  const calls: string[] = [];
   const ctx = fakeAe((fn, a) => {
+    calls.push(fn);
     if (fn === "status") return { project_path: aep };
     if (fn === "styleScan") return { width: w, height: h, time: 1, layers: scanLayers };
     const l = layers[a.layer.id - 1];
-    return { layer: { index: a.layer.id, id: a.layer.id, name: l.name }, kind: l.kind ?? "text", checkable: true, reason: null, samples: [{ time: 1, visible: true, rect: l.rect }] };
+    return { layer: { index: a.layer.id, id: a.layer.id, name: l.name }, kind: l.kind === "footage" || l.kind === "precomp" ? "av" : (l.kind ?? "text"), checkable: true, reason: null, samples: [{ time: 1, visible: true, rect: l.rect }] };
   });
-  return tool.handler(AeHouseStyleCheckSchema.parse({ comp_id: 1, ...args }), ctx) as Promise<any>;
+  const out = (await tool.handler(AeHouseStyleCheckSchema.parse({ comp_id: 1, ...args }), ctx)) as any;
+  out.__calls = calls;
+  return out;
 }
 
 const kinds = (out: any) => out.findings.map((f: any) => f.kind).sort();
@@ -148,19 +153,33 @@ describe("ae_house_style_check platform presets", () => {
 });
 
 describe("ae_house_style_check text floor", () => {
-  it("defaults to 2.6 % of the short side", async () => {
+  it("is off by default: no size check, min_text off", async () => {
+    const out = await run(1920, 1080, [{ name: "Label", rect: [900, 500, 1000, 540], size: 24 }]);
+    expect(out.findings.filter((f: any) => f.kind === "small_text")).toEqual([]);
+    expect(out.min_text).toEqual({ px: null, source: "off" });
+    expect(out.clean).toBe(true);
+  });
+
+  it("applies the 2.6 % floor when the call passes a platform", async () => {
     const out = await run(1920, 1080, [
       { name: "Small", rect: [900, 500, 1000, 540], size: 25 },
       { name: "Ok", rect: [900, 600, 1000, 640], size: 30 },
-    ]);
+    ], { platform: "landscape_16_9" });
     expect(out.findings.filter((f: any) => f.kind === "small_text").map((f: any) => f.layer.name)).toEqual(["Small"]);
-    expect(out.min_text).toEqual({ px: 28.1, source: "default" });
+    expect(out.min_text).toEqual({ px: 28.1, source: "platform" });
     expect(out.findings.find((f: any) => f.kind === "small_text").message).toMatch(/2\.6 % of the 1080 px short side/);
+  });
+
+  it("applies the floor when the brief sets a platform", async () => {
+    const out = await run(1920, 1080, [{ name: "Small", rect: [900, 500, 1000, 540], size: 25 }], {}, { platform: "landscape_16_9" });
+    expect(out.min_text).toEqual({ px: 28.1, source: "platform" });
+    expect(kinds(out)).toEqual(["small_text"]);
   });
 
   it("takes the brief's min_text_pct", async () => {
     const out = await run(1920, 1080, [{ name: "T", rect: [900, 500, 1000, 540], size: 40 }], {}, { min_text_pct: 5 });
     expect(out.min_text).toEqual({ px: 54, source: "brief" });
+    expect(out.__calls.filter((c: string) => c === "status")).toHaveLength(1);
     expect(kinds(out)).toEqual(["small_text"]);
   });
 
@@ -182,5 +201,52 @@ describe("ae_house_style_check backward compatibility", () => {
     expect(kinds(out)).toEqual(["outside_safe"]);
     expect(out.counts).toBeDefined();
     expect(out.checked).toEqual({ text: 1, shape: 0, solid: 0 });
+  });
+});
+
+describe("ae_house_style_check logos", () => {
+  it("matches logo as a word only, and skips backings", () => {
+    for (const n of ["Logo", "logo", "Brand logo", "logo_white", "Logo 2", "LOGO.png", "Chroma-logo-v2"]) expect(isLogoName(n), n).toBe(true);
+    for (const n of ["catalogue", "Dialogue 1", "Analogous", "Logos BG", "Logo BG", "logo bg", "logo backing", "Logo_Background"]) expect(isLogoName(n), n).toBe(false);
+  });
+
+  it("checks footage and precomp logos, once per layer, and ignores look-alike names", async () => {
+    const out = await run(
+      1080,
+      1920,
+      [
+        { name: "Logo", kind: "footage", rect: [80, 1500, 280, 1560] },
+        { name: "End card logo", kind: "precomp", rect: [900, 800, 1060, 860] },
+        { name: "Dialogue", kind: "footage", rect: [80, 1500, 280, 1560] },
+        { name: "Logo BG", kind: "shape", rect: [80, 1500, 280, 1560] },
+        { name: "Logo bg", kind: "footage", rect: [80, 1500, 280, 1560] },
+      ],
+      { platform: "reels_9_16" }
+    );
+    const by = (k: string) => out.findings.filter((f: any) => f.kind === k).map((f: any) => f.layer.name);
+    expect(by("below_platform_ui")).toEqual(["Logo"]);
+    expect(by("in_action_rail")).toEqual(["End card logo"]);
+    expect(out.__calls.filter((c: string) => c === "layerBoundsAt")).toHaveLength(2);
+    // Footage logos carry no colours or fonts, so no style findings.
+    expect(kinds(out)).toEqual(["below_platform_ui", "in_action_rail"]);
+  });
+
+  it("does not check logos without a platform preset", async () => {
+    const out = await run(1080, 1920, [{ name: "Logo", kind: "footage", rect: [80, 1500, 280, 1560] }]);
+    expect(kinds(out)).toEqual([]);
+  });
+
+  it("gives a cut-off layer one finding, not cut_off plus platform findings", async () => {
+    const out = await run(
+      1080,
+      1920,
+      [
+        { name: "Logo", kind: "footage", rect: [-60, 1500, 140, 1560] },
+        { name: "Caption", rect: [900, 1500, 1200, 1560] },
+      ],
+      { platform: "reels_9_16" }
+    );
+    expect(out.findings.filter((f: any) => f.layer.name === "Logo").map((f: any) => f.kind)).toEqual(["cut_off"]);
+    expect(out.findings.filter((f: any) => f.layer.name === "Caption").map((f: any) => f.kind)).toEqual(["cut_off"]);
   });
 });
