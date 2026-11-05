@@ -168,10 +168,21 @@ function moves(tweens: Tween[], frame: number): Tween[] {
 
 // ---------- the checks ----------
 
-function easeMonotony(tweens: Tween[], spec: ResolvedMotionSpec, frame: number): MotionFinding[] {
+function easeMonotony(tweens: Tween[], infos: Map<number, LayerInfo>, spec: ResolvedMotionSpec, frame: number): MotionFinding[] {
   // Hand-made looks hold keys and repeat a beat on purpose.
   if (spec.register === "handmade") return [];
-  const pool = moves(tweens, frame);
+  // A staggered group shares one ease by design (one gesture, offset starts): it counts as one
+  // tween here, so a well-made stagger is not reported as monotony.
+  const staggerExtras = new Set<Tween>();
+  for (const run of siblingRuns(tweens, infos, frame)) {
+    const byStart = [...run.members].sort((a, b) => a.start - b.start);
+    const spread = byStart[byStart.length - 1].start - byStart[0].start;
+    // Only a real stagger: offset starts within twice the group budget (stagger_spread reports
+    // the slow ones). Siblings seconds apart are separate gestures and still count.
+    if (spread <= frame || spread > (2 * spec.stagger_ms.group_total_max) / 1000) continue;
+    byStart.slice(1).forEach((t) => staggerExtras.add(t));
+  }
+  const pool = moves(tweens, frame).filter((t) => !staggerExtras.has(t));
   const used = new Set<Tween>();
   const out: MotionFinding[] = [];
   for (const seed of pool) {
@@ -461,7 +472,7 @@ export function reviewChoreography(input: ChoreoInput, spec: ResolvedMotionSpec,
   const infos = new Map(input.layers.map((l) => [l.id, l]));
   const tweens = extractTweens(input.props);
   const out: MotionFinding[] = [];
-  if (on.has("ease_monotony")) out.push(...easeMonotony(tweens, spec, frame));
+  if (on.has("ease_monotony")) out.push(...easeMonotony(tweens, infos, spec, frame));
   if (on.has("direction")) out.push(...direction(tweens, infos, frame));
   if (on.has("exit_ratio")) out.push(...exitRatio(tweens, infos, spec, frame));
   if (on.has("frame_zero")) out.push(...frameZero(tweens, infos, input.comp.fps > 0 ? input.comp.fps : 25));

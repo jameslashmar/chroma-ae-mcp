@@ -128,6 +128,13 @@ describe("choreography: ease monotony", () => {
     expect(f[0].severity).toBe("low");
     expect(f[0].message).toMatch(/4 tweens share one ease.*0\.5s.*L1 > Position.*L4 > Position/);
   });
+  it("counts a stagger (siblings offset by a beat, one shared ease) as one gesture, not monotony", () => {
+    const staggered = [0, 1, 2, 3].map((i) => pos(i + 1, 1 + i * 0.08, 1.5 + i * 0.08));
+    const near = [1, 2, 3, 4].map((i) => info(i, { in_point: 0 }));
+    expect(run(staggered, near, spec(), ["ease_monotony"])).toHaveLength(0);
+    // The same four, each a second apart, are four separate identical gestures.
+    expect(run(four, layers, spec(), ["ease_monotony"])).toHaveLength(1);
+  });
   it("does not flag when the durations differ", () => {
     const varied = [pos(1, 1, 1.3), pos(2, 2, 2.5), pos(3, 3, 3.8), pos(4, 4, 4.3)];
     expect(kinds(run(varied, layers, spec(), ["ease_monotony"]))).toEqual([]);
