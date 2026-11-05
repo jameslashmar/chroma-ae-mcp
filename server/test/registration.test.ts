@@ -22,6 +22,7 @@ const READS = [
   "ae_loudness_check",
   "ae_check_text_overlap",
   "ae_estimate_legibility",
+  "ae_timing_check",
   "ae_taste_baseline",
   "ae_learn_taste",
   "ae_taste_rules",

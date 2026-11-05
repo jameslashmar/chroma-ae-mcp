@@ -17,6 +17,7 @@ import { collectTools } from "./collect.js";
 import { deliverTools } from "./deliver.js";
 import { loudnessTools } from "./loudness.js";
 import { legibilityTools } from "./legibility.js";
+import { timingTools } from "./timing.js";
 import { variantsTools } from "./variants.js";
 import { learntasteTools } from "./learntaste.js";
 import { projectsessionTools } from "./projectsession.js";
@@ -121,6 +122,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...deliverTools,
   ...loudnessTools,
   ...legibilityTools,
+  ...timingTools,
   ...variantsTools,
   ...learntasteTools,
   ...projectsessionTools,
