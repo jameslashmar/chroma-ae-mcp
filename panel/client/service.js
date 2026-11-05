@@ -20,6 +20,8 @@
 
   var host = common.createHostAdapter();
   var aeVersion = "unknown";
+  // host/ext/*.jsx files that failed to load in the last boot: [{ file, line, message }].
+  var extLoadFailures = [];
   var paths = common.getPaths();
   var sessionToken = "";
 
@@ -346,6 +348,7 @@
           return {
             panelVersion: PANEL_VERSION,
             aeVersion: aeVersion,
+            extLoadFailures: extLoadFailures,
             port: boundPort,
             evalQueueDepth: queue.length,
             inFlight: inFlight
@@ -480,6 +483,7 @@
         busy: inFlight !== null,
         queueDepth: queue.length,
         aeVersion: aeVersion,
+        extLoadFailures: extLoadFailures,
         panelVersion: PANEL_VERSION,
         inFlight: inFlight
           ? { id: inFlight.id, label: inFlight.label, startedAt: inFlight.startedAt }
@@ -742,27 +746,24 @@
       var extFiles = fs.existsSync(extDirJsx)
         ? fs.readdirSync(extDirJsx).filter(function (n) { return /\.jsx$/i.test(n); }).sort()
         : [];
-      var extLoads = extFiles.map(function (n) {
-        return "$.evalFile(" + JSON.stringify(path.join(extDirJsx, n)) + ");";
-      }).join("");
-      var bootScript =
-        "(function(){" +
-        "if(typeof __chromaAe==='undefined'||!__chromaAe){" +
-        "$.evalFile(" + JSON.stringify(coreJsxPath) + ");" +
-        "}" +
-        extLoads +
-        "if(typeof __chromaAe==='object'&&__chromaAe){" +
-        "return String(app.version||'')+'|ok';" +
-        "}" +
-        "return 'missing';" +
-        "})()";
+      // Each ext file loads in its own try/catch inside the boot script, so one file that
+      // fails to parse does not stop the files after it (see common.buildBootScript).
+      var bootScript = common.buildBootScript(coreJsxPath, extDirJsx, extFiles);
 
       host.evalScript(bootScript, function (raw) {
         var str = String(raw || "");
-        if (str.slice(-3) === "|ok") {
-          var ver = str.slice(0, -3);
-          if (ver) {
-            aeVersion = ver;
+        var parsed = common.parseBootResult(str);
+        if (parsed) {
+          if (parsed.aeVersion) {
+            aeVersion = parsed.aeVersion;
+          }
+          extLoadFailures = parsed.failures;
+          for (var i = 0; i < parsed.failures.length; i++) {
+            var f = parsed.failures[i];
+            log("err", "host/ext/" + f.file + " failed to load" + (f.line ? " at line " + f.line : "") + ": " + f.message);
+          }
+          if (parsed.failures.length > 0) {
+            log("err", parsed.failures.length + " of " + extFiles.length + " host/ext files failed to load; their tools are unavailable");
           }
           resolve();
         } else {

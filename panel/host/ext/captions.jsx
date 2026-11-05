@@ -882,7 +882,7 @@
 
     // Style: the comp's short side sets the default size.
     var s = args.style || {};
-    var short = Math.min(comp.width, comp.height);
+    var shortSide = Math.min(comp.width, comp.height);
     var st = {
       font: s.font,
       fontSize: s.font_size,
@@ -892,7 +892,7 @@
       justification: s.justification || "center"
     };
     if (st.font !== undefined && st.font !== null && (typeof st.font !== "string" || st.font.length < 1 || st.font.length > 200)) fail("bad_args", "style.font must be a PostScript font name of 1..200 characters");
-    if (st.fontSize === undefined || st.fontSize === null) st.fontSize = Math.round(short * 0.06);
+    if (st.fontSize === undefined || st.fontSize === null) st.fontSize = Math.round(shortSide * 0.06);
     checkRange(st.fontSize, 1, 1296, "style.font_size");
     checkColor(st.fill, "style.fill_color");
     if (st.stroke) {

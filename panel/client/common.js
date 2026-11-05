@@ -371,6 +371,55 @@
     return line;
   }
 
+  // ---------- Host boot script (core.jsx plus host/ext/*.jsx) ----------
+  // The boot script runs as ExtendScript (ES3). Every ext file is loaded in its own
+  // try/catch so one file that fails to parse cannot stop the files after it. The result
+  // is "<aeVersion>|ok" and, when ext files failed, "<aeVersion>|ok|<records>" where each
+  // record is "file<TAB>line<TAB>message" and records are joined with a newline.
+  function buildBootScript(coreJsxPath, extDirJsx, extFiles) {
+    var loads = (extFiles || []).map(function (n) {
+      return (
+        "try{$.evalFile(" + JSON.stringify(path.join(extDirJsx, n)) + ");}catch(e){" +
+        "__f.push(" + JSON.stringify(n) + "+'\\t'+(e&&e.line?e.line:'')+'\\t'+" +
+        "String((e&&e.message)?e.message:e).replace(/[\\t\\r\\n]+/g,' '));}"
+      );
+    }).join("");
+    return (
+      "(function(){" +
+      "var __f=[];" +
+      "if(typeof __chromaAe==='undefined'||!__chromaAe){" +
+      "$.evalFile(" + JSON.stringify(coreJsxPath) + ");" +
+      "}" +
+      loads +
+      "if(typeof __chromaAe==='object'&&__chromaAe){" +
+      "return String(app.version||'')+'|ok'+(__f.length?'|'+__f.join('\\n'):'');" +
+      "}" +
+      "return 'missing';" +
+      "})()"
+    );
+  }
+
+  // Parses the boot script result. Returns null when core did not load, otherwise
+  // { aeVersion, failures: [{ file, line, message }] }.
+  function parseBootResult(raw) {
+    var str = String(raw || "");
+    var m = /^([^|]*)\|ok(?:\|([\s\S]*))?$/.exec(str);
+    if (!m) return null;
+    var failures = [];
+    if (m[2]) {
+      m[2].split("\n").forEach(function (rec) {
+        if (!rec) return;
+        var parts = rec.split("\t");
+        failures.push({
+          file: parts[0],
+          line: parts[1] ? Number(parts[1]) : null,
+          message: parts.slice(2).join(" ")
+        });
+      });
+    }
+    return { aeVersion: m[1], failures: failures };
+  }
+
   var api = {
     PANEL_VERSION: PANEL_VERSION,
     DEFAULT_PORT: DEFAULT_PORT,
@@ -395,7 +444,9 @@
     formatLogLine: formatLogLine,
     parseLogLine: parseLogLine,
     rotateLogIfNeeded: rotateLogIfNeeded,
-    appendServiceLog: appendServiceLog
+    appendServiceLog: appendServiceLog,
+    buildBootScript: buildBootScript,
+    parseBootResult: parseBootResult
   };
 
   if (typeof window !== "undefined") {

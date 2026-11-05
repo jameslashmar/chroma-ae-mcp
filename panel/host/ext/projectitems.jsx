@@ -1362,7 +1362,7 @@
   }
 
   function planSummary(P, args) {
-    var counts = { create_folder: 0, move: 0, rename: 0, label: 0, comment: 0, delete: 0 };
+    var counts = { create_folder: 0, move: 0, rename: 0, label: 0, comment: 0, "delete": 0 };
     var shown = [];
     for (var i = 0; i < P.actions.length; i++) {
       var a = P.actions[i];
