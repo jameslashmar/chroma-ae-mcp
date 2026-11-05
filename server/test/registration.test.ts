@@ -25,6 +25,7 @@ const READS = [
   "ae_taste_baseline",
   "ae_learn_taste",
   "ae_taste_rules",
+  "ae_track_read",
 ];
 const WRITES_WITH_CHECKPOINT = [
   "ae_layer_ops", "ae_comp_settings",
@@ -57,6 +58,23 @@ const WRITES_WITH_CHECKPOINT = [
   "ae_variants_pick",
   "ae_variants_discard",
   "ae_project_session",
+  "ae_track_multi",
+  "ae_cleanplate_pick",
+  "ae_track_apply",
+  "ae_patch_check",
+  "ae_region_stats",
+  "ae_stabilize",
+  "ae_stabilize_roundtrip",
+  "ae_cleanplate_setup",
+  "ae_inpaint_plate",
+  "ae_mask_follow",
+  "ae_garbage_matte",
+  "ae_caf_prep",
+  "ae_patch_color_match",
+  "ae_patch_grain",
+  "ae_patch_finish",
+  "ae_screen_corners",
+  "ae_screen_replace",
 ];
 // No checkpoint of the open project: purge changes AE's caches, a batch renders
 // a frozen copy, and relink works on a collected copy of the project.

@@ -20,6 +20,14 @@ import { legibilityTools } from "./legibility.js";
 import { variantsTools } from "./variants.js";
 import { learntasteTools } from "./learntaste.js";
 import { projectsessionTools } from "./projectsession.js";
+import { planarTools } from "./planar.js";
+import { patchcheckTools } from "./patchcheck.js";
+import { stabilizeTools } from "./stabilize.js";
+import { cleanplateTools } from "./cleanplate.js";
+import { inpaintTools } from "./inpaint.js";
+import { mattesTools } from "./mattes.js";
+import { patchfitTools } from "./patchfit.js";
+import { screenrepTools } from "./screenrep.js";
 import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { annotateTools } from "./annotate.js";
@@ -112,4 +120,12 @@ export const extTools: ToolDefinition<any>[] = [
   ...variantsTools,
   ...learntasteTools,
   ...projectsessionTools,
+  ...planarTools,
+  ...patchcheckTools,
+  ...stabilizeTools,
+  ...cleanplateTools,
+  ...inpaintTools,
+  ...mattesTools,
+  ...patchfitTools,
+  ...screenrepTools,
 ];

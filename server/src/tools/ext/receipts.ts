@@ -584,6 +584,23 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_variants_pick",
   "ae_variants_discard",
   "ae_project_session",
+  "ae_track_multi",
+  "ae_cleanplate_pick",
+  "ae_track_apply",
+  "ae_patch_check",
+  "ae_region_stats",
+  "ae_stabilize",
+  "ae_stabilize_roundtrip",
+  "ae_cleanplate_setup",
+  "ae_inpaint_plate",
+  "ae_mask_follow",
+  "ae_garbage_matte",
+  "ae_caf_prep",
+  "ae_patch_color_match",
+  "ae_patch_grain",
+  "ae_patch_finish",
+  "ae_screen_corners",
+  "ae_screen_replace",
 ];
 
 export const AeCheckpointRevertSchema = z.object({

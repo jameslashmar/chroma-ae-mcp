@@ -201,20 +201,52 @@ export class PointTracker {
     return this.first.std;
   }
 
-  /** The next frame's position, or null when the point is lost. */
-  step(frame: GrayImage): TrackStep | null {
-    const px = this.last.x + this.velocity.x;
-    const py = this.last.y + this.velocity.y;
+  /** The last accepted position. */
+  get position(): { x: number; y: number } {
+    return { x: this.last.x, y: this.last.y };
+  }
+
+  /** Position and velocity, to take a step back (see restoreMotion). */
+  get motion(): { x: number; y: number; vx: number; vy: number } {
+    return { x: this.last.x, y: this.last.y, vx: this.velocity.x, vy: this.velocity.y };
+  }
+
+  /** Puts the position and velocity back to a saved `motion`, so the next step is judged from there. */
+  restoreMotion(m: { x: number; y: number; vx: number; vy: number }): void {
+    this.last = { x: m.x, y: m.y };
+    this.velocity = { x: m.vx, y: m.vy };
+  }
+
+  /** Score of the best match in the latest step, whether or not it was accepted (0 when nothing could be matched). */
+  lastScore = 0;
+
+  /** Puts the tracker at (x, y) and forgets its velocity (a point re-acquired from other points' motion). */
+  relocate(x: number, y: number): void {
+    this.last = { x, y };
+    this.velocity = { x: 0, y: 0 };
+  }
+
+  /**
+   * The next frame's position, or null when the point is lost. `predicted`
+   * replaces the constant-velocity guess as the centre of the search, and
+   * `template` replaces the first pattern for the main match (a pattern
+   * warped by the motion so far, see makeWarpedTemplate).
+   */
+  step(frame: GrayImage, predicted?: { x: number; y: number }, template?: Template): TrackStep | null {
+    const px = predicted ? predicted.x : this.last.x + this.velocity.x;
+    const py = predicted ? predicted.y : this.last.y + this.velocity.y;
     const r = this.opts.searchRadius;
-    let pick = matchTemplate(frame, this.first, px, py, r);
+    const main = template ?? this.first;
+    let pick = matchTemplate(frame, main, px, py, r);
     let adapted = false;
     if (!pick || pick.score < this.opts.adaptBelow) {
-      const alt = this.current === this.first ? null : matchTemplate(frame, this.current, px, py, r);
+      const alt = this.current === main ? null : matchTemplate(frame, this.current, px, py, r);
       if (alt && (!pick || alt.score > pick.score)) {
         pick = alt;
         adapted = true;
       }
     }
+    this.lastScore = pick ? pick.score : 0;
     if (!pick || pick.score < this.opts.minConfidence) return null;
     this.velocity = { x: pick.x - this.last.x, y: pick.y - this.last.y };
     this.last = { x: pick.x, y: pick.y };
@@ -225,6 +257,70 @@ export class PointTracker {
     }
     return { x: pick.x, y: pick.y, confidence: pick.score, adapted };
   }
+}
+
+/** Box blur of radius `r` pixels (a (2r+1) square), edges clamped. r <= 0 returns the image itself. */
+export function boxBlurGray(img: GrayImage, r: number): GrayImage {
+  const k = Math.floor(r);
+  if (!(k > 0)) return img;
+  const { width: w, height: h } = img;
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const norm = 1 / (2 * k + 1);
+  for (let y = 0; y < h; y++) {
+    let s = 0;
+    for (let i = -k; i <= k; i++) s += img.data[y * w + Math.min(w - 1, Math.max(0, i))];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = s * norm;
+      s += img.data[y * w + Math.min(w - 1, x + k + 1)] - img.data[y * w + Math.max(0, x - k)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let i = -k; i <= k; i++) s += tmp[Math.min(h - 1, Math.max(0, i)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = s * norm;
+      s += tmp[Math.min(h - 1, y + k + 1) * w + x] - tmp[Math.max(0, y - k) * w + x];
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
+/**
+ * A pattern for a point whose surroundings have since been rotated, scaled or
+ * sheared: the reference frame sampled through the inverse of `affine2x3`
+ * ([a, b, tx, c, d, ty], row-major, mapping reference offsets to current
+ * offsets; only the linear part is used). Null when the pattern leaves the image
+ * or the linear part cannot be inverted.
+ */
+export function makeWarpedTemplate(ref: GrayImage, cx: number, cy: number, size: number, affine2x3: number[]): Template | null {
+  const [a, b, , c, d] = affine2x3;
+  const det = a * d - b * c;
+  if (!(Math.abs(det) > 1e-9)) return null;
+  const ia = d / det;
+  const ib = -b / det;
+  const ic = -c / det;
+  const id = a / det;
+  const h = (size - 1) / 2;
+  const data = new Float32Array(size * size);
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const ox = px - h;
+      const oy = py - h;
+      const x = cx + ia * ox + ib * oy;
+      const y = cy + ic * ox + id * oy;
+      if (x < 0 || y < 0 || x > ref.width - 1 || y > ref.height - 1) return null;
+      const x0 = Math.min(ref.width - 2, Math.floor(x));
+      const y0 = Math.min(ref.height - 2, Math.floor(y));
+      const fx = x - x0;
+      const fy = y - y0;
+      const i = y0 * ref.width + x0;
+      const top = ref.data[i] * (1 - fx) + ref.data[i + 1] * fx;
+      const bottom = ref.data[i + ref.width] * (1 - fx) + ref.data[i + ref.width + 1] * fx;
+      data[py * size + px] = top * (1 - fy) + bottom * fy;
+    }
+  }
+  return makeTemplate({ width: size, height: size, data });
 }
 
 /** Frame times from `start` to `end` inclusive, one per frame. */
