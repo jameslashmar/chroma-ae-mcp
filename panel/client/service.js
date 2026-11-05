@@ -829,7 +829,7 @@
   var guardTimer = null;
 
   function stopForRenderEngine(reason) {
-    log("", "Render engine detected (" + reason + "): Chroma AE MCP service not started");
+    log("warn", "Render engine detected (" + reason + "): Chroma AE MCP service not started");
     shutdown();
   }
 
@@ -849,7 +849,7 @@
       stopForRenderEngine(verdict.reason);
       return;
     }
-    if (verdict.kind !== "interactive") log("", "Render-engine check: " + verdict.reason + "; starting");
+    if (verdict.kind !== "interactive") log("ok", "Render-engine check: " + verdict.reason + "; starting");
     startService();
   }
 
@@ -889,7 +889,7 @@
       });
       sessionToken = tokenState.token;
       log(
-        "",
+        "ok",
         (tokenState && tokenState.reused ? "Token loaded from " : "Token written to ") + paths.tokenPath
       );
     } catch (storageErr) {

@@ -7260,6 +7260,7 @@ function cancelAerenderJob(registry, job, killProcess, by = "ae_aerender_cancel"
       else {
         const identity = (hooks.identify ?? ((p) => isAerenderProcess(p)))(job.pid);
         if (identity === true) {
+          registry.gate.stopEnginesOf(job.pid, job.log_path);
           try {
             (hooks.signal ?? ((p, sig) => {
               process.kill(p, sig);
@@ -56334,7 +56335,9 @@ var init_multicomp = __esm({
         }
       },
       { message: "name_pattern is not a valid regular expression." }
-    );
+    ).refine((v) => v.name_pattern === void 0 || !/\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]/.test(v.name_pattern), {
+      message: "name_pattern has a quantified group that holds a quantifier (like (a+)+), which can freeze After Effects. Simplify it."
+    });
     LAYER_KEYS = /* @__PURE__ */ new Set(["layer", "layers", "parent", "matte", "above", "below", "target", "targets", "relative_to"]);
     shortMismatches = (list) => (Array.isArray(list) ? list : []).slice(0, 5).map((m) => ({ path: String(m?.path ?? ""), message: String(m?.message ?? "").slice(0, 300) }));
     memoryJobs = /* @__PURE__ */ new Map();

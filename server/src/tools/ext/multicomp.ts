@@ -171,7 +171,12 @@ export const AeMultiCompApplySchema = z
       }
     },
     { message: "name_pattern is not a valid regular expression." }
-  );
+  )
+  // The pattern runs inside ExtendScript, where a runaway match freezes AE and cannot be
+  // aborted. A quantified group that itself holds a quantifier, like (a+)+, is the classic one.
+  .refine((v) => v.name_pattern === undefined || !/\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]/.test(v.name_pattern), {
+    message: "name_pattern has a quantified group that holds a quantifier (like (a+)+), which can freeze After Effects. Simplify it.",
+  });
 
 export type AeMultiCompApplyArgs = z.infer<typeof AeMultiCompApplySchema>;
 

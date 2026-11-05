@@ -1872,6 +1872,8 @@ export function cancelAerenderJob(
       else {
         const identity = (hooks.identify ?? ((p: number) => isAerenderProcess(p)))(job.pid);
         if (identity === true) {
+          // After a restart the engine is just as much a leftover as with a live handle.
+          registry.gate.stopEnginesOf(job.pid, job.log_path);
           try {
             (hooks.signal ?? ((p: number, sig: NodeJS.Signals) => { process.kill(p, sig); }))(job.pid, "SIGTERM");
           } catch {
