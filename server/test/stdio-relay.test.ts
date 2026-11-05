@@ -148,21 +148,43 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
 
   it("keeps the tools registered while AE is closed, and calls say to start AE", async () => {
     const { dir, dataDir } = home();
-    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+    const PROMPTS = [{ name: "motion_director", description: "d" }];
+    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS, prompts: PROMPTS }));
 
     const replies = await runRelay(dir, await closedPort(), [
       initialize(1, "2025-03-26"),
       listTools(2),
       callStatus(3),
-      { jsonrpc: "2.0", id: 4, method: "resources/list" },
+      { jsonrpc: "2.0", id: 4, method: "completion/complete" },
+      { jsonrpc: "2.0", id: 5, method: "prompts/list" },
+      { jsonrpc: "2.0", id: 6, method: "resources/list" },
+      { jsonrpc: "2.0", id: 7, method: "resources/read", params: { uri: "chroma-ae://guidance/motion-director/SKILL.md" } },
     ]);
 
     expect(replies[0].result.protocolVersion).toBe("2025-03-26");
     expect(replies[0].result.serverInfo.name).toBe("chroma-ae-mcp");
+    // The panel's capabilities, so prompts and resources stay registered while AE is closed.
+    expect(Object.keys(replies[0].result.capabilities).sort()).toEqual(["prompts", "resources", "tools"]);
     expect(replies[1].result.tools).toEqual(TOOLS);
     expect(replies[2].result.isError).toBe(true);
     expect(replies[2].result.content[0].text).toMatch(/Start After Effects/);
     expect(replies[3].error.message).toMatch(/not reachable/);
+    expect(replies[4].result.prompts).toEqual(PROMPTS);
+    // Never listed by the panel yet: an empty list rather than an error.
+    expect(replies[5].result.resources).toEqual([]);
+    expect(replies[6].error.message).toMatch(/not reachable/);
+  });
+
+  it("caches the prompt and resource lists the panel serves, beside the tool list", async () => {
+    const { dir, dataDir } = home();
+    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+    const PROMPTS = [{ name: "motion_review" }];
+    const panel = await fakePanel((body) => ({ status: 200, body: { jsonrpc: "2.0", id: body.id, result: { prompts: PROMPTS } } }));
+    const replies = await runRelay(dir, panel.port, [{ jsonrpc: "2.0", id: 1, method: "prompts/list" }]);
+    expect(replies[0].result.prompts).toEqual(PROMPTS);
+    const cache = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-cache.json"), "utf8"));
+    expect(cache.prompts).toEqual(PROMPTS);
+    expect(cache.tools).toEqual(TOOLS);
   });
 
   it("reports an error for tools/list when AE is closed and no list is cached", async () => {

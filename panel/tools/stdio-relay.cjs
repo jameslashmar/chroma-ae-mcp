@@ -8,9 +8,10 @@
 //   token" in the panel needs no config change.
 // - Requests have no timeout: renders can take minutes, and the panel must
 //   never see an in-flight evalScript abandoned.
-// - While AE is closed, initialize is answered here and tools/list comes
-//   from the last list the panel served, so the tools stay registered and a
-//   call tells the user to start AE.
+// - While AE is closed, initialize is answered here (with the panel's
+//   capabilities: tools, prompts, resources) and tools/list, prompts/list and
+//   resources/list come from the last lists the panel served, so everything
+//   stays registered and a call or a read tells the user to start AE.
 "use strict";
 
 const fs = require("fs");
@@ -105,22 +106,36 @@ function hasId(msg) {
   return msg && typeof msg === "object" && "id" in msg && msg.id !== undefined;
 }
 
-function readToolsCache() {
+// The last lists the panel served, by key ("tools", "prompts", "resources"), in one file.
+const LIST_RESULT_KEY = { "tools/list": "tools", "prompts/list": "prompts", "resources/list": "resources" };
+
+function readCacheFile() {
   try {
     const cached = JSON.parse(fs.readFileSync(TOOLS_CACHE_PATH, "utf8"));
-    return Array.isArray(cached.tools) ? cached.tools : null;
+    return cached && typeof cached === "object" ? cached : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-function writeToolsCache(tools) {
+function readListCache(key) {
+  const cached = readCacheFile();
+  return Array.isArray(cached[key]) ? cached[key] : null;
+}
+
+function readToolsCache() {
+  return readListCache("tools");
+}
+
+function writeListCache(key, list) {
   try {
+    const next = readCacheFile();
+    next[key] = list;
     const tmp = TOOLS_CACHE_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ tools }));
+    fs.writeFileSync(tmp, JSON.stringify(next));
     fs.renameSync(tmp, TOOLS_CACHE_PATH);
   } catch (err) {
-    log("could not cache the tool list: " + err.message);
+    log("could not cache the " + key + " list: " + err.message);
   }
 }
 
@@ -136,14 +151,29 @@ function offlineReply(msg, reason) {
       return {
         jsonrpc: "2.0",
         id,
-        result: { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO },
+        // The same capabilities as the panel, so a client that starts before AE still
+        // asks for prompts and resources (their lists come from the cache below).
+        result: {
+          protocolVersion,
+          capabilities: {
+            tools: { listChanged: false },
+            prompts: { listChanged: false },
+            resources: { subscribe: false, listChanged: false },
+          },
+          serverInfo: SERVER_INFO,
+        },
       };
     }
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
-    case "tools/list": {
-      const tools = readToolsCache();
-      if (tools) return { jsonrpc: "2.0", id, result: { tools } };
+    case "tools/list":
+    case "prompts/list":
+    case "resources/list": {
+      const key = LIST_RESULT_KEY[msg.method];
+      const list = readListCache(key);
+      if (list) return { jsonrpc: "2.0", id, result: { [key]: list } };
+      // Before the panel has ever been reached, an empty list beats an error for these two.
+      if (key !== "tools") return { jsonrpc: "2.0", id, result: { [key]: [] } };
       return { jsonrpc: "2.0", id, error: { code: -32000, message: reason } };
     }
     case "tools/call":
@@ -182,8 +212,9 @@ async function relay(message) {
     replyOffline(message, "The Chroma AE MCP panel sent an unreadable reply (HTTP " + res.status + ").");
     return;
   }
-  if (!Array.isArray(message) && message.method === "tools/list" && body.result && Array.isArray(body.result.tools)) {
-    writeToolsCache(body.result.tools);
+  const listKey = !Array.isArray(message) ? LIST_RESULT_KEY[message.method] : undefined;
+  if (listKey && body.result && Array.isArray(body.result[listKey])) {
+    writeListCache(listKey, body.result[listKey]);
   }
   send(body);
 }
