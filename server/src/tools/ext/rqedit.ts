@@ -106,6 +106,8 @@ interface Skipped {
   where?: string;
   key: string;
   reason?: string;
+  /** The key was only a spec default (Channels, audio rate) and AE does not offer it for the format: a note, not a failure. */
+  optional?: boolean;
 }
 
 interface StepError {
@@ -278,11 +280,11 @@ export const SPEC_LIBRARY: DeliverySpec[] = [
     container: "png_sequence",
     ext: "png",
     sequence: true,
-    template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG", flags: "i" }],
+    template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG.*alpha", flags: "i" }, { pattern: "PNG", flags: "i" }],
     channels: "RGB + Alpha",
     video_output: true,
     name_template: "[compName]_[spec]_[#####].png",
-    note: "Needs a PNG output module template on this machine. The folder should be empty: every frame is a file.",
+    note: "Needs a PNG output module template on this machine, preferably one with alpha in its name (\"PNG + ALPHA\"): AE lists no Channels setting for PNG templates, so alpha comes from the template; with a plain \"PNG\" template the alpha cannot be set and the receipt reports it. The folder should be empty: every frame is a file.",
   },
   {
     id: "wav_audio",
@@ -409,15 +411,16 @@ export function settingsMismatches(where: string, want: Record<string, unknown> 
   return m;
 }
 
-/** The host's per-step failures and skipped keys, as mismatches: the item is only partly as asked. */
+/** The host's per-step failures and skipped keys, as mismatches: the item is only partly as asked. A skipped key marked optional (a spec default AE does not offer for the format) is a note and not listed here. */
 export function stepMismatches(where: string, errors: StepError[] | undefined, skipped: Skipped[] | undefined): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   (errors ?? []).forEach((e, i) =>
     m.push({ path: `${where}.errors[${i}]`, expected: "the step to succeed", actual: e.message, message: `${e.step} failed: ${e.message}` })
   );
-  (skipped ?? []).forEach((s, i) =>
-    m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: undefined, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` })
-  );
+  (skipped ?? []).forEach((s, i) => {
+    if (s.optional === true) return;
+    m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: undefined, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` });
+  });
   return m;
 }
 
@@ -992,6 +995,7 @@ export const rqeditTools: ToolDefinition<any>[] = [
     description:
       "Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by `expect`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). " +
       "By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. " +
+      "Only these default keys may be left unset when AE does not offer them for the template's format, and they are listed in the result's skipped[] with optional: true without failing the call: Channels \"RGB\" (an H.264 template has no Channels key and is RGB anyway) and Resize off. Everything else defines the delivery and fails the read-back when it is missing: Channels \"RGB + Alpha\" (unless the template's name says alpha, e.g. \"PNG + ALPHA\": AE lists no Channels setting for PNG templates, so the template carries it), Output Audio, Audio Sample Rate, Video Output, Resize on and Resize to, and any key you pass in `settings`. " +
       "The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeApplySpecSchema,

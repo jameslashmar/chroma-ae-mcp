@@ -279,3 +279,42 @@ describe("keyframes.jsx: keyframesSelection", () => {
     expect(p.numKeys).toBe(3);
   });
 });
+
+describe("ae_remove_keyframes: Time Remap in the dry run, and a kept value the host could not write", () => {
+  const timeRemap = (keys: Array<[number, number]>) => ({ ...snap(keys), match_name: "ADBE Time Remapping" });
+
+  it("the dry run refuses every Time Remap key as the write does, and still lists a partial removal", async () => {
+    const { ctx, calls } = fakeAe({ keysSnapshot: [timeRemap([[0, 0], [1, 2]]), timeRemap([[0, 0], [1, 2]])] });
+    const tr = { ...base, path: ["ADBE Time Remapping"] };
+    const refused = await tool("ae_remove_keyframes").handler(AeRemoveKeyframesSchema.parse({ ...tr, all: true, dry_run: true }), ctx);
+    expect(refused).toMatchObject({ ok: false, error: "bad_args" });
+    expect(refused.message).toMatch(/switch time remapping off.*ae_time_remap with operation disable/);
+    const partial = await tool("ae_remove_keyframes").handler(AeRemoveKeyframesSchema.parse({ ...tr, keys: [2], dry_run: true }), ctx);
+    expect(partial).toMatchObject({ ok: true, dry_run: true, count: 1, all_keys: false });
+    expect(calls.map((c) => c.fn)).toEqual(["keysSnapshot", "keysSnapshot"]);
+  });
+
+  it("the host snapshot reports the property's match name", () => {
+    const project = new FakeProject();
+    const comp = project.addComp("Main", 640, 360, 4);
+    comp.layers.addSolid([1, 1, 1], "Ball", 100, 100, 1, 4).transform("Opacity").setValueAtTime(0, 5);
+    const { A } = loadHost(project, ["keyframes.jsx", "audio.jsx"]);
+    const r = JSON.parse(JSON.stringify(A.keysSnapshot({ comp_id: comp.id, layer: { name: "Ball" }, path: ["ADBE Transform Group", "ADBE Opacity"] })));
+    expect(r.match_name).toBe("ADBE Opacity");
+  });
+
+  it("a kept value the host could not write is a receipt mismatch and is returned, not reported as clean", async () => {
+    const hidden = "After Effects error: Can not set value with this property, because the property or a parent property is hidden.";
+    const { ctx } = fakeAe({
+      keysSnapshot: [snap([[0, 0], [1, 100]])],
+      keysSnapshotStatic: [snap([[0, 0], [1, 100]]), snap([], 100)],
+      removeKeys: [{ removed: [{ index: 1, time: 0, value: 0 }, { index: 2, time: 1, value: 100 }], numKeys: 0, static_value_error: hidden }],
+    });
+    const out = await tool("ae_remove_keyframes").handler(AeRemoveKeyframesSchema.parse({ ...base, all: true }), ctx);
+    expect(out.static_value_error).toBe(hidden);
+    expect(out.receipt.matches).toBe(false);
+    expect(out.receipt.mismatches.map((x: { path: string }) => x.path)).toEqual(["static_value"]);
+    expect(removeKeysMismatches(snap([[0, 0]]), snap([]), { removed: [{ time: 0 }], static_value_error: "boom" })[0].message).toContain("boom");
+    expect(removeKeysMismatches(snap([[0, 0]]), snap([]), { removed: [{ time: 0 }] })).toEqual([]);
+  });
+});

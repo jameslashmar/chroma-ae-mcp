@@ -21,6 +21,18 @@ export interface DialogButton {
   name: string;
   automationId: string;
   enabled: boolean;
+  /** "ocr" when the label was read from a screenshot (the dialog is painted by AE itself). */
+  source?: string;
+  /** The label as OCR read it, only when it was corrected (0K -> OK). */
+  raw_name?: string;
+}
+
+/** What can be answered without a person, for a dialog AE painted itself (OCR buttons). */
+export interface UnattendedAnswers {
+  /** Buttons that can be pressed without focusing AE. */
+  answerable: string[];
+  /** Plain statement of what is and is not possible. */
+  note: string;
 }
 
 export interface DialogCheckbox {
@@ -41,10 +53,12 @@ export interface RawPs1Dialog {
   class?: string;
   isModal?: boolean;
   text?: string;
+  text_source?: string;
   buttons?: Array<{
     name?: string;
     automationId?: string;
     enabled?: boolean;
+    source?: string;
   }>;
   checkboxes?: Array<{
     name?: string;
@@ -77,6 +91,9 @@ export interface EnrichedDialog {
   screenshot: string | null;
   first_seen: string;
   caused_by_op: string | null;
+  text_source?: string;
+  /** Only for AE-painted dialogs (OCR buttons): which buttons ae_dialog_respond can press. */
+  unattended?: UnattendedAnswers;
 }
 
 export type Ps1ListOutput =
@@ -331,6 +348,60 @@ export function parsePs1JsonOutput<T extends { ok: boolean }>(
   } as unknown as T;
 }
 
+/**
+ * OCR reads the letter O of "OK" as the digit zero ("0K"). Corrects that one label; any other
+ * label is returned unchanged.
+ */
+export function normalizeOcrLabel(name: string): string {
+  const t = (name ?? "").trim();
+  if (/^0k$/i.test(t)) return "OK";
+  return name;
+}
+
+const CANCEL_LIKE = /^(cancel|no|close)$/;
+const OK_LIKE = /^(ok|yes|continue)$/;
+
+/** The label the way ae-dialogs.ps1 (Get-NormalizedLabel) compares it: lower-case, 0 read as o, anything but letters and spaces dropped. */
+function psLabel(name: string): string {
+  return (name ?? "").trim().toLowerCase().replace(/0/g, "o").replace(/[^a-z ]/g, "").trim();
+}
+
+/**
+ * What ae_dialog_respond can press in an AE-painted dialog without focusing AE, the way
+ * ae-dialogs.ps1 decides it: Cancel/No/Close are sent as Escape, OK/Yes/Continue as Enter and only
+ * when it is the dialog's one button. So a two-button dialog (OK and Cancel) can only be cancelled
+ * unattended.
+ */
+export function unattendedAnswers(buttons: DialogButton[]): UnattendedAnswers {
+  const labels = buttons.map((b) => psLabel(b.name));
+  const answerable: string[] = [];
+  const viaEscape: string[] = [];
+  let viaEnter: string | null = null;
+  for (let i = 0; i < labels.length; i++) {
+    if (CANCEL_LIKE.test(labels[i])) {
+      answerable.push(normalizeOcrLabel(buttons[i].name));
+      viaEscape.push(normalizeOcrLabel(buttons[i].name));
+    }
+  }
+  if (labels.length === 1 && OK_LIKE.test(labels[0])) {
+    answerable.push(normalizeOcrLabel(buttons[0].name));
+    viaEnter = normalizeOcrLabel(buttons[0].name);
+  }
+  let note: string;
+  if (answerable.length === 0) {
+    note = "AE painted this dialog itself and none of its buttons can be pressed without focusing AE: ask the user to answer it.";
+  } else if (viaEnter !== null) {
+    note = "AE painted this dialog itself; its only button \"" + viaEnter + "\" is answered with Enter.";
+  } else if (labels.length === 1) {
+    note = "AE painted this dialog itself; its only button \"" + viaEscape[0] + "\" is answered with Escape.";
+  } else {
+    note =
+      "AE painted this dialog itself. Without focusing AE only Cancel/No/Close can be pressed (sent as Escape); " +
+      "OK or Yes on a dialog with more than one button needs the user to click it, so it can only be cancelled unattended.";
+  }
+  return { answerable, note };
+}
+
 function normalizeRawDialog(
   raw: RawPs1Dialog,
   meta: SeenDialogMeta
@@ -342,11 +413,20 @@ function normalizeRawDialog(
       : rawText;
 
   const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
-  const buttons: DialogButton[] = rawButtons.map((b) => ({
-    name: typeof b?.name === "string" ? b.name : "",
-    automationId: typeof b?.automationId === "string" ? b.automationId : "",
-    enabled: Boolean(b?.enabled ?? true),
-  }));
+  const buttons: DialogButton[] = rawButtons.map((b) => {
+    const rawName = typeof b?.name === "string" ? b.name : "";
+    const fromOcr = b?.source === "ocr";
+    const name = fromOcr ? normalizeOcrLabel(rawName) : rawName;
+    const btn: DialogButton = {
+      name,
+      automationId: typeof b?.automationId === "string" ? b.automationId : "",
+      enabled: Boolean(b?.enabled ?? true),
+    };
+    if (fromOcr) btn.source = "ocr";
+    if (fromOcr && name !== rawName) btn.raw_name = rawName;
+    return btn;
+  });
+  const painted = buttons.length > 0 && buttons.every((b) => b.source === "ocr");
 
   const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
   const checkboxes: DialogCheckbox[] = rawCheckboxes.map((c) => ({
@@ -362,7 +442,7 @@ function normalizeRawDialog(
     height: typeof r.height === "number" ? r.height : 0,
   };
 
-  return {
+  const out: EnrichedDialog = {
     handle: Number(raw.handle),
     title: typeof raw.title === "string" ? raw.title : "",
     class: typeof raw.class === "string" ? raw.class : "",
@@ -375,6 +455,9 @@ function normalizeRawDialog(
     first_seen: meta.first_seen,
     caused_by_op: meta.caused_by_op,
   };
+  if (typeof raw.text_source === "string") out.text_source = raw.text_source;
+  if (painted) out.unattended = unattendedAnswers(buttons);
+  return out;
 }
 
 /**
@@ -722,7 +805,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
     description:
-      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. " +
+      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: a two-button dialog (OK and Cancel) can only be cancelled unattended. Look at the screenshot when in doubt. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -742,7 +825,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialog_respond",
     description:
-      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
+      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable with a message and the answerable buttons: a two-button AE-painted dialog can only be cancelled unattended, so ask Jay to click OK. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -820,6 +903,16 @@ export const dialogsTools: ToolDefinition<any>[] = [
 
       if (parsed.ok && parsed.closed) {
         seenDialogs.delete(args.handle);
+      }
+
+      if (!parsed.ok && parsed.error === "button_not_answerable") {
+        // Say plainly what the AE-painted dialog allows, instead of leaving the caller to guess.
+        const ocr = (parsed as { ocr_buttons?: unknown }).ocr_buttons;
+        const names = Array.isArray(ocr) ? ocr.filter((n): n is string => typeof n === "string").map(normalizeOcrLabel) : [];
+        const fixed: DialogButton[] = names.map((n) => ({ name: n, automationId: "", enabled: true }));
+        const un = fixed.length > 0 ? unattendedAnswers(fixed) : undefined;
+        const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
+        return { ...parsed, ocr_buttons: names, ...(un ? { unattended: un } : {}), message: `"${args.button}" was NOT pressed. ${why}` };
       }
 
       return parsed;

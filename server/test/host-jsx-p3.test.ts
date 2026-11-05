@@ -191,7 +191,7 @@ describe("layout.jsx", () => {
 // The fake gains what these tests need, on the prototype: copies and moves of indexed-group members, mask attributes,
 // extra animator properties, wiggly and expression selectors, and variable font axes (all written the way AE's DOM
 // behaves as far as it is known; the live behaviour is in the report's unmeasured list).
-const flags = { noLockDimensions: false, dupBelow: true };
+const flags = { noLockDimensions: false, dupBelow: true, oddCorrelation: false };
 const P = (name: string, matchName: string, type: number, value: unknown) => new FakeProperty(name, matchName, type, value);
 const EXTRA_ANIM: Record<string, [string, number, unknown]> = {
   "ADBE Text Anchor Point 3D": ["Anchor Point", PropertyValueType.ThreeD, [0, 0, 0]],
@@ -205,21 +205,47 @@ const EXTRA_ANIM: Record<string, [string, number, unknown]> = {
   "ADBE Text Track Type": ["Tracking Type", PropertyValueType.OneD, 1],
   "ADBE Text Line Spacing": ["Line Spacing", PropertyValueType.TwoD, [0, 0]],
   "ADBE Text Character Offset": ["Character Offset", PropertyValueType.OneD, 0],
-  // Only the second name AE might use: the host must fall back to it.
-  "ADBE Text Character Range Type": ["Character Range", PropertyValueType.OneD, 1],
+  "ADBE Text Character Range": ["Character Range", PropertyValueType.OneD, 1],
 };
-// Properties After Effects adds together with another one.
-const COMPANIONS: Record<string, string[]> = { "ADBE Text Skew": ["ADBE Text Skew Axis"], "ADBE Text Character Offset": ["ADBE Text Character Range Type"] };
+// After Effects 26.2.1, measured: a new animator's Properties group already lists every animator property (103) as a
+// hidden placeholder. property(matchName) answers for a placeholder, a write to it is refused as hidden, and it takes no
+// expression (canSetExpression false). addProperty(matchName) makes that one real and only that one (Skew brings no Skew
+// Axis); adding one that is already there changes nothing; canAddProperty is true for every property in the list, added
+// or not, and false for a match name that is not in it.
+const BASE_ANIM: Record<string, [string, number, unknown]> = {
+  "ADBE Text Position 3D": ["Position", PropertyValueType.ThreeD_SPATIAL, [0, 0, 0]],
+  "ADBE Text Scale 3D": ["Scale", PropertyValueType.ThreeD, [100, 100, 100]],
+  "ADBE Text Rotation": ["Rotation", PropertyValueType.OneD, 0],
+  "ADBE Text Opacity": ["Opacity", PropertyValueType.OneD, 100],
+  "ADBE Text Fill Color": ["Fill Color", PropertyValueType.COLOR, [1, 0, 0, 1]],
+  "ADBE Text Tracking Amount": ["Tracking Amount", PropertyValueType.OneD, 0],
+  "ADBE Text Blur": ["Blur", PropertyValueType.TwoD, [0, 0]],
+};
+const HIDDEN_ERROR = "After Effects error: Can not “set value” with this property, because the property or a parent property is hidden.";
+const PLACEHOLDERS = Object.keys({ ...BASE_ANIM, ...EXTRA_ANIM }).length;
+function fillPlaceholders(properties: FakeGroup) {
+  for (const [mn, [n, t, v]] of Object.entries({ ...BASE_ANIM, ...EXTRA_ANIM })) {
+    const q = P(n, mn, t, v) as any;
+    q.parentProperty = properties;
+    q.canSetExpression = false;
+    q.placeholder = true;
+    q.setValue = () => {
+      throw new Error(HIDDEN_ERROR);
+    };
+    properties.props.push(q);
+  }
+  (properties as any).modelsPlaceholders = true;
+}
 const SELECTOR_FACTORY: Record<string, () => FakeGroup> = {
   "ADBE Text Wiggly Selector": () => {
     const kids = [
-      P("Mode", "ADBE Text Wiggly Mode", PropertyValueType.OneD, 1),
+      P("Mode", "ADBE Text Selector Mode", PropertyValueType.OneD, 1),
       P("Max Amount", "ADBE Text Wiggly Max Amount", PropertyValueType.OneD, 100),
       P("Min Amount", "ADBE Text Wiggly Min Amount", PropertyValueType.OneD, -100),
       P("Based On", "ADBE Text Range Type2", PropertyValueType.OneD, 1),
       P("Wiggles/Second", "ADBE Text Temporal Freq", PropertyValueType.OneD, 2),
-      // A match name the host does not know: it must be found by its display name.
-      P("Correlation", "ADBE Text Some Other Corr", PropertyValueType.OneD, 50),
+      // AE 26.2.1 calls it ADBE Text Character Correlation; flags.oddCorrelation gives it a name the host does not know.
+      P("Correlation", flags.oddCorrelation ? "ADBE Text Some Other Corr" : "ADBE Text Character Correlation", PropertyValueType.OneD, 50),
       P("Temporal Phase", "ADBE Text Temporal Phase", PropertyValueType.OneD, 0),
       P("Spatial Phase", "ADBE Text Spatial Phase", PropertyValueType.OneD, 0),
       P("Random Seed", "ADBE Text Wiggly Random Seed", PropertyValueType.OneD, 0),
@@ -246,18 +272,16 @@ function patchFake() {
     configurable: true,
   });
   proto.addProperty = function (matchName: string) {
-    if (this.matchName === "ADBE Text Animator Properties" && EXTRA_ANIM[matchName]) {
-      // AE refuses to add a property that is already there (Skew Axis arrives with Skew, Character Range with Character Offset).
-      if (this.props.some((q: any) => q.matchName === matchName)) throw new Error("Property already exists");
-      const made = [matchName, ...(COMPANIONS[matchName] ?? [])].map((mn) => {
-        if (this.props.some((q: any) => q.matchName === mn)) return null;
-        const [n, t, v] = EXTRA_ANIM[mn];
-        const q = P(n, mn, t, v);
-        q.parentProperty = this;
-        this.props.push(q);
-        return q;
-      });
-      return made[0];
+    if (this.matchName === "ADBE Text Animator Properties" && (this as any).modelsPlaceholders) {
+      const q = this.props.find((x: any) => x.matchName === matchName) as any;
+      if (!q) throw new Error(`Can't add ${matchName} to Properties`);
+      // Adding makes the placeholder real; adding it again changes nothing.
+      if (q.placeholder) {
+        delete q.setValue;
+        q.placeholder = false;
+        q.canSetExpression = matchName !== "ADBE Text Character Range";
+      }
+      return q;
     }
     if (this.matchName === "ADBE Text Selectors" && SELECTOR_FACTORY[matchName]) {
       const g = SELECTOR_FACTORY[matchName]();
@@ -266,6 +290,7 @@ function patchFake() {
       return g;
     }
     const made = origAdd.call(this, matchName);
+    if (matchName === "ADBE Text Animator") fillPlaceholders(made.property("ADBE Text Animator Properties") as FakeGroup);
     if (matchName === "ADBE Mask Atom") Object.assign(made, { locked: false, maskFeatherFalloff: 9302, maskMotionBlur: 9311, color: [1, 0, 0], rotoBezier: false });
     if (matchName === "ADBE Text Selector") {
       // AE adds Index Start/End/Offset beside the Percent properties; Units decides which pair drives the selection.
@@ -307,6 +332,10 @@ function patchFake() {
     const at = parent.props.indexOf(this);
     parent.props.splice(flags.dupBelow ? at + 1 : at, 0, copy);
     return copy;
+  };
+  proto.canAddProperty = function (matchName: string) {
+    if (!this.modelsPlaceholders) return true;
+    return this.props.some((x: any) => x.matchName === matchName);
   };
   proto.moveTo = function (i: number) {
     const parent = this.parentProperty;
@@ -528,6 +557,37 @@ function withFonts(A: any, table: Record<string, Array<{ tag: string; min: numbe
 }
 
 describe("ae_text_animator properties", () => {
+  it("adds each animator property before writing it, because After Effects pre-lists a hidden placeholder for every one", () => {
+    // Real AE 26.2.1: property(matchName) on a new animator's Properties group answers for a property nobody added, and a
+    // write to that placeholder is refused as hidden. canAddProperty stays true after the add, so it cannot tell added from
+    // not added; the host adds every property it writes (adding one twice is harmless).
+    const { add, read, layer } = textScene();
+    const group = () => ((layer().property("ADBE Text Properties") as FakeGroup).property("ADBE Text Animators") as FakeGroup).property(1)!.property("ADBE Text Animator Properties") as FakeGroup;
+    const r = add({ properties: { opacity: 0, position: [0, 30, 0], skew: 12, skew_axis: 30 } });
+    expect(r.properties).toEqual(["opacity", "position", "skew", "skew_axis"]);
+    // Nothing else was made real: Skew brought no Skew Axis of its own, and the other placeholders are still hidden.
+    const real = group().props.filter((q: any) => !q.placeholder).map((q: any) => q.matchName);
+    expect(real.sort()).toEqual(["ADBE Text Opacity", "ADBE Text Position 3D", "ADBE Text Skew", "ADBE Text Skew Axis"]);
+    expect(group().numProperties).toBe(PLACEHOLDERS);
+    expect(group().canAddProperty("ADBE Text Opacity")).toBe(true);
+    expect(group().canAddProperty("ADBE Text No Such Property")).toBe(false);
+    // The read lists the added properties, not the placeholders. Character Range is the exception: it takes no expression even
+    // when added, so an added one cannot be told from its placeholder, and it is always listed.
+    const props = read().animators[0].properties.map((p: any) => [p.matchName, p.value]);
+    expect(props.map((p: any) => p[0]).sort()).toEqual(["ADBE Text Character Range", "ADBE Text Opacity", "ADBE Text Position 3D", "ADBE Text Skew", "ADBE Text Skew Axis"]);
+    expect(props).toContainEqual(["ADBE Text Opacity", 0]);
+    expect(props).toContainEqual(["ADBE Text Position 3D", [0, 30, 0]]);
+  });
+
+  it("keeps the value of a property when it is added a second time", () => {
+    const { add, layer } = textScene();
+    add({ properties: { opacity: 25 } });
+    const group = ((layer().property("ADBE Text Properties") as FakeGroup).property("ADBE Text Animators") as FakeGroup).property(1)!.property("ADBE Text Animator Properties") as FakeGroup;
+    group.addProperty("ADBE Text Opacity");
+    expect((group.property("ADBE Text Opacity") as FakeProperty).value).toBe(25);
+    expect(group.props.filter((q: any) => q.matchName === "ADBE Text Opacity")).toHaveLength(1);
+  });
+
   it("adds the extended animator properties and reports the match names it used", () => {
     const { add, read } = textScene();
     const r = add({
@@ -545,7 +605,7 @@ describe("ae_text_animator properties", () => {
         character_range: 2,
       },
     });
-    expect(r.property_matches.character_range.match_name).toBe("ADBE Text Character Range Type");
+    expect(r.property_matches.character_range.match_name).toBe("ADBE Text Character Range");
     expect(r.property_matches.skew.match_name).toBe("ADBE Text Skew");
     // The Guide's name comes first; the older guess is the fallback.
     expect(r.property_matches.tracking_type.match_name).toBe("ADBE Text Track Type");
@@ -553,7 +613,7 @@ describe("ae_text_animator properties", () => {
     expect(props).toContainEqual(["ADBE Text Skew", 12]);
     expect(props).toContainEqual(["ADBE Text Stroke Width", 3]);
     expect(props).toContainEqual(["ADBE Text Line Spacing", [0, 30]]);
-    expect(props).toContainEqual(["ADBE Text Character Range Type", 2]);
+    expect(props).toContainEqual(["ADBE Text Character Range", 2]);
   });
 
   it("refuses a bad property value or an unknown property before the undo group", () => {
@@ -586,31 +646,37 @@ describe("ae_text_animator properties", () => {
 });
 
 describe("ae_text_animator selectors", () => {
-  it("writes smoothness before a non-square shape and refuses a seed without randomize", () => {
-    const { add, read } = textScene();
-    add({ properties: { opacity: 0 }, selector: { shape: "round", smoothness: 30, randomize: true, random_seed: 5 } });
+  it("writes smoothness on a square shape, refuses it with any other shape, and refuses a seed without randomize", () => {
+    const { add, read, undo } = textScene();
+    add({ properties: { opacity: 0 }, selector: { shape: "square", smoothness: 30, randomize: true, random_seed: 5 } });
     const sel = read().animators[0].selectors[0];
     const value = (mn: string) => sel.children.find((c: any) => c.matchName === mn).value;
     expect(value("ADBE Text Selector Smoothness")).toBe(30);
     expect(value("ADBE Text Random Seed")).toBe(5);
+    // Real AE 26.2.1: with a shape other than Square, Smoothness is hidden (a write is refused) and reads 100.
+    const begun = undo.begun;
+    expect(() => add({ properties: { opacity: 0 }, selector: { shape: "round", smoothness: 30 } })).toThrow(/smoothness applies only to the square shape/);
+    expect(() => add({ properties: { opacity: 0 }, selector: { shape: "ramp_up", smoothness: 100 } })).toThrow(/Nothing was changed/);
+    expect(undo.begun).toBe(begun);
+    expect(read().count).toBe(1);
     expect(() => add({ properties: { opacity: 0 }, selector: { random_seed: 5 } })).toThrow(/randomize: true/);
   });
 
-  it("adds a property that arrived as the companion of another (Skew and Skew Axis)", () => {
+  it("adds Skew and Skew Axis one by one: Skew brings no companion", () => {
     const { add, read } = textScene();
     const r = add({ properties: { skew: 12, skew_axis: 30, character_offset: 2, character_range: 2 } });
     expect(r.property_matches.skew_axis.match_name).toBe("ADBE Text Skew Axis");
     const props = read().animators[0].properties.map((q: any) => [q.matchName, q.value]);
     expect(props).toContainEqual(["ADBE Text Skew", 12]);
     expect(props).toContainEqual(["ADBE Text Skew Axis", 30]);
-    expect(props).toContainEqual(["ADBE Text Character Range Type", 2]);
+    expect(props).toContainEqual(["ADBE Text Character Range", 2]);
   });
 
   it("builds a range selector with units, mode, amount, smoothness and a seed, and keys a reveal on it", () => {
     const { add, read } = textScene();
     const r = add({
       properties: { opacity: 0 },
-      selector: { units: "index", start: 2, end: 8, mode: "intersect", amount: 80, smoothness: 40, random_seed: 7, based_on: "words", shape: "round", randomize: true },
+      selector: { units: "index", start: 2, end: 8, mode: "intersect", amount: 80, smoothness: 40, random_seed: 7, based_on: "words", shape: "square", randomize: true },
       reveal: { property: "end", from: 2, to: 8, start_time: 0, duration: 1 },
     });
     expect(r.selectors).toHaveLength(1);
@@ -623,7 +689,7 @@ describe("ae_text_animator selectors", () => {
     expect(value("ADBE Text Selector Smoothness")).toBe(40);
     expect(value("ADBE Text Random Seed")).toBe(7);
     expect(value("ADBE Text Range Type2")).toBe(3);
-    expect(value("ADBE Text Range Shape")).toBe(5);
+    expect(value("ADBE Text Range Shape")).toBe(1);
     expect(value("ADBE Text Randomize Order")).toBe(1);
     // Units is Index, so the selection is driven by the Index properties; the Percent ones stay untouched.
     expect(sel).toMatchObject({ type: "range", units: "index", start: 2, end_keys: 2, start_keys: 0 });
@@ -645,7 +711,7 @@ describe("ae_text_animator selectors", () => {
     expect(sel.children.find((c: any) => c.matchName === "ADBE Text Index Start").value).toBe(0);
   });
 
-  it("builds a wiggly selector (one child found by its display name) and an expression selector", () => {
+  it("builds a wiggly selector and an expression selector from the match names After Effects 26.2.1 reports", () => {
     const { add, read } = textScene();
     const r = add({
       properties: { position: [0, 20, 0] },
@@ -653,19 +719,34 @@ describe("ae_text_animator selectors", () => {
       more_selectors: [{ type: "expression", expression: "Math.sin(textIndex)*50+50", based_on: "words" }],
     });
     expect(r.selectors.map((s: any) => [s.index, s.type])).toEqual([[1, "wiggly"], [2, "expression"]]);
-    expect(r.selectors[0].fields.correlation).toEqual({ match_name: "ADBE Text Some Other Corr", name: "Correlation" });
+    expect(r.selectors[0].fields.correlation).toEqual({ match_name: "ADBE Text Character Correlation", name: "Correlation" });
+    expect(r.selectors[0].fields.mode).toEqual({ match_name: "ADBE Text Selector Mode", name: "Mode" });
+    expect(r.selectors[1].fields.expression).toEqual({ match_name: "ADBE Text Expressible Amount", name: "Amount" });
     const sels = read().animators[0].selectors;
     expect(sels.map((s: any) => s.type)).toEqual(["wiggly", "expression"]);
     const wig = (mn: string) => sels[0].children.find((c: any) => c.matchName === mn).value;
     expect(wig("ADBE Text Wiggly Max Amount")).toBe(80);
     expect(wig("ADBE Text Wiggly Min Amount")).toBe(-20);
     expect(wig("ADBE Text Temporal Freq")).toBe(3);
-    expect(wig("ADBE Text Some Other Corr")).toBe(10);
+    expect(wig("ADBE Text Character Correlation")).toBe(10);
+    expect(wig("ADBE Text Selector Mode")).toBe(1);
     expect(wig("ADBE Text Wiggly Lock Dim")).toBe(1);
     expect(wig("ADBE Text Wiggly Random Seed")).toBe(4);
     const amount = sels[1].children.find((c: any) => c.matchName === "ADBE Text Expressible Amount");
     expect(amount.expression).toBe("Math.sin(textIndex)*50+50");
     expect(amount.expression_error).toBe("");
+  });
+
+  it("finds a wiggly child whose match name it does not know by its display name", () => {
+    const { add, read } = textScene();
+    flags.oddCorrelation = true;
+    try {
+      const r = add({ properties: { position: [0, 20, 0] }, selector: { type: "wiggly", correlation: 10 } });
+      expect(r.selectors[0].fields.correlation).toEqual({ match_name: "ADBE Text Some Other Corr", name: "Correlation" });
+    } finally {
+      flags.oddCorrelation = false;
+    }
+    expect(read().animators[0].selectors[0].children.find((c: any) => c.matchName === "ADBE Text Some Other Corr").value).toBe(10);
   });
 
   it("keys the reveal on the first range selector when a wiggly selector comes first", () => {
@@ -691,7 +772,7 @@ describe("ae_text_animator selectors", () => {
     flags.noLockDimensions = true;
     try {
       expect(() => add({ properties: { opacity: 0 }, selector: { type: "wiggly", lock_dimensions: true }, grouping: { anchor_point_grouping: "word" } })).toThrow(
-        /no "lock_dimensions" property.*Its children are: .*ADBE Text Wiggly Mode/
+        /no "lock_dimensions" property.*Its children are: .*ADBE Text Selector Mode/
       );
     } finally {
       flags.noLockDimensions = false;
@@ -734,11 +815,71 @@ describe("ae_text_animator variable font axes", () => {
     doc().staticValue.font = "Inter-Variable";
     withFonts(A, { "Inter-Variable": inter });
     const r = add({ properties: { opacity: 100 }, variable_axes: [{ tag: "wght", value: 700 }, { tag: "wdth", value: 90 }] });
-    expect(r.variable_axes.map((a: any) => [a.tag, a.value, a.index, a.applies_to])).toEqual([["wght", 700, 2, ["Inter-Variable"]], ["wdth", 90, 3, ["Inter-Variable"]]]);
+    expect(r.variable_axes.map((a: any) => [a.tag, a.value, a.index, a.applies_to])).toEqual([["wght", 700, PLACEHOLDERS + 1, ["Inter-Variable"]], ["wdth", 90, PLACEHOLDERS + 2, ["Inter-Variable"]]]);
     expect(r.warnings).toEqual([]);
     const props = read().animators[0].properties;
-    expect(props[1]).toMatchObject({ matchName: "ADBE Text Variable Axis wght", value: 700 });
-    expect(props[2]).toMatchObject({ matchName: "ADBE Text Variable Axis wdth", value: 90 });
+    // Only the added properties are read (opacity, the always-listed Character Range, then the two axes), each with its place in the group.
+    expect(props.map((q: any) => q.matchName)).toEqual(["ADBE Text Opacity", "ADBE Text Character Range", "ADBE Text Variable Axis wght", "ADBE Text Variable Axis wdth"]);
+    expect(props[2]).toMatchObject({ index: PLACEHOLDERS + 1, value: 700 });
+    expect(props[3]).toMatchObject({ index: PLACEHOLDERS + 2, value: 90 });
+  });
+
+  // AE 26.2.1 (probed): addVariableFontAxis can return no property, and the Properties group already lists
+  // VF Axis 1..8 as hidden placeholders (numProperties stays put), so the last slot is a hidden one.
+  function withSilentAxisMethod(body: () => void, makeLive: boolean) {
+    const proto = FakeGroup.prototype as any;
+    const saved = proto.addVariableFontAxis;
+    proto.addVariableFontAxis = function (tag: string) {
+      if (!this.vfSlots) {
+        this.vfSlots = [];
+        for (let n = 1; n <= 8; n++) {
+          const q = P(`VF Axis ${n}`, `ADBE Text VF Axis ${n}`, PropertyValueType.OneD, 0) as any;
+          q.parentProperty = this;
+          q.canSetExpression = false;
+          q.setValue = () => {
+            throw new Error(HIDDEN_ERROR);
+          };
+          this.props.push(q);
+          q.propertyIndex = this.props.length;
+          this.vfSlots.push(q);
+        }
+      }
+      if (makeLive) {
+        const q = this.vfSlots.find((x: any) => x.canSetExpression === false);
+        delete q.setValue;
+        q.canSetExpression = true;
+        q.name = `VF Axis ${tag}`;
+      }
+      return undefined;
+    };
+    try {
+      body();
+    } finally {
+      proto.addVariableFontAxis = saved;
+    }
+  }
+
+  it("takes the slot that became usable when the add returns no property, not the last (hidden) one", () => {
+    const { add, A, doc, layer } = textScene();
+    doc().staticValue.font = "Inter-Variable";
+    withFonts(A, { "Inter-Variable": inter });
+    withSilentAxisMethod(() => {
+      const r = add({ properties: { opacity: 100 }, variable_axes: [{ tag: "wght", value: 700 }, { tag: "wdth", value: 90 }] });
+      expect(r.variable_axes.map((a: any) => [a.tag, a.value, a.index])).toEqual([["wght", 700, PLACEHOLDERS + 1], ["wdth", 90, PLACEHOLDERS + 2]]);
+      const group = ((layer().property("ADBE Text Properties") as FakeGroup).property("ADBE Text Animators") as FakeGroup).property(1)!.property("ADBE Text Animator Properties") as FakeGroup;
+      expect((group.property(PLACEHOLDERS + 1) as FakeProperty).value).toBe(700);
+      expect((group.property(PLACEHOLDERS + 2) as FakeProperty).value).toBe(90);
+    }, true);
+  });
+
+  it("fails clearly and keeps nothing when the add returns no property and no slot became usable", () => {
+    const { add, read, A, doc } = textScene();
+    doc().staticValue.font = "Inter-Variable";
+    withFonts(A, { "Inter-Variable": inter });
+    withSilentAxisMethod(() => {
+      expect(() => add({ properties: { opacity: 0 }, variable_axes: [{ tag: "wght", value: 700 }] })).toThrow(/did not say which property it is/);
+    }, false);
+    expect(read().count).toBe(0);
   });
 
   it("allows an animator that is only axes", () => {

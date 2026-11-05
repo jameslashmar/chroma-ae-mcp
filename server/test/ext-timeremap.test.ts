@@ -627,12 +627,36 @@ function remapable(layer: FakeLayer, duration: number, opts: { failExpression?: 
       },
     });
   }
+  // Real AE (26.2.1, probed): removing the last key of Time Remap switches the layer's remapping
+  // off and hides the property; a hidden property refuses every write until the switch is cycled.
+  // The expression text survives a disable and comes back with the next enable.
+  let hidden = false;
+  const hiddenError = (what: string) =>
+    new Error(`After Effects error: Can not “${what}” with this property, because the property or a parent property is hidden.`);
+  const baseSet = prop.setValueAtTime.bind(prop);
+  const baseRemove = prop.removeKey.bind(prop);
+  prop.setValueAtTime = (t: number, raw: unknown) => {
+    if (hidden) throw hiddenError("set value at time");
+    baseSet(t, raw);
+  };
+  prop.setValuesAtTimes = (ts: number[], vs: unknown[]) => {
+    if (hidden) throw hiddenError("set value at times");
+    ts.forEach((t, i) => baseSet(t, vs[i]));
+  };
+  prop.removeKey = (i: number) => {
+    baseRemove(i);
+    if (prop.numKeys === 0) {
+      hidden = true;
+      enabled = false;
+    }
+  };
   Object.defineProperty(layer, "timeRemapEnabled", {
     get: () => enabled,
     set: (on: boolean) => {
       enabled = on;
       layer.group.props = layer.group.props.filter((p) => p !== prop);
       prop.keys = [];
+      hidden = false;
       if (on) {
         layer.group.props.push(prop);
         prop.parentProperty = layer.group;
@@ -651,7 +675,7 @@ function scene(opts: { compSeconds?: number; layerOut?: number; failExpression?:
   const footage = project.importFile(new ImportOptions(new FakeFile("C:/clips/640x360_25fps_100f.mov") as never));
   const layer = comp.layers.add(footage, opts.layerOut) as FakeLayer;
   const prop = remapable(layer, footage.duration, { failExpression: opts.failExpression });
-  const { A, undo } = loadHost(project, ["timeremap.jsx"]);
+  const { A, undo } = loadHost(project, ["timeremap.jsx", "keyframes.jsx"]);
   const read = (times: number[] = []): RemapInfo => A.timeremapRead({ comp_id: comp.id, layer: { id: layer.id }, sample_times: times });
   const run = (input: Record<string, unknown>, label = "") => {
     let i = read();
@@ -703,6 +727,75 @@ describe("timeremap.jsx", () => {
     s.run({ operation: "freeze", at_time: 2 }).apply();
     expect(s.prop.numKeys).toBe(1);
     expect(s.prop.keyValue(1)).toBe(2);
+  });
+
+  it("replaces the keys of a remapped layer without ever emptying Time Remap (AE hides it at zero keys)", () => {
+    const s = scene();
+    s.run({ operation: "enable" }).apply();
+    expect(s.prop.numKeys).toBe(2);
+    // freeze: one key, neither of the two AE made at 0 and 4
+    expect(() => s.run({ operation: "freeze", at_time: 1.52 }).apply()).not.toThrow();
+    expect(s.prop.numKeys).toBe(1);
+    expect(s.prop.keyTime(1)).toBe(0);
+    // a per-frame ramp over a single-key layer, then a Bezier one
+    expect(() => s.run({ operation: "ramp", method: "per_frame", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] }).apply()).not.toThrow();
+    expect(s.prop.numKeys).toBeGreaterThan(2);
+    expect(() => s.run({ operation: "ramp", method: "bezier", points: [{ time: 0, speed: 100 }, { time: 2, speed: 0 }] }).apply()).not.toThrow();
+    expect(() => s.run({ operation: "reverse" }).apply()).not.toThrow();
+    expect(() => s.run({ operation: "loop", loop_type: "cycle" }).apply()).not.toThrow();
+    expect(s.prop.numKeys).toBeGreaterThan(0);
+    expect(() => s.run({ operation: "disable" }).apply()).not.toThrow();
+    expect(s.layer.timeRemapEnabled).toBe(false);
+  });
+
+  it("a Time Remap expression that AE kept through a disable does not act on the keys of a later enable", () => {
+    const s = scene();
+    s.run({ operation: "loop", loop_type: "cycle" }).apply();
+    expect(s.prop.expression).toBe('loopOut("cycle")');
+    s.run({ operation: "disable" }).apply();
+    expect(s.layer.timeRemapEnabled).toBe(false);
+    // AE keeps the text while remapping is off (probed): the next enable has to start clean.
+    expect(s.prop.expression).toBe('loopOut("cycle")');
+    s.run({ operation: "reverse" }).apply();
+    expect(s.layer.timeRemapEnabled).toBe(true);
+    expect(s.prop.expression).toBe("");
+    s.run({ operation: "disable" }).apply();
+    s.run({ operation: "enable" }).apply();
+    expect(s.prop.expression).toBe("");
+  });
+
+  it("ae_remove_keyframes refuses to take the last Time Remap key, which would switch remapping off", () => {
+    const s = scene();
+    s.run({ operation: "enable" }).apply();
+    const args = { comp_id: s.comp.id, layer: { id: s.layer.id }, path: ["ADBE Time Remapping"], expect: GUARD };
+    const undoBefore = { ...s.undo };
+    // Every key, by all, by index and by range, is the same removal.
+    expect(() => s.A.removeKeys({ ...args, all: true })).toThrow(/switch time remapping off/);
+    expect(() => s.A.removeKeys({ ...args, keys: [1, 2] })).toThrow(/ae_time_remap with operation disable/);
+    expect(() => s.A.removeKeys({ ...args, start: 0, end: 10 })).toThrow(/switch time remapping off/);
+    expect(s.prop.numKeys).toBe(2);
+    expect(s.layer.timeRemapEnabled).toBe(true);
+    expect(s.undo).toEqual(undoBefore);
+    // One key left is fine, and the property stays writable.
+    const w = s.A.removeKeys({ ...args, keys: [2] });
+    expect(w.numKeys).toBe(1);
+    expect(s.layer.timeRemapEnabled).toBe(true);
+    expect(() => s.run({ operation: "freeze", source_time: 1 }).apply()).not.toThrow();
+  });
+
+  it("ae_remove_keyframes reports a property that refuses setValue once its keys are gone, instead of throwing after the removal", () => {
+    const s = scene();
+    const opacity = s.layer.transform("ADBE Opacity") as any;
+    opacity.setValuesAtTimes([0, 1], [20, 60]);
+    opacity.setValue = () => {
+      throw new Error("After Effects error: Can not “set value” with this property, because the property or a parent property is hidden.");
+    };
+    const w = s.A.removeKeys({ comp_id: s.comp.id, layer: { id: s.layer.id }, path: ["ADBE Transform Group", "ADBE Opacity"], all: true, expect: GUARD });
+    expect(w.numKeys).toBe(0);
+    expect(w.removed).toHaveLength(2);
+    expect(w.static_value_error).toContain("hidden");
+    expect(w.static_value).toBeUndefined();
+    expect(s.undo).toEqual({ begun: 1, ended: 1 });
   });
 
   it("reverses with two linear keys, and mirrors an already remapped layer", () => {

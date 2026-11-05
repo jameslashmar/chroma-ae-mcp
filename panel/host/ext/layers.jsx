@@ -477,6 +477,8 @@
       var tm = l.trackMatteType;
       if (tm !== undefined) {
         s.trackMatte = { type: matteTypeName(tm), layer: null };
+        // The matte type can outlive the matte layer. A layer that reports no matte (AE 23+ hasTrackMatte false, no matte layer) is not matted, whatever type it still holds.
+        if (!l.trackMatteLayer && l.hasTrackMatte === false) s.trackMatte.type = "none";
         if (l.trackMatteLayer) {
           s.trackMatte.layer = { index: l.trackMatteLayer.index, id: l.trackMatteLayer.id, name: l.trackMatteLayer.name };
         } else if (tm !== TrackMatteType.NO_TRACK_MATTE && l.index > 1 && !hasModernMatteApi(l)) {
@@ -995,10 +997,25 @@
       var out = { layer: { index: layer.index, id: layer.id, name: layer.name }, type: type, api: "legacy" };
       if (modern) out.api = "setTrackMatte";
       if (type === "none") {
+        var previousId = null;
+        var previousIndex = null;
+        var previousName = null;
+        if (previous) {
+          previousId = previous.id;
+          previousIndex = previous.index;
+          previousName = previous.name;
+        }
         if (modern) layer.removeTrackMatte();
-        else layer.trackMatteType = TrackMatteType.NO_TRACK_MATTE;
-        if (previous && args.show_matte === true) previous.enabled = true;
-        if (previous) out.previous_matte = { index: previous.index, id: previous.id, name: previous.name };
+        // Live in AE 26.2.1: removeTrackMatte() drops the matte layer but the layer keeps its old trackMatteType (ALPHA read back 5013 with hasTrackMatte false). Write the type without reading it first.
+        try {
+          layer.trackMatteType = TrackMatteType.NO_TRACK_MATTE;
+        } catch (eClear) {}
+        // Look the old matte up again: the object read before the removal may no longer be the layer.
+        if (previousId !== null && args.show_matte === true) {
+          var prevNow = layerById(comp, previousId);
+          if (prevNow) prevNow.enabled = true;
+        }
+        if (previousId !== null) out.previous_matte = { index: previousIndex, id: previousId, name: previousName };
         return out;
       }
       if (modern) layer.setTrackMatte(matte, value);

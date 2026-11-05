@@ -170,6 +170,12 @@ export const AeExportMogrtSchema = z.object({
   comp_id: z.number().int().describe("A comp with Essential Graphics controllers."),
   path: z.string().min(1).optional().describe("Absolute .mogrt path. Default: AE's own Essential Graphics folder."),
   overwrite: z.boolean().optional().describe("Replace an existing file. Default false."),
+  allow_font_dialog: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default false: refuse when a text layer uses a font that is not from Adobe Fonts (or the font check could not cover everything), because AE then opens a modal \"fonts were not synced from Adobe\" dialog during the export and blocks every call until someone answers it. Pass true only when the user is at the machine to answer that dialog."
+    ),
   expect: ExpectSchema,
 });
 
@@ -456,6 +462,7 @@ export const layoutTools: ToolDefinition<any>[] = [
     description:
       "Export a comp's Essential Graphics template as a .mogrt, from the saved project (ae_save first; AE exports what is on disk), to `path` or AE's own Essential Graphics folder. " +
       "Guarded by `expect`; no undo group, since it writes a file, not the project. Dialogs are never suppressed: if AE asks something, the call says so and ae_dialogs shows it. " +
+      "Before exporting it reads the fonts of the comp's text layers (and of comps nested in it, at the current value and at each key, run by run, since a layer's own font is only its first run's; AE 24+ reports whether a font is from Adobe Fonts). A font that is not from Adobe Fonts makes AE open a modal dialog (\"The following fonts were not synced from Adobe ... Click OK to continue. Click Cancel to stop the export\") during the export that blocks the whole queue until a person answers it, so unattended the call refuses and names the fonts; pass allow_font_dialog: true only when the user is at the machine to answer. A font whose origin AE does not report is not refused (the result counts them in fonts_origin_unknown). If the check could not cover everything (more than 500 text layers, 5000 layers, 50 keyframes on one text, 6 levels of nesting, a text with very many font runs), the call refuses too and lists the gaps, unless allow_font_dialog is true; the result carries fonts_scan_complete and fonts_scan_gaps. " +
       "With a path, the file is checked on disk (new, not empty). Pairs with premiere-pro-mcp, which can place the template in a sequence. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeExportMogrtSchema,
@@ -474,9 +481,9 @@ export const layoutTools: ToolDefinition<any>[] = [
           const createdDir = args.path !== undefined ? fs.mkdirSync(path.dirname(args.path), { recursive: true }) : undefined;
           let res;
           try {
-            res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string }>({
+            res = await ctx.bridge.evalRaw<{ exported: boolean; controllers: number; template_name: string; fonts_checked?: number; fonts_origin_unknown?: number; fonts_scan_complete?: boolean; fonts_scan_gaps?: string[]; fonts_not_from_adobe?: unknown[] }>({
               id: opId,
-              script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
+              script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, allow_font_dialog: args.allow_font_dialog, expect: args.expect }),
               label: `ae_export_mogrt(${args.comp_id})`,
               mutates: false,
               toolName: "ae_export_mogrt",
@@ -505,6 +512,11 @@ export const layoutTools: ToolDefinition<any>[] = [
             exported: r.exported,
             controllers: r.controllers,
             template_name: r.template_name,
+            fonts_checked: r.fonts_checked,
+            fonts_origin_unknown: r.fonts_origin_unknown,
+            fonts_scan_complete: r.fonts_scan_complete,
+            ...(r.fonts_scan_gaps ? { fonts_scan_gaps: r.fonts_scan_gaps } : {}),
+            ...(r.fonts_not_from_adobe ? { fonts_not_from_adobe: r.fonts_not_from_adobe } : {}),
             file,
             ...(args.path && !verified ? { message: "AE reported an export but the file is missing, empty or old." } : {}),
           };

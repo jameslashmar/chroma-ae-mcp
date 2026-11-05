@@ -1959,6 +1959,40 @@ describe("layerops.jsx: split", () => {
     expect(r.cuts).toEqual([2, 6]);
   });
 
+  // Seen live in AE 26.2.1 (probe): setting the in point of a duplicate moves its out point by the same amount (a layer 0..6 s cut at 1.52 read 1.52..7.52).
+  function outFollowsIn(comp: any) {
+    const a = layer(comp, "A") as any;
+    const dupOf = a.duplicate;
+    a.duplicate = () => {
+      const d = dupOf();
+      let inP = d.inPoint;
+      Object.defineProperty(d, "inPoint", {
+        get: () => inP,
+        set: (v: number) => {
+          d.outPoint = d.outPoint - inP + v;
+          inP = v;
+        },
+        configurable: true,
+      });
+      return d;
+    };
+  }
+
+  it("a new part ends where the layer ended when AE moves its out point along with the in point", () => {
+    const { comp, A } = scene5(["A"]);
+    outFollowsIn(comp);
+    const r = A.layeropsApply({ action: "split", comp_id: comp.id, layers: sel("A"), time: 4, expect: GUARD });
+    expect(timesOf(comp)).toEqual([["A", 4, 10], ["A", 0, 4]]);
+    expect(r.splits[0].copies[0]).toMatchObject({ in_point: 4, out_point: 10 });
+  });
+
+  it("with two cuts every new part ends at the next part's start", () => {
+    const { comp, A } = scene5(["A"]);
+    outFollowsIn(comp);
+    A.layeropsApply({ action: "split", comp_id: comp.id, layers: sel("A"), times: [2, 6], expect: GUARD });
+    expect(timesOf(comp)).toEqual([["A", 6, 10], ["A", 2, 6], ["A", 0, 2]]);
+  });
+
   it("names the later parts with name_suffix and {n}", () => {
     const { comp, A } = scene5(["A"]);
     A.layeropsApply({ action: "split", comp_id: comp.id, layers: sel("A"), times: [2, 6], name_suffix: " pt {n}", expect: GUARD });

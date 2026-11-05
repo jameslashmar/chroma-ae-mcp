@@ -65,7 +65,7 @@ function fakeAe(results: Record<string, unknown[]>) {
 
 const P = (name: string, matchName: string, type: number, value: unknown) => new FakeProperty(name, matchName, type, value);
 
-const opts = { dropTaper: false, dropMiterLimit: false, noStages: false, noLabels: false, dupBefore: false, dupUnlocatable: false };
+const opts = { dropTaper: false, dropMiterLimit: false, noStages: false, noLabels: false, dupBefore: false, dupUnlocatable: false, hiddenDashes: false };
 
 /** A layer picker; with stage support it behaves like AE 26.5's. */
 function layerPicker(name: string, matchName: string) {
@@ -102,6 +102,31 @@ const effect = (name: string, matchName: string, children: any[]) => {
   return g;
 };
 
+/**
+ * AE 26 lists every Dash, Gap and Offset child of a new stroke at once and keeps the ones
+ * not added yet hidden; setValue on one throws until it has been added with addProperty.
+ */
+function hiddenDashChildren() {
+  const mk = (name: string, matchName: string, v: number) => {
+    const prop: any = P(name, matchName, PropertyValueType.OneD, v);
+    prop.hiddenUntilAdded = true;
+    // Seen live in AE 26.2.1: only an added child answers canSetExpression with true.
+    prop.canSetExpression = false;
+    const set = prop.setValue.bind(prop);
+    prop.setValue = (x: unknown) => {
+      if (prop.hiddenUntilAdded) throw new Error("Can not “set value” with this property, because the property or a parent property is hidden.");
+      set(x);
+    };
+    return prop;
+  };
+  return [
+    mk("Dash", "ADBE Vector Stroke Dash 1", 10), mk("Gap", "ADBE Vector Stroke Gap 1", 10),
+    mk("Dash 2", "ADBE Vector Stroke Dash 2", 10), mk("Gap 2", "ADBE Vector Stroke Gap 2", 10),
+    mk("Dash 3", "ADBE Vector Stroke Dash 3", 10), mk("Gap 3", "ADBE Vector Stroke Gap 3", 10),
+    mk("Offset", "ADBE Vector Stroke Offset", 0),
+  ];
+}
+
 const FACTORY: Record<string, (n: number) => any> = {
   "ADBE Gaussian Blur 2": () =>
     effect("Gaussian Blur", "ADBE Gaussian Blur 2", [
@@ -127,7 +152,7 @@ const FACTORY: Record<string, (n: number) => any> = {
       P("Line Cap", "ADBE Vector Stroke Line Cap", PropertyValueType.OneD, 1),
       P("Line Join", "ADBE Vector Stroke Line Join", PropertyValueType.OneD, 1),
       ...(opts.dropMiterLimit ? [] : [P("Miter Limit", "ADBE Vector Stroke Miter Limit", PropertyValueType.OneD, 4)]),
-      new FakeGroup("Dashes", "ADBE Vector Stroke Dashes", []),
+      new FakeGroup("Dashes", "ADBE Vector Stroke Dashes", opts.hiddenDashes ? hiddenDashChildren() : []),
       ...(opts.dropTaper
         ? []
         : [
@@ -233,6 +258,12 @@ const canHold = (g: any) => g.propertyType === PropertyType.INDEXED_GROUP || g.m
 
 beforeAll(() => {
   proto.addProperty = function (matchName: string) {
+    const hid = this.matchName === "ADBE Vector Stroke Dashes" ? this.props.find((p: any) => p.matchName === matchName && p.hiddenUntilAdded) : null;
+    if (hid) {
+      hid.hiddenUntilAdded = false;
+    hid.canSetExpression = true;
+      return hid;
+    }
     const make = FACTORY[matchName];
     if (!make) return saved.addProperty.call(this, matchName);
     if (!canHold(this)) throw new Error(`Can't add ${matchName} to ${this.name}`);
@@ -242,6 +273,8 @@ beforeAll(() => {
     return made;
   };
   proto.canAddProperty = function (matchName: string) {
+    // Seen live: a Dashes child answers true before and after it was added.
+    if (this.props.some((p: any) => p.matchName === matchName && p.hiddenUntilAdded !== undefined)) return true;
     return canHold(this) && Boolean(FACTORY[matchName]);
   };
   proto.moveTo = function (index: number) {
@@ -279,7 +312,7 @@ afterAll(() => {
   delete proto.propertyIndex;
 });
 afterEach(() => {
-  Object.assign(opts, { dropTaper: false, dropMiterLimit: false, noStages: false, noLabels: false, dupBefore: false, dupUnlocatable: false });
+  Object.assign(opts, { dropTaper: false, dropMiterLimit: false, noStages: false, noLabels: false, dupBefore: false, dupUnlocatable: false, hiddenDashes: false });
 });
 
 /** A comp with a solid "Plate" (indexed Effects group) and a second layer "Matte". */
@@ -970,6 +1003,29 @@ describe("shapes.jsx", () => {
     expect(items.find((i: any) => i.kind === "fill")).toMatchObject({ rule: 2 });
     const parsed: any = AeShapeSchema.parse({ comp_id: 1, layer: { index: 1 }, add: [spec], expect: expectArg });
     expect(shapeMismatches(parsed.add, { count: 0, contents: [], truncated: false }, back, out)).toEqual([]);
+  });
+
+  it("writes dashes that AE 26 lists but keeps hidden, by adding each one first (smoke: stroke dashes failed with 'is hidden')", () => {
+    opts.hiddenDashes = true;
+    const { edit, read, undo } = shapeScene();
+    edit({ add: [rect("Dashed", { stroke: { color: [1, 1, 1], width: 6, dashes: [{ dash: 12, gap: 8 }, { dash: 3, gap: 2 }], dash_offset: 4 } })] });
+    expect(undo.begun).toBe(1);
+    const stroke = read().contents[0].items.find((i: any) => i.kind === "stroke");
+    // only the dashes that were added are read back; Dash 3 and Gap 3 stay hidden
+    expect(stroke.dashes.map((d: any) => [d.matchName, d.value])).toEqual([
+      ["ADBE Vector Stroke Dash 1", 12], ["ADBE Vector Stroke Gap 1", 8], ["ADBE Vector Stroke Dash 2", 3], ["ADBE Vector Stroke Gap 2", 2], ["ADBE Vector Stroke Offset", 4],
+    ]);
+  });
+
+  it("reads a solid stroke as having no dashes although AE 26 lists the hidden Dash, Gap and Offset children", () => {
+    opts.hiddenDashes = true;
+    const { edit, read } = shapeScene();
+    edit({ add: [rect("Solid", { stroke: { color: [1, 1, 1], width: 6 } }), rect("Dashed", { stroke: { color: [1, 1, 1], width: 6, dashes: [{ dash: 12, gap: 8 }] } })] });
+    const groups = read().contents;
+    const solid = groups[0].items.find((i: any) => i.kind === "stroke");
+    const dashed = groups[1].items.find((i: any) => i.kind === "stroke");
+    expect(solid.dashes).toEqual([]);
+    expect(dashed.dashes.map((d: any) => [d.matchName, d.value])).toEqual([["ADBE Vector Stroke Dash 1", 12], ["ADBE Vector Stroke Gap 1", 8]]);
   });
 
   it("adds gradient fills and strokes with type, points and highlight", () => {

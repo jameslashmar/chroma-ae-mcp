@@ -1000,6 +1000,28 @@ describe("screenrep.jsx", () => {
     expect(s.plate.trackMatteLayer).toBeNull();
   });
 
+  it("keeps the insert switched on when AE hides the layer that becomes the reflection's matte", () => {
+    // Seen live in AE 26.2.1 (probe): setTrackMatte switches the matte layer off (enabled read false right after). The insert is the picture, so it must stay visible.
+    const s = hostScene();
+    const { A } = s.hostLoad();
+    const dupOf = (s.plate as any).duplicate;
+    (s.plate as any).duplicate = () => {
+      const d = dupOf();
+      const set = d.setTrackMatte;
+      d.setTrackMatte = (matte: any, type: number) => {
+        set(matte, type);
+        matte.enabled = false;
+      };
+      return d;
+    };
+    const r = A.screenrepApply(applyArgs(s, { reflections: { threshold: 0.8, opacity: 60 } }));
+    const ins = s.comp.layer(r.insert_layer.index)!;
+    const refl = s.comp.layer(r.look.reflections.layer_id === ins.id ? 0 : ins.index - 1)!;
+    expect(refl.trackMatteLayer).toBe(ins);
+    expect(ins.enabled).toBe(true);
+    expect((r.look_skipped ?? []).filter((x: any) => x.step === "reflections")).toEqual([]);
+  });
+
   it("takes the reflection back, and says so, when it cannot be finished", () => {
     const s = hostScene({ levelsParams: false });
     const { A } = s.hostLoad();

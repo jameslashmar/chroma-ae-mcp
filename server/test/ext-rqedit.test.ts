@@ -1667,3 +1667,134 @@ describe("w5render: rqedit.jsx removing items", () => {
     expect(() => A.rqeditRemove({ remove_filter: { status: "done" } })).toThrow(/no expect/);
   });
 });
+
+describe("rqedit.jsx: a spec key AE does not offer for the format (live smoke, AE 26.2.1)", () => {
+  // Measured live: an H.264 output module does not list "Channels" in STRING_SETTABLE once the template is applied.
+  // The fake offers it for every template, so this scene drops it the way AE does.
+  function h264WithoutChannels() {
+    const s = scene();
+    const om = s.item.outputModule(1);
+    const real = om.applyTemplate.bind(om);
+    om.applyTemplate = (name: string) => {
+      real(name);
+      delete (om.settings as Record<string, unknown>).Channels;
+    };
+    return s;
+  }
+  const apply = (A: any, extra: Record<string, unknown> = {}) =>
+    plainOf(A.rqeditApplySpec({ item_index: 1, specs: [specById("youtube_1080p")], output_folder: "C:/deliver", expect: GUARD, ...extra }));
+
+  it("marks the spec's default Channels optional when it is skipped, and the receipt has no mismatch for it", () => {
+    const { A, item } = h264WithoutChannels();
+    const out = apply(A);
+    const r = out.results[0];
+    expect(r.errors).toEqual([]);
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0]).toMatchObject({ key: "Channels", optional: true });
+    expect(r.skipped[0].reason).toMatch(/does not offer/);
+    // The rest of the spec was applied.
+    expect(item.outputModule(1).settings).toMatchObject({ Format: "H.264", "Audio Sample Rate": 48000, Resize: false });
+    const m = copiesMismatches("spec", { numItems: 1, items: [] }, read(A, 1), out.results, out.comp_id);
+    expect(m.filter((x) => /Channels/.test(x.message) || /skipped/.test(x.path))).toEqual([]);
+    expect(m).toEqual([]);
+  });
+
+  it("a Channels value the caller passed in settings is still a failure when AE does not offer it", () => {
+    const { A } = h264WithoutChannels();
+    const out = apply(A, { settings: { Channels: "RGB + Alpha" } });
+    const r = out.results[0];
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].key).toBe("Channels");
+    expect(r.skipped[0].optional).toBeUndefined();
+    const m = copiesMismatches("spec", { numItems: 1, items: [] }, read(A, 1), out.results, out.comp_id);
+    expect(m.some((x) => /"Channels" was not set/.test(x.message))).toBe(true);
+  });
+
+  it("a wanted resize AE does not offer is never optional", () => {
+    const { A, item } = scene({ width: 1280, height: 720 });
+    const om = item.outputModule(1);
+    const real = om.applyTemplate.bind(om);
+    om.applyTemplate = (name: string) => {
+      real(name);
+      delete (om.settings as Record<string, unknown>)["Resize to"];
+    };
+    const out = apply(A, { allow_stretch: true });
+    const skipped = out.results[0].skipped as Array<{ key: string; optional?: boolean }>;
+    const rt = skipped.find((s) => s.key === "Resize to");
+    expect(rt).toBeDefined();
+    expect(rt!.optional).toBeUndefined();
+  });
+
+  it("RGB + Alpha on a template without Channels is a mismatch: the item would render without alpha", () => {
+    const { A, item } = scene();
+    const om = item.outputModule(1);
+    const real = om.applyTemplate.bind(om);
+    om.applyTemplate = (name: string) => {
+      real(name);
+      delete (om.settings as Record<string, unknown>).Channels;
+    };
+    const out = plainOf(A.rqeditApplySpec({ item_index: 1, specs: [specById("png_sequence")], output_folder: "C:/deliver", expect: GUARD }));
+    const r = out.results[0];
+    const ch = (r.skipped as Array<{ key: string; optional?: boolean }>).find((x) => x.key === "Channels");
+    expect(ch).toBeDefined();
+    expect(ch!.optional).toBeUndefined();
+    const m = copiesMismatches("spec", { numItems: 1, items: [] }, read(A, 1), out.results, out.comp_id);
+    expect(m.some((x) => /"Channels" was not set/.test(x.message))).toBe(true);
+  });
+
+  it("AE lists no Channels for a PNG template (live): a template with alpha in its name carries it, a plain one cannot", () => {
+    const png = (templates: string[]) => {
+      const { A, item } = scene();
+      const om = item.outputModule(1);
+      om.templates = ["Lossless", ...templates];
+      const real = om.applyTemplate.bind(om);
+      om.applyTemplate = (name: string) => {
+        real(name);
+        delete (om.settings as Record<string, unknown>).Channels;
+      };
+      const out = plainOf(A.rqeditApplySpec({ item_index: 1, specs: [specById("png_sequence")], output_folder: "C:/deliver", expect: GUARD }));
+      const m = copiesMismatches("spec", { numItems: 1, items: [] }, read(A, 1), out.results, out.comp_id);
+      return { out, m };
+    };
+    const alpha = png(["PNG", "PNG + ALPHA"]);
+    expect(alpha.out.results[0].template).toBe("PNG + ALPHA");
+    expect(alpha.out.results[0].skipped[0]).toMatchObject({ key: "Channels", optional: true });
+    expect(alpha.m).toEqual([]);
+    const plain = png(["PNG"]);
+    expect(plain.out.results[0].template).toBe("PNG");
+    expect(plain.out.results[0].skipped[0].optional).toBeUndefined();
+    expect(plain.m.some((x) => /"Channels" was not set/.test(x.message))).toBe(true);
+  });
+
+  it("audio keys a template does not offer are mismatches, plain RGB and Resize off are the only optional keys", () => {
+    const { A, item } = scene();
+    const om = item.outputModule(1);
+    const real = om.applyTemplate.bind(om);
+    om.applyTemplate = (name: string) => {
+      real(name);
+      delete (om.settings as Record<string, unknown>)["Audio Sample Rate"];
+      delete (om.settings as Record<string, unknown>).Channels;
+      delete (om.settings as Record<string, unknown>).Resize;
+    };
+    const out = apply(A);
+    const skipped = out.results[0].skipped as Array<{ key: string; optional?: boolean }>;
+    const byKey: Record<string, boolean | undefined> = {};
+    for (const x of skipped) byKey[x.key] = x.optional;
+    expect(byKey).toEqual({ Channels: true, Resize: true, "Audio Sample Rate": undefined });
+    const m = copiesMismatches("spec", { numItems: 1, items: [] }, read(A, 1), out.results, out.comp_id);
+    expect(m.some((x) => /"Audio Sample Rate" was not set/.test(x.message))).toBe(true);
+    expect(m.some((x) => /"Channels"|"Resize"/.test(x.message))).toBe(false);
+  });
+
+  it("stepMismatches leaves out an optional skip and keeps any other", () => {
+    expect(stepMismatches("w", [], [{ key: "Channels", optional: true }])).toEqual([]);
+    expect(stepMismatches("w", [], [{ key: "Channels" }])).toHaveLength(1);
+  });
+
+  it("the tool description says a default key AE does not offer is a note", () => {
+    const t = rqeditTools.find((x) => x.name === "ae_render_queue_apply_spec")!;
+    expect(t.description).toMatch(/optional: true/);
+    expect(t.description).toMatch(/without failing the call/);
+    expect(t.description).toMatch(/RGB \+ Alpha/);
+  });
+});

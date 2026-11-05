@@ -927,8 +927,12 @@
 
   // ---------- retune an existing camera ----------
 
+  // Camera values are 32-bit floats, so a value written and read back can differ
+  // from the number sent by up to about 6e-8 of itself (Zoom 1866.6666... can read
+  // back as 1866.66662597...). Compare with a relative tolerance of 5e-7, or a
+  // repeat of the same retune would look like a change.
   function sameNum(a, b) {
-    return isNum(a) && isNum(b) && Math.abs(a - b) <= 1e-6 + Math.abs(b) * 1e-9;
+    return isNum(a) && isNum(b) && Math.abs(a - b) <= 1e-6 + Math.abs(b) * 5e-7;
   }
 
   function oneOf(v) {

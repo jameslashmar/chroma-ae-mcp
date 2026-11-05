@@ -1051,6 +1051,25 @@ describe("camera.jsx cameraRig: retune", () => {
     expect(undo.begun).toBe(0);
   });
 
+  it("the same lens retune again is a no-op when AE keeps Zoom as a 32-bit float", () => {
+    // Seen live in AE 26.2.1 (probe): Zoom for a 35 mm lens on 1920 px reads back as 1866.66662597656 against 1866.66666666667 sent (diff 4e-5, over the old tolerance of 2.9e-6).
+    const { comp, A, undo, opt } = cameraScene();
+    const zoom = opt("ADBE Camera Zoom");
+    const set = zoom.setValue.bind(zoom);
+    zoom.setValue = (v: unknown) => set(typeof v === "number" ? Math.fround(v) : v);
+    const first = plain(A.cameraRig({ comp_id: comp.id, camera: { name: "Camera 1" }, lens: { focal_length: 35 }, expect: GUARD }));
+    expect(first.changes.map((c: any) => c.key)).toEqual(["zoom"]);
+    expect(zoom.value).not.toBe(1866.6666666666667);
+    undo.begun = 0;
+    const again = plain(A.cameraRig({ comp_id: comp.id, camera: { name: "Camera 1" }, lens: { focal_length: 35 }, expect: GUARD }));
+    expect(again.no_op).toBe(true);
+    expect(again.changes).toEqual([]);
+    expect(undo.begun).toBe(0);
+    // A real change of the lens is still written.
+    const wider = plain(A.cameraRig({ comp_id: comp.id, camera: { name: "Camera 1" }, lens: { focal_length: 28 }, expect: GUARD }));
+    expect(wider.changes.map((c: any) => c.key)).toEqual(["zoom"]);
+  });
+
   it("turns depth of field on with a focus layer expression, aperture and blur, then a fixed distance replaces the expression", () => {
     const { comp, A, plane, opt } = cameraScene();
     plane("Hero");

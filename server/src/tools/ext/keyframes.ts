@@ -120,7 +120,13 @@ interface KeysSnapshot {
   keys: Array<{ index: number; time: number; value: unknown }>;
   truncated: boolean;
   value: unknown;
+  /** The property's match name, when the host reports it. */
+  match_name?: string;
 }
+
+/** The refusal for taking every Time Remap key; the host (keyframes.jsx) says the same. */
+export const TIME_REMAP_REMOVE_ALL =
+  "Removing every Time Remap key makes After Effects switch time remapping off. Keep at least one key, or use ae_time_remap with operation disable to switch it off on purpose.";
 
 /** The keys removeKeys would take (mirrors keyframes.jsx), for the dry run. */
 export function selectKeys(keys: Array<{ index: number; time: number }>, args: RemoveKeysArgs) {
@@ -156,6 +162,15 @@ export function removeKeysMismatches(beforeRaw: unknown, afterRaw: unknown, writ
     }
   }
   if (written.static_value !== undefined && after.numKeys === 0) compareValues(written.static_value, after.value, "value", m);
+  // The keys are gone but the host could not put the kept value back (the property went read-only once empty).
+  if (typeof written.static_value_error === "string" && written.static_value_error.length > 0) {
+    m.push({
+      path: "static_value",
+      expected: "kept value written",
+      actual: written.static_value_error,
+      message: `The keys were removed, but the kept value could not be written: ${written.static_value_error}`,
+    });
+  }
   return m;
 }
 
@@ -185,6 +200,7 @@ export const keyframesTools: ToolDefinition<any>[] = [
     description:
       "Remove a property's keyframes in one undo group guarded by `expect`: all of them, some by index, the keys selected in the timeline (keys: 'selected'; the selection is read from AE and resolved to explicit indexes, and the dry run shows them), or those in a time range. " +
       "When every key goes, the property keeps the value it had at static_value_at (default: the comp's current time, as AE's stopwatch does). " +
+      "On Time Remap, removing every key is refused before anything changes, because After Effects then switches time remapping off and hides the property; keep one key, or use ae_time_remap with operation disable. " +
       "dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count, that the keys are gone, and the kept value. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRemoveKeyframesSchema,
@@ -231,6 +247,10 @@ export const keyframesTools: ToolDefinition<any>[] = [
         if (bad !== undefined) return { ok: false, error: "bad_args", message: `Key ${bad} out of range (1..${snap.numKeys})` };
         const would = selectKeys(snap.keys, args);
         const count = selectionCount(snap, args);
+        // The write refuses to take every Time Remap key, so the dry run says so too.
+        if (snap.numKeys > 0 && count === snap.numKeys && snap.match_name === "ADBE Time Remapping") {
+          return { ok: false, error: "bad_args", message: TIME_REMAP_REMOVE_ALL };
+        }
         const truncated = snap.truncated === true;
         return {
           ok: true,
@@ -292,6 +312,7 @@ export const keyframesTools: ToolDefinition<any>[] = [
           removed: w.removed,
           numKeys: (after as KeysSnapshot | null)?.numKeys,
           ...(w.static_value !== undefined ? { static_value: w.static_value, static_value_at: w.static_value_at } : {}),
+          ...(w.static_value_error !== undefined ? { static_value_error: w.static_value_error } : {}),
         }),
       });
     },

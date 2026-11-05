@@ -51,6 +51,17 @@ export const CONTROL_MATCH_NAMES: Record<ControlKind, string> = {
   dropdown: "ADBE Dropdown Control",
 };
 
+/**
+ * AE 26.2 reports the dropdown it adds under ADBE Dropdown Control as a pseudo effect whose
+ * match name (Pseudo/@@ plus a code) is not constant: it differs from one dropdown to the next
+ * (seen live). The host tells a dropdown by its parameter (isDropdownEffect), so here any
+ * Pseudo/@@ name fits a dropdown, together with the documented one. Every other kind keeps its own name.
+ */
+function matchNameFits(kind: ControlKind, matchName: string | undefined): boolean {
+  if (matchName === CONTROL_MATCH_NAMES[kind]) return true;
+  return kind === "dropdown" && typeof matchName === "string" && matchName.startsWith("Pseudo/@@");
+}
+
 /** AE's Slider Control takes -1,000,000 to 1,000,000 (to confirm live); angles are wider. */
 const MAX_SLIDER = 1_000_000;
 const MAX_ANGLE = 1_000_000_000;
@@ -243,7 +254,7 @@ export function controlMismatches(
     return;
   }
   expectThat(m, state.kind === spec.kind, `${label}.kind`, spec.kind, state.kind, "The control is of another kind");
-  expectThat(m, state.match_name === CONTROL_MATCH_NAMES[spec.kind], `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
+  expectThat(m, matchNameFits(spec.kind, state.match_name), `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
   if (!checkValue) return;
   const want = expectedControlValue(spec);
   if (want !== undefined) expectThat(m, valuesMatch(want, state.value), `${label}.value`, want, state.value, "The control's value differs");
@@ -420,7 +431,7 @@ export function renameMismatches(args: RenameArgs, beforeRaw: unknown, afterRaw:
         path: `${r.layer_name} > ${r.path}`,
         expected: `effect("${args.new_name}")`,
         actual: r.expression,
-        message: `This expression still names the old control "${args.control}". AE did not update it and autoFixExpressions did not either (it only repairs expressions that error); edit it by hand`,
+        message: `This expression still names the old control "${args.control}". The rename swaps the name only where it can place the reference (layer("Holder").effect(..), the holder layer's own effect(..), a variable assigned once), and AE does not update the rest; edit it by hand`,
       });
     }
     if (stale.truncated) m.push({ path: "references", expected: 0, actual: stale.count, message: `${stale.count} expressions still name the old control (first ${stale.references.length} listed)` });
@@ -816,9 +827,9 @@ export const rigTools: ToolDefinition<any>[] = [
     name: "ae_rig_rename",
     description:
       "Rename an Expression Control without breaking the expressions that name it, in one undo group guarded by `expect`. " +
-      "Order: set the effect's name; force the expressions that still name the old one to evaluate; then Project.autoFixExpressions on effect(\"Old\") -> effect(\"New\") (it repairs only expressions that error, and is project-wide). " +
-      "AE may already update references on its own; the tool does not assume either. The read-back (a separate evalScript) searches every expression in the comp: " +
-      "any that still names the old control, or that errors now, is a receipt mismatch you must fix by hand (AE can skip locked layers and references inside conditionals). " +
+      "Order: set the effect's name; then swap the quoted name in this comp's expressions (effect('Old') -> effect('New'), either quote style) at the spots that surely reach this control: layer('Holder').effect(..), a bare effect( or thisLayer.effect( on the holder layer, or a variable assigned once to the holder layer. AE does not update references itself (seen live) and Project.autoFixExpressions ignores effect('Old') text. " +
+      "A reference it cannot place (a variable with several assignments, a layer index) or an expression AE refuses is left as written and counted in references_unresolved; for those, and when the scan was capped, it makes them evaluate and calls Project.autoFixExpressions with the bare old and new names, which is project-wide and changes only expressions that error now and hold the old name. " +
+      "Expressions in other comps (comp('X').layer('Holder').effect('Old')) are not scanned or changed (other_comps_scanned: false). Setting an expression also switches it back on if it was disabled. The read-back (a separate evalScript) searches every expression in this comp: any that still names the old control, or that errors now, is a receipt mismatch you must fix by hand. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRigRenameSchema,
     handler: (args: RenameArgs, ctx: ToolContext) =>

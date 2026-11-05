@@ -1914,6 +1914,8 @@
         try {
           d = t.duplicate();
           d.inPoint = cut;
+          // Live in AE 26.2.1: setting the copy's in point moves its out point by the same amount (a 0..6 s layer cut at 1.52 read 1.52..7.52), so write the out point after the in point, without reading it first.
+          d.outPoint = curOut;
           t.outPoint = cut;
         } catch (e) {
           if (d) {

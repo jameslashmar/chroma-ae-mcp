@@ -8,7 +8,7 @@
 //   placeholders no comp uses, and empty folders
 // - exploreConsolidatePlan / exploreConsolidateFootage and exploreReducePlan / exploreReduceProject:
 //   duplicate footage and a project reduced to chosen comps (plan = read, the others guarded writes)
-// - exportMogrt (no undo group: it writes a file, not the project)
+// - exportMogrt (no undo group: it writes a file, not the project; refuses fonts not from Adobe Fonts unless allow_font_dialog)
 // - styleScan (read): fonts, sizes and colours used by text, shape and solid
 //   layers, for the house style check
 //
@@ -582,6 +582,142 @@
 
   // ---------- MOGRT ----------
 
+  // Where a text document's font comes from: "adobe" (Adobe Fonts), "local" (installed on this
+  // machine) or "unknown" (this AE does not say: before AE 24, or a Font without isFromAdobeFonts).
+  function fontOrigin(td) {
+    var fo = null;
+    try { fo = td.fontObject; } catch (e1) {}
+    if (!fo) return "unknown";
+    var flag;
+    try { flag = fo.isFromAdobeFonts; } catch (e2) { return "unknown"; }
+    if (flag === true) return "adobe";
+    if (flag === false) return "local";
+    return "unknown";
+  }
+
+  function noteFont(found, layer, comp, td) {
+    var origin = fontOrigin(td);
+    var name = "";
+    try { name = String(td.font); } catch (e1) {}
+    var family = "";
+    try { family = String(td.fontFamily); } catch (e2) {}
+    var style = "";
+    try { style = String(td.fontStyle); } catch (e3) {}
+    var label = family;
+    if (style) label = family + " " + style;
+    if (!label) label = name;
+    var where = comp.name + " > " + layer.name;
+    var i;
+    for (i = 0; i < found.fonts.length; i++) {
+      if (found.fonts[i].font === name) {
+        var ls = found.fonts[i].layers;
+        if (ls[ls.length - 1] !== where) ls.push(where);
+        return;
+      }
+    }
+    found.fonts.push({ font: name, label: label, origin: origin, layers: [where] });
+  }
+
+  function gap(found, why) {
+    var i;
+    for (i = 0; i < found.gaps.length; i++) {
+      if (found.gaps[i] === why) return;
+    }
+    found.gaps.push(why);
+  }
+
+  // A text document's td.font is only the font of its first run. Live (AE 26.2.1): a text whose
+  // characters 6-11 are ArialMT and the rest SpaceGrotesk-Regular reports td.font = SpaceGrotesk-Regular,
+  // while td.characterRange(0, n).font is undefined for a mixed range and a name for a uniform one.
+  // So split the range in halves until each piece is uniform (a few dozen calls for a text with a
+  // handful of runs; measured 39 calls for 2000 characters and 2 mixed spots). The budget bounds a
+  // text with very many runs; the rest is reported as a gap and the export is refused.
+  var RUN_BUDGET = 400;
+
+  function noteDoc(found, layer, comp, td) {
+    var n = -1;
+    try { n = String(td.text).length; } catch (e0) {}
+    if (n < 2 || typeof td.characterRange !== "function") {
+      noteFont(found, layer, comp, td);
+      return;
+    }
+    var calls = 0;
+    var walk = function (a, b) {
+      if (calls >= RUN_BUDGET) {
+        gap(found, "a text layer with more font runs than the scan follows (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      calls++;
+      var r = null;
+      var f;
+      try {
+        r = td.characterRange(a, b);
+        f = r.font;
+      } catch (e1) {
+        gap(found, "a text range AE would not read (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      if (typeof f === "string" && f !== "") {
+        noteFont(found, layer, comp, r);
+        return;
+      }
+      if (b - a <= 1) {
+        gap(found, "a character whose font AE does not report (" + comp.name + " > " + layer.name + ")");
+        return;
+      }
+      var mid = Math.floor((a + b) / 2);
+      walk(a, mid);
+      walk(mid, b);
+    };
+    walk(0, n);
+  }
+
+  // The fonts of the text layers of a comp and of the comps nested in it (an exported template
+  // carries them): each layer's text document now and at each of its keys, run by run. Anything the
+  // scan could not cover is added to found.gaps.
+  var MAX_SCAN_LAYERS = 5000;
+  var MAX_FONT_KEYS = 50;
+
+  function scanFonts(comp, found, seen, depth) {
+    if (seen[comp.id] === true) return;
+    if (depth > MAX_DEPTH) {
+      gap(found, "comps nested more than " + MAX_DEPTH + " levels deep (" + comp.name + ")");
+      return;
+    }
+    seen[comp.id] = true;
+    var i;
+    for (i = 1; i <= comp.numLayers; i++) {
+      if (found.layers_examined >= MAX_SCAN_LAYERS) {
+        gap(found, "more than " + MAX_SCAN_LAYERS + " layers (stopped in " + comp.name + ")");
+        return;
+      }
+      found.layers_examined++;
+      var l = comp.layer(i);
+      var kind = "";
+      try { kind = String(l.reflect.name); } catch (e0) {}
+      if (kind === "TextLayer") {
+        if (found.layers_read >= MAX_LIST) {
+          gap(found, "more than " + MAX_LIST + " text layers (stopped in " + comp.name + ")");
+          continue;
+        }
+        found.layers_read++;
+        try {
+          var prop = l.property("ADBE Text Properties").property("ADBE Text Document");
+          noteDoc(found, l, comp, prop.value);
+          var k;
+          for (k = 1; k <= prop.numKeys && k <= MAX_FONT_KEYS; k++) noteDoc(found, l, comp, prop.keyValue(k));
+          if (prop.numKeys > MAX_FONT_KEYS) gap(found, "more than " + MAX_FONT_KEYS + " text keyframes (" + comp.name + " > " + l.name + ")");
+        } catch (e1) {
+          gap(found, "a text layer AE would not read (" + comp.name + " > " + l.name + ")");
+        }
+      } else {
+        var src = null;
+        try { src = l.source; } catch (e2) {}
+        if (src && src instanceof CompItem) scanFonts(src, found, seen, depth + 1);
+      }
+    }
+  }
+
   A.exportMogrt = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
@@ -590,10 +726,42 @@
     if (n === 0) fail("bad_args", "\"" + comp.name + "\" has no Essential Graphics controllers to export (ae_set_essential_graphics adds them)");
     if (!app.project.file) fail("bad_args", "Save the project first: AE exports templates from a saved project");
     if (app.project.dirty) fail("bad_args", "The project has unsaved changes; ae_save first so the template matches what you see");
+    // A font that is not from Adobe Fonts makes AE open a modal "fonts were not synced" dialog during
+    // the export and block everything until someone answers it (it did, for 40 minutes). Refuse before
+    // the export unless the caller says a person is there to answer.
+    var found = { fonts: [], layers_read: 0, layers_examined: 0, gaps: [] };
+    scanFonts(comp, found, {}, 0);
+    var local = [];
+    var unknownOrigin = 0;
+    var f;
+    for (f = 0; f < found.fonts.length; f++) {
+      if (found.fonts[f].origin === "local") local.push(found.fonts[f]);
+      else if (found.fonts[f].origin === "unknown") unknownOrigin++;
+    }
+    if (local.length > 0 && args.allow_font_dialog !== true) {
+      var names = [];
+      for (f = 0; f < local.length; f++) names.push(local[f].label + " (" + local[f].layers[0] + ")");
+      fail(
+        "bad_args",
+        "Not exporting: the template uses font(s) that are not from Adobe Fonts: " + names.join("; ") +
+          ". AE opens a modal dialog during the export (\"fonts were not synced from Adobe\") and the whole queue waits until someone answers it. " +
+          "Use Adobe Fonts for these text layers, or pass allow_font_dialog: true when the user is at the machine to click OK or Cancel in that dialog."
+      );
+    }
+    if (found.gaps.length > 0 && args.allow_font_dialog !== true) {
+      fail(
+        "bad_args",
+        "Not exporting: the font check could not cover everything (" + found.gaps.join("; ") + "), so a font that is not from Adobe Fonts could be hiding there and would block the queue behind a modal dialog. " +
+          "Pass allow_font_dialog: true when the user is at the machine."
+      );
+    }
     var ok;
     if (args.path) ok = comp.exportAsMotionGraphicsTemplate(args.overwrite === true, args.path);
     else ok = comp.exportAsMotionGraphicsTemplate(args.overwrite === true);
-    return { exported: ok === true, controllers: n, template_name: comp.motionGraphicsTemplateName };
+    var res = { exported: ok === true, controllers: n, template_name: comp.motionGraphicsTemplateName, fonts_checked: found.fonts.length, fonts_origin_unknown: unknownOrigin, fonts_scan_complete: found.gaps.length === 0 };
+    if (found.gaps.length > 0) res.fonts_scan_gaps = found.gaps;
+    if (local.length > 0) res.fonts_not_from_adobe = local;
+    return res;
   };
 
   // ---------- style scan ----------

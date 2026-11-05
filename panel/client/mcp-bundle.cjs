@@ -9812,15 +9812,59 @@ function parsePs1JsonOutput(stdout) {
     error: `invalid_ps1_json: ${trimmed.slice(0, 200)}`
   };
 }
+function normalizeOcrLabel(name) {
+  const t = (name ?? "").trim();
+  if (/^0k$/i.test(t)) return "OK";
+  return name;
+}
+function psLabel(name) {
+  return (name ?? "").trim().toLowerCase().replace(/0/g, "o").replace(/[^a-z ]/g, "").trim();
+}
+function unattendedAnswers(buttons) {
+  const labels = buttons.map((b) => psLabel(b.name));
+  const answerable = [];
+  const viaEscape = [];
+  let viaEnter = null;
+  for (let i = 0; i < labels.length; i++) {
+    if (CANCEL_LIKE.test(labels[i])) {
+      answerable.push(normalizeOcrLabel(buttons[i].name));
+      viaEscape.push(normalizeOcrLabel(buttons[i].name));
+    }
+  }
+  if (labels.length === 1 && OK_LIKE.test(labels[0])) {
+    answerable.push(normalizeOcrLabel(buttons[0].name));
+    viaEnter = normalizeOcrLabel(buttons[0].name);
+  }
+  let note;
+  if (answerable.length === 0) {
+    note = "AE painted this dialog itself and none of its buttons can be pressed without focusing AE: ask the user to answer it.";
+  } else if (viaEnter !== null) {
+    note = 'AE painted this dialog itself; its only button "' + viaEnter + '" is answered with Enter.';
+  } else if (labels.length === 1) {
+    note = 'AE painted this dialog itself; its only button "' + viaEscape[0] + '" is answered with Escape.';
+  } else {
+    note = "AE painted this dialog itself. Without focusing AE only Cancel/No/Close can be pressed (sent as Escape); OK or Yes on a dialog with more than one button needs the user to click it, so it can only be cancelled unattended.";
+  }
+  return { answerable, note };
+}
 function normalizeRawDialog(raw, meta) {
   const rawText = typeof raw.text === "string" ? raw.text : "";
   const boundedText = rawText.length > MAX_DIALOG_TEXT_CHARS ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS) : rawText;
   const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
-  const buttons = rawButtons.map((b) => ({
-    name: typeof b?.name === "string" ? b.name : "",
-    automationId: typeof b?.automationId === "string" ? b.automationId : "",
-    enabled: Boolean(b?.enabled ?? true)
-  }));
+  const buttons = rawButtons.map((b) => {
+    const rawName = typeof b?.name === "string" ? b.name : "";
+    const fromOcr = b?.source === "ocr";
+    const name = fromOcr ? normalizeOcrLabel(rawName) : rawName;
+    const btn = {
+      name,
+      automationId: typeof b?.automationId === "string" ? b.automationId : "",
+      enabled: Boolean(b?.enabled ?? true)
+    };
+    if (fromOcr) btn.source = "ocr";
+    if (fromOcr && name !== rawName) btn.raw_name = rawName;
+    return btn;
+  });
+  const painted = buttons.length > 0 && buttons.every((b) => b.source === "ocr");
   const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
   const checkboxes = rawCheckboxes.map((c) => ({
     name: typeof c?.name === "string" ? c.name : "",
@@ -9833,7 +9877,7 @@ function normalizeRawDialog(raw, meta) {
     width: typeof r.width === "number" ? r.width : 0,
     height: typeof r.height === "number" ? r.height : 0
   };
-  return {
+  const out = {
     handle: Number(raw.handle),
     title: typeof raw.title === "string" ? raw.title : "",
     class: typeof raw.class === "string" ? raw.class : "",
@@ -9846,6 +9890,9 @@ function normalizeRawDialog(raw, meta) {
     first_seen: meta.first_seen,
     caused_by_op: meta.caused_by_op
   };
+  if (typeof raw.text_source === "string") out.text_source = raw.text_source;
+  if (painted) out.unattended = unattendedAnswers(buttons);
+  return out;
 }
 function enrichDialogsList(rawDialogs) {
   const activeHandles = /* @__PURE__ */ new Set();
@@ -10044,7 +10091,7 @@ async function describeBlockingDialogs() {
     return [];
   }
 }
-var import_node_child_process, fs10, path11, url, import_meta, JAY_DIALOG_RULES, DESTRUCTIVE_BUTTON_PATTERN, DIALOG_EXEC_TIMEOUT_MS, MAX_DIALOG_TEXT_CHARS, inFlightOps, seenDialogs, runtimeOverrides, AeDialogsSchema, AeDialogRespondSchema, dialogsTools;
+var import_node_child_process, fs10, path11, url, import_meta, JAY_DIALOG_RULES, DESTRUCTIVE_BUTTON_PATTERN, DIALOG_EXEC_TIMEOUT_MS, MAX_DIALOG_TEXT_CHARS, inFlightOps, seenDialogs, runtimeOverrides, CANCEL_LIKE, OK_LIKE, AeDialogsSchema, AeDialogRespondSchema, dialogsTools;
 var init_dialogs = __esm({
   "src/tools/ext/dialogs.ts"() {
     "use strict";
@@ -10063,6 +10110,8 @@ var init_dialogs = __esm({
     inFlightOps = [];
     seenDialogs = /* @__PURE__ */ new Map();
     runtimeOverrides = {};
+    CANCEL_LIKE = /^(cancel|no|close)$/;
+    OK_LIKE = /^(ok|yes|continue)$/;
     AeDialogsSchema = external_exports.object({
       screenshots: external_exports.boolean().default(true).optional().describe(
         "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
@@ -10089,7 +10138,7 @@ var init_dialogs = __esm({
     dialogsTools = [
       {
         name: "ae_dialogs",
-        description: `READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr", which may contain small misreads such as 0K for OK). Look at the screenshot when in doubt. ` + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+        description: 'READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE\'s blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: a two-button dialog (OK and Cancel) can only be cancelled unattended. Look at the screenshot when in doubt. ' + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
         schema: AeDialogsSchema,
         handler: async (args) => {
           if (!dialogsSupported()) {
@@ -10104,7 +10153,7 @@ var init_dialogs = __esm({
       },
       {
         name: "ae_dialog_respond",
-        description: "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable: ask Jay to answer it. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+        description: "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable with a message and the answerable buttons: a two-button AE-painted dialog can only be cancelled unattended, so ask Jay to click OK. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
         schema: AeDialogRespondSchema,
         handler: async (args) => {
           if (!dialogsSupported()) {
@@ -10171,6 +10220,14 @@ var init_dialogs = __esm({
           });
           if (parsed.ok && parsed.closed) {
             seenDialogs.delete(args.handle);
+          }
+          if (!parsed.ok && parsed.error === "button_not_answerable") {
+            const ocr = parsed.ocr_buttons;
+            const names = Array.isArray(ocr) ? ocr.filter((n) => typeof n === "string").map(normalizeOcrLabel) : [];
+            const fixed = names.map((n) => ({ name: n, automationId: "", enabled: true }));
+            const un = fixed.length > 0 ? unattendedAnswers(fixed) : void 0;
+            const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
+            return { ...parsed, ocr_buttons: names, ...un ? { unattended: un } : {}, message: `"${args.button}" was NOT pressed. ${why}` };
           }
           return parsed;
         }
@@ -11425,6 +11482,10 @@ var init_captions = __esm({
 });
 
 // src/tools/ext/rig.ts
+function matchNameFits(kind, matchName) {
+  if (matchName === CONTROL_MATCH_NAMES[kind]) return true;
+  return kind === "dropdown" && typeof matchName === "string" && matchName.startsWith("Pseudo/@@");
+}
 function controlSpecProblem(spec) {
   const { kind, value, items } = spec;
   const has = value !== void 0 && value !== null;
@@ -11488,7 +11549,7 @@ function controlMismatches(m, label, spec, state, checkValue = true, targetLayer
     return;
   }
   expectThat(m, state.kind === spec.kind, `${label}.kind`, spec.kind, state.kind, "The control is of another kind");
-  expectThat(m, state.match_name === CONTROL_MATCH_NAMES[spec.kind], `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
+  expectThat(m, matchNameFits(spec.kind, state.match_name), `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
   if (!checkValue) return;
   const want = expectedControlValue(spec);
   if (want !== void 0) expectThat(m, valuesMatch(want, state.value), `${label}.value`, want, state.value, "The control's value differs");
@@ -11555,7 +11616,7 @@ function renameMismatches(args, beforeRaw, afterRaw) {
         path: `${r.layer_name} > ${r.path}`,
         expected: `effect("${args.new_name}")`,
         actual: r.expression,
-        message: `This expression still names the old control "${args.control}". AE did not update it and autoFixExpressions did not either (it only repairs expressions that error); edit it by hand`
+        message: `This expression still names the old control "${args.control}". The rename swaps the name only where it can place the reference (layer("Holder").effect(..), the holder layer's own effect(..), a variable assigned once), and AE does not update the rest; edit it by hand`
       });
     }
     if (stale.truncated) m.push({ path: "references", expected: 0, actual: stale.count, message: `${stale.count} expressions still name the old control (first ${stale.references.length} listed)` });
@@ -11937,7 +11998,7 @@ var init_rig = __esm({
       },
       {
         name: "ae_rig_rename",
-        description: 'Rename an Expression Control without breaking the expressions that name it, in one undo group guarded by `expect`. Order: set the effect\'s name; force the expressions that still name the old one to evaluate; then Project.autoFixExpressions on effect("Old") -> effect("New") (it repairs only expressions that error, and is project-wide). AE may already update references on its own; the tool does not assume either. The read-back (a separate evalScript) searches every expression in the comp: any that still names the old control, or that errors now, is a receipt mismatch you must fix by hand (AE can skip locked layers and references inside conditionals). ' + AGENT_SAFETY_GUIDANCE,
+        description: "Rename an Expression Control without breaking the expressions that name it, in one undo group guarded by `expect`. Order: set the effect's name; then swap the quoted name in this comp's expressions (effect('Old') -> effect('New'), either quote style) at the spots that surely reach this control: layer('Holder').effect(..), a bare effect( or thisLayer.effect( on the holder layer, or a variable assigned once to the holder layer. AE does not update references itself (seen live) and Project.autoFixExpressions ignores effect('Old') text. A reference it cannot place (a variable with several assignments, a layer index) or an expression AE refuses is left as written and counted in references_unresolved; for those, and when the scan was capped, it makes them evaluate and calls Project.autoFixExpressions with the bare old and new names, which is project-wide and changes only expressions that error now and hold the old name. Expressions in other comps (comp('X').layer('Holder').effect('Old')) are not scanned or changed (other_comps_scanned: false). Setting an expression also switches it back on if it was disabled. The read-back (a separate evalScript) searches every expression in this comp: any that still names the old control, or that errors now, is a receipt mismatch you must fix by hand. " + AGENT_SAFETY_GUIDANCE,
         schema: AeRigRenameSchema,
         handler: (args, ctx) => runGuardedWrite(ctx, {
           toolName: "ae_rig_rename",
@@ -13506,7 +13567,7 @@ var init_timeremap = __esm({
       comp_id: external_exports.number().int(),
       layer: LayerSelectorSchema.describe("A footage or precomp layer. Stills, solids, text, shapes, nulls, cameras and lights can't be time remapped."),
       operation: external_exports.enum(OPERATIONS).describe(
-        "enable: switch Time Remap on (AE adds its own keys). disable: switch it off (its keys go). freeze: hold one frame for the whole layer (at_time or source_time). reverse: play the layer backwards. speed: constant speed through layer.stretch (speed_percent; not while remapping is on). ramp: a speed ramp through points of {time, speed}. hold_last_frame: keep the last source frame on screen until `until`. loop: loopOut on Time Remap (loop_type)."
+        "enable: switch Time Remap on (AE adds its own keys, and a Time Remap expression left from before is cleared). disable: switch it off (its keys go; AE keeps the expression text). freeze: hold one frame for the whole layer (at_time or source_time). reverse: play the layer backwards. speed: constant speed through layer.stretch (speed_percent; not while remapping is on). ramp: a speed ramp through points of {time, speed}. hold_last_frame: keep the last source frame on screen until `until`. loop: loopOut on Time Remap (loop_type)."
       ),
       at_time: external_exports.number().optional().describe("freeze: the comp time of the frame to hold. Must lie inside the layer."),
       source_time: external_exports.number().min(0).optional().describe("freeze: the frame to hold as seconds into the source, instead of at_time."),
@@ -22299,9 +22360,10 @@ function stepMismatches(where, errors, skipped) {
   (errors ?? []).forEach(
     (e, i) => m.push({ path: `${where}.errors[${i}]`, expected: "the step to succeed", actual: e.message, message: `${e.step} failed: ${e.message}` })
   );
-  (skipped ?? []).forEach(
-    (s, i) => m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: void 0, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` })
-  );
+  (skipped ?? []).forEach((s, i) => {
+    if (s.optional === true) return;
+    m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: void 0, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` });
+  });
   return m;
 }
 function itemMismatches(where, echo, item, skipped) {
@@ -22601,11 +22663,11 @@ var init_rqedit = __esm({
         container: "png_sequence",
         ext: "png",
         sequence: true,
-        template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG", flags: "i" }],
+        template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG.*alpha", flags: "i" }, { pattern: "PNG", flags: "i" }],
         channels: "RGB + Alpha",
         video_output: true,
         name_template: "[compName]_[spec]_[#####].png",
-        note: "Needs a PNG output module template on this machine. The folder should be empty: every frame is a file."
+        note: 'Needs a PNG output module template on this machine, preferably one with alpha in its name ("PNG + ALPHA"): AE lists no Channels setting for PNG templates, so alpha comes from the template; with a plain "PNG" template the alpha cannot be set and the receipt reports it. The folder should be empty: every frame is a file.'
       },
       {
         id: "wav_audio",
@@ -22949,7 +23011,7 @@ var init_rqedit = __esm({
       },
       {
         name: "ae_render_queue_apply_spec",
-        description: "Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by `expect`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. " + AGENT_SAFETY_GUIDANCE,
+        description: `Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by \`expect\`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. Only these default keys may be left unset when AE does not offer them for the template's format, and they are listed in the result's skipped[] with optional: true without failing the call: Channels "RGB" (an H.264 template has no Channels key and is RGB anyway) and Resize off. Everything else defines the delivery and fails the read-back when it is missing: Channels "RGB + Alpha" (unless the template's name says alpha, e.g. "PNG + ALPHA": AE lists no Channels setting for PNG templates, so the template carries it), Output Audio, Audio Sample Rate, Video Output, Resize on and Resize to, and any key you pass in \`settings\`. The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. ` + AGENT_SAFETY_GUIDANCE,
         schema: AeApplySpecSchema,
         handler: (args, ctx) => runGuardedWrite(ctx, {
           toolName: "ae_render_queue_apply_spec",
@@ -47849,7 +47911,7 @@ var init_screenrep = __esm({
       insert_black: external_exports.number().min(0).max(1).optional().describe("The insert's own black level (0..1, encoded), used as Levels Input Black. Measured when the insert is a comp; footage is taken as 0 unless you give it."),
       insert_white: external_exports.number().min(0).max(1).optional().describe("The insert's own white level (0..1, encoded), used as Levels Input White. Measured when the insert is a comp; footage is taken as 1."),
       blur_px: external_exports.number().min(0).max(4).optional().describe("Gaussian sigma as it should look on screen, in comp pixels, instead of the measured one (0 for none). The measured value is capped at 2. It is converted to the insert's own pixels (the blur runs before the pin) before it is written."),
-      reflections: external_exports.boolean().default(false).describe("Put a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare and reflections stay on top. Needs `plate` and AE 23+. The duplicate also carries the old screen's brightest content, so check it and lower reflection_opacity if needed."),
+      reflections: external_exports.boolean().default(false).describe("Put a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare and reflections stay on top (the insert layer stays switched on although AE hides a layer used as a matte). Needs `plate` and AE 23+. The duplicate also carries the old screen's brightest content, so check it and lower reflection_opacity if needed."),
       reflection_threshold: external_exports.number().min(0).max(1).optional().describe("Levels Input Black of the reflection layer (0..1, encoded): only plate pixels brighter than this stay. Default: the old screen's measured 95th percentile luma plus 0.03."),
       reflection_opacity: external_exports.number().min(0).max(100).default(100).describe("Opacity of the reflection layer. Default 100."),
       switch_off_source_layer: external_exports.boolean().default(true).describe("With insert.layer: switch that layer off so it does not show beside the replacement. Default true."),
@@ -53022,9 +53084,17 @@ function removeKeysMismatches(beforeRaw, afterRaw, written) {
     }
   }
   if (written.static_value !== void 0 && after.numKeys === 0) compareValues(written.static_value, after.value, "value", m);
+  if (typeof written.static_value_error === "string" && written.static_value_error.length > 0) {
+    m.push({
+      path: "static_value",
+      expected: "kept value written",
+      actual: written.static_value_error,
+      message: `The keys were removed, but the kept value could not be written: ${written.static_value_error}`
+    });
+  }
   return m;
 }
-var PathSchema3, AeGetKeyframesSchema, AeRemoveKeyframesSchema, keyframesTools;
+var PathSchema3, AeGetKeyframesSchema, AeRemoveKeyframesSchema, TIME_REMAP_REMOVE_ALL, keyframesTools;
 var init_keyframes = __esm({
   "src/tools/ext/keyframes.ts"() {
     "use strict";
@@ -53057,6 +53127,7 @@ var init_keyframes = __esm({
     }).refine((v) => v.all === true || v.keys === "selected" || Array.isArray(v.keys) && v.keys.length > 0 || v.start !== void 0 || v.end !== void 0, {
       message: "Say which keys: all, keys, or start/end."
     });
+    TIME_REMAP_REMOVE_ALL = "Removing every Time Remap key makes After Effects switch time remapping off. Keep at least one key, or use ae_time_remap with operation disable to switch it off on purpose.";
     keyframesTools = [
       {
         name: "ae_get_keyframes",
@@ -53076,7 +53147,7 @@ var init_keyframes = __esm({
       },
       {
         name: "ae_remove_keyframes",
-        description: "Remove a property's keyframes in one undo group guarded by `expect`: all of them, some by index, the keys selected in the timeline (keys: 'selected'; the selection is read from AE and resolved to explicit indexes, and the dry run shows them), or those in a time range. When every key goes, the property keeps the value it had at static_value_at (default: the comp's current time, as AE's stopwatch does). dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count, that the keys are gone, and the kept value. " + AGENT_SAFETY_GUIDANCE,
+        description: "Remove a property's keyframes in one undo group guarded by `expect`: all of them, some by index, the keys selected in the timeline (keys: 'selected'; the selection is read from AE and resolved to explicit indexes, and the dry run shows them), or those in a time range. When every key goes, the property keeps the value it had at static_value_at (default: the comp's current time, as AE's stopwatch does). On Time Remap, removing every key is refused before anything changes, because After Effects then switches time remapping off and hides the property; keep one key, or use ae_time_remap with operation disable. dry_run lists what would go without touching AE. The read-back (a separate evalScript) checks the count, that the keys are gone, and the kept value. " + AGENT_SAFETY_GUIDANCE,
         schema: AeRemoveKeyframesSchema,
         handler: async (rawArgs, ctx) => {
           let args = { ...rawArgs, keys: Array.isArray(rawArgs.keys) ? rawArgs.keys : void 0 };
@@ -53116,6 +53187,9 @@ var init_keyframes = __esm({
             if (bad4 !== void 0) return { ok: false, error: "bad_args", message: `Key ${bad4} out of range (1..${snap2.numKeys})` };
             const would = selectKeys(snap2.keys, args);
             const count = selectionCount(snap2, args);
+            if (snap2.numKeys > 0 && count === snap2.numKeys && snap2.match_name === "ADBE Time Remapping") {
+              return { ok: false, error: "bad_args", message: TIME_REMAP_REMOVE_ALL };
+            }
             const truncated = snap2.truncated === true;
             return {
               ok: true,
@@ -53171,7 +53245,8 @@ var init_keyframes = __esm({
               ...resolvedFromSelection ? { selected: resolvedFromSelection } : {},
               removed: w.removed,
               numKeys: after?.numKeys,
-              ...w.static_value !== void 0 ? { static_value: w.static_value, static_value_at: w.static_value_at } : {}
+              ...w.static_value !== void 0 ? { static_value: w.static_value, static_value_at: w.static_value_at } : {},
+              ...w.static_value_error !== void 0 ? { static_value_error: w.static_value_error } : {}
             })
           });
         }
@@ -53965,6 +54040,9 @@ var init_layout = __esm({
       comp_id: external_exports.number().int().describe("A comp with Essential Graphics controllers."),
       path: external_exports.string().min(1).optional().describe("Absolute .mogrt path. Default: AE's own Essential Graphics folder."),
       overwrite: external_exports.boolean().optional().describe("Replace an existing file. Default false."),
+      allow_font_dialog: external_exports.boolean().optional().describe(
+        'Default false: refuse when a text layer uses a font that is not from Adobe Fonts (or the font check could not cover everything), because AE then opens a modal "fonts were not synced from Adobe" dialog during the export and blocks every call until someone answers it. Pass true only when the user is at the machine to answer that dialog.'
+      ),
       expect: ExpectSchema
     });
     AeHouseStyleCheckSchema = external_exports.object({
@@ -54032,7 +54110,7 @@ var init_layout = __esm({
       },
       {
         name: "ae_export_mogrt",
-        description: "Export a comp's Essential Graphics template as a .mogrt, from the saved project (ae_save first; AE exports what is on disk), to `path` or AE's own Essential Graphics folder. Guarded by `expect`; no undo group, since it writes a file, not the project. Dialogs are never suppressed: if AE asks something, the call says so and ae_dialogs shows it. With a path, the file is checked on disk (new, not empty). Pairs with premiere-pro-mcp, which can place the template in a sequence. " + AGENT_SAFETY_GUIDANCE,
+        description: "Export a comp's Essential Graphics template as a .mogrt, from the saved project (ae_save first; AE exports what is on disk), to `path` or AE's own Essential Graphics folder. Guarded by `expect`; no undo group, since it writes a file, not the project. Dialogs are never suppressed: if AE asks something, the call says so and ae_dialogs shows it. Before exporting it reads the fonts of the comp's text layers (and of comps nested in it, at the current value and at each key, run by run, since a layer's own font is only its first run's; AE 24+ reports whether a font is from Adobe Fonts). A font that is not from Adobe Fonts makes AE open a modal dialog (\"The following fonts were not synced from Adobe ... Click OK to continue. Click Cancel to stop the export\") during the export that blocks the whole queue until a person answers it, so unattended the call refuses and names the fonts; pass allow_font_dialog: true only when the user is at the machine to answer. A font whose origin AE does not report is not refused (the result counts them in fonts_origin_unknown). If the check could not cover everything (more than 500 text layers, 5000 layers, 50 keyframes on one text, 6 levels of nesting, a text with very many font runs), the call refuses too and lists the gaps, unless allow_font_dialog is true; the result carries fonts_scan_complete and fonts_scan_gaps. With a path, the file is checked on disk (new, not empty). Pairs with premiere-pro-mcp, which can place the template in a sequence. " + AGENT_SAFETY_GUIDANCE,
         schema: AeExportMogrtSchema,
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
@@ -54050,7 +54128,7 @@ var init_layout = __esm({
               try {
                 res = await ctx.bridge.evalRaw({
                   id: opId,
-                  script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, expect: args.expect }),
+                  script: buildJsxCall("exportMogrt", { comp_id: args.comp_id, path: args.path?.replace(/\\/g, "/"), overwrite: args.overwrite, allow_font_dialog: args.allow_font_dialog, expect: args.expect }),
                   label: `ae_export_mogrt(${args.comp_id})`,
                   mutates: false,
                   toolName: "ae_export_mogrt"
@@ -54077,6 +54155,11 @@ var init_layout = __esm({
                 exported: r.exported,
                 controllers: r.controllers,
                 template_name: r.template_name,
+                fonts_checked: r.fonts_checked,
+                fonts_origin_unknown: r.fonts_origin_unknown,
+                fonts_scan_complete: r.fonts_scan_complete,
+                ...r.fonts_scan_gaps ? { fonts_scan_gaps: r.fonts_scan_gaps } : {},
+                ...r.fonts_not_from_adobe ? { fonts_not_from_adobe: r.fonts_not_from_adobe } : {},
                 file,
                 ...args.path && !verified ? { message: "AE reported an export but the file is missing, empty or old." } : {}
               };
@@ -54761,7 +54844,7 @@ function animatorMismatches(args, beforeRaw, afterRaw, written) {
     compareValues(want, Array.isArray(want) && Array.isArray(p.value) ? p.value.slice(0, want.length) : p.value, `animator.${key}`, m);
   }
   for (const ax of written.variable_axes ?? []) {
-    const p = a.properties[ax.index - 1];
+    const p = a.properties.find((x) => x.index === ax.index) ?? a.properties[ax.index - 1];
     if (!p || p.matchName !== ax.match_name && p.name !== ax.name) {
       m.push({ path: `animator.axis.${ax.tag}`, expected: ax.match_name, actual: p?.matchName, message: `The variable font axis ${ax.tag} is not in the read-back` });
       continue;
@@ -54913,7 +54996,7 @@ var init_masks = __esm({
       mode: SEL_MODE_ENUM.optional().describe("range and wiggly: how this selector combines with the ones above it."),
       amount: external_exports.number().min(-100).max(100).optional().describe("range: Amount, percent."),
       shape: external_exports.enum(["square", "ramp_up", "ramp_down", "triangle", "round", "smooth"]).optional().describe("range: the falloff shape."),
-      smoothness: external_exports.number().min(0).max(100).optional().describe("range: Smoothness, percent (square shape)."),
+      smoothness: external_exports.number().min(0).max(100).optional().describe("range: Smoothness, percent. Square shape only: with any other shape After Effects hides it and resets it to 100, so the call is refused."),
       ease_high: external_exports.number().min(-100).max(100).optional(),
       ease_low: external_exports.number().min(-100).max(100).optional(),
       randomize: external_exports.boolean().optional().describe("range: Randomize Order."),
@@ -54969,7 +55052,7 @@ var init_masks = __esm({
     COLOR_TOLERANCE = 0.01;
     PROP_MATCH = Object.fromEntries(Object.entries(ANIM_PROPS).map(([key, def]) => [key, def.match]));
     MASK_DESCRIPTION = "Add, change, duplicate, reorder and remove a layer's masks in one undo group guarded by `expect`: a rectangle or ellipse in a box, or a free path with tangents; mode (add, subtract, intersect, lighten, darken, difference, none), inversion, feather, opacity and expansion, and the mask attributes feather_falloff (linear, smooth), motion_blur (same_as_layer, on, off), colour, locked and roto_bezier (turning it on makes After Effects recompute the tangents: a warning says so; a member this After Effects lacks is skipped and listed in `unsupported`). `duplicate` ({mask, count}) copies masks and `move_to` ({mask, index}) reorders them; selectors mean the masks as they are before the call, copies and moves happen after changes and removals, new masks are added last. Each entry of `duplicated` has `index` (where the copy sat when it was made; later copies and moves can shift it) and `final_index` (where it ends up). Removing, copying or moving masks changes what expressions that address masks by index (mask(1)) read: the layer's expressions are scanned and a warning lists any such references. A locked layer is refused. A change (`set`) to a locked mask unlocks it, applies the edit and locks it again (`locked: false` leaves it unlocked); remove, duplicate and move_to do not check a mask's lock. The read-back (a separate evalScript) checks the count, the order after copies and moves (against the planned order and the names read before the write; a copy's own name is After Effects' choice), and each mask's mode, inversion, feather, opacity, expansion, attributes and box (for a path: the box of its points, the vertex count and closed; tangents are not read back). To animate a mask path there are two routes: ae_path_write with its `time` (preferred for keyed edits: it keeps feather points and checks vertex counts, and can change the vertex count), or ae_set_property on path ['ADBE Mask Parade', '<mask name>', 'ADBE Mask Shape'] with a Shape value { vertices, inTangents?, outTangents?, closed? } or keyframes of such values (every key needs the same vertex count). " + AGENT_SAFETY_GUIDANCE;
-    ANIMATOR_DESCRIPTION = "Add a text animator to a text layer in one undo group guarded by `expect`. `properties` takes any animator property: anchor point, position, scale, skew, skew axis, rotation (X, Y, Z), opacity, fill (opacity, colour, hue, saturation, brightness), stroke (opacity, colour, hue, saturation, brightness, width), tracking (type, amount), line anchor, line spacing, character alignment/range/value/offset and blur. Selectors: `selector` (and `more_selectors`) is a range selector by default (start, end, offset in percent, or indexes with units: index, in which case they are written to and read from the Index Start/End/Offset properties that After Effects then uses; based_on; mode; amount; shape; smoothness; ease high and low; randomize order; random seed), or type wiggly (mode, max/min amount, based_on, wiggles_per_second, correlation, temporal and spatial phase, lock_dimensions, random_seed) or type expression (an Amount expression plus based_on); fields from another type are refused. The Wiggly and Expression selector child match names are not on the Guide's match-name page: the host finds them by match name, then by display name, and a field it cannot find fails with the selector's real children (nothing is left behind). `variable_axes` ([{tag, value}], After Effects 26.0+) animates variable font axes, checked against the layer's font (an axis the font lacks is refused; custom uppercase tags are allowed; with mixed fonts it applies only where the font has the axis and the result says so). `grouping` sets the layer's More Options (anchor point grouping, grouping alignment, fill & stroke and inter-character blending as menu indexes). `reveal` keyframes the first range selector's start, end or offset. A classic reveal: opacity 0 with a reveal of start from 0 to 100. A locked layer is refused. The read-back (a separate evalScript) checks the animator's properties, each selector's fields, the axes, the More Options and the reveal's keys. " + AGENT_SAFETY_GUIDANCE;
+    ANIMATOR_DESCRIPTION = "Add a text animator to a text layer in one undo group guarded by `expect`. `properties` takes any animator property: anchor point, position, scale, skew, skew axis, rotation (X, Y, Z), opacity, fill (opacity, colour, hue, saturation, brightness), stroke (opacity, colour, hue, saturation, brightness, width), tracking (type, amount), line anchor, line spacing, character alignment/range/value/offset and blur. Selectors: `selector` (and `more_selectors`) is a range selector by default (start, end, offset in percent, or indexes with units: index, in which case they are written to and read from the Index Start/End/Offset properties that After Effects then uses; based_on; mode; amount; shape; smoothness (square shape only); ease high and low; randomize order; random seed), or type wiggly (mode, max/min amount, based_on, wiggles_per_second, correlation, temporal and spatial phase, lock_dimensions, random_seed) or type expression (an Amount expression plus based_on); fields from another type are refused. The Wiggly and Expression selector children are found by match name (read from After Effects 26.2.1: Wiggly has ADBE Text Selector Mode, ADBE Text Wiggly Max Amount, ADBE Text Wiggly Min Amount, ADBE Text Range Type2, ADBE Text Temporal Freq, ADBE Text Character Correlation, ADBE Text Temporal Phase, ADBE Text Spatial Phase, ADBE Text Wiggly Lock Dim and ADBE Text Wiggly Random Seed; Expression has ADBE Text Range Type2 and ADBE Text Expressible Amount), then by display name, and a field it cannot find fails with the selector's real children (nothing is left behind). After Effects lists every animator property as a hidden placeholder and refuses writes to it until it is added, so the host adds each property first (adding one twice is harmless) and the read-back lists only the properties that were added. `variable_axes` ([{tag, value}], After Effects 26.0+) animates variable font axes, checked against the layer's font (an axis the font lacks is refused; custom uppercase tags are allowed; with mixed fonts it applies only where the font has the axis and the result says so). `grouping` sets the layer's More Options (anchor point grouping, grouping alignment, fill & stroke and inter-character blending as menu indexes). `reveal` keyframes the first range selector's start, end or offset. A classic reveal: opacity 0 with a reveal of start from 0 to 100. A locked layer is refused. The read-back (a separate evalScript) checks the animator's properties, each selector's fields, the axes, the More Options and the reveal's keys. " + AGENT_SAFETY_GUIDANCE;
     masksTools = [
       {
         name: "ae_mask",

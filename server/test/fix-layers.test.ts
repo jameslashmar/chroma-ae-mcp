@@ -25,7 +25,7 @@ import {
   type LayerStack,
   type StackLayer,
 } from "../src/tools/ext/layers.js";
-import { FakeProject, GUARD, loadHost, type FakeComp, type FakeLayer } from "./support/fake-ae.js";
+import { FakeProject, GUARD, loadHost, TrackMatteType, type FakeComp, type FakeLayer } from "./support/fake-ae.js";
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -331,5 +331,36 @@ describe("create layer args per type (C56, C18)", () => {
     const after = stack([L(1, 11, "S", { lightType: "undefined" }), L(2, 10, "BG")]);
     const args = { comp_id: 1, type: "solid", light_type: "spot", expect: expectArg } as any;
     expect(createLayerMismatches(args, before, after, { id: 11 })).toEqual([]);
+  });
+});
+
+describe("removing a track matte when AE keeps the matte type", () => {
+  it("clears the type, re-enables the old matte by looking it up again, and the stack reads none", () => {
+    const { project, comp } = scene();
+    const { A } = loadHost(project, ["layers.jsx"]);
+    A.createLayer({ comp_id: comp.id, type: "solid", name: "Plate", expect: GUARD });
+    A.createLayer({ comp_id: comp.id, type: "text", text: "MATTE", expect: GUARD });
+    A.setTrackMatte({ comp_id: comp.id, layer: { name: "Plate" }, matte: { name: "MATTE" }, type: "alpha", expect: GUARD });
+    const plate = comp.layer("Plate")!;
+    // Seen live in AE 26.2.1 (probe): removeTrackMatte drops the matte layer, the layer still reads the old type (ALPHA 5013) with hasTrackMatte false, and the matte layer stays switched off.
+    Object.defineProperty(plate, "hasTrackMatte", { get: () => plate.trackMatteLayer !== null, configurable: true });
+    plate.removeTrackMatte = () => {
+      plate.trackMatteLayer = null;
+    };
+    const off = A.setTrackMatte({ comp_id: comp.id, layer: { name: "Plate" }, type: "none", show_matte: true, expect: GUARD });
+    expect(off.previous_matte.name).toBe("MATTE");
+    expect(plate.trackMatteType).toBe(TrackMatteType.NO_TRACK_MATTE);
+    expect(comp.layer("MATTE")!.enabled).toBe(true);
+    expect(A.layerStack({ comp_id: comp.id }).layers.find((l: any) => l.name === "Plate").trackMatte).toEqual({ type: "none", layer: null });
+  });
+
+  it("reads a layer with a leftover matte type and no matte layer as none", () => {
+    const { project, comp } = scene();
+    const { A } = loadHost(project, ["layers.jsx"]);
+    A.createLayer({ comp_id: comp.id, type: "solid", name: "Plate", expect: GUARD });
+    const plate = comp.layer("Plate")!;
+    plate.trackMatteType = TrackMatteType.ALPHA;
+    Object.defineProperty(plate, "hasTrackMatte", { get: () => false, configurable: true });
+    expect(A.layerStack({ comp_id: comp.id }).layers[0].trackMatte).toEqual({ type: "none", layer: null });
   });
 });

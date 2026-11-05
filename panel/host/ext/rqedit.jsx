@@ -744,7 +744,9 @@
 
   // One key at a time, with a fresh dump each time: a key can appear once
   // another is set (Resize to after Resize), and a failing key leaves the rest alone.
-  function applySettings(rep, label, getTarget, map) {
+  // `optional` names keys the plan only asks for by default (a delivery spec's channels or audio
+  // rate): when AE does not offer one for the format, the skip is a note (optional: true), not a failure.
+  function applySettings(rep, label, getTarget, map, optional) {
     var k;
     for (k in map) {
       if (!hasOwn(map, k)) continue;
@@ -756,7 +758,12 @@
         continue;
       }
       if (dump.settings !== null && !dump.truncated && !hasOwn(dump.settings, k)) {
-        rep.skipped.push({ where: label, key: k, reason: "AE does not offer this setting for the current format" });
+        var note = { where: label, key: k, reason: "AE does not offer this setting for the current format" };
+        if (inList(optional || [], k)) {
+          note.optional = true;
+          note.reason = "AE does not offer this setting for the current format; the spec's value does not change the result there, so nothing was set";
+        }
+        rep.skipped.push(note);
         continue;
       }
       var val = mirror(dump.settings === null ? undefined : dump.settings[k], map[k]);
@@ -787,7 +794,7 @@
         getOm().applyTemplate(m.template);
       });
     }
-    if (m.settings) applySettings(rep, label, getOm, m.settings);
+    if (m.settings) applySettings(rep, label, getOm, m.settings, m.optional_keys);
     if (m.file) {
       step(rep, label + ": file", function () {
         getOm().file = new File(m.file);
@@ -1481,6 +1488,30 @@
     return s;
   }
 
+  // The spec keys AE may leave unset for the spec's format without changing what the spec promises:
+  // plain RGB Channels (an H.264 template has no Channels key and is RGB anyway) and Resize: false (no
+  // Resize key means nothing resizes). Everything else defines the delivery and stays a real mismatch
+  // when AE does not offer it: Channels "RGB + Alpha", Output Audio, Audio Sample Rate, Video Output,
+  // Resize on and Resize to. A key the caller passed in settings is never optional.
+  // One more case, measured live in AE 26.2.1: no PNG template lists a Channels key at all, so an alpha
+  // PNG is only reachable through a template whose name says alpha ("PNG + ALPHA"); for such a template
+  // "RGB + Alpha" is carried by the template and is optional. A template without alpha in its name
+  // (plain "PNG") cannot promise it, so there it stays a real mismatch.
+  function specOptionalKeys(spec, comp, extra, template) {
+    var base = specSettings(spec, comp);
+    var out = [];
+    var k;
+    if (!base) return out;
+    for (k in base) {
+      if (!hasOwn(base, k)) continue;
+      if (extra && hasOwn(extra, k)) continue;
+      if (k === "Channels" && base[k] === "RGB") out.push(k);
+      else if (k === "Channels" && base[k] === "RGB + Alpha" && template && /alpha/i.test(String(template))) out.push(k);
+      else if (k === "Resize" && base[k] === false) out.push(k);
+    }
+    return out;
+  }
+
   function mergeSettings(base, extra) {
     var out = {};
     var k;
@@ -1550,6 +1581,7 @@
             index: 1,
             template: v.template,
             settings: mergeSettings(specSettings(spec, comp), args.settings),
+            optional_keys: specOptionalKeys(spec, comp, args.settings, v.template),
             file: file,
             post_render_action: args.post_render_action
           }

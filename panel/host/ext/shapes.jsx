@@ -182,6 +182,14 @@
     return out;
   }
 
+  function strokeChildAdded(c) {
+    try {
+      return c.canSetExpression !== false;
+    } catch (e) {
+      return true;
+    }
+  }
+
   function describeStrokeDetails(p, d) {
     d.line_cap = val(p, "ADBE Vector Stroke Line Cap");
     d.line_join = val(p, "ADBE Vector Stroke Line Join");
@@ -189,9 +197,15 @@
     try {
       var dg = p.property("ADBE Vector Stroke Dashes");
       if (dg) {
+        // AE 26 lists every Dash, Gap and Offset child of a stroke whether it was
+        // added or not (a solid stroke still shows 7 children: 10, 10, ... and 0).
+        // Only the added ones answer canSetExpression with true (seen live), so
+        // the others are left out and a solid stroke reads back with no dashes.
         d.dashes = [];
         for (var i = 1; i <= dg.numProperties && i <= 8; i++) {
-          d.dashes.push({ matchName: dg.property(i).matchName, value: val(dg, dg.property(i).matchName) });
+          var dc = dg.property(i);
+          if (!strokeChildAdded(dc)) continue;
+          d.dashes.push({ matchName: dc.matchName, value: val(dg, dc.matchName) });
         }
       }
     } catch (eD) {}
@@ -383,17 +397,52 @@
     return contentsOf(layer).property(gi).property("ADBE Vectors Group").property(si);
   }
 
+  function isHiddenError(e) {
+    var t = "";
+    try { t = String(e.message); } catch (e1) { t = String(e); }
+    return /hidden/i.test(t);
+  }
+
+  // Writes one child of a stroke's sub-group (Dashes, Taper, Wave). In AE 26 a
+  // new stroke already lists every Dash, Gap and Offset child but keeps the ones
+  // not added yet hidden, and setValue on a hidden property throws "the property
+  // or a parent property is hidden". So a child that is missing, or refuses the
+  // write because it is hidden, is added to its group (what the + button does)
+  // and looked up again from the layer before the write is tried once more.
+  function setStrokeChild(layer, gi, si, groupMatch, childMatch, value, what) {
+    var grp = itemAt(layer, gi, si).property(groupMatch);
+    if (!grp) fail("bad_args", what + " group " + groupMatch + " is missing (needs After Effects 17.1.1 or later)");
+    var prop = grp.property(childMatch);
+    var added = false;
+    if (!prop) {
+      if (!grp.canAddProperty(childMatch)) fail("bad_args", "AE cannot add " + childMatch + " to the stroke's " + groupMatch);
+      grp.addProperty(childMatch);
+      added = true;
+      prop = itemAt(layer, gi, si).property(groupMatch).property(childMatch);
+      if (!prop) fail("bad_args", childMatch + " is missing after it was added");
+    }
+    try {
+      prop.setValue(value);
+    } catch (eSet) {
+      if (added || !isHiddenError(eSet)) throw eSet;
+      grp = itemAt(layer, gi, si).property(groupMatch);
+      if (!grp.canAddProperty(childMatch)) fail("bad_args", childMatch + " is hidden in the stroke's " + groupMatch + " and AE will not add it: " + A.formatError(eSet));
+      grp.addProperty(childMatch);
+      prop = itemAt(layer, gi, si).property(groupMatch).property(childMatch);
+      if (!prop) fail("bad_args", childMatch + " is missing after it was added");
+      prop.setValue(value);
+    }
+  }
+
   function setGroupFields(layer, gi, si, groupMatch, fields, spec, what) {
     for (var k in fields) {
       if (fields.hasOwnProperty(k) && has(spec[k])) {
-        var grp = itemAt(layer, gi, si).property(groupMatch);
-        if (!grp) fail("bad_args", what + " group " + groupMatch + " is missing (needs After Effects 17.1.1 or later)");
-        setIf(grp, fields[k], spec[k]);
+        setStrokeChild(layer, gi, si, groupMatch, fields[k], spec[k], what);
       }
     }
   }
 
-  // Dashes are added one child at a time; every add invalidates the
+  // Dashes are written one child at a time; every add invalidates the
   // siblings, so the stroke is looked up again from the layer each time.
   function applyDashes(layer, gi, si, dashes, offset) {
     var wanted = [];
@@ -410,15 +459,7 @@
       values.push(offset);
     }
     for (i = 0; i < wanted.length; i++) {
-      var dg = itemAt(layer, gi, si).property("ADBE Vector Stroke Dashes");
-      if (!dg) fail("bad_args", "The stroke has no Dashes group");
-      if (!dg.property(wanted[i])) {
-        if (!dg.canAddProperty(wanted[i])) fail("bad_args", "AE cannot add " + wanted[i] + " to the stroke's Dashes");
-        dg.addProperty(wanted[i]);
-      }
-      var dp = itemAt(layer, gi, si).property("ADBE Vector Stroke Dashes").property(wanted[i]);
-      if (!dp) fail("bad_args", wanted[i] + " is missing after it was added");
-      dp.setValue(values[i]);
+      setStrokeChild(layer, gi, si, "ADBE Vector Stroke Dashes", wanted[i], values[i], "Stroke dashes");
     }
   }
 

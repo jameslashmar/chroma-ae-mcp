@@ -4,6 +4,7 @@
 // - removeKeys (guarded write): all of a property's keys, a list of them, or
 //   those in a time range. With every key gone, the property keeps the value
 //   it had at one moment (AE's stopwatch uses the current time).
+//   Removing every Time Remap key is refused: AE would switch remapping off and hide the property.
 // ae_get_keyframes reads through getKeyframeEase (animate.jsx), and the
 // read-backs through keysSnapshot (audio.jsx).
 //
@@ -140,8 +141,14 @@
       if (match) picked.push(i);
     }
     if (picked.length === 0) fail("bad_args", "No keys match that selection; the property has " + prop.numKeys + " key(s)");
-    // The value to keep once every key is gone, read before anything changes.
     var keepAll = picked.length > 0 && picked.length === prop.numKeys;
+    // Removing the last key of Time Remap makes After Effects switch time remapping off and hide
+    // the property (seen live: layer.timeRemapEnabled turned false, setValue then threw "hidden").
+    // That is what ae_time_remap disable does on purpose, so it is refused here, before anything changes.
+    if (keepAll && prop.matchName === "ADBE Time Remapping") {
+      fail("bad_args", "Removing every Time Remap key makes After Effects switch time remapping off. Keep at least one key, or use ae_time_remap with operation disable to switch it off on purpose.");
+    }
+    // The value to keep once every key is gone, read before anything changes.
     var keepValue = null;
     var keepAt = null;
     if (keepAll && prop.propertyValueType !== PropertyValueType.CUSTOM_VALUE) {
@@ -159,9 +166,17 @@
       removed.reverse();
       var out = { removed: removed, numKeys: prop.numKeys, property: prop.name };
       if (keepAll && keepValue !== null && prop.numKeys === 0) {
-        prop.setValue(keepValue);
+        // A property that After Effects hides once its keys are gone refuses setValue; the keys
+        // are already removed then, so the call reports that instead of throwing.
+        var wrote = false;
+        try {
+          prop.setValue(keepValue);
+          wrote = true;
+        } catch (eSet) {
+          out.static_value_error = String(eSet);
+        }
         // Text and shape values flatten to "[object ...]", which proves nothing: not reported.
-        if (typeof keepValue === "number" || keepValue instanceof Array) {
+        if (wrote && (typeof keepValue === "number" || keepValue instanceof Array)) {
           out.static_value = plain(keepValue);
           out.static_value_at = keepAt;
         }

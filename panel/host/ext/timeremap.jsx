@@ -471,9 +471,23 @@
     }
   }
 
-  function removeAllKeys(prop) {
-    // Highest index first: removing one renumbers those above it.
-    for (var i = prop.numKeys; i >= 1; i--) prop.removeKey(i);
+  // Removing every key of Time Remap hides the property in After Effects, and a hidden
+  // property refuses setValueAtTime ("the property or a parent property is hidden"). So
+  // the new keys are written first and only the old keys that are not at one of the
+  // new times are removed afterwards: the property never has zero keys.
+  // Highest index first: removing one renumbers those above it.
+  function removeKeysNotAt(prop, times) {
+    for (var i = prop.numKeys; i >= 1; i--) {
+      var t = prop.keyTime(i);
+      var keep = false;
+      for (var j = 0; j < times.length; j++) {
+        if (Math.abs(times[j] - t) <= 1e-6) {
+          keep = true;
+          break;
+        }
+      }
+      if (!keep) prop.removeKey(i);
+    }
   }
 
   function styleKey(prop, i, k) {
@@ -503,8 +517,12 @@
   // plan is returned, and the read-back reports it as a num_keys mismatch.
   function writeKeys(prop, keys) {
     var i;
-    removeAllKeys(prop);
-    for (i = 0; i < keys.length; i++) prop.setValueAtTime(keys[i].time, keys[i].value);
+    var times = [];
+    for (i = 0; i < keys.length; i++) {
+      prop.setValueAtTime(keys[i].time, keys[i].value);
+      times.push(keys[i].time);
+    }
+    removeKeysNotAt(prop, times);
     var kept = prop.numKeys;
     if (kept === keys.length) {
       for (i = 0; i < keys.length; i++) styleKey(prop, i + 1, keys[i]);
@@ -514,8 +532,8 @@
 
   function writePerFrame(prop, pf) {
     var i;
-    removeAllKeys(prop);
     prop.setValuesAtTimes(pf.times, pf.values);
+    removeKeysNotAt(prop, pf.times);
     var kept = prop.numKeys;
     if (kept === pf.times.length) {
       for (i = 1; i <= pf.times.length; i++) prop.setInterpolationTypeAtKey(i, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
@@ -636,9 +654,16 @@
           layer.timeRemapEnabled = true;
           enabledHere = true;
         }
-        if (writesKeys || writesFrames || setsExpression) {
+        if (enabledHere || writesKeys || writesFrames || setsExpression) {
           prop = remapProp(layer);
-          if (!prop) fail("bad_args", "\"" + layer.name + "\" has no Time Remap property after enabling it");
+          if (!prop && (writesKeys || writesFrames || setsExpression)) fail("bad_args", "\"" + layer.name + "\" has no Time Remap property after enabling it");
+        }
+        // After Effects keeps a Time Remap expression while remapping is off and brings it
+        // back when remapping is switched on again (seen live: loopOut survived a disable and
+        // an enable). A remap switched on here starts clean, so a stale loop can not act on
+        // the new keys; a plan that sets an expression writes its own below.
+        if (enabledHere && prop && !setsExpression) {
+          try { prop.expression = ""; } catch (eExpr) {}
         }
         if (writesKeys) {
           keysWritten = writeKeys(prop, plan.keys);

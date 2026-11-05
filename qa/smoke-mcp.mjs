@@ -407,8 +407,9 @@ async function main() {
   const staged = path.join(ROOT, "_assets", "stills", "red.png");
   fs.mkdirSync(path.dirname(staged), { recursive: true });
   fs.writeFileSync(staged, Buffer.from(RED_PNG, "base64"));
-  const settled = new Date(Date.now() - 10_000);
-  fs.utimesSync(staged, settled, settled);
+  // The importer judges a file "still being written" by the newest of mtime, ctime and birthtime with a 2 s settle.
+  // utimes only moves mtime (ctime and birthtime stay at "now"), so the file has to age for real: wait it out.
+  await sleep(2500);
   r = await call("ae_import_assets", { expect: { project_path: AEP } });
   const again = await call("ae_import_assets", { dry_run: true, expect: { project_path: AEP } });
   check("ae_import_assets", r.ok && r.imported?.length === 1 && r.receipt?.matches === true && again.to_import?.length === 0, `${r.imported?.[0]?.name} into ${r.bin}; ${cpNote(r)}`);
@@ -1686,8 +1687,10 @@ async function main() {
 
     r = await call("ae_text_animator", { comp_id: T, layer: tl, name: "Wiggle", properties: { position: [0, 20, 0], rotation: 8, stroke_width: 2, skew: 10 }, selector: { type: "wiggly", max_amount: 100, min_amount: -100, wiggles_per_second: 3, correlation: 40, lock_dimensions: false, based_on: "characters" }, expect });
     check("ae_text_animator (wiggly selector): LIVE CHECK the child match names", r.applied === true && r.receipt?.matches === true, `${JSON.stringify(r.selectors?.[0]?.fields)}; ${why(r)}`);
-    r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 0 }, selector: { type: "range", units: "index", start: 0, end: 3, mode: "add", shape: "round", smoothness: 50 }, more_selectors: [{ type: "expression", expression: "Math.sin(textIndex * 0.8) * 50 + 50" }], reveal: { property: "end", from: 0, to: 12, start_time: 0, duration: 1 }, expect });
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 0 }, selector: { type: "range", units: "index", start: 0, end: 3, mode: "add", shape: "round" }, more_selectors: [{ type: "expression", expression: "Math.sin(textIndex * 0.8) * 50 + 50" }], reveal: { property: "end", from: 0, to: 12, start_time: 0, duration: 1 }, expect });
     check("ae_text_animator (range selector in index units plus an expression selector)", r.applied === true && r.receipt?.matches === true, `${JSON.stringify(r.selectors?.map((s) => s.type))}; ${why(r)}`);
+    r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 50 }, selector: { type: "range", shape: "round", smoothness: 50 }, expect });
+    check("ae_text_animator (smoothness with a round shape is refused before anything changes)", refused(r) && /smoothness applies only to the square shape/i.test(why(r)), why(r).slice(0, 140));
     r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 100 }, grouping: { anchor_point_grouping: "word", grouping_alignment: [0, 0] }, expect });
     check("ae_text_animator (More Options: grouping)", r.applied === true && r.receipt?.matches === true, JSON.stringify(r.grouping));
     r = await call("ae_text_animator", { comp_id: T, layer: tl, variable_axes: [{ tag: "wght", value: 700 }], expect });
@@ -1862,7 +1865,16 @@ async function main() {
   r = await call("ae_audio_analyze", { audio_path: CLICKS_WAV });
   check("ae_audio_analyze (file)", r.ok && Math.abs((r.tempo?.bpm ?? 0) - 120) < 3 && r.onsets?.length === 8, `${r.tempo?.bpm} BPM, ${r.onsets?.length} onsets`);
   r = await call("ae_export_mogrt", { comp_id: PRE, path: path.join(RENDER, "qa_template.mogrt"), overwrite: true, expect });
-  check("ae_export_mogrt", r.ok && r.file?.size > 0 && r.file?.fresh === true, `${r.controllers} controller(s), ${r.file?.size} bytes ${r.message ?? ""}`);
+  // Space Grotesk is installed locally, not from Adobe Fonts, and AE would open a modal "fonts were not synced" dialog
+  // during the export. Called without allow_font_dialog the tool must refuse and name the font; that refusal is the pass.
+  // An Adobe Fonts font or a comp without local fonts exports for real, which passes as well.
+  if (r.ok && r.file?.size > 0 && r.file?.fresh === true) {
+    check("ae_export_mogrt", true, `${r.controllers} controller(s), ${r.file?.size} bytes`);
+  } else if (/not from Adobe Fonts/i.test(why(r))) {
+    check("ae_export_mogrt", /Space Grotesk|SpaceGrotesk/i.test(why(r)) && /allow_font_dialog/.test(why(r)), `refused before the export, as designed: ${why(r).slice(0, 160)}`);
+  } else {
+    check("ae_export_mogrt", false, `${r.controllers ?? "?"} controller(s), ${r.file?.size ?? "no file"} ${why(r)}`);
+  }
 
   r = await call("ae_set_property", { comp_id: COMP, layer: dot, path: opacity, value: 90, expect });
   check("ae_set_property (after save)", r.applied && r.checkpoint?.status === want("created") && !r.checkpoint?.unsaved_changes_not_included, cpNote(r));
@@ -2061,7 +2073,10 @@ async function main() {
     const yt = (specs.specs ?? []).find((s) => s.id === "youtube_1080p");
     if (yt?.feasible) {
       r = await call("ae_render_queue_apply_spec", { item_index: rqIdx, comp_id: COMP, specs: ["youtube_1080p"], output_folder: RENDER, allow_stretch: true, allow_overwrite: true, expect });
-      check("ae_render_queue_apply_spec", okWrite(r), why(r));
+      // Channels "RGB" is not offered for an H.264 template: it comes back in results[].skipped[] with optional: true and is no failure.
+      const optSkips = (r.results ?? []).flatMap((x) => (x.skipped ?? []).filter((k) => k.optional === true).map((k) => k.key));
+      const realSkips = (r.results ?? []).flatMap((x) => (x.skipped ?? []).filter((k) => k.optional !== true).map((k) => k.key));
+      check("ae_render_queue_apply_spec", okWrite(r) && realSkips.length === 0, why(r) || `optional skips: ${optSkips.join(", ") || "none"}`);
     } else {
       skip("ae_render_queue_apply_spec", `youtube_1080p is not feasible here: ${yt?.refusal ?? yt?.reason ?? "no reason given"}`);
     }

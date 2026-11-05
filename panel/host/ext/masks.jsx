@@ -708,9 +708,12 @@
     expression: "ADBE Text Expressible Selector"
   };
 
-  // Selector fields: match names to try (the first is documented where the Guide documents it), display names to fall
-  // back to, and the kind of value. The Wiggly and Expression children are not on the Guide's match-name page, so they
-  // are also found by their display names, and a field that cannot be found fails with the selector's real children.
+  // Selector fields: match names to try (the first is the one After Effects 26.2.1 reports, read from its real selectors),
+  // display names to fall back to, and the kind of value. A field that cannot be found fails with the selector's real
+  // children. Measured in 26.2.1: the Wiggly selector has ADBE Text Selector Mode, ADBE Text Wiggly Max Amount, ADBE Text
+  // Wiggly Min Amount, ADBE Text Range Type2, ADBE Text Temporal Freq, ADBE Text Character Correlation, ADBE Text Temporal
+  // Phase, ADBE Text Spatial Phase, ADBE Text Wiggly Lock Dim and ADBE Text Wiggly Random Seed; the Expression selector
+  // has ADBE Text Range Type2 and ADBE Text Expressible Amount.
   function SF(cands, names, kind, map) {
     return { c: cands, n: names, kind: kind, map: map };
   }
@@ -732,7 +735,7 @@
       random_seed: SF(["ADBE Text Random Seed"], ["Random Seed"], "num")
     },
     wiggly: {
-      mode: SF(["ADBE Text Wiggly Mode", "ADBE Text Selector Mode"], ["Mode"], "enum", SEL_MODES),
+      mode: SF(["ADBE Text Selector Mode", "ADBE Text Wiggly Mode"], ["Mode"], "enum", SEL_MODES),
       max_amount: SF(["ADBE Text Wiggly Max Amount"], ["Max Amount"], "num"),
       min_amount: SF(["ADBE Text Wiggly Min Amount"], ["Min Amount"], "num"),
       based_on: SF(["ADBE Text Range Type2"], ["Based On"], "enum", BASED_ON),
@@ -767,8 +770,8 @@
     return txt;
   }
 
-  // The order fields are written in: units before start and end, so index values are read as indexes; smoothness before
-  // shape, because After Effects hides Smoothness (and refuses writes to it) once the shape is not Square.
+  // The order fields are written in: units before start and end, so index values are read as indexes. Smoothness is
+  // written before shape; it is refused up front for any shape but square (After Effects hides it and resets it to 100).
   var SEL_ORDER = [
     "units", "based_on", "mode", "amount", "smoothness", "shape", "ease_high", "ease_low", "randomize", "random_seed",
     "max_amount", "min_amount", "wiggles_per_second", "correlation", "temporal_phase", "spatial_phase", "lock_dimensions",
@@ -816,6 +819,7 @@
       if (!defs.hasOwnProperty(key)) fail("bad_args", "Selector field \"" + key + "\" does not belong to a " + type + " selector. Nothing was changed.");
       fieldValue(defs[key], key, spec[key]);
     }
+    if (type === "range" && present(spec.smoothness) && present(spec.shape) && spec.shape !== "square") fail("bad_args", "smoothness applies only to the square shape: After Effects hides Smoothness (refuses writes to it) and resets it to 100 for any other shape. Nothing was changed.");
     if (type === "range" && present(spec.random_seed) && spec.randomize !== true) fail("bad_args", "random_seed needs randomize: true (After Effects hides Random Seed while Randomize Order is off). Nothing was changed.");
     if (type === "expression" && !present(spec.expression)) fail("bad_args", "An expression selector needs `expression`. Nothing was changed.");
   }
@@ -881,6 +885,27 @@
     }
   }
 
+  // Which slots of a group take an expression now (a hidden placeholder does not): [true, false, ...] by slot.
+  function liveSlots(grp) {
+    var out = [];
+    for (var i = 1; i <= grp.numProperties; i++) {
+      var can = false;
+      try { can = grp.property(i).canSetExpression === true; } catch (e0) { can = false; }
+      out.push(can);
+    }
+    return out;
+  }
+
+  // The slot that became usable since liveSlots was taken (a new slot counts), or null.
+  function newLiveSlot(grp, before) {
+    for (var i = 1; i <= grp.numProperties; i++) {
+      var can = false;
+      try { can = grp.property(i).canSetExpression === true; } catch (e0) { can = false; }
+      if (can && before[i - 1] !== true) return grp.property(i);
+    }
+    return null;
+  }
+
   function fillSelector(layer, ai, si, type, spec, outFields) {
     var defs = SEL_FIELDS[type];
     var o;
@@ -909,7 +934,24 @@
     }
   }
 
-  // The animator property node (looked up again each time) and its value, set on a fresh reference.
+  // The child of a group with this match name, found by walking the group's real children by index.
+  function childByMatch(grp, matchName) {
+    var n = 0;
+    try { n = grp.numProperties; } catch (e0) { return null; }
+    for (var i = 1; i <= n; i++) {
+      var node = null;
+      try { node = grp.property(i); } catch (e1) { node = null; }
+      if (node && node.matchName === matchName) return node;
+    }
+    return null;
+  }
+
+  // The animator property node (looked up again each time), added to the animator first. After Effects pre-lists every
+  // property an animator can have (103 of them) as a hidden placeholder: property(matchName) answers at once, and a write
+  // to the placeholder is refused as hidden until addProperty makes it real. canAddProperty stays true after the add, so
+  // it cannot say whether a property is already there. Adding one that is already there changes nothing (no copy, the
+  // value is kept), so the add is always done. The match names that are not in the list at all are the ones canAddProperty
+  // refuses; those are skipped for the next candidate.
   function addAnimProp(layer, ai, key) {
     var cands = ANIM_PROPS[key].m;
     var lastError = "";
@@ -918,13 +960,9 @@
     var pr;
     for (c = 0; c < cands.length; c++) {
       grp = animators(layer).property(ai).property("ADBE Text Animator Properties");
-      // Some properties arrive as the companion of another one (Skew brings Skew Axis): reuse it instead of adding it again.
-      pr = null;
-      try { pr = grp.property(cands[c]); } catch (e1) { pr = null; }
-      if (pr) return pr;
       try {
         if (typeof grp.canAddProperty === "function" && grp.canAddProperty(cands[c]) === false) {
-          lastError = "canAddProperty is false";
+          lastError = cands[c] + " is not an animator property in this After Effects (canAddProperty is false)";
           continue;
         }
         grp.addProperty(cands[c]);
@@ -932,12 +970,26 @@
         lastError = shortError(e0);
         continue;
       }
-      pr = animators(layer).property(ai).property("ADBE Text Animator Properties").property(cands[c]);
+      grp = animators(layer).property(ai).property("ADBE Text Animator Properties");
+      pr = childByMatch(grp, cands[c]);
       if (pr) return pr;
-      lastError = "the property did not appear";
+      lastError = "the property did not appear after the add (" + cands[c] + ")";
     }
     fail("bad_args", "After Effects would not add the animator property \"" + key + "\" (tried " + cands.join(", ") + "): " + lastError + ".");
     return null;
+  }
+
+  // After Effects lists every property an animator can have as a hidden placeholder (103 of them); only the ones that
+  // were added take expressions (placeholder: canSetExpression false, added: true). Two added ones, Character Alignment
+  // and Character Range, report false too, so they are always listed (their placeholders are read as well).
+  function animPropIsReal(p) {
+    var can = false;
+    try { can = p.canSetExpression === true; } catch (e0) { can = false; }
+    if (can) return true;
+    var keyed = 0;
+    try { keyed = p.numKeys; } catch (e1) { keyed = 0; }
+    if (keyed > 0) return true;
+    return p.matchName === "ADBE Text Character Change Type" || p.matchName === "ADBE Text Character Range";
   }
 
   A.textAnimators = function (args) {
@@ -949,9 +1001,10 @@
       var a = anims.property(i);
       var entry = { index: i, name: a.name, properties: [], selectors: [] };
       var props = a.property("ADBE Text Animator Properties");
-      for (var k = 1; k <= props.numProperties && k <= MAX_LIST; k++) {
+      for (var k = 1; k <= props.numProperties && entry.properties.length < MAX_LIST; k++) {
         var p = props.property(k);
-        var pe = { name: p.name, matchName: p.matchName, value: null, keys: 0 };
+        if (!animPropIsReal(p)) continue;
+        var pe = { index: k, name: p.name, matchName: p.matchName, value: null, keys: 0 };
         try { pe.value = copy(p.value); } catch (eV) {}
         try { pe.keys = p.numKeys; } catch (eK) {}
         entry.properties.push(pe);
@@ -1264,13 +1317,19 @@
         }
         for (a2 = 0; a2 < axisPlan.length; a2++) {
           grp = animators(layer).property(ai).property("ADBE Text Animator Properties");
+          var liveBefore = liveSlots(grp);
           ret = grp.addVariableFontAxis(axisPlan[a2].tag);
           pr = null;
           if (ret && typeof ret.setValue === "function") {
             pr = ret;
           } else {
+            // No property came back. AE 26.2.1 pre-lists the animator properties (VF Axis 1..8 among them) as
+            // hidden placeholders, so the last slot is not the new axis; it is the slot that became usable.
             grp = animators(layer).property(ai).property("ADBE Text Animator Properties");
-            pr = grp.property(grp.numProperties);
+            pr = newLiveSlot(grp, liveBefore);
+            if (!pr) {
+              fail("bad_args", "After Effects added the " + axisPlan[a2].tag + " axis but did not say which property it is, and none of the Properties group's slots became usable; nothing was kept.");
+            }
           }
           var axIndex = grp.numProperties;
           try { if (isNum(pr.propertyIndex)) axIndex = pr.propertyIndex; } catch (eIx) {}

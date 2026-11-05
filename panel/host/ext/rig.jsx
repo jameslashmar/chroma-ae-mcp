@@ -163,9 +163,31 @@
     dropdown: "ADBE Dropdown Control"
   };
 
-  function kindOfMatch(mn) {
+  // The kind of Expression Control an effect is, or null. AE 26.2 reports the
+  // dropdown it adds under ADBE Dropdown Control as a pseudo effect whose match
+  // name (Pseudo/@@...) is not a constant and not a function of the items: it
+  // changes between dropdowns and between runs, even for identical items (seen
+  // live: the same items [A,B,C] got a different name on each run). Nothing may
+  // depend on the name. A dropdown is recognised by its one parameter:
+  // isDropdownEffect is true.
+  function onlyParameter(fx) {
+    for (var j = 2; j <= fx.numProperties; j++) {
+      if (fx.property(j).matchName !== "ADBE Effect Built In Params") return false;
+    }
+    return true;
+  }
+
+  function kindOfEffect(fx) {
+    var mn = "";
+    try { mn = String(fx.matchName); } catch (e0) { return null; }
     for (var k in KINDS) {
       if (KINDS.hasOwnProperty(k) && KINDS[k] === mn) return k;
+    }
+    if (mn.indexOf("Pseudo/@@") === 0) {
+      try {
+        // One parameter (the effect also lists its Compositing Options group): a pseudo effect with more is a preset, not a control.
+        if (fx.property(1).isDropdownEffect === true && onlyParameter(fx)) return "dropdown";
+      } catch (e1) {}
     }
     return null;
   }
@@ -228,7 +250,7 @@
     var hits = effectsNamed(par, name);
     if (hits.length === 0) fail("not_found", "No effect named \"" + name + "\" on layer \"" + layer.name + "\"");
     if (hits.length > 1) fail("bad_args", hits.length + " effects on \"" + layer.name + "\" are named \"" + name + "\"; rename one first");
-    var kind = kindOfMatch(hits[0].matchName);
+    var kind = kindOfEffect(hits[0]);
     if (kind === null) fail("bad_args", "Effect \"" + name + "\" on \"" + layer.name + "\" is not an Expression Control (" + hits[0].matchName + ")");
     return { effect: hits[0], kind: kind, index: hits[0].propertyIndex };
   }
@@ -406,11 +428,62 @@
   }
 
   // A text search: the expression names the effect, and on another layer also names the layer.
-  // The layer named just before a match, as in layer("X").effect(...): its name, or null.
+  // The layer named just before a match, as in layer("X").effect(...):
+  // { name, start } (start is where layer( begins), or null.
   function layerBefore(text, pos) {
     var m = /layer\((["'])((?:(?!\1)[\s\S])*)\1\)\s*\.\s*$/.exec(text.substring(0, pos));
     if (!m) return null;
-    return m[2];
+    return { name: m[2], start: m.index };
+  }
+
+  // The name of the comp an expression runs in, or null when the host does not say.
+  function ownCompName(entry) {
+    try {
+      return String(entry.layer.containingComp.name);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Which comp a name stands for: "this" (the expression's own), "other", "maybe".
+  // thisComp is this one; comp("X") is this one only when X is its name.
+  function compNamed(entry, name) {
+    var own = ownCompName(entry);
+    if (own === null) return "maybe";
+    if (name === own) return "this";
+    return "other";
+  }
+
+  // The comp the text in front of a layer( reaches, from the text alone: "this",
+  // "other" or "maybe". prefix is what stands in front of layer( with its dot
+  // removed; nothing in front (a bare layer( call) is this comp. A variable
+  // is followed back to its assignments (var m = comp("X")).
+  function compOfPrefix(entry, prefix) {
+    var p = prefix.replace(/\s+$/, "");
+    if (p.length === 0) return "this";
+    if (/(?:^|[^\w$.])thisComp$/.test(p)) return "this";
+    var named = /(?:^|[^\w$.])comp\((["'])((?:(?!\1)[\s\S])*)\1\)$/.exec(p);
+    if (named) return compNamed(entry, named[2]);
+    var v = /(?:^|[^\w$.])([A-Za-z_$][\w$]*)$/.exec(p);
+    if (!v) return "maybe";
+    var re = new RegExp("(?:^|[^\\w$.])(?:var\\s+)?" + v[1].replace(/\$/g, "\\$") + "\\s*=(?!=)\\s*([^;\\n]*)", "g");
+    var before = p.substring(0, v.index);
+    var answer = null;
+    var rhs;
+    while ((rhs = re.exec(before)) !== null) {
+      var value = rhs[1].replace(/\s+$/, "");
+      var one = "maybe";
+      if (value === "thisComp") {
+        one = "this";
+      } else {
+        var cm = /^comp\((["'])((?:(?!\1)[\s\S])*)\1\)$/.exec(value);
+        if (cm) one = compNamed(entry, cm[2]);
+      }
+      if (answer === null) answer = one;
+      else if (answer !== one) answer = "maybe";
+    }
+    if (answer === null) return "maybe";
+    return answer;
   }
 
   // Every place the text names the effect: [position, ...].
@@ -427,31 +500,89 @@
     return spots;
   }
 
-  // True when the spot is reached through a variable, as in c.effect(...) after
-  // var c = thisComp.layer("X"). A bare effect( or thisLayer.effect( names the
-  // expression's own layer, so it never reaches another layer's control.
-  function viaVariable(text, pos) {
-    var m = /([A-Za-z_$][\w$]*)\s*\.\s*$/.exec(text.substring(0, pos));
-    if (!m) return false;
-    return m[1] !== "thisLayer";
+  // What a spot like c.effect("Name") reaches, from the text alone:
+  // "yes" (the holder's control), "no" (another layer's), "maybe" (can't tell).
+  // layer("X").effect(..) names its layer, and counts only in this comp
+  // (thisComp.layer, a bare layer(, or a variable holding thisComp; comp("Y")
+  // is another comp unless Y is this one's name); a bare effect( or thisLayer.effect(
+  // is the expression's own layer; a variable is followed back to its one
+  // assignment (var c = thisComp.layer("X")). Anything else is "maybe".
+  function reachOfSpot(entry, holder, spot) {
+    var lb = layerBefore(entry.text, spot);
+    if (lb !== null) {
+      if (lb.name !== holder.name) return "no";
+      // The holder's name, but in which comp? Only this comp's layer is the holder.
+      var pre = entry.text.substring(0, lb.start);
+      var inComp = "this";
+      if (/[\w$]$/.test(pre)) inComp = "maybe";
+      else if (/\.\s*$/.test(pre)) inComp = compOfPrefix(entry, pre.replace(/\s*\.\s*$/, ""));
+      if (inComp === "this") return "yes";
+      if (inComp === "other") return "no";
+      return "maybe";
+    }
+    var before = entry.text.substring(0, spot);
+    if (/[\w$]$/.test(before)) return "no";
+    var own = entry.layer.id === holder.id ? "yes" : "no";
+    if (!/\.\s*$/.test(before)) return own;
+    var m = /([A-Za-z_$][\w$]*)\s*\.\s*$/.exec(before);
+    if (!m) return "maybe";
+    if (m[1] === "thisLayer") return own;
+    var re = new RegExp("(?:^|[^\\w$.])(?:var\\s+)?" + m[1].replace(/\$/g, "\\$") + "\\s*=(?!=)\\s*([^;\\n]*)", "g");
+    var answer = null;
+    var rhs;
+    while ((rhs = re.exec(before)) !== null) {
+      var value = rhs[1].replace(/\s+$/, "");
+      var one = "maybe";
+      if (value === "thisLayer") {
+        one = own;
+      } else {
+        var named = /^(?:thisComp\s*\.\s*)?layer\((["'])((?:(?!\1)[\s\S])*)\1\)$/.exec(value);
+        if (named) one = named[2] === holder.name ? "yes" : "no";
+      }
+      if (answer === null) answer = one;
+      else if (answer !== one) answer = "maybe";
+    }
+    if (answer === null) return "maybe";
+    return answer;
+  }
+
+  // For reading: a "maybe" counts when the expression also names the holder layer.
+  function spotReaches(entry, holder, spot) {
+    var r = reachOfSpot(entry, holder, spot);
+    if (r === "maybe") return mentionsLayer(entry.text, holder.name);
+    return r === "yes";
   }
 
   function refersTo(entry, holder, name) {
     var spots = effectSpots(entry.text, name);
-    if (spots.length === 0) return false;
-    var onHolder = entry.layer.id === holder.id;
     for (var i = 0; i < spots.length; i++) {
-      var lname = layerBefore(entry.text, spots[i]);
-      if (lname !== null) {
-        // layer("X").effect(...) reaches the holder only when X is its name.
-        if (lname === holder.name) return true;
-      } else if (onHolder) {
-        return true;
-      } else if (viaVariable(entry.text, spots[i]) && mentionsLayer(entry.text, holder.name)) {
-        return true;
-      }
+      if (spotReaches(entry, holder, spots[i])) return true;
     }
     return false;
+  }
+
+  // For writing: only the spots that are surely the holder's control change.
+  // The spots refersTo counts but could not be placed are counted in unresolved
+  // and left as they are. effect("Old") is 8 characters before the name.
+  function renamedText(entry, holder, oldName, newName) {
+    var spots = effectSpots(entry.text, oldName);
+    var keep = [];
+    var unresolved = 0;
+    for (var i = 0; i < spots.length; i++) {
+      if (reachOfSpot(entry, holder, spots[i]) === "yes") keep.push(spots[i]);
+      else if (spotReaches(entry, holder, spots[i])) unresolved++;
+    }
+    keep.sort(function (a, b) { return b - a; });
+    var text = entry.text;
+    for (var j = 0; j < keep.length; j++) {
+      // The quote sits at keep[j] + 7. A control name may hold an apostrophe
+      // (checkName forbids only the double quote and the backslash), so in a
+      // single-quoted spot each one gets a backslash.
+      var put = newName;
+      if (text.charAt(keep[j] + 7) === "'") put = newName.replace(/'/g, "\\'");
+      text = text.substring(0, keep[j] + 8) + put + text.substring(keep[j] + 8 + oldName.length);
+    }
+    return { text: text, changed: keep.length, unresolved: unresolved };
   }
 
   function refEntry(entry, withError, time) {
@@ -475,7 +606,7 @@
   // ---------- reads ----------
 
   function controlInfo(fx, layer, comp) {
-    var kind = kindOfMatch(fx.matchName);
+    var kind = kindOfEffect(fx);
     var info = {
       found: true,
       layer_id: layer.id,
@@ -601,7 +732,7 @@
       if (!par) continue;
       for (var i = 1; i <= par.numProperties; i++) {
         var fx = par.property(i);
-        if (!fx || kindOfMatch(fx.matchName) === null) continue;
+        if (!fx || kindOfEffect(fx) === null) continue;
         if (controls.length >= MAX_LIST) {
           truncated = true;
           break;
@@ -1096,35 +1227,55 @@
       ctl.effect.name = args.new_name;
       var time = comp.time;
       var lay = findLayer(comp, { id: layerId });
-      // AE may update the references itself on a rename; whatever it left is
-      // forced to evaluate so AE marks it broken, then autoFixExpressions
-      // (which only repairs broken expressions) rewrites the quoted name.
+      // AE 26.2 does not update the references when a script renames an effect,
+      // and autoFixExpressions given effect("Old") did nothing either (seen live).
+      // So the quoted name is swapped here, in this comp's expressions, at the
+      // spots that surely reach this control. Setting an expression also
+      // switches it back on if AE had disabled it. A spot that can't be placed
+      // (a variable with several assignments, a layer index) is left as it is.
       var S1 = { nodes: 0, truncated: false };
       var entries1 = collectExpressions(allLayers(comp, S1), S1);
-      var still = 0;
+      var rewritten = 0;
+      var unresolved = 0;
+      var stuck = [];
       for (var k = 0; k < entries1.length; k++) {
-        if (refersTo(entries1[k], lay, args.control)) {
-          still++;
-          if (forceable(entries1[k].prop)) {
-            try { entries1[k].prop.valueAtTime(time, false); } catch (eF) {}
+        if (!refersTo(entries1[k], lay, args.control)) continue;
+        var res = renamedText(entries1[k], lay, args.control, args.new_name);
+        var left = res.unresolved;
+        if (res.changed > 0) {
+          try {
+            entries1[k].prop.expression = res.text;
+            rewritten++;
+          } catch (eSet) {
+            left += res.changed;
           }
         }
+        if (left > 0) {
+          unresolved += left;
+          stuck.push(entries1[k]);
+        }
       }
+      var still = stuck.length;
       var attempted = 0;
       var autofix = "not needed";
       if (still > 0 || S1.truncated) {
+        // What was left (or past the scan cap): AE's own repair. It rewrites only
+        // expressions that error now, so the stuck ones are made to evaluate
+        // first, and it must be given the bare names (seen live). It is
+        // project-wide: any expression that errors and holds the old name changes.
         if (typeof app.project.autoFixExpressions !== "function") {
           autofix = "unavailable";
         } else {
           autofix = "attempted";
+          for (var f = 0; f < stuck.length; f++) {
+            if (forceable(stuck[f].prop)) {
+              try { stuck[f].prop.valueAtTime(time, false); } catch (eF) {}
+            }
+          }
           try {
-            app.project.autoFixExpressions("effect(\"" + jsString(args.control) + "\")", "effect(\"" + jsString(args.new_name) + "\")");
+            app.project.autoFixExpressions(args.control, args.new_name);
             attempted++;
           } catch (eA) {}
-          try {
-            app.project.autoFixExpressions("effect('" + args.control + "')", "effect('" + args.new_name + "')");
-            attempted++;
-          } catch (eB) {}
         }
       }
       return {
@@ -1133,6 +1284,9 @@
         new_name: args.new_name,
         references_before: before.length,
         references_left_after_rename: still,
+        references_rewritten: rewritten,
+        references_unresolved: unresolved,
+        other_comps_scanned: false,
         scan_truncated: S1.truncated,
         autofix: autofix,
         autofix_calls: attempted
@@ -1424,7 +1578,7 @@
       var hits = effectsNamed(par, spec.name);
       if (hits.length > 1) fail("bad_args", hits.length + " effects on \"" + controller.name + "\" are named \"" + spec.name + "\"");
       if (hits.length === 1) {
-        var have = kindOfMatch(hits[0].matchName);
+        var have = kindOfEffect(hits[0]);
         if (have !== spec.kind) fail("bad_args", "\"" + spec.name + "\" on \"" + controller.name + "\" exists but is not a " + spec.kind + " control");
         reuse.push(spec.name);
       } else {

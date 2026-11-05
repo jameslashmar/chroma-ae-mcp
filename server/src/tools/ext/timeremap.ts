@@ -113,7 +113,7 @@ export const AeTimeRemapSchema = z
     operation: z
       .enum(OPERATIONS)
       .describe(
-        "enable: switch Time Remap on (AE adds its own keys). disable: switch it off (its keys go). " +
+        "enable: switch Time Remap on (AE adds its own keys, and a Time Remap expression left from before is cleared). disable: switch it off (its keys go; AE keeps the expression text). " +
           "freeze: hold one frame for the whole layer (at_time or source_time). reverse: play the layer backwards. " +
           "speed: constant speed through layer.stretch (speed_percent; not while remapping is on). " +
           "ramp: a speed ramp through points of {time, speed}. hold_last_frame: keep the last source frame on screen until `until`. " +

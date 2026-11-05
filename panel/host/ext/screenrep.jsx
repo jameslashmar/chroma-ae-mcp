@@ -829,7 +829,10 @@
             var lres = addLevels(comp, dup, { in_black: refl.threshold });
             if (!lres.ok) throw new Error(lres.reason);
             dup.blendingMode = BlendingMode.SCREEN;
+            var insertWasOn = layer.enabled === true;
             dup.setTrackMatte(layer, TrackMatteType.ALPHA);
+            // Live in AE 26.2.1: setTrackMatte switches the matte layer off. The insert is the picture itself and must stay visible, so switch it back on (written without reading it first).
+            if (insertWasOn) layer.enabled = true;
             // Always set it: the duplicate inherits the plate's opacity, which may not be 100, may be keyed, or may be driven by an expression.
             var op = child(dup.property("ADBE Transform Group"), "ADBE Opacity");
             if (op) {

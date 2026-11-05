@@ -235,6 +235,8 @@
     var limit = MAX_KEYS;
     if (typeof args.max === "number" && args.max > 0) limit = Math.min(Math.floor(args.max), 3 * MAX_KEYS);
     var out = { numKeys: prop.numKeys, keys: [], truncated: false, value: null };
+    // The match name lets ae_remove_keyframes' dry run see a Time Remap target.
+    try { out.match_name = String(prop.matchName); } catch (eM) {}
     if (prop.numKeys === 0) {
       try { out.value = plain(prop.value); } catch (eV) {}
     }

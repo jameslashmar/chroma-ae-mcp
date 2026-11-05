@@ -61,6 +61,14 @@ const sim = {
   project: null as null | FakeProject,
 };
 
+/**
+ * AE 26.2.1 lists the dropdown it adds under ADBE Dropdown Control as a pseudo effect whose match
+ * name is not constant: a new one gets one name, and setting its items gives it another, different
+ * for every item list (seen live: Pseudo/@@PLsS7uDISY+ewLPSnMW4yQ for one, Pseudo/@@ZVaut0+JSf2vUHsWGRpjTg for another).
+ */
+const pseudoFor = (items: string[]) => `Pseudo/@@${Buffer.from(`items:${items.join("|")}`).toString("base64").replace(/=+$/, "")}`;
+const PSEUDO_RE = /^Pseudo\/@@/;
+
 const DEFAULTS: Record<string, [string, number, unknown]> = {
   "ADBE Slider Control": ["Slider Control", PropertyValueType.OneD, 0],
   "ADBE Angle Control": ["Angle Control", PropertyValueType.OneD, 0],
@@ -88,10 +96,16 @@ function arm(p: FakeProperty, owner?: FakeLayer) {
     configurable: true,
     get: () => {
       if (!expr || !owner) return "";
-      for (const m of expr.matchAll(/(?:thisComp\.layer\("([^"]*)"\)\.)?effect\("([^"]*)"\)/g)) {
-        const holder = m[1] ? owner.comp.stack.find((l) => l.name === m[1]) : owner;
+      for (const m of expr.matchAll(/(?:thisComp\.layer\("([^"]*)"\)\.|([A-Za-z_$][\w$]*)\.)?effect\((?:"([^"]*)"|'([^']*)')\)/g)) {
+        // A variable is followed to its one assignment, var c = thisComp.layer("X"); otherwise (a ternary, say) it counts as the layer itself.
+        let layerName = m[1];
+        if (!layerName && m[2] && m[2] !== "thisLayer") {
+          const a = new RegExp(`\\b${m[2]}\\s*=\\s*thisComp\\.layer\\((?:"([^"]*)"|'([^']*)')\\)\\s*(?:;|$)`).exec(expr);
+          if (a) layerName = a[1] ?? a[2];
+        }
+        const holder = layerName ? owner.comp.stack.find((l) => l.name === layerName) : owner;
         const par = holder?.group.property("ADBE Effect Parade") as FakeGroup | null | undefined;
-        if (!par || !par.props.some((fx) => fx.name === m[2])) return `Effect named "${m[2]}" is missing or does not exist`;
+        if (!par || !par.props.some((fx) => fx.name === (m[3] ?? m[4]))) return `Effect named "${m[3] ?? m[4]}" is missing or does not exist`;
       }
       return "";
     },
@@ -112,17 +126,26 @@ beforeAll(() => {
     if (this.matchName !== "ADBE Effect Parade") return origAdd.call(this, matchName);
     const d = DEFAULTS[matchName];
     if (!d) throw new Error(`Can't add ${matchName}`);
-    const leaf = new FakeProperty("Slider", `${matchName}-0001`, d[1], d[2]);
+    // What the effect reports as its match name (the dropdown differs in real AE).
+    const isDropdown = matchName === "ADBE Dropdown Control";
+    const realMatch = isDropdown ? pseudoFor([]) : matchName;
+    const leaf = new FakeProperty("Slider", `${realMatch}-0001`, d[1], d[2]);
     const items: string[] = [];
+    // Like AE: every effect lists its one parameter and a Compositing Options group; only a dropdown's parameter says isDropdownEffect true.
+    Object.assign(leaf, { isDropdownEffect: isDropdown });
+    const g = new FakeGroup(d[0], realMatch, [leaf, new FakeGroup("Compositing Options", "ADBE Effect Built In Params", [])]);
     Object.assign(leaf, {
       setPropertyParameters: (list: string[]) => {
         if (sim.dropdownFails) throw new Error("setPropertyParameters failed");
         items.splice(0, items.length, ...list);
+        // AE rebuilds the effect: a new match name from the items, and the name back to the default.
+        g.matchName = pseudoFor(list);
+        leaf.matchName = `${g.matchName}-0001`;
+        g.name = d[0];
         return leaf;
       },
       propertyParameters: items,
     });
-    const g = new FakeGroup(d[0], matchName, [leaf]);
     Object.defineProperty(g, "propertyIndex", { get: () => this.props.indexOf(g) + 1 });
     g.parentProperty = this;
     this.props.push(g);
@@ -154,9 +177,11 @@ function scene(opts: { autoFix?: boolean } = {}): Scene {
   (project as unknown as Record<string, unknown>).expressionEngine = "javascript-1.0";
   const fixes: Array<[string, string]> = [];
   if (opts.autoFix !== false) {
-    // Like AE's: it repairs only expressions that error now.
+    // Like AE 26.2.1's: it repairs only expressions that error now, and it did nothing for a
+    // search text with effect("..") around the name (seen live); a bare name worked.
     (project as unknown as Record<string, unknown>).autoFixExpressions = (oldText: string, newText: string) => {
       fixes.push([oldText, newText]);
+      if (oldText.includes("(")) return;
       const fix = (g: FakeGroup | FakeLayer["group"]) => {
         for (const p of g.props) {
           if (p instanceof FakeProperty) {
@@ -164,7 +189,14 @@ function scene(opts: { autoFix?: boolean } = {}): Scene {
           } else fix(p);
         }
       };
-      for (const it of project.all) for (const l of (it as FakeComp).stack ?? []) fix(l.group);
+      // AE's own repair is not subject to the syntax check a script's set goes through.
+      const refuse = sim.rejectExpr;
+      sim.rejectExpr = null;
+      try {
+        for (const it of project.all) for (const l of (it as FakeComp).stack ?? []) fix(l.group);
+      } finally {
+        sim.rejectExpr = refuse;
+      }
     };
   }
   const { A, undo } = loadHost(project, ["rig.jsx"]);
@@ -671,7 +703,7 @@ describe("rig.jsx: adding controls", () => {
       "ADBE Point Control",
       "ADBE Point3D Control",
       "ADBE Layer Control",
-      "ADBE Dropdown Control",
+      expect.stringMatching(PSEUDO_RE),
     ]);
     expect(val(0).staticValue).toBe(50);
     expect(val(1).staticValue).toBe(90);
@@ -976,14 +1008,16 @@ describe("rig.jsx: renaming", () => {
     return s;
   }
 
-  it("renames, then repairs the quoted references that AE left broken", () => {
+  it("renames, then rewrites the quoted references that AE left broken (AE and autoFixExpressions did not)", () => {
     const s = referenced();
     const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
     expect(effectsOf(s.ctl).map((f) => f.name)).toEqual(["Gain", "Other"]);
-    expect(out).toMatchObject({ old_name: "Speed", new_name: "Gain", references_before: 2, references_left_after_rename: 2, autofix: "attempted", autofix_calls: 2 });
-    expect(s.fixes[0]).toEqual(['effect("Speed")', 'effect("Gain")']);
+    expect(out).toMatchObject({ old_name: "Speed", new_name: "Gain", references_before: 2, references_left_after_rename: 0, references_rewritten: 2, autofix: "not needed", autofix_calls: 0 });
+    expect(s.fixes).toEqual([]);
     expect(propOf(s.box, ...OPACITY).expression).toBe('thisComp.layer("Controls").effect("Gain")(1) * 2');
     expect(propOf(s.ctl, ...ROT).expression).toBe('effect("Gain")(1)');
+    // The other layer's own effect of the same name is not ours and is left alone.
+    expect(propOf(s.box, ...ROT).expression).toBe('effect("Speed")(1)');
     expect(s.undo).toEqual({ begun: 1, ended: 1 });
     // The read-back finds nothing on the old name and both references on the new.
     const state = run(s, "rigState", { controls: [{ layer: { name: "Controls" }, name: "Gain" }], scans: [{ layer: { name: "Controls" }, name: "Speed" }, { layer: { name: "Controls" }, name: "Gain" }] });
@@ -992,8 +1026,86 @@ describe("rig.jsx: renaming", () => {
     expect(state.scans[1].references.every((r: { error: unknown }) => r.error === null)).toBe(true);
   });
 
-  it("with no autoFixExpressions it says so and leaves the references for the read-back to find", () => {
+  it("rewrites every spot, single-quoted ones and ones through a variable, but not another layer's", () => {
+    const s = referenced();
+    propOf(s.box, ...OPACITY).expression = "var c = thisComp.layer('Controls');\nc.effect('Speed')(1) + thisComp.layer(\"Controls\").effect(\"Speed\")(1) + thisComp.layer(\"Box\").effect(\"Speed\")(1)";
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain Two" });
+    expect(out).toMatchObject({ references_left_after_rename: 0, references_rewritten: 2 });
+    expect(propOf(s.box, ...OPACITY).expression).toBe("var c = thisComp.layer('Controls');\nc.effect('Gain Two')(1) + thisComp.layer(\"Controls\").effect(\"Gain Two\")(1) + thisComp.layer(\"Box\").effect(\"Speed\")(1)");
+  });
+
+  it("with no autoFixExpressions the rewrite still repairs the references", () => {
     const s = referenced({ autoFix: false });
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
+    expect(out.autofix).toBe("not needed");
+    const state = run(s, "rigState", { scans: [{ layer: { name: "Controls" }, name: "Speed" }, { layer: { name: "Controls" }, name: "Gain" }] });
+    expect(state.scans[0].count).toBe(0);
+    expect(state.scans[1].count).toBe(2);
+  });
+
+  it("falls back to autoFixExpressions, with the bare names, for an expression it could not set; AE then repairs it", () => {
+    const s = referenced();
+    sim.rejectExpr = (v) => v.includes("Gain");
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
+    expect(out).toMatchObject({ references_left_after_rename: 2, references_rewritten: 0, references_unresolved: 2, autofix: "attempted", autofix_calls: 1 });
+    // The wrapped effect("Speed") text does nothing in AE (seen live); only the bare names are asked for.
+    expect(s.fixes).toEqual([["Speed", "Gain"]]);
+    expect(propOf(s.box, ...OPACITY).expression).toBe('thisComp.layer("Controls").effect("Gain")(1) * 2');
+    expect(propOf(s.ctl, ...ROT).expression).toBe('effect("Gain")(1)');
+  });
+
+  it("leaves a variable that points at another layer alone, and one it can't place for AE's repair", () => {
+    const s = referenced();
+    // On the holder layer: o is another layer, so o.effect("Speed") is not ours, and a bare effect( is.
+    propOf(s.ctl, ...OPACITY).expression = `var o = thisComp.layer("Box");\no.effect("Speed")(1) + effect("Speed")(1)`;
+    // A third layer that names both layers: c is Controls (ours), o is Box (not).
+    propOf(s.text, ...OPACITY).expression = `var c = thisComp.layer("Controls"); var o = thisComp.layer('Box');\nc.effect("Speed")(1) + o.effect("Speed")(1)`;
+    // A ternary assignment cannot be placed: it is not rewritten, and AE's repair gets it (it errors now).
+    propOf(s.text, ...ROT).expression = `var c = x ? thisComp.layer("Controls") : thisComp.layer("Box");\nc.effect("Speed")(1)`;
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
+    expect(propOf(s.ctl, ...OPACITY).expression).toBe(`var o = thisComp.layer("Box");\no.effect("Speed")(1) + effect("Gain")(1)`);
+    expect(propOf(s.text, ...OPACITY).expression).toBe(`var c = thisComp.layer("Controls"); var o = thisComp.layer('Box');\nc.effect("Gain")(1) + o.effect("Speed")(1)`);
+    expect(out).toMatchObject({ references_unresolved: 1, references_left_after_rename: 1, autofix: "attempted", autofix_calls: 1 });
+    expect(s.fixes).toEqual([["Speed", "Gain"]]);
+    // Box's own Speed effect on the other layer is untouched.
+    expect(propOf(s.box, ...ROT).expression).toBe('effect("Speed")(1)');
+  });
+
+  it("leaves a same-named layer in another comp alone, directly or through a variable, and still rewrites comp() of its own comp", () => {
+    const s = referenced();
+    // The holder's name, but comp("Other") is not this comp: Other's layer "Controls" is not our holder.
+    propOf(s.box, ...OPACITY).expression = 'comp("Other").layer("Controls").effect("Speed")(1)';
+    propOf(s.text, ...OPACITY).expression = "var m = comp('Other');\nm.layer('Controls').effect('Speed')(1)";
+    // comp("Main") is this comp (its name), so it is the holder.
+    propOf(s.text, ...ROT).expression = 'comp("Main").layer("Controls").effect("Speed")(1)';
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
+    expect(propOf(s.box, ...OPACITY).expression).toBe('comp("Other").layer("Controls").effect("Speed")(1)');
+    expect(propOf(s.text, ...OPACITY).expression).toBe("var m = comp('Other');\nm.layer('Controls').effect('Speed')(1)");
+    expect(propOf(s.text, ...ROT).expression).toBe('comp("Main").layer("Controls").effect("Gain")(1)');
+    expect(propOf(s.ctl, ...ROT).expression).toBe('effect("Gain")(1)');
+    expect(out).toMatchObject({ references_before: 2, references_rewritten: 2, references_left_after_rename: 0, references_unresolved: 0, autofix: "not needed" });
+  });
+
+  it("does not guess at a comp it cannot place: a variable with no known comp is left for AE's repair", () => {
+    const s = referenced();
+    propOf(s.box, ...OPACITY).expression = 'var m = someComp;\nm.layer("Controls").effect("Speed")(1)';
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
+    expect(propOf(s.box, ...OPACITY).expression).toBe('var m = someComp;\nm.layer("Controls").effect("Speed")(1)');
+    expect(out).toMatchObject({ references_unresolved: 1, references_left_after_rename: 1, autofix: "attempted" });
+  });
+
+  it("escapes an apostrophe in the new name inside a single-quoted reference, and leaves a double-quoted one as it is", () => {
+    const s = referenced();
+    propOf(s.box, ...OPACITY).expression = "thisComp.layer('Controls').effect('Speed')(1) + thisComp.layer(\"Controls\").effect(\"Speed\")(1)";
+    const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Joe's Knob" });
+    expect(propOf(s.box, ...OPACITY).expression).toBe("thisComp.layer('Controls').effect('Joe\\'s Knob')(1) + thisComp.layer(\"Controls\").effect(\"Joe's Knob\")(1)");
+    expect(effectsOf(s.ctl).map((f) => f.name)).toContain("Joe's Knob");
+    expect(out).toMatchObject({ references_left_after_rename: 0, references_unresolved: 0 });
+  });
+
+  it("with no autoFixExpressions and an expression it can't set, it says so and leaves the references for the read-back to find", () => {
+    const s = referenced({ autoFix: false });
+    sim.rejectExpr = (v) => v.includes("Gain");
     const out = run(s, "rigRename", { layer: { name: "Controls" }, control: "Speed", new_name: "Gain" });
     expect(out.autofix).toBe("unavailable");
     const state = run(s, "rigState", { scans: [{ layer: { name: "Controls" }, name: "Speed" }] });
@@ -1437,6 +1549,51 @@ describe("rig.jsx and rig.ts: review fixes", () => {
     expect(controlSpecProblem({ name: "A", kind: "angle", value: 5e6 })).toBeNull();
     expect(fails(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "S", kind: "slider", value: 5e6 }] })).toMatchObject({ kind: "bad_args" });
     expect(s.undo.begun).toBe(0);
+  });
+
+  it("knows every dropdown AE 26.2 adds (a pseudo effect whose match name differs per item list) in the receipt, the list and the state", () => {
+    const s = scene();
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Mode", kind: "dropdown", items: ["A", "B", "C"], value: 2 }, { name: "Many", kind: "dropdown", items: ["One", "Two"] }, { name: "Speed", kind: "slider" }] });
+    const [mode, many] = effectsOf(s.ctl);
+    // Two dropdowns, two different pseudo names: no constant can tell them from an effect that is no control.
+    expect(mode.matchName).toMatch(PSEUDO_RE);
+    expect(many.matchName).toMatch(PSEUDO_RE);
+    expect(mode.matchName).not.toBe(many.matchName);
+    const state = run(s, "rigState", { controls: [{ layer: { name: "Controls" }, name: "Mode" }, { layer: { name: "Controls" }, name: "Many" }] });
+    expect(state.controls[0]).toMatchObject({ found: true, kind: "dropdown", match_name: mode.matchName, value: 2, items: ["A", "B", "C"] });
+    expect(state.controls[1]).toMatchObject({ found: true, kind: "dropdown", match_name: many.matchName, items: ["One", "Two"] });
+    const m: Parameters<typeof controlMismatches>[0] = [];
+    controlMismatches(m, "c", { name: "Mode", kind: "dropdown", items: ["A", "B", "C"], value: 2 } as ControlSpec, state.controls[0]);
+    controlMismatches(m, "c", { name: "Many", kind: "dropdown", items: ["One", "Two"] } as ControlSpec, state.controls[1]);
+    expect(m).toEqual([]);
+    // The documented match name still passes, and a slider's does not pass for a dropdown's.
+    controlMismatches(m, "c", { name: "Mode", kind: "dropdown", items: ["A"], value: 1 } as ControlSpec, { found: true, name: "Mode", kind: "dropdown", match_name: "ADBE Dropdown Control", value: 1, items: ["A"] });
+    expect(m).toEqual([]);
+    controlMismatches(m, "c", { name: "Mode", kind: "dropdown", items: ["A"], value: 1 } as ControlSpec, { found: true, name: "Mode", kind: "dropdown", match_name: "ADBE Slider Control", value: 1, items: ["A"] });
+    expect(m.map((x) => x.path)).toEqual(["c.match_name"]);
+    const list = run(s, "rigList", {});
+    expect(list.controls.map((c: { name: string; kind: string }) => [c.name, c.kind])).toEqual([["Mode", "dropdown"], ["Many", "dropdown"], ["Speed", "slider"]]);
+  });
+
+  it("does not take a pseudo effect that is not a dropdown control for one", () => {
+    const s = scene();
+    run(s, "rigAddControls", { layer: { name: "Controls" }, controls: [{ name: "Mode", kind: "dropdown", items: ["A", "B"] }] });
+    const par = s.ctl.group.property("ADBE Effect Parade") as FakeGroup;
+    // A preset: a Pseudo/@@ match name whose parameter is no dropdown, and one with two parameters.
+    const leaf = new FakeProperty("Amount", "Pseudo/@@preset-0001", PropertyValueType.OneD, 0);
+    Object.assign(leaf, { isDropdownEffect: false });
+    const preset = new FakeGroup("Preset", "Pseudo/@@preset", [leaf]);
+    const twoLeaf = new FakeProperty("Menu", "Pseudo/@@two-0001", PropertyValueType.OneD, 1);
+    Object.assign(twoLeaf, { isDropdownEffect: true });
+    const two = new FakeGroup("Two", "Pseudo/@@two", [twoLeaf, new FakeProperty("Other", "Pseudo/@@two-0002", PropertyValueType.OneD, 0)]);
+    for (const g of [preset, two]) {
+      Object.defineProperty(g, "propertyIndex", { get: () => par.props.indexOf(g) + 1 });
+      g.parentProperty = par;
+      par.props.push(g);
+    }
+    const list = run(s, "rigList", {});
+    expect(list.controls.map((c: { name: string }) => c.name)).toEqual(["Mode"]);
+    expect(fails(s, "rigRename", { layer: { name: "Controls" }, control: "Preset", new_name: "X" }).message).toContain("not an Expression Control");
   });
 
   it("reads back a dropdown of 100 items whole", () => {

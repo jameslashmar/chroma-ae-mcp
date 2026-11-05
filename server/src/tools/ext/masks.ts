@@ -177,7 +177,7 @@ const SelectorBase = z.object({
   mode: SEL_MODE_ENUM.optional().describe("range and wiggly: how this selector combines with the ones above it."),
   amount: z.number().min(-100).max(100).optional().describe("range: Amount, percent."),
   shape: z.enum(["square", "ramp_up", "ramp_down", "triangle", "round", "smooth"]).optional().describe("range: the falloff shape."),
-  smoothness: z.number().min(0).max(100).optional().describe("range: Smoothness, percent (square shape)."),
+  smoothness: z.number().min(0).max(100).optional().describe("range: Smoothness, percent. Square shape only: with any other shape After Effects hides it and resets it to 100, so the call is refused."),
   ease_high: z.number().min(-100).max(100).optional(),
   ease_low: z.number().min(-100).max(100).optional(),
   randomize: z.boolean().optional().describe("range: Randomize Order."),
@@ -387,7 +387,7 @@ interface AnimatorState {
   animators: Array<{
     index: number;
     name: string;
-    properties: Array<{ matchName: string; name?: string; value: unknown }>;
+    properties: Array<{ index?: number; matchName: string; name?: string; value: unknown }>;
     selectors: SelectorState[];
   }>;
   more_options?: Record<string, unknown> | null;
@@ -452,7 +452,8 @@ export function animatorMismatches(args: z.infer<typeof AeTextAnimatorSchema>, b
     compareValues(want, Array.isArray(want) && Array.isArray(p.value) ? (p.value as unknown[]).slice(0, want.length) : p.value, `animator.${key}`, m);
   }
   for (const ax of (written.variable_axes as Array<{ tag: string; value: number; index: number; name: string; match_name: string }> | undefined) ?? []) {
-    const p = a.properties[ax.index - 1];
+    // The read lists only the properties that were added, so the axis is found by its place in the group (index), not by its position in the list.
+    const p = a.properties.find((x) => x.index === ax.index) ?? a.properties[ax.index - 1];
     if (!p || (p.matchName !== ax.match_name && p.name !== ax.name)) {
       m.push({ path: `animator.axis.${ax.tag}`, expected: ax.match_name, actual: p?.matchName, message: `The variable font axis ${ax.tag} is not in the read-back` });
       continue;
@@ -516,8 +517,9 @@ const MASK_DESCRIPTION =
 
 const ANIMATOR_DESCRIPTION =
   "Add a text animator to a text layer in one undo group guarded by `expect`. `properties` takes any animator property: anchor point, position, scale, skew, skew axis, rotation (X, Y, Z), opacity, fill (opacity, colour, hue, saturation, brightness), stroke (opacity, colour, hue, saturation, brightness, width), tracking (type, amount), line anchor, line spacing, character alignment/range/value/offset and blur. " +
-  "Selectors: `selector` (and `more_selectors`) is a range selector by default (start, end, offset in percent, or indexes with units: index, in which case they are written to and read from the Index Start/End/Offset properties that After Effects then uses; based_on; mode; amount; shape; smoothness; ease high and low; randomize order; random seed), or type wiggly (mode, max/min amount, based_on, wiggles_per_second, correlation, temporal and spatial phase, lock_dimensions, random_seed) or type expression (an Amount expression plus based_on); fields from another type are refused. " +
-  "The Wiggly and Expression selector child match names are not on the Guide's match-name page: the host finds them by match name, then by display name, and a field it cannot find fails with the selector's real children (nothing is left behind). " +
+  "Selectors: `selector` (and `more_selectors`) is a range selector by default (start, end, offset in percent, or indexes with units: index, in which case they are written to and read from the Index Start/End/Offset properties that After Effects then uses; based_on; mode; amount; shape; smoothness (square shape only); ease high and low; randomize order; random seed), or type wiggly (mode, max/min amount, based_on, wiggles_per_second, correlation, temporal and spatial phase, lock_dimensions, random_seed) or type expression (an Amount expression plus based_on); fields from another type are refused. " +
+  "The Wiggly and Expression selector children are found by match name (read from After Effects 26.2.1: Wiggly has ADBE Text Selector Mode, ADBE Text Wiggly Max Amount, ADBE Text Wiggly Min Amount, ADBE Text Range Type2, ADBE Text Temporal Freq, ADBE Text Character Correlation, ADBE Text Temporal Phase, ADBE Text Spatial Phase, ADBE Text Wiggly Lock Dim and ADBE Text Wiggly Random Seed; Expression has ADBE Text Range Type2 and ADBE Text Expressible Amount), then by display name, and a field it cannot find fails with the selector's real children (nothing is left behind). " +
+  "After Effects lists every animator property as a hidden placeholder and refuses writes to it until it is added, so the host adds each property first (adding one twice is harmless) and the read-back lists only the properties that were added. " +
   "`variable_axes` ([{tag, value}], After Effects 26.0+) animates variable font axes, checked against the layer's font (an axis the font lacks is refused; custom uppercase tags are allowed; with mixed fonts it applies only where the font has the axis and the result says so). " +
   "`grouping` sets the layer's More Options (anchor point grouping, grouping alignment, fill & stroke and inter-character blending as menu indexes). `reveal` keyframes the first range selector's start, end or offset. " +
   "A classic reveal: opacity 0 with a reveal of start from 0 to 100. A locked layer is refused. The read-back (a separate evalScript) checks the animator's properties, each selector's fields, the axes, the More Options and the reveal's keys. " +
