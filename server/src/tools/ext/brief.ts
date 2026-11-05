@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
 import type { ToolContext, ToolDefinition } from "../common.js";
+import { MotionSpecSchema, resolveMotionSpec, type ResolvedMotionSpec } from "../../motion-spec.js";
 
 // ---------- swatches (.ase) ----------
 
@@ -195,6 +196,7 @@ export const BriefFieldsSchema = z.object({
   fonts: z.array(z.string().min(1).max(100)).max(6).optional(),
   do_not_change: z.array(z.string().min(1).max(300)).max(20).optional().describe("Layers, comps or decisions to leave alone."),
   notes: z.string().max(4000).optional(),
+  motion: MotionSpecSchema.optional(),
 });
 
 export type BriefFields = z.infer<typeof BriefFieldsSchema>;
@@ -296,7 +298,25 @@ export function missingFields(brief: Brief | null) {
   return BRIEF_FIELDS.filter((f) => isEmpty(brief?.[f]));
 }
 
-async function openProjectPath(ctx: ToolContext): Promise<string> {
+/**
+ * The open project's motion spec, filled from its register's defaults. Never throws: with no
+ * project, no brief or an unreadable one it returns the brand_film defaults (from_brief empty).
+ * Checks call it for their thresholds.
+ */
+export async function loadMotionSpec(ctx: ToolContext): Promise<ResolvedMotionSpec & { brief_path: string | null }> {
+  let file: string | null = null;
+  try {
+    const projectPath = await openProjectPath(ctx);
+    if (projectPath) file = briefPath(projectPath);
+  } catch {
+    file = null;
+  }
+  const brief = file ? readBrief(file) : null;
+  const parsed = MotionSpecSchema.safeParse(brief?.motion ?? {});
+  return { ...resolveMotionSpec(parsed.success ? parsed.data : null), brief_path: brief ? file : null };
+}
+
+export async function openProjectPath(ctx: ToolContext): Promise<string> {
   const res = await ctx.bridge.evalRaw<{ project_path: string }>({
     id: `${ctx.bridge.newOpId()}_brief_status`,
     script: buildJsxCall("status", {}),
