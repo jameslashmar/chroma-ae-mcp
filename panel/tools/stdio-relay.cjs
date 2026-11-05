@@ -44,11 +44,36 @@ function resolvePort() {
 
 const PORT = resolvePort();
 const TOKEN_PATH = path.join(dataDir(), "token");
-const TOOLS_CACHE_PATH = path.join(dataDir(), "relay-tools-cache.json");
 
 // Keep in step with server/src/mcp-rpc.ts.
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
-const SERVER_INFO = { name: "chroma-ae-mcp", version: "0.2.0" };
+// The version comes from the repo's VERSION file (relay at panel/tools/), or, in the packaged
+// extension where scripts/package.ps1 stamps CSXS/manifest.xml instead, from the manifest's
+// ExtensionBundleVersion. Falls back to 0.0.0.
+function readVersion() {
+  const semver = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+  try {
+    const v = fs.readFileSync(path.join(__dirname, "..", "..", "VERSION"), "utf8").trim();
+    if (semver.test(v)) return v;
+  } catch {
+    // not in the repo layout
+  }
+  try {
+    const xml = fs.readFileSync(path.join(__dirname, "..", "CSXS", "manifest.xml"), "utf8");
+    const m = /ExtensionBundleVersion="([^"]+)"/.exec(xml);
+    if (m && semver.test(m[1])) return m[1];
+  } catch {
+    // no manifest beside the relay
+  }
+  return "0.0.0";
+}
+
+const SERVER_INFO = { name: "chroma-ae-mcp", version: readVersion() };
+
+// Methods the panel's MCP serves. Anything else is "method not found" even offline.
+const KNOWN_METHODS = [
+  "initialize", "ping", "tools/list", "tools/call", "prompts/list", "prompts/get", "resources/list", "resources/read",
+];
 
 const NOT_RUNNING =
   "After Effects is not reachable. Start After Effects and wait until " +
@@ -106,34 +131,29 @@ function hasId(msg) {
   return msg && typeof msg === "object" && "id" in msg && msg.id !== undefined;
 }
 
-// The last lists the panel served, by key ("tools", "prompts", "resources"), in one file.
+// The last lists the panel served, one file per key so several relay processes (Claude Desktop
+// can start more than one) never read-modify-write a shared file. Each holds {<key>: [...]}.
 const LIST_RESULT_KEY = { "tools/list": "tools", "prompts/list": "prompts", "resources/list": "resources" };
 
-function readCacheFile() {
-  try {
-    const cached = JSON.parse(fs.readFileSync(TOOLS_CACHE_PATH, "utf8"));
-    return cached && typeof cached === "object" ? cached : {};
-  } catch {
-    return {};
-  }
+function cachePath(key) {
+  return path.join(dataDir(), "relay-" + key + "-cache.json");
 }
 
 function readListCache(key) {
-  const cached = readCacheFile();
-  return Array.isArray(cached[key]) ? cached[key] : null;
-}
-
-function readToolsCache() {
-  return readListCache("tools");
+  try {
+    const cached = JSON.parse(fs.readFileSync(cachePath(key), "utf8"));
+    return cached && Array.isArray(cached[key]) ? cached[key] : null;
+  } catch {
+    return null;
+  }
 }
 
 function writeListCache(key, list) {
   try {
-    const next = readCacheFile();
-    next[key] = list;
-    const tmp = TOOLS_CACHE_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(next));
-    fs.renameSync(tmp, TOOLS_CACHE_PATH);
+    const file = cachePath(key);
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ [key]: list }));
+    fs.renameSync(tmp, file);
   } catch (err) {
     log("could not cache the " + key + " list: " + err.message);
   }
@@ -179,6 +199,10 @@ function offlineReply(msg, reason) {
     case "tools/call":
       return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: reason }], isError: true } };
     default:
+      if (KNOWN_METHODS.indexOf(msg.method) < 0) {
+        return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found: " + String(msg.method) } };
+      }
+      // prompts/get and resources/read need the panel.
       return { jsonrpc: "2.0", id, error: { code: -32000, message: reason } };
   }
 }
@@ -236,6 +260,10 @@ rl.on("line", (line) => {
     message = JSON.parse(line);
   } catch {
     send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+    return;
+  }
+  if (message === null || typeof message !== "object") {
+    send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });
     return;
   }
   pending++;

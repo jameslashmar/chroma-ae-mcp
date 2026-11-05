@@ -755,6 +755,7 @@ export async function timingCheckHandler(args: AeTimingCheckArgs, ctx: ToolConte
       register: spec.register,
       from_brief: spec.from_brief,
       brief_path: spec.brief_path,
+      ...(spec.warning ? { warning: spec.warning } : {}),
       thresholds: {
         reading: spec.reading,
         dead_stretch_s: spec.dead_stretch_s,

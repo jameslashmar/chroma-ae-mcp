@@ -111,6 +111,9 @@ export interface ResolvedMotionSpec {
   exit_ratio: { min: number; max: number };
   max_same_ease: number;
   platform: PlatformPreset;
+  /** Pass-through from the brief; no check reads these yet. */
+  entrance_pattern?: string;
+  transitions?: { primary?: string; accents?: string[] };
   min_text_pct: number;
   reading: { base_s: number; per_word_s: number; last_line_s: number };
   dead_stretch_s: number;
@@ -184,6 +187,9 @@ export function resolveMotionSpec(spec?: MotionSpec | null): ResolvedMotionSpec 
   const durations = pick("durations_ms");
   const stagger = pick("stagger_ms");
   const reading = pick("reading");
+  const entrancePattern = pick("entrance_pattern");
+  const transitions = pick("transitions");
+  if (s.register !== undefined) from.push("register");
   return {
     register,
     signature_ease: ease === undefined ? d.signature_ease : typeof ease === "string" ? NAMED_EASES[ease] : (ease as [number, number, number, number]),
@@ -200,6 +206,8 @@ export function resolveMotionSpec(spec?: MotionSpec | null): ResolvedMotionSpec 
     facts: pick("facts") ?? [],
     banned: pick("banned") ?? [],
     beats: pick("beats") ?? [],
+    ...(entrancePattern !== undefined ? { entrance_pattern: entrancePattern } : {}),
+    ...(transitions !== undefined ? { transitions } : {}),
     from_brief: from,
   };
 }

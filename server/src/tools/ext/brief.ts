@@ -17,7 +17,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
 import type { ToolContext, ToolDefinition } from "../common.js";
-import { MotionSpecSchema, resolveMotionSpec, type ResolvedMotionSpec } from "../../motion-spec.js";
+import { MotionSpecSchema, resolveMotionSpec, type MotionSpec, type ResolvedMotionSpec } from "../../motion-spec.js";
 
 // ---------- swatches (.ase) ----------
 
@@ -303,7 +303,9 @@ export function mergeBrief(current: Brief | null, patch: BriefFields, now: Date)
     if (v === undefined) continue;
     if (isEmpty(v)) delete next[k];
     else if (k === "motion") {
-      const merged: Record<string, unknown> = { ...((next.motion as object | undefined) ?? {}) };
+      const stored = next.motion;
+      const merged: Record<string, unknown> =
+        stored !== null && typeof stored === "object" && !Array.isArray(stored) ? { ...(stored as Record<string, unknown>) } : {};
       for (const [mk, mv] of Object.entries(v as object)) {
         if (mv === undefined) continue;
         if (isEmpty(mv)) delete merged[mk];
@@ -326,7 +328,7 @@ export function missingFields(brief: Brief | null) {
  * project, no brief or an unreadable one it returns the brand_film defaults (from_brief empty).
  * Checks call it for their thresholds.
  */
-export async function loadMotionSpec(ctx: ToolContext): Promise<ResolvedMotionSpec & { brief_path: string | null }> {
+export async function loadMotionSpec(ctx: ToolContext): Promise<ResolvedMotionSpec & { brief_path: string | null; warning?: string }> {
   let file: string | null = null;
   try {
     const projectPath = await openProjectPath(ctx);
@@ -335,15 +337,44 @@ export async function loadMotionSpec(ctx: ToolContext): Promise<ResolvedMotionSp
     file = null;
   }
   const brief = file ? readBrief(file) : null;
-  const parsed = MotionSpecSchema.safeParse(brief?.motion ?? {});
-  return { ...resolveMotionSpec(parsed.success ? parsed.data : null), brief_path: brief ? file : null };
+  const { spec, warning } = salvageMotionSpec(brief?.motion);
+  return { ...resolveMotionSpec(spec), brief_path: brief ? file : null, ...(warning ? { warning } : {}) };
 }
 
-/** The brief's motion spec filled from register defaults, for the ae_brief result. A malformed stored spec falls back to defaults. */
+/**
+ * Validates a stored motion spec key by key and keeps the valid ones, so one bad value does not
+ * throw the rest away. `warning` names the dropped keys.
+ */
+export function salvageMotionSpec(raw: unknown): { spec: MotionSpec | null; warning?: string } {
+  if (raw === undefined || raw === null) return { spec: null };
+  const whole = MotionSpecSchema.safeParse(raw);
+  if (whole.success) return { spec: whole.data };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { spec: null, warning: "The stored motion spec is not an object; register defaults are used." };
+  }
+  const shape = MotionSpecSchema.shape as Record<string, z.ZodTypeAny>;
+  const kept: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const field = shape[key];
+    if (!field || value === undefined) continue;
+    const r = field.safeParse(value);
+    if (r.success) kept[key] = r.data;
+    else dropped.push(key);
+  }
+  return {
+    spec: kept as MotionSpec,
+    warning: dropped.length
+      ? `The stored motion spec has invalid values for: ${dropped.join(", ")}. Those keys are ignored and the register defaults are used for them.`
+      : undefined,
+  };
+}
+
+/** The brief's motion spec filled from register defaults, for the ae_brief result. Invalid stored keys are dropped with a warning. */
 function motionResolved(brief: Brief | null) {
-  const parsed = MotionSpecSchema.safeParse(brief?.motion ?? {});
-  const r = resolveMotionSpec(parsed.success ? parsed.data : null);
-  return parsed.success ? r : { ...r, warning: "The stored motion spec does not validate; register defaults are used." };
+  const { spec, warning } = salvageMotionSpec(brief?.motion);
+  const r = resolveMotionSpec(spec);
+  return warning ? { ...r, warning } : r;
 }
 
 export async function openProjectPath(ctx: ToolContext): Promise<string> {

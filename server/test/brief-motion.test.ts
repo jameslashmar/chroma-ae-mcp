@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveMotionSpec } from "../src/motion-spec.js";
 import type { ToolContext } from "../src/tools/common.js";
 import { AeBriefSchema, BRIEF_QUESTIONS, briefPath, briefTools, loadMotionSpec, mergeBrief, missingFields } from "../src/tools/ext/brief.js";
 
@@ -54,7 +55,7 @@ describe("ae_brief motion", () => {
     expect(out.motion_resolved.register).toBe("energetic");
     expect(out.motion_resolved.overshoot_max_pct).toBe(25);
     expect(out.motion_resolved.platform).toBe("reels_9_16");
-    expect([...out.motion_resolved.from_brief].sort()).toEqual(["max_same_ease", "platform"]);
+    expect([...out.motion_resolved.from_brief].sort()).toEqual(["max_same_ease", "platform", "register"]);
     const none = await tool.handler(AeBriefSchema.parse({}), ctxFor(path.join(tempDir(), "N.aep")));
     expect(none.motion).toBeNull();
     expect(none.motion_resolved).toMatchObject({ register: "brand_film", from_brief: [] });
@@ -101,9 +102,45 @@ describe("ae_brief motion", () => {
     expect(await loadMotionSpec(ctxFor(aep))).toMatchObject({ register: "brand_film", from_brief: [], brief_path: briefPath(aep) });
 
     fs.writeFileSync(briefPath(aep), JSON.stringify({ motion: { register: "handmade", platform: "feed_4_5" } }));
-    expect(await loadMotionSpec(ctxFor(aep))).toMatchObject({ register: "handmade", platform: "feed_4_5", from_brief: ["platform"] });
+    expect(await loadMotionSpec(ctxFor(aep))).toMatchObject({ register: "handmade", platform: "feed_4_5" });
+    expect([...(await loadMotionSpec(ctxFor(aep))).from_brief].sort()).toEqual(["platform", "register"]);
 
     fs.writeFileSync(briefPath(aep), JSON.stringify({ motion: { register: "nonsense" } }));
-    expect(await loadMotionSpec(ctxFor(aep))).toMatchObject({ register: "brand_film", from_brief: [] });
+    const bad = await loadMotionSpec(ctxFor(aep));
+    expect(bad).toMatchObject({ register: "brand_film", from_brief: [] });
+    expect(bad.warning).toContain("register");
+  });
+
+  it("salvages the valid keys of a partly invalid stored motion and warns about the dropped ones", async () => {
+    const aep = path.join(tempDir(), "Shot.aep");
+    fs.writeFileSync(briefPath(aep), JSON.stringify({ motion: { register: "energetic", platform: "feed_4_5", overshoot_max_pct: 500, beats: [{ start_s: 3, end_s: 2 }] } }));
+    const spec = await loadMotionSpec(ctxFor(aep));
+    expect(spec.register).toBe("energetic");
+    expect(spec.platform).toBe("feed_4_5");
+    expect(spec.overshoot_max_pct).toBe(25);
+    expect([...spec.from_brief].sort()).toEqual(["platform", "register"]);
+    expect(spec.warning).toContain("overshoot_max_pct");
+    expect(spec.warning).toContain("beats");
+    expect(spec.warning).not.toContain("platform");
+    const out = await tool.handler(AeBriefSchema.parse({}), ctxFor(aep));
+    expect(out.motion_resolved).toMatchObject({ register: "energetic", platform: "feed_4_5" });
+    expect(out.motion_resolved.warning).toContain("overshoot_max_pct");
+    fs.writeFileSync(briefPath(aep), JSON.stringify({ motion: { register: "handmade" } }));
+    expect((await loadMotionSpec(ctxFor(aep))).warning).toBeUndefined();
+  });
+
+  it("mergeBrief starts from {} when the stored motion is not a plain object", () => {
+    const now = new Date("2026-01-01T00:00:00Z");
+    expect(mergeBrief({ motion: "abc" } as any, { motion: { register: "handmade" } }, now).motion).toEqual({ register: "handmade" });
+    expect(mergeBrief({ motion: ["a"] } as any, { motion: { register: "handmade" } }, now).motion).toEqual({ register: "handmade" });
+    expect(mergeBrief({ motion: null } as any, { motion: { register: "handmade" } }, now).motion).toEqual({ register: "handmade" });
+  });
+
+  it("lists register in from_brief and passes entrance_pattern and transitions through", () => {
+    const r = resolveMotionSpec({ register: "energetic", entrance_pattern: "rise", transitions: { primary: "push" } });
+    expect(r.from_brief).toEqual(expect.arrayContaining(["register", "entrance_pattern", "transitions"]));
+    expect(r.entrance_pattern).toBe("rise");
+    expect(r.transitions).toEqual({ primary: "push" });
+    expect(resolveMotionSpec(null)).not.toHaveProperty("entrance_pattern");
   });
 });

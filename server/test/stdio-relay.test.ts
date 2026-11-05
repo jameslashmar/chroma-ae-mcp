@@ -149,7 +149,8 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
   it("keeps the tools registered while AE is closed, and calls say to start AE", async () => {
     const { dir, dataDir } = home();
     const PROMPTS = [{ name: "motion_director", description: "d" }];
-    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS, prompts: PROMPTS }));
+    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+    fs.writeFileSync(path.join(dataDir, "relay-prompts-cache.json"), JSON.stringify({ prompts: PROMPTS }));
 
     const replies = await runRelay(dir, await closedPort(), [
       initialize(1, "2025-03-26"),
@@ -168,10 +169,12 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(replies[1].result.tools).toEqual(TOOLS);
     expect(replies[2].result.isError).toBe(true);
     expect(replies[2].result.content[0].text).toMatch(/Start After Effects/);
-    expect(replies[3].error.message).toMatch(/not reachable/);
+    // Unknown to the relay altogether: method not found. Known methods that need the panel: -32000.
+    expect(replies[3].error.code).toBe(-32601);
     expect(replies[4].result.prompts).toEqual(PROMPTS);
     // Never listed by the panel yet: an empty list rather than an error.
     expect(replies[5].result.resources).toEqual([]);
+    expect(replies[6].error.code).toBe(-32000);
     expect(replies[6].error.message).toMatch(/not reachable/);
   });
 
@@ -182,9 +185,36 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const panel = await fakePanel((body) => ({ status: 200, body: { jsonrpc: "2.0", id: body.id, result: { prompts: PROMPTS } } }));
     const replies = await runRelay(dir, panel.port, [{ jsonrpc: "2.0", id: 1, method: "prompts/list" }]);
     expect(replies[0].result.prompts).toEqual(PROMPTS);
-    const cache = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-cache.json"), "utf8"));
-    expect(cache.prompts).toEqual(PROMPTS);
-    expect(cache.tools).toEqual(TOOLS);
+    const prompts = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-prompts-cache.json"), "utf8"));
+    expect(prompts).toEqual({ prompts: PROMPTS });
+    // One file per key: the tools file is untouched, and no temp file is left behind.
+    const tools = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-cache.json"), "utf8"));
+    expect(tools).toEqual({ tools: TOOLS });
+    expect(fs.readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("reports the version in VERSION when offline", async () => {
+    const { dir } = home();
+    const version = fs.readFileSync(path.resolve(__dirname, "../../VERSION"), "utf8").trim();
+    const replies = await runRelay(dir, await closedPort(), [initialize(1)]);
+    expect(replies[0].result.serverInfo.version).toBe(version);
+  });
+
+  it("answers null and non-object lines with -32600 and does not forward them", async () => {
+    const { dir } = home();
+    const panel = await fakePanel((body) => ({ status: 200, body: { jsonrpc: "2.0", id: body.id, result: {} } }));
+    const child = childProcess.spawn(process.execPath, [RELAY], {
+      env: { ...process.env, LOCALAPPDATA: dir, HOME: dir, USERPROFILE: dir, CHROMA_AE_MCP_PORT: String(panel.port) },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (c) => (out += c));
+    child.stdin.end('null\n42\n"x"\n');
+    await new Promise((r) => child.on("close", r));
+    const replies = out.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    expect(replies).toHaveLength(3);
+    expect(replies.every((r) => r.id === null && r.error.code === -32600)).toBe(true);
+    expect(panel.seen).toHaveLength(0);
   });
 
   it("reports an error for tools/list when AE is closed and no list is cached", async () => {

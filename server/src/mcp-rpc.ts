@@ -301,9 +301,13 @@ async function handleSingleRpc(
 
     case "resources/read": {
       const uri = params.uri;
-      const res = typeof uri === "string" ? readGuidance(uri) : undefined;
+      if (typeof uri !== "string") {
+        return makeErrorResponse(id, -32602, "Invalid params: `uri` must be a string");
+      }
+      const res = readGuidance(uri);
       if (!res) {
-        return makeErrorResponse(id, -32602, `Invalid params: unknown resource ${JSON.stringify(uri)}. Use resources/list.`);
+        // -32002: resource not found (MCP spec).
+        return makeErrorResponse(id, -32002, `Resource not found: ${JSON.stringify(uri)}. Use resources/list.`);
       }
       return { jsonrpc: "2.0", id, result: { contents: [{ uri: res.uri, mimeType: res.mimeType, text: res.text }] } };
     }

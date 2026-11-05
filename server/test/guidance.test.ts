@@ -112,9 +112,9 @@ describe("motion guidance: MCP prompts and resources", () => {
     expect(c[0]).toEqual({ uri, mimeType: "text/markdown", text: GUIDANCE_FILES["references/timing-and-easing.md"] });
   });
 
-  it("resources/read with an unknown or missing uri is -32602", async () => {
+  it("resources/read with an unknown uri is -32002 (not found), a missing one -32602", async () => {
     const a = (await rpc("resources/read", { uri: "chroma-ae://guidance/motion-director/nope.md" })) as JsonRpcErrorResponse;
-    expect(a.error.code).toBe(-32602);
+    expect(a.error.code).toBe(-32002);
     const b = (await rpc("resources/read", {})) as JsonRpcErrorResponse;
     expect(b.error.code).toBe(-32602);
   });

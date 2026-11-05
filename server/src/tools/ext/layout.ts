@@ -686,6 +686,7 @@ export const layoutTools: ToolDefinition<any>[] = [
         clean: findings.length === 0,
         used: { brand_colors: brandColors, fonts, from_brief: Boolean(brief) && !args.brand_colors && !args.fonts },
         ...(ignored.length ? { ignored_brief_entries: ignored } : {}),
+        ...(motion?.warning ? { motion_warning: motion.warning } : {}),
         min_text: { px: Math.round((args.min_font_size ?? relativeFloor) * 10) / 10, source: args.min_font_size ? "argument" : motion?.from_brief.includes("min_text_pct") ? "brief" : "default" },
         platform: presetActive && platform ? { preset: platform, label: PLATFORM_PRESETS[platform].label, source: platformSource, box: Object.values(safeRect(platform, scan.width, scan.height)).map((n) => Math.round(n)) } : { preset: "title_safe", source: platform ? platformSource : "default", title_safe: args.title_safe ?? 0.2 },
         ...(scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape and solid layers; later layers were not checked." } : {}),

@@ -1500,6 +1500,7 @@ export const motionTools: ToolDefinition<any>[] = [
           register: spec.register,
           from_brief: spec.from_brief,
           brief_path: spec.brief_path,
+          ...(spec.warning ? { warning: spec.warning } : {}),
           checks,
           thresholds: {
             max_same_ease: spec.max_same_ease,
