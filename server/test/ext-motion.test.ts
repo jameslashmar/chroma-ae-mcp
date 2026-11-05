@@ -863,7 +863,7 @@ describe("ae_motion_review against a fake AE", () => {
       const tool = motionTools.find((t) => t.name === "ae_motion_review")!;
       const res = (await tool.handler(AeMotionReviewSchema.parse({ comp_id: 7, bounds: false }), { bridge: host, queue, quarantine })) as Record<string, any>;
 
-      expect(scripts).toHaveLength(3);
+      expect(scripts).toHaveLength(4); // list, status (motion spec), two samples
       const sampleCalls = scripts.filter((s) => s.includes("__chromaAe.sampleProperty("));
       expect(sampleCalls).toHaveLength(2);
       // Keys only: sampled between the keys. Expression: on to the work area end.

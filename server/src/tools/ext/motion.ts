@@ -13,6 +13,16 @@ import {
   type ToolDefinition,
 } from "../common.js";
 import { defaultFramesDir } from "../render.js";
+import type { ResolvedMotionSpec } from "../../motion-spec.js";
+import { loadMotionSpec } from "./brief.js";
+import {
+  CHOREOGRAPHY_CHECKS,
+  overshootKind,
+  overshootPct,
+  reviewChoreography,
+  type ChoreoProp,
+  type LayerInfo,
+} from "./choreography.js";
 import { analyzeDecodedFrame, captureCompFrame, decodePngFile, type FrameFlag } from "./frames.js";
 import {
   blit,
@@ -676,7 +686,16 @@ export type FindingKind =
   | "overshoot"
   | "subframe_key"
   | "cut_off"
-  | "outside_safe";
+  | "outside_safe"
+  | "ease_monotony"
+  | "wrong_direction"
+  | "exit_ratio"
+  | "first_frame_move"
+  | "stagger_spread"
+  | "stagger_irregular"
+  | "density"
+  | "landed_text_moving"
+  | "long_tween";
 export type FindingSeverity = "medium" | "low" | "info";
 
 export interface MotionFinding {
@@ -754,7 +773,8 @@ export function reviewProperty(
   speeds: SpeedSample[],
   path: PropertyPath,
   target: ReviewTarget,
-  taste?: ReviewTaste
+  taste?: ReviewTaste,
+  choreo?: { spec: ResolvedMotionSpec; effectName?: string; enabled?: boolean }
 ): MotionFinding[] {
   const findings: MotionFinding[] = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
@@ -888,15 +908,33 @@ export function reviewProperty(
       if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
     }
     const unwanted = taste?.avoid_overshoot === true;
+    let severity: FindingSeverity = unwanted ? "low" : "info";
+    let note = unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.";
+    if (choreo && choreo.enabled !== false) {
+      const kind = overshootKind({ samples: s, effect_name: choreo.effectName });
+      const pct = overshootPct(s, o);
+      const max = choreo.spec.overshoot_max_pct;
+      const pctText = `${Math.round(pct * 10) / 10}% of its keyframe span`;
+      if (kind === "opacity" || kind === "colour" || kind === "number") {
+        severity = "medium";
+        const what = kind === "number" ? "A counting number" : kind === "colour" ? "Colour" : "Opacity";
+        note = `${what} never overshoots (${pctText}): it reads as wrong data or a flash. Use an ease without overshoot on these keys.`;
+      } else if (kind === "motion" && pct > max) {
+        const lenient = choreo.spec.register === "handmade" || choreo.spec.register === "energetic";
+        severity = max === 0 && !lenient ? "medium" : "low";
+        note = `That is ${pctText}; the ${choreo.spec.register} register allows ${max}% on position and scale. ${max === 0 ? "Use an ease without overshoot." : "Reduce the bounce."}`;
+      } else if (kind === "motion") {
+        note = `That is ${pctText}, inside the ${choreo.spec.register} register's ${max}% budget.`;
+      }
+    }
     findings.push({
       ...base,
-      severity: unwanted ? "low" : "info",
+      severity,
       kind: "overshoot",
       keys: [],
       time: r3(s.times[at]),
       message:
-        `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. ` +
-        (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise."),
+        `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r3(s.times[at])}s. ` + note,
     });
   }
 
@@ -1126,6 +1164,11 @@ export const AeMotionReviewSchema = z.object({
     .describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
   action_safe: z.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
   title_safe: z.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's."),
+  checks: z
+    .array(z.enum(CHOREOGRAPHY_CHECKS))
+    .min(1)
+    .optional()
+    .describe("Choreography checks to run (default: all). The per-property checks (linear, abrupt start/stop, speed jump, sub-frame keys) always run."),
 });
 
 export type AeMotionReviewArgs = z.infer<typeof AeMotionReviewSchema>;
@@ -1146,7 +1189,9 @@ interface AnimatedPropertyList {
     first_key_time: number;
     last_key_time: number;
     expression: boolean;
+    effect_name?: string;
   }>;
+  layer_info?: LayerInfo[];
   truncated: boolean;
 }
 
@@ -1336,7 +1381,8 @@ export const motionTools: ToolDefinition<any>[] = [
     name: "ae_motion_review",
     description:
       "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: " +
-      "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. " +
+      "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info for a bounce on position or scale within the register's budget; medium on opacity, colour or a counting number, and past the budget); keys that sit between frames. " +
+      "Choreography checks (from keyframe data, no render; thresholds from the brief's motion spec, see ae_brief, else the brand_film defaults; `checks` picks a subset): ease_monotony (more than max_same_ease tweens sharing one ease and duration), direction (an entrance that eases in only, an exit that eases out only), exit_ratio (exit not the spec's fraction of its entrance), frame_zero (a move starting on the layer's first frame), stagger (uneven offsets or spread over the budget among siblings), density (over a third of siblings moving at once), landed_text (text still moving after it landed, or wiggle/loop expressions on it), long_tween (a position move longer than the register allows). The result's `spec` shows the register and thresholds used; the handmade register relaxes monotony and the linear checks. " +
       "Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. " +
       "Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. " +
       "Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " +
@@ -1356,7 +1402,7 @@ export const motionTools: ToolDefinition<any>[] = [
         const list = listResp.result;
         const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
         // One evalScript per property, so AE's UI gets a breath between them.
-        const sampled: Array<{ path: PropertyPath; samples: PropertySamples; speeds: SpeedSample[]; analysis: MotionAnalysis; parents: number[]; ancestorOnly: boolean }> = [];
+        const sampled: Array<{ path: PropertyPath; samples: PropertySamples; speeds: SpeedSample[]; analysis: MotionAnalysis; parents: number[]; ancestorOnly: boolean; effectName?: string }> = [];
         for (let i = 0; i < list.properties.length; i++) {
           const p = list.properties[i];
           // Keys alone stop at the last key; an expression can keep moving
@@ -1370,7 +1416,7 @@ export const motionTools: ToolDefinition<any>[] = [
             toolName: "ae_motion_review",
           });
           const speeds = sampleSpeeds(resp.result);
-          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
+          sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true, effectName: p.effect_name });
         }
         // Where each animated layer comes to rest, then its box there: one evalScript per layer.
         const bounds: LayerBounds[] = [];
@@ -1404,10 +1450,26 @@ export const motionTools: ToolDefinition<any>[] = [
 
       const target: ReviewTarget = { comp_id: args.comp_id, project_path: scanned.list.project_path };
       const taste = ctx.settings?.get().taste;
+      const spec = await loadMotionSpec(ctx);
+      const checks = args.checks ?? CHOREOGRAPHY_CHECKS;
       let findings: MotionFinding[] = [];
-      for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
+      const choreoProps: ChoreoProp[] = [];
+      for (const { path: propPath, samples, speeds, analysis, ancestorOnly, effectName } of scanned.sampled) {
         if (ancestorOnly) continue;
-        findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
+        findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste, { spec, effectName, enabled: checks.includes("overshoot") }));
+        choreoProps.push({ path: propPath, samples, analysis, effect_name: effectName });
+      }
+      findings.push(
+        ...reviewChoreography(
+          { comp: { width: Number(scanned.list.comp.width), height: Number(scanned.list.comp.height), fps: Number(scanned.list.comp.fps) }, layers: scanned.list.layer_info ?? [], props: choreoProps },
+          spec,
+          checks
+        )
+      );
+      // Hand-made looks hold keys and keep constant speeds on purpose: the timing findings step down a tier.
+      if (spec.register === "handmade") {
+        const down = { medium: "low", low: "info", info: "info" } as const;
+        findings = findings.map((f) => (f.kind === "linear" || f.kind === "abrupt_start" || f.kind === "abrupt_stop" ? { ...f, severity: down[f.severity] } : f));
       }
       const safe: SafeAreas = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
       for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
@@ -1434,6 +1496,20 @@ export const motionTools: ToolDefinition<any>[] = [
         clean: counts.medium === 0 && counts.low === 0,
         counts,
         by_kind: byKind,
+        spec: {
+          register: spec.register,
+          from_brief: spec.from_brief,
+          brief_path: spec.brief_path,
+          checks,
+          thresholds: {
+            max_same_ease: spec.max_same_ease,
+            exit_ratio: spec.exit_ratio,
+            overshoot_max_pct: spec.overshoot_max_pct,
+            stagger_group_total_max_ms: spec.stagger_ms.group_total_max,
+            long_tween_s: spec.long_tween_s,
+          },
+          ...(spec.register === "handmade" ? { relaxed: ["ease_monotony skipped", "linear, abrupt_start and abrupt_stop one tier lower"] } : {}),
+        },
         findings: findings.slice(0, max),
         findings_truncated: findings.length > max,
         ...(args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...(unchecked.length ? { bounds_unchecked: unchecked } : {}) } : {}),
