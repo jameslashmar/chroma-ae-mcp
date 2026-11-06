@@ -31,10 +31,10 @@ This is an internal Chroma tool, not a consumer product.
 
 ## Status
 
-**v0.5.0, released 2026-11-05** (signed ZXP on the [v0.5.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.5.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
+**v0.6.0, released 2026-11-06** (signed ZXP on the [v0.6.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.6.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **177 tools** on `main` (0.5.0 shipped 173), all through the build, 4,936 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
-- Live-tested on AE 26.2.1 and 26.3 on Windows. macOS should work but is untested.
+- **177 tools**, all through the build, 4,979 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions were checked live on AE 26.3. macOS should work but is untested.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
 
 Test details, what is open and what each release added: [docs/ROADMAP.md](docs/ROADMAP.md).

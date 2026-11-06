@@ -37,6 +37,11 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.6.0:**
+- motion guidance: the chroma-motion-director skill served as MCP prompts and resources (also through the stdio relay while AE is closed), `ae_brief` motion specs read by `ae_motion_review` (choreography, keyed overshoot), `ae_timing_check` and `ae_house_style_check` (platform safe zones);
+- captions: standards that fix timing, grammar-aware breaks, cut snapping, clean-up, word-by-word and template output, speaker colours and SDH labels, looks, automatic fit, and three new tools: `ae_transcribe` (ElevenLabs Scribe), `ae_captions_export` (SRT, VTT, TTML) and `ae_captions_qa`; the standalone `captions` skill is served as guidance too;
+- relicensed to AGPL-3.0-only.
+
 **Done in 0.5.0:**
 - waves 1 to 3 (69 tools): layer ops, multi-comp apply, annotated frames, preflight, captions, rigs, text fitting, staggering, time remap, cameras, diagnosis, paths, render queue edits and batches, collect and deliver, loudness, legibility, variants, taste learning, project sessions;
 - wave 4 (18 tools): planar tracking, stabilizing, clean plates, inpainting, mattes, patch fitting and checks, screen replacement;
