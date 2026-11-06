@@ -4714,8 +4714,8 @@ var init_quarantine = __esm({
           }
           const raw = fs2.readFileSync(this.filePath, "utf8");
           const parsed = JSON.parse(raw);
-          const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.entries) ? parsed.entries : [];
-          for (const item of list) {
+          const list2 = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.entries) ? parsed.entries : [];
+          for (const item of list2) {
             if (item && typeof item === "object" && typeof item.op_id === "string") {
               const e = item;
               this.entries.set(e.op_id, {
@@ -5633,12 +5633,12 @@ var init_read_back = __esm({
 });
 
 // src/tools/ext/preflight.ts
-function sortFindings(list) {
-  return list.map((f, i) => ({ f, i })).sort((a, b) => SEVERITY_RANK[a.f.severity] - SEVERITY_RANK[b.f.severity] || a.i - b.i).map((x) => x.f);
+function sortFindings(list2) {
+  return list2.map((f, i) => ({ f, i })).sort((a, b) => SEVERITY_RANK[a.f.severity] - SEVERITY_RANK[b.f.severity] || a.i - b.i).map((x) => x.f);
 }
-function countSeverities(list) {
+function countSeverities(list2) {
   const c = { blocker: 0, warning: 0, note: 0 };
-  for (const f of list) c[f.severity]++;
+  for (const f of list2) c[f.severity]++;
   return c;
 }
 function isDefaultName(name) {
@@ -5943,9 +5943,9 @@ async function runScan(s, call2, limits) {
   }
   return { complete: s.phase === "done", slices };
 }
-function cap(out, list, limit, overflow) {
-  out.push(...list.slice(0, limit));
-  if (list.length > limit) out.push(overflow(list.length - limit));
+function cap(out, list2, limit, overflow) {
+  out.push(...list2.slice(0, limit));
+  if (list2.length > limit) out.push(overflow(list2.length - limit));
 }
 function projectFindings(s) {
   const p = s.project;
@@ -6183,32 +6183,32 @@ function layerIssueFindings(s) {
       truncated.push(i);
     }
   }
-  for (const [font, list] of fontLayers) {
-    const where = { comp_id: list[0].comp_id, comp: list[0].comp };
+  for (const [font, list2] of fontLayers) {
+    const where = { comp_id: list2[0].comp_id, comp: list2[0].comp };
     out.push({
       severity: "blocker",
       code: "font_missing",
-      message: `Font "${font}" is missing or substituted on ${list.length} layer${list.length === 1 ? "" : "s"}: ${list.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ")}${list.length > 5 ? ", ..." : ""}.`,
+      message: `Font "${font}" is missing or substituted on ${list2.length} layer${list2.length === 1 ? "" : "s"}: ${list2.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ")}${list2.length > 5 ? ", ..." : ""}.`,
       where,
-      count: list.length,
+      count: list2.length,
       fix: { tool: "ae_fonts", hint: "List the fonts in use, install the missing one, or change the text layers' font." }
     });
   }
-  for (const [font, list] of glyphLayers) {
+  for (const [font, list2] of glyphLayers) {
     const chars = [];
     const suggested = [];
-    for (const l of list) {
+    for (const l of list2) {
       for (const c of l.missing ?? []) if (!chars.includes(c) && chars.length < 20) chars.push(c);
       for (const g of l.suggested ?? []) if (!suggested.includes(g) && suggested.length < 3) suggested.push(g);
     }
-    const where = list.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ") + (list.length > 5 ? ", ..." : "");
+    const where = list2.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ") + (list2.length > 5 ? ", ..." : "");
     const alt = suggested.length ? `; AE's default font for that script is ${suggested.join(", ")}` : "";
     out.push({
       severity: "warning",
       code: "glyphs_missing",
-      message: `Font "${font}" has no glyph for ${chars.join(" ") || "some characters"} used on ${list.length} layer${list.length === 1 ? "" : "s"}: ${where}. They render as empty boxes or fallback glyphs${alt}.`,
-      where: { comp_id: list[0].comp_id, comp: list[0].comp, layer_index: list[0].index, layer_id: list[0].layer_id, layer: list[0].layer },
-      count: list.length,
+      message: `Font "${font}" has no glyph for ${chars.join(" ") || "some characters"} used on ${list2.length} layer${list2.length === 1 ? "" : "s"}: ${where}. They render as empty boxes or fallback glyphs${alt}.`,
+      where: { comp_id: list2[0].comp_id, comp: list2[0].comp, layer_index: list2[0].index, layer_id: list2[0].layer_id, layer: list2[0].layer },
+      count: list2.length,
       fix: {
         tool: "ae_fonts",
         hint: "Check the real text with ae_fonts action check and text, then switch the layers to a font that has the glyphs (ae_set_text with style.font).",
@@ -6222,14 +6222,14 @@ function layerIssueFindings(s) {
       out.push({ severity: "note", code: "font_missing_elsewhere", message: `AE reports the font "${f}" as missing; none of the layers checked use it.`, fix: { tool: "ae_fonts", hint: "Find where it is used." } });
     }
   }
-  for (const [match, list] of effectLayers) {
+  for (const [match, list2] of effectLayers) {
     const builtIn = match.indexOf("ADBE ") === 0;
     out.push({
       severity: builtIn ? "note" : "warning",
       code: "effect_unavailable",
-      message: `Effect "${list[0].effect ?? match}" (${match}) is not in the installed effects list; used on ${list.length} layer${list.length === 1 ? "" : "s"}: ${list.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ")}${list.length > 5 ? ", ..." : ""}.`,
-      where: { comp_id: list[0].comp_id, comp: list[0].comp, layer_index: list[0].index, layer: list[0].layer },
-      count: list.length,
+      message: `Effect "${list2[0].effect ?? match}" (${match}) is not in the installed effects list; used on ${list2.length} layer${list2.length === 1 ? "" : "s"}: ${list2.slice(0, 5).map((l) => `${l.comp} > ${l.layer}`).join(", ")}${list2.length > 5 ? ", ..." : ""}.`,
+      where: { comp_id: list2[0].comp_id, comp: list2[0].comp, layer_index: list2[0].index, layer: list2[0].layer },
+      count: list2.length,
       confidence: "low",
       fix: { tool: "ae_list_effects", hint: "Confirm in AE (an unavailable plug-in shows as missing); install the plug-in or remove the effect." }
     });
@@ -6309,10 +6309,10 @@ function namingFindings(s) {
     }
   }
   if (appliesTo(s, "layers")) {
-    const list = [...s.layer_names.entries()];
+    const list2 = [...s.layer_names.entries()];
     cap(
       out,
-      list.map(([id, np]) => ({
+      list2.map(([id, np]) => ({
         severity: "note",
         code,
         message: `${np.count} layer${np.count === 1 ? "" : "s"} in "${s.comps.get(id)?.name ?? id}" break the naming rules (e.g. ${np.examples.map((e) => `"${e}"`).join(", ")}).`,
@@ -6326,16 +6326,16 @@ function namingFindings(s) {
   }
   const byName = /* @__PURE__ */ new Map();
   for (const c of s.comps.values()) byName.set(c.name, [...byName.get(c.name) ?? [], c]);
-  for (const [name, list] of byName) {
-    if (list.length < 2) continue;
+  for (const [name, list2] of byName) {
+    if (list2.length < 2) continue;
     if (s.duplicate_roots.includes(name)) continue;
-    const involvesFinal = list.some((c) => s.finals.has(c.id));
+    const involvesFinal = list2.some((c) => s.finals.has(c.id));
     if (!involvesFinal && s.opts.scope === "delivery") continue;
     out.push({
       severity: involvesFinal ? "warning" : "note",
       code: "duplicate_comp_name",
-      message: `${list.length} comps are named "${name}" (ids ${list.map((c) => c.id).join(", ")}). Anything that picks a comp by name, aerender included, takes the first.`,
-      count: list.length,
+      message: `${list2.length} comps are named "${name}" (ids ${list2.map((c) => c.id).join(", ")}). Anything that picks a comp by name, aerender included, takes the first.`,
+      count: list2.length,
       fix: rename("comps")
     });
   }
@@ -7110,16 +7110,16 @@ async function listEnginesAsync(run = execFileText, platform = process.platform)
     if (!/"AfterFX\.com"/i.test(quick)) return [];
     const script = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='AfterFX.com'" | ForEach-Object { $_.ProcessId.ToString() + [char]9 + $_.ParentProcessId.ToString() + [char]9 + ([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime).ToString() + [char]9 + $_.CommandLine }`;
     const out = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], 15e3);
-    const list = [];
+    const list2 = [];
     for (const line of out.split(String.fromCharCode(10))) {
       const parts = line.replace(/\r$/, "").split(String.fromCharCode(9));
       const pid = parseInt(parts[0] ?? "", 10);
       const ppid = parseInt(parts[1] ?? "", 10);
       if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
       const ticks = Number(parts[2] ?? "");
-      list.push({ pid, ppid, cpu_ms: Number.isFinite(ticks) && (parts[2] ?? "") !== "" ? ticks / 1e4 : null, command: parts.slice(3).join(String.fromCharCode(9)) });
+      list2.push({ pid, ppid, cpu_ms: Number.isFinite(ticks) && (parts[2] ?? "") !== "" ? ticks / 1e4 : null, command: parts.slice(3).join(String.fromCharCode(9)) });
     }
-    return list;
+    return list2;
   } catch {
     return null;
   }
@@ -7660,8 +7660,8 @@ var init_aerender = __esm({
           }
           const raw = fs6.readFileSync(this.filePath, "utf8");
           const parsed = JSON.parse(raw);
-          const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
-          for (const item of list) {
+          const list2 = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.jobs) ? parsed.jobs : [];
+          for (const item of list2) {
             if (item && typeof item === "object" && typeof item.job_id === "string") {
               const rec = item;
               if (rec.state === "running" && rec.phase === "queued") {
@@ -7744,9 +7744,9 @@ var init_aerender = __esm({
         if (this.queryBusy || this.sampleWaiters.length === 0) return;
         this.queryBusy = true;
         const startedMs = this.opts.now();
-        const done = (list) => {
+        const done = (list2) => {
           this.queryBusy = false;
-          const sample = { list, startedMs, atMs: this.opts.now() };
+          const sample = { list: list2, startedMs, atMs: this.opts.now() };
           this.latest = sample;
           const ready = this.sampleWaiters.filter((w) => w.since <= startedMs);
           this.sampleWaiters = this.sampleWaiters.filter((w) => w.since > startedMs);
@@ -7766,7 +7766,7 @@ var init_aerender = __esm({
         }
         if (result !== null && !Array.isArray(result) && typeof result.then === "function") {
           result.then(
-            (list) => done(Array.isArray(list) ? list : null),
+            (list2) => done(Array.isArray(list2) ? list2 : null),
             () => done(null)
           );
         } else {
@@ -8994,10 +8994,10 @@ var init_session = __esm({
       /** Logs an agent write to a project: guarded writes from noteAfterWrite, the rest from the bridge hook. */
       noteAgentWrite(projectPath, w) {
         const key = keyOf(projectPath);
-        const list = this.state.agent_writes[key] ?? [];
-        list.push({ at: this.now().toISOString(), ...w });
+        const list2 = this.state.agent_writes[key] ?? [];
+        list2.push({ at: this.now().toISOString(), ...w });
         delete this.state.agent_writes[key];
-        this.state.agent_writes[key] = list.slice(-MAX_AGENT_WRITES);
+        this.state.agent_writes[key] = list2.slice(-MAX_AGENT_WRITES);
         const keys = Object.keys(this.state.agent_writes);
         for (const old of keys.slice(0, Math.max(0, keys.length - MAX_SNAPSHOTS))) delete this.state.agent_writes[old];
         this.save();
@@ -9008,9 +9008,9 @@ var init_session = __esm({
        * undo steps (imports, effects, text, keyframe ease, ...).
        */
       agentWritesSince(projectPath, since) {
-        const list = this.state.agent_writes[keyOf(projectPath)] ?? [];
+        const list2 = this.state.agent_writes[keyOf(projectPath)] ?? [];
         const ms = since ? Date.parse(since) : NaN;
-        return Number.isFinite(ms) ? list.filter((w) => Date.parse(w.at) > ms) : list.slice();
+        return Number.isFinite(ms) ? list2.filter((w) => Date.parse(w.at) > ms) : list2.slice();
       }
       save() {
         writeJson(this.statePath, this.state);
@@ -11088,9 +11088,9 @@ function parseCueBlocks(text, isVtt) {
 function num(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : void 0;
 }
-function wordsFrom(list) {
+function wordsFrom(list2) {
   const words = [];
-  for (const w of list) {
+  for (const w of list2) {
     if (!w || typeof w !== "object") continue;
     const o = w;
     if (o.type !== void 0 && o.type !== "word") continue;
@@ -11200,11 +11200,11 @@ function sentencesOf(seg) {
     return out;
   }
   const parts = seg.text.match(/[^.!?…]+[.!?…]+["')\]]?|[^.!?…]+$/g)?.map((p) => p.trim()).filter(Boolean) ?? [seg.text];
-  const total = parts.reduce((n, p) => n + p.length, 0) || 1;
+  const total2 = parts.reduce((n, p) => n + p.length, 0) || 1;
   const span = seg.end - seg.start;
   let t = seg.start;
   return parts.map((p) => {
-    const d = span * p.length / total;
+    const d = span * p.length / total2;
     const s = { text: p, start: t, end: t + d, speaker: seg.speaker };
     t += d;
     return s;
@@ -11213,11 +11213,11 @@ function sentencesOf(seg) {
 function wordsOf(seg) {
   if (seg.words && seg.words.length) return seg.words.map((w) => ({ text: w.text, start: w.start, end: w.end, speaker: w.speaker ?? seg.speaker }));
   const words = seg.text.split(/\s+/).filter(Boolean);
-  const total = words.reduce((n, w) => n + w.length, 0) || 1;
+  const total2 = words.reduce((n, w) => n + w.length, 0) || 1;
   const span = seg.end - seg.start;
   let t = seg.start;
   return words.map((w) => {
-    const d = span * w.length / total;
+    const d = span * w.length / total2;
     const s = { text: w, start: t, end: t + d, speaker: seg.speaker };
     t += d;
     return s;
@@ -11264,10 +11264,10 @@ function timedWords(seg) {
       if (parts.length === 1) out.push({ ...w, text: parts[0] });
       continue;
     }
-    const total = parts.reduce((n, p) => n + p.length, 0) || 1;
+    const total2 = parts.reduce((n, p) => n + p.length, 0) || 1;
     let t = w.start;
     for (const p of parts) {
-      const d = (w.end - w.start) * p.length / total;
+      const d = (w.end - w.start) * p.length / total2;
       out.push({ ...w, text: p, start: t, end: t + d });
       t += d;
     }
@@ -12687,11 +12687,11 @@ var init_rig = __esm({
         description: "List the expression recipes ae_expr_recipe can apply: wiggle, overshoot, bounce, loop, follow_delay, auto_fade, count_up, master_scale, tint_color, ease_between, follow_text, follow_text_position. For each: what it does, the property types it fits (1d, 2d, 3d, color, text), the controls it creates with their default values, and its parameters. Does not talk to After Effects.",
         schema: external_exports.object({ recipe: external_exports.enum(RECIPE_NAMES).optional().describe("Only this recipe.") }),
         handler: async (args) => {
-          const list = RECIPES.filter((r) => !args.recipe || r.name === args.recipe).map((r) => ({
+          const list2 = RECIPES.filter((r) => !args.recipe || r.name === args.recipe).map((r) => ({
             ...r,
             control_names: r.controls.map((c) => ({ key: c.key, name: recipeControlName(r.label, c.label) }))
           }));
-          return { recipes: list, note: "Control names use the recipe's label as the prefix unless name_prefix is given." };
+          return { recipes: list2, note: "Control names use the recipe's label as the prefix unless name_prefix is given." };
         }
       },
       {
@@ -13295,8 +13295,8 @@ function planStagger(args, read3) {
       }
       for (const l of keyless) skipped.push({ id: l.id, name: l.name, reason: "no keys on the property" });
       layers = layers.filter((l) => (prop(l)?.numKeys ?? 0) > 0);
-      const total = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
-      if (total > MAX_KEYS_TOTAL) return bad4(`${total} keys would be rebuilt; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+      const total2 = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
+      if (total2 > MAX_KEYS_TOTAL) return bad4(`${total2} keys would be rebuilt; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
     }
     if (args.mode === "copy_keys") {
       const src = read3.source;
@@ -13308,8 +13308,8 @@ function planStagger(args, read3) {
         if (has.length) return bad4(`${has.length} target layer(s) already have keys on that property (${has.slice(0, 5).map((l) => `"${l.name}"`).join(", ")}); pass replace_existing to overwrite them.`);
       }
       const existing = layers.reduce((s, l) => s + (prop(l)?.numKeys ?? 0), 0);
-      const total = (src.property.numKeys ?? 0) * layers.length + existing;
-      if (total > MAX_KEYS_TOTAL) return bad4(`${total} keys would be written; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
+      const total2 = (src.property.numKeys ?? 0) * layers.length + existing;
+      if (total2 > MAX_KEYS_TOTAL) return bad4(`${total2} keys would be written; at most ${MAX_KEYS_TOTAL} per call. Split the layers into batches.`);
     }
   }
   if (layers.length === 0) return bad4("No layers left to stagger.");
@@ -18649,8 +18649,8 @@ var init_camera = __esm({
 
 // src/tools/ext/explain.ts
 function rankExplanation(raw) {
-  const list = Array.isArray(raw.findings) ? raw.findings : [];
-  const findings = list.map((f) => ({ ...f, fix: FIX_HINTS[f.id] })).sort((a, b) => (SEVERITY_RANK2[a.severity] ?? 9) - (SEVERITY_RANK2[b.severity] ?? 9) || a.order - b.order);
+  const list2 = Array.isArray(raw.findings) ? raw.findings : [];
+  const findings = list2.map((f) => ({ ...f, fix: FIX_HINTS[f.id] })).sort((a, b) => (SEVERITY_RANK2[a.severity] ?? 9) - (SEVERITY_RANK2[b.severity] ?? 9) || a.order - b.order);
   const counts = { blocks: 0, likely: 0, possible: 0, info: 0 };
   for (const f of findings) if (f.severity in counts) counts[f.severity]++;
   let verdict;
@@ -18978,6 +18978,980 @@ var init_explain = __esm({
   }
 });
 
+// src/motion-spec.ts
+function resolveMotionSpec(spec) {
+  const s = spec ?? {};
+  const register = s.register ?? "brand_film";
+  const d = REGISTER_DEFAULTS[register];
+  const from = [];
+  const pick4 = (k) => {
+    if (s[k] !== void 0) from.push(k);
+    return s[k];
+  };
+  const ease = pick4("signature_ease");
+  const durations = pick4("durations_ms");
+  const stagger2 = pick4("stagger_ms");
+  const reading = pick4("reading");
+  const entrancePattern = pick4("entrance_pattern");
+  const transitions = pick4("transitions");
+  if (s.register !== void 0) from.push("register");
+  return {
+    register,
+    signature_ease: ease === void 0 ? d.signature_ease : typeof ease === "string" ? NAMED_EASES[ease] : ease,
+    durations_ms: { ...d.durations_ms, ...durations ?? {} },
+    stagger_ms: { ...d.stagger_ms, ...stagger2 ?? {} },
+    overshoot_max_pct: pick4("overshoot_max_pct") ?? d.overshoot_max_pct,
+    exit_ratio: pick4("exit_ratio") ?? d.exit_ratio,
+    max_same_ease: pick4("max_same_ease") ?? d.max_same_ease,
+    platform: pick4("platform") ?? d.platform,
+    min_text_pct: pick4("min_text_pct") ?? d.min_text_pct,
+    reading: { ...d.reading, ...reading ?? {} },
+    dead_stretch_s: pick4("dead_stretch_s") ?? d.dead_stretch_s,
+    long_tween_s: d.long_tween_s,
+    facts: pick4("facts") ?? [],
+    banned: pick4("banned") ?? [],
+    beats: pick4("beats") ?? [],
+    ...entrancePattern !== void 0 ? { entrance_pattern: entrancePattern } : {},
+    ...transitions !== void 0 ? { transitions } : {},
+    from_brief: from
+  };
+}
+function readingTimeS(text, reading, isLast = false) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean).length;
+  const t = reading.base_s + reading.per_word_s * words;
+  return isLast ? Math.max(t, reading.last_line_s) : t;
+}
+function safeRect(preset, width, height) {
+  const p = PLATFORM_PRESETS[preset];
+  return {
+    left: p.left * width,
+    top: p.top * height,
+    right: width - p.right * width,
+    bottom: height - p.bottom * height
+  };
+}
+function minTextPx(spec, width, height) {
+  return spec.min_text_pct / 100 * Math.min(width, height);
+}
+var MOTION_REGISTERS, NAMED_EASES, Bezier, PLATFORM_PRESETS, PLATFORM_PRESET_IDS, MotionBeatSchema, MotionSpecSchema, COMMON, REGISTER_DEFAULTS;
+var init_motion_spec = __esm({
+  "src/motion-spec.ts"() {
+    "use strict";
+    init_zod();
+    MOTION_REGISTERS = ["ui_micro", "brand_film", "energetic", "handmade"];
+    NAMED_EASES = {
+      premium: [0.4, 0, 0.2, 1],
+      standard: [0.2, 0, 0, 1],
+      emphasized: [0.05, 0.7, 0.1, 1],
+      expo_out: [0.16, 1, 0.3, 1],
+      quart_out: [0.25, 1, 0.5, 1],
+      exit: [0.3, 0, 1, 1],
+      in_out: [0.65, 0, 0.35, 1],
+      camera: [0.37, 0, 0.63, 1],
+      apple: [0.25, 0.1, 0.25, 1]
+    };
+    Bezier = external_exports.tuple([external_exports.number().min(0).max(1), external_exports.number(), external_exports.number().min(0).max(1), external_exports.number()]);
+    PLATFORM_PRESETS = {
+      /** Any format: 80 % title-safe box. */
+      title_safe: { label: "Title safe (10 % in from each edge)", left: 0.1, right: 0.1, top: 0.1, bottom: 0.1 },
+      /** 16:9: captions 80-120 px above the bottom at 1080 high. */
+      landscape_16_9: { label: "16:9 landscape", left: 0.1, right: 0.1, top: 0.1, bottom: 0.1 },
+      /**
+       * 9:16 reels and shorts at 1080x1920: anything that matters between y 168 and y 1330,
+       * out of the right 120 px (the action rail).
+       */
+      reels_9_16: { label: "9:16 reels / shorts / TikTok", left: 0.05, right: 120 / 1080, top: 168 / 1920, bottom: (1920 - 1330) / 1920 },
+      /** 9:16 promo layout: CTA above the bottom 15 %, title above the bottom 22 %, top 10 % clear. */
+      promo_9_16: { label: "9:16 promo (title above the bottom 22 %)", left: 0.067, right: 0.12, top: 0.1, bottom: 0.22 },
+      /** 4:5 feed posts. */
+      feed_4_5: { label: "4:5 feed", left: 0.067, right: 0.067, top: 0.067, bottom: 0.067 },
+      /** 1:1 square. */
+      square_1_1: { label: "1:1 square", left: 0.067, right: 0.067, top: 0.067, bottom: 0.067 }
+    };
+    PLATFORM_PRESET_IDS = Object.keys(PLATFORM_PRESETS);
+    MotionBeatSchema = external_exports.object({
+      start_s: external_exports.number().min(0),
+      end_s: external_exports.number().min(0),
+      role: external_exports.string().min(1).max(40).optional().describe("hook, tension, reveal, proof, payoff, claim, cta, ..."),
+      text: external_exports.string().max(300).optional().describe("What is on screen in this beat."),
+      hero_s: external_exports.number().min(0).optional().describe("The frame that must work as a still.")
+    }).refine((b) => b.end_s > b.start_s, { message: "a beat must end after it starts (end_s > start_s)", path: ["end_s"] }).refine((b) => b.hero_s === void 0 || b.hero_s >= b.start_s && b.hero_s <= b.end_s, {
+      message: "hero_s must fall inside the beat (start_s..end_s)",
+      path: ["hero_s"]
+    });
+    MotionSpecSchema = external_exports.object({
+      register: external_exports.enum(MOTION_REGISTERS).optional().describe("ui_micro, brand_film (default), energetic or handmade."),
+      signature_ease: external_exports.union([external_exports.enum(Object.keys(NAMED_EASES)), Bezier]).optional().describe("The ease for about 80 % of moves: a name or [x1, y1, x2, y2]."),
+      durations_ms: external_exports.object({ short: external_exports.number().positive(), medium: external_exports.number().positive(), long: external_exports.number().positive() }).partial().optional().describe("The three-tier duration palette."),
+      stagger_ms: external_exports.object({ words: external_exports.number().min(0), items: external_exports.number().min(0), group_total_max: external_exports.number().positive() }).partial().optional(),
+      overshoot_max_pct: external_exports.number().min(0).max(100).optional().describe("Largest overshoot allowed on position or scale. Opacity, colour and numbers never overshoot."),
+      exit_ratio: external_exports.object({ min: external_exports.number().positive(), max: external_exports.number().positive() }).optional().describe("Exit duration as a fraction of the entrance's (default 0.5-0.6, i.e. 40-50 % shorter)."),
+      max_same_ease: external_exports.number().int().min(1).optional().describe("Most tweens per comp that may share one ease and duration (default 2)."),
+      entrance_pattern: external_exports.string().max(200).optional(),
+      transitions: external_exports.object({ primary: external_exports.string().max(60).optional(), accents: external_exports.array(external_exports.string().max(60)).max(4).optional() }).optional(),
+      platform: external_exports.enum(PLATFORM_PRESET_IDS).optional().describe("Safe-zone preset for text and logos."),
+      min_text_pct: external_exports.number().positive().max(50).optional().describe("Smallest text height as a % of the comp's short side (default 2.6)."),
+      reading: external_exports.object({ base_s: external_exports.number().min(0), per_word_s: external_exports.number().min(0), last_line_s: external_exports.number().min(0) }).partial().optional().describe("Reading time: base + per word; the last line at least last_line_s (defaults 0.5, 0.3, 2)."),
+      dead_stretch_s: external_exports.number().positive().optional().describe("Longest span with nothing changing (default 3)."),
+      facts: external_exports.array(external_exports.string().min(1).max(200)).max(200).optional().describe("Approved names, dates and numbers; other text on screen is flagged."),
+      banned: external_exports.array(external_exports.string().min(1).max(200)).max(20).optional(),
+      beats: external_exports.array(MotionBeatSchema).max(100).optional()
+    }).describe("The motion language as numbers; checks read their thresholds from it.");
+    COMMON = {
+      exit_ratio: { min: 0.5, max: 0.6 },
+      max_same_ease: 2,
+      platform: "title_safe",
+      min_text_pct: 2.6,
+      reading: { base_s: 0.5, per_word_s: 0.3, last_line_s: 2 },
+      dead_stretch_s: 3
+    };
+    REGISTER_DEFAULTS = {
+      ui_micro: {
+        ...COMMON,
+        signature_ease: NAMED_EASES.standard,
+        durations_ms: { short: 150, medium: 250, long: 400 },
+        stagger_ms: { words: 40, items: 40, group_total_max: 400 },
+        overshoot_max_pct: 5,
+        long_tween_s: 0.8
+      },
+      brand_film: {
+        ...COMMON,
+        signature_ease: NAMED_EASES.premium,
+        durations_ms: { short: 300, medium: 500, long: 800 },
+        stagger_ms: { words: 80, items: 60, group_total_max: 600 },
+        overshoot_max_pct: 0,
+        long_tween_s: 2
+      },
+      energetic: {
+        ...COMMON,
+        signature_ease: NAMED_EASES.expo_out,
+        durations_ms: { short: 150, medium: 250, long: 400 },
+        stagger_ms: { words: 60, items: 40, group_total_max: 500 },
+        overshoot_max_pct: 25,
+        long_tween_s: 1.2
+      },
+      handmade: {
+        ...COMMON,
+        signature_ease: NAMED_EASES.in_out,
+        durations_ms: { short: 250, medium: 500, long: 1e3 },
+        stagger_ms: { words: 120, items: 100, group_total_max: 1200 },
+        overshoot_max_pct: 0,
+        // Stepped, hand-made looks hold keys on purpose: monotony and linear checks are relaxed by the caller.
+        long_tween_s: 3
+      }
+    };
+  }
+});
+
+// src/tools/ext/brief.ts
+function labToSrgb(L, a, b) {
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  const eps = 216 / 24389;
+  const kappa = 24389 / 27;
+  const finv = (f) => f * f * f > eps ? f * f * f : (116 * f - 16) / kappa;
+  const X = 0.9642 * finv(fx);
+  const Y = L > kappa * eps ? Math.pow((L + 16) / 116, 3) : L / kappa;
+  const Z = 0.8249 * finv(fz);
+  const rl = 3.1338561 * X - 1.6168667 * Y - 0.4906146 * Z;
+  const gl = -0.9787684 * X + 1.9161415 * Y + 0.033454 * Z;
+  const bl = 0.0719453 * X - 0.2289914 * Y + 1.4052427 * Z;
+  const out = [rl, gl, bl].some((c) => c < -2e-3 || c > 1.002);
+  return { rgb: [encodeSrgb(rl), encodeSrgb(gl), encodeSrgb(bl)], out_of_gamut: out };
+}
+function swatchToColor(v) {
+  switch (v.type) {
+    case "RGB":
+      if (!isNum(v.r) || !isNum(v.g) || !isNum(v.b)) return "RGB swatch is missing r, g or b";
+      return { hex: toHex(v.r, v.g, v.b), approximate: false };
+    case "Gray":
+      if (!isNum(v.value)) return "Gray swatch has no value";
+      return { hex: toHex(v.value, v.value, v.value), approximate: false };
+    case "CMYK": {
+      if (!isNum(v.c) || !isNum(v.m) || !isNum(v.y) || !isNum(v.k)) return "CMYK swatch is missing c, m, y or k";
+      const k = 1 - clamp01(v.k);
+      return { hex: toHex((1 - clamp01(v.c)) * k, (1 - clamp01(v.m)) * k, (1 - clamp01(v.y)) * k), approximate: true };
+    }
+    case "LAB": {
+      if (!isNum(v.L) || !isNum(v.a) || !isNum(v.b)) return "LAB swatch is missing L, a or b";
+      const { rgb, out_of_gamut } = labToSrgb(clamp01(v.L) * 100, v.a, v.b);
+      return { hex: toHex(rgb[0], rgb[1], rgb[2]), approximate: true, ...out_of_gamut ? { out_of_gamut: true } : {} };
+    }
+    default:
+      return `swatch type '${v.type}' is not supported (only RGB, CMYK, LAB and Gray)`;
+  }
+}
+function convertSwatches(values) {
+  const swatches = [];
+  const skipped = [];
+  const seen = /* @__PURE__ */ new Set();
+  let dupes = 0;
+  values.forEach((v, i) => {
+    const c = swatchToColor(v);
+    if (typeof c === "string") {
+      skipped.push({ index: i + 1, type: String(v.type), reason: c });
+      return;
+    }
+    if (seen.has(c.hex)) {
+      dupes++;
+      return;
+    }
+    seen.add(c.hex);
+    swatches.push({ index: i + 1, type: v.type, ...c });
+  });
+  return {
+    swatches,
+    colors: swatches.map((s) => s.hex),
+    duplicates_removed: dupes,
+    skipped,
+    approximate_count: swatches.filter((s) => s.approximate).length
+  };
+}
+function mergeBrandColors(existing, incoming, max = 12) {
+  const have = new Set(existing.map((c) => c.toLowerCase()));
+  const merged = [...existing];
+  const added = [];
+  const already_present = [];
+  const not_added = [];
+  for (const c of incoming) {
+    if (have.has(c.toLowerCase())) already_present.push(c);
+    else if (merged.length >= max) not_added.push(c);
+    else {
+      merged.push(c);
+      have.add(c.toLowerCase());
+      added.push(c);
+    }
+  }
+  return { merged, added, already_present, not_added };
+}
+function checkSwatchPath(file) {
+  if (!path17.isAbsolute(file)) return "The swatch path must be absolute.";
+  if (path17.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
+  let st;
+  try {
+    st = fs18.statSync(file);
+  } catch {
+    return "No file at that path.";
+  }
+  if (!st.isFile()) return "That path is not a file.";
+  if (st.size === 0) return "The swatch file is empty.";
+  if (st.size > MAX_SWATCH_FILE_BYTES) return `The swatch file is larger than ${MAX_SWATCH_FILE_BYTES / (1024 * 1024)} MB.`;
+  return null;
+}
+function briefPath(projectPath) {
+  return path17.join(path17.dirname(projectPath), `${path17.basename(projectPath, path17.extname(projectPath))}.brief.json`);
+}
+function isEmpty(v) {
+  if (v === void 0 || v === null || v === "") return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v).length === 0;
+  return false;
+}
+function readBrief(file) {
+  try {
+    const parsed = JSON.parse(fs18.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function mergeBrief(current, patch, now) {
+  const next = { ...current ?? {} };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === void 0) continue;
+    if (isEmpty(v)) delete next[k];
+    else if (k === "motion") {
+      const stored = next.motion;
+      const merged = stored !== null && typeof stored === "object" && !Array.isArray(stored) ? { ...stored } : {};
+      for (const [mk, mv] of Object.entries(v)) {
+        if (mv === void 0) continue;
+        if (isEmpty(mv)) delete merged[mk];
+        else merged[mk] = mv;
+      }
+      if (Object.keys(merged).length === 0) delete next.motion;
+      else next.motion = merged;
+    } else next[k] = v;
+  }
+  next.updated_at = now.toISOString();
+  return next;
+}
+function missingFields(brief) {
+  return BRIEF_FIELDS.filter((f) => isEmpty(brief?.[f]));
+}
+async function loadMotionSpec(ctx) {
+  let file = null;
+  try {
+    const projectPath = await openProjectPath(ctx);
+    if (projectPath) file = briefPath(projectPath);
+  } catch {
+    file = null;
+  }
+  const brief = file ? readBrief(file) : null;
+  const { spec, warning } = salvageMotionSpec(brief?.motion);
+  return { ...resolveMotionSpec(spec), brief_path: brief ? file : null, ...warning ? { warning } : {} };
+}
+function salvageMotionSpec(raw) {
+  if (raw === void 0 || raw === null) return { spec: null };
+  const whole = MotionSpecSchema.safeParse(raw);
+  if (whole.success) return { spec: whole.data };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { spec: null, warning: "The stored motion spec is not an object; register defaults are used." };
+  }
+  const shape = MotionSpecSchema.shape;
+  const kept = {};
+  const dropped = [];
+  for (const [key, value] of Object.entries(raw)) {
+    const field = shape[key];
+    if (!field || value === void 0) continue;
+    const r = field.safeParse(value);
+    if (r.success) kept[key] = r.data;
+    else dropped.push(key);
+  }
+  return {
+    spec: kept,
+    warning: dropped.length ? `The stored motion spec has invalid values for: ${dropped.join(", ")}. Those keys are ignored and the register defaults are used for them.` : void 0
+  };
+}
+function motionResolved(brief) {
+  const { spec, warning } = salvageMotionSpec(brief?.motion);
+  const r = resolveMotionSpec(spec);
+  return warning ? { ...r, warning } : r;
+}
+async function openProjectPath(ctx) {
+  const res = await ctx.bridge.evalRaw({
+    id: `${ctx.bridge.newOpId()}_brief_status`,
+    script: buildJsxCall("status", {}),
+    label: "ae_brief (project path)",
+    mutates: false,
+    toolName: "ae_brief"
+  });
+  return res.result.project_path;
+}
+async function parseSwatches(file, ctx) {
+  const bad4 = checkSwatchPath(file);
+  if (bad4) return { ok: false, error: "bad_swatch_file", message: bad4 };
+  let raw;
+  try {
+    const res = await ctx.bridge.callHost("briefParseSwatches", { path: file }, { label: "ae_brief (parse swatches)", mutates: false, toolName: "ae_brief" });
+    raw = res.result;
+  } catch (err) {
+    return { ok: false, error: "swatch_parse_failed", message: err instanceof Error ? err.message : String(err) };
+  }
+  const conv = convertSwatches(raw.values ?? []);
+  const report = {
+    path: file,
+    ase_version: raw.majorVersion != null ? `${raw.majorVersion}.${raw.minorVersion ?? 0}` : void 0,
+    swatch_count: raw.count ?? (raw.values ?? []).length,
+    ...raw.truncated ? { truncated: true } : {},
+    colors: conv.colors,
+    swatches: conv.swatches,
+    duplicates_removed: conv.duplicates_removed,
+    skipped: conv.skipped,
+    approximate_count: conv.approximate_count,
+    confirmed: false,
+    note: "The .ase file holds no colour names, so the colours are numbered in file order (swatches[].index). CMYK and LAB are converted without colour profiles: approximate." + (conv.colors.length > 12 ? " brand_colors holds at most 12 colours: only the first free slots are filled." : ""),
+    next: "Show these colours to the user (ae_ask_user) and, on a yes, call ae_brief again with import_swatches.confirm true and expect.project_path."
+  };
+  return { ok: true, report, colors: conv.colors };
+}
+function isLinear(c) {
+  return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
+}
+var fs18, path17, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
+var init_brief = __esm({
+  "src/tools/ext/brief.ts"() {
+    "use strict";
+    fs18 = __toESM(require("node:fs"), 1);
+    path17 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_jsx();
+    init_motion_spec();
+    clamp01 = (x) => Math.min(1, Math.max(0, x));
+    isNum = (x) => typeof x === "number" && Number.isFinite(x);
+    toHex = (r, g, b) => "#" + [r, g, b].map((c) => Math.round(clamp01(c) * 255).toString(16).padStart(2, "0")).join("");
+    encodeSrgb = (lin) => {
+      const c = clamp01(lin);
+      return c <= 31308e-7 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+    };
+    MAX_SWATCH_FILE_BYTES = 5 * 1024 * 1024;
+    BriefFieldsSchema = external_exports.object({
+      goal: external_exports.string().max(1e3).optional().describe("What the piece is for and the one thing it must get across."),
+      audience: external_exports.string().max(500).optional().describe("Who watches it, and where (platform, screen)."),
+      format: external_exports.object({
+        width: external_exports.number().int().positive().optional(),
+        height: external_exports.number().int().positive().optional(),
+        fps: external_exports.number().positive().optional(),
+        duration_s: external_exports.number().positive().optional()
+      }).optional().describe("Delivery size, frame rate and length."),
+      feel: external_exports.array(external_exports.string().min(1).max(40)).max(6).optional().describe("A few words for the feel, e.g. ['confident', 'clean', 'snappy']."),
+      references: external_exports.array(external_exports.string().min(1).max(500)).max(20).optional().describe("Links, file paths, or descriptions of work to match."),
+      brand_colors: external_exports.array(external_exports.string().regex(/^#[0-9a-fA-F]{6}$/, "colors are #rrggbb")).max(12).optional().describe("Brand colours as #rrggbb."),
+      fonts: external_exports.array(external_exports.string().min(1).max(100)).max(6).optional(),
+      do_not_change: external_exports.array(external_exports.string().min(1).max(300)).max(20).optional().describe("Layers, comps or decisions to leave alone."),
+      notes: external_exports.string().max(4e3).optional(),
+      motion: MotionSpecSchema.optional()
+    });
+    AeBriefSchema = external_exports.object({
+      set: BriefFieldsSchema.optional().describe(
+        "Fields to save. Omitted fields keep their value; an empty string or list clears one. Save only what the user said or confirmed."
+      ),
+      import_swatches: external_exports.object({
+        path: external_exports.string().min(1).max(1e3).describe("Absolute path to an Adobe Swatch Exchange (.ase) file."),
+        confirm: external_exports.boolean().default(false).describe(
+          "false (default): only list the colours the file holds, to show the user (ae_ask_user) and get a yes. true: add them to brand_colors (existing colours stay; new ones are appended up to the limit of 12)."
+        )
+      }).optional().describe(
+        "Read a client .ase palette through After Effects and offer its colours as #rrggbb for brand_colors. RGB and Gray are exact; CMYK and LAB are converted without colour profiles and flagged approximate. The file holds no colour names, so the colours are numbered in file order. Nothing is saved until confirm is true."
+      ),
+      expect: external_exports.object({ project_path: external_exports.string().min(1) }).optional().describe("Required with `set` or `import_swatches.confirm`: the open project's path, so the brief lands next to the right .aep.")
+    }).refine((v) => !v.set && v.import_swatches?.confirm !== true || v.expect !== void 0, { message: "Saving a brief needs expect.project_path." });
+    BRIEF_FIELDS = ["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change", "motion"];
+    BRIEF_QUESTIONS = {
+      goal: { question: "What is this piece for, and what is the one thing it must get across?" },
+      audience: {
+        question: "Who will watch it, and where?",
+        options: [
+          { id: "social_vertical", label: "Social, vertical (Reels, TikTok, Shorts)" },
+          { id: "web_16x9", label: "YouTube or web, 16:9" },
+          { id: "broadcast", label: "Broadcast or TV" },
+          { id: "event", label: "Event screen or presentation" }
+        ]
+      },
+      format: { question: "What size, frame rate and length should it be delivered at?" },
+      feel: {
+        question: "Which words fit the feel?",
+        options: [
+          { id: "calm", label: "Calm" },
+          { id: "energetic", label: "Energetic" },
+          { id: "playful", label: "Playful" },
+          { id: "premium", label: "Premium" },
+          { id: "technical", label: "Technical" },
+          { id: "bold", label: "Bold" }
+        ],
+        multi_select: true
+      },
+      references: { question: "Is there any work (links or files) it should feel like?" },
+      brand_colors: { question: "Which brand colours should it use (hex codes)?" },
+      fonts: { question: "Which fonts should it use?" },
+      do_not_change: { question: "Is there anything I must leave alone?" },
+      motion: {
+        question: "What kind of motion is this? It sets the timing, easing and stagger the checks hold the work to.",
+        options: [
+          { id: "ui_micro", label: "UI micro: quick, functional (150-400 ms)" },
+          { id: "brand_film", label: "Brand film: smooth, premium, no overshoot" },
+          { id: "energetic", label: "Energetic: snappy, punchy, some overshoot" },
+          { id: "handmade", label: "Handmade: slower, stepped, organic" }
+        ]
+      }
+    };
+    AeTasteSchema = external_exports.object({
+      set: external_exports.object({
+        // Deliberately not EASE_CURVE_ARRAY_SCHEMA/MIN_HANDLE-bounded: [0, 0, 1, 1] (x1=0,
+        // x2=1) is a meaningful "clear to linear" sentinel here, checked by isLinear() below
+        // before it's ever applied as a curve - the tighter apply-time bound would reject it.
+        preferred_ease: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, { message: "curve x1 and x2 must be within 0..1" }).optional().describe("The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."),
+        allow_linear_non_motion: external_exports.boolean().optional().describe("Linear timing on opacity and effect parameters is on purpose: the review stops flagging it."),
+        avoid_overshoot: external_exports.boolean().optional().describe("The user doesn't want overshoot: the review reports it as low instead of info."),
+        notes: external_exports.string().max(2e3).optional().describe("What the user has said about their taste, in their words. Replaces the earlier notes.")
+      }).optional().describe("Fields to change. Save only what the user said or confirmed.")
+    });
+    briefTools = [
+      {
+        name: "ae_brief",
+        description: "Read or save the open project's brief: goal, audience, format, feel, references, brand colours and fonts, and what not to change. It lives next to the .aep as <name>.brief.json, so it travels with the project. Call it at the start of any creative job. The result lists `missing` fields with `questions`; ask the ones that matter for the task, choices through ae_ask_user (pass the question and options as given) and open questions in the chat, then save the answers with `set`. `motion` is the project's motion language as numbers: register (ui_micro, brand_film (default), energetic, handmade), signature_ease, durations_ms, stagger_ms, overshoot_max_pct, exit_ratio, platform safe zone, min_text_pct, reading time, dead_stretch_s, facts, banned and beats. The motion, timing and house-style checks read their thresholds from it; anything left out comes from the register's defaults (see `motion_resolved` in the result, where `from_brief` names what was set). Saving `motion` merges one level deep: `set: {motion: {platform: 'reels_9_16'}}` keeps the register, beats and the rest; each sub-field you give replaces that sub-field whole; an empty one (\"\", [], {}) clears it; `motion: {}` clears the whole spec. A bad value (unknown register, a beat that ends before it starts, hero_s outside its beat) is rejected and nothing is saved. `motion` is listed as missing only while none of it is set. Respect `do_not_change` in everything you do. Unsaved projects have no brief until they are saved. Never touches the AE project. `import_swatches` {path, confirm} reads a client .ase palette through After Effects and lists its colours as #rrggbb (RGB and Gray exact, CMYK and LAB approximate, no names, so they are numbered); show them to the user with ae_ask_user, then repeat with confirm true to merge them into brand_colors (existing colours are kept, 12 at most).",
+        schema: AeBriefSchema,
+        handler: async (args, ctx) => {
+          const projectPath = await openProjectPath(ctx);
+          const imp = args.import_swatches;
+          const writes = !!args.set || imp?.confirm === true;
+          const previewOnly = !!imp && !writes;
+          if (projectPath === "<unsaved>" && !previewOnly) {
+            return {
+              ok: false,
+              error: "unsaved_project",
+              message: "The project has not been saved, so there is nowhere to keep a brief yet. Ask the user to save it (or keep the brief in the chat for now)."
+            };
+          }
+          const file = projectPath === "<unsaved>" ? null : briefPath(projectPath);
+          let brief = file ? readBrief(file) : null;
+          let saved = false;
+          if (writes && normalizeGuardPath(args.expect.project_path) !== normalizeGuardPath(projectPath)) {
+            return {
+              ok: false,
+              error: "guard",
+              message: `The open project is ${projectPath}, not ${args.expect.project_path}. Re-read state; nothing was saved.`
+            };
+          }
+          let swatchReport;
+          let importColors;
+          if (imp) {
+            const parsed = await parseSwatches(imp.path, ctx);
+            if (!parsed.ok) return parsed;
+            swatchReport = parsed.report;
+            importColors = parsed.colors;
+          }
+          if (args.set) brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
+          if (imp?.confirm && importColors) {
+            const merge = mergeBrandColors(brief?.brand_colors ?? [], importColors);
+            brief = mergeBrief(brief, { brand_colors: merge.merged }, /* @__PURE__ */ new Date());
+            swatchReport = { ...swatchReport, confirmed: true, added: merge.added, already_present: merge.already_present, not_added: merge.not_added };
+          }
+          if (writes && file && brief) {
+            const tmp = `${file}.tmp-${process.pid}`;
+            fs18.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
+            fs18.renameSync(tmp, file);
+            saved = true;
+          }
+          const missing = missingFields(brief);
+          return {
+            ok: true,
+            project_path: projectPath,
+            brief_path: file,
+            exists: brief !== null,
+            saved,
+            brief,
+            motion: brief?.motion ?? null,
+            motion_resolved: motionResolved(brief),
+            missing,
+            questions: missing.map((field) => ({ field, ...BRIEF_QUESTIONS[field] })),
+            ...swatchReport ? { swatch_import: swatchReport } : {}
+          };
+        }
+      },
+      {
+        name: "ae_taste",
+        description: "Read or change the user's motion taste, kept across projects: a preferred ease curve, whether linear opacity and effect timing is deliberate, whether overshoot is unwanted, and notes in their words. ae_motion_review follows it (its fixes use the preferred curve's handle lengths). Read it before animating so first passes already match. Change it only on the user's word: after they pick an ease with ae_ask_user, ask whether it should become their default. Call with no arguments to read.",
+        schema: AeTasteSchema,
+        handler: async (args, ctx) => {
+          if (!ctx.settings) {
+            return { ok: false, error: "no_settings", message: "This server has no settings store, so taste can't be kept." };
+          }
+          let saved = false;
+          if (args.set) {
+            const patch = { ...args.set };
+            if (patch.preferred_ease && isLinear(patch.preferred_ease)) {
+              patch.preferred_ease = null;
+            }
+            ctx.settings.updateTaste(patch);
+            saved = true;
+          }
+          return { ok: true, saved, taste: ctx.settings.get().taste, settings_path: ctx.settings.path };
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/choreography.ts
+function overshootKind(prop) {
+  const m = prop.samples.property.matchName;
+  if (m === "ADBE Opacity") return "opacity";
+  if (prop.samples.property.value_type === "COLOR") return "colour";
+  if (m === "ADBE Slider Control-0001" && COUNT_WORDS.test(`${prop.effect_name ?? ""} ${prop.samples.property.name}`)) return "number";
+  if (MOVE_NAMES.has(m)) return "motion";
+  return "other";
+}
+function overshootPct(s, o) {
+  const vals = s.keys.map((k) => k.value[o.dimension]).filter((v) => typeof v === "number");
+  const span = vals.length ? Math.max(...vals) - Math.min(...vals) : 0;
+  const past = Math.max(o.above_keys_by, o.below_keys_by);
+  return span > 1e-9 ? past / span * 100 : 100;
+}
+function influence(list2) {
+  return list2 && list2.length ? list2[0].influence : null;
+}
+function extractTweens(props) {
+  const out = [];
+  for (const p of props) {
+    const m = p.samples.property.matchName;
+    let cls = "other";
+    if (m === "ADBE Opacity") cls = "opacity";
+    else if (p.samples.property.value_type === "COLOR") cls = "color";
+    else if (TRANSFORM_NAMES.has(m)) cls = "move";
+    const keyAt = new Map(p.samples.keys.map((k) => [k.index, k]));
+    for (const g of p.analysis.segments) {
+      if (g.profile === "hold" || g.profile === "static") continue;
+      const a = keyAt.get(g.from_key);
+      const b = keyAt.get(g.to_key);
+      if (!a || !b) continue;
+      out.push({
+        layer: p.samples.layer,
+        prop: p,
+        cls,
+        transform: TRANSFORM_NAMES.has(m),
+        start: g.start,
+        end: g.end,
+        duration: r22(g.end - g.start),
+        segment: g,
+        out_influence: influence(a.out_ease),
+        in_influence: influence(b.in_ease),
+        eased: a.out_interp === "bezier" && b.in_interp === "bezier" && g.profile !== "constant"
+      });
+    }
+  }
+  return out;
+}
+function sameEase(a, b) {
+  if (a.segment.profile !== b.segment.profile) return false;
+  const close2 = (x, y) => x === null || y === null || Math.abs(x - y) <= 5;
+  return close2(a.out_influence, b.out_influence) && close2(a.in_influence, b.in_influence);
+}
+function finding(t, severity2, kind, message, time = t.start) {
+  return {
+    severity: severity2,
+    kind,
+    layer: t.layer,
+    property: { name: t.prop.samples.property.name, path: t.prop.path },
+    keys: [t.segment.from_key, t.segment.to_key],
+    time,
+    message
+  };
+}
+function list(names, max = 8) {
+  const uniq3 = Array.from(new Set(names));
+  return uniq3.length <= max ? uniq3.join(", ") : `${uniq3.slice(0, max).join(", ")} and ${uniq3.length - max} more`;
+}
+function moves(tweens, frame) {
+  const kept = [];
+  for (const t of tweens) {
+    if (!t.eased) continue;
+    const dup = kept.find((k) => k.layer.id === t.layer.id && Math.abs(k.start - t.start) <= frame && Math.abs(k.duration - t.duration) <= frame);
+    if (!dup) kept.push(t);
+  }
+  return kept;
+}
+function easeMonotony(tweens, infos, spec, frame) {
+  if (spec.register === "handmade") return [];
+  const staggerExtras = /* @__PURE__ */ new Set();
+  for (const run of staggerRuns(tweens, infos, spec, frame)) {
+    [...run.members].sort((a, b) => a.start - b.start).slice(1).forEach((t) => staggerExtras.add(t));
+  }
+  const pool = moves(tweens, frame).filter((t) => !staggerExtras.has(t));
+  const used = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const seed of pool) {
+    if (used.has(seed)) continue;
+    const group = pool.filter((t) => !used.has(t) && Math.abs(t.duration - seed.duration) <= frame && sameEase(seed, t));
+    group.forEach((t) => used.add(t));
+    if (group.length <= spec.max_same_ease) continue;
+    const ease = `${seed.segment.profile}${seed.out_influence !== null && seed.in_influence !== null ? `, influence ${Math.round(seed.out_influence)}% out / ${Math.round(seed.in_influence)}% in` : ""}`;
+    out.push(
+      finding(
+        group[0],
+        "low",
+        "ease_monotony",
+        `${group.length} tweens share one ease (${ease}) and one duration (${seed.duration}s): ${list(group.map((t) => `${layerLabel(t)} > ${propLabel(t)}`))}. More than ${spec.max_same_ease} identical tweens in a comp is the generated tell; vary the duration across the three-tier palette or the ease family by role (hero, supporting, exit).`
+      )
+    );
+  }
+  return out;
+}
+function perLayer(tweens) {
+  const by = /* @__PURE__ */ new Map();
+  for (const t of tweens) by.set(t.layer.id, [...by.get(t.layer.id) ?? [], t].sort((a, b) => a.start - b.start));
+  return by;
+}
+function entranceExit(layerTweens, info, frame) {
+  const mt = layerTweens.filter((t) => t.cls === "move" && MOVE_NAMES.has(t.prop.samples.property.matchName) || t.cls === "opacity");
+  if (!mt.length) return {};
+  const inP = info?.in_point ?? null;
+  const outP = info?.out_point ?? null;
+  const near9 = 0.5;
+  let entrance = mt.find((t) => {
+    if (inP !== null && t.start <= inP + near9) return true;
+    return t.cls === "opacity" && (t.prop.samples.values[0]?.[0] ?? 100) <= 5 && t === mt[0];
+  });
+  let exit;
+  for (let i = mt.length - 1; i >= 0; i--) {
+    const t = mt[i];
+    const fadesOut = t.cls === "opacity" && (t.prop.samples.values[t.prop.samples.values.length - 1]?.[0] ?? 100) <= 5;
+    if (outP !== null && t.end >= outP - near9 || fadesOut) {
+      exit = t;
+      break;
+    }
+  }
+  if (entrance && exit && (entrance === exit || Math.abs(entrance.start - exit.start) <= frame)) {
+    if (inP !== null && entrance.start <= inP + near9) exit = void 0;
+    else entrance = void 0;
+  }
+  return { entrance, exit };
+}
+function direction(tweens, infos, frame) {
+  const out = [];
+  for (const [id, lt] of perLayer(tweens)) {
+    const { entrance, exit } = entranceExit(lt, infos.get(id), frame);
+    if (entrance && entrance.segment.profile === "speeds up" && (entrance.segment.peak_at ?? 0) >= 0.6) {
+      out.push(
+        finding(
+          entrance,
+          entrance.cls === "move" ? "medium" : "low",
+          "wrong_direction",
+          `${layerLabel(entrance)} enters with ${propLabel(entrance)} easing in only (key ${entrance.segment.from_key} to ${entrance.segment.to_key}, ${entrance.start}s): it starts slowly and arrives at ${Math.round(entrance.segment.end_speed / Math.max(entrance.segment.peak_speed, 1e-9) * 100)}% of top speed. Heuristic: the layer's first position, scale or opacity tween starts within 0.5 s of its in point (or fades up from 0) and only accelerates. An entrance should decelerate into place (ease out).`
+        )
+      );
+    }
+    if (exit && exit.segment.profile === "slows down" && (exit.segment.peak_at ?? 1) <= 0.4) {
+      out.push(
+        finding(
+          exit,
+          exit.cls === "move" ? "medium" : "low",
+          "wrong_direction",
+          `${layerLabel(exit)} exits with ${propLabel(exit)} easing out only (key ${exit.segment.from_key} to ${exit.segment.to_key}, ${exit.start}s): it leaves at full speed and drifts to a stop. Heuristic: the layer's last position, scale or opacity tween ends within 0.5 s of its out point (or fades to 0) and only decelerates. An exit should accelerate away (ease in).`
+        )
+      );
+    }
+  }
+  return out;
+}
+function exitRatio(tweens, infos, spec, frame) {
+  const out = [];
+  for (const [id, lt] of perLayer(tweens)) {
+    const { entrance, exit } = entranceExit(lt, infos.get(id), frame);
+    if (!entrance || !exit || entrance.duration < 0.2) continue;
+    const ratio = exit.duration / entrance.duration;
+    const lo = spec.exit_ratio.min * entrance.duration - frame;
+    const hi = spec.exit_ratio.max * entrance.duration + frame;
+    if (exit.duration >= lo && exit.duration <= hi) continue;
+    const longer = exit.duration > hi;
+    let severity2 = "info";
+    if (longer) severity2 = exit.duration >= entrance.duration ? "medium" : "low";
+    out.push(
+      finding(
+        exit,
+        severity2,
+        "exit_ratio",
+        `${layerLabel(exit)} exits in ${exit.duration}s after entering in ${entrance.duration}s (${r22(ratio)}x); the spec wants ${spec.exit_ratio.min}x to ${spec.exit_ratio.max}x, about ${r22(spec.exit_ratio.min * entrance.duration)}s to ${r22(spec.exit_ratio.max * entrance.duration)}s. ${longer ? "A leaving element should go faster than it arrived." : "This exit is abrupt next to the entrance."}`
+      )
+    );
+  }
+  return out;
+}
+function frameZero(tweens, infos, fps) {
+  const out = [];
+  const half = 0.5 / fps;
+  for (const [id, lt] of perLayer(tweens)) {
+    const info = infos.get(id);
+    const first = lt.find((t) => t.cls === "move" || t.cls === "opacity");
+    if (!first || !info || info.in_point === null) continue;
+    if (Math.abs(first.start - info.in_point) > half) continue;
+    out.push(
+      finding(
+        first,
+        "info",
+        "first_frame_move",
+        `${layerLabel(first)} starts moving on its very first frame (${propLabel(first)} at ${first.start}s, the layer's in point). The viewer meets it already in motion; start a few frames in (or hold the first frame) unless the cut is meant to land mid-move.`
+      )
+    );
+  }
+  return out;
+}
+function siblingRuns(tweens, infos, frame) {
+  const firsts = /* @__PURE__ */ new Map();
+  for (const [id, lt] of perLayer(tweens)) {
+    const first = lt.find((t) => t.eased && (t.cls === "move" || t.cls === "opacity"));
+    if (!first) continue;
+    const parent = infos.get(id)?.parent ?? null;
+    const key = `${parent}|${first.prop.samples.property.matchName}`;
+    firsts.set(key, [...firsts.get(key) ?? [], first]);
+  }
+  const runs = [];
+  for (const [key, list_] of firsts) {
+    const sorted = [...list_].sort((a, b) => a.layer.index - b.layer.index);
+    let cur = [];
+    const flush = () => {
+      if (cur.length >= 3) {
+        const [p, m] = key.split("|");
+        runs.push({ parent: p === "null" ? null : Number(p), matchName: m, members: cur });
+      }
+      cur = [];
+    };
+    for (const t of sorted) {
+      const prev = cur[cur.length - 1];
+      const similar = prev && Math.abs(prev.duration - t.duration) <= Math.max(frame, 0.2 * prev.duration);
+      if (prev && (t.layer.index - prev.layer.index > 1 || !similar)) flush();
+      cur.push(t);
+    }
+    flush();
+  }
+  return runs;
+}
+function staggerRuns(tweens, infos, spec, frame) {
+  return siblingRuns(tweens, infos, frame).filter((run) => {
+    const starts = run.members.map((t) => t.start);
+    const spread = Math.max(...starts) - Math.min(...starts);
+    return spread > frame && spread <= 2 * spec.stagger_ms.group_total_max / 1e3;
+  });
+}
+function stagger(tweens, infos, spec, frame) {
+  const out = [];
+  for (const run of siblingRuns(tweens, infos, frame)) {
+    const byStart = [...run.members].sort((a, b) => a.start - b.start);
+    const starts = byStart.map((t) => t.start);
+    const spread = starts[starts.length - 1] - starts[0];
+    if (spread <= frame) continue;
+    const gaps = starts.slice(1).map((s, i) => s - starts[i]);
+    const mean3 = spread / gaps.length;
+    const names = list(byStart.map(layerLabel));
+    const limit = spec.stagger_ms.group_total_max / 1e3;
+    if (spread > limit + 1e-6) {
+      out.push(
+        finding(byStart[0], spread > 2 * limit ? "medium" : "low", "stagger_spread", `Siblings ${names} (${propLabel(byStart[0])}) start over ${r22(spread)}s; the ${spec.register} stagger budget is ${limit}s for the group. The last items arrive after the viewer has stopped waiting; shorten the offset to about ${Math.round(limit / (run.members.length - 1) * 1e3)} ms.`)
+      );
+    }
+    if (Math.max(...gaps) - Math.min(...gaps) > Math.max(frame, 0.35 * mean3)) {
+      out.push(
+        finding(byStart[0], "low", "stagger_irregular", `Siblings ${names} (${propLabel(byStart[0])}) start at uneven offsets (${gaps.map((g) => `${Math.round(g * 1e3)} ms`).join(", ")}). A stagger reads as a rhythm only when the offsets are the same.`)
+      );
+    }
+  }
+  return out;
+}
+function isBackground(info, comp) {
+  const n = info.name.trim();
+  if (/^(bg|background|backdrop)(?![a-z0-9])/i.test(n) || /(?<![a-z0-9])(bg|background|backdrop)$/i.test(n)) return true;
+  if (info.kind === "text" || info.width === null || info.height === null) return false;
+  return info.width * info.height >= 0.9 * comp.width * comp.height;
+}
+function density(tweens, input, infos, spec, frame) {
+  const out = [];
+  const mt = tweens.filter((t) => t.eased && (t.cls === "move" || t.cls === "opacity"));
+  const byParent = /* @__PURE__ */ new Map();
+  for (const l of input.layers) {
+    if (l.kind === "camera" || l.kind === "light" || l.kind === "null" || isBackground(l, input.comp)) continue;
+    byParent.set(l.parent, [...byParent.get(l.parent) ?? [], l]);
+  }
+  const elementOf = /* @__PURE__ */ new Map();
+  const runSize = /* @__PURE__ */ new Map();
+  for (const run of staggerRuns(tweens, infos, spec, frame)) {
+    const lead = run.members[0].layer.id;
+    run.members.forEach((t) => elementOf.set(t.layer.id, lead));
+    runSize.set(lead, run.members.length);
+  }
+  const elem = (t) => elementOf.get(t.layer.id) ?? t.layer.id;
+  for (const [parent, group] of byParent) {
+    if (group.length < 3) continue;
+    const ids = new Set(group.map((l) => l.id));
+    const nameOf = new Map(group.map((l) => [l.id, l.name]));
+    const gt = mt.filter((t) => ids.has(t.layer.id));
+    let worst = null;
+    for (const at of gt.map((t) => t.start + frame / 2)) {
+      const onScreen = group.filter((l) => (l.in_point === null || l.in_point <= at + 1e-6) && (l.out_point === null || l.out_point > at));
+      if (onScreen.length < 3) continue;
+      const moving = [...new Set(gt.filter((t) => t.start <= at && t.end > at).map(elem))];
+      if (moving.length / onScreen.length > 1 / 3 && moving.length >= 2 && (!worst || moving.length / onScreen.length > worst.moving.length / worst.onScreen)) {
+        worst = { t: at, moving, onScreen: onScreen.length };
+      }
+    }
+    if (!worst) continue;
+    const share = worst.moving.length / worst.onScreen;
+    const first = gt.find((t) => worst.moving.includes(elem(t)));
+    const names = worst.moving.map((id) => {
+      const n = runSize.get(id) ?? 1;
+      return n > 1 ? `${nameOf.get(id) ?? id} and ${n - 1} more in a stagger` : nameOf.get(id) ?? String(id);
+    });
+    out.push(
+      finding(
+        first,
+        share >= 2 / 3 && worst.onScreen >= 4 ? "medium" : "low",
+        "density",
+        `${worst.moving.length} of ${worst.onScreen} sibling layers${parent === null ? "" : " under one parent"} are moving at ${r22(worst.t)}s (${Math.round(share * 100)}%): ${names.join(", ")}. More than a third moving at once reads as noise; stagger them or let one lead and the rest hold.`,
+        r22(worst.t)
+      )
+    );
+  }
+  return out;
+}
+function landedText(tweens, input, infos, frame) {
+  const out = [];
+  const by = perLayer(tweens.filter((t) => t.transform));
+  for (const info of input.layers) {
+    if (info.kind !== "text") continue;
+    const expr = info.transform_expressions.find((e) => /\b(wiggle|loopOut|loopIn)\s*\(/.test(e.text));
+    const lt = by.get(info.id) ?? [];
+    const any = lt[0] ?? tweens.find((t2) => t2.layer.id === info.id);
+    if (expr) {
+      const anchor = any ?? { layer: { index: info.index, id: info.id, name: info.name }, prop: { path: ["ADBE Transform Group"], samples: { property: { name: expr.name } } }, segment: { from_key: 0, to_key: 0 }, start: 0 };
+      const f = finding(anchor, "medium", "landed_text_moving", `Text layer ${info.name} has an expression on ${expr.name} using ${/wiggle/.test(expr.text) ? "wiggle" : "loopOut/loopIn"}, so it keeps moving after it has landed. Text should be still once read; remove it or limit it to the entrance.`, 0);
+      f.property = { name: expr.name, path: ["ADBE Transform Group"] };
+      f.keys = [];
+      out.push(f);
+    }
+    if (lt.length < 2) continue;
+    let settle = lt[0].end;
+    for (const t2 of lt) if (t2.start <= settle + frame) settle = Math.max(settle, t2.end);
+    const { exit } = entranceExit(lt, infos.get(info.id), frame);
+    const later = lt.filter((t2) => t2.start > settle + 0.3 && t2 !== exit && !(exit && Math.abs(t2.start - exit.start) <= frame));
+    if (!later.length) continue;
+    const t = later[0];
+    out.push(
+      finding(t, "low", "landed_text_moving", `Text layer ${layerLabel(t)} moves again (${propLabel(t)}, ${t.start}s to ${t.end}s) after it landed at ${r22(settle)}s and before its exit. Text that has been read should hold still; keep any later move deliberate (a handover to the next line) rather than a drift.`)
+    );
+  }
+  return out;
+}
+function longTween(tweens, input, spec) {
+  const infos = new Map(input.layers.map((l) => [l.id, l]));
+  const out = [];
+  for (const t of tweens) {
+    if (!t.prop.samples.property.spatial || t.duration <= spec.long_tween_s) continue;
+    const info = infos.get(t.layer.id);
+    if (info && (info.kind === "camera" || info.kind === "light" || isBackground(info, input.comp))) continue;
+    out.push(
+      finding(
+        t,
+        t.duration > 2 * spec.long_tween_s ? "medium" : "low",
+        "long_tween",
+        `${layerLabel(t)} ${propLabel(t)} travels for ${t.duration}s (key ${t.segment.from_key} to ${t.segment.to_key}); the ${spec.register} register allows ${spec.long_tween_s}s for a move. It will feel slow unless it is an ambient drift; shorten it or make it a camera or background move.`
+      )
+    );
+  }
+  return out;
+}
+function reviewChoreography(input, spec, checks = CHOREOGRAPHY_CHECKS) {
+  const on = new Set(checks);
+  const frame = 1 / (input.comp.fps > 0 ? input.comp.fps : 25);
+  const infos = new Map(input.layers.map((l) => [l.id, l]));
+  const tweens = extractTweens(input.props);
+  const drawn = tweens.filter((t) => {
+    const k = infos.get(t.layer.id)?.kind;
+    return k !== "camera" && k !== "light" && k !== "null";
+  });
+  const out = [];
+  if (on.has("ease_monotony")) out.push(...easeMonotony(tweens, infos, spec, frame));
+  if (on.has("direction")) out.push(...direction(drawn, infos, frame));
+  if (on.has("exit_ratio")) out.push(...exitRatio(drawn, infos, spec, frame));
+  if (on.has("frame_zero")) out.push(...frameZero(drawn, infos, input.comp.fps > 0 ? input.comp.fps : 25));
+  if (on.has("stagger")) out.push(...stagger(tweens, infos, spec, frame));
+  if (on.has("density")) out.push(...density(tweens, input, infos, spec, frame));
+  if (on.has("landed_text")) out.push(...landedText(tweens, input, infos, frame));
+  if (on.has("long_tween")) out.push(...longTween(tweens, input, spec));
+  return out;
+}
+var CHOREOGRAPHY_CHECKS, r22, MOVE_NAMES, TRANSFORM_NAMES, COUNT_WORDS, layerLabel, propLabel;
+var init_choreography = __esm({
+  "src/tools/ext/choreography.ts"() {
+    "use strict";
+    CHOREOGRAPHY_CHECKS = [
+      "ease_monotony",
+      "direction",
+      "exit_ratio",
+      "frame_zero",
+      "overshoot",
+      "stagger",
+      "density",
+      "landed_text",
+      "long_tween"
+    ];
+    r22 = (x) => Math.round(x * 100) / 100;
+    MOVE_NAMES = /* @__PURE__ */ new Set(["ADBE Position", "ADBE Position_0", "ADBE Position_1", "ADBE Position_2", "ADBE Scale"]);
+    TRANSFORM_NAMES = /* @__PURE__ */ new Set([...MOVE_NAMES, "ADBE Rotate Z", "ADBE Rotate X", "ADBE Rotate Y", "ADBE Orientation"]);
+    COUNT_WORDS = /count|number|num\b|value|stat|total|percent|amount|price|score|figure/i;
+    layerLabel = (t) => t.layer.name;
+    propLabel = (t) => t.prop.samples.property.name;
+  }
+});
+
 // src/tools/ext/motion.ts
 function contactSheetTimes(comp, opts) {
   const fps = comp.fps > 0 ? comp.fps : 25;
@@ -19266,13 +20240,13 @@ function renderMotionGraph(s, speeds, width, height) {
 function fixEase(taste) {
   const c = taste?.preferred_ease;
   if (!c || c.length !== 4) return { ease: "easy_ease", name: "Easy ease" };
-  const influence = (v) => Math.min(100, Math.max(0.1, Math.round(v * 1e3) / 10));
+  const influence2 = (v) => Math.min(100, Math.max(0.1, Math.round(v * 1e3) / 10));
   return {
-    ease: { in: { speed: 0, influence: influence(1 - c[2]) }, out: { speed: 0, influence: influence(c[0]) } },
+    ease: { in: { speed: 0, influence: influence2(1 - c[2]) }, out: { speed: 0, influence: influence2(c[0]) } },
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path51, target, taste) {
+function reviewProperty(s, analysis, speeds, path51, target, taste, choreo) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
@@ -19381,19 +20355,38 @@ function reviewProperty(s, analysis, speeds, path51, target, taste) {
       if (past ? s.values[i][d] > s.values[at][d] : s.values[i][d] < s.values[at][d]) at = i;
     }
     const unwanted = taste?.avoid_overshoot === true;
+    let severity2 = unwanted ? "low" : "info";
+    let note = unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.";
+    if (choreo && choreo.enabled !== false) {
+      const kind = overshootKind({ samples: s, effect_name: choreo.effectName });
+      const pct2 = overshootPct(s, o);
+      const max = choreo.spec.overshoot_max_pct;
+      const pctText = `${Math.round(pct2 * 10) / 10}% of its keyframe span`;
+      if (kind === "opacity" || kind === "colour" || kind === "number") {
+        severity2 = "medium";
+        const what = kind === "number" ? "A counting number" : kind === "colour" ? "Colour" : "Opacity";
+        note = `${what} never overshoots (${pctText}): it reads as wrong data or a flash. Use an ease without overshoot on these keys.`;
+      } else if (kind === "motion" && pct2 > (max === 0 ? OVERSHOOT_SETTLE_TOLERANCE_PCT : max)) {
+        const lenient = choreo.spec.register === "handmade" || choreo.spec.register === "energetic";
+        severity2 = max === 0 && !lenient ? "medium" : "low";
+        note = `That is ${pctText}; the ${choreo.spec.register} register allows ${max}% on position and scale. ${max === 0 ? "Use an ease without overshoot." : "Reduce the bounce."}`;
+      } else if (kind === "motion") {
+        note = `That is ${pctText}, inside the ${choreo.spec.register} register's ${max}% budget.`;
+      }
+    }
     findings.push({
       ...base,
-      severity: unwanted ? "low" : "info",
+      severity: severity2,
       kind: "overshoot",
       keys: [],
       time: r32(s.times[at]),
-      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r32(s.times[at])}s. ` + (unwanted ? "The user prefers no overshoot." : "Fine for a bounce or settle; a mistake otherwise.")
+      message: `${s.property.name}${s.values[0].length > 1 ? ` (dimension ${d})` : ""} goes ${formatNumber(Math.max(o.above_keys_by, o.below_keys_by))} past its keyframe values around ${r32(s.times[at])}s. ` + note
     });
   }
   const fps = s.comp.fps > 0 ? s.comp.fps : 25;
   const offGrid = s.keys.filter((k) => !k.roving).map((k) => ({ index: k.index, time: k.time, frame: k.time * fps })).filter((k) => Math.abs(k.frame - Math.round(k.frame)) > 0.01);
   if (offGrid.length > 0) {
-    const list = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+    const list2 = (items) => items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
     const many = offGrid.length > 1;
     findings.push({
       ...base,
@@ -19401,7 +20394,7 @@ function reviewProperty(s, analysis, speeds, path51, target, taste) {
       kind: "subframe_key",
       keys: offGrid.map((k) => k.index),
       time: r32(offGrid[0].time),
-      message: `${many ? "Keys" : "Key"} ${list(offGrid.map((k) => String(k.index)))} of ${s.property.name} ${many ? "sit" : "sits"} between frames (frame ${list(offGrid.map((k) => formatNumber(k.frame)))}), so no rendered frame lands on ${many ? "them" : "it"}. Move ${many ? "them" : "it"} to frame ${list(offGrid.map((k) => String(Math.round(k.frame))))}.`
+      message: `${many ? "Keys" : "Key"} ${list2(offGrid.map((k) => String(k.index)))} of ${s.property.name} ${many ? "sit" : "sits"} between frames (frame ${list2(offGrid.map((k) => formatNumber(k.frame)))}), so no rendered frame lands on ${many ? "them" : "it"}. Move ${many ? "them" : "it"} to frame ${list2(offGrid.map((k) => String(Math.round(k.frame))))}.`
     });
   }
   return findings;
@@ -19529,19 +20522,21 @@ async function runQueued2(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto7, fs18, path17, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r32, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
+var crypto7, fs19, path18, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r32, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, OVERSHOOT_SETTLE_TOLERANCE_PCT, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
 var init_motion = __esm({
   "src/tools/ext/motion.ts"() {
     "use strict";
     crypto7 = __toESM(require("node:crypto"), 1);
-    fs18 = __toESM(require("node:fs"), 1);
-    path17 = __toESM(require("node:path"), 1);
+    fs19 = __toESM(require("node:fs"), 1);
+    path18 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
     init_queue();
     init_common();
     init_render();
+    init_brief();
+    init_choreography();
     init_frames();
     init_png_utils();
     MAX_SHEET_FRAMES = 24;
@@ -19628,6 +20623,7 @@ var init_motion = __esm({
     ]);
     SEVERITY_ORDER = { medium: 0, low: 1, info: 2 };
     isMoving = (g) => g.profile !== "hold" && g.profile !== "static";
+    OVERSHOOT_SETTLE_TOLERANCE_PCT = 2;
     TRANSFORM_MATCH_NAMES = /* @__PURE__ */ new Set([
       "ADBE Position",
       "ADBE Position_0",
@@ -19644,7 +20640,8 @@ var init_motion = __esm({
       max_findings: external_exports.number().int().min(1).max(200).optional().describe("Return at most this many findings, most severe first (default 50)."),
       bounds: external_exports.boolean().optional().describe("Check where animated layers come to rest against the frame and the safe areas. Default true. 2D layers only; effects that move pixels (Transform, masks) are not followed. A parented layer counts its parents' transform motion when deciding it is at rest; a layer with no transform keys of its own is not checked."),
       action_safe: external_exports.number().min(0).max(0.5).optional().describe("Action-safe margin as a share of width and height, both sides together. Default 0.1, AE's."),
-      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's.")
+      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Title-safe margin for text layers. Default 0.2, AE's."),
+      checks: external_exports.array(external_exports.enum(CHOREOGRAPHY_CHECKS)).min(1).optional().describe("Choreography checks to run (default: all). The per-property checks (linear, abrupt start/stop, speed jump, sub-frame keys) always run.")
     });
     motionTools = [
       {
@@ -19653,7 +20650,7 @@ var init_motion = __esm({
         schema: AeContactSheetSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs18.mkdirSync(framesDir, { recursive: true });
+          fs19.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const captured = await runQueued2(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
             const compResp = await ctx.bridge.evalRaw({
@@ -19711,11 +20708,11 @@ var init_motion = __esm({
             frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
           });
           const sheet = buildContactSheet(tiles, layout);
-          const sheetPath = path17.join(
+          const sheetPath = path18.join(
             framesDir,
             `contact_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
           );
-          fs18.writeFileSync(sheetPath, encodePng(sheet));
+          fs19.writeFileSync(sheetPath, encodePng(sheet));
           return {
             ok: true,
             path: sheetPath,
@@ -19761,12 +20758,12 @@ var init_motion = __esm({
           const width = args.width ?? 960;
           const height = args.height ?? 540;
           const framesDir = defaultFramesDir();
-          fs18.mkdirSync(framesDir, { recursive: true });
-          const graphPath = path17.join(
+          fs19.mkdirSync(framesDir, { recursive: true });
+          const graphPath = path18.join(
             framesDir,
             `graph_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
           );
-          fs18.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+          fs19.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
           return {
             ok: true,
             path: graphPath,
@@ -19798,7 +20795,7 @@ var init_motion = __esm({
       },
       {
         name: "ae_motion_review",
-        description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info: fine for a bounce); keys that sit between frames. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
+        description: "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info for a bounce on position or scale within the register's budget; medium on opacity, colour or a counting number, and past the budget); keys that sit between frames. Choreography checks (from keyframe data, no render; thresholds from the brief's motion spec, see ae_brief, else the brand_film defaults; `checks` picks a subset): ease_monotony (more than max_same_ease tweens sharing one ease and duration), direction (an entrance that eases in only, an exit that eases out only), exit_ratio (exit not the spec's fraction of its entrance), frame_zero (a move starting on the layer's first frame), stagger (uneven offsets or spread over the budget among siblings), density (over a third of siblings moving at once), landed_text (text still moving after it landed, or wiggle/loop expressions on it), long_tween (a position move longer than the register allows). The result's `spec` shows the register and thresholds used; the handmade register relaxes monotony and the linear checks. Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. Show the findings to the user and apply fixes only once they agree, then run ae_motion_review again to confirm. ae_motion_graph shows any one property in detail. The comp is never modified. " + AGENT_SAFETY_GUIDANCE,
         schema: AeMotionReviewSchema,
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
@@ -19811,11 +20808,11 @@ var init_motion = __esm({
               mutates: false,
               toolName: "ae_motion_review"
             });
-            const list = listResp.result;
-            const workAreaEnd = Number(list.comp.workAreaStart) + Number(list.comp.workAreaDuration);
+            const list2 = listResp.result;
+            const workAreaEnd = Number(list2.comp.workAreaStart) + Number(list2.comp.workAreaDuration);
             const sampled = [];
-            for (let i = 0; i < list.properties.length; i++) {
-              const p = list.properties[i];
+            for (let i = 0; i < list2.properties.length; i++) {
+              const p = list2.properties[i];
               const end = p.expression && workAreaEnd > p.last_key_time + 1e-6 ? workAreaEnd : void 0;
               const resp = await ctx.bridge.evalRaw({
                 id: `${opId}_p${i}`,
@@ -19825,7 +20822,7 @@ var init_motion = __esm({
                 toolName: "ae_motion_review"
               });
               const speeds = sampleSpeeds(resp.result);
-              sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true });
+              sampled.push({ path: p.path, samples: resp.result, speeds, analysis: analyzeMotion(resp.result, speeds), parents: p.layer.parents ?? [], ancestorOnly: p.ancestor_only === true, effectName: p.effect_name });
             }
             const bounds = [];
             if (args.bounds !== false) {
@@ -19833,13 +20830,13 @@ var init_motion = __esm({
               for (const s of sampled) byLayer.set(s.samples.layer.id, [...byLayer.get(s.samples.layer.id) ?? [], s]);
               for (const [layerId, props] of byLayer) {
                 if (props.every((s) => s.ancestorOnly)) continue;
-                if (list.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
+                if (list2.ancestors_truncated && props[0].parents.some((id) => !byLayer.has(id))) {
                   const l = props[0].samples.layer;
                   bounds.push({ layer: { index: l.index, id: l.id, name: l.name }, kind: "av", checkable: false, reason: "a parent's motion was not fully scanned (listing cut short)", samples: [] });
                   continue;
                 }
                 const ancestors = props[0].parents.flatMap((id) => byLayer.get(id) ?? []);
-                const times = restTimes(props, Number(list.comp.fps), ancestors);
+                const times = restTimes(props, Number(list2.comp.fps), ancestors);
                 if (!times.length) continue;
                 const resp = await ctx.bridge.evalRaw({
                   id: `${opId}_b${layerId}`,
@@ -19851,14 +20848,29 @@ var init_motion = __esm({
                 bounds.push(resp.result);
               }
             }
-            return { list, sampled, bounds };
+            return { list: list2, sampled, bounds };
           });
           const target = { comp_id: args.comp_id, project_path: scanned.list.project_path };
           const taste = ctx.settings?.get().taste;
+          const spec = await loadMotionSpec(ctx);
+          const checks = args.checks ?? CHOREOGRAPHY_CHECKS;
           let findings = [];
-          for (const { path: propPath, samples, speeds, analysis, ancestorOnly } of scanned.sampled) {
+          const choreoProps = [];
+          for (const { path: propPath, samples, speeds, analysis, ancestorOnly, effectName } of scanned.sampled) {
             if (ancestorOnly) continue;
-            findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste));
+            findings.push(...reviewProperty(samples, analysis, speeds, propPath, target, taste, { spec, effectName, enabled: checks.includes("overshoot") }));
+            choreoProps.push({ path: propPath, samples, analysis, effect_name: effectName });
+          }
+          findings.push(
+            ...reviewChoreography(
+              { comp: { width: Number(scanned.list.comp.width), height: Number(scanned.list.comp.height), fps: Number(scanned.list.comp.fps) }, layers: scanned.list.layer_info ?? [], props: choreoProps },
+              spec,
+              checks
+            )
+          );
+          if (spec.register === "handmade") {
+            const down = { medium: "low", low: "info", info: "info" };
+            findings = findings.map((f) => f.kind === "linear" || f.kind === "abrupt_start" || f.kind === "abrupt_stop" ? { ...f, severity: down[f.severity] } : f);
           }
           const safe = { action: args.action_safe ?? 0.1, title: args.title_safe ?? 0.2 };
           for (const b of scanned.bounds) findings.push(...reviewBounds(b, scanned.list.comp, safe));
@@ -19884,6 +20896,21 @@ var init_motion = __esm({
             clean: counts.medium === 0 && counts.low === 0,
             counts,
             by_kind: byKind,
+            spec: {
+              register: spec.register,
+              from_brief: spec.from_brief,
+              brief_path: spec.brief_path,
+              ...spec.warning ? { warning: spec.warning } : {},
+              checks,
+              thresholds: {
+                max_same_ease: spec.max_same_ease,
+                exit_ratio: spec.exit_ratio,
+                overshoot_max_pct: spec.overshoot_max_pct,
+                stagger_group_total_max_ms: spec.stagger_ms.group_total_max,
+                long_tween_s: spec.long_tween_s
+              },
+              ...spec.register === "handmade" ? { relaxed: ["ease_monotony skipped", "linear, abrupt_start and abrupt_stop one tier lower"] } : {}
+            },
             findings: findings.slice(0, max),
             findings_truncated: findings.length > max,
             ...args.bounds !== false ? { bounds_checked: scanned.bounds.length - unchecked.length, ...unchecked.length ? { bounds_unchecked: unchecked } : {} } : {},
@@ -20198,9 +21225,9 @@ function describeFromRaw(raw, maxBeats = 12) {
     lines.push(`Throughout (long moves, not in the beats): ${throughout.slice(0, 5).join("; ")}${throughout.length > 5 ? `; and ${throughout.length - 5} more` : ""}.`);
   }
   if (expressions.length > 0) {
-    const total = expressions.reduce((s, e) => s + e.count, 0);
+    const total2 = expressions.reduce((s, e) => s + e.count, 0);
     const names = expressions.slice(0, 5).map((e) => `"${e.name}" (${e.count})`).join(", ");
-    lines.push(`Expressions: ${plural(total, "property", "properties")} on ${plural(expressions.length, "layer")}: ${names}${expressions.length > 5 ? ", ..." : ""}. Expression-driven motion is sampled at a few times (not read from keys): it shows as "moves (expression)" and can miss quick changes.`);
+    lines.push(`Expressions: ${plural(total2, "property", "properties")} on ${plural(expressions.length, "layer")}: ${names}${expressions.length > 5 ? ", ..." : ""}. Expression-driven motion is sampled at a few times (not read from keys): it shows as "moves (expression)" and can miss quick changes.`);
   }
   if (precomps.length > 0) {
     const names = precomps.slice(0, 5).map((p) => `"${p.name}" -> "${p.comp_name}"`).join(", ");
@@ -20282,9 +21309,9 @@ function drawGantt(raw) {
   }
   const segByLayer = /* @__PURE__ */ new Map();
   for (const s of raw.segments) {
-    const list = segByLayer.get(s.layer) ?? [];
-    list.push(s.start, s.end);
-    segByLayer.set(s.layer, list);
+    const list2 = segByLayer.get(s.layer) ?? [];
+    list2.push(s.start, s.end);
+    segByLayer.set(s.layer, list2);
   }
   layers.forEach((l, i) => {
     const y = headerH + i * rowH;
@@ -20314,13 +21341,13 @@ function drawGantt(raw) {
   }
   return { png, info: { width, height, rows: layers.length, rows_truncated: raw.layers.length > layers.length } };
 }
-var crypto8, fs19, path18, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
+var crypto8, fs20, path19, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
 var init_describe = __esm({
   "src/tools/ext/describe.ts"() {
     "use strict";
     crypto8 = __toESM(require("node:crypto"), 1);
-    fs19 = __toESM(require("node:fs"), 1);
-    path18 = __toESM(require("node:path"), 1);
+    fs20 = __toESM(require("node:fs"), 1);
+    path19 = __toESM(require("node:path"), 1);
     init_zod();
     init_render();
     init_motion();
@@ -20430,9 +21457,9 @@ var init_describe = __esm({
             try {
               const { png, info } = drawGantt(raw);
               const dir = defaultFramesDir();
-              fs19.mkdirSync(dir, { recursive: true });
-              const file = path18.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`);
-              fs19.writeFileSync(file, encodePng(png));
+              fs20.mkdirSync(dir, { recursive: true });
+              const file = path19.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`);
+              fs20.writeFileSync(file, encodePng(png));
               out.gantt = { path: file, ...info };
               if (info.rows_truncated) out.truncated = true;
             } catch (e) {
@@ -20449,29 +21476,29 @@ var init_describe = __esm({
 // src/tools/ext/verify.ts
 function looksLikeSequence(file) {
   if (!STILL.test(file)) return false;
-  const base = path19.basename(file);
+  const base = path20.basename(file);
   if (!/[._-]\d{3,}\.[^.]+$/.test(base)) return false;
   const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(base);
   if (!m) return false;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}\\d{${m[2].length}}${esc(m[3])}$`, "i");
   try {
-    return fs20.readdirSync(path19.dirname(file)).some((n) => n !== base && re.test(n));
+    return fs21.readdirSync(path20.dirname(file)).some((n) => n !== base && re.test(n));
   } catch {
     return false;
   }
 }
 function firstFrameOf(output) {
-  if (!/\[#+\]/.test(output)) return fs20.existsSync(output) ? output : null;
-  const dir = path19.dirname(output);
-  const base = path19.basename(output);
+  if (!/\[#+\]/.test(output)) return fs21.existsSync(output) ? output : null;
+  const dir = path20.dirname(output);
+  const base = path20.basename(output);
   const m = /^(.*)\[(#+)\](.*)$/.exec(base);
   if (!m) return null;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
   try {
-    const frames = fs20.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
-    return frames.length ? path19.join(dir, frames[0]) : null;
+    const frames = fs21.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
+    return frames.length ? path20.join(dir, frames[0]) : null;
   } catch {
     return null;
   }
@@ -20513,7 +21540,7 @@ function checkJobOutputs(paths, startedAt) {
     let size = 0;
     let mtime = 0;
     try {
-      const st = fs20.statSync(file);
+      const st = fs21.statSync(file);
       size = st.size;
       mtime = st.mtimeMs;
     } catch {
@@ -20568,8 +21595,8 @@ function createVerifyTools(options = {}) {
           jobIsSequence = /\[#+\]/.test(outputPath);
           if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
         }
-        if (!file || !path19.isAbsolute(file) || !fs20.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-        const stat = fs20.statSync(file);
+        if (!file || !path20.isAbsolute(file) || !fs21.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+        const stat = fs21.statSync(file);
         if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
         if (args.comp_id === void 0 && jobCompId === void 0 && !compName) {
           return { ok: false, error: "bad_args", message: "Give comp_id to compare with (a whole-queue job renders several comps)." };
@@ -20661,12 +21688,12 @@ function createVerifyTools(options = {}) {
     }
   ];
 }
-var fs20, path19, AeVerifyRenderSchema, STILL, verifyTools;
+var fs21, path20, AeVerifyRenderSchema, STILL, verifyTools;
 var init_verify = __esm({
   "src/tools/ext/verify.ts"() {
     "use strict";
-    fs20 = __toESM(require("node:fs"), 1);
-    path19 = __toESM(require("node:path"), 1);
+    fs21 = __toESM(require("node:fs"), 1);
+    path20 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -20796,14 +21823,14 @@ function measureFrame(png, index = 0) {
       }
     }
   }
-  const total = Math.max(1, w * h);
+  const total2 = Math.max(1, w * h);
   const round42 = (n) => Math.round(n * 1e4) / 1e4;
   return {
     hash: crypto9.createHash("md5").update(data).digest("hex"),
     kind,
     flags: analysis.flags,
-    mean_luma: round42(lumaSum / (255 * total)),
-    clip_frac: round42(clip3 / total),
+    mean_luma: round42(lumaSum / (255 * total2)),
+    clip_frac: round42(clip3 / total2),
     edges: {
       top: round42(top / Math.max(1, by * w)),
       bottom: round42(bottom / Math.max(1, by * w)),
@@ -21171,7 +22198,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   const verdict = verdictOf(findings);
   const curve = measured.pairs.map((p) => ({ time: p.a_time, diff: p.mean_abs_diff, luma: p.a.mean_luma }));
   const bad4 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
-  fs21.mkdirSync(framesDir, { recursive: true });
+  fs22.mkdirSync(framesDir, { recursive: true });
   const stamp3 = `${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
   const frameSize = measured.pairs[0] ? { width: measured.pairs[0].a.width, height: measured.pairs[0].a.height } : { width: prep.size.width, height: prep.size.height };
   let chart = null;
@@ -21182,8 +22209,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     if (curve.length > 0) {
       const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST), bad4);
-      const chartPath = path20.join(framesDir, `scrub_chart_${stamp3}.png`);
-      fs21.writeFileSync(chartPath, encodePng(png));
+      const chartPath = path21.join(framesDir, `scrub_chart_${stamp3}.png`);
+      fs22.writeFileSync(chartPath, encodePng(png));
       chart = { path: chartPath, width: png.width, height: png.height };
     }
   } catch (err) {
@@ -21192,8 +22219,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     const built = buildSuspectSheet(cap2.captured, findings, args.max_suspects ?? 6, frameSize);
     if (built) {
-      const sheetPath = path20.join(framesDir, `scrub_suspects_${stamp3}.png`);
-      fs21.writeFileSync(sheetPath, encodePng(built.png));
+      const sheetPath = path21.join(framesDir, `scrub_suspects_${stamp3}.png`);
+      fs22.writeFileSync(sheetPath, encodePng(built.png));
       sheet = { path: sheetPath, width: built.png.width, height: built.png.height, suspects: built.shown.length };
       shown = built.shown;
       for (const s of built.shown) for (const p of s.paths) kept.add(p);
@@ -21205,7 +22232,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
     for (const c of cap2.captured) {
       if (c && !kept.has(c.path)) {
         try {
-          fs21.unlinkSync(c.path);
+          fs22.unlinkSync(c.path);
         } catch {
         }
       }
@@ -21245,7 +22272,7 @@ function resolveRange(args, base) {
 async function scrubComp(args, ctx) {
   const compId = args.comp_id;
   const framesDir = defaultFramesDir();
-  fs21.mkdirSync(framesDir, { recursive: true });
+  fs22.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const run = await runQueued3(ctx, `ae_scrub_check(${compId})`, opId, async () => {
     const infoResp = await ctx.bridge.evalRaw({
@@ -21287,8 +22314,8 @@ async function scrubComp(args, ctx) {
 }
 async function scrubFile(args, ctx) {
   const file = args.path;
-  if (!path20.isAbsolute(file) || !fs21.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-  const stat = fs21.statSync(file);
+  if (!path21.isAbsolute(file) || !fs22.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+  const stat = fs22.statSync(file);
   if (!stat.isFile() || stat.size === 0) return { ok: false, error: "empty", message: `${file} is not a file with content.` };
   const sequence = STILL_FILE.test(file) && (args.sequence ?? looksLikeSequence(file));
   const jsxPath = file.replace(/\\/g, "/");
@@ -21296,22 +22323,22 @@ async function scrubFile(args, ctx) {
   let sequenceInfo = null;
   if (sequence) {
     try {
-      sequenceInfo = sequenceGaps(fs21.readdirSync(path20.dirname(file)), path20.basename(file));
+      sequenceInfo = sequenceGaps(fs22.readdirSync(path21.dirname(file)), path21.basename(file));
     } catch {
       sequenceInfo = null;
     }
     if (sequenceInfo && sequenceInfo.missing.length > 0) {
-      const list = describeRanges(sequenceInfo.missing);
+      const list2 = describeRanges(sequenceInfo.missing);
       extra.push({
         kind: "sequence_gap",
         severity: "fail",
         value: sequenceInfo.missing.length,
-        message: `${sequenceInfo.missing.length}${sequenceInfo.truncated ? "+" : ""} frame number${sequenceInfo.missing.length === 1 ? " is" : "s are"} missing from ${sequenceInfo.pattern} between ${sequenceInfo.first} and ${sequenceInfo.last}: ${list}.`
+        message: `${sequenceInfo.missing.length}${sequenceInfo.truncated ? "+" : ""} frame number${sequenceInfo.missing.length === 1 ? " is" : "s are"} missing from ${sequenceInfo.pattern} between ${sequenceInfo.first} and ${sequenceInfo.last}: ${list2}.`
       });
     }
   }
   const framesDir = defaultFramesDir();
-  fs21.mkdirSync(framesDir, { recursive: true });
+  fs22.mkdirSync(framesDir, { recursive: true });
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
   const expect = { project_path: args.expect.project_path, comp_id: args.expect?.comp_id };
@@ -21439,13 +22466,13 @@ async function scrubFile(args, ctx) {
   const result = finish(args, prep, plan2, cap2, [...extra, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
   return { ...result, ...project2 };
 }
-var crypto9, fs21, path20, SCRUB_MAX_SAMPLES, MAX_LIST, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs, median, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
+var crypto9, fs22, path21, SCRUB_MAX_SAMPLES, MAX_LIST, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs, median, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
 var init_scrub = __esm({
   "src/tools/ext/scrub.ts"() {
     "use strict";
     crypto9 = __toESM(require("node:crypto"), 1);
-    fs21 = __toESM(require("node:fs"), 1);
-    path20 = __toESM(require("node:path"), 1);
+    fs22 = __toESM(require("node:fs"), 1);
+    path21 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -22057,8 +23084,8 @@ function mirrorPath(p, opts) {
 }
 function pathChecksum(p) {
   let sum = 0;
-  for (const list of [p.vertices, p.inTangents, p.outTangents]) {
-    list.forEach((v, i) => {
+  for (const list2 of [p.vertices, p.inTangents, p.outTangents]) {
+    list2.forEach((v, i) => {
       sum += v[0] * (1 + i % 7) + v[1] * (2 + i % 5);
     });
   }
@@ -22122,8 +23149,8 @@ function repeaterChild(item, field) {
     start_opacity: ["start opacity", "opacity 1"],
     end_opacity: ["end opacity", "opacity 2"]
   };
-  const list = item.transform ?? [];
-  const hit = list.find((c) => wanted[field].some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
+  const list2 = item.transform ?? [];
+  const hit = list2.find((c) => wanted[field].some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
   return hit?.value;
 }
 function genericMismatches(args, item, at, m) {
@@ -22137,11 +23164,11 @@ function genericMismatches(args, item, at, m) {
   }
   const transform = spec.transform ?? void 0;
   if (transform) {
-    const list = item.transform ?? [];
+    const list2 = item.transform ?? [];
     for (const [key, want] of Object.entries(transform)) {
       if (want === void 0) continue;
       const names = WIGGLER_CHILD[key] ?? [key];
-      const hit = list.find((c) => names.some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
+      const hit = list2.find((c) => names.some((w) => c.name.toLowerCase() === w || c.matchName.toLowerCase().endsWith(w)));
       if (hit === void 0) {
         m.push({ path: `${at}.transform.${key}`, expected: want, actual: void 0, message: `The Wiggle Transform's Transform group lists no ${key} in the read-back` });
       } else {
@@ -23119,7 +24146,7 @@ function checkDeliveryFile(spec, filePath) {
   let size = 0;
   let exists = false;
   try {
-    const st = fs22.statSync(filePath);
+    const st = fs23.statSync(filePath);
     exists = st.isFile();
     size = st.size;
   } catch {
@@ -23129,7 +24156,7 @@ function checkDeliveryFile(spec, filePath) {
     issues.push("The file does not exist.");
   } else {
     if (size === 0) issues.push("The file is empty.");
-    const ext2 = path21.extname(filePath).replace(/^\./, "").toLowerCase();
+    const ext2 = path22.extname(filePath).replace(/^\./, "").toLowerCase();
     if (ext2 !== spec.ext) issues.push(`The extension is .${ext2}, the spec's is .${spec.ext}.`);
     if (spec.max_size_mb !== void 0 && size > spec.max_size_mb * 1024 * 1024) {
       issues.push(`The file is ${(size / 1048576).toFixed(1)} MB, over the spec's approximate ${spec.max_size_mb} MB limit.`);
@@ -23159,12 +24186,12 @@ function removeMismatches(beforeRaw, afterRaw, written) {
   }
   return m;
 }
-var fs22, path21, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
+var fs23, path22, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
 var init_rqedit = __esm({
   "src/tools/ext/rqedit.ts"() {
     "use strict";
-    fs22 = __toESM(require("node:fs"), 1);
-    path21 = __toESM(require("node:path"), 1);
+    fs23 = __toESM(require("node:fs"), 1);
+    path22 = __toESM(require("node:path"), 1);
     init_zod();
     init_common();
     init_write_runner();
@@ -23733,7 +24760,7 @@ function sanitizeFileToken(s) {
   return cleaned.length > 0 ? cleaned : "_";
 }
 function isSequencePath(p) {
-  return /\[#+\]/.test(path22.basename(p.replace(/\\/g, "/")));
+  return /\[#+\]/.test(path23.basename(p.replace(/\\/g, "/")));
 }
 function joinOutput(dir, name) {
   const sep4 = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
@@ -23994,12 +25021,12 @@ function sequenceRegex(base) {
 function outputFiles(outputPath) {
   try {
     if (isSequencePath(outputPath)) {
-      const norm3 = path22.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
-      const dir = path22.dirname(norm3);
-      const re = sequenceRegex(path22.basename(norm3));
-      return fs23.readdirSync(dir).filter((n) => re.test(n)).map((n) => path22.join(dir, n));
+      const norm3 = path23.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
+      const dir = path23.dirname(norm3);
+      const re = sequenceRegex(path23.basename(norm3));
+      return fs24.readdirSync(dir).filter((n) => re.test(n)).map((n) => path23.join(dir, n));
     }
-    return fs23.existsSync(outputPath) ? [outputPath] : [];
+    return fs24.existsSync(outputPath) ? [outputPath] : [];
   } catch {
     return [];
   }
@@ -24011,7 +25038,7 @@ function inspectOutput(outputPath) {
   const files = [];
   for (const f of outputFiles(outputPath)) {
     try {
-      const st = fs23.statSync(f);
+      const st = fs24.statSync(f);
       if (!st.isFile()) continue;
       count++;
       files.push({ mtime_ms: st.mtimeMs, size: st.size });
@@ -24116,7 +25143,7 @@ async function getFreeBytes(dir, platform = process.platform, run = defaultRunFi
       return Number.isFinite(n) && n >= 0 ? n : null;
     }
     let probe = dir;
-    while (probe && !fs23.existsSync(probe) && path22.dirname(probe) !== probe) probe = path22.dirname(probe);
+    while (probe && !fs24.existsSync(probe) && path23.dirname(probe) !== probe) probe = path23.dirname(probe);
     return parseDfAvailableBytes(await run("df", ["-Pk", probe]));
   } catch {
     return null;
@@ -24158,8 +25185,8 @@ function computeEta(b, nowMs, gate = {}) {
   }
   if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
   const conc = Math.max(1, Math.min(b.options.concurrency, gate.concurrency ?? b.options.concurrency));
-  const total = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
-  return { eta_seconds: total, eta_at: new Date(nowMs + total * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
+  const total2 = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
+  return { eta_seconds: total2, eta_at: new Date(nowMs + total2 * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
 }
 function countStates(items) {
   const c = { pending: 0, running: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
@@ -24180,7 +25207,7 @@ function refreshRunning(item, job, now, stallMs) {
   let outBytes = 0;
   for (const out of outputsOf(item)) {
     try {
-      outBytes += fs23.existsSync(out) && !isSequencePath(out) ? fs23.statSync(out).size : 0;
+      outBytes += fs24.existsSync(out) && !isSequencePath(out) ? fs24.statSync(out).size : 0;
     } catch {
     }
   }
@@ -24241,7 +25268,7 @@ function readArgs(job) {
 }
 function fileSig(p) {
   try {
-    const st = fs23.statSync(p);
+    const st = fs24.statSync(p);
     return `${st.mtimeMs}|${st.size}`;
   } catch {
     return "";
@@ -24254,7 +25281,7 @@ function createRenderbatch(options = {}) {
   let storeInstance = options.store ?? null;
   let runnerInstance = null;
   const getStore = () => {
-    if (!storeInstance) storeInstance = new BatchStore(path22.join(getRegistry().rendersDir, "batches"));
+    if (!storeInstance) storeInstance = new BatchStore(path23.join(getRegistry().rendersDir, "batches"));
     return storeInstance;
   };
   const pidAlive2 = options.isPidAlive ?? ((pid, jobId) => defaultIsPidAlive(pid, getRegistry(), jobId));
@@ -24425,19 +25452,19 @@ function createRenderbatch(options = {}) {
         const store = getStore();
         const batchId = store.newId();
         const batchDir = store.batchDir(batchId);
-        const ext2 = path22.extname(ready.project_path) || ".aep";
+        const ext2 = path23.extname(ready.project_path) || ".aep";
         const beside = args.freeze_location === "project_folder";
-        const frozenDir = beside ? path22.dirname(ready.project_path) : batchDir;
-        const frozen = path22.join(frozenDir, beside ? `${path22.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path22.basename(ready.project_path, ext2)}${ext2}`);
+        const frozenDir = beside ? path23.dirname(ready.project_path) : batchDir;
+        const frozen = path23.join(frozenDir, beside ? `${path23.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path23.basename(ready.project_path, ext2)}${ext2}`);
         try {
-          fs23.mkdirSync(frozenDir, { recursive: true });
-          fs23.copyFileSync(ready.project_path, frozen);
+          fs24.mkdirSync(frozenDir, { recursive: true });
+          fs24.copyFileSync(ready.project_path, frozen);
         } catch (err) {
           return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
         }
         if (ready.project_sig !== null && fileSig(ready.project_path) !== ready.project_sig) {
           try {
-            if (beside) fs23.rmSync(frozen, { force: true });
+            if (beside) fs24.rmSync(frozen, { force: true });
           } catch {
           }
           store.forget(batchId);
@@ -24464,7 +25491,7 @@ function createRenderbatch(options = {}) {
           store.save(batch);
         } catch (err) {
           try {
-            if (beside) fs23.rmSync(frozen, { force: true });
+            if (beside) fs24.rmSync(frozen, { force: true });
           } catch {
           }
           store.forget(batchId);
@@ -24576,7 +25603,7 @@ function createRenderbatch(options = {}) {
         } catch (err) {
           return queued10(err, opId);
         }
-        if (!fs23.existsSync(batch.frozen_project)) {
+        if (!fs24.existsSync(batch.frozen_project)) {
           return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
         }
         const runner = getRunner();
@@ -24637,14 +25664,14 @@ function createRenderbatch(options = {}) {
 function createRenderbatchTools(options = {}) {
   return createRenderbatch(options).tools;
 }
-var childProcess2, crypto10, fs23, path22, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
+var childProcess2, crypto10, fs24, path23, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
 var init_renderbatch = __esm({
   "src/tools/ext/renderbatch.ts"() {
     "use strict";
     childProcess2 = __toESM(require("node:child_process"), 1);
     crypto10 = __toESM(require("node:crypto"), 1);
-    fs23 = __toESM(require("node:fs"), 1);
-    path22 = __toESM(require("node:path"), 1);
+    fs24 = __toESM(require("node:fs"), 1);
+    path23 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -24752,24 +25779,24 @@ var init_renderbatch = __esm({
         return `batch_${Date.now()}_${crypto10.randomBytes(3).toString("hex")}`;
       }
       batchDir(id) {
-        return path22.join(this.dir, id);
+        return path23.join(this.dir, id);
       }
       jsonPath(id) {
-        return path22.join(this.batchDir(id), "batch.json");
+        return path23.join(this.batchDir(id), "batch.json");
       }
       save(b) {
         this.cache.set(b.batch_id, b);
         const file = this.jsonPath(b.batch_id);
-        fs23.mkdirSync(path22.dirname(file), { recursive: true });
+        fs24.mkdirSync(path23.dirname(file), { recursive: true });
         const tmp = `${file}.tmp-${process.pid}-${crypto10.randomBytes(3).toString("hex")}`;
         const payload = JSON.stringify(b, null, 2);
         try {
-          fs23.writeFileSync(tmp, payload, "utf8");
-          fs23.renameSync(tmp, file);
+          fs24.writeFileSync(tmp, payload, "utf8");
+          fs24.renameSync(tmp, file);
         } catch {
-          fs23.writeFileSync(file, payload, "utf8");
+          fs24.writeFileSync(file, payload, "utf8");
           try {
-            fs23.unlinkSync(tmp);
+            fs24.unlinkSync(tmp);
           } catch {
           }
         }
@@ -24779,7 +25806,7 @@ var init_renderbatch = __esm({
         this.cache.delete(id);
         if (!BATCH_ID_RE.test(id)) return;
         try {
-          fs23.rmSync(this.batchDir(id), { recursive: true, force: true });
+          fs24.rmSync(this.batchDir(id), { recursive: true, force: true });
         } catch {
         }
       }
@@ -24788,7 +25815,7 @@ var init_renderbatch = __esm({
         const cached = this.cache.get(id);
         if (cached) return cached;
         try {
-          const b = JSON.parse(fs23.readFileSync(this.jsonPath(id), "utf8"));
+          const b = JSON.parse(fs24.readFileSync(this.jsonPath(id), "utf8"));
           if (b && typeof b.batch_id === "string") {
             this.cache.set(id, b);
             return b;
@@ -24801,7 +25828,7 @@ var init_renderbatch = __esm({
       list(limit = 20) {
         let ids = [];
         try {
-          ids = fs23.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
+          ids = fs24.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
         } catch {
           ids = [];
         }
@@ -24866,7 +25893,7 @@ var init_renderbatch = __esm({
           if (b.state === "succeeded" && b.frozen_temporary) {
             b.frozen_temporary = false;
             try {
-              fs23.rmSync(b.frozen_project, { force: true });
+              fs24.rmSync(b.frozen_project, { force: true });
               b.notices.push(`Every item finished; the frozen project copy ${b.frozen_project} was deleted.`);
             } catch (err) {
               b.notices.push(`Every item finished, but the frozen project copy ${b.frozen_project} could not be deleted (${errText(err)}).`);
@@ -25183,7 +26210,7 @@ function pathKey2(p, caseInsensitive = WIN_OR_MAC) {
 function safeSegment(name, max = 120) {
   let s = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
   if (!s || s === "." || s === "..") s = "_";
-  const ext2 = path23.extname(s);
+  const ext2 = path24.extname(s);
   const stem = ext2 ? s.slice(0, -ext2.length) : s;
   const room = Math.max(1, max - ext2.length);
   let out = (stem.length > room ? stem.slice(0, room) : stem) + ext2;
@@ -25211,20 +26238,20 @@ function matchFrames(names, base, caseInsensitive = WIN_OR_MAC) {
 }
 async function resolveSource(file, sequence) {
   let warning;
-  if (sequence && splitFrameName(path23.basename(file))) {
-    const dir = path23.dirname(file);
+  if (sequence && splitFrameName(path24.basename(file))) {
+    const dir = path24.dirname(file);
     let names = [];
     try {
-      names = await fs24.promises.readdir(dir);
+      names = await fs25.promises.readdir(dir);
     } catch {
       names = [];
     }
-    const frames = matchFrames(names, path23.basename(file));
+    const frames = matchFrames(names, path24.basename(file));
     if (frames.length > 0) {
       const files = [];
       try {
         for (let i = 0; i < frames.length; i += 64) {
-          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile(path23.join(dir, f.name)))));
+          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile(path24.join(dir, f.name)))));
         }
       } catch (err) {
         return { files: [], error: `a frame could not be read: ${err instanceof Error ? err.message : String(err)}` };
@@ -25233,12 +26260,12 @@ async function resolveSource(file, sequence) {
       const last = frames[frames.length - 1].number;
       const distinct = new Set(frames.map((f) => f.number)).size;
       const res = { files, frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct) } };
-      if (files.length === 1) res.warning = `${path23.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
+      if (files.length === 1) res.warning = `${path24.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
       return res;
     }
-    warning = `the frames next to ${path23.basename(file)} could not be listed: only this file is collected`;
+    warning = `the frames next to ${path24.basename(file)} could not be listed: only this file is collected`;
   } else if (sequence) {
-    warning = `${path23.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
+    warning = `${path24.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
   }
   try {
     const one = { files: [await statFile(file)] };
@@ -25250,9 +26277,9 @@ async function resolveSource(file, sequence) {
   }
 }
 function sourceKey(file, sequence) {
-  const f = sequence ? splitFrameName(path23.basename(file)) : null;
+  const f = sequence ? splitFrameName(path24.basename(file)) : null;
   if (!f) return pathKey2(file);
-  return `${pathKey2(path23.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
+  return `${pathKey2(path24.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
 }
 function planCollect(entries, resolved, opts = {}) {
   const refs = [];
@@ -25287,30 +26314,30 @@ function planCollect(entries, resolved, opts = {}) {
   };
   const plan2 = { sources: [], files: [], bytes: 0, shared: [], problems: [], gaps: [], skipped_unused: skippedUnused, warnings: [] };
   const sharedBy = /* @__PURE__ */ new Map();
-  for (const ref2 of refs) {
-    const key = sourceKey(ref2.file, ref2.sequence);
-    const gkey = `${key}|${ref2.role}`;
+  for (const ref3 of refs) {
+    const key = sourceKey(ref3.file, ref3.sequence);
+    const gkey = `${key}|${ref3.role}`;
     let g = groups.get(gkey);
     const res = resolved.get(key) ?? { files: [], error: "not resolved" };
     if (!g) {
       let phys = physical.get(key);
       if (!phys) {
-        const binDir = [...ref2.role === "proxy" ? ["_Proxies"] : [], ...ref2.bin.map((b) => safeSegment(b))].join("/");
+        const binDir = [...ref3.role === "proxy" ? ["_Proxies"] : [], ...ref3.bin.map((b) => safeSegment(b))].join("/");
         const base = `_Footage${binDir ? `/${binDir}` : ""}`;
         let destDir = base;
         let destFirst = "";
         if (res.files.length > 0) {
-          if (ref2.sequence && res.files.length >= 1 && splitFrameName(path23.basename(ref2.file))) {
-            const folder = unique(takenDirs, `${base}/${safeSegment(path23.basename(path23.dirname(ref2.file)) || "sequence")}`, (r) => [r, ""]);
+          if (ref3.sequence && res.files.length >= 1 && splitFrameName(path24.basename(ref3.file))) {
+            const folder = unique(takenDirs, `${base}/${safeSegment(path24.basename(path24.dirname(ref3.file)) || "sequence")}`, (r) => [r, ""]);
             destDir = folder;
-            destFirst = `${folder}/${safeSegment(path23.basename(res.files[0].path))}`;
+            destFirst = `${folder}/${safeSegment(path24.basename(res.files[0].path))}`;
           } else {
-            const rel = unique(takenFiles, `${base}/${safeSegment(path23.basename(ref2.file))}`, (r) => {
-              const ext2 = path23.extname(r);
+            const rel = unique(takenFiles, `${base}/${safeSegment(path24.basename(ref3.file))}`, (r) => {
+              const ext2 = path24.extname(r);
               return [ext2 ? r.slice(0, -ext2.length) : r, ext2];
             });
             destFirst = rel;
-            destDir = path23.posix.dirname(rel);
+            destDir = path24.posix.dirname(rel);
           }
         }
         phys = { dest_dir: destDir, dest_first: destFirst };
@@ -25318,8 +26345,8 @@ function planCollect(entries, resolved, opts = {}) {
       }
       g = {
         key,
-        role: ref2.role,
-        sequence: ref2.sequence,
+        role: ref3.role,
+        sequence: ref3.sequence,
         ae_files: [],
         item_ids: [],
         dest_first: phys.dest_first,
@@ -25328,10 +26355,10 @@ function planCollect(entries, resolved, opts = {}) {
       groups.set(gkey, g);
       plan2.sources.push(g);
     }
-    if (!g.ae_files.includes(ref2.file)) g.ae_files.push(ref2.file);
-    if (!g.item_ids.includes(ref2.item_id)) g.item_ids.push(ref2.item_id);
-    const sh = sharedBy.get(key) ?? { file: ref2.file, item_ids: /* @__PURE__ */ new Set() };
-    sh.item_ids.add(ref2.item_id);
+    if (!g.ae_files.includes(ref3.file)) g.ae_files.push(ref3.file);
+    if (!g.item_ids.includes(ref3.item_id)) g.item_ids.push(ref3.item_id);
+    const sh = sharedBy.get(key) ?? { file: ref3.file, item_ids: /* @__PURE__ */ new Set() };
+    sh.item_ids.add(ref3.item_id);
     sharedBy.set(key, sh);
   }
   const emitted = /* @__PURE__ */ new Set();
@@ -25358,7 +26385,7 @@ function planCollect(entries, resolved, opts = {}) {
     const roleOf = plan2.sources.some((o) => o.key === g.key && o.role === "main") ? "main" : "proxy";
     for (let i = 0; i < res.files.length; i++) {
       const f = res.files[i];
-      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path23.basename(f.path))}`;
+      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path24.basename(f.path))}`;
       plan2.files.push({ source: f.path, path: rel, bytes: f.bytes, mtime_ms: f.mtimeMs, role: roleOf, item_ids: [...ids] });
       plan2.bytes += f.bytes;
     }
@@ -25381,9 +26408,9 @@ async function writeZip(zipPath, inputs, opts = {}) {
     for (const input of inputs) {
       const name = Buffer.from(input.name, "utf8");
       if (name.length > 65535) throw new Error(`zip name too long: ${input.name.slice(0, 80)}`);
-      const size = input.data ? input.data.length : (await fs24.promises.stat(input.file)).size;
+      const size = input.data ? input.data.length : (await fs25.promises.stat(input.file)).size;
       const zip64 = opts.forceZip64 === true || size >= ZIP64_AT;
-      const ext2 = path23.extname(input.name).toLowerCase();
+      const ext2 = path24.extname(input.name).toLowerCase();
       const method = STORED_EXT.has(ext2) || size === 0 ? 0 : 8;
       const { time, date } = dosDateTime(input.mtime);
       const offset = out.offset;
@@ -25422,7 +26449,7 @@ async function writeZip(zipPath, inputs, opts = {}) {
           out.write(chunk).then(() => cb(), cb);
         }
       });
-      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs24.createReadStream(input.file);
+      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs25.createReadStream(input.file);
       if (method === 8) await (0, import_promises.pipeline)(source, counter, zlib.createDeflateRaw({ level: 6 }), sink);
       else await (0, import_promises.pipeline)(source, counter, sink);
       if (!zip64 && (usize >= U32_MAX || csize >= U32_MAX)) throw new Error(`${input.name} grew past 4 GB while it was zipped`);
@@ -25491,18 +26518,18 @@ async function writeZip(zipPath, inputs, opts = {}) {
     e.writeUInt32LE(needZip64 ? U32_MAX : cdSize, 12);
     e.writeUInt32LE(needZip64 ? U32_MAX : cdStart, 16);
     await out.write(e);
-    const total = out.offset;
+    const total2 = out.offset;
     await out.close();
-    await fs24.promises.rename(part, zipPath);
-    return { path: zipPath, entries: central.length, bytes: total, zip64: needZip64 || central.some((r) => r.zip64) };
+    await fs25.promises.rename(part, zipPath);
+    return { path: zipPath, entries: central.length, bytes: total2, zip64: needZip64 || central.some((r) => r.zip64) };
   } catch (err) {
     await out.close().catch(() => void 0);
-    await fs24.promises.rm(part, { force: true }).catch(() => void 0);
+    await fs25.promises.rm(part, { force: true }).catch(() => void 0);
     throw err;
   }
 }
 async function readZipDirectory(zipPath) {
-  const fh = await fs24.promises.open(zipPath, "r");
+  const fh = await fs25.promises.open(zipPath, "r");
   try {
     const size = (await fh.stat()).size;
     const tailLen = Math.min(size, 65557 + 20);
@@ -25585,7 +26612,7 @@ async function verifyZip(zipPath, expected) {
   } catch (err) {
     return { ok: false, entries: 0, zip64: false, errors: [`the central directory could not be read: ${err instanceof Error ? err.message : String(err)}`] };
   }
-  const fh = await fs24.promises.open(zipPath, "r");
+  const fh = await fs25.promises.open(zipPath, "r");
   const seen = /* @__PURE__ */ new Set();
   try {
     for (const e of dir.entries) {
@@ -25602,7 +26629,7 @@ async function verifyZip(zipPath, expected) {
       let n = 0;
       try {
         if (e.csize > 0) {
-          const raw = fs24.createReadStream(zipPath, { start, end: start + e.csize - 1 });
+          const raw = fs25.createReadStream(zipPath, { start, end: start + e.csize - 1 });
           const stream = e.method === 8 ? raw.pipe(zlib.createInflateRaw()) : e.method === 0 ? raw : null;
           if (!stream) {
             note(`${e.name}: unsupported method ${e.method}`);
@@ -25638,7 +26665,7 @@ async function verifyZip(zipPath, expected) {
 async function sha1File(p) {
   const h = crypto11.createHash("sha1");
   await (0, import_promises.pipeline)(
-    fs24.createReadStream(p),
+    fs25.createReadStream(p),
     new import_node_stream.Writable({
       write(chunk, _enc, cb) {
         h.update(chunk);
@@ -25649,7 +26676,7 @@ async function sha1File(p) {
   return h.digest("hex");
 }
 async function copyHashed(src, dest, mtimeMs) {
-  await fs24.promises.mkdir(path23.dirname(dest), { recursive: true });
+  await fs25.promises.mkdir(path24.dirname(dest), { recursive: true });
   const part = `${dest}.part`;
   const hash = crypto11.createHash("sha1");
   let bytes = 0;
@@ -25661,12 +26688,12 @@ async function copyHashed(src, dest, mtimeMs) {
     }
   });
   try {
-    await (0, import_promises.pipeline)(fs24.createReadStream(src), tap, fs24.createWriteStream(part));
-    await fs24.promises.rename(part, dest);
+    await (0, import_promises.pipeline)(fs25.createReadStream(src), tap, fs25.createWriteStream(part));
+    await fs25.promises.rename(part, dest);
     const when = new Date(mtimeMs);
-    await fs24.promises.utimes(dest, when, when).catch(() => void 0);
+    await fs25.promises.utimes(dest, when, when).catch(() => void 0);
   } catch (err) {
-    await fs24.promises.rm(part, { force: true }).catch(() => void 0);
+    await fs25.promises.rm(part, { force: true }).catch(() => void 0);
     throw err;
   }
   return { sha1: hash.digest("hex"), bytes };
@@ -25675,27 +26702,27 @@ function buildMappings(m, dest) {
   const out = [];
   for (const s of m.sources) {
     if (!s.dest_first) continue;
-    const to = path23.join(dest, ...s.dest_first.split("/"));
+    const to = path24.join(dest, ...s.dest_first.split("/"));
     for (const from of s.ae_files) out.push({ from, to, sequence: s.sequence, role: s.role, item_ids: s.item_ids });
   }
   return out;
 }
 function manifestPath(dest) {
-  return path23.join(dest, "manifest.json");
+  return path24.join(dest, "manifest.json");
 }
 async function readManifest(dest) {
   try {
-    const m = JSON.parse(await fs24.promises.readFile(manifestPath(dest), "utf8"));
+    const m = JSON.parse(await fs25.promises.readFile(manifestPath(dest), "utf8"));
     return m && m.version === 1 && Array.isArray(m.files) && Array.isArray(m.sources) ? m : null;
   } catch {
     return null;
   }
 }
 async function writeFileAtomic(p, text) {
-  await fs24.promises.mkdir(path23.dirname(p), { recursive: true });
+  await fs25.promises.mkdir(path24.dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  await fs24.promises.writeFile(tmp, text, "utf8");
-  await fs24.promises.rename(tmp, p);
+  await fs25.promises.writeFile(tmp, text, "utf8");
+  await fs25.promises.rename(tmp, p);
 }
 function diffManifests(prev, files) {
   if (!prev) return null;
@@ -25734,31 +26761,31 @@ async function resolveAll(entries, opts) {
     if (!e.proxy_only) todo.set(sourceKey(e.file, e.sequence), { file: e.file, sequence: e.sequence });
     if (e.proxy && opts.include_proxies !== false) todo.set(sourceKey(e.proxy.file, e.proxy.sequence), { file: e.proxy.file, sequence: e.proxy.sequence });
   }
-  const list = [...todo.entries()];
+  const list2 = [...todo.entries()];
   const out = /* @__PURE__ */ new Map();
-  for (let i = 0; i < list.length; i += 8) {
-    const batch = list.slice(i, i + 8);
+  for (let i = 0; i < list2.length; i += 8) {
+    const batch = list2.slice(i, i + 8);
     const res = await Promise.all(batch.map(([, v]) => resolveSource(v.file, v.sequence)));
     batch.forEach(([k], j) => out.set(k, res[j]));
   }
   return out;
 }
 function destFolder(project2, dest) {
-  return path23.resolve(dest ?? path23.join(path23.dirname(project2), "_collect"));
+  return path24.resolve(dest ?? path24.join(path24.dirname(project2), "_collect"));
 }
 function destProblem(dest) {
-  if (dest !== void 0 && !path23.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
+  if (dest !== void 0 && !path24.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
   return null;
 }
 async function inspectDest(dest) {
   let st;
   try {
-    st = await fs24.promises.stat(dest);
+    st = await fs25.promises.stat(dest);
   } catch {
     return { exists: false, isDir: false, empty: true, manifest: null };
   }
   if (!st.isDirectory()) return { exists: true, isDir: false, empty: false, manifest: null };
-  const names = await fs24.promises.readdir(dest).catch(() => []);
+  const names = await fs25.promises.readdir(dest).catch(() => []);
   const onlyOwnReports = names.length > 0 && names.every((n) => OWN_REPORT_FILES.has(n.toLowerCase()));
   return { exists: true, isDir: true, empty: names.length === 0 || onlyOwnReports, manifest: await readManifest(dest) };
 }
@@ -25816,11 +26843,11 @@ async function collectFilesBody(args, ctx, hold) {
   const problem = savedProblem(state);
   if (problem) return bad2(problem);
   const project2 = state.project_path;
-  if (!fs24.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
+  if (!fs25.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
   const badDest = destProblem(args.dest);
   if (badDest) return bad2(badDest);
   const dest = destFolder(project2, args.dest);
-  const aepDest = path23.join(dest, path23.basename(project2));
+  const aepDest = path24.join(dest, path24.basename(project2));
   if (pathKey2(aepDest) === pathKey2(project2)) return bad2("dest is the project's own folder: the copy would overwrite the .aep. Pick another folder.");
   const dry = args.dry_run !== false;
   const destInfo = await inspectDest(dest);
@@ -25861,11 +26888,11 @@ async function collectFilesBody(args, ctx, hold) {
   const plan2 = planCollect(foot.entries, resolved, args);
   const warnings = [];
   if (destIssue) warnings.push(destIssue);
-  const longest = plan2.files.reduce((n, f) => Math.max(n, path23.join(dest, f.path).length), 0);
+  const longest = plan2.files.reduce((n, f) => Math.max(n, path24.join(dest, f.path).length), 0);
   if (process.platform === "win32" && longest > 240) warnings.push(`Some collected paths are ${longest} characters long; Windows may refuse paths past 259. Pick a shorter dest.`);
-  const sameFolder = plan2.files.filter((f) => pathKey2(path23.join(dest, f.path)) === pathKey2(f.source));
+  const sameFolder = plan2.files.filter((f) => pathKey2(path24.join(dest, f.path)) === pathKey2(f.source));
   if (sameFolder.length) warnings.push(`${sameFolder.length} file(s) already sit at their collected path: they are left alone.`);
-  const projectBytes = fs24.statSync(project2).size;
+  const projectBytes = fs25.statSync(project2).size;
   const summary3 = summarisePlan(plan2, foot.noFile, warnings);
   if (dry) {
     return {
@@ -25886,8 +26913,8 @@ async function collectFilesBody(args, ctx, hold) {
   const keepAep = !!prev?.relinked && pathKey2(prev.project.path) === pathKey2(project2);
   const t0 = Date.now();
   const deadline = t0 + (args.max_seconds ?? 50) * 1e3;
-  await fs24.promises.mkdir(dest, { recursive: true });
-  const aepStat = fs24.statSync(project2);
+  await fs25.promises.mkdir(dest, { recursive: true });
+  const aepStat = fs25.statSync(project2);
   let aepNote;
   if (keepAep) {
     aepNote = "kept: the copy there is already relinked (restart: true copies the .aep again)";
@@ -25908,7 +26935,7 @@ async function collectFilesBody(args, ctx, hold) {
       created: prev?.created ?? (/* @__PURE__ */ new Date()).toISOString(),
       updated: (/* @__PURE__ */ new Date()).toISOString(),
       complete: complete2,
-      project: { path: project2, name: path23.basename(project2) },
+      project: { path: project2, name: path24.basename(project2) },
       ae: state.ae,
       options: { only_used: args.only_used === true, include_proxies: args.include_proxies !== false },
       relinked: keepAep,
@@ -25920,7 +26947,7 @@ async function collectFilesBody(args, ctx, hold) {
         dest_first: s.dest_first,
         frames: s.resolved.frames
       })),
-      files: [...files, { source: project2, path: path23.basename(project2), bytes: fs24.existsSync(aepDest) ? fs24.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
+      files: [...files, { source: project2, path: path24.basename(project2), bytes: fs25.existsSync(aepDest) ? fs25.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
       not_collected: NOT_COLLECTED
     };
     await writeFileAtomic(manifestPath(dest), JSON.stringify(m));
@@ -25932,13 +26959,13 @@ async function collectFilesBody(args, ctx, hold) {
       stoppedEarly = true;
       break;
     }
-    const target = path23.join(dest, ...f.path.split("/"));
+    const target = path24.join(dest, ...f.path.split("/"));
     try {
       if (pathKey2(target) === pathKey2(f.source)) {
         f.sha1 = await sha1File(f.source);
         continue;
       }
-      const st = await fs24.promises.stat(target).catch(() => null);
+      const st = await fs25.promises.stat(target).catch(() => null);
       if (st && st.size === f.bytes && Math.abs(st.mtimeMs - f.mtime_ms) < 2e3) {
         const was = prevSha.get(f.path);
         f.sha1 = was && was.bytes === f.bytes ? was.sha1 : await sha1File(target);
@@ -25966,21 +26993,21 @@ async function collectFilesBody(args, ctx, hold) {
   let zipInfo = null;
   if (complete) {
     const aepEntry = manifest.files.find((f) => f.role === "project");
-    if (aepEntry && fs24.existsSync(aepDest)) {
+    if (aepEntry && fs25.existsSync(aepDest)) {
       aepEntry.sha1 = await sha1File(aepDest);
-      aepEntry.bytes = fs24.statSync(aepDest).size;
+      aepEntry.bytes = fs25.statSync(aepDest).size;
       await writeFileAtomic(manifestPath(dest), JSON.stringify(manifest));
     }
     if (args.report !== "none") {
       try {
-        const file = path23.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
-        const lastStamp = await fs24.promises.readFile(path23.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
-        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs24.existsSync(file)) {
+        const file = path24.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
+        const lastStamp = await fs25.promises.readFile(path24.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
+        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs25.existsSync(file)) {
           reportInfo = { path: file, unchanged: true, note: "The collect has not changed since the last report: it was kept as the baseline for the next diff." };
         } else {
           const r = await buildReport2(ctx, { dest, hash_outputs: true, manifest, deadline }, tool);
           await writeFileAtomic(file, args.report === "json" ? JSON.stringify(r, null, 2) : renderReportMarkdown(r));
-          await writeFileAtomic(path23.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
+          await writeFileAtomic(path24.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
           reportInfo = { path: file };
         }
       } catch (err) {
@@ -26039,12 +27066,12 @@ async function zipStep(dest, manifest, deadline) {
     job = void 0;
   }
   if (!job) {
-    const stored = await fs24.promises.readFile(stampPath, "utf8").catch(() => null);
-    const st = stored !== null && stored.trim() === stamp3 ? await fs24.promises.stat(zipPath).catch(() => null) : null;
+    const stored = await fs25.promises.readFile(stampPath, "utf8").catch(() => null);
+    const st = stored !== null && stored.trim() === stamp3 ? await fs25.promises.stat(zipPath).catch(() => null) : null;
     if (st) {
       return { ok: true, path: zipPath, bytes: st.size, bytes_human: formatBytes(st.size), verified: true, verify_errors: [], up_to_date: true, note: "The zip already verified against this manifest: it was not written again." };
     }
-    if (stored === null && fs24.existsSync(zipPath)) {
+    if (stored === null && fs25.existsSync(zipPath)) {
       return { ok: false, status: "conflict", path: zipPath, error: "conflict", message: `${zipPath} already exists and was not written by this tool, so it was left alone. Move or rename it and call again.` };
     }
     const fresh = { stamp: stamp3, state: "running", promise: Promise.resolve(), result: null };
@@ -26071,20 +27098,20 @@ async function zipStep(dest, manifest, deadline) {
   return job.result ?? { ok: false, error: "The zip job ended without a result." };
 }
 async function zipCollect(dest, manifest, stamp3) {
-  const root = path23.basename(dest);
+  const root = path24.basename(dest);
   const zipPath = `${dest}.zip`;
   const inputs = [];
   const expected = /* @__PURE__ */ new Map();
   for (const f of manifest.files) {
-    const abs = path23.join(dest, ...f.path.split("/"));
-    const st = await fs24.promises.stat(abs);
+    const abs = path24.join(dest, ...f.path.split("/"));
+    const st = await fs25.promises.stat(abs);
     const name = `${root}/${f.path}`;
     inputs.push({ name, file: abs, mtime: st.mtime });
     expected.set(name, { bytes: st.size, sha1: f.sha1 });
   }
   for (const extra of ["manifest.json", "collect-report.md", "collect-report.json"]) {
-    const abs = path23.join(dest, extra);
-    if (fs24.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs24.statSync(abs).mtime });
+    const abs = path24.join(dest, extra);
+    if (fs25.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs25.statSync(abs).mtime });
   }
   await writeFileAtomic(`${zipPath}.stamp`, `pending ${stamp3}`);
   const written = await writeZip(zipPath, inputs);
@@ -26093,18 +27120,18 @@ async function zipCollect(dest, manifest, stamp3) {
   return { ok: check.ok, path: zipPath, entries: written.entries, bytes: written.bytes, bytes_human: formatBytes(written.bytes), zip64: written.zip64, verified: check.ok, verify_errors: check.errors };
 }
 async function statSequenceOutput(pattern) {
-  const dir = path23.dirname(pattern);
-  const base = path23.basename(pattern);
+  const dir = path24.dirname(pattern);
+  const base = path24.basename(pattern);
   const m = FRAME_TOKEN.exec(base);
   const re = new RegExp(`^${escapeRe2(base.slice(0, m.index))}\\d{${m[1].length},}${escapeRe2(base.slice(m.index + m[0].length))}$`, WIN_OR_MAC ? "i" : "");
-  const names = await fs24.promises.readdir(dir);
+  const names = await fs25.promises.readdir(dir);
   let frames = 0;
   let bytes = 0;
   let oldest = Infinity;
   let newest = 0;
   for (const n of names) {
     if (!re.test(n)) continue;
-    const st = await fs24.promises.stat(path23.join(dir, n)).catch(() => null);
+    const st = await fs25.promises.stat(path24.join(dir, n)).catch(() => null);
     if (!st || !st.isFile()) continue;
     frames++;
     bytes += st.size;
@@ -26139,7 +27166,7 @@ async function buildReport2(ctx, opts, toolName) {
   const project2 = info.project_path;
   let pStat = null;
   try {
-    pStat = project2 === "<unsaved>" ? null : fs24.statSync(project2);
+    pStat = project2 === "<unsaved>" ? null : fs25.statSync(project2);
   } catch {
     pStat = null;
   }
@@ -26172,7 +27199,7 @@ async function buildReport2(ctx, opts, toolName) {
   let notHashed = 0;
   for (const o of info.render_outputs.slice(0, MAX_LIST2)) {
     const row = { comp: o.comp, status: o.status, output_module: o.output_module, file: o.file, exists: false, bytes: null, mtime: null, newer_than_project: null, sha1: null };
-    if (o.file && FRAME_TOKEN.test(path23.basename(o.file))) {
+    if (o.file && FRAME_TOKEN.test(path24.basename(o.file))) {
       try {
         const seqInfo = await statSequenceOutput(o.file);
         row.frames = seqInfo.frames;
@@ -26186,7 +27213,7 @@ async function buildReport2(ctx, opts, toolName) {
       }
     } else if (o.file) {
       try {
-        const st = await fs24.promises.stat(o.file);
+        const st = await fs25.promises.stat(o.file);
         row.exists = st.isFile();
         row.bytes = st.size;
         row.mtime = st.mtime.toISOString();
@@ -26209,7 +27236,7 @@ async function buildReport2(ctx, opts, toolName) {
   if (project2 !== "<unsaved>") {
     const dir = checkpointDirFor(project2);
     try {
-      const names = (await fs24.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
+      const names = (await fs25.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
       checkpoints = { dir, count: names.length, latest: names.slice(-5).reverse() };
     } catch {
       checkpoints = { dir, count: 0, latest: [] };
@@ -26218,7 +27245,7 @@ async function buildReport2(ctx, opts, toolName) {
   const m = opts.manifest === void 0 ? await readManifest(opts.dest) : opts.manifest;
   const report = {
     generated: (/* @__PURE__ */ new Date()).toISOString(),
-    project: { path: project2, name: path23.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
+    project: { path: project2, name: path24.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
     ae: info.ae,
     comps: info.comps,
     comps_truncated: info.comps_truncated,
@@ -26238,7 +27265,7 @@ async function buildReport2(ctx, opts, toolName) {
   };
   let prev = null;
   try {
-    prev = JSON.parse(await fs24.promises.readFile(path23.join(opts.dest, "collect-report.json"), "utf8"));
+    prev = JSON.parse(await fs25.promises.readFile(path24.join(opts.dest, "collect-report.json"), "utf8"));
   } catch {
     prev = null;
   }
@@ -26307,9 +27334,9 @@ async function reportHandler(args, ctx) {
   let writeError = null;
   if (args.write !== false) {
     try {
-      written = path23.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
+      written = path24.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
       await writeFileAtomic(written, format === "json" ? JSON.stringify(report, null, 2) : renderReportMarkdown(report));
-      await writeFileAtomic(path23.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
+      await writeFileAtomic(path24.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
     } catch (err) {
       writeError = `The report could not be written: ${err instanceof Error ? err.message : String(err)}`;
       written = null;
@@ -26424,12 +27451,12 @@ async function relinkHandler(args, ctx) {
   if (!manifest) return bad2(`No manifest in ${dest}. Run ae_collect_files with dry_run false first.`);
   if (!manifest.complete) return bad2("The collect is not complete. Call ae_collect_files again until it says complete.");
   if (pathKey2(manifest.project.path) !== pathKey2(original)) return bad2(`The collect in ${dest} is of ${manifest.project.path}, not the open project.`);
-  const copyPath = path23.join(dest, manifest.project.name);
-  if (!fs24.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
+  const copyPath = path24.join(dest, manifest.project.name);
+  if (!fs25.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
   if (manifest.relinked) return bad2("The copy is already relinked. Run ae_collect_files with restart: true to copy the .aep again first.");
   const mappings = buildMappings(manifest, dest);
   if (mappings.length === 0) return bad2("The manifest has nothing to relink.");
-  const missing = mappings.filter((x) => !fs24.existsSync(x.to));
+  const missing = mappings.filter((x) => !fs25.existsSync(x.to));
   if (missing.length) return bad2(`${missing.length} collected file(s) are missing from ${dest}: ${missing[0].to}`, { missing: missing.slice(0, 20).map((x) => x.to) });
   let reduceTo;
   if (args.reduce_to_comp_ids?.length) {
@@ -26552,7 +27579,7 @@ async function relinkHandler(args, ctx) {
           const aep = m2.files.find((f) => f.role === "project");
           if (aep) {
             aep.sha1 = await sha1File(copyPath);
-            aep.bytes = fs24.statSync(copyPath).size;
+            aep.bytes = fs25.statSync(copyPath).size;
           }
           await writeFileAtomic(manifestPath(dest), JSON.stringify(m2));
         } catch (err) {
@@ -26588,13 +27615,13 @@ async function relinkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto11, fs24, path23, import_node_stream, import_promises, zlib, MAX_LIST2, MAX_TEXT, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED, statFile, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe2, MAX_ITEM_MISMATCHES, collectTools;
+var crypto11, fs25, path24, import_node_stream, import_promises, zlib, MAX_LIST2, MAX_TEXT, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED, statFile, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe2, MAX_ITEM_MISMATCHES, collectTools;
 var init_collect = __esm({
   "src/tools/ext/collect.ts"() {
     "use strict";
     crypto11 = __toESM(require("node:crypto"), 1);
-    fs24 = __toESM(require("node:fs"), 1);
-    path23 = __toESM(require("node:path"), 1);
+    fs25 = __toESM(require("node:fs"), 1);
+    path24 = __toESM(require("node:path"), 1);
     import_node_stream = require("node:stream");
     import_promises = require("node:stream/promises");
     zlib = __toESM(require("node:zlib"), 1);
@@ -26611,7 +27638,7 @@ var init_collect = __esm({
     MAX_LIST2 = 500;
     MAX_TEXT = 2e4;
     WIN_OR_MAC = process.platform === "win32" || process.platform === "darwin";
-    DestSchema = external_exports.string().min(1).refine((p) => path23.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
+    DestSchema = external_exports.string().min(1).refine((p) => path24.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
     AeCollectFilesSchema = external_exports.object({
       dest: DestSchema,
       dry_run: external_exports.boolean().optional().describe("Default true: report total bytes, the files, duplicates and what can't be collected, and copy nothing. Pass false to copy."),
@@ -26639,7 +27666,7 @@ var init_collect = __esm({
     });
     RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
     statFile = async (p) => {
-      const st = await fs24.promises.stat(p);
+      const st = await fs25.promises.stat(p);
       if (!st.isFile()) throw new Error("not a file");
       return { path: p, bytes: st.size, mtimeMs: st.mtimeMs };
     };
@@ -26699,7 +27726,7 @@ var init_collect = __esm({
       ws;
       failure = null;
       constructor(p) {
-        this.ws = fs24.createWriteStream(p);
+        this.ws = fs25.createWriteStream(p);
         this.ws.on("error", (e) => {
           this.failure = e;
         });
@@ -26809,9 +27836,9 @@ function findingsOf(res) {
   const planErrors = Array.isArray(res.errors) ? res.errors.map(
     (e) => e && typeof e === "object" ? { severity: "blocker", message: e.message ?? e.code, where: typeof e.comp === "string" ? e.comp : e.item !== void 0 ? `item ${String(e.item)}` : void 0 } : e
   ) : [];
-  const list = [...Array.isArray(res.findings) ? res.findings : [], ...planErrors];
+  const list2 = [...Array.isArray(res.findings) ? res.findings : [], ...planErrors];
   const out = [];
-  for (const f of list) {
+  for (const f of list2) {
     if (out.length >= MAX_FINDINGS2) break;
     if (f === null || typeof f !== "object") continue;
     const o = f;
@@ -27164,7 +28191,7 @@ function schemaAcceptsKey(schema, key) {
   return true;
 }
 function deliverPath(projectPath) {
-  return path24.join(path24.dirname(projectPath), `${path24.basename(projectPath, path24.extname(projectPath))}.deliver.json`);
+  return path25.join(path25.dirname(projectPath), `${path25.basename(projectPath, path25.extname(projectPath))}.deliver.json`);
 }
 function unreadable(err) {
   if (err instanceof StoreUnreadableError) return { ok: false, error: err.kind, applied: false, message: err.message };
@@ -27173,7 +28200,7 @@ function unreadable(err) {
 function readStoreFile(file) {
   let raw;
   try {
-    raw = fs25.readFileSync(file, "utf8");
+    raw = fs26.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -27183,7 +28210,7 @@ function readStoreFile(file) {
     if (parsed && Array.isArray(parsed.recipes) && Array.isArray(parsed.runs)) return { version: 1, recipes: parsed.recipes, runs: parsed.runs };
   } catch {
   }
-  fs25.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs26.renameSync(file, `${file}.${Date.now()}.bak`);
   return null;
 }
 function loadStore(projectPath) {
@@ -27220,14 +28247,14 @@ function saveStore(projectPath, store) {
   const file = deliverPath(projectPath);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    fs25.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs25.renameSync(tmp, file);
+    fs26.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs26.renameSync(tmp, file);
     unsavedStores.delete(projectPath);
     return { file };
   } catch (e) {
     unsavedStores.add(projectPath);
     try {
-      fs25.unlinkSync(tmp);
+      fs26.unlinkSync(tmp);
     } catch {
     }
     return { file: null, error: e.message };
@@ -27349,7 +28376,7 @@ function expectOf(env) {
 }
 function fileStamp(file) {
   try {
-    const st = fs25.statSync(file);
+    const st = fs26.statSync(file);
     return `${st.size}:${st.mtimeMs}`;
   } catch {
     return null;
@@ -28114,13 +29141,13 @@ async function deliverStatus(args, ctx) {
     ...run.state === "done" && project2.dirty ? run.project_dirty_at_end === true ? { note: "The delivery ended with unsaved changes made by its own stages (a verify or scrub imports and removes a file). Save the project before relying on the file on disk." } : { note: "The project has unsaved changes made after this delivery ran; the delivered files may not match it." } : {}
   });
 }
-var crypto12, fs25, path24, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip2, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
+var crypto12, fs26, path25, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip2, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
 var init_deliver = __esm({
   "src/tools/ext/deliver.ts"() {
     "use strict";
     crypto12 = __toESM(require("node:crypto"), 1);
-    fs25 = __toESM(require("node:fs"), 1);
-    path24 = __toESM(require("node:path"), 1);
+    fs26 = __toESM(require("node:fs"), 1);
+    path25 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_quarantine();
@@ -28772,22 +29799,22 @@ function stamp() {
   return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 }
 function findRenderedAudio(outputPath) {
-  if (fs26.existsSync(outputPath)) return outputPath;
-  const dir = path25.dirname(outputPath);
-  const stem = path25.basename(outputPath, path25.extname(outputPath));
+  if (fs27.existsSync(outputPath)) return outputPath;
+  const dir = path26.dirname(outputPath);
+  const stem = path26.basename(outputPath, path26.extname(outputPath));
   try {
-    const hit = fs26.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
-    return hit ? path25.join(dir, hit) : null;
+    const hit = fs27.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
+    return hit ? path26.join(dir, hit) : null;
   } catch {
     return null;
   }
 }
 async function analyzeFile(file, offset, opts, maxSeconds = MAX_ANALYSIS_SECONDS) {
-  const stat = fs26.statSync(file);
+  const stat = fs27.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES) throw new AudioDecodeError(`Audio file is over ${MAX_AUDIO_BYTES / 1048576} MB`);
-  const decoded = decodeAudio(await fs26.promises.readFile(file), { maxSeconds });
+  const decoded = decodeAudio(await fs27.promises.readFile(file), { maxSeconds });
   const analysis = offsetAnalysis(await analyzeAudio(decoded.mono, decoded.sampleRate, opts), offset);
-  const boundList = (list) => ({ list: list.slice(0, MAX_LIST3), truncated: list.length > MAX_LIST3 });
+  const boundList = (list2) => ({ list: list2.slice(0, MAX_LIST3), truncated: list2.length > MAX_LIST3 });
   const beats = boundList(analysis.beats);
   const onsets = boundList(analysis.onsets);
   return {
@@ -28818,7 +29845,7 @@ function createAudioTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs26.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs27.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -28869,7 +29896,7 @@ function createAudioTools(options = {}) {
         };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path25.isAbsolute(args.audio_path) || !fs26.existsSync(args.audio_path)) {
+          if (!path26.isAbsolute(args.audio_path) || !fs27.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -28905,9 +29932,9 @@ function createAudioTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; analyse at most ${MAX_ANALYSIS_SECONDS / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path25.join(rendersDir(), "audio");
-        fs26.mkdirSync(dir, { recursive: true });
-        const outputPath = path25.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
+        const dir = path26.join(rendersDir(), "audio");
+        fs27.mkdirSync(dir, { recursive: true });
+        const outputPath = path26.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -28924,7 +29951,7 @@ function createAudioTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs26.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs27.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, opts);
@@ -28988,12 +30015,12 @@ function createAudioTools(options = {}) {
     }
   ];
 }
-var fs26, path25, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST3, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
+var fs27, path26, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST3, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
 var init_audio2 = __esm({
   "src/tools/ext/audio.ts"() {
     "use strict";
-    fs26 = __toESM(require("node:fs"), 1);
-    path25 = __toESM(require("node:path"), 1);
+    fs27 = __toESM(require("node:fs"), 1);
+    path26 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_receipts();
@@ -29463,16 +30490,16 @@ function pruneOldRenders(dir, now = Date.now()) {
   let removed = 0;
   let names = [];
   try {
-    names = fs27.readdirSync(dir);
+    names = fs28.readdirSync(dir);
   } catch {
     return 0;
   }
   for (const n of names) {
     if (!/^loudness_.+\.(aif|aiff|aifc|wav)(\.json)?$/i.test(n)) continue;
-    const p = path26.join(dir, n);
+    const p = path27.join(dir, n);
     try {
-      if (now - fs27.statSync(p).mtimeMs > RENDER_KEEP_MS) {
-        fs27.unlinkSync(p);
+      if (now - fs28.statSync(p).mtimeMs > RENDER_KEEP_MS) {
+        fs28.unlinkSync(p);
         removed++;
       }
     } catch {
@@ -29517,7 +30544,7 @@ function applyHint(m, std, verdict) {
   };
 }
 async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECONDS2, wholeFile = false) {
-  const stat = fs27.statSync(file);
+  const stat = fs28.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES2) {
     const mb = MAX_AUDIO_BYTES2 / 1048576;
     throw new AudioDecodeError(
@@ -29526,7 +30553,7 @@ async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECON
   }
   let decoded;
   try {
-    decoded = decodeAudioChannels(await fs27.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
+    decoded = decodeAudioChannels(await fs28.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
   } catch (err) {
     if (wholeFile && err instanceof AudioDecodeError && err.message.includes("use start/end")) {
       const cut = err.message.replace(" (use start/end)", "").replace(". Measure a shorter range", "").replace(/[.;]\s*$/, "");
@@ -29567,7 +30594,7 @@ function createLoudnessTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs27.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs28.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -29618,7 +30645,7 @@ function createLoudnessTools(options = {}) {
         const choice = { standard: args.standard, target_lufs: args.target_lufs, true_peak_max_db: args.true_peak_max_db, tolerance_lu: args.tolerance_lu };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path26.isAbsolute(args.audio_path) || !fs27.existsSync(args.audio_path)) {
+          if (!path27.isAbsolute(args.audio_path) || !fs28.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -29655,10 +30682,10 @@ function createLoudnessTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; measure at most ${MAX_ANALYSIS_SECONDS2 / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path26.join(rendersDir(), "audio");
-        fs27.mkdirSync(dir, { recursive: true });
+        const dir = path27.join(rendersDir(), "audio");
+        fs28.mkdirSync(dir, { recursive: true });
         pruneOldRenders(dir);
-        const outputPath = path26.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto13.randomBytes(3).toString("hex")}.aif`);
+        const outputPath = path27.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto13.randomBytes(3).toString("hex")}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -29675,7 +30702,7 @@ function createLoudnessTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs27.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs28.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, choice);
@@ -29754,13 +30781,13 @@ function createLoudnessTools(options = {}) {
     }
   ];
 }
-var fs27, crypto13, path26, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
+var fs28, crypto13, path27, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
 var init_loudness = __esm({
   "src/tools/ext/loudness.ts"() {
     "use strict";
-    fs27 = __toESM(require("node:fs"), 1);
+    fs28 = __toESM(require("node:fs"), 1);
     crypto13 = __toESM(require("node:crypto"), 1);
-    path26 = __toESM(require("node:path"), 1);
+    path27 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_host();
@@ -29883,8 +30910,8 @@ function findOverlaps(items, minShare) {
       pairs2.push({
         a: { index: items[i].index, id: items[i].id, name: items[i].name },
         b: { index: items[j].index, id: items[j].id, name: items[j].name },
-        rect: rect.map(r22),
-        area: r22(area),
+        rect: rect.map(r23),
+        area: r23(area),
         share_of_smaller: r33(share)
       });
     }
@@ -30148,9 +31175,9 @@ function ratioStats(sorted, required, tolerance) {
   const q = Math.min(n - 1, Math.floor(tolerance * n));
   const share = below / n;
   return {
-    min: r22(sorted[0]),
-    low: r22(sorted[q]),
-    median: r22(sorted[Math.floor((n - 1) / 2)]),
+    min: r23(sorted[0]),
+    low: r23(sorted[q]),
+    median: r23(sorted[Math.floor((n - 1) / 2)]),
     fail_share: r33(share),
     pass: share <= tolerance
   };
@@ -30282,7 +31309,7 @@ function measuredEntry(l, s, j, measured) {
 function judgeAnalysis(l, s, a, j, o) {
   const { entry, req } = measuredEntry(l, s, j, o.measured);
   const notes = [];
-  const toComp = (b) => [b[0] * (o.comp.width / o.img.width), b[1] * (o.comp.height / o.img.height), b[2] * (o.comp.width / o.img.width), b[3] * (o.comp.height / o.img.height)].map(r22);
+  const toComp = (b) => [b[0] * (o.comp.width / o.img.width), b[1] * (o.comp.height / o.img.height), b[2] * (o.comp.width / o.img.width), b[3] * (o.comp.height / o.img.height)].map(r23);
   entry.glyph_pixels = a.glyph_pixels;
   if (o.measured === "estimate") {
     notes.push("An estimate: the fill colour is the DOM's and the background is the ring of pixels around the box, not what is behind the glyphs. Use ae_check_legibility for the exact figure.");
@@ -30455,8 +31482,8 @@ function summarise3(entries) {
   return { verdict, checked: entries.length, pass: count("pass"), fail: failed.length, inconclusive: count("inconclusive"), worst };
 }
 function writeOverlay(framesDir, compId, time, png) {
-  const file = path27.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto14.randomBytes(4).toString("hex")}.png`);
-  fs28.writeFileSync(file, encodePng(png));
+  const file = path28.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto14.randomBytes(4).toString("hex")}.png`);
+  fs29.writeFileSync(file, encodePng(png));
   return file;
 }
 function overlapReport(read3, minShare) {
@@ -30464,21 +31491,21 @@ function overlapReport(read3, minShare) {
     const { pairs: pairs2, truncated } = overlapsAt(read3, ti, minShare);
     return { time, overlaps: pairs2, ...truncated ? { truncated: true } : {} };
   });
-  const { skipped, total } = skippedEntries(read3);
+  const { skipped, total: total2 } = skippedEntries(read3);
   return {
     ...layerSummary(read3),
     min_overlap: minShare,
     overlap_count: perTime.reduce((n, t) => n + t.overlaps.length, 0),
     times_checked: perTime,
     skipped,
-    ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+    ...total2 > skipped.length ? { skipped_truncated: true, skipped_total: total2 } : {},
     notes: [NOTES_COMMON[0], "Only the layers' boxes are compared (DOM only, no render): two lines of text in the same layer never count, and glyphs that don't fill their box may not really collide."]
   };
 }
 async function estimateHandler(args, ctx) {
   const tool = "ae_estimate_legibility";
   const framesDir = defaultFramesDir();
-  fs28.mkdirSync(framesDir, { recursive: true });
+  fs29.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const label = `${tool}(${args.comp_id})`;
   const judging = { required: { level: args.level, minRatio: args.min_ratio, largeTextPx: args.large_text_px }, tolerance: args.tolerance };
@@ -30574,7 +31601,7 @@ async function estimateHandler(args, ctx) {
       overlaps: overlays
     };
   });
-  const { skipped, total } = withExtra(skippedEntries(read3), offFrame);
+  const { skipped, total: total2 } = withExtra(skippedEntries(read3), offFrame);
   return {
     ok: true,
     read_only: true,
@@ -30585,7 +31612,7 @@ async function estimateHandler(args, ctx) {
     ...summarise3(entries),
     times_checked: timeResults,
     skipped,
-    ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+    ...total2 > skipped.length ? { skipped_truncated: true, skipped_total: total2 } : {},
     notes: [
       "ESTIMATE. The fill colour is the one the DOM reports for the first character, which ignores animators, effects, layer styles, opacity and blend modes, and the background is the ring of pixels around each box, not what is behind the glyphs. Treat a pass as 'probably fine' and any figure as approximate; ae_check_legibility measures the real glyph pixels.",
       ...NOTES_COMMON
@@ -30668,14 +31695,14 @@ async function checkHandler(args, ctx) {
       const read3 = await readText(ctx, opId, toolName, label, args);
       const { tested, overflow } = testableLayers(read3);
       if (tested.length === 0) {
-        const { skipped: skipped2, total: total2 } = skippedEntries(read3);
+        const { skipped: skipped2, total: total3 } = skippedEntries(read3);
         return {
           ok: false,
           error: "nothing_to_check",
           message: read3.text_layers === 0 ? "The comp has no text layers." : "No text layer shows with a measurable box at the chosen times.",
           ...layerSummary(read3),
           skipped: skipped2,
-          ...total2 > skipped2.length ? { skipped_truncated: true, skipped_total: total2 } : {}
+          ...total3 > skipped2.length ? { skipped_truncated: true, skipped_total: total3 } : {}
         };
       }
       const guard = await verifyTargetGuard(ctx, expect, opId);
@@ -30684,7 +31711,7 @@ async function checkHandler(args, ctx) {
       const sessionFields = await noteBeforeWrite(ctx, note);
       proofLayerIds = tested.map((l) => l.id);
       const before = await state("before");
-      fs28.mkdirSync(framesDir, { recursive: true });
+      fs29.mkdirSync(framesDir, { recursive: true });
       beginInflight(note);
       let begun;
       try {
@@ -30820,7 +31847,7 @@ async function checkHandler(args, ctx) {
       entries.push(...untestedAll);
       const untested = untestedAll.slice(0, SKIPPED_CAP);
       const olderCopies = before?.temp_comps ?? 0;
-      const { skipped, total } = withExtra(skippedEntries(read3), offFrame);
+      const { skipped, total: total2 } = withExtra(skippedEntries(read3), offFrame);
       return {
         op_id: opId,
         applied: true,
@@ -30830,7 +31857,7 @@ async function checkHandler(args, ctx) {
         ...summarise3(entries),
         times_checked: timeResults,
         skipped,
-        ...total > skipped.length ? { skipped_truncated: true, skipped_total: total } : {},
+        ...total2 > skipped.length ? { skipped_truncated: true, skipped_total: total2 } : {},
         ...untested.length > 0 ? { untested, ...untestedAll.length > untested.length ? { untested_truncated: true, untested_total: untestedAll.length } : {} } : {},
         ...blocked ? { ae_blocked: BLOCKED_NOTE } : {},
         temp_comp: { copy_removed: removed, switched_off: begun.switched_off },
@@ -30854,13 +31881,13 @@ async function checkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto14, fs28, path27, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r22, r33, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage2, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
+var crypto14, fs29, path28, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r23, r33, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage2, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
 var init_legibility = __esm({
   "src/tools/ext/legibility.ts"() {
     "use strict";
     crypto14 = __toESM(require("node:crypto"), 1);
-    fs28 = __toESM(require("node:fs"), 1);
-    path27 = __toESM(require("node:path"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path28 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -30929,13 +31956,13 @@ var init_legibility = __esm({
       LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     }
     hex2 = (rgb) => "#" + [0, 1, 2].map((i) => Math.max(0, Math.min(255, Math.round(rgb[i]))).toString(16).padStart(2, "0")).join("");
-    r22 = (v) => Math.round(v * 100) / 100;
+    r23 = (v) => Math.round(v * 100) / 100;
     r33 = (v) => Math.round(v * 1e3) / 1e3;
     boxArea = (b) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
     MAX_OVERLAPS = 200;
-    inAny = (list, x, y) => {
-      if (!list) return false;
-      for (const r of list) if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return true;
+    inAny = (list2, x, y) => {
+      if (!list2) return false;
+      for (const r of list2) if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return true;
       return false;
     };
     MIN_PIXELS = 6;
@@ -31015,6 +32042,737 @@ var init_legibility = __esm({
   }
 });
 
+// src/tools/ext/timing.ts
+function finding2(fps, f) {
+  return { ...f, start_s: r34(f.start_s), end_s: r34(f.end_s), start_frame: Math.round(f.start_s * fps), end_frame: Math.round(f.end_s * fps) };
+}
+function sortFindings3(list2) {
+  return [...list2].sort((a, b) => SEVERITY_RANK3[a.severity] - SEVERITY_RANK3[b.severity] || a.start_s - b.start_s || a.check.localeCompare(b.check));
+}
+function mergeIntervals(list2, gap = EPS2) {
+  const s = list2.filter((i) => i[1] >= i[0]).map((i) => [i[0], i[1]]).sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const i of s) {
+    const last = out[out.length - 1];
+    if (last && i[0] <= last[1] + gap) {
+      if (i[1] > last[1]) last[1] = i[1];
+    } else out.push(i);
+  }
+  return out;
+}
+function intersectIntervals(a, b) {
+  const out = [];
+  for (const x of a) {
+    for (const y of b) {
+      const lo = Math.max(x[0], y[0]);
+      const hi = Math.min(x[1], y[1]);
+      if (hi > lo + EPS2) out.push([lo, hi]);
+    }
+  }
+  return mergeIntervals(out);
+}
+function opacityAt(o, t) {
+  const ks = o.keys;
+  if (!ks || ks.length === 0) return o.value;
+  if (t <= ks[0].t) return ks[0].v;
+  const last = ks[ks.length - 1];
+  if (t >= last.t) return last.v;
+  for (let i = 0; i + 1 < ks.length; i++) {
+    const a = ks[i];
+    const b = ks[i + 1];
+    if (t >= a.t && t <= b.t) return b.t === a.t ? b.v : a.v + (b.v - a.v) * (t - a.t) / (b.t - a.t);
+  }
+  return last.v;
+}
+function opacityVisible(o, a, b) {
+  if (b <= a) return [];
+  const marks = [a, b, ...(o.keys ?? []).map((k) => k.t).filter((t) => t > a && t < b)].sort((x, y) => x - y);
+  const out = [];
+  for (let i = 0; i + 1 < marks.length; i++) {
+    const s = marks[i];
+    const e = marks[i + 1];
+    if (e <= s) continue;
+    const vs = opacityAt(o, s);
+    const ve = opacityAt(o, e);
+    const sOn = vs > MIN_VISIBLE_OPACITY;
+    const eOn = ve > MIN_VISIBLE_OPACITY;
+    if (sOn && eOn) out.push([s, e]);
+    else if (sOn || eOn) {
+      const tc = s + (MIN_VISIBLE_OPACITY - vs) / (ve - vs) * (e - s);
+      out.push(sOn ? [s, tc] : [tc, e]);
+    }
+  }
+  return mergeIntervals(out);
+}
+function presence(l, soloAny) {
+  if (!l.enabled || l.guide) return [];
+  if (l.out_s <= l.in_s) return [];
+  if (CONTROLLERS.has(l.kind)) return [[l.in_s, l.out_s]];
+  if (l.kind === "audio") return [];
+  if (soloAny && !l.solo) return [];
+  return opacityVisible(l.opacity, l.in_s, l.out_s);
+}
+function textLines(layers, soloAny) {
+  const out = [];
+  for (const l of layers) {
+    if (l.kind !== "text") continue;
+    const pres = presence(l, soloAny);
+    if (pres.length === 0) continue;
+    const keys = l.text_keys && l.text_keys.length > 0 ? [...l.text_keys].sort((a, b) => a.t - b.t) : null;
+    const windows = [];
+    if (!keys) windows.push({ text: l.text ?? "", w: [l.in_s, l.out_s] });
+    else {
+      for (let i = 0; i < keys.length; i++) {
+        const start = i === 0 ? l.in_s : Math.max(keys[i].t, l.in_s);
+        const end = i + 1 < keys.length ? Math.min(keys[i + 1].t, l.out_s) : l.out_s;
+        if (end > start + EPS2) windows.push({ text: keys[i].text, w: [start, end] });
+      }
+    }
+    const merged = [];
+    for (const w of windows) {
+      const prev = merged[merged.length - 1];
+      if (prev && normText(prev.text) === normText(w.text) && w.w[0] <= prev.w[1] + EPS2) prev.w = [prev.w[0], w.w[1]];
+      else merged.push({ text: w.text, w: [w.w[0], w.w[1]] });
+    }
+    for (const m of merged) {
+      const text = normText(m.text);
+      if (!text) continue;
+      const visible = intersectIntervals([m.w], pres);
+      if (visible.length === 0) continue;
+      out.push({ layer: l, text, window: m.w, visible, visible_s: total(visible), start_s: visible[0][0], end_s: visible[visible.length - 1][1] });
+    }
+  }
+  return out;
+}
+function readingReport(lines, spec, range, fps) {
+  const inRange = lines.filter((x) => x.end_s > range[0] + EPS2 && x.start_s < range[1] - EPS2);
+  let last = null;
+  for (const x of inRange) {
+    if (!last || x.end_s > last.end_s + EPS2 || Math.abs(x.end_s - last.end_s) <= EPS2 && x.start_s > last.start_s) last = x;
+  }
+  const tol = 0.5 / Math.max(fps, 1);
+  return inRange.map((x) => {
+    const isLast = x === last;
+    const needed = readingTimeS(x.text, spec.reading, isLast);
+    return {
+      layer: ref2(x.layer),
+      text: x.text,
+      start_s: r34(x.start_s),
+      end_s: r34(x.end_s),
+      on_screen_s: r34(x.visible_s),
+      needed_s: r34(needed),
+      is_last: isLast,
+      ok: x.visible_s + tol >= needed
+    };
+  });
+}
+function unreadFindings(reports, fps) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Map();
+  for (const r of reports) {
+    if (r.ok) continue;
+    const words = r.text.split(/\s+/).filter(Boolean).length;
+    const short2 = r.needed_s - r.on_screen_s;
+    const key = `${r.text}|${r.start_s}|${r.end_s}`;
+    const dup = seen.get(key);
+    if (dup) {
+      dup.layers.push(r.layer);
+      continue;
+    }
+    const f = finding2(fps, {
+      check: "unread_lines",
+      severity: r.on_screen_s < r.needed_s / 2 ? "P0" : "P1",
+      start_s: r.start_s,
+      end_s: r.end_s,
+      layers: [r.layer],
+      message: `"${r.text.length > 80 ? r.text.slice(0, 77) + "..." : r.text}" (${words} word${words === 1 ? "" : "s"}${r.is_last ? ", the last line" : ""}) is on screen ${r.on_screen_s} s; reading needs ${r.needed_s} s`,
+      fix: `Hold it ${r34(short2)} s longer (out point to ${r34(r.end_s + short2)} s), or cut the copy to fit ${r.on_screen_s} s`,
+      detail: { on_screen_s: r.on_screen_s, needed_s: r.needed_s, words, is_last: r.is_last }
+    });
+    seen.set(key, f);
+    out.push(f);
+  }
+  return out;
+}
+function changeIntervals(layers, soloAny) {
+  const out = [];
+  for (const l of layers) {
+    const pres = presence(l, soloAny);
+    if (pres.length === 0) continue;
+    for (const p of pres) out.push([p[0], p[0]], [p[1], p[1]]);
+    for (const s of l.spans) out.push(...intersectIntervals([[s[0], s[1]]], pres));
+    const moments = [...l.points, ...(l.text_keys ?? []).map((k) => k.t)];
+    for (const t of moments) if (pres.some((p) => t >= p[0] - EPS2 && t <= p[1] + EPS2)) out.push([t, t]);
+    if (l.expression || l.video_playing) out.push(...pres);
+    if (l.truncated) out.push(...intersectIntervals([[l.change_from_s ?? l.in_s, l.out_s]], pres));
+  }
+  return mergeIntervals(out);
+}
+function partialLayers(host) {
+  return host.layers.filter((l) => l.truncated && presence(l, host.solo_any).length > 0);
+}
+function deadStretches(layers, soloAny, range, limit) {
+  const changes = changeIntervals(layers, soloAny).map((i) => [Math.max(i[0], range[0]), Math.min(i[1], range[1])]).filter((i) => i[1] >= i[0]);
+  const gaps = [];
+  let cursor = range[0];
+  for (const c of mergeIntervals(changes)) {
+    if (c[0] > cursor) gaps.push([cursor, c[0]]);
+    cursor = Math.max(cursor, c[1]);
+  }
+  if (cursor < range[1]) gaps.push([cursor, range[1]]);
+  return gaps.filter((g) => g[1] - g[0] > limit + EPS2).map((g) => {
+    const here = layers.filter((l) => {
+      const p = intersectIntervals(presence(l, soloAny), [g]);
+      return total(p) >= (g[1] - g[0]) * 0.5 && l.kind !== "null" && l.kind !== "camera" && l.kind !== "light";
+    });
+    return { start_s: g[0], end_s: g[1], length_s: g[1] - g[0], layers: here.slice(0, 8).map(ref2) };
+  });
+}
+function deadStretchFindings(stretches, limit, fps) {
+  return stretches.map(
+    (s) => finding2(fps, {
+      check: "dead_stretches",
+      severity: s.length_s > limit * 2 ? "P0" : "P1",
+      start_s: s.start_s,
+      end_s: s.end_s,
+      layers: s.layers,
+      message: `Nothing changes for ${r34(s.length_s)} s (limit ${limit} s): no keyframe moves, no layer comes or goes, no footage or precomp plays`,
+      fix: `Give ${r34(s.start_s)}-${r34(s.end_s)} s a reason to look: a move, a cut, a reveal or a new line, or cut ${r34(s.length_s - limit)} s from the hold`,
+      detail: { length_s: r34(s.length_s), limit_s: limit }
+    })
+  );
+}
+function silentFilmFindings(layers, range, fps) {
+  const carriers = layers.filter(
+    (l) => l.has_audio && l.audio_enabled && !l.audio_muted && l.out_s > l.in_s && l.out_s > range[0] + EPS2 && l.in_s < range[1] - EPS2
+  );
+  const length = range[1] - range[0];
+  if (length <= SILENT_AFTER_S + EPS2) return { findings: [], audio_layers: carriers.length };
+  const covered = mergeIntervals(carriers.map((l) => [Math.max(l.in_s, range[0]), Math.min(l.out_s, range[1])]));
+  const gaps = [];
+  let cursor = range[0];
+  for (const c of covered) {
+    if (c[0] > cursor + EPS2) gaps.push([cursor, c[0]]);
+    cursor = Math.max(cursor, c[1]);
+  }
+  if (cursor < range[1] - EPS2) gaps.push([cursor, range[1]]);
+  const findings = gaps.filter((g) => g[1] - g[0] > SILENT_AFTER_S + EPS2).map((g) => {
+    const whole = carriers.length === 0;
+    return finding2(fps, {
+      check: "silent_film",
+      severity: "P1",
+      start_s: g[0],
+      end_s: g[1],
+      layers: [],
+      message: whole ? `${r34(g[1] - g[0])} s with no audio layer that is on and not muted (limit ${SILENT_AFTER_S} s)` : `${r34(g[1] - g[0])} s (${r34(g[0])}-${r34(g[1])} s) with no audio playing: the audio layers that are on do not cover it (limit ${SILENT_AFTER_S} s)`,
+      fix: whole ? "Add a music bed, voice-over or sound design, or tell the client the film is silent on purpose" : `Extend or loop the audio over ${r34(g[0])}-${r34(g[1])} s, or tell the client that stretch is silent on purpose`,
+      detail: { length_s: r34(g[1] - g[0]), limit_s: SILENT_AFTER_S, audio_layers: carriers.length }
+    });
+  });
+  return { findings, audio_layers: carriers.length };
+}
+function numKey(core) {
+  const n = Number(core.replace(/,/g, ""));
+  return Number.isFinite(n) ? String(n) : core;
+}
+function maskComposites(text) {
+  let t = text;
+  const blank = (m) => " ".repeat(m.length);
+  t = t.replace(PHONE_RE, (m) => m.replace(/\D/g, "").length >= 8 ? blank(m) : m);
+  for (const re of COMPOSITE_RES) t = t.replace(re, blank);
+  return t;
+}
+function extractNumbers(text, skipComposite = true) {
+  const out = [];
+  if (skipComposite) text = maskComposites(text);
+  const re = new RegExp(NUM_RE.source, NUM_RE.flags);
+  let m;
+  while (m = re.exec(text)) {
+    const start = m.index;
+    const currency = m[1];
+    let core = m[2];
+    let suffix = m[3] ?? "";
+    let end = start + m[0].length;
+    if (/,$/.test(core)) {
+      core = core.replace(/,+$/, "");
+      end -= m[2].length - core.length;
+    }
+    if (start > 0 && /[\p{L}0-9]/u.test(text[start - 1])) continue;
+    if (suffix && suffix !== "%" && !currency) {
+      suffix = "";
+      end -= (m[3] ?? "").length;
+    }
+    if (end < text.length && new RegExp("\\p{L}", "u").test(text[end])) continue;
+    out.push({ text: text.slice(start, end), key: numKey(core) });
+  }
+  return out;
+}
+function extractNames(text) {
+  const out = [];
+  for (const segment of text.split(/[\r\n]+/)) {
+    const seg = segment.trim();
+    if (!seg || !new RegExp("\\p{Ll}", "u").test(seg)) continue;
+    const words = seg.split(/\s+/);
+    const alpha = words.filter((w) => new RegExp("\\p{L}", "u").test(w));
+    if (alpha.length >= 4 && alpha.every((w) => new RegExp("^\\p{Lu}", "u").test(w))) continue;
+    let run = [];
+    const flush = () => {
+      while (run.length && LEAD_STOP.has(run[0].toLowerCase())) run.shift();
+      while (run.length && CONNECT.has(run[run.length - 1].toLowerCase())) run.pop();
+      const caps = run.filter((w) => NAME_WORD.test(w));
+      if (caps.length >= 2) out.push(run.join(" "));
+      run = [];
+    };
+    for (let i = 0; i < words.length; i++) {
+      const raw = words[i];
+      const endsPunct = /[,.:;!?)\]"”]$/.test(raw);
+      const w = raw.replace(/^[("“]+/, "").replace(/[,.:;!?)\]"”]+$/, "");
+      if (NAME_WORD.test(w)) {
+        run.push(w);
+        if (endsPunct) flush();
+      } else if (CONNECT.has(w.toLowerCase()) && run.length > 0 && i + 1 < words.length && NAME_WORD.test(words[i + 1].replace(/^[("“]+/, ""))) {
+        run.push(w);
+      } else flush();
+    }
+    flush();
+  }
+  return out;
+}
+function isLikelyUnapprovedName(name, facts) {
+  const caps = name.split(/\s+/).filter((w) => NAME_WORD.test(w)).flatMap(nameWords);
+  if (caps.some((w) => COMMON_COPY_WORDS.has(w))) return false;
+  const factWords = new Set(facts.flatMap(nameWords));
+  if (caps.some((w) => factWords.has(w))) return true;
+  return caps.some((w) => w.length >= 2 && !COMMON_COPY_WORDS.has(w));
+}
+function unapprovedTokens(text, facts) {
+  const factNums = /* @__PURE__ */ new Set();
+  for (const f of facts) for (const n of extractNumbers(f, false)) factNums.add(n.key);
+  const factNames = facts.map(normName).filter((f) => f.trim().length >= 2);
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const n of extractNumbers(text)) {
+    if (factNums.has(n.key) || seen.has("n" + n.text)) continue;
+    seen.add("n" + n.text);
+    out.push({ text: n.text, kind: "number" });
+  }
+  for (const name of extractNames(text)) {
+    const nn = normName(name);
+    if (factNames.some((f) => nn.includes(f) || f.includes(nn)) || seen.has("w" + nn)) continue;
+    if (!isLikelyUnapprovedName(name, facts)) continue;
+    seen.add("w" + nn);
+    out.push({ text: name, kind: "name" });
+  }
+  return out;
+}
+function factsFindings(lines, facts, range, fps) {
+  if (facts.length === 0) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const x of lines) {
+    if (x.end_s <= range[0] + EPS2 || x.start_s >= range[1] - EPS2) continue;
+    const key = `${x.text}|${r34(x.start_s)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const bad4 = unapprovedTokens(x.text, facts);
+    if (bad4.length === 0) continue;
+    out.push(
+      finding2(fps, {
+        check: "facts",
+        severity: bad4.some(isMoneyOrPercent) ? "P0" : "P1",
+        start_s: x.start_s,
+        end_s: x.end_s,
+        layers: [ref2(x.layer)],
+        message: `Not in the approved facts: ${bad4.map((b) => `${b.kind} "${b.text}"`).join(", ")}, in "${x.text.length > 80 ? x.text.slice(0, 77) + "..." : x.text}"`,
+        fix: "Check each against the client's source. If it is right, add it to the brief's motion.facts; if not, correct the text",
+        detail: { unapproved: bad4 }
+      })
+    );
+  }
+  return out;
+}
+function firstFrameFinding(a, time, fps) {
+  if (!a.is_blank) return null;
+  const what = a.is_transparent ? "fully transparent" : a.is_black ? "black" : "one flat colour";
+  return finding2(fps, {
+    check: "first_frame",
+    severity: "P0",
+    start_s: time,
+    end_s: time,
+    layers: [],
+    message: `The first frame (${r34(time)} s) is ${what}`,
+    fix: "Start the first element on frame 1, or move the work area start to the first frame with something in it. Posters, thumbnails and autoplay previews use this frame",
+    detail: { flags: a.flags, mean_rgba: a.mean_rgba }
+  });
+}
+async function runQueued5(ctx, label, opId, fn) {
+  try {
+    return await ctx.queue.run(label, fn);
+  } catch (err) {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  }
+}
+function analyzeTiming(host, spec, checks, range) {
+  const fps = host.comp.frame_rate;
+  const findings = [];
+  const lines = textLines(host.layers, host.solo_any);
+  let reports = [];
+  let stretches = [];
+  if (checks.has("unread_lines")) {
+    reports = readingReport(lines, spec, range, fps);
+    findings.push(...unreadFindings(reports, fps));
+  }
+  let deadSkipped = false;
+  const partial = partialLayers(host);
+  if (checks.has("dead_stretches")) {
+    if (host.truncated) {
+      deadSkipped = true;
+      findings.push(
+        finding2(fps, {
+          check: "dead_stretches",
+          severity: "P2",
+          start_s: range[0],
+          end_s: range[1],
+          layers: [],
+          message: `dead_stretches skipped: only the first ${host.layers.length} of ${host.layer_count} layers were read, so a gap could be filled by a layer that was not read`,
+          fix: "Run it on a comp with fewer layers (pre-compose groups), or check the timeline by eye",
+          detail: { layers_read: host.layers.length, layer_count: host.layer_count }
+        })
+      );
+    } else {
+      stretches = deadStretches(host.layers, host.solo_any, range, spec.dead_stretch_s);
+      findings.push(...deadStretchFindings(stretches, spec.dead_stretch_s, fps));
+      if (partial.length > 0) {
+        const from = Math.min(...partial.map((l) => l.change_from_s ?? l.in_s));
+        findings.push(
+          finding2(fps, {
+            check: "dead_stretches",
+            severity: "P2",
+            start_s: Math.max(range[0], from),
+            end_s: range[1],
+            layers: partial.slice(0, 8).map(ref2),
+            message: `${partial.length} layer${partial.length === 1 ? " was" : "s were"} read in part (too many properties or keys), so they count as changing from where the read stopped and dead stretches there can be missed`,
+            fix: "Check that stretch by eye or with confirm_with_frames",
+            detail: { layers: partial.length, keys_truncated: host.keys_truncated === true }
+          })
+        );
+      }
+    }
+  }
+  let audioLayers;
+  if (checks.has("silent_film")) {
+    const s = silentFilmFindings(host.layers, range, fps);
+    audioLayers = s.audio_layers;
+    findings.push(...s.findings);
+  }
+  if (checks.has("facts")) findings.push(...factsFindings(lines, spec.facts, range, fps));
+  return { findings, lines, reports, stretches, audioLayers, deadSkipped, partial: partial.length };
+}
+async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
+  const stage = { confirmations: /* @__PURE__ */ new Map() };
+  const framesDir = defaultFramesDir();
+  fs30.mkdirSync(framesDir, { recursive: true });
+  const opId = ctx.bridge.newOpId();
+  const tool = "ae_timing_check";
+  let blocked = false;
+  let idx = 0;
+  await runQueued5(ctx, `${tool}(${compId})`, opId, async () => {
+    if (wantFirst) {
+      try {
+        const snap2 = await captureCompFrame({ ctx, opId, compId, time: range[0], frameIndex: idx++, framesDir, toolName: tool });
+        const a = analyzeDecodedFrame(decodePngFile(snap2.path), { index: 0, path: snap2.path, time: snap2.time });
+        stage.first_frame = { time_s: r34(range[0]), path: snap2.path, flags: a.flags, mean_rgba: a.mean_rgba };
+        const f = firstFrameFinding(a, range[0], fps);
+        if (f) stage.finding = f;
+      } catch (err) {
+        stage.first_frame = { time_s: r34(range[0]), error: errMessage3(err) };
+        if (err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued")) blocked = true;
+      }
+    }
+    const frame = 1 / Math.max(fps, 1);
+    for (let si = 0; si < confirm.length && !blocked; si++) {
+      const s = confirm[si];
+      const span = s.end_s - s.start_s;
+      const times = [0.1, 0.5, 0.9].map((u) => Math.min(Math.max(s.start_s + span * u, s.start_s + frame), s.end_s - frame));
+      try {
+        const paths = [];
+        for (const t of times) paths.push((await captureCompFrame({ ctx, opId, compId, time: t, frameIndex: idx++, framesDir, toolName: tool })).path);
+        const pngs = paths.map(decodePngFile);
+        let worst = 0;
+        let identical = true;
+        for (let i = 0; i + 1 < pngs.length; i++) {
+          const c = compareDecodedFrames(pngs[i], pngs[i + 1], { threshold: 0.02 });
+          worst = Math.max(worst, c.mean_abs_diff);
+          if (!c.identical) identical = false;
+        }
+        stage.confirmations.set(si, { identical, max_mean_abs_diff: Math.round(worst * 1e6) / 1e6, frames: paths });
+      } catch (err) {
+        stage.confirmations.set(si, { error: errMessage3(err) });
+        if (err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued")) blocked = true;
+      }
+    }
+  });
+  return stage;
+}
+async function timingCheckHandler(args, ctx) {
+  const tool = "ae_timing_check";
+  const spec = await loadMotionSpec(ctx);
+  const res = await ctx.bridge.callHost(
+    "timingRead",
+    { comp_id: args.comp_id },
+    { label: `${tool}(${args.comp_id ?? "active"})`, mutates: false, toolName: tool, timeoutMs: SLOW_TIMEOUT_MS }
+  );
+  const host = res.result;
+  const c = host.comp;
+  const checks = new Set(args.checks ?? TIMING_CHECKS);
+  const waStart = c.work_area_start_s;
+  const waEnd = Math.min(c.duration_s, waStart + c.work_area_duration_s);
+  const rs = Math.max(0, args.start_s ?? waStart);
+  const re = Math.min(c.duration_s, args.end_s ?? waEnd);
+  if (re <= rs) {
+    return { ok: false, error: "empty_range", message: `The range ${rs}-${re} s is empty (comp is ${c.duration_s} s long).` };
+  }
+  const range = [rs, re];
+  const a = analyzeTiming(host, spec, checks, range);
+  let findings = a.findings;
+  let frames = null;
+  const wantFirst = checks.has("first_frame");
+  const toConfirm = args.confirm_with_frames ? a.stretches.slice(0, MAX_CONFIRM_STRETCHES) : [];
+  if (wantFirst || toConfirm.length > 0) {
+    frames = await frameStage(ctx, c.id, c.frame_rate, range, wantFirst, toConfirm);
+    if (frames.finding) findings.push(frames.finding);
+    if (frames.confirmations.size > 0) {
+      findings = findings.map((f) => {
+        if (f.check !== "dead_stretches") return f;
+        const si = a.stretches.findIndex((s) => Math.abs(s.start_s - f.start_s) < 2e-3);
+        const conf = frames.confirmations.get(si);
+        if (!conf) return f;
+        if ("error" in conf) return { ...f, detail: { ...f.detail, frames_confirm: { error: conf.error } } };
+        if (conf.identical) return { ...f, detail: { ...f.detail, frames_confirm: conf } };
+        return {
+          ...f,
+          severity: "P2",
+          message: f.message + "; but rendered frames inside it differ, so something moves that the keyframes and layers don't show",
+          fix: "Probably an effect or expression driving the change: if that is the intended motion, leave it",
+          detail: { ...f.detail, frames_confirm: conf }
+        };
+      });
+    }
+  }
+  findings = sortFindings3(findings);
+  const counts = { P0: 0, P1: 0, P2: 0 };
+  for (const f of findings) counts[f.severity]++;
+  const notes = [
+    "Read only: nothing in the project is changed.",
+    `Range ${r34(rs)}-${r34(re)} s (${args.start_s === void 0 && args.end_s === void 0 ? "the work area" : "as asked"}). Lines are judged on their whole on-screen span even when it crosses the range edge.`,
+    `On screen means in to out point with Opacity above ${MIN_VISIBLE_OPACITY} %; hold keys on Opacity, animator opacity, mattes and blend modes are not modelled.`,
+    "Text inside precomps is not read (a precomp only counts as playing or still). Effects that move by themselves with no keys or expression are not seen as change; use confirm_with_frames to check a stretch.",
+    "Expressions: any enabled expression marks its whole layer as changing, even if it produces no visible movement (a known false negative for dead_stretches).",
+    'facts: a price or percentage no fact covers is P0; other numbers and names are P1. Numbers match on value alone; times, ratios, phone numbers, dates, years and #n are not read as numbers; a name is covered when it contains a fact or a fact contains it; all-caps text, Title Case lines of 4+ words and common call-to-action phrases ("Learn More", "Black Friday") are skipped.',
+    "silent_film: only audio layers that overlap the range count, and an audio-free stretch over 15 s is flagged."
+  ];
+  if (host.truncated) notes.push(`Only the first ${host.layers.length} of ${host.layer_count} layers were read.`);
+  if (a.deadSkipped) notes.push("dead_stretches was skipped because layers were not read (see the P2 finding).");
+  else if (a.partial > 0) notes.push(`${a.partial} layer(s) with very many properties or keyframes were read in part; they count as changing from where the read stopped, so dead stretches there can be missed.`);
+  if (checks.has("facts") && spec.facts.length === 0) notes.push("The brief has no motion.facts list, so the facts check had nothing to compare against.");
+  if (checks.has("first_frame") && !wantFirst) notes.push("first_frame was not run.");
+  return {
+    ok: true,
+    read_only: true,
+    comp: { id: c.id, name: c.name, duration_s: c.duration_s, fps: c.frame_rate, work_area: [r34(waStart), r34(waEnd)] },
+    range_s: [r34(rs), r34(re)],
+    spec: {
+      register: spec.register,
+      from_brief: spec.from_brief,
+      brief_path: spec.brief_path,
+      ...spec.warning ? { warning: spec.warning } : {},
+      thresholds: {
+        reading: spec.reading,
+        dead_stretch_s: spec.dead_stretch_s,
+        silent_film_after_s: SILENT_AFTER_S,
+        min_visible_opacity_pct: MIN_VISIBLE_OPACITY,
+        facts: spec.facts.length
+      }
+    },
+    checks_run: [...checks],
+    verdict: counts.P0 + counts.P1 === 0 ? "clean" : "issues",
+    counts,
+    findings,
+    ...checks.has("unread_lines") ? { lines_checked: a.reports.length, lines: a.reports.slice(0, MAX_LINES_LISTED), ...a.reports.length > MAX_LINES_LISTED ? { lines_truncated: true } : {} } : {},
+    ...checks.has("silent_film") ? { audio_layers: a.audioLayers } : {},
+    ...frames?.first_frame ? { first_frame: frames.first_frame } : {},
+    notes
+  };
+}
+var fs30, TIMING_CHECKS, MIN_VISIBLE_OPACITY, SILENT_AFTER_S, MAX_CONFIRM_STRETCHES, MAX_LINES_LISTED, EPS2, AeTimingCheckSchema, SEVERITY_RANK3, r34, ref2, total, CONTROLLERS, normText, NUM_RE, MONTHS, COMPOSITE_RES, PHONE_RE, NAME_WORD, LEAD_STOP, CONNECT, normName, COMMON_COPY_WORDS, nameWords, isMoneyOrPercent, errMessage3, timingTools;
+var init_timing = __esm({
+  "src/tools/ext/timing.ts"() {
+    "use strict";
+    fs30 = __toESM(require("node:fs"), 1);
+    init_zod();
+    init_host();
+    init_queue();
+    init_motion_spec();
+    init_render();
+    init_brief();
+    init_frames();
+    TIMING_CHECKS = ["unread_lines", "dead_stretches", "first_frame", "silent_film", "facts"];
+    MIN_VISIBLE_OPACITY = 5;
+    SILENT_AFTER_S = 15;
+    MAX_CONFIRM_STRETCHES = 3;
+    MAX_LINES_LISTED = 60;
+    EPS2 = 1e-6;
+    AeTimingCheckSchema = external_exports.object({
+      comp_id: external_exports.number().int().optional().describe("The comp to check. Default: the active comp."),
+      checks: external_exports.array(external_exports.enum(TIMING_CHECKS)).min(1).max(TIMING_CHECKS.length).optional().describe("Which checks to run: unread_lines, dead_stretches, first_frame, silent_film, facts. Default: all."),
+      start_s: external_exports.number().min(0).optional().describe("Start of the range to check, in seconds. Default: the work area start."),
+      end_s: external_exports.number().min(0).optional().describe("End of the range to check, in seconds. Default: the work area end."),
+      confirm_with_frames: external_exports.boolean().default(false).describe("Also render three frames inside each dead stretch (the first three stretches) and diff them, to confirm nothing moves. A stretch whose frames differ is downgraded to P2. Costs renders; default false.")
+    }).refine((v) => v.start_s === void 0 || v.end_s === void 0 || v.end_s > v.start_s, { message: "end_s must be after start_s", path: ["end_s"] });
+    SEVERITY_RANK3 = { P0: 0, P1: 1, P2: 2 };
+    r34 = (v) => Math.round(v * 1e3) / 1e3;
+    ref2 = (l) => ({ id: l.id, index: l.index, name: l.name });
+    total = (list2) => list2.reduce((n, i) => n + (i[1] - i[0]), 0);
+    CONTROLLERS = /* @__PURE__ */ new Set(["null", "camera", "light"]);
+    normText = (s) => String(s).replace(/\s+/g, " ").trim();
+    NUM_RE = /([£$€])?(\d[\d,]*(?:\.\d+)?)(%|bn|m|k)?/gi;
+    MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+    COMPOSITE_RES = [
+      /\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\.?)?/gi,
+      /\d+\/\d+(?:\/\d+)?/g,
+      /#\s?\d+/g,
+      new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${MONTHS})\\b\\.?(?:\\s+(?:19|20)\\d{2})?`, "gi"),
+      new RegExp(`\\b(?:${MONTHS})\\b\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+(?:19|20)\\d{2})?\\b`, "gi"),
+      /(?<![£$€\d.,])\b(?:19|20)\d{2}\b(?![\d%]|[.,]\d)/g
+    ];
+    PHONE_RE = /\+?\(?\d{2,5}\)?(?:[ -]\d{2,5}){2,}/g;
+    NAME_WORD = new RegExp("^\\p{Lu}[\\p{L}'\u2019&-]*$", "u");
+    LEAD_STOP = /* @__PURE__ */ new Set(["the", "a", "an", "our", "your", "my", "this", "that", "these", "those", "new", "introducing", "meet", "why", "how", "what", "when", "get", "buy", "shop", "try", "join", "see", "watch", "discover", "free", "now", "and", "or", "but", "with", "for", "from", "in", "on", "at", "to", "by", "it", "its", "we", "you"]);
+    CONNECT = /* @__PURE__ */ new Set(["of", "the", "de", "van", "von", "du", "la", "le", "&"]);
+    normName = (s) => ` ${s.toLowerCase().replace(/[^\p{L}\p{N}&]+/gu, " ").trim()} `;
+    COMMON_COPY_WORDS = /* @__PURE__ */ new Set([
+      "learn",
+      "more",
+      "sign",
+      "up",
+      "today",
+      "visit",
+      "our",
+      "store",
+      "shop",
+      "now",
+      "get",
+      "started",
+      "buy",
+      "free",
+      "new",
+      "black",
+      "friday",
+      "built",
+      "different",
+      "discover",
+      "find",
+      "out",
+      "see",
+      "how",
+      "why",
+      "what",
+      "the",
+      "a",
+      "an",
+      "and",
+      "of",
+      "for",
+      "with",
+      "your",
+      "you",
+      "we",
+      // Further everyday copy words, days and months.
+      "product",
+      "products",
+      "launch",
+      "event",
+      "events",
+      "collection",
+      "sale",
+      "offer",
+      "offers",
+      "limited",
+      "edition",
+      "special",
+      "best",
+      "top",
+      "big",
+      "great",
+      "welcome",
+      "thank",
+      "thanks",
+      "join",
+      "call",
+      "book",
+      "contact",
+      "order",
+      "download",
+      "watch",
+      "read",
+      "view",
+      "start",
+      "tomorrow",
+      "tonight",
+      "cyber",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "saturday",
+      "sunday",
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
+      "all",
+      "this",
+      "that",
+      "only",
+      "save",
+      "off",
+      "pre",
+      "available",
+      "coming",
+      "soon",
+      "next",
+      "last",
+      "first",
+      "online",
+      "in",
+      "on",
+      "at",
+      "to",
+      "by"
+    ]);
+    nameWords = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    isMoneyOrPercent = (t) => t.kind === "number" && (/^[£$€]/.test(t.text) || /%$/.test(t.text));
+    errMessage3 = (err) => err instanceof Error ? err.message : String(err);
+    timingTools = [
+      {
+        name: "ae_timing_check",
+        description: "READ-ONLY timeline review against the project's motion spec (the brief's `motion` field; defaults come from its register). Checks: (1) unread_lines: each text line's on-screen time (in to out, narrowed where Opacity is under 5 %, one line per Source Text key) against reading time = base + per-word, the last line at least last_line_s (defaults 0.5 s + 0.3 s per word, 2 s); (2) dead_stretches: spans over dead_stretch_s (default 3 s) where no keyframe segment moves, no layer comes or goes, no video footage or animated precomp plays (stills and solids don't count), computed from layer data with no render (`confirm_with_frames` also diffs three rendered frames in each of the first three stretches); (3) first_frame: renders the first frame of the range (the work area start by default) and flags it when blank, black or transparent; (4) silent_film: only audio layers that overlap the range and are on and unmuted count; an audio-free stretch over 15 s inside a range over 15 s is flagged (P1) with its start and end; (5) facts: with `motion.facts` in the brief, numbers and Capitalised multi-word names in visible text that no fact covers; a price or percentage is P0, anything else P1; times, dates, phone numbers, ratios and ordinary call-to-action phrases (Learn More, Black Friday) are ignored. Known limits: any enabled expression marks its whole layer as changing (so a layer with a dead expression hides a dead stretch); layers or properties beyond the host's read caps are marked, and dead_stretches is skipped (P2) when layers were not read. Returns `spec` (register, which fields came from the brief, thresholds used) and `findings` sorted P0 first, each with start/end in seconds and frames, layers, a message and a one-line fix. Range: the work area, or start_s/end_s. Only the first-frame check (and confirm_with_frames) renders; the time indicator and project are not touched. Text in precomps is not read.",
+        schema: AeTimingCheckSchema,
+        handler: timingCheckHandler
+      }
+    ];
+  }
+});
+
 // src/tools/ext/animate.ts
 function pickKeyExtras(args) {
   const out = {};
@@ -31031,10 +32789,10 @@ function rovingSkipKeys(result) {
   const nums = (v) => Array.isArray(v) ? v.filter((n) => typeof n === "number") : [];
   return [.../* @__PURE__ */ new Set([...nums(r.roving), ...nums(r.extras?.roving)])];
 }
-function clampInfluenceValue(influence) {
-  if (influence < 0.1) return 0.1;
-  if (influence > 100) return 100;
-  return influence;
+function clampInfluenceValue(influence2) {
+  if (influence2 < 0.1) return 0.1;
+  if (influence2 > 100) return 100;
+  return influence2;
 }
 function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot, skipKeys) {
   if (ease === void 0 || !afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
@@ -31371,9 +33129,9 @@ function layoutChanged(before, after) {
   return null;
 }
 function resolvedRanges(result) {
-  const list = result?.ranges;
-  if (!Array.isArray(list)) return [];
-  return list.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
+  const list2 = result?.ranges;
+  if (!Array.isArray(list2)) return [];
+  return list2.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
 }
 function coveredByFirstRange(key, ranges) {
   let group = [key];
@@ -31390,16 +33148,16 @@ function rangeExpectations(ranges) {
 }
 function rangeActuals(ranges, afterRanges) {
   const out = {};
-  const list = Array.isArray(afterRanges) ? afterRanges : [];
+  const list2 = Array.isArray(afterRanges) ? afterRanges : [];
   ranges.forEach((r, i) => {
-    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = list[i]?.style?.[k];
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = list2[i]?.style?.[k];
   });
   return out;
 }
 function reloadChanges(beforeItems, afterItems, ids) {
-  const list = (v) => Array.isArray(v) ? v : [];
-  const before = new Map(list(beforeItems).map((i) => [i.item_id, i]));
-  const after = new Map(list(afterItems).map((i) => [i.item_id, i]));
+  const list2 = (v) => Array.isArray(v) ? v : [];
+  const before = new Map(list2(beforeItems).map((i) => [i.item_id, i]));
+  const after = new Map(list2(afterItems).map((i) => [i.item_id, i]));
   const changed = [];
   for (const id of ids) {
     const b = before.get(id);
@@ -32469,10 +34227,10 @@ var init_animate = __esm({
 
 // src/tools/ext/ask.ts
 function checkImagePath(p) {
-  if (!path28.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!path29.isAbsolute(p)) return `image_path must be absolute: ${p}`;
   if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
   try {
-    const st = fs29.statSync(p);
+    const st = fs31.statSync(p);
     if (!st.isFile()) return `image_path is not a file: ${p}`;
     if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
   } catch {
@@ -32515,12 +34273,12 @@ function presentAnswer(q, a) {
 function sameCurve(a, b) {
   return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
 }
-var fs29, path28, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
+var fs31, path29, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
 var init_ask = __esm({
   "src/tools/ext/ask.ts"() {
     "use strict";
-    fs29 = __toESM(require("node:fs"), 1);
-    path28 = __toESM(require("node:path"), 1);
+    fs31 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
     init_zod();
     init_animate();
     PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
@@ -32781,14 +34539,14 @@ function promoteMismatches(beforeRaw, afterRaw, written) {
 }
 function saveSet(ctx, rec) {
   try {
-    fs30.mkdirSync(setsDir(ctx), { recursive: true });
+    fs32.mkdirSync(setsDir(ctx), { recursive: true });
     const tmp = `${setFile(ctx, rec.set_id)}.${process.pid}.tmp`;
     try {
-      fs30.writeFileSync(tmp, JSON.stringify(rec, null, 2));
-      fs30.renameSync(tmp, setFile(ctx, rec.set_id));
+      fs32.writeFileSync(tmp, JSON.stringify(rec, null, 2));
+      fs32.renameSync(tmp, setFile(ctx, rec.set_id));
     } catch (err) {
       try {
-        fs30.rmSync(tmp, { force: true });
+        fs32.rmSync(tmp, { force: true });
       } catch {
       }
       throw err;
@@ -32800,7 +34558,7 @@ function saveSet(ctx, rec) {
 }
 function loadSet(ctx, id) {
   try {
-    return JSON.parse(fs30.readFileSync(setFile(ctx, id), "utf8"));
+    return JSON.parse(fs32.readFileSync(setFile(ctx, id), "utf8"));
   } catch {
     return null;
   }
@@ -32814,7 +34572,7 @@ function normProjectPath(p) {
 }
 function dropSet(ctx, id) {
   try {
-    fs30.rmSync(setFile(ctx, id), { force: true });
+    fs32.rmSync(setFile(ctx, id), { force: true });
   } catch {
   }
 }
@@ -32830,9 +34588,9 @@ function logPick(ctx, rec, pickedId, cleanup) {
       rejected: rec.variants.filter((v) => v.id !== pickedId).map((v) => ({ id: v.id, label: v.label, ops: v.ops })),
       cleanup
     };
-    const file = path29.join(dataDirOf(ctx), "variant-picks.jsonl");
-    fs30.mkdirSync(path29.dirname(file), { recursive: true });
-    fs30.appendFileSync(file, `${JSON.stringify(entry)}
+    const file = path30.join(dataDirOf(ctx), "variant-picks.jsonl");
+    fs32.mkdirSync(path30.dirname(file), { recursive: true });
+    fs32.appendFileSync(file, `${JSON.stringify(entry)}
 `);
     return file;
   } catch {
@@ -32851,20 +34609,20 @@ function clampRenderTime(time, duration, fps) {
 }
 async function renderVariants(ctx, setId, original, copies, times, tileSize) {
   const out = { times, variants: [], errors: [] };
-  const framesDir = path29.join(dataDirOf(ctx), "frames");
+  const framesDir = path30.join(dataDirOf(ctx), "frames");
   const shots = /* @__PURE__ */ new Map();
   try {
-    fs30.mkdirSync(framesDir, { recursive: true });
+    fs32.mkdirSync(framesDir, { recursive: true });
     const opId = ctx.bridge.newOpId();
     await ctx.queue.run(`ae_variants(${original.comp_id}) frames`, async () => {
       for (const c of copies) {
-        const list = [];
-        shots.set(c.variant_id, list);
+        const list2 = [];
+        shots.set(c.variant_id, list2);
         for (let i = 0; i < times.length; i++) {
           const time = clampRenderTime(times[i], c.duration, original.fps);
           try {
             const snap2 = await captureCompFrame({ ctx, opId: `${opId}_${c.variant_id}`, compId: c.comp_id, time, frameIndex: i, framesDir, toolName: "ae_variants" });
-            list.push({ time: snap2.time, path: snap2.path });
+            list2.push({ time: snap2.time, path: snap2.path });
           } catch (err) {
             out.errors.push(`${c.variant_id} @ ${time}s: ${err instanceof Error ? err.message : String(err)}`);
           }
@@ -32878,22 +34636,22 @@ async function renderVariants(ctx, setId, original, copies, times, tileSize) {
     const allTiles = [];
     let columns = 1;
     for (const c of copies) {
-      const list = shots.get(c.variant_id) ?? [];
+      const list2 = shots.get(c.variant_id) ?? [];
       const rendered = { variant_id: c.variant_id, frames: [] };
       out.variants.push(rendered);
-      if (!list.length) continue;
-      const layout = sheetLayout(list.length, original.width, original.height, tileSize, list.length, true);
-      const tiles = list.map((shot, index) => {
+      if (!list2.length) continue;
+      const layout = sheetLayout(list2.length, original.width, original.height, tileSize, list2.length, true);
+      const tiles = list2.map((shot, index) => {
         const full = decodePngFile(shot.path);
         const analysis = analyzeDecodedFrame(full, { index, path: shot.path, time: shot.time });
         rendered.frames.push({ time: shot.time, path: shot.path, flags: analysis.flags });
         return { image: resizeArea(full, layout.tileWidth, layout.tileHeight), label: `${upper(c.variant_id)} ${shot.time.toFixed(2)}s`, flagged: analysis.flags.length > 0 };
       });
-      const strip2 = path29.join(framesDir, `variant_${setId}_${c.variant_id}_${crypto15.randomBytes(3).toString("hex")}.png`);
-      fs30.writeFileSync(strip2, encodePng(buildContactSheet(tiles, layout)));
+      const strip2 = path30.join(framesDir, `variant_${setId}_${c.variant_id}_${crypto15.randomBytes(3).toString("hex")}.png`);
+      fs32.writeFileSync(strip2, encodePng(buildContactSheet(tiles, layout)));
       rendered.strip_path = strip2;
       allTiles.push(...tiles);
-      columns = Math.max(columns, list.length);
+      columns = Math.max(columns, list2.length);
     }
     if (allTiles.length) {
       const layout = sheetLayout(copies.length * columns, original.width, original.height, tileSize, columns, true);
@@ -32904,8 +34662,8 @@ async function renderVariants(ctx, setId, original, copies, times, tileSize) {
           padded.push(own[i] ?? { image: resizeArea({ width: 1, height: 1, data: Buffer.from([24, 24, 24, 255]) }, layout.tileWidth, layout.tileHeight), flagged: false });
         }
       }
-      const sheet = path29.join(framesDir, `variants_${setId}_${crypto15.randomBytes(3).toString("hex")}.png`);
-      fs30.writeFileSync(sheet, encodePng(buildContactSheet(padded, layout)));
+      const sheet = path30.join(framesDir, `variants_${setId}_${crypto15.randomBytes(3).toString("hex")}.png`);
+      fs32.writeFileSync(sheet, encodePng(buildContactSheet(padded, layout)));
       out.sheet_path = sheet;
     }
   } catch (err) {
@@ -32933,13 +34691,13 @@ async function askWhich(ctx, variants, rendered, args, compName, folderName = VA
     return { ask: { ok: false, error: "ask_failed", message: err instanceof Error ? err.message : String(err) } };
   }
 }
-var crypto15, fs30, path29, VARIANTS_FOLDER, MAX_TARGETS, MAX_PROBE_KEYS, EASE_PRESETS, Layers2, PropertyPath2, ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp, VariantOpSchema, VariantSchema, CleanupSchema, SetIdSchema, AeVariantsSchema, AeVariantsPickSchema, AeVariantsDiscardSchema, asRead2, near4, setsDir, setFile, upper, hostVariants, probesOf, variantsTools;
+var crypto15, fs32, path30, VARIANTS_FOLDER, MAX_TARGETS, MAX_PROBE_KEYS, EASE_PRESETS, Layers2, PropertyPath2, ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp, VariantOpSchema, VariantSchema, CleanupSchema, SetIdSchema, AeVariantsSchema, AeVariantsPickSchema, AeVariantsDiscardSchema, asRead2, near4, setsDir, setFile, upper, hostVariants, probesOf, variantsTools;
 var init_variants = __esm({
   "src/tools/ext/variants.ts"() {
     "use strict";
     crypto15 = __toESM(require("node:crypto"), 1);
-    fs30 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    fs32 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
     init_zod();
     init_common();
     init_animate();
@@ -33021,9 +34779,9 @@ var init_variants = __esm({
     }).superRefine((v, ctx) => {
       const ids = v.variants.map((x) => x.id);
       if (new Set(ids).size !== ids.length) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Variant ids must be unique.", path: ["variants"] });
-      const total = v.variants.reduce((n, x) => n + countTargets(x.ops), 0);
-      if (total > MAX_TARGETS) {
-        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: `At most ${MAX_TARGETS} layer changes across all variants (this has ${total}).`, path: ["variants"] });
+      const total2 = v.variants.reduce((n, x) => n + countTargets(x.ops), 0);
+      if (total2 > MAX_TARGETS) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: `At most ${MAX_TARGETS} layer changes across all variants (this has ${total2}).`, path: ["variants"] });
       }
       v.variants.forEach((x, vi) => {
         x.ops.forEach((op, oi) => {
@@ -33050,8 +34808,8 @@ var init_variants = __esm({
     });
     asRead2 = (v) => v && typeof v === "object" ? v : null;
     near4 = (a, b, tol = 1e-3) => Math.abs(a - b) <= tol + 1e-6 * Math.max(Math.abs(a), Math.abs(b));
-    setsDir = (ctx) => path29.join(dataDirOf(ctx), "variants");
-    setFile = (ctx, id) => path29.join(setsDir(ctx), `${id}.json`);
+    setsDir = (ctx) => path30.join(dataDirOf(ctx), "variants");
+    setFile = (ctx, id) => path30.join(setsDir(ctx), `${id}.json`);
     upper = (s) => s.toUpperCase();
     hostVariants = (variants) => variants.map((v) => ({ id: v.id, label: v.label, ops: toHostOps(v.ops) }));
     probesOf = (copies) => (copies ?? []).flatMap((c) => c.probes.map((p) => ({ ...p, comp_id: c.comp_id })));
@@ -33559,8 +35317,8 @@ function shareWithin(values, target, tol) {
   if (values.length === 0) return 0;
   return values.filter((v) => Math.abs(v - target) <= tol).length / values.length;
 }
-function agentUsed(list) {
-  const was = list.map((p) => p[0]).filter((v) => typeof v === "number");
+function agentUsed(list2) {
+  const was = list2.map((p) => p[0]).filter((v) => typeof v === "number");
   if (was.length === 0) return "the agent used linear keys";
   return `the agent used about ${Math.round(median2(was))}%`;
 }
@@ -33603,15 +35361,15 @@ function buildRules(series, reviews) {
   const removed = numbers(series.overshoot_removed).length;
   const added = numbers(series.overshoot_added).length;
   if (removed > 0 && removed > added) {
-    const total = removed + added;
-    const consistency = removed / total;
+    const total2 = removed + added;
+    const consistency = removed / total2;
     rules.push({
       id: "overshoot",
       kind: "overshoot",
-      text: `The user removes overshoot (animations that travel past their last value): ${removed} of ${total} changes took it out.`,
+      text: `The user removes overshoot (animations that travel past their last value): ${removed} of ${total2} changes took it out.`,
       value: null,
-      confidence: confidenceOf(total, consistency, rev("overshoot_removed", "overshoot_added")),
-      samples: total,
+      confidence: confidenceOf(total2, consistency, rev("overshoot_removed", "overshoot_added")),
+      samples: total2,
       reviews: rev("overshoot_removed", "overshoot_added"),
       consistency: round(consistency, 2)
     });
@@ -33690,17 +35448,17 @@ function emptyLedger() {
   return { version: 1, baselines: [], evidence: {}, proposals: {}, applied: {} };
 }
 function ledgerPath(ctx) {
-  return path30.join(dataDirOf(ctx), "learn-taste.json");
+  return path31.join(dataDirOf(ctx), "learn-taste.json");
 }
 function loadLedger(file) {
   try {
-    const parsed = JSON.parse(fs31.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs33.readFileSync(file, "utf8"));
     const base = emptyLedger();
     if (Array.isArray(parsed.baselines)) base.baselines = parsed.baselines.filter((b) => b && typeof b.id === "string" && b.snapshot && Array.isArray(b.snapshot.layers)).slice(-MAX_BASELINES);
     if (parsed.evidence && typeof parsed.evidence === "object") {
       for (const name of SERIES) {
-        const list = parsed.evidence[name];
-        if (Array.isArray(list)) base.evidence[name] = list.filter((e) => e && typeof e.review_id === "string" && Array.isArray(e.values)).slice(-MAX_ENTRIES_PER_SERIES);
+        const list2 = parsed.evidence[name];
+        if (Array.isArray(list2)) base.evidence[name] = list2.filter((e) => e && typeof e.review_id === "string" && Array.isArray(e.values)).slice(-MAX_ENTRIES_PER_SERIES);
       }
     }
     if (parsed.proposals && typeof parsed.proposals === "object") base.proposals = parsed.proposals;
@@ -33711,10 +35469,10 @@ function loadLedger(file) {
   }
 }
 function saveLedger(file, ledger) {
-  fs31.mkdirSync(path30.dirname(file), { recursive: true, mode: 448 });
+  fs33.mkdirSync(path31.dirname(file), { recursive: true, mode: 448 });
   const tmp = `${file}.tmp-${process.pid}`;
-  fs31.writeFileSync(tmp, JSON.stringify(ledger), { encoding: "utf8", mode: 384 });
-  fs31.renameSync(tmp, file);
+  fs33.writeFileSync(tmp, JSON.stringify(ledger), { encoding: "utf8", mode: 384 });
+  fs33.renameSync(tmp, file);
 }
 function baselineKey(projectPath, compId) {
   return `${normalizeGuardPath(projectPath)}|${compId}`;
@@ -34053,12 +35811,12 @@ async function rulesHandler(args, ctx) {
     message: "Saved. ae_taste shows them. Only preferred_ease and avoid_overshoot are enforced by ae_motion_review today; the other rules are for you to read before animating."
   };
 }
-var fs31, path30, round, MAX_LISTED_VALUES, SERIES, RULE_SERIES, MAX_SAMPLES_PER_SERIES, pct, clamp, pairs, easePairs, numbers, MAX_BASELINES, MAX_ENTRIES_PER_SERIES, AeTasteBaselineSchema, AeLearnTasteSchema, AeTasteRulesSchema, CAVEATS, learntasteTools;
+var fs33, path31, round, MAX_LISTED_VALUES, SERIES, RULE_SERIES, MAX_SAMPLES_PER_SERIES, pct, clamp, pairs, easePairs, numbers, MAX_BASELINES, MAX_ENTRIES_PER_SERIES, AeTasteBaselineSchema, AeLearnTasteSchema, AeTasteRulesSchema, CAVEATS, learntasteTools;
 var init_learntaste = __esm({
   "src/tools/ext/learntaste.ts"() {
     "use strict";
-    fs31 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
+    fs33 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     init_settings();
@@ -34089,9 +35847,9 @@ var init_learntaste = __esm({
     MAX_SAMPLES_PER_SERIES = 200;
     pct = (x) => Math.round(x * 100);
     clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-    pairs = (list) => (list ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && s.every((v) => typeof v === "number"));
-    easePairs = (list) => (list ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && typeof s[1] === "number" && (s[0] === null || typeof s[0] === "number"));
-    numbers = (list) => (list ?? []).filter((s) => typeof s === "number");
+    pairs = (list2) => (list2 ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && s.every((v) => typeof v === "number"));
+    easePairs = (list2) => (list2 ?? []).filter((s) => Array.isArray(s) && s.length >= 2 && typeof s[1] === "number" && (s[0] === null || typeof s[0] === "number"));
+    numbers = (list2) => (list2 ?? []).filter((s) => typeof s === "number");
     MAX_BASELINES = 20;
     MAX_ENTRIES_PER_SERIES = 60;
     AeTasteBaselineSchema = external_exports.object({
@@ -34162,21 +35920,21 @@ function recoveryDirs(projectPath, projectDir, autoSaveDir) {
   if (projectDir) {
     base = projectDir;
   } else if (projectPath !== "<unsaved>") {
-    let dir = path31.dirname(projectPath);
-    const leaf = path31.basename(dir);
-    if (leaf === "_mcp_checkpoints" || leaf === "_mcp_backups" || AUTO_SAVE_FOLDER.test(leaf)) dir = path31.dirname(dir);
+    let dir = path32.dirname(projectPath);
+    const leaf = path32.basename(dir);
+    if (leaf === "_mcp_checkpoints" || leaf === "_mcp_backups" || AUTO_SAVE_FOLDER.test(leaf)) dir = path32.dirname(dir);
     base = dir;
   }
   if (autoSaveDir) out.push({ source: "auto_save", dir: autoSaveDir });
   if (base) {
     try {
-      for (const e of fs32.readdirSync(base, { withFileTypes: true })) {
-        if (e.isDirectory() && AUTO_SAVE_FOLDER.test(e.name)) out.push({ source: "auto_save", dir: path31.join(base, e.name) });
+      for (const e of fs34.readdirSync(base, { withFileTypes: true })) {
+        if (e.isDirectory() && AUTO_SAVE_FOLDER.test(e.name)) out.push({ source: "auto_save", dir: path32.join(base, e.name) });
       }
     } catch {
     }
-    out.push({ source: "backup", dir: path31.join(base, "_mcp_backups") });
-    out.push({ source: "checkpoint", dir: path31.join(base, "_mcp_checkpoints") });
+    out.push({ source: "backup", dir: path32.join(base, "_mcp_backups") });
+    out.push({ source: "checkpoint", dir: path32.join(base, "_mcp_checkpoints") });
   }
   return out;
 }
@@ -34186,7 +35944,7 @@ function scanRecoveryFiles(dirs, projectFileMtimeMs, nowMs, info) {
   for (const { source, dir } of dirs) {
     let entries;
     try {
-      entries = fs32.readdirSync(dir, { withFileTypes: true });
+      entries = fs34.readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -34197,11 +35955,11 @@ function scanRecoveryFiles(dirs, projectFileMtimeMs, nowMs, info) {
         info?.capped_dirs.push(dir);
         break;
       }
-      const full = path31.join(dir, e.name);
+      const full = path32.join(dir, e.name);
       if (seen.has(full)) continue;
       seen.add(full);
       try {
-        const st = fs32.statSync(full);
+        const st = fs34.statSync(full);
         files.push({
           source,
           name: e.name,
@@ -34285,7 +36043,7 @@ function prefsMismatches(written, after) {
   const out = [];
   if (written.applied === false) return out;
   const prefs = after && typeof after === "object" ? after : null;
-  const list = Array.isArray(written.written) ? written.written : [];
+  const list2 = Array.isArray(written.written) ? written.written : [];
   const failed = Array.isArray(written.failed) ? written.failed : [];
   for (const f of failed) {
     out.push({ path: `failed.${f.field}`, expected: "written", actual: "refused", message: `After Effects refused the ${f.field} preference${f.error ? `: ${f.error}` : "."}` });
@@ -34294,7 +36052,7 @@ function prefsMismatches(written, after) {
     out.push({ path: "saved_to_disk", expected: true, actual: false, message: `saveToDisk failed${written.error ? `: ${String(written.error)}` : "."}` });
   }
   if (!prefs) return out;
-  for (const w of list) {
+  for (const w of list2) {
     const hit = prefs.fields[w.field];
     const want = hit?.type === "long" && typeof w.value === "boolean" ? w.value ? 1 : 0 : w.value;
     expectThat(out, !!hit && hit.value === want, `fields.${w.field}`, want, hit?.value, `The ${w.field} preference does not read back the value written.`);
@@ -34321,7 +36079,7 @@ function keepOwnBackups(saved, deps) {
   const bp = saved && typeof saved === "object" ? saved.backup_path : null;
   if (typeof bp !== "string" || bp.length === 0) return;
   policyState.own_backups.push(bp);
-  const remove = deps.removeFile ?? ((f) => fs32.unlinkSync(f));
+  const remove = deps.removeFile ?? ((f) => fs34.unlinkSync(f));
   while (policyState.own_backups.length > MAX_POLICY_BACKUPS) {
     const old = policyState.own_backups.shift();
     try {
@@ -34452,7 +36210,7 @@ async function leaveAndRun(ctx, args, kind, target) {
   }
   const verdict = leaveVerdict(state.dirty, args.if_dirty, state.project_path);
   if (!verdict.proceed) return needsUserResult(state, verdict.reason ?? "The open project has unsaved changes.");
-  if (kind === "open" && target && !fs32.existsSync(target)) {
+  if (kind === "open" && target && !fs34.existsSync(target)) {
     throw new BridgeError({ kind: "guard", message: `Project file does not exist on disk: "${target}".`, expected: { path: target }, actual: { exists: false } });
   }
   const hostName = kind === "open" ? "projectsessionOpen" : kind === "new" ? "projectsessionNew" : "projectsessionClose";
@@ -34506,16 +36264,16 @@ function markReopened() {
   }
 }
 function backupProjectFile(projectPath) {
-  if (projectPath === "<unsaved>" || !fs32.existsSync(projectPath)) return null;
+  if (projectPath === "<unsaved>" || !fs34.existsSync(projectPath)) return null;
   try {
-    const ext2 = path31.extname(projectPath) || ".aep";
-    const base = path31.basename(projectPath, ext2);
-    const dir = path31.join(path31.dirname(projectPath), "_mcp_backups");
-    fs32.mkdirSync(dir, { recursive: true });
+    const ext2 = path32.extname(projectPath) || ".aep";
+    const base = path32.basename(projectPath, ext2);
+    const dir = path32.join(path32.dirname(projectPath), "_mcp_backups");
+    fs34.mkdirSync(dir, { recursive: true });
     const stem = `${base}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
-    let target = path31.join(dir, `${stem}${ext2}`);
-    for (let n = 2; fs32.existsSync(target); n++) target = path31.join(dir, `${stem}-${n}${ext2}`);
-    fs32.copyFileSync(projectPath, target);
+    let target = path32.join(dir, `${stem}${ext2}`);
+    for (let n = 2; fs34.existsSync(target); n++) target = path32.join(dir, `${stem}-${n}${ext2}`);
+    fs34.copyFileSync(projectPath, target);
     return target;
   } catch (err) {
     throw new BridgeError({
@@ -34532,14 +36290,14 @@ async function recover(ctx, args) {
   let projectMtime = null;
   if (state.project_path !== "<unsaved>") {
     try {
-      projectMtime = fs32.statSync(state.project_path).mtimeMs;
+      projectMtime = fs34.statSync(state.project_path).mtimeMs;
     } catch {
       projectMtime = null;
     }
   }
   const scan = { capped_dirs: [] };
   const files = scanRecoveryFiles(dirs, projectMtime, Date.now(), scan);
-  const base = state.project_path === "<unsaved>" ? null : path31.basename(state.project_path, path31.extname(state.project_path)).toLowerCase();
+  const base = state.project_path === "<unsaved>" ? null : path32.basename(state.project_path, path32.extname(state.project_path)).toLowerCase();
   for (const f of files) f.same_project = base === null ? null : f.name.toLowerCase().startsWith(base);
   if (base !== null) {
     const ordered = [...files.filter((f) => f.same_project), ...files.filter((f) => !f.same_project)];
@@ -34568,7 +36326,7 @@ async function recover(ctx, args) {
   return {
     project_path: state.project_path,
     dirty: state.dirty,
-    searched: dirs.map((d) => ({ source: d.source, dir: d.dir, exists: fs32.existsSync(d.dir) })),
+    searched: dirs.map((d) => ({ source: d.source, dir: d.dir, exists: fs34.existsSync(d.dir) })),
     files: files.slice(0, limit),
     total: files.length,
     truncated: files.length > limit,
@@ -34634,12 +36392,12 @@ async function autosave(ctx, args) {
     hint: notFound.length > 0 ? "Some Auto-Save preference keys were not found under the names probed (they are undocumented). Pass `probe` to look up others, or ask the user to check Edit > Preferences > Auto-Save." : "AE's own Auto-Save writes rolling copies without touching the project file; prefer it. Ask the user before changing it."
   };
 }
-var fs32, path31, ACTIONS, ABSOLUTE_PATH, MAX_RECOVERY_FILES, MAX_SCAN_PER_DIR, MIN_POLICY_MINUTES, MAX_POLICY_BACKUPS, AUTO_SAVE_FOLDER, SetPrefsSchema, PolicySchema, ProbeSchema, AeProjectSessionSchema, summary, stateOf2, TOOL2, TICK_MS, policyState, defaultMtime, defaultDialogs, defaultSave, projectsessionTools;
+var fs34, path32, ACTIONS, ABSOLUTE_PATH, MAX_RECOVERY_FILES, MAX_SCAN_PER_DIR, MIN_POLICY_MINUTES, MAX_POLICY_BACKUPS, AUTO_SAVE_FOLDER, SetPrefsSchema, PolicySchema, ProbeSchema, AeProjectSessionSchema, summary, stateOf2, TOOL2, TICK_MS, policyState, defaultMtime, defaultDialogs, defaultSave, projectsessionTools;
 var init_projectsession = __esm({
   "src/tools/ext/projectsession.ts"() {
     "use strict";
-    fs32 = __toESM(require("node:fs"), 1);
-    path31 = __toESM(require("node:path"), 1);
+    fs34 = __toESM(require("node:fs"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -34744,7 +36502,7 @@ var init_projectsession = __esm({
     };
     defaultMtime = (p) => {
       try {
-        return fs32.statSync(p).mtimeMs;
+        return fs34.statSync(p).mtimeMs;
       } catch {
         return null;
       }
@@ -35167,17 +36925,17 @@ function frameAt(track, time) {
   return null;
 }
 function relativeTo(track, refTime) {
-  const ref2 = frameAt(track, refTime);
-  const inv = ref2 && ref2.ok && ref2.H ? invertH(ref2.H) : null;
+  const ref3 = frameAt(track, refTime);
+  const inv = ref3 && ref3.ok && ref3.H ? invertH(ref3.H) : null;
   const frames = track.frames.map((fr) => {
     if (!inv || !fr.ok || !fr.H) return { ...fr, ok: false, H: null, note: fr.note ?? (inv ? void 0 : "the new reference frame has no solved H") };
     return { ...fr, H: mulH(fr.H, inv) };
   });
   const refPoints = track.ref_points.map((p) => {
-    const q = ref2 && ref2.H ? applyH(ref2.H, p) : null;
+    const q = ref3 && ref3.H ? applyH(ref3.H, p) : null;
     return q ?? p;
   });
-  return { ...track, ref_time: ref2 ? ref2.time : refTime, ref_points: refPoints, frames };
+  return { ...track, ref_time: ref3 ? ref3.time : refTime, ref_points: refPoints, frames };
 }
 function smoothFrames(track, sigmaFrames) {
   if (!(sigmaFrames > 0)) return track;
@@ -35515,7 +37273,7 @@ function boxBlurGray(img, r) {
   }
   return { width: w, height: h, data: out };
 }
-function makeWarpedTemplate(ref2, cx, cy, size, affine2x3) {
+function makeWarpedTemplate(ref3, cx, cy, size, affine2x3) {
   const [a, b, , c, d] = affine2x3;
   const det = a * d - b * c;
   if (!(Math.abs(det) > 1e-9)) return null;
@@ -35531,14 +37289,14 @@ function makeWarpedTemplate(ref2, cx, cy, size, affine2x3) {
       const oy = py - h;
       const x = cx + ia * ox + ib * oy;
       const y = cy + ic * ox + id * oy;
-      if (x < 0 || y < 0 || x > ref2.width - 1 || y > ref2.height - 1) return null;
-      const x0 = Math.min(ref2.width - 2, Math.floor(x));
-      const y0 = Math.min(ref2.height - 2, Math.floor(y));
+      if (x < 0 || y < 0 || x > ref3.width - 1 || y > ref3.height - 1) return null;
+      const x0 = Math.min(ref3.width - 2, Math.floor(x));
+      const y0 = Math.min(ref3.height - 2, Math.floor(y));
       const fx = x - x0;
       const fy = y - y0;
-      const i = y0 * ref2.width + x0;
-      const top = ref2.data[i] * (1 - fx) + ref2.data[i + 1] * fx;
-      const bottom = ref2.data[i + ref2.width] * (1 - fx) + ref2.data[i + ref2.width + 1] * fx;
+      const i = y0 * ref3.width + x0;
+      const top = ref3.data[i] * (1 - fx) + ref3.data[i + 1] * fx;
+      const bottom = ref3.data[i + ref3.width] * (1 - fx) + ref3.data[i + ref3.width + 1] * fx;
       data[py * size + px] = top * (1 - fy) + bottom * fy;
     }
   }
@@ -35579,12 +37337,12 @@ async function queued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs33, path32, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
+var fs35, path33, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
 var init_track = __esm({
   "src/tools/ext/track.ts"() {
     "use strict";
-    fs33 = __toESM(require("node:fs"), 1);
-    path32 = __toESM(require("node:path"), 1);
+    fs35 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -35692,7 +37450,7 @@ var init_track = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs33.mkdirSync(framesDir, { recursive: true });
+          fs35.mkdirSync(framesDir, { recursive: true });
           const patchSize = (args.pattern_size ?? 31) | 1;
           const opts = {
             patchSize,
@@ -35740,14 +37498,14 @@ var init_track = __esm({
                   points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
                 }
               }
-              fs33.rmSync(snap2.path, { force: true });
+              fs35.rmSync(snap2.path, { force: true });
               if (lostAt2) break;
             }
             return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast };
           });
           const { points, lostAt } = tracked;
-          const previewPath = path32.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-          fs33.writeFileSync(
+          const previewPath = path33.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+          fs35.writeFileSync(
             previewPath,
             encodePng(
               drawTrackPreview(
@@ -35759,21 +37517,21 @@ var init_track = __esm({
             )
           );
           const conf = points.slice(1).map((p) => p.confidence);
-          const r210 = (v) => Math.round(v * 100) / 100;
+          const r211 = (v) => Math.round(v * 100) / 100;
           const result = {
             ok: true,
             comp_id: args.comp_id,
-            start: r210(tracked.start),
-            end: r210(tracked.end),
+            start: r211(tracked.start),
+            end: r211(tracked.end),
             frames_requested: tracked.times.length,
             frames_tracked: points.length,
             lost_at: lostAt,
-            mean_confidence: conf.length ? r210(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
-            min_confidence: conf.length ? r210(Math.min(...conf)) : null,
+            mean_confidence: conf.length ? r211(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
+            min_confidence: conf.length ? r211(Math.min(...conf)) : null,
             adapted_frames: points.filter((p) => p.adapted).length,
-            pattern_contrast: r210(tracked.contrast),
+            pattern_contrast: r211(tracked.contrast),
             preview_path: previewPath,
-            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r210(p.x), r210(p.y), r210(p.confidence)]),
+            path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r211(p.x), r211(p.y), r211(p.confidence)]),
             path_format: "[time_s, x_px, y_px, confidence]"
           };
           if (!args.apply) return result;
@@ -35816,7 +37574,7 @@ var init_track = __esm({
           if (write.made.numKeys !== points.length) {
             mismatches.push({ path: "numKeys", expected: points.length, actual: write.made.numKeys, message: "Key count differs from the tracked frames" });
           }
-          keys.forEach((k, i) => compareValues(values[i].map(r210), k.value.slice(0, 2).map(r210), `keyframes[${i + 1}].value`, mismatches));
+          keys.forEach((k, i) => compareValues(values[i].map(r211), k.value.slice(0, 2).map(r211), `keyframes[${i + 1}].value`, mismatches));
           const receipt = buildReceipt({ before: null, after: { null: write.made, keys_read: keys.length }, customMismatches: mismatches });
           return {
             ...result,
@@ -35833,7 +37591,7 @@ var init_track = __esm({
 
 // src/tools/ext/planar.ts
 function tracksDir() {
-  return path33.join(path33.dirname(defaultFramesDir()), "tracks");
+  return path34.join(path34.dirname(defaultFramesDir()), "tracks");
 }
 function newTrackId() {
   return `trk_${Date.now().toString(36)}_${crypto16.randomBytes(3).toString("hex")}`;
@@ -35841,14 +37599,14 @@ function newTrackId() {
 function saveTrack(track) {
   if (!TRACK_ID.test(track.track_id)) throw new Error(`Bad track id "${track.track_id}"`);
   const dir = tracksDir();
-  fs34.mkdirSync(dir, { recursive: true });
-  const file = path33.join(dir, `${track.track_id}.json`);
+  fs36.mkdirSync(dir, { recursive: true });
+  const file = path34.join(dir, `${track.track_id}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs34.writeFileSync(tmp, JSON.stringify(track));
-  fs34.renameSync(tmp, file);
+  fs36.writeFileSync(tmp, JSON.stringify(track));
+  fs36.renameSync(tmp, file);
   try {
-    const entries = fs34.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs34.statSync(path33.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
-    for (const old of entries.slice(KEEP_TRACKS)) fs34.rmSync(path33.join(dir, old.n), { force: true });
+    const entries = fs36.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs36.statSync(path34.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const old of entries.slice(KEEP_TRACKS)) fs36.rmSync(path34.join(dir, old.n), { force: true });
   } catch {
   }
   return file;
@@ -35856,7 +37614,7 @@ function saveTrack(track) {
 function loadTrack(trackId) {
   if (!TRACK_ID.test(trackId)) return null;
   try {
-    const t = JSON.parse(fs34.readFileSync(path33.join(tracksDir(), `${trackId}.json`), "utf8"));
+    const t = JSON.parse(fs36.readFileSync(path34.join(tracksDir(), `${trackId}.json`), "utf8"));
     if (t.version !== 1 || !Array.isArray(t.frames) || !Array.isArray(t.ref_points)) return null;
     return t;
   } catch {
@@ -35882,9 +37640,9 @@ function platesFolderFor(projectPath) {
   if (!projectPath || projectPath === "<unsaved>") {
     throw new PlanarError("refused", "The project has not been saved, so there is no folder to put plates next to. Save it first.");
   }
-  const dir = path33.dirname(projectPath);
-  const name = path33.basename(projectPath, path33.extname(projectPath));
-  return path33.join(dir, `${name} chroma plates`) + path33.sep;
+  const dir = path34.dirname(projectPath);
+  const name = path34.basename(projectPath, path34.extname(projectPath));
+  return path34.join(dir, `${name} chroma plates`) + path34.sep;
 }
 function createRenderBudget(opts) {
   const started = Date.now();
@@ -35897,7 +37655,7 @@ function createRenderBudget(opts) {
       return renders >= opts.maxRenders || (Date.now() - started) / 1e3 >= opts.maxSeconds;
     },
     get used() {
-      return { renders, seconds: r23((Date.now() - started) / 1e3) };
+      return { renders, seconds: r24((Date.now() - started) / 1e3) };
     }
   };
 }
@@ -36004,7 +37762,7 @@ async function withIsolatedPlate(ctx, opId, a, fn) {
       });
       removed = end.result?.removed === true;
     } catch (err) {
-      error = errMessage3(err);
+      error = errMessage4(err);
     } finally {
       if (a.note) endInflight(unisolateId);
     }
@@ -36208,14 +37966,14 @@ function trackSummary(track, maxFrames = 500) {
     model: track.model,
     source: track.source,
     ref_time: r4(track.ref_time),
-    ref_points: track.ref_points.map((p) => [r23(p[0]), r23(p[1])]),
+    ref_points: track.ref_points.map((p) => [r24(p[0]), r24(p[1])]),
     frames: track.frames.length,
     frames_ok: ok.length,
     first_time: track.frames.length ? r4(track.frames[0].time) : null,
     last_time: track.frames.length ? r4(track.frames[track.frames.length - 1].time) : null,
-    rms_px: rms.length ? { mean: r23(rms.reduce((a, b) => a + b, 0) / rms.length), max: r23(Math.max(...rms)) } : null,
+    rms_px: rms.length ? { mean: r24(rms.reduce((a, b) => a + b, 0) / rms.length), max: r24(Math.max(...rms)) } : null,
     frames_lost_per_point: lostPer,
-    frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r23(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
+    frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r24(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
     ...step2 > 1 ? { frame_rows_sampled_every: step2 } : {},
     full_data: "The track file holds every frame with per-point positions and confidences."
@@ -36257,9 +38015,9 @@ function drawTrackSheet(tiles, o) {
   return sheet;
 }
 function writeSheet(framesDir, tag, png) {
-  fs34.mkdirSync(framesDir, { recursive: true });
-  const file = path33.join(framesDir, `track_${tag}.png`);
-  fs34.writeFileSync(file, encodePng(png));
+  fs36.mkdirSync(framesDir, { recursive: true });
+  const file = path34.join(framesDir, `track_${tag}.png`);
+  fs36.writeFileSync(file, encodePng(png));
   return file;
 }
 function buildLayerKeys(a) {
@@ -36333,7 +38091,7 @@ function buildLayerKeys(a) {
       tr.scale.push(round23(dec.scale_pct));
     }
   });
-  const out = { times, skipped, max_fit_px: r23(maxFit) };
+  const out = { times, skipped, max_fit_px: r24(maxFit) };
   if (wantPin) out.pin = pin;
   if (wantTransform) out.transform = { position: tr.position, rotation: unwrapDegrees(tr.rotation).map(r4), scale: tr.scale };
   return out;
@@ -36412,7 +38170,7 @@ async function applyTrackTo(ctx, a) {
   const based = relativeTo(a.track, refTime);
   const refFrame = frameAt(based, refTime);
   if (!refFrame || !refFrame.ok || !refFrame.H) {
-    throw new PlanarError("bad_args", `The reference frame at ${r23(refTime)} s has no solved motion, so it cannot be the frame the target looks right at. Pass a ref_time where the track is ok.`);
+    throw new PlanarError("bad_args", `The reference frame at ${r24(refTime)} s has no solved motion, so it cannot be the frame the target looks right at. Pass a ref_time where the track is ok.`);
   }
   const half = 0.5 / (based.fps || 25);
   const inRange = based.frames.filter((f) => !target.range || f.time >= target.range.start - half && f.time <= target.range.end + half);
@@ -36435,7 +38193,7 @@ async function applyTrackTo(ctx, a) {
     if (!layer) throw new PlanarError("not_found", "The target layer was not found.");
     if (layer.locked) throw new PlanarError("refused", `Layer "${layer.name}" is locked.`);
     if (layer.three_d) throw new PlanarError("refused", `Layer "${layer.name}" is a 3D layer; planar tracks work in 2D only.`);
-    const ref2 = await readLayerSpace(ctx, opId, "refspace", a.compId, layer, [refTime], a.toolName);
+    const ref3 = await readLayerSpace(ctx, opId, "refspace", a.compId, layer, [refTime], a.toolName);
     const got = await readLayerSpace(ctx, opId, "space", a.compId, layer, frames.map((f) => f.time), a.toolName);
     let refPin;
     if (target.mode === "corner_pin" || target.mode === "power_pin" || target.mode === "transform_pin") {
@@ -36458,7 +38216,7 @@ async function applyTrackTo(ctx, a) {
         if (pts.length === 4) refPin = pts;
       }
     }
-    return { layer, ref: ref2.samples[0], samples: got.samples, width: ref2.width, height: ref2.height, refPin };
+    return { layer, ref: ref3.samples[0], samples: got.samples, width: ref3.width, height: ref3.height, refPin };
   });
   const notes = [];
   if (typeof based.comp_id === "number" && based.comp_id !== a.compId) {
@@ -36596,7 +38354,7 @@ async function trackMulti(ctx, args) {
   const toolName = "ae_track_multi";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs34.mkdirSync(framesDir, { recursive: true });
+  fs36.mkdirSync(framesDir, { recursive: true });
   const label = `ae_track_multi(${args.comp_id})`;
   const budget = createRenderBudget({ maxRenders: args.max_frames, maxSeconds: args.max_seconds });
   let stored = null;
@@ -36627,7 +38385,7 @@ async function trackMulti(ctx, args) {
       if (end < start) throw new PlanarError("bad_args", "end is before start.");
       const dflt = comp.time >= start && comp.time <= end ? comp.time : (start + end) / 2;
       refTime = snapFrame(args.ref_time ?? dflt, fps);
-      if (refTime < start - 1e-6 || refTime > end + 1e-6) throw new PlanarError("bad_args", `ref_time ${r23(refTime)} s is outside the range ${r23(start)}-${r23(end)} s.`);
+      if (refTime < start - 1e-6 || refTime > end + 1e-6) throw new PlanarError("bad_args", `ref_time ${r24(refTime)} s is outside the range ${r24(start)}-${r24(end)} s.`);
     }
     const notes2 = [];
     if (!stored && Math.round((end - start) * fps) + 1 > MAX_TRACK_FRAMES2) {
@@ -36637,7 +38395,7 @@ async function trackMulti(ctx, args) {
       const newEnd = snapFrame(Math.min(end, newStart + span), fps);
       start = newStart;
       end = newEnd;
-      notes2.push(`The range was cut to ${MAX_TRACK_FRAMES2} frames (${r23(start)}-${r23(end)} s, around ref_time ${r23(refTime)} s), the most one track holds.`);
+      notes2.push(`The range was cut to ${MAX_TRACK_FRAMES2} frames (${r24(start)}-${r24(end)} s, around ref_time ${r24(refTime)} s), the most one track holds.`);
     }
     const o = stored ? stored.tracking.options : {
       model: args.model ?? "translate",
@@ -36673,7 +38431,7 @@ async function trackMulti(ctx, args) {
         try {
           return decodePngFile(s.path);
         } finally {
-          fs34.rmSync(s.path, { force: true });
+          fs36.rmSync(s.path, { force: true });
         }
       };
       const cached = stored ? LIVE.get(stored.track_id) : void 0;
@@ -36704,7 +38462,7 @@ async function trackMulti(ctx, args) {
         chosen = goodFeatures(boxBlurGray(toGray(refPng), 1), mask, { count: ap.count, minDistancePx: minDist, patchSize: patchImg });
         await yieldLoop();
         if (chosen.length === 0) throw new PlanarError("not_found", "No trackable corner was found in that region (it is flat, too small or fully excluded). Widen the region or pick points by hand.");
-        refPoints = chosen.map((c) => [r23((c.x + 0.5) / scale), r23((c.y + 0.5) / scale)]);
+        refPoints = chosen.map((c) => [r24((c.x + 0.5) / scale), r24((c.y + 0.5) / scale)]);
       }
       const mkOpts = () => ({
         model: o.model,
@@ -36784,7 +38542,7 @@ async function trackMulti(ctx, args) {
             png = await snap2(times[i], (dir === "forward" ? 1 : 100001) + i);
             mustAdvance = false;
           } catch (err) {
-            run_.renderError = errMessage3(err);
+            run_.renderError = errMessage4(err);
             run_.blocked = isBlocked(err);
             break;
           }
@@ -36838,13 +38596,13 @@ async function trackMulti(ctx, args) {
           const tiles = [];
           const lb = ends.backward;
           const lf = ends.forward;
-          if (lb) tiles.push({ image: lb.png, frame: lb.frame, label: `t=${r23(lb.frame.time)}` });
+          if (lb) tiles.push({ image: lb.png, frame: lb.frame, label: `t=${r24(lb.frame.time)}` });
           refPng ??= await snap2(refTime, 999999);
-          tiles.push({ image: refPng, frame: refFrame, label: `ref t=${r23(refTime)}` });
-          if (lf) tiles.push({ image: lf.png, frame: lf.frame, label: `t=${r23(lf.frame.time)}` });
+          tiles.push({ image: refPng, frame: refFrame, label: `ref t=${r24(refTime)}` });
+          if (lf) tiles.push({ image: lf.png, frame: lf.frame, label: `t=${r24(lf.frame.time)}` });
           previewPath = writeSheet(framesDir, `${track2.track_id}_${opId}`, drawTrackSheet(tiles, { quad, patchSize: o.pattern_size, compSize }));
         } catch (err) {
-          previewError = errMessage3(err);
+          previewError = errMessage4(err);
         }
       }
       return { track: track2, notes: notes2, previewPath, previewError, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
@@ -36866,7 +38624,7 @@ async function trackMulti(ctx, args) {
         return {
           failure: {
             error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage3(err),
+            message: errMessage4(err),
             temp: made,
             checkpoint,
             sessionFields
@@ -36931,9 +38689,9 @@ async function trackMulti(ctx, args) {
     ...finished ? {} : { next: { direction: nextDir, time: nextTime }, continue_track_id: track.track_id },
     points: track.ref_points.map((p, i) => ({
       index: i + 1,
-      x: r23(p[0]),
-      y: r23(p[1]),
-      ...ran.chosen && ran.chosen[i] ? { score: r23(ran.chosen[i].score), contrast: r23(ran.chosen[i].std), auto: true } : {},
+      x: r24(p[0]),
+      y: r24(p[1]),
+      ...ran.chosen && ran.chosen[i] ? { score: r24(ran.chosen[i].score), contrast: r24(ran.chosen[i].std), auto: true } : {},
       ...st.dropped.some((d) => d.index === i) ? { dropped: st.dropped.find((d) => d.index === i).reason } : {}
     })),
     reacquired_points_this_call: ran.reacquired,
@@ -36952,19 +38710,19 @@ async function trackMulti(ctx, args) {
       try {
         result.apply = await applyTrackTo(ctx, { compId: args.comp_id, track, target: args.apply, expect, toolName });
       } catch (err) {
-        result.apply = { applied: false, error: err instanceof PlanarError ? err.code : "failed", message: errMessage3(err) };
+        result.apply = { applied: false, error: err instanceof PlanarError ? err.code : "failed", message: errMessage4(err) };
       }
     }
   }
   return result;
 }
-var crypto16, fs34, path33, PlanarError, fail, errMessage3, r23, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto16, fs36, path34, PlanarError, fail, errMessage4, r24, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
     crypto16 = __toESM(require("node:crypto"), 1);
-    fs34 = __toESM(require("node:fs"), 1);
-    path33 = __toESM(require("node:path"), 1);
+    fs36 = __toESM(require("node:fs"), 1);
+    path34 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -36987,15 +38745,15 @@ var init_planar = __esm({
       }
     };
     fail = (e) => ({ ok: false, error: e.code, message: e.message });
-    errMessage3 = (err) => err instanceof Error ? err.message : String(err);
-    r23 = (v) => Math.round(v * 100) / 100;
+    errMessage4 = (err) => err instanceof Error ? err.message : String(err);
+    r24 = (v) => Math.round(v * 100) / 100;
     r4 = (v) => Math.round(v * 1e4) / 1e4;
     yieldLoop = () => new Promise((r) => setImmediate(r));
     TRACK_ID = /^[A-Za-z0-9_-]{1,80}$/;
     KEEP_TRACKS = 200;
     MAX_TRACK_FRAMES2 = 3e3;
     MAX_KEYS = 3e3;
-    trackFilePath = (trackId) => path33.join(tracksDir(), `${trackId}.json`);
+    trackFilePath = (trackId) => path34.join(tracksDir(), `${trackId}.json`);
     BLURRINESS_PER_SIGMA = 2.5;
     blurrinessFromSigma = (sigmaPx) => sigmaPx * BLURRINESS_PER_SIGMA;
     sigmaFromBlurriness = (blurriness) => blurriness / BLURRINESS_PER_SIGMA;
@@ -37108,7 +38866,7 @@ var init_planar = __esm({
             );
           } catch (err) {
             this.trackers.push(null);
-            this.dropped.push({ index: i, reason: errMessage3(err) });
+            this.dropped.push({ index: i, reason: errMessage4(err) });
           }
         });
       }
@@ -37306,16 +39064,16 @@ var init_planar = __esm({
                     seen.add(f.time);
                     const s = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: f.time, frameIndex: i++, framesDir, toolName });
                     try {
-                      tiles.push({ image: decodePngFile(s.path), frame: f, label: `t=${r23(f.time)}` });
+                      tiles.push({ image: decodePngFile(s.path), frame: f, label: `t=${r24(f.time)}` });
                     } finally {
-                      fs34.rmSync(s.path, { force: true });
+                      fs36.rmSync(s.path, { force: true });
                     }
                     await yieldLoop();
                   }
                   const refPts = track.ref_points;
                   previewPath = writeSheet(framesDir, `${track.track_id}_${opId}`, drawTrackSheet(tiles, { quad: boundingQuad(refPts), patchSize: 31, compSize: track.comp_size }));
                 } catch (err) {
-                  previewError = errMessage3(err);
+                  previewError = errMessage4(err);
                 }
               }
               return { track, info: info2, previewPath, previewError };
@@ -37546,9 +39304,9 @@ function linearToSrgb(v) {
   const c = Math.max(0, v);
   return c <= 31308e-7 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 }
-function percentile(hist, total, p) {
-  if (total === 0) return 0;
-  const target = p * total;
+function percentile(hist, total2, p) {
+  if (total2 === 0) return 0;
+  const target = p * total2;
   let acc = 0;
   for (let i = 0; i < hist.length; i++) {
     acc += hist[i];
@@ -37635,14 +39393,14 @@ function lumaPercentiles(img, mask, threshold = 0.5, opts = {}) {
     return { p05: at(0.05), p50: at(0.5), p95: at(0.95) };
   }
   const hist = new Uint32Array(256);
-  let total = 0;
+  let total2 = 0;
   for (let k = 0; k < img.width * img.height; k++) {
     if (mask[k] < threshold) continue;
     const i = k * 4;
     hist[Math.min(255, Math.round(LUMA[0] * img.data[i] + LUMA[1] * img.data[i + 1] + LUMA[2] * img.data[i + 2]))]++;
-    total++;
+    total2++;
   }
-  return { p05: percentile(hist, total, 0.05), p50: percentile(hist, total, 0.5), p95: percentile(hist, total, 0.95) };
+  return { p05: percentile(hist, total2, 0.05), p50: percentile(hist, total2, 0.5), p95: percentile(hist, total2, 0.95) };
 }
 function madSigma(a) {
   if (a.length === 0) return 0;
@@ -37695,12 +39453,12 @@ function gaussianBlurGray(gray, sigma) {
   if (!(sigma >= 0.05)) return { width: w, height: h, data: Float32Array.from(gray.data) };
   const r = Math.max(1, Math.ceil(sigma * 3));
   const kernel = new Float32Array(2 * r + 1);
-  let total = 0;
+  let total2 = 0;
   for (let i = -r; i <= r; i++) {
     kernel[i + r] = Math.exp(-(i * i) / (2 * sigma * sigma));
-    total += kernel[i + r];
+    total2 += kernel[i + r];
   }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= total;
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= total2;
   const tmp = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -37734,15 +39492,15 @@ function cropToBounds(img, bounds, margin) {
   }
   return { img: { width: w, height: h, data }, x0, y0 };
 }
-function fitGainOffset(ref2, img, mask, opts) {
-  const n = Math.min(ref2.width * ref2.height, img.width * img.height, mask.length);
+function fitGainOffset(ref3, img, mask, opts) {
+  const n = Math.min(ref3.width * ref3.height, img.width * img.height, mask.length);
   const idx = [];
   for (let k = 0; k < n; k++) {
     if (mask[k] < 0.5) continue;
     if (opts.excludeClipped) {
       let clipped = false;
       for (let c = 0; c < 3 && !clipped; c++) {
-        const a = ref2.data[k * 4 + c] / 255;
+        const a = ref3.data[k * 4 + c] / 255;
         const b = img.data[k * 4 + c] / 255;
         if (a <= 0.01 || a >= 0.99 || b <= 0.01 || b >= 0.99) clipped = true;
       }
@@ -37756,26 +39514,26 @@ function fitGainOffset(ref2, img, mask, opts) {
   let sqErr = 0;
   let used = 0;
   for (let c = 0; c < 3; c++) {
-    const fit = (list) => {
+    const fit = (list2) => {
       let sx = 0;
       let sy = 0;
       let sxx = 0;
       let sxy = 0;
-      for (const k of list) {
+      for (const k of list2) {
         const x = img.data[k * 4 + c] / 255;
-        const y = ref2.data[k * 4 + c] / 255;
+        const y = ref3.data[k * 4 + c] / 255;
         sx += x;
         sy += y;
         sxx += x * x;
         sxy += x * y;
       }
-      const m = list.length;
+      const m = list2.length;
       const varX = sxx - sx * sx / m;
       if (varX < 1e-9 * m) return { g: 1, o: (sy - sx) / m };
       const g = (sxy - sx * sy / m) / varX;
       return { g, o: (sy - g * sx) / m };
     };
-    const resid = (k, f2) => f2.g * (img.data[k * 4 + c] / 255) + f2.o - ref2.data[k * 4 + c] / 255;
+    const resid = (k, f2) => f2.g * (img.data[k * 4 + c] / 255) + f2.o - ref3.data[k * 4 + c] / 255;
     let f = fit(idx);
     let keep = idx;
     if (opts.trimPct > 0 && idx.length > 10) {
@@ -37989,7 +39747,7 @@ function planSamples2(o) {
   const f0 = o.start !== void 0 ? clampF(Math.round(o.start * fps)) : wf0;
   const f1 = Math.max(f0, o.end !== void 0 ? clampF(Math.round(o.end * fps)) : wf1);
   const refFrame = o.refTime !== void 0 ? clampF(Math.round(o.refTime * fps)) : void 0;
-  const total = f1 - f0 + 1;
+  const total2 = f1 - f0 + 1;
   const range = [r42(f0 / fps), r42(f1 / fps)];
   if (o.times && o.times.length > 0) {
     const cap2 = Math.max(1, Math.min(o.maxSamples, MAX_SAMPLES));
@@ -38006,11 +39764,11 @@ function planSamples2(o) {
       keep = refFrame !== void 0 ? [...rest, refFrame] : rest;
     }
     const frames2 = keep.sort((a, b) => a - b);
-    const span = asked2.length > 0 ? asked2[asked2.length - 1] - asked2[0] + 1 : total;
+    const span = asked2.length > 0 ? asked2[asked2.length - 1] - asked2[0] + 1 : total2;
     return { times: frames2.map((f) => f / fps), total_frames: span, every_n: 0, ref_time: (refFrame ?? frames2[0]) / fps, range: [r42(asked2[0] / fps), r42(asked2[asked2.length - 1] / fps)], capped: frames2.length < wanted, ...frames2.length < wanted ? { times_dropped: wanted - frames2.length } : {} };
   }
   const refF = refFrame ?? f0;
-  let n = o.everyN ?? Math.max(1, Math.ceil(total / Math.max(2, o.maxSamples)));
+  let n = o.everyN ?? Math.max(1, Math.ceil(total2 / Math.max(2, o.maxSamples)));
   const asked = n;
   const build = (step2) => {
     const set = /* @__PURE__ */ new Set([f0, f1, refF]);
@@ -38018,11 +39776,11 @@ function planSamples2(o) {
     return [...set].sort((a, b) => a - b);
   };
   let frames = build(n);
-  while (frames.length > o.maxSamples && n < total) {
+  while (frames.length > o.maxSamples && n < total2) {
     n++;
     frames = build(n);
   }
-  return { times: frames.map((f) => f / fps), total_frames: total, every_n: n, ref_time: refF / fps, range, capped: n !== asked && o.everyN !== void 0 };
+  return { times: frames.map((f) => f / fps), total_frames: total2, every_n: n, ref_time: refF / fps, range, capped: n !== asked && o.everyN !== void 0 };
 }
 function homographyAt(track, t) {
   const sorted = [...track].sort((a2, b2) => a2.time - b2.time);
@@ -38208,9 +39966,9 @@ function seriesStats(times, values, o) {
   }
   const slope = den > 1e-12 ? num4 / den : 0;
   const flicker = Math.sqrt(v.reduce((s, x, i) => s + (x - (mv + slope * (t[i] - mt))) ** 2, 0) / n);
-  const ref2 = o.jitterFrom && o.jitterFrom.length >= 2 ? o.jitterFrom.slice(0, n) : v;
+  const ref3 = o.jitterFrom && o.jitterFrom.length >= 2 ? o.jitterFrom.slice(0, n) : v;
   const diffs = [];
-  for (let i = 1; i < ref2.length; i++) diffs.push(ref2[i] - ref2[i - 1]);
+  for (let i = 1; i < ref3.length; i++) diffs.push(ref3[i] - ref3[i - 1]);
   const jitter = madSigmaOf(diffs);
   const threshold = Math.max(o.popFactor * jitter, o.minJump ?? MIN_POP_JUMP);
   const pops = [];
@@ -38370,7 +40128,7 @@ function analyseFrame(inp) {
         valid = false;
         reason = "the ring changed between the two frames by more than grain (the shot moves), so temporal noise is not measurable here";
       }
-      grain = { patch_tn: r34(tnP), ring_tn: r34(tnR), ratio: valid && tnR > 0 ? r34(tnP / tnR) : null, valid, ...reason ? { reason } : {} };
+      grain = { patch_tn: r35(tnP), ring_tn: r35(tnR), ratio: valid && tnR > 0 ? r35(tnP / tnR) : null, valid, ...reason ? { reason } : {} };
     }
   }
   const lb = (v) => r42(v);
@@ -38378,9 +40136,9 @@ function analyseFrame(inp) {
     time: inp.time,
     usable: true,
     region: {
-      bounds: [r24(inp.polyComp.reduce((m, p) => Math.min(m, p[0]), Infinity)), r24(inp.polyComp.reduce((m, p) => Math.min(m, p[1]), Infinity)), r24(inp.polyComp.reduce((m, p) => Math.max(m, p[0]), -Infinity)), r24(inp.polyComp.reduce((m, p) => Math.max(m, p[1]), -Infinity))],
-      area_px: r24(polygonArea(inp.polyComp)),
-      frame_share: r34(frameShare)
+      bounds: [r25(inp.polyComp.reduce((m, p) => Math.min(m, p[0]), Infinity)), r25(inp.polyComp.reduce((m, p) => Math.min(m, p[1]), Infinity)), r25(inp.polyComp.reduce((m, p) => Math.max(m, p[0]), -Infinity)), r25(inp.polyComp.reduce((m, p) => Math.max(m, p[1]), -Infinity))],
+      area_px: r25(polygonArea(inp.polyComp)),
+      frame_share: r35(frameShare)
     },
     difference: {
       inside_mean: lb(patchPx > 0 ? inSum / patchPx : 0),
@@ -38390,15 +40148,15 @@ function analyseFrame(inp) {
       outside_pixels: Math.round(outCount / (sx * sy)),
       leaked_pixels: Math.round(leaked / (sx * sy)),
       leaked_share: r42(outCount > 0 ? leaked / outCount : 0),
-      leak_bbox: leaked > 0 ? [r24(lx0 / sx), r24(ly0 / sy), r24((lx1 + 1) / sx), r24((ly1 + 1) / sy)] : null
+      leak_bbox: leaked > 0 ? [r25(lx0 / sx), r25(ly0 / sy), r25((lx1 + 1) / sx), r25((ly1 + 1) / sy)] : null
     },
-    seam: { score: r34(seam.score), worst_segment: seam.worst_segment ? { from: [r24((seam.worst_segment.from[0] + x0) / sx), r24((seam.worst_segment.from[1] + y0) / sy)], to: [r24((seam.worst_segment.to[0] + x0) / sx), r24((seam.worst_segment.to[1] + y0) / sy)], score: r34(seam.worst_segment.score) } : null, chunks: seam.chunks },
+    seam: { score: r35(seam.score), worst_segment: seam.worst_segment ? { from: [r25((seam.worst_segment.from[0] + x0) / sx), r25((seam.worst_segment.from[1] + y0) / sy)], to: [r25((seam.worst_segment.to[0] + x0) / sx), r25((seam.worst_segment.to[1] + y0) / sy)], score: r35(seam.worst_segment.score) } : null, chunks: seam.chunks },
     patch: { luma: lb(ps.luma_mean), rgb: ps.mean_rgb.map(lb), pixels: ps.pixels },
     ring: { luma: lb(rs.luma_mean), rgb: rs.mean_rgb.map(lb), pixels: rs.pixels },
     delta_luma: lb(ps.luma_mean - rs.luma_mean),
     delta_rgb: [lb(ps.mean_rgb[0] - rs.mean_rgb[0]), lb(ps.mean_rgb[1] - rs.mean_rgb[1]), lb(ps.mean_rgb[2] - rs.mean_rgb[2])],
-    sharpness: { patch: r34(lapP), ring: r34(lapR), ratio: lapR > 1e-3 ? r34(lapP / lapR) : null },
-    noise: { patch_sigma: r34(sigP), ring_sigma: r34(sigR) },
+    sharpness: { patch: r35(lapP), ring: r35(lapR), ratio: lapR > 1e-3 ? r35(lapP / lapR) : null },
+    noise: { patch_sigma: r35(sigP), ring_sigma: r35(sigR) },
     ...grain ? { grain } : {}
   };
 }
@@ -38435,7 +40193,7 @@ function measureSlip(frames, poly0, o) {
     return { ...result, reason: "the patch has no texture to follow (a flat or nearly flat fill, or a region too small for a pattern), so slip can't be measured; it is not 0" };
   }
   if (ring.length < 3) return { ...result, reason: "the ring around the patch has no texture to follow, so slip can't be measured" };
-  const liveOf = (list) => list.filter((f) => !f.lost && f.dx !== null && f.dy !== null);
+  const liveOf = (list2) => list2.filter((f) => !f.lost && f.dx !== null && f.dy !== null);
   const modelFrames = { similarity: 0, translate: 0 };
   const ringPredictor = (rl) => {
     const mdx = medianOf(rl.map((f) => f.dx));
@@ -38488,7 +40246,7 @@ function measureSlip(frames, poly0, o) {
       const rx = pl.map((f) => f.x0 + f.dx - pred.predict(f)[0]);
       const ry = pl.map((f) => f.y0 + f.dy - pred.predict(f)[1]);
       const slip = Math.hypot(medianOf(rx), medianOf(ry)) / o.scale;
-      result.series.push({ time: fr.time, slip_px: r34(slip), patch_live: pl.length, ring_live: rl.length });
+      result.series.push({ time: fr.time, slip_px: r35(slip), patch_live: pl.length, ring_live: rl.length });
       if (slip > maxSlip) maxSlip = slip;
       measured++;
     } else {
@@ -38497,7 +40255,7 @@ function measureSlip(frames, poly0, o) {
   }
   result.ring_model = modelFrames;
   if (measured === 0) return { ...result, reason: "the features were lost in every later frame (the shot moves more than the search distance between samples, or the frames are too far apart): sample closer frames" };
-  return { ...result, status: "ok", max_slip_px: r34(maxSlip) };
+  return { ...result, status: "ok", max_slip_px: r35(maxSlip) };
 }
 function worseOf(a, b) {
   return severity(b) > severity(a) ? b : a;
@@ -38703,8 +40461,8 @@ function judgePatch(frames, slip, o) {
       checks.push({
         check: "sharpness",
         verdict: verdict2,
-        summary: verdict2 === "ok" ? `The patch is as detailed as its surround (ratio ${r34(med)}).` : med < t.sharpness_min ? `The patch is softer than its surround: ${r34(med)} of the ring's detail (limit ${t.sharpness_min}).` : `The patch is sharper or noisier than its surround: ${r34(med)} times the ring's detail (limit ${t.sharpness_max}).`,
-        numbers: { median_ratio: r34(med), min: t.sharpness_min, max: t.sharpness_max },
+        summary: verdict2 === "ok" ? `The patch is as detailed as its surround (ratio ${r35(med)}).` : med < t.sharpness_min ? `The patch is softer than its surround: ${r35(med)} of the ring's detail (limit ${t.sharpness_min}).` : `The patch is sharper or noisier than its surround: ${r35(med)} times the ring's detail (limit ${t.sharpness_max}).`,
+        numbers: { median_ratio: r35(med), min: t.sharpness_min, max: t.sharpness_max },
         worst_times: topTimes(rows.map((r) => ({ time: r.time, v: Math.max(r.v / t.sharpness_max, t.sharpness_min / Math.max(r.v, 0.01)) }))),
         fixes: verdict2 === "ok" ? [] : [{ tool: "ae_patch_finish", why: "Match the patch's blur or sharpening to the plate." }, { tool: "ae_patch_grain", why: "Grain adds the fine detail a soft patch lacks." }]
       });
@@ -38712,7 +40470,7 @@ function judgePatch(frames, slip, o) {
   }
   const measured = checks.filter((c) => c.verdict !== "not_measurable");
   const verdict = measured.length === 0 ? "inconclusive" : measured.reduce((v, c) => worseOf(v, c.verdict), "ok");
-  const frameScores = [...scores.entries()].map(([time, s]) => ({ time, score: r34(s.score), reasons: [...new Set(s.reasons)] })).sort((a, b) => a.time - b.time);
+  const frameScores = [...scores.entries()].map(([time, s]) => ({ time, score: r35(s.score), reasons: [...new Set(s.reasons)] })).sort((a, b) => a.time - b.time);
   const worstFrames = [...frameScores].sort((a, b) => b.score - a.score).slice(0, 5);
   return {
     verdict,
@@ -38923,7 +40681,7 @@ async function runWithPlateCopy(ctx, spec) {
     });
     return res.result ?? null;
   };
-  return runQueued5(ctx, spec.label, opId, async () => {
+  return runQueued6(ctx, spec.label, opId, async () => {
     ctx.quarantine.assertClear();
     const prepared = await spec.prepare(opId);
     if ("refuse" in prepared) return { refused: prepared.refuse };
@@ -38933,7 +40691,7 @@ async function runWithPlateCopy(ctx, spec) {
     const sessionFields = await noteBeforeWrite(ctx, note);
     proofIds = prepared.layers.map((l) => l.id);
     const before = await state("before");
-    fs35.mkdirSync(spec.framesDir, { recursive: true });
+    fs37.mkdirSync(spec.framesDir, { recursive: true });
     beginInflight(note);
     let begun;
     try {
@@ -38956,7 +40714,7 @@ async function runWithPlateCopy(ctx, spec) {
       if (typeof copyId !== "number") throw new Error("AE returned no id for the temporary comp, so nothing was rendered");
       value = await spec.body(copyId, prepared.prep, opId);
     } catch (err) {
-      bodyError = errMessage4(err);
+      bodyError = errMessage5(err);
     }
     let cleanupError = null;
     let removed = false;
@@ -38973,7 +40731,7 @@ async function runWithPlateCopy(ctx, spec) {
       });
       removed = end.result?.removed === true;
     } catch (err) {
-      cleanupError = errMessage4(err);
+      cleanupError = errMessage5(err);
     } finally {
       endInflight(removeId);
       endInflight(opId);
@@ -39191,7 +40949,7 @@ async function patchCheckHandler(args, ctx) {
               await yieldLoop2();
             } catch (err) {
               if (isAeBlocked2(err)) blocked = true;
-              notes.push(`The probe frame next to ${time}s could not be rendered: ${errMessage4(err)}`);
+              notes.push(`The probe frame next to ${time}s could not be rendered: ${errMessage5(err)}`);
             }
           }
           const metrics = analyseFrame({ time: pair.time, composite: orig, plate, neighbour, polyComp: poly, comp, opts: fopts, featherPx: feathers[ti] });
@@ -39220,7 +40978,7 @@ async function patchCheckHandler(args, ctx) {
           }
         } catch (err) {
           if (isAeBlocked2(err)) blocked = true;
-          frames.push(unusable(time, `this time could not be measured: ${errMessage4(err)}`));
+          frames.push(unusable(time, `this time could not be measured: ${errMessage5(err)}`));
         }
       }
       let slip = null;
@@ -39230,7 +40988,7 @@ async function patchCheckHandler(args, ctx) {
           slip = measureSlip(slipFrames, slipPoly0, { patchSize: PATCH_SIZE, searchPx: 16, features: 8, scale: imgScale, gapPx: (args.ring_gap_px + halfFeather) * imgScale, ringPx: args.ring_px * imgScale });
           await yieldLoop2();
         } catch (err) {
-          slip = { status: "not_measurable", reason: `slip failed: ${errMessage4(err)}`, patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
+          slip = { status: "not_measurable", reason: `slip failed: ${errMessage5(err)}`, patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
         }
       } else if (!notes.some((n) => n.startsWith("Slip"))) {
         slip = { status: "not_measurable", reason: "fewer than two frames could be measured", patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
@@ -39284,10 +41042,10 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
   let seriesPath;
   let seriesError;
   try {
-    fs35.mkdirSync(framesDir, { recursive: true });
+    fs37.mkdirSync(framesDir, { recursive: true });
     seriesPath = writeJson2(framesDir, "patchcheck", comp.id, { comp: head2({ index: 0, id: comp.id, name: comp.name }), sampled: body.plan, thresholds, frames: body.frames, slip: body.slip, checks: judged.checks, series });
   } catch (err) {
-    seriesError = errMessage4(err);
+    seriesError = errMessage5(err);
   }
   let sheet;
   let sheetError;
@@ -39297,8 +41055,8 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
       const want = [];
       if (usableRendered.length > 0) {
         want.push({ label: "FIRST", time: usableRendered[0].time });
-        const ref2 = usableRendered.find((r) => Math.abs(r.time - body.plan.ref_time) < 1e-3);
-        if (ref2) want.push({ label: "REF", time: ref2.time });
+        const ref3 = usableRendered.find((r) => Math.abs(r.time - body.plan.ref_time) < 1e-3);
+        if (ref3) want.push({ label: "REF", time: ref3.time });
         want.push({ label: "LAST", time: usableRendered[usableRendered.length - 1].time });
         for (const w of judged.worst_frames.filter((s) => s.score >= 1).slice(0, 2)) want.push({ label: "WORST", time: w.time });
       }
@@ -39317,10 +41075,10 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
       if (png) {
         const fit = fitWithin(png.width, png.height, args.sheet_max_size);
         const out = fit.width < png.width ? resizeArea(png, fit.width, fit.height) : png;
-        sheet = { path: writePngFile(framesDir, "patchcheck_sheet", comp.id, out), frames: items.map((i) => ({ label: i.label, time: r24(i.time) })) };
+        sheet = { path: writePngFile(framesDir, "patchcheck_sheet", comp.id, out), frames: items.map((i) => ({ label: i.label, time: r25(i.time) })) };
       } else sheetError = "no frame could be drawn";
     } catch (err) {
-      sheetError = errMessage4(err);
+      sheetError = errMessage5(err);
     }
   }
   const notes = [
@@ -39364,7 +41122,7 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
       frames_in_range: body.plan.total_frames,
       every_n: body.plan.every_n,
       range: body.plan.range,
-      ref_time: r24(body.plan.ref_time),
+      ref_time: r25(body.plan.ref_time),
       times: body.plan.times.map(r42),
       ...body.plan.capped ? { capped: cappedNote(body.plan) } : {}
     },
@@ -39414,9 +41172,9 @@ function regionFrameStats(inp) {
       if (bw * bh <= 16e6) {
         const shifted = poly.map((p) => [p[0] - bb[0] + m, p[1] - bb[1] + m]);
         const full = ringMask(bw, bh, shifted, inp.ring.inner_px * sAvg, inp.ring.outer_px * sAvg);
-        let total = 0;
-        for (let i = 0; i < full.length; i++) total += full[i];
-        share = total > 0 ? Math.min(1, n / total) : 1;
+        let total2 = 0;
+        for (let i = 0; i < full.length; i++) total2 += full[i];
+        share = total2 > 0 ? Math.min(1, n / total2) : 1;
       }
     }
   } else {
@@ -39451,7 +41209,7 @@ function regionFrameStats(inp) {
     time: inp.time,
     usable: true,
     pixels: st.pixels,
-    frame_share: r34(share),
+    frame_share: r35(share),
     mean_rgb: t3(st.mean_rgb),
     std_rgb: t3(st.std_rgb),
     p05_rgb: t3(st.p05_rgb),
@@ -39460,8 +41218,8 @@ function regionFrameStats(inp) {
     luma: { mean: r42(st.luma_mean), std: r42(st.luma_std), p05: r42(lp.p05), p50: r42(lp.p50), p95: r42(lp.p95) },
     clipped_low: r42(st.clipped_low),
     clipped_high: r42(st.clipped_high),
-    noise_sigma: r34(noiseSigma(gray, mask)),
-    sharpness: r34(Math.sqrt(laplacianEnergy(gray, mask))),
+    noise_sigma: r35(noiseSigma(gray, mask)),
+    sharpness: r35(Math.sqrt(laplacianEnergy(gray, mask))),
     change
   };
 }
@@ -39532,7 +41290,7 @@ async function collectRegionStats(p) {
       prev = img;
     } catch (err) {
       if (isAeBlocked2(err)) blocked = true;
-      regions.forEach((_, ri) => rows[ri].push({ time, usable: false, reason: `this time could not be measured: ${errMessage4(err)}` }));
+      regions.forEach((_, ri) => rows[ri].push({ time, usable: false, reason: `this time could not be measured: ${errMessage5(err)}` }));
     }
   }
   return { rows, firstFrame, firstTime, blocked, notes, budget: budgetReport(budget, { renders: p.maxRenders, seconds: p.maxSeconds }, budgetSkipped), budgetSkipped };
@@ -39623,7 +41381,7 @@ async function regionStatsHandler(args, ctx) {
     copyTail = { temp_comp: { copy_removed: run.removed, switched_off: run.begun.switched_off }, checkpoint: run.checkpoint, receipt: run.receipt, ...run.sessionFields };
   } else {
     opId = ctx.bridge.newOpId();
-    const got = await runQueued5(ctx, label, opId, async () => {
+    const got = await runQueued6(ctx, label, opId, async () => {
       const i = await readHost2(ctx, opId, toolName, label, "info", { comp_id: args.comp_id });
       const pl = planFor(i.comp);
       try {
@@ -39632,7 +41390,7 @@ async function regionStatsHandler(args, ctx) {
         if (err instanceof PlanarError) return { refused: { ok: false, error: err.code, message: err.message } };
         throw err;
       }
-      fs35.mkdirSync(framesDir, { recursive: true });
+      fs37.mkdirSync(framesDir, { recursive: true });
       const s = await collectRegionStats({ ctx, opId, toolName, framesDir, compId: args.comp_id, info: i, plan: pl, regions, linear, ...budgetArgs });
       return { i, pl, s };
     });
@@ -39649,14 +41407,14 @@ async function regionStatsHandler(args, ctx) {
   let regionsPng;
   const fileErrors = [];
   try {
-    fs35.mkdirSync(framesDir, { recursive: true });
+    fs37.mkdirSync(framesDir, { recursive: true });
     seriesPath = writeJson2(framesDir, "regionstats", comp.id, {
       comp: { id: comp.id, name: comp.name },
       sampled: plan2,
       regions: regions.map((r, ri) => ({ name: r.name, shape: r.shape, ring: r.ring ?? null, rows: stats.rows[ri], summary: summaries[ri] }))
     });
   } catch (err) {
-    fileErrors.push(`series file: ${errMessage4(err)}`);
+    fileErrors.push(`series file: ${errMessage5(err)}`);
   }
   if (args.graph) {
     try {
@@ -39666,7 +41424,7 @@ async function regionStatsHandler(args, ctx) {
       }).filter((l) => l.values.length > 0);
       if (lines.length > 0) graphPath = writePngFile(framesDir, "regionstats_graph", comp.id, drawSeriesGraph(lines));
     } catch (err) {
-      fileErrors.push(`graph: ${errMessage4(err)}`);
+      fileErrors.push(`graph: ${errMessage5(err)}`);
     }
   }
   if (args.draw_regions && stats.firstFrame && stats.firstTime !== null) {
@@ -39676,7 +41434,7 @@ async function regionStatsHandler(args, ctx) {
       const drawn = regions.map((r) => ({ name: r.name, polygon: placedAt(r.shape, r.track, t0).polygon, ring: r.ring })).filter((r) => r.polygon !== null);
       regionsPng = writePngFile(framesDir, "regionstats_regions", comp.id, drawRegionsOverlay(frame, comp, drawn, args.max_size));
     } catch (err) {
-      fileErrors.push(`regions picture: ${errMessage4(err)}`);
+      fileErrors.push(`regions picture: ${errMessage5(err)}`);
     }
   }
   const measured = Math.max(0, ...stats.rows.map((r) => r.filter((x) => x.usable).length));
@@ -39727,13 +41485,13 @@ async function regionStatsHandler(args, ctx) {
     ...copyTail
   };
 }
-var crypto17, fs35, path34, MAX_SAMPLES, Num, PtSchema, RegionShapeSchema, HomographySchema, RegionTrackSchema, RegionTrackInputSchema, budgetFields, timesField2, SamplingFields, LumaSpace, AePatchCheckSchema, RegionDefSchema, AeRegionStatsSchema, r24, r34, r42, errMessage4, OUT_CAP, yieldLoop2, head2, MIN_POP_JUMP, unusable, scalePoly, severity, topTimes, CELL_BG, INK3, LABEL_BG, LINE_COLOURS, runQueued5, BLOCKED_NOTE2, writeJson2, writePngFile, BUDGET_SKIP, PATCH_SIZE, SLIP_MEMORY_CAP, PROBE_NOTE, COLOUR_NOTE, REGION_COLOURS, patchcheckTools;
+var crypto17, fs37, path35, MAX_SAMPLES, Num, PtSchema, RegionShapeSchema, HomographySchema, RegionTrackSchema, RegionTrackInputSchema, budgetFields, timesField2, SamplingFields, LumaSpace, AePatchCheckSchema, RegionDefSchema, AeRegionStatsSchema, r25, r35, r42, errMessage5, OUT_CAP, yieldLoop2, head2, MIN_POP_JUMP, unusable, scalePoly, severity, topTimes, CELL_BG, INK3, LABEL_BG, LINE_COLOURS, runQueued6, BLOCKED_NOTE2, writeJson2, writePngFile, BUDGET_SKIP, PATCH_SIZE, SLIP_MEMORY_CAP, PROBE_NOTE, COLOUR_NOTE, REGION_COLOURS, patchcheckTools;
 var init_patchcheck = __esm({
   "src/tools/ext/patchcheck.ts"() {
     "use strict";
     crypto17 = __toESM(require("node:crypto"), 1);
-    fs35 = __toESM(require("node:fs"), 1);
-    path34 = __toESM(require("node:path"), 1);
+    fs37 = __toESM(require("node:fs"), 1);
+    path35 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -39836,10 +41594,10 @@ var init_patchcheck = __esm({
       ...budgetFields(100),
       expect: ExpectSchema.optional().describe("Target guard. Required with `hide_layers`, ignored without it.")
     }).refine((v) => v.hide_layers === void 0 || v.expect !== void 0, { message: "hide_layers writes a temporary comp: give `expect` (project_path and optionally comp_id)." });
-    r24 = (v) => Math.round(v * 100) / 100;
-    r34 = (v) => Math.round(v * 1e3) / 1e3;
+    r25 = (v) => Math.round(v * 100) / 100;
+    r35 = (v) => Math.round(v * 1e3) / 1e3;
     r42 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage4 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage5 = (err) => err instanceof Error ? err.message : String(err);
     OUT_CAP = 500;
     yieldLoop2 = () => new Promise((r) => setImmediate(r));
     head2 = (l) => ({ index: l.index, id: l.id, name: l.name });
@@ -39861,7 +41619,7 @@ var init_patchcheck = __esm({
       [160, 160, 255, 255],
       [200, 200, 200, 255]
     ];
-    runQueued5 = async (ctx, label, opId, fn) => {
+    runQueued6 = async (ctx, label, opId, fn) => {
       try {
         return await ctx.queue.run(label, fn);
       } catch (err) {
@@ -39871,13 +41629,13 @@ var init_patchcheck = __esm({
     };
     BLOCKED_NOTE2 = "AE stopped responding during a render (often a modal dialog); the remaining frames were not rendered. Check ae_dialogs, then run again.";
     writeJson2 = (framesDir, tag, compId, data) => {
-      const file = path34.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.json`);
-      fs35.writeFileSync(file, JSON.stringify(data));
+      const file = path35.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.json`);
+      fs37.writeFileSync(file, JSON.stringify(data));
       return file;
     };
     writePngFile = (framesDir, tag, compId, png) => {
-      const file = path34.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.png`);
-      fs35.writeFileSync(file, encodePng(png));
+      const file = path35.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.png`);
+      fs37.writeFileSync(file, encodePng(png));
       return file;
     };
     BUDGET_SKIP = "render budget reached";
@@ -40109,7 +41867,7 @@ function buildTransformKeys(a) {
     out.scale.push([r43(dec.scale_pct[0]), r43(dec.scale_pct[1])]);
   }
   out.rotation = unwrapDegrees(out.rotation).map(r43);
-  out.max_fit_px = r25(maxFit);
+  out.max_fit_px = r26(maxFit);
   return out;
 }
 function transformKeysMatrix(k, i) {
@@ -40131,11 +41889,11 @@ function roundtripError(inner, outer, plate, size) {
   return worst;
 }
 function pickSheetTimes(frames, pivot, refTime) {
-  let ref2 = frames[0].time;
+  let ref3 = frames[0].time;
   let worst = frames[0].time;
   let worstD = -1;
   for (const f of frames) {
-    if (Math.abs(f.time - refTime) < Math.abs(ref2 - refTime)) ref2 = f.time;
+    if (Math.abs(f.time - refTime) < Math.abs(ref3 - refTime)) ref3 = f.time;
     const p = applyH(f.H, pivot);
     const d = p ? Math.hypot(p[0] - pivot[0], p[1] - pivot[1]) : 0;
     if (d > worstD) {
@@ -40143,7 +41901,7 @@ function pickSheetTimes(frames, pivot, refTime) {
       worst = f.time;
     }
   }
-  return { first: frames[0].time, ref: ref2, last: frames[frames.length - 1].time, worst };
+  return { first: frames[0].time, ref: ref3, last: frames[frames.length - 1].time, worst };
 }
 function evenSamples(times, n) {
   if (times.length <= n) return [...times];
@@ -40231,9 +41989,9 @@ function drawStabSheet(tiles, compSize, maxTile = 480) {
   return sheet;
 }
 function writeSheet2(dir, tag, png) {
-  fs36.mkdirSync(dir, { recursive: true });
-  const file = path35.join(dir, `stabilize_${tag}.png`);
-  fs36.writeFileSync(file, encodePng(png));
+  fs38.mkdirSync(dir, { recursive: true });
+  const file = path36.join(dir, `stabilize_${tag}.png`);
+  fs38.writeFileSync(file, encodePng(png));
   return file;
 }
 function meanAbsDiff(a, b) {
@@ -40299,15 +42057,15 @@ function checkPlate(ins, a) {
   if (a.target === "transform_effect") {
     const s = ins.transform.scale;
     if (Math.abs(s[0] - s[1]) > 1e-4 * Math.max(1, Math.abs(s[0]))) {
-      throw new PlanarError("refused", `${name} has a non-uniform Scale (${r25(s[0])}, ${r25(s[1])}); the Transform effect would need a skew. Use target layer_transform.`);
+      throw new PlanarError("refused", `${name} has a non-uniform Scale (${r26(s[0])}, ${r26(s[1])}); the Transform effect would need a skew. Use target layer_transform.`);
     }
   }
 }
 function planStabilize(track, ins, a) {
   const comp = [track.comp_size[0], track.comp_size[1]];
   const layerSize = [ins.layer.width, ins.layer.height];
-  const ref2 = plateSample(ins, track.ref_time);
-  const base = ref2.full;
+  const ref3 = plateSample(ins, track.ref_time);
+  const base = ref3.full;
   if (!invertH(base)) throw new PlanarError("refused", `Layer "${ins.layer.name}" has a Scale of 0, so it has no placement to stabilize.`);
   const pivot = a.pivot ?? pivotOf(track);
   const notes = [];
@@ -40341,7 +42099,7 @@ function planStabilize(track, ins, a) {
     if (ext2 && ext2.needed) {
       const pct2 = tileOutputPct(layerSize, ext2);
       tile = { output_w_pct: pct2.w, output_h_pct: pct2.h, extents: ext2 };
-      notes.push(`motion_tile: the plate is extended to ${pct2.w}% x ${pct2.h}% with Mirror Edges on, in front of the stabilizing, to cover the largest offset (${r25(Math.max(ext2.left, ext2.right, ext2.top, ext2.bottom))} px).`);
+      notes.push(`motion_tile: the plate is extended to ${pct2.w}% x ${pct2.h}% with Mirror Edges on, in front of the stabilizing, to cover the largest offset (${r26(Math.max(ext2.left, ext2.right, ext2.top, ext2.bottom))} px).`);
     } else {
       notes.push("motion_tile: no offset reaches past the plate's edges, so no Motion Tile was added.");
     }
@@ -40389,7 +42147,7 @@ function planStabilize(track, ins, a) {
     if (!exactModel) notes.push(`The ${track.model} track was fitted with a similarity for the Transform effect (largest corner deviation ${keys.max_fit_px} px). Use target corner_pin for the full perspective.`);
   } else {
     const pinFrames = frames.map((f) => ({ time: f.time, ok: true, H: f.D, points: [], confidence: [], rms_px: 0, inliers: 0 }));
-    const keys = buildLayerKeys({ mode: "corner_pin", frames: pinFrames, ref: ref2, samples: pinFrames.map(() => ref2), size: layerSize });
+    const keys = buildLayerKeys({ mode: "corner_pin", frames: pinFrames, ref: ref3, samples: pinFrames.map(() => ref3), size: layerSize });
     if (keys.times.length === 0) throw new PlanarError("bad_args", "No frame could be turned into Corner Pin keys (every frame was degenerate).");
     plan2.pin = keys;
     plan2.skipped = keys.skipped;
@@ -40452,7 +42210,7 @@ async function renderShot(ctx, opId, compId, time, index, framesDir, toolName) {
     const png = decodePngFile(s.path);
     return { time, gray: toGray(png), image: png };
   } finally {
-    fs36.rmSync(s.path, { force: true });
+    fs38.rmSync(s.path, { force: true });
   }
 }
 async function stabilize(ctx, args) {
@@ -40469,7 +42227,7 @@ async function stabilize(ctx, args) {
     const based = relativeTo(track2, refTime2);
     const refFrame = frameAt(based, refTime2);
     if (!refFrame || !refFrame.ok || !refFrame.H) {
-      throw new PlanarError("bad_args", `The reference frame at ${r25(refTime2)} s has no solved motion, so it cannot be the frame whose framing is kept. Pass a ref_time where the track is ok.`);
+      throw new PlanarError("bad_args", `The reference frame at ${r26(refTime2)} s has no solved motion, so it cannot be the frame whose framing is kept. Pass a ref_time where the track is ok.`);
     }
     const ins2 = await hostRead(ctx, opId, "inspect", "stabilizeInspect", { comp_id: args.comp_id, layer: args.layer, ref_time: refTime2 }, toolName);
     let target2;
@@ -40506,7 +42264,7 @@ async function stabilize(ctx, args) {
           await yieldLoop3();
         }
       } catch (err) {
-        beforeError = errMessage5(err);
+        beforeError = errMessage6(err);
       }
     }
     return { track: based, info, refTime: refTime2, ins: ins2, target: target2, plan: plan3, times, sheetTimes: sheetTimes2, before, beforeError };
@@ -40622,7 +42380,7 @@ async function stabilize(ctx, args) {
             budget.spend();
             afterRenders++;
           } catch (err) {
-            verifyError = errMessage5(err);
+            verifyError = errMessage6(err);
             break;
           }
           await yieldLoop3();
@@ -40664,7 +42422,7 @@ async function stabilize(ctx, args) {
       if (args.sheets) {
         try {
           const comp = track.comp_size;
-          const tiles = (list, mark, prefix) => list.map((s) => ({ image: s.image, label: `${prefix} t=${r25(s.time)}`, marks: mark(s.time).filter((p) => p !== null) }));
+          const tiles = (list2, mark, prefix) => list2.map((s) => ({ image: s.image, label: `${prefix} t=${r26(s.time)}`, marks: mark(s.time).filter((p) => p !== null) }));
           if (prep.before.length > 0) {
             const raw = (t) => {
               const tf = trackFrameAt(t);
@@ -40676,11 +42434,11 @@ async function stabilize(ctx, args) {
           if (sheetShots.length > 0) afterSheet = writeSheet2(framesDir, `${opId}_after`, drawStabSheet(tiles(sheetShots, expectedAt, "after"), comp));
           if (sheetShots.length < prep.sheetTimes.length || prep.before.length < prep.sheetTimes.length) sheetError ??= "The render budget ran out before every sheet frame was rendered; raise max_renders.";
         } catch (err) {
-          sheetError ??= errMessage5(err);
+          sheetError ??= errMessage6(err);
         }
       }
     } catch (err) {
-      verifyError ??= errMessage5(err);
+      verifyError ??= errMessage6(err);
     }
   }
   if (residual && residual.rms_px !== null) {
@@ -40697,12 +42455,12 @@ async function stabilize(ctx, args) {
     track_id: track.track_id,
     track_model: track.model,
     ref_time: r43(refTime),
-    pivot: [r25(plan2.pivot[0]), r25(plan2.pivot[1])],
+    pivot: [r26(plan2.pivot[0]), r26(plan2.pivot[1])],
     layer: { index: ins.layer.index, id: ins.layer.id, name: ins.layer.name },
     frames_written: keyTimes2.length,
     ...skipped.length ? { frames_skipped: skipped.slice(0, 100).map(r43), frames_skipped_total: skipped.length } : {},
     ...plan2.zoom !== null ? { zoom: plan2.zoom } : {},
-    ...plan2.tile ? { motion_tile: { ...written.tile, extents_px: { left: r25(plan2.tile.extents.left), right: r25(plan2.tile.extents.right), top: r25(plan2.tile.extents.top), bottom: r25(plan2.tile.extents.bottom) } } } : {},
+    ...plan2.tile ? { motion_tile: { ...written.tile, extents_px: { left: r26(plan2.tile.extents.left), right: r26(plan2.tile.extents.right), top: r26(plan2.tile.extents.top), bottom: r26(plan2.tile.extents.bottom) } } } : {},
     max_fit_px: plan2.max_fit_px,
     written: written.written ?? [],
     param_tables: {
@@ -40725,7 +42483,7 @@ async function stabilize(ctx, args) {
 function planRig(track, ins, a) {
   const comp = [track.comp_size[0], track.comp_size[1]];
   const layerSize = [ins.layer.width, ins.layer.height];
-  const ref2 = plateSample(ins, track.ref_time);
+  const ref3 = plateSample(ins, track.ref_time);
   const pivot = pivotOf(track);
   const corr = correctionFrames({ track, mode: "lock", smoothFrames: 0, pivot });
   if (corr.frames.length === 0) throw new PlanarError("bad_args", "No frame of the track is ok, so there is nothing to build the rig from.");
@@ -40738,7 +42496,7 @@ function planRig(track, ins, a) {
   if (W > 3e4 || Hh > 3e4) throw new PlanarError("bad_args", `The work comp would be ${W}x${Hh}, over After Effects' 30000 px limit. Use a smaller pad_px.`);
   const notes = [];
   const perspective = track.model === "perspective" || track.model === "affine";
-  const Mref = ref2.full;
+  const Mref = ref3.full;
   const Tp = translationH(p, p);
   const Tn = translationH(-p, -p);
   const Min = mulH(Tp, Mref);
@@ -40795,9 +42553,9 @@ function planRig(track, ins, a) {
   }
   const innerFrames = corr.frames.map((f) => ({ time: f.time, ok: true, H: Finner(f), points: [], confidence: [], rms_px: 0, inliers: 0 }));
   const outerFrames = corr.frames.map((f) => ({ time: f.time, ok: true, H: f.H, points: [], confidence: [], rms_px: 0, inliers: 0 }));
-  const innerSample = { ...ref2, position: [innerStatic.position[0], innerStatic.position[1]], full: Min };
+  const innerSample = { ...ref3, position: [innerStatic.position[0], innerStatic.position[1]], full: Min };
   const outerSample = {
-    time: ref2.time,
+    time: ref3.time,
     anchor: outerStatic.anchor,
     position: outerStatic.position,
     scale_pct: outerStatic.scale,
@@ -40907,7 +42665,7 @@ async function roundtripBuild(ctx, args) {
     const based = relativeTo(track2, refTime2);
     const refFrame = frameAt(based, refTime2);
     if (!refFrame || !refFrame.ok || !refFrame.H) {
-      throw new PlanarError("bad_args", `The reference frame at ${r25(refTime2)} s has no solved motion, so the steady image cannot be taken from it. Pass a ref_time where the track is ok.`);
+      throw new PlanarError("bad_args", `The reference frame at ${r26(refTime2)} s has no solved motion, so the steady image cannot be taken from it. Pass a ref_time where the track is ok.`);
     }
     const ins2 = await hostRead(ctx, opId, "inspect", "stabilizeInspect", { comp_id: args.comp_id, layer: args.plate, ref_time: refTime2 }, toolName);
     const kind = based.model === "perspective" || based.model === "affine" ? "corner_pin" : "transform";
@@ -40927,7 +42685,7 @@ async function roundtripBuild(ctx, args) {
           await yieldLoop3();
         }
       } catch (err) {
-        beforeError = errMessage5(err);
+        beforeError = errMessage6(err);
       }
     }
     return { track: based, info, refTime: refTime2, ins: ins2, plan: plan3, pad: pad2, sheetTimes: sheetTimes2, before, beforeError };
@@ -41018,7 +42776,7 @@ async function roundtripBuild(ctx, args) {
         const out = f ? outline.map((c) => applyH(f.H, c)) : null;
         return out && out.every((c) => c !== null) ? out : null;
       };
-      const tiles = (list, prefix) => list.map((s) => ({ image: s.image, label: `${prefix} t=${r25(s.time)}`, outline: moved(s.time) }));
+      const tiles = (list2, prefix) => list2.map((s) => ({ image: s.image, label: `${prefix} t=${r26(s.time)}`, outline: moved(s.time) }));
       beforeSheet = writeSheet2(framesDir, `${opId}_rig_before`, drawStabSheet(tiles(prep.before, "before"), track.comp_size));
       if (shots.length > 0) afterSheet = writeSheet2(framesDir, `${opId}_rig_after`, drawStabSheet(tiles(shots, "after"), track.comp_size));
       pictureDiff = shots.map((s) => {
@@ -41031,7 +42789,7 @@ async function roundtripBuild(ctx, args) {
       if (measured) guideSuspected = guidePlateRenders(pictureDiff, refFrameTime);
       if (guideSuspected) notes.push(`picture_change is above ${GUIDE_DIFF_THRESHOLD} at a frame away from the reference: the guide plate probably renders in the shot comp (the rig should leave the picture unchanged). Remove the rig and build it again with guide_mode opacity_switch.`);
     } catch (err) {
-      sheetError ??= errMessage5(err);
+      sheetError ??= errMessage6(err);
     }
   }
   if (args.sheet && guideSuspected === void 0) notes.push("The guide-plate check was not measured: no frame away from the reference was compared (the render budget ran out, a sheet render failed, or the frames could not be read); raise max_renders and run again.");
@@ -41060,7 +42818,7 @@ async function roundtripBuild(ctx, args) {
     ...afterSheet ? { after_sheet_path: afterSheet } : {},
     ...sheetError ? { sheet_error: sheetError } : {},
     how_to_use: [
-      `Open the work comp "${workName}" (id ${written.work_comp?.id}): the plate is steady there, ${pad} px of padding on each side. Frame ${r25(refTime)} s is the reference.`,
+      `Open the work comp "${workName}" (id ${written.work_comp?.id}): the plate is steady there, ${pad} px of padding on each side. Frame ${r26(refTime)} s is the reference.`,
       "Add patch layers inside the work comp as SEPARATE layers above the guide plate. Paint or masks on the guide plate itself never reach the shot comp, because a guide layer is not rendered there.",
       `Or run ae_cleanplate_setup (comp_id ${written.work_comp?.id}, plate {id: ${written.inner?.layer_id}}, no track) or ae_inpaint_plate (comp_id ${written.work_comp?.id}, plate_layer {id: ${written.inner?.layer_id}}, place_in_comp {comp_id: ${written.work_comp?.id}}: masked and centred, which matches the symmetric pad) on the work comp. Both render the plate copy, which must be visible there: with guide_mode guide_layer it is a guide layer and may render empty (unverified), with opacity_switch tick 'Show Stabilized Plate' on the rig layer first.`,
       `The rig layer sits directly above the plate in comp ${args.comp_id}; its comment holds pad_px ${pad}, ref_time ${r43(refTime)} and the track id, so other tools can place patches at the right offset.`,
@@ -41112,12 +42870,12 @@ async function roundtripRemove(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs36, path35, r25, r43, errMessage5, yieldLoop3, fail2, MAX_KEYS2, RESIDUAL_TARGET_PX, RIG_SCOPE, TRANSFORM_FX_PARAMS, TILE_FX_PARAMS, zoomAbout, MAX_SEARCH_ZOOM, AeStabilizeSchema, sampleIdx2, sampleTimes, uniqSorted, AeStabilizeRoundtripSchema, defaultPad, GUIDE_DIFF_THRESHOLD, patchOutline, stabilizeTools;
+var fs38, path36, r26, r43, errMessage6, yieldLoop3, fail2, MAX_KEYS2, RESIDUAL_TARGET_PX, RIG_SCOPE, TRANSFORM_FX_PARAMS, TILE_FX_PARAMS, zoomAbout, MAX_SEARCH_ZOOM, AeStabilizeSchema, sampleIdx2, sampleTimes, uniqSorted, AeStabilizeRoundtripSchema, defaultPad, GUIDE_DIFF_THRESHOLD, patchOutline, stabilizeTools;
 var init_stabilize = __esm({
   "src/tools/ext/stabilize.ts"() {
     "use strict";
-    fs36 = __toESM(require("node:fs"), 1);
-    path35 = __toESM(require("node:path"), 1);
+    fs38 = __toESM(require("node:fs"), 1);
+    path36 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -41130,9 +42888,9 @@ var init_stabilize = __esm({
     init_png_utils();
     init_track();
     init_write_runner();
-    r25 = (v) => Math.round(v * 100) / 100;
+    r26 = (v) => Math.round(v * 100) / 100;
     r43 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage5 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage6 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop3 = () => new Promise((r) => setImmediate(r));
     fail2 = (e) => ({ ok: false, error: e.code, message: e.message });
     MAX_KEYS2 = 3e3;
@@ -41288,10 +43046,10 @@ function regionsDiagonal(regions) {
   return Math.hypot(b[2] - b[0], b[3] - b[1]);
 }
 function maskParams(o) {
-  const feather = r26(o.feather !== void 0 ? o.feather : Math.max(0.5, o.diagonal * 0.02));
+  const feather = r27(o.feather !== void 0 ? o.feather : Math.max(0.5, o.diagonal * 0.02));
   const wanted = o.expansion !== void 0 ? o.expansion : feather / 2;
   const floor = feather / 2;
-  return { feather, expansion: r26(Math.max(wanted, floor)), raised: o.expansion !== void 0 && o.expansion < floor };
+  return { feather, expansion: r27(Math.max(wanted, floor)), raised: o.expansion !== void 0 && o.expansion < floor };
 }
 function patchTrackMode(model) {
   return model === "translate" || model === "similarity" ? "transform" : "transform_pin";
@@ -41304,8 +43062,8 @@ function patchTrackKeys(track, size, range) {
   if (frames.length === 0) throw badArgs2("No frame of the track is ok inside that range, so there is nothing to track the patch with.");
   const c = [size[0] / 2, size[1] / 2];
   const base = { time: 0, anchor: c, position: c, scale: [100, 100], rotation: 0, parent_chain: [], three_d: false };
-  const ref2 = layerSampleOf(base);
-  const keys = buildLayerKeys({ mode, frames, ref: ref2, samples: frames.map((f) => layerSampleOf({ ...base, time: f.time })), size });
+  const ref3 = layerSampleOf(base);
+  const keys = buildLayerKeys({ mode, frames, ref: ref3, samples: frames.map((f) => layerSampleOf({ ...base, time: f.time })), size });
   return { mode, keys, not_ok: inRange.filter((f) => !(f.ok && f.H !== null)).map((f) => f.time) };
 }
 function cloneShifts(a) {
@@ -41371,30 +43129,30 @@ function scoreFrames(rows, o) {
     const trackN = (r.confidence ?? 1) * (r.rms_px === null ? 1 : 1 / (1 + r.rms_px / 3));
     const coverN = Math.pow(r.coverage, 4);
     const cleanN = r.distance === null ? null : 1 / (1 + Math.max(0, r.distance - dMin) / CLEAN_SCALE);
-    let total = w.sharp * sharpN + w.motion * motionN + w.track * trackN + w.cover * coverN;
-    if (o.moving) total += w.clean * (cleanN ?? 0.5);
+    let total2 = w.sharp * sharpN + w.motion * motionN + w.track * trackN + w.cover * coverN;
+    if (o.moving) total2 += w.clean * (cleanN ?? 0.5);
     const midFactor = 0.9 + 0.1 * (1 - Math.min(1, Math.abs(r.time - mid) / half));
     const reasons = [];
     if (sharpN >= 0.9) reasons.push("sharp");
     else if (sharpN < 0.5) reasons.push("soft (motion blur or defocus)");
-    if (r.speed !== null) reasons.push(r.speed <= 0.5 ? "little motion" : r.speed > 3 ? `fast motion (${r26(r.speed)} px/frame): motion blur likely` : `${r26(r.speed)} px/frame`);
-    if (r.confidence !== null) reasons.push(r.confidence >= 0.9 ? "track confident" : `track confidence ${r26(r.confidence)}`);
+    if (r.speed !== null) reasons.push(r.speed <= 0.5 ? "little motion" : r.speed > 3 ? `fast motion (${r27(r.speed)} px/frame): motion blur likely` : `${r27(r.speed)} px/frame`);
+    if (r.confidence !== null) reasons.push(r.confidence >= 0.9 ? "track confident" : `track confidence ${r27(r.confidence)}`);
     if (cleanN !== null) reasons.push(cleanN >= 0.9 ? "hole area is clean" : cleanN < 0.5 ? "something else is in the hole area" : "hole area partly differs from the median");
     if (r.coverage < 0.999) reasons.push(`${Math.round(r.coverage * 100)}% of the region in frame`);
-    return { ...r, score: r44(total * midFactor), cleanliness: cleanN === null ? null : r44(cleanN), reasons };
+    return { ...r, score: r44(total2 * midFactor), cleanliness: cleanN === null ? null : r44(cleanN), reasons };
   });
 }
 function planPickFrames(o) {
   const fps = o.fps > 0 ? o.fps : 24;
   const f0 = Math.round(o.start * fps);
   const f1 = Math.max(f0, Math.round(o.end * fps));
-  const total = f1 - f0 + 1;
+  const total2 = f1 - f0 + 1;
   let step2 = Math.max(1, o.everyN);
   const count = (s) => Math.floor((f1 - f0) / s) + 1;
   while (count(step2) > o.maxRenders) step2++;
   const times = [];
   for (let f = f0; f <= f1; f += step2) times.push(f / fps);
-  return { times, total, step: step2 };
+  return { times, total: total2, step: step2 };
 }
 function alignGridFor(poly, maxSide = 96, margin = 2) {
   const b = polygonBounds(poly);
@@ -41513,7 +43271,7 @@ function findSpatialSources(gray, scale, poly, o) {
         varB += (bvals[k] - meanB) * (bvals[k] - meanB);
       }
       if (varB < 1e-6) continue;
-      found.push({ dx: r26(dx / scale), dy: r26(dy / scale), nssd: r44(1 - cov / Math.sqrt(varA * varB)) });
+      found.push({ dx: r27(dx / scale), dy: r27(dy / scale), nssd: r44(1 - cov / Math.sqrt(varA * varB)) });
     }
   }
   found.sort((p, q) => p.nssd - q.nssd);
@@ -41586,9 +43344,9 @@ function drawSheet(tiles, o) {
   return sheet;
 }
 function writeSheetFile(dir, tag, sheet) {
-  fs37.mkdirSync(dir, { recursive: true });
-  const file = path36.join(dir, `cleanplate_${tag}.png`);
-  fs37.writeFileSync(file, encodePng(sheet));
+  fs39.mkdirSync(dir, { recursive: true });
+  const file = path37.join(dir, `cleanplate_${tag}.png`);
+  fs39.writeFileSync(file, encodePng(sheet));
   return file;
 }
 async function queued4(ctx, label, opId, fn) {
@@ -41649,7 +43407,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     try {
       return decodePngFile(s.path);
     } finally {
-      fs37.rmSync(s.path, { force: true });
+      fs39.rmSync(s.path, { force: true });
     }
   };
   for (let i = 0; i < plan2.times.length; i++) {
@@ -41678,7 +43436,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     try {
       png = await snap2(t, i);
     } catch (err) {
-      renderError = errMessage6(err);
+      renderError = errMessage7(err);
       break;
     }
     rendered++;
@@ -41761,7 +43519,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
         spatial = findSpatialSources(toGray(png), png.width / compSize[0], bPoly, { ringPx, count: 3, clearancePx: mp.expansion + mp.feather / 2 });
       }
     } catch (err) {
-      renderError = renderError ?? errMessage6(err);
+      renderError = renderError ?? errMessage7(err);
     }
   }
   if (moving && best) temporal.push(...temporalSources(scored, { fps, step: plan2.step, count: 3 }));
@@ -41771,11 +43529,11 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     try {
       const tiles = ranked.slice(0, 5).map((r, n) => {
         const i = scored.indexOf(r);
-        return { image: thumbs[i], poly: polys[i], label: `#${n + 1} t=${r26(r.time)} s=${r.score}` };
+        return { image: thumbs[i], poly: polys[i], label: `#${n + 1} t=${r27(r.time)} s=${r.score}` };
       });
       sheet = writeSheetFile(framesDir, `pick_${opId}`, drawSheet(tiles, { cols: 3, compSize }));
     } catch (err) {
-      sheetError = errMessage6(err);
+      sheetError = errMessage7(err);
     }
   }
   return {
@@ -41801,7 +43559,7 @@ async function pick(ctx, args) {
   const toolName = "ae_cleanplate_pick";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs37.mkdirSync(framesDir, { recursive: true });
+  fs39.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName}(${args.comp_id})`;
   checkRegion(args.region);
   if (args.start !== void 0 && args.end !== void 0 && args.end < args.start) throw badArgs2("end is before start.");
@@ -41825,7 +43583,7 @@ async function pick(ctx, args) {
     const regionTime = snapFrame2(args.region_time ?? track?.ref_time ?? (start + end) / 2, fps);
     if (track) {
       const rf = frameAt(relativeTo(track, regionTime), regionTime);
-      if (!rf || !rf.ok || !rf.H) throw badArgs2(`The track has no solved motion at region_time ${r26(regionTime)} s, so the region cannot be moved with it. Give region_time at a frame the track solved (the track's own ref_time is the default).`);
+      if (!rf || !rf.ok || !rf.H) throw badArgs2(`The track has no solved motion at region_time ${r27(regionTime)} s, so the region cannot be moved with it. Give region_time at a frame the track solved (the track's own ref_time is the default).`);
     }
     if (!expect) return { value: await pickCore(ctx, args, opId, info, args.comp_id, track, regionTime, framesDir, newBudget()), temp: null, checkpoint: null, sessionFields: {} };
     const plateInfo = info.plate;
@@ -41848,7 +43606,7 @@ async function pick(ctx, args) {
     } catch (err) {
       const temp2 = err.plateTemp;
       if (temp2) await noteWritten(ctx, note);
-      if (temp2) return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage6(err), temp: temp2, checkpoint, sessionFields } };
+      if (temp2) return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage7(err), temp: temp2, checkpoint, sessionFields } };
       throw err;
     }
   });
@@ -41875,7 +43633,7 @@ async function pick(ctx, args) {
   if (temp) notes.push("isolate made a temporary copy of the comp and removed it again: two undo entries, one for each.");
   if (!v.best) notes.push("No frame could be scored: check the track (frames not ok), the region (inside the frame?) and the range.");
   const visible = v.rows.filter((r) => r.usable).sort((a, b) => b.score - a.score);
-  const regionAtBest = v.bestPoly ? { polygon: v.bestPoly.map((p) => [r26(p[0]), r26(p[1])]) } : null;
+  const regionAtBest = v.bestPoly ? { polygon: v.bestPoly.map((p) => [r27(p[0]), r27(p[1])]) } : null;
   const asked = args.track ? { track: args.track } : {};
   return {
     ok: true,
@@ -41929,9 +43687,9 @@ function tempMismatch(temp) {
 }
 function uniqueStillPath(dir, plateName, frame) {
   const base = `${sanitize3(plateName)} still f${frame}`;
-  let file = path36.join(dir, `${base}.png`);
-  for (let n = 2; fs37.existsSync(file) && n < 1e3; n++) file = path36.join(dir, `${base} ${n}.png`);
-  if (fs37.existsSync(file)) throw new PlanarError("refused", `Every name '${base} N.png' up to 999 is taken in ${dir}; nothing was overwritten. Move or delete old stills there.`);
+  let file = path37.join(dir, `${base}.png`);
+  for (let n = 2; fs39.existsSync(file) && n < 1e3; n++) file = path37.join(dir, `${base} ${n}.png`);
+  if (fs39.existsSync(file)) throw new PlanarError("refused", `Every name '${base} N.png' up to 999 is taken in ${dir}; nothing was overwritten. Move or delete old stills there.`);
   return file;
 }
 function planSetup(a) {
@@ -41985,7 +43743,7 @@ async function renderTiles(ctx, opId, tag, compId, times, framesDir, toolName) {
       const fit = fitWithin(png.width, png.height, 720);
       out.push({ time: times[i], image: resizeArea(png, fit.width, fit.height) });
     } finally {
-      fs37.rmSync(s.path, { force: true });
+      fs39.rmSync(s.path, { force: true });
     }
     await yieldLoop4();
   }
@@ -42081,7 +43839,7 @@ async function setupBuild(ctx, args) {
   const toolName = "ae_cleanplate_setup";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs37.mkdirSync(framesDir, { recursive: true });
+  fs39.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName}(${args.comp_id})`;
   const regionList = args.regions ?? (args.region ? [args.region] : []);
   regionList.forEach((r, i) => checkRegion(r, regionList.length > 1 ? `regions[${i}]` : "region"));
@@ -42107,9 +43865,9 @@ async function setupBuild(ctx, args) {
     const askedRef = refTime;
     refTime = snapFrame2(refTime, fps);
     if (Math.abs(refTime - askedRef) > 1e-6) notes.push(`ref_time ${r44(askedRef)} s was snapped to the frame grid: ${r44(refTime)} s (frame ${Math.round(refTime * fps)}). The freeze, the still, the track re-base and the patch name all use that frame.`);
-    if (refTime >= c2.duration - 1e-6) throw badArgs2(`ref_time ${r26(refTime)} s is at or past the end of the comp (${r26(c2.duration)} s): choose a time inside it.`);
+    if (refTime >= c2.duration - 1e-6) throw badArgs2(`ref_time ${r27(refTime)} s is at or past the end of the comp (${r27(c2.duration)} s): choose a time inside it.`);
     if (refTime < plate.in_point - 1e-6 || refTime >= plate.out_point - 1e-6) {
-      throw badArgs2(`ref_time ${r26(refTime)} s is outside the plate layer's in/out (${r26(plate.in_point)} to ${r26(plate.out_point)} s): a freeze would hold the clamped first or last frame and a still would be empty, while the track is re-based at ref_time. Choose a time where the plate is visible.`);
+      throw badArgs2(`ref_time ${r27(refTime)} s is outside the plate layer's in/out (${r27(plate.in_point)} to ${r27(plate.out_point)} s): a freeze would hold the clamped first or last frame and a still would be empty, while the track is re-based at ref_time. Choose a time where the plate is visible.`);
     }
     if (plate.locked) throw new PlanarError("refused", `The plate layer "${plate.name}" is locked.`);
     if (plate.three_d) throw new PlanarError("refused", `The plate layer "${plate.name}" is a 3D layer; the patch tools work in 2D only.`);
@@ -42140,7 +43898,7 @@ async function setupBuild(ctx, args) {
       }
       track = relativeTo(track, refTime);
       const rf = frameAt(track, refTime);
-      if (!rf || !rf.ok || !rf.H) throw badArgs2(`The track has no solved motion at ref_time ${r26(refTime)} s, so it cannot be the frame the patch looks right at. Choose a ref_time inside the tracked range (ae_cleanplate_pick recommends one).`);
+      if (!rf || !rf.ok || !rf.H) throw badArgs2(`The track has no solved motion at ref_time ${r27(refTime)} s, so it cannot be the frame the patch looks right at. Choose a ref_time inside the tracked range (ae_cleanplate_pick recommends one).`);
     }
     const plan2 = planSetup({ args, track, size: [c2.width, c2.height], shapes, centre: centre2 });
     const local = [];
@@ -42174,7 +43932,7 @@ async function setupBuild(ctx, args) {
       const spatialClear = Math.abs(args.offset.dx) >= ub[2] - ub[0] + rim || Math.abs(args.offset.dy) >= ub[3] - ub[1] + rim;
       if (!spatialClear && args.offset.frames === 0) {
         cloneFix = "small";
-        local.push(`The offset is smaller than the hole plus the mask rim (${r26(rim)} px): the clone still contains the object. Move it at least the hole's size plus the rim.`);
+        local.push(`The offset is smaller than the hole plus the mask rim (${r27(rim)} px): the clone still contains the object. Move it at least the hole's size plus the rim.`);
       } else if (!spatialClear && args.clean_frame !== true) {
         cloneFix = "time";
         local.push("The clone is shifted in time only (the spatial offset does not clear the hole): it removes the object only if the object is not in the hole on the offset frame. A static object, or a locked-off shot where it stays, is shown again. Pass clean_frame: true once you checked that (ae_cleanplate_pick in moving_occluder mode lists clean offsets).");
@@ -42192,7 +43950,7 @@ async function setupBuild(ctx, args) {
       if (uncovered.length > 0) {
         trim = { start: Math.max(plan2.span.start, visIn), end: Math.min(spanEnd, visOut) };
         local.push(
-          `The track (or range) keys the patch only from ${r26(plan2.span.start)} s to ${r26(spanEnd)} s, but the plate shows in the comp from ${r26(visIn)} to ${r26(visOut)} s. The patch layer is trimmed to the keyed span (the result says whether the read-back confirmed it); ${uncovered.map((u) => `${r26(u.start)}-${r26(u.end)} s`).join(" and ")} show the plate WITHOUT the patch. Continue the track (ae_track_multi continue_track_id) or re-track, then run this again.`
+          `The track (or range) keys the patch only from ${r27(plan2.span.start)} s to ${r27(spanEnd)} s, but the plate shows in the comp from ${r27(visIn)} to ${r27(visOut)} s. The patch layer is trimmed to the keyed span (the result says whether the read-back confirmed it); ${uncovered.map((u) => `${r27(u.start)}-${r27(u.end)} s`).join(" and ")} show the plate WITHOUT the patch. Continue the track (ae_track_multi continue_track_id) or re-track, then run this again.`
         );
       }
     }
@@ -42210,7 +43968,7 @@ async function setupBuild(ctx, args) {
     try {
       before = await renderTiles(ctx, opId, "before", args.comp_id, times, framesDir, toolName);
     } catch (err) {
-      beforeError = errMessage6(err);
+      beforeError = errMessage7(err);
     }
     let stillPath;
     let isolate = null;
@@ -42225,15 +43983,15 @@ async function setupBuild(ctx, args) {
       sessionFields = await noteBeforeWrite(ctx, note);
       let made = "";
       try {
-        fs37.mkdirSync(dir, { recursive: true });
+        fs39.mkdirSync(dir, { recursive: true });
         const iso = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers: [{ index: plate.index, id: plate.id }], expect: expectGuard, toolName, note }, async (copyId) => {
           const s = await captureCompFrame({ ctx, opId, compId: copyId, time: refTime, frameIndex: 0, framesDir, toolName });
           try {
             const target = uniqueStillPath(dir, plate.name, Math.round(refTime * fps));
-            fs37.copyFileSync(s.path, target, fs37.constants.COPYFILE_EXCL);
+            fs39.copyFileSync(s.path, target, fs39.constants.COPYFILE_EXCL);
             made = target;
           } finally {
-            fs37.rmSync(s.path, { force: true });
+            fs39.rmSync(s.path, { force: true });
           }
         });
         isolate = iso.temp;
@@ -42241,18 +43999,18 @@ async function setupBuild(ctx, args) {
         stillPath = made;
         const png = decodePngFile(stillPath);
         if (png.width !== c2.width || png.height !== c2.height) {
-          fs37.rmSync(stillPath, { force: true });
+          fs39.rmSync(stillPath, { force: true });
           throw new PlanarError("refused", `The rendered still is ${png.width}x${png.height} and the comp is ${c2.width}x${c2.height}: the comp's resolution is not Full. Nothing was imported.`);
         }
       } catch (err) {
         const temp = err.plateTemp ?? isolate;
         if (!temp) throw err;
         if (!isolate) await noteWritten(ctx, note);
-        if (made && fs37.existsSync(made) && !stillPath) fs37.rmSync(made, { force: true });
+        if (made && fs39.existsSync(made) && !stillPath) fs39.rmSync(made, { force: true });
         return {
           failure: {
             error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage6(err),
+            message: errMessage7(err),
             temp,
             checkpoint,
             sessionFields
@@ -42356,22 +44114,22 @@ async function setupBuild(ctx, args) {
   try {
     const after = await queued4(ctx, `${label} after`, opId, () => renderTiles(ctx, opId, "after", args.comp_id, prep.times, framesDir, toolName));
     const tiles = [];
-    for (const b of prep.before) tiles.push({ image: b.image, poly: outlineAt(polys, prep.track, b.time), label: `BEFORE t=${r26(b.time)}` });
-    for (const a of after) tiles.push({ image: a.image, poly: outlineAt(polys, prep.track, a.time), label: `AFTER t=${r26(a.time)}` });
+    for (const b of prep.before) tiles.push({ image: b.image, poly: outlineAt(polys, prep.track, b.time), label: `BEFORE t=${r27(b.time)}` });
+    for (const a of after) tiles.push({ image: a.image, poly: outlineAt(polys, prep.track, a.time), label: `AFTER t=${r27(a.time)}` });
     if (prep.before.length === after.length && after.length > 0) {
       sheetPath = writeSheetFile(framesDir, `setup_${opId}`, drawSheet(tiles, { cols: after.length, compSize: [c.width, c.height] }));
     } else {
       sheetError = sheetError ?? "The before frames could not be rendered, so there is no before/after sheet.";
     }
   } catch (err) {
-    sheetError = errMessage6(err);
+    sheetError = errMessage7(err);
   }
   const w = result;
   const readPatch = kept.inspect?.patch ?? null;
   const trimOk = trimExpect !== null && trimConfirmed(readPatch, trimExpect);
   if (trimExpect) {
     notes.push(
-      trimOk ? `The patch layer is trimmed to the keyed span (${r26(readPatch?.in_point ?? 0)}-${r26(readPatch?.out_point ?? 0)} s, confirmed by the read-back).` : `The trim of the patch layer to the keyed span (${r26(trimExpect.start)}-${r26(trimExpect.end)} s) was NOT confirmed by the read-back: AE holds the last key over the uncovered stretch until you trim the layer's in and out points to that span yourself.`
+      trimOk ? `The patch layer is trimmed to the keyed span (${r27(readPatch?.in_point ?? 0)}-${r27(readPatch?.out_point ?? 0)} s, confirmed by the read-back).` : `The trim of the patch layer to the keyed span (${r27(trimExpect.start)}-${r27(trimExpect.end)} s) was NOT confirmed by the read-back: AE holds the last key over the uncovered stretch until you trim the layer's in and out points to that span yourself.`
     );
   }
   const needsFix = (args.source === "freeze" || args.source === "still") && args.clean_frame !== true && args.still_footage_id === void 0 || args.source === "clone_offset" && prep.cloneFix !== null;
@@ -42433,7 +44191,7 @@ async function setupReload(ctx, args) {
   const toolName = "ae_cleanplate_setup";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs37.mkdirSync(framesDir, { recursive: true });
+  fs39.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName} reload(${args.comp_id})`;
   const expectGuard = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const prep = await queued4(ctx, `${label} prepare`, opId, async () => {
@@ -42445,7 +44203,7 @@ async function setupReload(ctx, args) {
     try {
       before = await renderTiles(ctx, opId, "before", args.comp_id, times, framesDir, toolName);
     } catch (e) {
-      err = errMessage6(e);
+      err = errMessage7(e);
     }
     return { info, times, before, err };
   });
@@ -42475,13 +44233,13 @@ async function setupReload(ctx, args) {
     if (prep.before.length === after.length && after.length > 0) {
       const size = [prep.info.comp.width, prep.info.comp.height];
       const tiles = [
-        ...prep.before.map((b) => ({ image: b.image, poly: null, label: `BEFORE t=${r26(b.time)}` })),
-        ...after.map((a) => ({ image: a.image, poly: null, label: `AFTER t=${r26(a.time)}` }))
+        ...prep.before.map((b) => ({ image: b.image, poly: null, label: `BEFORE t=${r27(b.time)}` })),
+        ...after.map((a) => ({ image: a.image, poly: null, label: `AFTER t=${r27(a.time)}` }))
       ];
       sheetPath = writeSheetFile(framesDir, `reload_${opId}`, drawSheet(tiles, { cols: after.length, compSize: size }));
     }
   } catch (e) {
-    sheetError = errMessage6(e);
+    sheetError = errMessage7(e);
   }
   const w = result;
   return {
@@ -42499,12 +44257,12 @@ async function setupReload(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs37, path36, r26, r44, errMessage6, yieldLoop4, failOut, badArgs2, OUT_CAP2, MAX_CLONE_FRAMES, MAX_CLONE_POINTS, MAX_MASK_PX, MAX_REGIONS, SHEET_TILE, KAPPA, MIN_COVERAGE, CLEAN_SCALE, OCCLUDED_BELOW, CLEAN_FROM, snapFrame2, RegionTimeField, AeCleanplatePickSchema, OffsetSchema, AeCleanplateSetupSchema, sanitize3, CHAIN_NOTE, cleanplateTools;
+var fs39, path37, r27, r44, errMessage7, yieldLoop4, failOut, badArgs2, OUT_CAP2, MAX_CLONE_FRAMES, MAX_CLONE_POINTS, MAX_MASK_PX, MAX_REGIONS, SHEET_TILE, KAPPA, MIN_COVERAGE, CLEAN_SCALE, OCCLUDED_BELOW, CLEAN_FROM, snapFrame2, RegionTimeField, AeCleanplatePickSchema, OffsetSchema, AeCleanplateSetupSchema, sanitize3, CHAIN_NOTE, cleanplateTools;
 var init_cleanplate = __esm({
   "src/tools/ext/cleanplate.ts"() {
     "use strict";
-    fs37 = __toESM(require("node:fs"), 1);
-    path36 = __toESM(require("node:path"), 1);
+    fs39 = __toESM(require("node:fs"), 1);
+    path37 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -42521,9 +44279,9 @@ var init_cleanplate = __esm({
     init_session();
     init_track();
     init_write_runner();
-    r26 = (v) => Math.round(v * 100) / 100;
+    r27 = (v) => Math.round(v * 100) / 100;
     r44 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage6 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage7 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop4 = () => new Promise((r) => setImmediate(r));
     failOut = (e) => ({ ok: false, error: e.code, message: e.message });
     badArgs2 = (message) => new PlanarError("bad_args", message);
@@ -42737,10 +44495,10 @@ function warpCrop(src, H, bbox, scale = 1) {
   }
   return { width: w, height: h, data: out };
 }
-function matchColor(sample, ref2, ring) {
+function matchColor(sample, ref3, ring) {
   const mask = new Float32Array(ring.length);
   for (let i = 0; i < ring.length; i++) if (ring[i] && sample.data[i * 4 + 3] === 255) mask[i] = 1;
-  const fit = fitGainOffset(ref2, sample, mask, { trimPct: 10, excludeClipped: true });
+  const fit = fitGainOffset(ref3, sample, mask, { trimPct: 10, excludeClipped: true });
   const base = { gain: fit.gain, offset: fit.offset, pixels: fit.pixels };
   if (fit.pixels < 50) return { applied: false, ...base, reason: "fewer than 50 usable ring pixels" };
   if (fit.gain.some((g) => !(g > 0.5 && g < 2))) return { applied: false, ...base, badGain: true, reason: "the fitted gain is outside 0.5..2 (the ring does not match: bad track or parallax)" };
@@ -42754,7 +44512,7 @@ function matchColor(sample, ref2, ring) {
   }
   return { applied: true, ...base };
 }
-async function medianStack(samples, hole, ref2, opts) {
+async function medianStack(samples, hole, ref3, opts) {
   const n = hole.length;
   const rgb = new Float32Array(n * 3);
   const count = new Uint16Array(n);
@@ -42765,8 +44523,8 @@ async function medianStack(samples, hole, ref2, opts) {
   const cap2 = Math.max(1, samples.length);
   const bufs = [new Float32Array(cap2), new Float32Array(cap2), new Float32Array(cap2)];
   const devs = new Float32Array(cap2);
-  const rd = ref2.data;
-  const w = ref2.width;
+  const rd = ref3.data;
+  const w = ref3.width;
   for (let p = 0; p < n; p++) {
     if (opts.tick && p % (w * 16) === 0 && p > 0) await opts.tick();
     if (!hole[p]) continue;
@@ -43162,14 +44920,14 @@ async function patchMatchFill(plane, unknown, opts = {}) {
   return { plane: full.plane, levels: 2, sourcePatches: fine.sources, fallback: fine.sources === 0 };
 }
 async function gatherSamples(inp) {
-  const { ref: ref2 } = inp;
-  const hs = prepareHole(ref2.width, ref2.height, inp.comp, inp.polygons, inp.growPx, inp.ringGapPx, inp.ringPx);
+  const { ref: ref3 } = inp;
+  const hs = prepareHole(ref3.width, ref3.height, inp.comp, inp.polygons, inp.growPx, inp.ringGapPx, inp.ringPx);
   if (hs.share > MAX_HOLE_SHARE) {
     throw new InpaintError("refused", `The hole covers ${(hs.share * 100).toFixed(1)}% of the frame; the limit is ${MAX_HOLE_SHARE * 100}%. Fill it in parts.`);
   }
   const { x0, y0, w, h } = hs.crop;
-  const refCrop = cropRgba(ref2, x0, y0, w, h);
-  const total = w * h;
+  const refCrop = cropRgba(ref3, x0, y0, w, h);
+  const total2 = w * h;
   const samples = [];
   const bbox = [x0, y0, x0 + w, y0 + h];
   let skipped = 0;
@@ -43188,13 +44946,13 @@ async function gatherSamples(inp) {
         break;
       }
       const frame = await inp.getFrame(s.time);
-      if (!frame || frame.width !== ref2.width || frame.height !== ref2.height) {
+      if (!frame || frame.width !== ref3.width || frame.height !== ref3.height) {
         skipped++;
         continue;
       }
       const warped = warpCrop(frame, s.H, bbox, hs.scale);
       let overlap = 0;
-      for (let i = 0; i < total; i++) if (hs.hole[i] && warped.data[i * 4 + 3] === 255) overlap++;
+      for (let i = 0; i < total2; i++) if (hs.hole[i] && warped.data[i * 4 + 3] === 255) overlap++;
       if (overlap < hs.holePixels * 0.02) {
         skipped++;
         continue;
@@ -43214,12 +44972,12 @@ async function gatherSamples(inp) {
   return { hs, refCrop, samples, skipped, matched, matchSkipped, matchRejected, stopped, notRendered };
 }
 async function fillFromGathered(inp, g) {
-  const { ref: ref2 } = inp;
+  const { ref: ref3 } = inp;
   const { hs, refCrop, samples, skipped, matched, matchSkipped, matchRejected, stopped } = g;
   const { x0, y0, w, h } = hs.crop;
-  const total = w * h;
+  const total2 = w * h;
   const notes = [];
-  const classes = new Uint8Array(total);
+  const classes = new Uint8Array(total2);
   const plane = planeFromRgba(refCrop);
   let stack = null;
   if (inp.method !== "spatial" && inp.samples.length > 0) {
@@ -43228,7 +44986,7 @@ async function fillFromGathered(inp, g) {
     }
   }
   if (inp.method === "temporal" && !stack) notes.push("No usable sample frame, so nothing was filled temporally.");
-  const unknown = new Uint8Array(total);
+  const unknown = new Uint8Array(total2);
   let tempOk = 0;
   let tempLow = 0;
   let countMin = Infinity;
@@ -43236,7 +44994,7 @@ async function fillFromGathered(inp, g) {
   let countSum = 0;
   let countN = 0;
   let spreadSum = 0;
-  for (let i = 0; i < total; i++) {
+  for (let i = 0; i < total2; i++) {
     if (!hs.hole[i]) continue;
     if (stack && stack.filled[i]) {
       for (let c = 0; c < 3; c++) plane.data[i * 3 + c] = stack.rgb[i * 3 + c];
@@ -43275,28 +45033,28 @@ async function fillFromGathered(inp, g) {
       if (!res.ok) notes.push("The crop holds no known pixel to fill from.");
       else if (res.residual > 0.05) notes.push(`The diffusion fill stopped before it settled (residual ${res.residual.toFixed(3)}).`);
     }
-    for (let i = 0; i < total; i++) {
+    for (let i = 0; i < total2; i++) {
       if (!unknown[i]) continue;
       for (let c = 0; c < 3; c++) plane.data[i * 3 + c] = filledPlane.data[i * 3 + c];
       classes[i] = CLS.SPATIAL;
       spatialN++;
     }
   } else if (remaining > 0) {
-    for (let i = 0; i < total; i++) if (unknown[i]) classes[i] = CLS.UNFILLED;
+    for (let i = 0; i < total2; i++) if (unknown[i]) classes[i] = CLS.UNFILLED;
     notes.push(`${remaining} hole pixels were never revealed in the sampled frames and were left as they are (method temporal).`);
   }
   const fillCrop = planeToRgba(plane);
-  for (let i = 0; i < total; i++) {
+  for (let i = 0; i < total2; i++) {
     if (!hs.hole[i] || classes[i] === CLS.UNFILLED) {
       for (let c = 0; c < 4; c++) fillCrop.data[i * 4 + c] = refCrop.data[i * 4 + c];
     }
   }
-  const image = { width: ref2.width, height: ref2.height, data: new Uint8Array(ref2.data) };
+  const image = { width: ref3.width, height: ref3.height, data: new Uint8Array(ref3.data) };
   for (let row = 0; row < h; row++) {
     for (let col = 0; col < w; col++) {
       const i = row * w + col;
       if (!hs.hole[i]) continue;
-      const o = ((y0 + row) * ref2.width + x0 + col) * 4;
+      const o = ((y0 + row) * ref3.width + x0 + col) * 4;
       for (let c = 0; c < 4; c++) image.data[o + c] = fillCrop.data[i * 4 + c];
     }
   }
@@ -43384,8 +45142,8 @@ function safeName(name) {
   return (s || "plate").slice(0, 60);
 }
 function uniquePath(dir, stem, ext2) {
-  let target = path37.join(dir, `${stem}${ext2}`);
-  for (let n = 2; fs38.existsSync(target); n++) target = path37.join(dir, `${stem}_${n}${ext2}`);
+  let target = path38.join(dir, `${stem}${ext2}`);
+  for (let n = 2; fs40.existsSync(target); n++) target = path38.join(dir, `${stem}_${n}${ext2}`);
   return target;
 }
 function planSamples3(o) {
@@ -43522,7 +45280,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   const lastTime = Math.max(0, comp.duration - comp.frame_duration);
   const holeCheck = prepareHole(comp.width, comp.height, comp, polys, args.grow_px, 2, 24);
   if (holeCheck.share > MAX_HOLE_SHARE) {
-    return { refused: refuse("refused", `The hole covers ${r27(holeCheck.share * 100)}% of the frame; the limit is ${MAX_HOLE_SHARE * 100}%. Fill it in parts.`) };
+    return { refused: refuse("refused", `The hole covers ${r28(holeCheck.share * 100)}% of the frame; the limit is ${MAX_HOLE_SHARE * 100}%. Fill it in parts.`) };
   }
   let track = null;
   let refTime = args.ref_time;
@@ -43596,7 +45354,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
     budget.spend();
     const png = decodePngFile(snapped.path);
     try {
-      fs38.rmSync(snapped.path, { force: true });
+      fs40.rmSync(snapped.path, { force: true });
     } catch {
     }
     await yieldLoop5();
@@ -43604,12 +45362,12 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   };
   let fillInput = null;
   const work = async (renderCompId) => {
-    const ref2 = await render(renderCompId, ref_time);
-    if (ref2.width !== comp.width || ref2.height !== comp.height) {
-      throw new InpaintError("refused", `The render is ${ref2.width}x${ref2.height} but the comp is ${comp.width}x${comp.height}. The masks and the placement work in comp pixels, so the fill needs a full-resolution render. Set the comp's resolution to Full and try again.`);
+    const ref3 = await render(renderCompId, ref_time);
+    if (ref3.width !== comp.width || ref3.height !== comp.height) {
+      throw new InpaintError("refused", `The render is ${ref3.width}x${ref3.height} but the comp is ${comp.width}x${comp.height}. The masks and the placement work in comp pixels, so the fill needs a full-resolution render. Set the comp's resolution to Full and try again.`);
     }
     const input = {
-      ref: ref2,
+      ref: ref3,
       comp: { width: comp.width, height: comp.height },
       polygons: polys,
       growPx: args.grow_px,
@@ -43625,7 +45383,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
         } catch (err) {
           failures++;
           consecutive++;
-          lastFailure = errMessage7(err);
+          lastFailure = errMessage8(err);
           return null;
         }
       },
@@ -43668,18 +45426,18 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   }
   const finish2 = async () => {
     const fill = await fillFromGathered(fillInput, gathered);
-    fs38.mkdirSync(folder, { recursive: true });
+    fs40.mkdirSync(folder, { recursive: true });
     const stem = `${safeName(plate.name)}_f${frame}_inpaint`;
     const pngPath = uniquePath(folder, stem, ".png");
-    fs38.writeFileSync(pngPath, encodePng(toPng(fill.image)), { flag: "wx" });
+    fs40.writeFileSync(pngPath, encodePng(toPng(fill.image)), { flag: "wx" });
     let previewPath = null;
     if (args.preview) {
       try {
         previewPath = uniquePath(folder, `${stem}_preview`, ".png");
-        fs38.writeFileSync(previewPath, encodePng(previewSheet(fill)), { flag: "wx" });
+        fs40.writeFileSync(previewPath, encodePng(previewSheet(fill)), { flag: "wx" });
       } catch (err) {
         previewPath = null;
-        notes.push(`The preview could not be written: ${errMessage7(err)}`);
+        notes.push(`The preview could not be written: ${errMessage8(err)}`);
       }
     }
     let placement = null;
@@ -43702,19 +45460,19 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
       let rest;
       if (args.method === "temporal") rest = "The hole is left unfilled (method temporal): use method auto for a spatial fill.";
       else if (noTemporal) rest = "Everything is spatial. Keep the hole small and thin, or use the patch fill.";
-      else rest = `${r27(s.spatial_share * 100)}% of the hole goes to the spatial fill, so keep the hole small and thin, or use the patch fill.`;
+      else rest = `${r28(s.spatial_share * 100)}% of the hole goes to the spatial fill, so keep the hole small and thin, or use the patch fill.`;
       if (noTemporal) {
         notes.push(
           "No hole pixel was filled from the sampled frames: either none showed the background there (a static object on a locked-off or purely panning shot is never revealed)" + (args.object_moves ? "" : `, or the samples looked like the object (${grainHint})`) + `. ${rest}`
         );
       } else {
         notes.push(
-          `${r27(s.unrevealed_share * 100)}% of the hole was judged to be the object in the sampled frames and got no background from them: either the background is never revealed there, or the samples looked like the object (${grainHint}). ${rest}`
+          `${r28(s.unrevealed_share * 100)}% of the hole was judged to be the object in the sampled frames and got no background from them: either the background is never revealed there, or the samples looked like the object (${grainHint}). ${rest}`
         );
       }
     }
-    if (s.temporal_low_confidence_share > 0.1) notes.push(`${r27(s.temporal_low_confidence_share * 100)}% of the hole is temporal but low confidence (red in the preview): parallax, a moving object or a loose track. Check the track or shrink the range.`);
-    if (s.unfilled_share > 0) notes.push(`${r27(s.unfilled_share * 100)}% of the hole was not filled (method temporal). Use method auto for a spatial fill of the rest.`);
+    if (s.temporal_low_confidence_share > 0.1) notes.push(`${r28(s.temporal_low_confidence_share * 100)}% of the hole is temporal but low confidence (red in the preview): parallax, a moving object or a loose track. Check the track or shrink the range.`);
+    if (s.unfilled_share > 0) notes.push(`${r28(s.unfilled_share * 100)}% of the hole was not filled (method temporal). Use method auto for a spatial fill of the rest.`);
     notes.push(...fill.notes);
     const report = {
       png_path: pngPath,
@@ -43795,12 +45553,12 @@ function inpaintMismatches(beforeRaw, afterRaw, written, placed, want) {
   }
   return m;
 }
-var fs38, path37, import_pngjs3, PlaceSchema, AeInpaintPlateSchema, r27, errMessage7, yieldLoop5, refuse, CLASS_COLORS, SAMPLE_MEMORY_BUDGET, PATCH_NAME, inpaintTools;
+var fs40, path38, import_pngjs3, PlaceSchema, AeInpaintPlateSchema, r28, errMessage8, yieldLoop5, refuse, CLASS_COLORS, SAMPLE_MEMORY_BUDGET, PATCH_NAME, inpaintTools;
 var init_inpaint = __esm({
   "src/tools/ext/inpaint.ts"() {
     "use strict";
-    fs38 = __toESM(require("node:fs"), 1);
-    path37 = __toESM(require("node:path"), 1);
+    fs40 = __toESM(require("node:fs"), 1);
+    path38 = __toESM(require("node:path"), 1);
     import_pngjs3 = __toESM(require_png(), 1);
     init_zod();
     init_host();
@@ -43853,8 +45611,8 @@ var init_inpaint = __esm({
       preview: external_exports.boolean().default(true).describe("Write a preview PNG next to the still: the reference crop, the fill, and the confidence map (green temporal, yellow spatial, red low-confidence temporal, magenta unfilled). Default true."),
       expect: ExpectSchema
     });
-    r27 = (v) => Math.round(v * 100) / 100;
-    errMessage7 = (err) => err instanceof Error ? err.message : String(err);
+    r28 = (v) => Math.round(v * 100) / 100;
+    errMessage8 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop5 = () => new Promise((r) => setImmediate(r));
     refuse = (code, message) => ({ ok: false, error: code, message });
     CLASS_COLORS = {
@@ -43876,7 +45634,7 @@ var init_inpaint = __esm({
           try {
             polys = args.regions.map(regionPolygon);
           } catch (err) {
-            return refuse(err.code ?? "bad_args", errMessage7(err));
+            return refuse(err.code ?? "bad_args", errMessage8(err));
           }
           const toolName = "ae_inpaint_plate";
           const opId = ctx.bridge.newOpId();
@@ -43895,7 +45653,7 @@ var init_inpaint = __esm({
             }
             const made = err?.plateTemp;
             const code = err instanceof PlanarError || err instanceof InpaintError ? err.code : "failed";
-            return { ...refuse(code, errMessage7(err)), plate_copy: made ?? state.temp, plate_checkpoint: state.checkpoint, ...state.sessionFields };
+            return { ...refuse(code, errMessage8(err)), plate_copy: made ?? state.temp, plate_checkpoint: state.checkpoint, ...state.sessionFields };
           }
           const place = built.placement;
           try {
@@ -43928,7 +45686,7 @@ var init_inpaint = __esm({
               ok: false,
               applied: false,
               error: code,
-              message: `The fill was made but the still was not imported: ${errMessage7(err)}${unsure ? " AE did not answer in time, so the import may still have run: look in the Project panel before trying again." : ""} The fill image was saved at ${built.pngPath}; import it by hand or call the tool again.`,
+              message: `The fill was made but the still was not imported: ${errMessage8(err)}${unsure ? " AE did not answer in time, so the import may still have run: look in the Project panel before trying again." : ""} The fill image was saved at ${built.pngPath}; import it by hand or call the tool again.`,
               ...unsure ? { write_state: "unknown" } : {},
               png_path: built.pngPath,
               fill: built.report,
@@ -44021,7 +45779,7 @@ function toPatchRegion(region) {
 }
 function shapeVector(s, extra = []) {
   const v = [];
-  for (const list of [s.vertices, s.inTangents, s.outTangents]) for (const p of list) v.push(p[0], p[1]);
+  for (const list2 of [s.vertices, s.inTangents, s.outTangents]) for (const p of list2) v.push(p[0], p[1]);
   return [...v, ...extra];
 }
 function followShapes(a) {
@@ -44135,7 +45893,7 @@ function noteTrackOrigin(based, comp, compId, notes) {
     notes.push(`The track was made in comp ${based.comp_id}, not comp ${compId}: it is applied here because the sizes match. Check that both comps show the same footage in the same place.`);
   }
   if (based.fps > 0 && comp.fps > 0 && Math.abs(based.fps - comp.fps) > 1e-6) {
-    notes.push(`The track is ${r35(based.fps)} fps and this comp is ${r35(comp.fps)} fps: key times are snapped onto this comp's frames, up to half a frame off.`);
+    notes.push(`The track is ${r36(based.fps)} fps and this comp is ${r36(comp.fps)} fps: key times are snapped onto this comp's frames, up to half a frame off.`);
   }
 }
 async function planFollow(ctx, a) {
@@ -44219,7 +45977,7 @@ async function planFollow(ctx, a) {
         shape = stripShape(transformShape(regionToShape2(a.newMask.region), inv));
       } catch (err) {
         if (err instanceof PlanarError) throw err;
-        throw new PlanarError("refused", errMessage8(err));
+        throw new PlanarError("refused", errMessage9(err));
       }
     }
     const plan2 = {
@@ -44297,7 +46055,7 @@ async function planFollow(ctx, a) {
       }
       if (followed.maxErrorPx > BEZIER_WARN_PX) {
         notes.push(
-          `The perspective motion bends the mask's curves: the rebuilt beziers stray up to ${r35(followed.maxErrorPx)} px from the true image (over ${BEZIER_WARN_PX} px). Vertices are exact; add vertices to curved segments for a closer fit, or use an affine / similarity track.`
+          `The perspective motion bends the mask's curves: the rebuilt beziers stray up to ${r36(followed.maxErrorPx)} px from the true image (over ${BEZIER_WARN_PX} px). Vertices are exact; add vertices to curved segments for a closer fit, or use an affine / similarity track.`
         );
       }
       if (plan2.skipped.length + notOk.length > 0) {
@@ -44435,8 +46193,8 @@ async function writeFollow(ctx, a, plan2, expect, label) {
     },
     write: { host: "mattesFollowApply", args: followWriteArgs(a, plan2, a.toolName === "ae_caf_prep" ? "CAF prep" : "Mask follow"), timeoutMs: SLOW_TIMEOUT_MS },
     check: (_before, after, written) => {
-      const total = exp.keys !== null && plan2.keyRange ? { ...exp, keys: exp.keys + Number(written?.kept_keys ?? 0) } : exp;
-      return followMismatches(total, after);
+      const total2 = exp.keys !== null && plan2.keyRange ? { ...exp, keys: exp.keys + Number(written?.kept_keys ?? 0) } : exp;
+      return followMismatches(total2, after);
     }
   });
   return { result, exp };
@@ -44444,12 +46202,12 @@ async function writeFollow(ctx, a, plan2, expect, label) {
 function writeOutcomeNotes(result, notes) {
   if (result.feather_fallback) {
     notes.push(
-      `AE rejected the path with its variable-feather arrays (${errMessage8(result.feather_error)}), so it was written again without them: ${String(result.feather_points_dropped)} feather point(s) were dropped. Re-create the variable feather by hand or with ae_path_write.`
+      `AE rejected the path with its variable-feather arrays (${errMessage9(result.feather_error)}), so it was written again without them: ${String(result.feather_points_dropped)} feather point(s) were dropped. Re-create the variable feather by hand or with ae_path_write.`
     );
   }
-  if (result.path_error) notes.push(`The path could not be written: ${errMessage8(result.path_error)}. The mask exists; the receipt shows what it holds.`);
-  if (result.interpolation_error) notes.push(`The keys were written but could not be set to linear: ${errMessage8(result.interpolation_error)}.`);
-  if (result.work_area_error) notes.push(`The work area could not be set (${errMessage8(result.work_area_error)}); it was put back as it was. Set it by hand.`);
+  if (result.path_error) notes.push(`The path could not be written: ${errMessage9(result.path_error)}. The mask exists; the receipt shows what it holds.`);
+  if (result.interpolation_error) notes.push(`The keys were written but could not be set to linear: ${errMessage9(result.interpolation_error)}.`);
+  if (result.work_area_error) notes.push(`The work area could not be set (${errMessage9(result.work_area_error)}); it was put back as it was. Set it by hand.`);
 }
 function followSummary(plan2, result) {
   const t = plan2.track;
@@ -44464,7 +46222,7 @@ function followSummary(plan2, result) {
         dropped_by_decimation: plan2.keyed ? plan2.frameCount - plan2.skipped.length - plan2.keptCount : 0,
         not_keyed: [...plan2.notOk, ...plan2.skipped].length
       },
-      max_bezier_error_px: r35(plan2.maxErrorPx),
+      max_bezier_error_px: r36(plan2.maxErrorPx),
       ...plan2.notOk.length + plan2.skipped.length > 0 ? { frames_not_keyed: [...plan2.notOk, ...plan2.skipped].sort((x, y) => x - y).slice(0, 100).map(r46) } : {}
     } : {},
     ...plan2.featherScales ? { feather_scaled: true } : {},
@@ -44619,7 +46377,7 @@ async function garbageMatte(ctx, args) {
     out.maxErrorPx = followed.maxErrorPx;
     out.trackId = got.based.track_id;
     if (followed.maxErrorPx > BEZIER_WARN_PX) {
-      notes.push(`The perspective motion bends the matte's curves: up to ${r35(followed.maxErrorPx)} px from the true image. Use a polygon region (straight edges are exact) or an affine / similarity track.`);
+      notes.push(`The perspective motion bends the matte's curves: up to ${r36(followed.maxErrorPx)} px from the true image. Use a polygon region (straight edges are exact) or an affine / similarity track.`);
     }
     if (followed.skipped.length + picked.notOk.length > 0) notes.push(`${followed.skipped.length + picked.notOk.length} frame(s) were not keyed; the keys interpolate across them.`);
     if (args.decimate_px > 0 && keptSnapped.length < followed.frames.length) notes.push(`${followed.frames.length - keptSnapped.length} of ${followed.frames.length} keys were dropped (linear interpolation reproduces them within ${args.decimate_px} px).`);
@@ -44708,13 +46466,13 @@ async function garbageMatte(ctx, args) {
     ...prep.trackId ? { track_id: prep.trackId } : {},
     ...prep.times.length > 0 ? {
       frames: { solved: prep.frames, keyed: prep.kept, not_keyed: prep.skipped.length + prep.notOk.length },
-      max_bezier_error_px: r35(prep.maxErrorPx)
+      max_bezier_error_px: r36(prep.maxErrorPx)
     } : {},
     notes
   };
 }
 function cafInstructions(a) {
-  const range = a.workArea ? ` (${r35(a.workArea.start)} s to ${r35(a.workArea.end)} s)` : "";
+  const range = a.workArea ? ` (${r36(a.workArea.start)} s to ${r36(a.workArea.end)} s)` : "";
   return [
     `Select the layer "${a.plateName}" in the timeline: Content-Aware Fill works on the selected layer.`,
     "Open Window > Content-Aware Fill. Window-menu commands toggle, so check with ae_ui_screenshot that it is closed first, then call ae_open_panel with name 'Content-Aware Fill' and allow_toggle: true.",
@@ -44839,7 +46597,7 @@ async function cafPrep(ctx, args) {
     notes: plan2.notes
   };
 }
-var r35, r46, errMessage8, fail3, MAX_FRAMES, BEZIER_WARN_PX, VERTEX_TOL, KAPPA2, MAX_WRITE_POINTS, snapToFrame2, MASK_MODES, MATTE_TYPES, MaskRefSchema, RangeSchema, FeatherSchema, TRACK_FIELDS, AeMaskFollowSchema, AeGarbageMatteSchema, AeCafPrepSchema, stripShape, roundShape, pick2, near6, toPair, mattesTools;
+var r36, r46, errMessage9, fail3, MAX_FRAMES, BEZIER_WARN_PX, VERTEX_TOL, KAPPA2, MAX_WRITE_POINTS, snapToFrame2, MASK_MODES, MATTE_TYPES, MaskRefSchema, RangeSchema, FeatherSchema, TRACK_FIELDS, AeMaskFollowSchema, AeGarbageMatteSchema, AeCafPrepSchema, stripShape, roundShape, pick2, near6, toPair, mattesTools;
 var init_mattes = __esm({
   "src/tools/ext/mattes.ts"() {
     "use strict";
@@ -44852,9 +46610,9 @@ var init_mattes = __esm({
     init_planar();
     init_region_math();
     init_write_runner();
-    r35 = (v) => Math.round(v * 1e3) / 1e3;
+    r36 = (v) => Math.round(v * 1e3) / 1e3;
     r46 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage8 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage9 = (err) => err instanceof Error ? err.message : String(err);
     fail3 = (e) => ({ ok: false, error: e.code, message: e.message });
     MAX_FRAMES = MAX_TRACK_FRAMES2 - 1;
     BEZIER_WARN_PX = 0.5;
@@ -44952,12 +46710,12 @@ var init_mattes = __esm({
       closed: s.closed !== false
     });
     roundShape = (s) => ({
-      vertices: s.vertices.map((p) => [r35(p[0]), r35(p[1])]),
-      inTangents: s.inTangents.map((p) => [r35(p[0]), r35(p[1])]),
-      outTangents: s.outTangents.map((p) => [r35(p[0]), r35(p[1])]),
+      vertices: s.vertices.map((p) => [r36(p[0]), r36(p[1])]),
+      inTangents: s.inTangents.map((p) => [r36(p[0]), r36(p[1])]),
+      outTangents: s.outTangents.map((p) => [r36(p[0]), r36(p[1])]),
       closed: s.closed
     });
-    pick2 = (list, idx) => idx.map((i) => list[i]);
+    pick2 = (list2, idx) => idx.map((i) => list2[i]);
     near6 = (a, b, tol) => Math.abs(a - b) <= tol;
     toPair = (f) => f === void 0 ? void 0 : Array.isArray(f) ? [f[0], f[1]] : [f, f];
     mattesTools = [
@@ -45202,15 +46960,15 @@ function warpGrayToRef(src, H, scale, ring) {
   }
   return { gray: { width, height, data }, valid, validCount };
 }
-function fitFrame(ref2, frame, ring, H, scale, o) {
+function fitFrame(ref3, frame, ring, H, scale, o) {
   const bad4 = (reason, visible2 = 0) => ({ ok: false, reason, gain: [1, 1, 1], offset: [0, 0, 0], rms: 0, pixels: 0, visible: visible2 });
   if (!H) return bad4(LOST_REASON);
   if (ring.idx.length < 30) return bad4("the ring has fewer than 30 pixels");
-  if (ref2.width !== ring.width || ref2.height !== ring.height) return bad4("the reference render has another size");
+  if (ref3.width !== ring.width || ref3.height !== ring.height) return bad4("the reference render has another size");
   const warped = warpRgbaToRef(frame, H, scale, ring);
   const visible = warped.validCount / ring.idx.length;
   if (visible < o.minVisible) return bad4(`only ${Math.round(visible * 100)}% of the ring is in view`, visible);
-  const fit = fitGainOffset(warped.img, ref2, warped.valid, { trimPct: o.trimPct ?? 10, excludeClipped: true });
+  const fit = fitGainOffset(warped.img, ref3, warped.valid, { trimPct: o.trimPct ?? 10, excludeClipped: true });
   if (fit.pixels < 30) return bad4("too few unclipped ring pixels", visible);
   return { ok: true, gain: fit.gain, offset: fit.offset, rms: fit.rms, pixels: fit.pixels, visible };
 }
@@ -45394,7 +47152,7 @@ function writeFailure(err, base, what) {
     ok: false,
     applied: false,
     error: kind,
-    message: `${what} was not written: ${errMessage9(err)}${unsure ? " AE did not answer in time, so the write may still have run: read the layer before trying again." : ""}`,
+    message: `${what} was not written: ${errMessage10(err)}${unsure ? " AE did not answer in time, so the write may still have run: read the layer before trying again." : ""}`,
     ...unsure ? { write_state: "unknown" } : {}
   };
 }
@@ -45420,7 +47178,7 @@ function makeSnap(ctx, opId, toolName, framesDir, budget, pick4) {
     try {
       return decodePngFile(s.path);
     } finally {
-      fs39.rmSync(s.path, { force: true });
+      fs41.rmSync(s.path, { force: true });
     }
   };
 }
@@ -45449,7 +47207,7 @@ async function plateRun(ctx, spec) {
     const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
     const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
     const sessionFields = await noteBeforeWrite(ctx, note);
-    fs39.mkdirSync(framesDir, { recursive: true });
+    fs41.mkdirSync(framesDir, { recursive: true });
     const budget = createRenderBudget({ maxRenders: spec.maxRenders, maxSeconds: spec.maxSeconds });
     let bodyError = null;
     let value = null;
@@ -45473,7 +47231,7 @@ async function plateRun(ctx, spec) {
           try {
             return { ok: true, v: await spec.body(env, prepared.prep) };
           } catch (err) {
-            return { ok: false, error: errMessage9(err), blocked: isAeBlocked3(err) };
+            return { ok: false, error: errMessage10(err), blocked: isAeBlocked3(err) };
           }
         }
       );
@@ -45484,7 +47242,7 @@ async function plateRun(ctx, spec) {
       const made = err?.plateTemp;
       if (!made) throw err;
       temp = made;
-      bodyError = errMessage9(err);
+      bodyError = errMessage10(err);
     }
     try {
       await noteAfterWrite(ctx, note, { addStep: true });
@@ -45515,7 +47273,7 @@ async function compLease(ctx, toolName, label, compId, budgetOpts, fn) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   return queued7(ctx, label, opId, async () => {
-    fs39.mkdirSync(framesDir, { recursive: true });
+    fs41.mkdirSync(framesDir, { recursive: true });
     const budget = createRenderBudget(budgetOpts);
     const snap2 = makeSnap(ctx, opId, toolName, framesDir, budget, () => compId);
     return fn((time) => snap2("comp", time), opId);
@@ -45549,25 +47307,25 @@ function regionPolygon2(region) {
   return regionToPolygon(region);
 }
 function writePng(framesDir, tag, compId, png) {
-  fs39.mkdirSync(framesDir, { recursive: true });
-  const file = path38.join(framesDir, `${tag}_c${compId}_${crypto18.randomBytes(4).toString("hex")}.png`);
-  fs39.writeFileSync(file, encodePng(png));
+  fs41.mkdirSync(framesDir, { recursive: true });
+  const file = path39.join(framesDir, `${tag}_c${compId}_${crypto18.randomBytes(4).toString("hex")}.png`);
+  fs41.writeFileSync(file, encodePng(png));
   return file;
 }
 function stateDir() {
-  return path38.join(path38.dirname(defaultFramesDir()), "patchfit");
+  return path39.join(path39.dirname(defaultFramesDir()), "patchfit");
 }
 function saveState(id, state) {
   if (!STATE_ID.test(id)) throw new Error(`Bad continue id "${id}"`);
   const dir = stateDir();
-  fs39.mkdirSync(dir, { recursive: true });
-  const file = path38.join(dir, `${id}.json`);
+  fs41.mkdirSync(dir, { recursive: true });
+  const file = path39.join(dir, `${id}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs39.writeFileSync(tmp, JSON.stringify(state));
-  fs39.renameSync(tmp, file);
+  fs41.writeFileSync(tmp, JSON.stringify(state));
+  fs41.renameSync(tmp, file);
   try {
-    const entries = fs39.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs39.statSync(path38.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
-    for (const old of entries.slice(KEEP_STATES)) fs39.rmSync(path38.join(dir, old.n), { force: true });
+    const entries = fs41.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs41.statSync(path39.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const old of entries.slice(KEEP_STATES)) fs41.rmSync(path39.join(dir, old.n), { force: true });
   } catch {
   }
   return file;
@@ -45575,7 +47333,7 @@ function saveState(id, state) {
 function loadState(id) {
   if (!STATE_ID.test(id)) return null;
   try {
-    return JSON.parse(fs39.readFileSync(path38.join(stateDir(), `${id}.json`), "utf8"));
+    return JSON.parse(fs41.readFileSync(path39.join(stateDir(), `${id}.json`), "utf8"));
   } catch {
     return null;
   }
@@ -45595,7 +47353,7 @@ async function verifyRows(snap2, times, poly, track, o) {
       const seam = seamColour(img, scalePoly2(at.poly, s), o.gapPx * s, o.ringPx * s);
       rows.push(seam ? { time: r47(t), ...seam } : { time: r47(t), skipped: "the seam bands hold too few pixels" });
     } catch (err) {
-      rows.push({ time: r47(t), skipped: errMessage9(err) });
+      rows.push({ time: r47(t), skipped: errMessage10(err) });
       if (isAeBlocked3(err)) break;
     }
   }
@@ -45833,7 +47591,7 @@ async function colorMatchHandler(args, ctx) {
           retries[i] = (retries[i] ?? 0) + 1;
           renderFailed++;
           if (retries[i] >= MAX_RENDER_RETRIES) {
-            st.fits[i] = { ok: false, reason: `render failed ${retries[i]} times: ${errMessage9(err)}`, gain: [1, 1, 1], offset: [0, 0, 0], rms: 0, pixels: 0, visible: 0 };
+            st.fits[i] = { ok: false, reason: `render failed ${retries[i]} times: ${errMessage10(err)}`, gain: [1, 1, 1], offset: [0, 0, 0], rms: 0, pixels: 0, visible: 0 };
           } else {
             skippedByBudget++;
           }
@@ -46024,7 +47782,7 @@ async function finishColor(ctx, args, run, body, tail, o) {
       const a = meanAbsOf(after);
       result.verify = { frames: body.verifyTimes.map(r47), before: body.before, after, mean_seam_difference_before: b, mean_seam_difference_after: a, improved: b !== null && a !== null ? a < b : null };
     } catch (err) {
-      result.verify = { error: errMessage9(err), before: body.before };
+      result.verify = { error: errMessage10(err), before: body.before };
     }
   }
   return result;
@@ -46052,9 +47810,9 @@ function grainFrame(inp) {
   return { ring, patch };
 }
 function medianSigma(rows) {
-  const spatial = [0, 1, 2].map((c) => r36(median4(rows.map((r) => r.spatial[c]))));
+  const spatial = [0, 1, 2].map((c) => r37(median4(rows.map((r) => r.spatial[c]))));
   const temps = rows.map((r) => r.temporal).filter((t) => t > 0);
-  return { spatial, temporal: temps.length ? r36(median4(temps)) : 0, frames: rows.length };
+  return { spatial, temporal: temps.length ? r37(median4(temps)) : 0, frames: rows.length };
 }
 function grainMismatches(args, patchId, before, after, written) {
   const m = [];
@@ -46205,7 +47963,7 @@ async function grainHandler(args, ctx) {
   if (body.skipped.length) notes.push(`Skipped: ${body.skipped.join("; ")}`);
   const ringSigma = sigmaMean(body.ring);
   const patchSigma = sigmaMean(body.patch);
-  const temporalRatio = body.ring.temporal > 0 ? r36(body.patch.temporal / body.ring.temporal) : null;
+  const temporalRatio = body.ring.temporal > 0 ? r37(body.patch.temporal / body.ring.temporal) : null;
   const frozen = temporalRatio !== null && temporalRatio < 0.5;
   const header = {
     ok: true,
@@ -46217,7 +47975,7 @@ async function grainHandler(args, ctx) {
     ...tail
   };
   if (ringSigma < args.min_sigma) {
-    notes.push(`The plate is clean: its grain sigma is ${r28(ringSigma)} of 255, under min_sigma ${args.min_sigma}, so no grain was added.`);
+    notes.push(`The plate is clean: its grain sigma is ${r29(ringSigma)} of 255, under min_sigma ${args.min_sigma}, so no grain was added.`);
     return { ...header, grain_added: false, notes };
   }
   if (patchSigma > ringSigma * 1.3 && args.degrain === "none") {
@@ -46306,7 +48064,7 @@ async function grainHandler(args, ctx) {
           return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0], temporal: 0, frames: 0 }, last: lastImg };
         });
       } catch (err2) {
-        tuneFailure = `Round ${round5} could not render: ${errMessage9(err2)}`;
+        tuneFailure = `Round ${round5} could not render: ${errMessage10(err2)}`;
         break;
       }
       patchNow = measured.set;
@@ -46317,7 +48075,7 @@ async function grainHandler(args, ctx) {
       }
       const now = tuneTemporal ? patchNow.temporal : sigmaMean(patchNow);
       const err = tuneTarget > 0 ? Math.abs(now - tuneTarget) / tuneTarget : 0;
-      rounds.push({ round: round5, intensity, metric: tuneTemporal ? "temporal" : "spatial", patch_sigma: r36(now), plate_sigma: r36(tuneTarget), error: r36(err) });
+      rounds.push({ round: round5, intensity, metric: tuneTemporal ? "temporal" : "spatial", patch_sigma: r37(now), plate_sigma: r37(tuneTarget), error: r37(err) });
       if (err <= args.tolerance) {
         converged = true;
         break;
@@ -46349,8 +48107,8 @@ async function grainHandler(args, ctx) {
           present: (_b, _a, w) => ({ intensity_before: w.intensity_before, intensity: w.intensity })
         });
       } catch (err2) {
-        tuneFailure = `Tuning round ${round5 + 1} was not written: ${errMessage9(err2)}${err2 instanceof BridgeError && err2.kind === "timeout" ? " AE did not answer in time, so it may still have run: read the grain layer's Intensity." : ""} The grain stays at Intensity ${intensity}.`;
-        rounds[rounds.length - 1].tune_failure = errMessage9(err2);
+        tuneFailure = `Tuning round ${round5 + 1} was not written: ${errMessage10(err2)}${err2 instanceof BridgeError && err2.kind === "timeout" ? " AE did not answer in time, so it may still have run: read the grain layer's Intensity." : ""} The grain stays at Intensity ${intensity}.`;
+        rounds[rounds.length - 1].tune_failure = errMessage10(err2);
         break;
       }
       intensity = next;
@@ -46362,7 +48120,7 @@ async function grainHandler(args, ctx) {
   if (tuneFailure) notes.push(tuneFailure);
   if (!converged && rounds.length > 0) notes.push(`The patch's ${tuneTemporal ? "temporal (moving) grain" : "sigma"} did not reach the plate's within ${args.tolerance * 100}% in ${args.rounds} tuning round(s); run again with a start intensity, or raise rounds.`);
   if (tuneTemporal && sigmaMean(patchNow) > ringSigma * 1.3) {
-    notes.push(`The patch's total spatial grain (sigma ${r28(sigmaMean(patchNow))}) is above the plate's (${r28(ringSigma)}) because its own frozen grain stays under the new moving grain. Run again with degrain 'median' or 'remove_grain' to remove the excess.`);
+    notes.push(`The patch's total spatial grain (sigma ${r29(sigmaMean(patchNow))}) is above the plate's (${r29(ringSigma)}) because its own frozen grain stays under the new moving grain. Run again with degrain 'median' or 'remove_grain' to remove the excess.`);
   }
   const previewPath = preview(compAfter);
   return {
@@ -46375,7 +48133,7 @@ async function grainHandler(args, ctx) {
     final_intensity: intensity,
     converged,
     rounds,
-    sigma_after: { plate_ring: body.ring, patch: patchNow, temporal_ratio: body.ring.temporal > 0 && patchNow.temporal > 0 ? r36(patchNow.temporal / body.ring.temporal) : null },
+    sigma_after: { plate_ring: body.ring, patch: patchNow, temporal_ratio: body.ring.temporal > 0 && patchNow.temporal > 0 ? r37(patchNow.temporal / body.ring.temporal) : null },
     ...previewPath ? { preview_path: previewPath, preview_note: "Left: the plate ring and region at 2x; right: the composite with the new grain." } : {},
     notes
   };
@@ -46548,7 +48306,7 @@ async function finishHandler(args, ctx) {
   const report = {};
   const ls = layerCompScale(info.layer);
   if (args.sharpness || args.edge) {
-    if (Math.abs(ls.scale - 1) > 0.02) notes.push(`The patch layer is scaled to ${r36(ls.scale)}x in the comp (transform and parents), so the comp-pixel sigma and mask feather are divided by it before they are written (a part that is not planned, or a dry_run, writes nothing).`);
+    if (Math.abs(ls.scale - 1) > 0.02) notes.push(`The patch layer is scaled to ${r37(ls.scale)}x in the comp (transform and parents), so the comp-pixel sigma and mask feather are divided by it before they are written (a part that is not planned, or a dry_run, writes nothing).`);
     if (ls.pinned) notes.push("The patch layer has a pin effect: Gaussian Blur and Mask Feather work in the layer's own pixels before the pin, and the pin's own scale (source quad to destination quad) is not measured, so the blur may be too strong or too weak by that scale. Check it by eye or use a transform-based placement.");
     if (ls.keyed) notes.push("The patch layer's Scale (or a parent's) is animated or expression-driven: the scale at the comp's current time was used for the whole shot.");
   }
@@ -46561,22 +48319,22 @@ async function finishHandler(args, ctx) {
     const blurrinessAt = sigLayer.map((x) => blurrinessFromSigma(Math.hypot(oldSigma, x)));
     const spread = blurrinessAt.length ? Math.max(...blurrinessAt) - Math.min(...blurrinessAt) : 0;
     report.sharpness = {
-      patch_detail: r28(body.patchEnergy),
-      ring_detail: body.ringEnergy.map((x) => ({ time: r47(x.time), energy: r28(x.energy) })),
-      sigma_px: sig.map((x) => ({ time: r47(x.time), sigma: r36(x.sigma) })),
-      sigma_layer_px: sigLayer.map((x, i) => ({ time: r47(sig[i].time), sigma: r36(x) })),
-      layer_scale: r36(ls.scale),
-      ...own ? { existing_blurriness_at_ref: oldBlurriness === null ? null : r36(oldBlurriness), existing_sigma_px: r36(oldSigma) } : {},
-      blurriness: blurrinessAt.map(r28),
+      patch_detail: r29(body.patchEnergy),
+      ring_detail: body.ringEnergy.map((x) => ({ time: r47(x.time), energy: r29(x.energy) })),
+      sigma_px: sig.map((x) => ({ time: r47(x.time), sigma: r37(x.sigma) })),
+      sigma_layer_px: sigLayer.map((x, i) => ({ time: r47(sig[i].time), sigma: r37(x) })),
+      layer_scale: r37(ls.scale),
+      ...own ? { existing_blurriness_at_ref: oldBlurriness === null ? null : r37(oldBlurriness), existing_sigma_px: r37(oldSigma) } : {},
+      blurriness: blurrinessAt.map(r29),
       note: "Blurriness is estimated as 2.5 x sigma until calibrated live; the read-back shows what was set."
     };
     if (sig.length > 0 && Math.max(...sigLayer) > 0.15 / ls.scale) {
       const keyed = sig.length > 1 && spread >= 1;
       const times2 = keyed ? sig.map((x) => x.time) : [sig[0].time];
-      const values = keyed ? blurrinessAt.map(r36) : [r36(median4(blurrinessAt))];
+      const values = keyed ? blurrinessAt.map(r37) : [r37(median4(blurrinessAt))];
       plan2.blur = { times: times2, values, replace_existing: args.replace_existing };
       if (own && oldBlurriness !== null) {
-        notes.push(`The earlier sit-in blur (Blurriness ${r36(oldBlurriness)}, sigma ${r36(oldSigma)} px at the reference frame) was in the composite when the patch was measured, so the amount written is the square root of its square plus the extra sigma measured at each time, and it replaces the earlier blur.`);
+        notes.push(`The earlier sit-in blur (Blurriness ${r37(oldBlurriness)}, sigma ${r37(oldSigma)} px at the reference frame) was in the composite when the patch was measured, so the amount written is the square root of its square plus the extra sigma measured at each time, and it replaces the earlier blur.`);
       } else if (own) {
         notes.push("The earlier sit-in blur was in the composite when the patch was measured and its amount could not be read, so only the extra blur was written: the patch ends up sharper than needed. Run again to add more.");
       }
@@ -46585,11 +48343,11 @@ async function finishHandler(args, ctx) {
     }
   }
   if (args.edge) {
-    report.edge = { layer_scale: r36(ls.scale), seam: body.seam.map((x) => ({ time: r47(x.time), score: r28(x.score) })), worst: r28(body.worstSeam), limit: args.seam_max };
+    report.edge = { layer_scale: r37(ls.scale), seam: body.seam.map((x) => ({ time: r47(x.time), score: r29(x.score) })), worst: r29(body.worstSeam), limit: args.seam_max };
     if (body.worstSeam > args.seam_max) {
       const masks = info.layer.masks;
       if (masks.length === 0) {
-        notes.push(`The seam scores ${r28(body.worstSeam)} (limit ${args.seam_max}) but the patch layer has no masks to feather: mask the patch, or blend it with a feathered matte.`);
+        notes.push(`The seam scores ${r29(body.worstSeam)} (limit ${args.seam_max}) but the patch layer has no masks to feather: mask the patch, or blend it with a feathered matte.`);
       } else {
         const open = masks.filter((mk) => !mk.feather_keyed && !mk.expansion_keyed);
         const keyed = masks.filter((mk) => mk.feather_keyed || mk.expansion_keyed);
@@ -46602,7 +48360,7 @@ async function finishHandler(args, ctx) {
               const curF = Array.isArray(mk.feather) ? Math.max(mk.feather[0] ?? 0, mk.feather[1] ?? 0) : typeof mk.feather === "number" ? mk.feather : 0;
               const ms = ls.scale;
               const fe = featherFor(body.worstSeam, args.seam_max, curF * ms, (mk.expansion ?? 0) * ms, args.max_feather);
-              return { index: mk.index, feather: r28(fe.feather / ms), expansion: r28(fe.expansion / ms) };
+              return { index: mk.index, feather: r29(fe.feather / ms), expansion: r29(fe.expansion / ms) };
             })
           };
         }
@@ -46614,7 +48372,7 @@ async function finishHandler(args, ctx) {
       report.motion_blur = { result: "No track given: the motion of the shot is unknown, so motion blur is not matched." };
     } else {
       const lens = prepSpeeds.map((v) => blurLengthPx(v, shutter));
-      const stats = { shutter_angle: shutter, max_px: r28(lens.length ? Math.max(...lens) : 0), p95_px: r28(percentile2(lens, 0.95)), median_px: r28(median4(lens)), frames: lens.length };
+      const stats = { shutter_angle: shutter, max_px: r29(lens.length ? Math.max(...lens) : 0), p95_px: r29(percentile2(lens, 0.95)), median_px: r29(median4(lens)), frames: lens.length };
       report.motion_blur = {
         ...stats,
         mover: info.layer.pinned ? "pin effect" : "layer transform",
@@ -46701,17 +48459,17 @@ async function finishHandler(args, ctx) {
       result.crops_note = "Left: the patch before, right: after, 2x.";
     }
   } catch (err) {
-    result.crops_error = errMessage9(err);
+    result.crops_error = errMessage10(err);
   }
   return result;
 }
-var crypto18, fs39, path38, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, GRAIN_SIGMA_PER_INTENSITY, r28, r36, r47, errMessage9, yieldLoop6, clamp2, median4, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail4, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
+var crypto18, fs41, path39, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, GRAIN_SIGMA_PER_INTENSITY, r29, r37, r47, errMessage10, yieldLoop6, clamp2, median4, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail4, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
 var init_patchfit = __esm({
   "src/tools/ext/patchfit.ts"() {
     "use strict";
     crypto18 = __toESM(require("node:crypto"), 1);
-    fs39 = __toESM(require("node:fs"), 1);
-    path38 = __toESM(require("node:path"), 1);
+    fs41 = __toESM(require("node:fs"), 1);
+    path39 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -46739,10 +48497,10 @@ var init_patchfit = __esm({
     EIGHT_BIT_HALF = 0.5 / 255;
     SHARPNESS_SLACK = 1.1;
     GRAIN_SIGMA_PER_INTENSITY = 20;
-    r28 = (v) => Math.round(v * 100) / 100;
-    r36 = (v) => Math.round(v * 1e3) / 1e3;
+    r29 = (v) => Math.round(v * 100) / 100;
+    r37 = (v) => Math.round(v * 1e3) / 1e3;
     r47 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage9 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage10 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop6 = () => new Promise((r) => setImmediate(r));
     clamp2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     median4 = (a) => {
@@ -46757,7 +48515,7 @@ var init_patchfit = __esm({
     LOST_REASON = "the track lost the plate at this time";
     CHANNEL_KEYS = ["red", "green", "blue"];
     r4e = (v) => Math.round(v * 1e6) / 1e6;
-    fail4 = (e) => ({ ok: false, error: e instanceof PlanarError ? e.code : "failed", message: errMessage9(e) });
+    fail4 = (e) => ({ ok: false, error: e instanceof PlanarError ? e.code : "failed", message: errMessage10(e) });
     BLOCKED_NOTE3 = "AE stopped responding during a render (often a modal dialog); the remaining frames were not rendered. Check ae_dialogs, then continue.";
     STATE_ID = /^[A-Za-z0-9_-]{1,80}$/;
     LayerSel = LayerSelectorSchema;
@@ -47143,7 +48901,7 @@ function snapQuad(gray, guesses, o) {
       corner_agrees: agrees,
       template_std: std,
       trackable: std !== null && std >= 3,
-      confidence: r29(clamp3(confidence, 0, 1))
+      confidence: r210(clamp3(confidence, 0, 1))
     };
   });
   return { corners, sides };
@@ -47228,7 +48986,7 @@ function quadMetrics(c) {
     ok: chk.ok,
     ...chk.reason ? { reason: chk.reason } : {},
     area_px: polygonArea(c),
-    edge_lengths_px: c.map((p, i) => r29(Math.hypot(c[(i + 1) % 4][0] - p[0], c[(i + 1) % 4][1] - p[1])))
+    edge_lengths_px: c.map((p, i) => r210(Math.hypot(c[(i + 1) % 4][0] - p[0], c[(i + 1) % 4][1] - p[1])))
   };
 }
 function scaleQuad(q, k) {
@@ -47291,23 +49049,23 @@ function suggestPoints(gray, quadComp, o) {
   const feats = goodFeatures(boxBlurGray(gray, 1), mask, { count: o.count, minDistancePx: minDist, patchSize: patchImg });
   return feats.map((f) => {
     const p = [(f.x + 0.5) / o.scale, (f.y + 0.5) / o.scale];
-    return { x: r29(p[0]), y: r29(p[1]), score: r29(f.score), contrast: r29(f.std), zone: insideConvex(quadComp, p) ? "inside" : "bezel" };
+    return { x: r210(p[0]), y: r210(p[1]), score: r210(f.score), contrast: r210(f.std), zone: insideConvex(quadComp, p) ? "inside" : "bezel" };
   });
 }
 function lumaQuantiles(img, mask, qs, opts = {}) {
   const hist = new Uint32Array(256);
-  let total = 0;
+  let total2 = 0;
   const minAlpha = opts.minAlpha ?? 0;
   for (let k = 0; k < img.width * img.height; k++) {
     if (mask[k] < 0.5) continue;
     const i = k * 4;
     if (img.data[i + 3] < minAlpha) continue;
     hist[Math.min(255, Math.round(0.2126 * img.data[i] + 0.7152 * img.data[i + 1] + 0.0722 * img.data[i + 2]))]++;
-    total++;
+    total2++;
   }
   const values = qs.map((q) => {
-    if (total === 0) return 0;
-    const target = q * total;
+    if (total2 === 0) return 0;
+    const target = q * total2;
     let acc = 0;
     for (let i = 0; i < 256; i++) {
       acc += hist[i];
@@ -47315,7 +49073,7 @@ function lumaQuantiles(img, mask, qs, opts = {}) {
     }
     return 1;
   });
-  return { values, pixels: total };
+  return { values, pixels: total2 };
 }
 function quadEdgeSigma(gray, quadImg, scale) {
   const half = 6;
@@ -47379,7 +49137,7 @@ function quadEdgeSigma(gray, quadImg, scale) {
   const lo = mean2(ok.slice(0, 3).map((k) => avg[k]));
   const hi = mean2(ok.slice(-3).map((k) => avg[k]));
   const contrast = hi - lo;
-  if (contrast < 6) return { sigma_px: null, sigma_measured_px: null, contrast: r29(contrast), samples: used, reason: "the step is under 6 gray levels, too faint to read a softness from" };
+  if (contrast < 6) return { sigma_px: null, sigma_measured_px: null, contrast: r210(contrast), samples: used, reason: "the step is under 6 gray levels, too faint to read a softness from" };
   const norm3 = ok.map((k) => (avg[k] - lo) / contrast);
   const cross = (level) => {
     for (let i = 1; i < ok.length; i++) {
@@ -47392,18 +49150,18 @@ function quadEdgeSigma(gray, quadImg, scale) {
   };
   const d10 = cross(0.1);
   const d90 = cross(0.9);
-  if (d10 === null || d90 === null || d90 <= d10) return { sigma_px: null, sigma_measured_px: null, contrast: r29(contrast), samples: used, reason: "the averaged profile is not a clean step" };
+  if (d10 === null || d90 === null || d90 <= d10) return { sigma_px: null, sigma_measured_px: null, contrast: r210(contrast), samples: used, reason: "the averaged profile is not a clean step" };
   const sigmaImg = (d90 - d10) * step2 / 2.563;
   const measured = sigmaImg / scale;
   const sampling = 0.289 / scale;
-  return { sigma_px: r37(Math.sqrt(Math.max(0, measured * measured - sampling * sampling))), sigma_measured_px: r37(measured), contrast: r29(contrast), samples: used };
+  return { sigma_px: r38(Math.sqrt(Math.max(0, measured * measured - sampling * sampling))), sigma_measured_px: r38(measured), contrast: r210(contrast), samples: used };
 }
 function planLevels(m) {
   const notes = [];
   let outBlack = clamp3(m.plateBlack, 0, 1);
   if (outBlack > 0.5) {
     outBlack = 0.5;
-    notes.push(`The plate's measured screen black (${r37(m.plateBlack)}) is over 0.5, which is a picture, not a black level: Output Black was capped at 0.5.`);
+    notes.push(`The plate's measured screen black (${r38(m.plateBlack)}) is over 0.5, which is a picture, not a black level: Output Black was capped at 0.5.`);
   }
   let inBlack = clamp3(m.insertBlack, 0, 0.5);
   let inWhite = clamp3(m.insertWhite, 0, 1);
@@ -47507,7 +49265,7 @@ function buildInsertKeys(a) {
     expanded,
     ...a.transform ? { transform: { position: tr.position, rotation: unwrapDegrees(tr.rotation).map(r48), scale: tr.scale } } : {},
     skipped,
-    max_fit_px: r29(maxFit)
+    max_fit_px: r210(maxFit)
   };
 }
 function nearestOk(ok, t) {
@@ -47536,10 +49294,10 @@ function pickSheetFrames(track, corners, refTime) {
       fastest = ok[i];
     }
   }
-  const ref2 = frameAt(track, refTime);
+  const ref3 = frameAt(track, refTime);
   const picks = [
     { label: "first", time: ok[0].time },
-    { label: "reference", time: ref2 ? ref2.time : nearestOk(ok, refTime).time },
+    { label: "reference", time: ref3 ? ref3.time : nearestOk(ok, refTime).time },
     { label: "last", time: ok[ok.length - 1].time }
   ];
   if (fastest) picks.push({ label: "fastest", time: fastest.time });
@@ -47596,7 +49354,7 @@ function drawBeforeAfterSheet(before, after, maxTile) {
   const tiles = (shots, tag) => shots.slice(0, cols).map((s) => {
     const fit = fitWithin(s.image.width, s.image.height, maxTile);
     const img = resizeArea(s.image, fit.width, fit.height);
-    drawLabel(img, `${tag} ${s.label} t=${r29(s.time)}`, 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
+    drawLabel(img, `${tag} ${s.label} t=${r210(s.time)}`, 3, 3, 1, [16, 16, 16, 255], YELLOW, 2);
     return img;
   });
   const top = tiles(before, "before");
@@ -47615,9 +49373,9 @@ function drawBeforeAfterSheet(before, after, maxTile) {
   return sheet;
 }
 function writePng2(framesDir, tag, png) {
-  fs40.mkdirSync(framesDir, { recursive: true });
-  const file = path39.join(framesDir, `${tag}.png`);
-  fs40.writeFileSync(file, encodePng(png));
+  fs42.mkdirSync(framesDir, { recursive: true });
+  const file = path40.join(framesDir, `${tag}.png`);
+  fs42.writeFileSync(file, encodePng(png));
   return file;
 }
 async function queued8(ctx, label, opId, fn) {
@@ -47653,14 +49411,14 @@ async function renderFrame(ctx, opId, compId, time, index, framesDir, toolName) 
   try {
     return { image: decodePngFile(s.path), time: s.time };
   } finally {
-    fs40.rmSync(s.path, { force: true });
+    fs42.rmSync(s.path, { force: true });
   }
 }
 async function screenCorners(ctx, args) {
   const toolName = "ae_screen_corners";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs40.mkdirSync(framesDir, { recursive: true });
+  fs42.mkdirSync(framesDir, { recursive: true });
   const label = `ae_screen_corners(${args.comp_id})`;
   const isolate = args.isolate_layers;
   const expect = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
@@ -47709,7 +49467,7 @@ async function screenCorners(ctx, args) {
           await noteAfterWrite(ctx, note, { addStep: true });
         } catch {
         }
-        return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage10(err), temp: made, checkpoint, sessionFields } };
+        return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage11(err), temp: made, checkpoint, sessionFields } };
       }
       await noteAfterWrite(ctx, note, { addStep: true });
     } else {
@@ -47732,7 +49490,7 @@ async function screenCorners(ctx, args) {
         const based = relativeTo(trackData, refTime);
         const refFrame = frameAt(based, refTime);
         if (!refFrame || !refFrame.ok || !refFrame.H) {
-          trackNote2 = `The track has no solved motion at ${r29(refTime)} s, so the corners could not be followed; pass a ref_time inside the track.`;
+          trackNote2 = `The track has no solved motion at ${r210(refTime)} s, so the corners could not be followed; pass a ref_time inside the track.`;
         } else {
           excursions3 = cornerExcursions(based, quadCheck(snapped3).ok ? snapped3 : guesses, [comp2.width, comp2.height]);
         }
@@ -47744,7 +49502,7 @@ async function screenCorners(ctx, args) {
       analysed = await analyse();
     } catch (err) {
       if (!temp) throw err;
-      return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage10(err), temp, checkpoint, sessionFields } };
+      return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage11(err), temp, checkpoint, sessionFields } };
     }
     const { scale: scale2, snap: snap3, snapped: snapped2, points: points2, excursions: excursions2, trackNote } = analysed;
     return { comp: comp2, refTime: frame.time, scale: scale2, frame: frame.image, snap: snap3, snapped: snapped2, points: points2, excursions: excursions2, trackNote, temp, checkpoint, sessionFields };
@@ -47788,7 +49546,7 @@ async function screenCorners(ctx, args) {
     try {
       previewPath = writePng2(framesDir, `screencorners_${opId}`, drawCornersPreview(ran.frame, [comp.width, comp.height], { guesses: args.corners, snapped, edges: sidesToDraw, points, maxSize: args.max_size }));
     } catch (err) {
-      previewError = errMessage10(err);
+      previewError = errMessage11(err);
     }
   }
   const cornerRows = snap2.corners.map((c, i) => {
@@ -47796,19 +49554,19 @@ async function screenCorners(ctx, args) {
     if (c.method === "corner_response") notes2.push("Only a corner response was found here (the side's edge was too weak or too short to fit), so the position is less exact.");
     if (c.method === "unchanged") notes2.push("Neither an edge nor a corner was found within the search radius: the guess is unchanged.");
     if (c.competing_share > 0.3) notes2.push(`Two strong parallel edges compete on this corner's sides (${Math.round(c.competing_share * 100)}% of the scan lines); "${args.edge}" picked one. Check the preview.`);
-    if (!c.trackable) notes2.push(c.template_std === null ? "Too close to the frame's border to hold a tracking pattern." : `Template contrast ${r29(c.template_std)} gray levels is under 3: this corner will not track well; use the suggested points.`);
+    if (!c.trackable) notes2.push(c.template_std === null ? "Too close to the frame's border to hold a tracking pattern." : `Template contrast ${r210(c.template_std)} gray levels is under 3: this corner will not track well; use the suggested points.`);
     if (c.shift_px / scale > args.search_px) notes2.push("The snapped corner is further than search_px from the guess.");
     return {
       index: i + 1,
       name: CORNER_NAMES[i],
-      guess: [r29(args.corners[i][0]), r29(args.corners[i][1])],
-      snapped: [r29(snapped[i][0]), r29(snapped[i][1])],
-      shift_px: r29(c.shift_px / scale),
+      guess: [r210(args.corners[i][0]), r210(args.corners[i][1])],
+      snapped: [r210(snapped[i][0]), r210(snapped[i][1])],
+      shift_px: r210(c.shift_px / scale),
       method: c.method,
-      edge_strength: c.edge_strength === null ? null : r29(c.edge_strength),
+      edge_strength: c.edge_strength === null ? null : r210(c.edge_strength),
       competing_edges: c.competing_share > 0.3,
       trackable: c.trackable,
-      template_contrast: c.template_std === null ? null : r29(c.template_std),
+      template_contrast: c.template_std === null ? null : r210(c.template_std),
       corner_agrees: c.corner_agrees,
       confidence: c.confidence,
       ...notes2.length ? { notes: notes2 } : {}
@@ -47819,22 +49577,22 @@ async function screenCorners(ctx, args) {
   if (lowest < 0.5) notes.push(`The least certain corner has confidence ${lowest}: look at preview_path before using these corners, or give better guesses.`);
   if (est && est.method === "perspective") {
     notes.push(
-      `The aspect ratio is an estimate from one perspective view with the picture centre as the principal point; it is exact only for a known focal length (range ${r37(est.range[0])}-${r37(est.range[1])} for focal lengths 0.7x-1.43x). ` + (est.common_ratio ? `It is close to ${est.common_ratio.name}: give insert_aspect if you know it.` : "Give insert_aspect if you know the panel's ratio.")
+      `The aspect ratio is an estimate from one perspective view with the picture centre as the principal point; it is exact only for a known focal length (range ${r38(est.range[0])}-${r38(est.range[1])} for focal lengths 0.7x-1.43x). ` + (est.common_ratio ? `It is close to ${est.common_ratio.name}: give insert_aspect if you know it.` : "Give insert_aspect if you know the panel's ratio.")
     );
   } else if (est && est.method === "assumed_focal") {
     notes.push(
-      `The focal length could not be recovered from this quad (one vanishing point is at or near infinity, as for a screen turned about the vertical axis with a level camera), so the aspect assumes a focal length equal to the comp width; the range ${r37(est.range[0])}-${r37(est.range[1])} covers 0.5x-3x of it. Give insert_aspect if you know the panel's ratio.`
+      `The focal length could not be recovered from this quad (one vanishing point is at or near infinity, as for a screen turned about the vertical axis with a level camera), so the aspect assumes a focal length equal to the comp width; the range ${r38(est.range[0])}-${r38(est.range[1])} covers 0.5x-3x of it. Give insert_aspect if you know the panel's ratio.`
     );
   } else if (est) {
     notes.push("The quad is a parallelogram (no perspective), so the focal length cannot be recovered and the aspect is the plain ratio of its edge lengths.");
   }
   if (args.insert_aspect !== void 0 && est) {
     const off = Math.abs(est.aspect - args.insert_aspect) / args.insert_aspect;
-    if (off > 0.08) notes.push(`The estimate (${r37(est.aspect)}) is ${Math.round(off * 100)}% away from the given insert_aspect (${r37(args.insert_aspect)}); the given one wins in ae_screen_replace, but check the corners.`);
+    if (off > 0.08) notes.push(`The estimate (${r38(est.aspect)}) is ${Math.round(off * 100)}% away from the given insert_aspect (${r38(args.insert_aspect)}); the given one wins in ae_screen_replace, but check the corners.`);
   }
   if (points.length < 4) notes.push(`Only ${points.length} trackable point${points.length === 1 ? "" : "s"} found on the plane: the surface is flat or low in contrast. Track the corners, or add marks.`);
   if (ran.trackNote) notes.push(ran.trackNote);
-  if (excursions && excursions.frames_outside > 0) notes.push(`A corner leaves the frame on ${excursions.frames_outside} of ${excursions.frames_checked} frames (first at ${r29(excursions.first_outside_time ?? 0)} s): the track must extrapolate there; ae_track_multi keeps following the points that stay in.`);
+  if (excursions && excursions.frames_outside > 0) notes.push(`A corner leaves the frame on ${excursions.frames_outside} of ${excursions.frames_checked} frames (first at ${r210(excursions.first_outside_time ?? 0)} s): the track must extrapolate there; ae_track_multi keeps following the points that stay in.`);
   if (excursions && excursions.frames_folded > 0) notes.push(`The quad folds or goes non-convex on ${excursions.frames_folded} frames: the track is unreliable there.`);
   if (ran.temp) notes.push("isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
   if (previewError) notes.push(`The preview could not be written: ${previewError}`);
@@ -47852,18 +49610,18 @@ async function screenCorners(ctx, args) {
     ...ran.temp ? {} : { read_only: true },
     comp: { id: comp.id, name: comp.name, width: comp.width, height: comp.height },
     ref_time: r48(ran.refTime),
-    image_scale: r37(scale),
+    image_scale: r38(scale),
     corners: cornerRows,
-    corners_snapped: snapped.map((p) => [r29(p[0]), r29(p[1])]),
+    corners_snapped: snapped.map((p) => [r210(p[0]), r210(p[1])]),
     quad: { ...quad, convex: quad.ok },
     aspect: est ? {
-      estimate: r37(est.aspect),
-      range: [r37(est.range[0]), r37(est.range[1])],
+      estimate: r38(est.aspect),
+      range: [r38(est.range[0]), r38(est.range[1])],
       method: est.method,
       focal_px: est.focal_px === null ? null : Math.round(est.focal_px),
-      edge_length_ratio: r37(est.edge_ratio),
+      edge_length_ratio: r38(est.edge_ratio),
       ...est.common_ratio ? { nearest_common_ratio: est.common_ratio.name } : {},
-      ...args.insert_aspect !== void 0 ? { given: args.insert_aspect, use: args.insert_aspect } : { use: r37(est.aspect) }
+      ...args.insert_aspect !== void 0 ? { given: args.insert_aspect, use: args.insert_aspect } : { use: r38(est.aspect) }
     } : { error: "The snapped corners do not make a quad, so no aspect was estimated." },
     ...excursions ? { track: excursions } : {},
     suggested_points: points,
@@ -48018,11 +49776,11 @@ async function measureLook(ctx, p) {
   for (let i = 0; i < p.times.length; i++) {
     const t = p.times[i];
     if (out.blocked) {
-      out.skipped.push(`${r29(t)} s: not rendered, AE stopped responding`);
+      out.skipped.push(`${r210(t)} s: not rendered, AE stopped responding`);
       continue;
     }
     if (budget.exhausted()) {
-      out.skipped.push(`${r29(t)} s: render budget reached`);
+      out.skipped.push(`${r210(t)} s: render budget reached`);
       continue;
     }
     try {
@@ -48033,12 +49791,12 @@ async function measureLook(ctx, p) {
       if (!p.needMeasure) continue;
       const fr = frameAt(p.based, t);
       if (!fr || !fr.H) {
-        out.skipped.push(`${r29(t)} s: the track has no motion here`);
+        out.skipped.push(`${r210(t)} s: the track has no motion here`);
         continue;
       }
       const quad = p.corners.map((c) => applyH(fr.H, c));
       if (quad.some((q) => q === null)) {
-        out.skipped.push(`${r29(t)} s: a corner is behind the plane`);
+        out.skipped.push(`${r210(t)} s: a corner is behind the plane`);
         continue;
       }
       const scale = snap2.image.width / p.comp.width;
@@ -48047,20 +49805,20 @@ async function measureLook(ctx, p) {
       const stats = lumaQuantiles(snap2.image, mask, [0.02, 0.5, 0.95, 0.98]);
       const share = stats.pixels / Math.max(1, polygonArea(poly));
       if (share < 0.5) {
-        out.skipped.push(`${r29(t)} s: under half of the screen is inside the frame`);
+        out.skipped.push(`${r210(t)} s: under half of the screen is inside the frame`);
         continue;
       }
       p02s.push(stats.values[0]);
       p95s.push(stats.values[2]);
       p98s.push(stats.values[3]);
-      out.per_frame.push({ time: r48(t), p02: r48(stats.values[0]), p50: r48(stats.values[1]), p98: r48(stats.values[3]), visible_share: r37(Math.min(1, share)) });
+      out.per_frame.push({ time: r48(t), p02: r48(stats.values[0]), p50: r48(stats.values[1]), p98: r48(stats.values[3]), visible_share: r38(Math.min(1, share)) });
       if (!edgeDone && t === refNearest) {
         edgeDone = true;
         out.edge = quadEdgeSigma(toGray(snap2.image), quad.map((q) => [q[0] * scale - 0.5, q[1] * scale - 0.5]), scale);
       }
     } catch (err) {
       if (isAeBlocked4(err)) out.blocked = true;
-      out.skipped.push(`${r29(t)} s: ${errMessage10(err)}`);
+      out.skipped.push(`${r210(t)} s: ${errMessage11(err)}`);
     }
   }
   out.frames_measured = p02s.length;
@@ -48088,7 +49846,7 @@ async function measureLook(ctx, p) {
         }
       } catch (err) {
         if (isAeBlocked4(err)) break;
-        out.skipped.push(`insert at ${r29(at[i])} s: ${errMessage10(err)}`);
+        out.skipped.push(`insert at ${r210(at[i])} s: ${errMessage11(err)}`);
       }
     }
     if (blacks.length > 0) out.insert = { black: median5(blacks), white: median5(whites), frames: blacks.length, source: "measured" };
@@ -48142,10 +49900,10 @@ async function screenReplace(ctx, args) {
     const based2 = relativeTo(track, refTime2);
     const refFrame = frameAt(based2, refTime2);
     if (!refFrame || !refFrame.ok || !refFrame.H) {
-      throw new PlanarError("bad_args", `The track has no solved motion at ${r29(refTime2)} s, so that cannot be the frame the corners were taken on. Pass a ref_time where the track is ok.`);
+      throw new PlanarError("bad_args", `The track has no solved motion at ${r210(refTime2)} s, so that cannot be the frame the corners were taken on. Pass a ref_time where the track is ok.`);
     }
     const qc = quadCheck(corners);
-    if (!qc.ok) throw new PlanarError("bad_args", `The corners do not make a quad at ${r29(refTime2)} s: ${qc.reason}. Give them in the order UL, UR, LR, LL (ae_screen_corners returns them so).`);
+    if (!qc.ok) throw new PlanarError("bad_args", `The corners do not make a quad at ${r210(refTime2)} s: ${qc.reason}. Give them in the order UL, UR, LR, LL (ae_screen_corners returns them so).`);
     const half = 0.5 / (based2.fps || 25);
     const inRange = based2.frames.filter((f) => !args.range || f.time >= args.range.start - half && f.time <= args.range.end + half);
     const okFrames2 = inRange.filter((f) => f.ok && f.H !== null);
@@ -48158,30 +49916,30 @@ async function screenReplace(ctx, args) {
     }
     const est = estimateAspect(corners, [comp2.width / 2, comp2.height / 2]);
     const aspect = args.insert_aspect ?? est.aspect;
-    if (!(aspect >= 0.1 && aspect <= 10)) throw new PlanarError("bad_args", `The screen's aspect came out at ${r37(aspect)}; give insert_aspect.`);
+    if (!(aspect >= 0.1 && aspect <= 10)) throw new PlanarError("bad_args", `The screen's aspect came out at ${r38(aspect)}; give insert_aspect.`);
     if (args.insert_aspect === void 0) {
       const about = est.common_ratio ? `, about ${est.common_ratio.name}` : "";
       if (est.method === "assumed_focal") {
         notes.push(
-          `The screen's aspect (${r37(aspect)}${about}) is a guess: the corners do not fix the focal length, so it was assumed to be the comp width; range ${r37(est.range[0])}-${r37(est.range[1])}. Pass insert_aspect if you know the panel's ratio.`
+          `The screen's aspect (${r38(aspect)}${about}) is a guess: the corners do not fix the focal length, so it was assumed to be the comp width; range ${r38(est.range[0])}-${r38(est.range[1])}. Pass insert_aspect if you know the panel's ratio.`
         );
       } else if (est.method === "edge_lengths") {
-        notes.push(`The screen's aspect (${r37(aspect)}${about}) is the ratio of the mean edge lengths (no perspective in the corners); pass insert_aspect if you know the panel's ratio.`);
+        notes.push(`The screen's aspect (${r38(aspect)}${about}) is the ratio of the mean edge lengths (no perspective in the corners); pass insert_aspect if you know the panel's ratio.`);
       } else {
         notes.push(
-          `The screen's aspect (${r37(aspect)}${about}) was estimated from the corners in perspective, range ${r37(est.range[0])}-${r37(est.range[1])}; pass insert_aspect if you know the panel's ratio.`
+          `The screen's aspect (${r38(aspect)}${about}) was estimated from the corners in perspective, range ${r38(est.range[0])}-${r38(est.range[1])}; pass insert_aspect if you know the panel's ratio.`
         );
       }
     }
     const srcW = item2.width * (item2.pixel_aspect > 0 ? item2.pixel_aspect : 1);
-    if (Math.abs(item2.pixel_aspect - 1) > 1e-6) notes.push(`"${item2.name}" has non-square pixels (${r37(item2.pixel_aspect)}); its width was scaled by that for the fit.`);
+    if (Math.abs(item2.pixel_aspect - 1) > 1e-6) notes.push(`"${item2.name}" has non-square pixels (${r38(item2.pixel_aspect)}); its width was scaled by that for the fit.`);
     const insertSize2 = insertCompSize({ width: srcW, height: item2.height }, aspect, args.fit);
     const sheet2 = args.contact_sheet ? pickSheetFrames({ ...based2, frames: okFrames2 }, corners, refTime2) : [];
     const needMeasure = args.match_look || args.reflections;
     const planned = needMeasure ? planSampleTimes({ times: okFrames2.map((f) => f.time), refTime: refTime2, sheet: sheet2.map((s) => s.time), maxSamples: args.max_samples, maxRenders: args.max_renders }) : { times: sheet2.map((s) => s.time).slice(0, args.max_renders), trimmed: sheet2.length > args.max_renders };
     const keep = /* @__PURE__ */ new Map();
     for (const s of sheet2) keep.set(s.time, null);
-    fs40.mkdirSync(framesDir, { recursive: true });
+    fs42.mkdirSync(framesDir, { recursive: true });
     let measure2 = null;
     if (planned.times.length > 0) {
       measure2 = await measureLook(ctx, {
@@ -48251,9 +50009,9 @@ async function screenReplace(ctx, args) {
       const quadArea = polygonArea(corners);
       const pinScale = quadArea > 0 ? Math.sqrt(insertSize[0] * insertSize[1] / quadArea) : 1;
       blurSigmaLayer = blurSigma * pinScale;
-      blurriness = r37(blurrinessFromSigma(blurSigmaLayer));
-      if (Math.abs(pinScale - 1) > 0.05) notes.push(`The blur sigma of ${r37(blurSigma)} px on screen is ${r37(blurSigmaLayer)} px in the insert's own pixels (the insert is pinned onto the screen at about 1/${r37(pinScale)} scale), because the blur runs before the pin.`);
-    } else if (blurSigma !== null) notes.push(`The edge is sharp (sigma ${r37(blurSigma)} px under 0.4): no blur was added.`);
+      blurriness = r38(blurrinessFromSigma(blurSigmaLayer));
+      if (Math.abs(pinScale - 1) > 0.05) notes.push(`The blur sigma of ${r38(blurSigma)} px on screen is ${r38(blurSigmaLayer)} px in the insert's own pixels (the insert is pinned onto the screen at about 1/${r38(pinScale)} scale), because the blur runs before the pin.`);
+    } else if (blurSigma !== null) notes.push(`The edge is sharp (sigma ${r38(blurSigma)} px under 0.4): no blur was added.`);
   }
   if (args.reflections) {
     let threshold = args.reflection_threshold;
@@ -48286,10 +50044,10 @@ async function screenReplace(ctx, args) {
   if (args.motion_blur === "none") notes.push("Corner Pin and CC Power Pin animation gets no layer motion blur: pass motion_blur transform_pin or force if the shot has motion blur.");
   if (item.kind === "footage" && item.duration > 0) {
     const lastKey = keys.times[keys.times.length - 1];
-    if ((args.insert_start ?? 0) + item.duration < lastKey) notes.push(`The insert is ${r29(item.duration)} s long and ends before the last key (${r29(lastKey)} s): the screen goes empty after it. Loop or extend it.`);
+    if ((args.insert_start ?? 0) + item.duration < lastKey) notes.push(`The insert is ${r210(item.duration)} s long and ends before the last key (${r210(lastKey)} s): the screen goes empty after it. Loop or extend it.`);
   }
-  if ((args.insert_start ?? 0) > keys.times[0] + 1e-6) notes.push(`insert_start (${r29(args.insert_start ?? 0)} s) is after the first key (${r29(keys.times[0])} s): the old screen shows until then, because the insert layer starts at insert_start.`);
-  if (args.range) notes.push(`This call made its own insert comp and layer, cut to its range (${r29(keys.times[0])}-${r29(keys.times[keys.times.length - 1])} s). Existing insert layers are not extended, so a further range makes another layer and the old screen shows in any gap.`);
+  if ((args.insert_start ?? 0) > keys.times[0] + 1e-6) notes.push(`insert_start (${r210(args.insert_start ?? 0)} s) is after the first key (${r210(keys.times[0])} s): the old screen shows until then, because the insert layer starts at insert_start.`);
+  if (args.range) notes.push(`This call made its own insert comp and layer, cut to its range (${r210(keys.times[0])}-${r210(keys.times[keys.times.length - 1])} s). Existing insert layers are not extended, so a further range makes another layer and the old screen shows in any gap.`);
   const plan2 = {
     name,
     pin: args.pin,
@@ -48393,7 +50151,7 @@ async function screenReplace(ctx, args) {
       if (png) sheetPath = writePng2(framesDir, `screenreplace_${opId}`, png);
       else sheetError = "no frame could be rendered for the sheet";
     } catch (err) {
-      sheetError = errMessage10(err);
+      sheetError = errMessage11(err);
     }
   }
   if (sheetError) notes.push(`The before / after sheet could not be made: ${sheetError}`);
@@ -48406,13 +50164,13 @@ async function screenReplace(ctx, args) {
     comp_id: args.comp_id,
     ref_time: r48(refTime),
     insert: { comp: w.insert_comp, layer: w.insert_layer, source: w.source_item ?? { id: item.item_id, name: item.name, kind: item.kind }, size: insertSize, fit: args.fit },
-    aspect: { used: r37(prep.aspect), estimated: r37(prep.est.aspect), range: [r37(prep.est.range[0]), r37(prep.est.range[1])], given: args.insert_aspect ?? null, method: prep.est.method },
+    aspect: { used: r38(prep.aspect), estimated: r38(prep.est.aspect), range: [r38(prep.est.range[0]), r38(prep.est.range[1])], given: args.insert_aspect ?? null, method: prep.est.method },
     pin: w.pin,
     written: w.written,
     look: {
       ...w.look ?? {},
       ...levels ? { levels_plan: { in_black: r48(levels.in_black), in_white: r48(levels.in_white), out_black: r48(levels.out_black), out_white: r48(levels.out_white) } } : {},
-      ...blurSigma !== null ? { blur_sigma_px: r37(blurSigma), ...blurSigmaLayer !== null ? { blur_sigma_layer_px: r37(blurSigmaLayer) } : {}, blurriness } : {}
+      ...blurSigma !== null ? { blur_sigma_px: r38(blurSigma), ...blurSigmaLayer !== null ? { blur_sigma_layer_px: r38(blurSigmaLayer) } : {}, blurriness } : {}
     },
     motion_blur: w.motion_blur ?? { mode: args.motion_blur },
     ...w.source_layer ? { source_layer: w.source_layer } : {},
@@ -48440,12 +50198,12 @@ async function screenReplace(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs40, path39, r29, r37, r48, clamp3, errMessage10, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES, median5, mean2, MIN_EDGE, distToLine, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round24, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
+var fs42, path40, r210, r38, r48, clamp3, errMessage11, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES, median5, mean2, MIN_EDGE, distToLine, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round24, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
 var init_screenrep = __esm({
   "src/tools/ext/screenrep.ts"() {
     "use strict";
-    fs40 = __toESM(require("node:fs"), 1);
-    path39 = __toESM(require("node:path"), 1);
+    fs42 = __toESM(require("node:fs"), 1);
+    path40 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -48462,11 +50220,11 @@ var init_screenrep = __esm({
     init_session();
     init_track();
     init_write_runner();
-    r29 = (v) => Math.round(v * 100) / 100;
-    r37 = (v) => Math.round(v * 1e3) / 1e3;
+    r210 = (v) => Math.round(v * 100) / 100;
+    r38 = (v) => Math.round(v * 1e3) / 1e3;
     r48 = (v) => Math.round(v * 1e4) / 1e4;
     clamp3 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    errMessage10 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage11 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop7 = () => new Promise((r) => setImmediate(r));
     failure = (e) => ({ ok: false, error: e.code, message: e.message });
     snapFrame3 = (t, fps) => Math.round(t * fps) / fps;
@@ -48677,8 +50435,8 @@ function copiedCompWarnings(expressions, originalNames) {
   for (const ex of expressions) {
     if (!ex.enabled) continue;
     if (ex.text_truncated && out.length < MAX_WARNINGS) out.push(warnPartial(ex));
-    for (const ref2 of findItemReferences(ex.text)) {
-      if (ref2.kind !== "comp" || !names.has(ref2.name)) continue;
+    for (const ref3 of findItemReferences(ex.text)) {
+      if (ref3.kind !== "comp" || !names.has(ref3.name)) continue;
       if (out.length >= MAX_WARNINGS) return out;
       out.push({
         comp_id: ex.comp_id,
@@ -48687,8 +50445,8 @@ function copiedCompWarnings(expressions, originalNames) {
         layer_name: ex.layer_name,
         path: ex.path,
         kind: "copied_comp_reference",
-        reference: `comp("${ref2.name}")`,
-        message: `comp("${ref2.name}") still points at the original comp, not its copy. Repoint it with ae_batch_set or ae_set_property if the copy should read the copy.`
+        reference: `comp("${ref3.name}")`,
+        message: `comp("${ref3.name}") still points at the original comp, not its copy. Repoint it with ae_batch_set or ae_set_property if the copy should read the copy.`
       });
     }
   }
@@ -48697,8 +50455,8 @@ function copiedCompWarnings(expressions, originalNames) {
 function referencesToRenamed(expressions, renames) {
   const out = [];
   for (const ex of expressions) {
-    for (const ref2 of findItemReferences(ex.text)) {
-      if (renames.some((r) => r.kind === ref2.kind && r.from === ref2.name)) out.push({ ex, ref: ref2 });
+    for (const ref3 of findItemReferences(ex.text)) {
+      if (renames.some((r) => r.kind === ref3.kind && r.from === ref3.name)) out.push({ ex, ref: ref3 });
     }
   }
   return out;
@@ -48711,9 +50469,9 @@ function renamedReferenceWarnings(expressions, renames, names) {
   for (const ex of expressions) {
     if (!ex.enabled) continue;
     if (ex.text_truncated && out.length < MAX_WARNINGS) out.push(warnPartial(ex));
-    for (const ref2 of findItemReferences(ex.text)) {
-      const renamedTo = to.get(`${ref2.kind}:${ref2.name}`);
-      if (renamedTo === void 0 || current[ref2.kind].has(ref2.name)) continue;
+    for (const ref3 of findItemReferences(ex.text)) {
+      const renamedTo = to.get(`${ref3.kind}:${ref3.name}`);
+      if (renamedTo === void 0 || current[ref3.kind].has(ref3.name)) continue;
       if (out.length >= MAX_WARNINGS) return out;
       out.push({
         comp_id: ex.comp_id,
@@ -48722,8 +50480,8 @@ function renamedReferenceWarnings(expressions, renames, names) {
         layer_name: ex.layer_name,
         path: ex.path,
         kind: "renamed_item_reference",
-        reference: `${ref2.kind}("${ref2.name}")`,
-        message: `${ref2.kind}("${ref2.name}") refers to an item renamed to "${renamedTo}"; no ${ref2.kind} item has the old name now, so the expression errors. Repair it with ae_batch_set or ae_set_property.`
+        reference: `${ref3.kind}("${ref3.name}")`,
+        message: `${ref3.kind}("${ref3.name}") refers to an item renamed to "${renamedTo}"; no ${ref3.kind} item has the old name now, so the expression errors. Repair it with ae_batch_set or ae_set_property.`
       });
     }
   }
@@ -48923,10 +50681,10 @@ function idsOfOps(ops) {
   }
   return [...new Set(ids)].slice(0, 500);
 }
-function lastPerId(list) {
+function lastPerId(list2) {
   const last = /* @__PURE__ */ new Map();
-  list.forEach((x, i) => last.set(x.id, i));
-  return list.map((x, i) => ({ x, i })).filter((e) => last.get(e.x.id) === e.i);
+  list2.forEach((x, i) => last.set(x.id, i));
+  return list2.map((x, i) => ({ x, i })).filter((e) => last.get(e.x.id) === e.i);
 }
 function projectItemsMismatches(beforeRaw, afterRaw, w, ops) {
   const m = [];
@@ -49069,10 +50827,10 @@ async function projectItems(args, ctx) {
     check: (before, after2, w) => projectItemsMismatches(before, after2, w, ops),
     present: (_before, after2, w) => {
       const read3 = itemsOf(after2);
-      const total = (name, list) => w[`${name}_total`] ?? list?.length ?? 0;
+      const total2 = (name, list2) => w[`${name}_total`] ?? list2?.length ?? 0;
       const totals = {};
-      for (const [name, list] of [["created_folders", w.created_folders], ["moved", w.moved], ["renamed", w.renamed], ["labelled", w.labelled], ["commented", w.commented], ["deleted", w.deleted], ["failed", w.failed]]) {
-        if (list && total(name, list) > list.length) totals[`${name}_total`] = total(name, list);
+      for (const [name, list2] of [["created_folders", w.created_folders], ["moved", w.moved], ["renamed", w.renamed], ["labelled", w.labelled], ["commented", w.commented], ["deleted", w.deleted], ["failed", w.failed]]) {
+        if (list2 && total2(name, list2) > list2.length) totals[`${name}_total`] = total2(name, list2);
       }
       return {
         ...totals,
@@ -49081,10 +50839,10 @@ async function projectItems(args, ctx) {
         refused: w.refused,
         refusals: w.refusals,
         created_folders: w.created_folders,
-        moved: w.moved && w.moved.length > 50 ? { count: total("moved", w.moved), folder_ids: [...new Set(w.moved.map((x) => x.folder_id))].slice(0, 100) } : w.moved,
+        moved: w.moved && w.moved.length > 50 ? { count: total2("moved", w.moved), folder_ids: [...new Set(w.moved.map((x) => x.folder_id))].slice(0, 100) } : w.moved,
         renamed: w.renamed?.slice(0, 500),
-        labelled: w.labelled && w.labelled.length > 50 ? { count: total("labelled", w.labelled) } : w.labelled,
-        commented: w.commented && w.commented.length > 50 ? { count: total("commented", w.commented) } : w.commented?.map((c) => ({ id: c.id })),
+        labelled: w.labelled && w.labelled.length > 50 ? { count: total2("labelled", w.labelled) } : w.labelled,
+        commented: w.commented && w.commented.length > 50 ? { count: total2("commented", w.commented) } : w.commented?.map((c) => ({ id: c.id })),
         deleted: w.deleted?.slice(0, 500).map(({ contained_ids, contained_ids_truncated: _t, ...d }) => ({ ...d, contained_ids_count: contained_ids?.length || void 0 })),
         failed: w.failed?.length ? w.failed.slice(0, 500) : void 0,
         skipped: plan2.skipped.length ? plan2.skipped : void 0,
@@ -50050,27 +51808,27 @@ function indexReferenceWarnings(before, map, occupant) {
     const ownerNew = map.get(ex.layer_id);
     const edits = [];
     const found = [];
-    for (const ref2 of findIndexReferences(ex.text)) {
-      if (ref2.relative && !ref2.parsed) {
+    for (const ref3 of findIndexReferences(ex.text)) {
+      if (ref3.relative && !ref3.parsed) {
         if (ownerOld !== ownerNew) {
           found.push({
             layer_id: ex.layer_id,
             layer_name: ex.layer_name,
             path: ex.path,
             kind: "relative_index_unparsed",
-            reference: ref2.text,
-            message: `${ref2.text} uses index arithmetic this scan can't evaluate, and its layer moved from ${ownerOld} to ${ownerNew}: check what it points at.`
+            reference: ref3.text,
+            message: `${ref3.text} uses index arithmetic this scan can't evaluate, and its layer moved from ${ownerOld} to ${ownerNew}: check what it points at.`
           });
         }
         continue;
       }
-      const oldIndex = ref2.relative ? ownerOld + ref2.value : ref2.value;
+      const oldIndex = ref3.relative ? ownerOld + ref3.value : ref3.value;
       const target = idAt.get(oldIndex);
       if (!target) continue;
       if (!map.has(target.id)) continue;
       const newTarget = map.get(target.id);
-      const readsIndex = ref2.relative ? ownerNew + ref2.value : ref2.value;
-      const kind = ref2.relative ? "relative_index" : "index";
+      const readsIndex = ref3.relative ? ownerNew + ref3.value : ref3.value;
+      const kind = ref3.relative ? "relative_index" : "index";
       const was = { index: oldIndex, layer_id: target.id, layer_name: target.name };
       if (newTarget === null) {
         const occ = occupant(readsIndex);
@@ -50079,10 +51837,10 @@ function indexReferenceWarnings(before, map, occupant) {
           layer_name: ex.layer_name,
           path: ex.path,
           kind,
-          reference: ref2.text,
+          reference: ref3.text,
           was,
           now: occ ? { index: readsIndex, ...occ } : null,
-          message: `${ref2.text} pointed at "${target.name}", which is deleted; it now reads ${occ ? `"${occ.layer_name}"` : "no layer"}.`
+          message: `${ref3.text} pointed at "${target.name}", which is deleted; it now reads ${occ ? `"${occ.layer_name}"` : "no layer"}.`
         });
       } else if (newTarget !== readsIndex) {
         const occ = occupant(readsIndex);
@@ -50091,12 +51849,12 @@ function indexReferenceWarnings(before, map, occupant) {
           layer_name: ex.layer_name,
           path: ex.path,
           kind,
-          reference: ref2.text,
+          reference: ref3.text,
           was,
           now: occ ? { index: readsIndex, ...occ } : null,
-          message: `${ref2.text} pointed at "${target.name}", which is now at index ${newTarget}; it reads ${occ ? `"${occ.layer_name}"` : "index " + readsIndex} instead.`
+          message: `${ref3.text} pointed at "${target.name}", which is now at index ${newTarget}; it reads ${occ ? `"${occ.layer_name}"` : "index " + readsIndex} instead.`
         });
-        if (!ref2.relative) edits.push({ start: ref2.start, end: ref2.end, to: newTarget });
+        if (!ref3.relative) edits.push({ start: ref3.start, end: ref3.end, to: newTarget });
       }
     }
     if (found.length > 0) {
@@ -50119,16 +51877,16 @@ function nameReferenceWarnings(after, renames) {
   for (const ex of after.expressions ?? []) {
     if (!ex.enabled) continue;
     if (ex.text_truncated && out.length < MAX_WARNINGS2) out.push(partialScanWarning(ex));
-    for (const ref2 of findNameReferences(ex.text)) {
-      if (!renamed.has(ref2) || names.has(ref2)) continue;
+    for (const ref3 of findNameReferences(ex.text)) {
+      if (!renamed.has(ref3) || names.has(ref3)) continue;
       if (out.length >= MAX_WARNINGS2) return out;
       out.push({
         layer_id: ex.layer_id,
         layer_name: ex.layer_name,
         path: ex.path,
         kind: "name",
-        reference: `layer("${ref2}")`,
-        message: `layer("${ref2}") refers to a layer renamed to "${renamed.get(ref2)}"; no layer has the old name now. Repair it with fix_name_references or ae_batch_set.`
+        reference: `layer("${ref3}")`,
+        message: `layer("${ref3}") refers to a layer renamed to "${renamed.get(ref3)}"; no layer has the old name now. Repair it with fix_name_references or ae_batch_set.`
       });
     }
   }
@@ -51183,344 +52941,6 @@ var init_timeline = __esm({
   }
 });
 
-// src/tools/ext/brief.ts
-function labToSrgb(L, a, b) {
-  const fy = (L + 16) / 116;
-  const fx = fy + a / 500;
-  const fz = fy - b / 200;
-  const eps = 216 / 24389;
-  const kappa = 24389 / 27;
-  const finv = (f) => f * f * f > eps ? f * f * f : (116 * f - 16) / kappa;
-  const X = 0.9642 * finv(fx);
-  const Y = L > kappa * eps ? Math.pow((L + 16) / 116, 3) : L / kappa;
-  const Z = 0.8249 * finv(fz);
-  const rl = 3.1338561 * X - 1.6168667 * Y - 0.4906146 * Z;
-  const gl = -0.9787684 * X + 1.9161415 * Y + 0.033454 * Z;
-  const bl = 0.0719453 * X - 0.2289914 * Y + 1.4052427 * Z;
-  const out = [rl, gl, bl].some((c) => c < -2e-3 || c > 1.002);
-  return { rgb: [encodeSrgb(rl), encodeSrgb(gl), encodeSrgb(bl)], out_of_gamut: out };
-}
-function swatchToColor(v) {
-  switch (v.type) {
-    case "RGB":
-      if (!isNum(v.r) || !isNum(v.g) || !isNum(v.b)) return "RGB swatch is missing r, g or b";
-      return { hex: toHex(v.r, v.g, v.b), approximate: false };
-    case "Gray":
-      if (!isNum(v.value)) return "Gray swatch has no value";
-      return { hex: toHex(v.value, v.value, v.value), approximate: false };
-    case "CMYK": {
-      if (!isNum(v.c) || !isNum(v.m) || !isNum(v.y) || !isNum(v.k)) return "CMYK swatch is missing c, m, y or k";
-      const k = 1 - clamp01(v.k);
-      return { hex: toHex((1 - clamp01(v.c)) * k, (1 - clamp01(v.m)) * k, (1 - clamp01(v.y)) * k), approximate: true };
-    }
-    case "LAB": {
-      if (!isNum(v.L) || !isNum(v.a) || !isNum(v.b)) return "LAB swatch is missing L, a or b";
-      const { rgb, out_of_gamut } = labToSrgb(clamp01(v.L) * 100, v.a, v.b);
-      return { hex: toHex(rgb[0], rgb[1], rgb[2]), approximate: true, ...out_of_gamut ? { out_of_gamut: true } : {} };
-    }
-    default:
-      return `swatch type '${v.type}' is not supported (only RGB, CMYK, LAB and Gray)`;
-  }
-}
-function convertSwatches(values) {
-  const swatches = [];
-  const skipped = [];
-  const seen = /* @__PURE__ */ new Set();
-  let dupes = 0;
-  values.forEach((v, i) => {
-    const c = swatchToColor(v);
-    if (typeof c === "string") {
-      skipped.push({ index: i + 1, type: String(v.type), reason: c });
-      return;
-    }
-    if (seen.has(c.hex)) {
-      dupes++;
-      return;
-    }
-    seen.add(c.hex);
-    swatches.push({ index: i + 1, type: v.type, ...c });
-  });
-  return {
-    swatches,
-    colors: swatches.map((s) => s.hex),
-    duplicates_removed: dupes,
-    skipped,
-    approximate_count: swatches.filter((s) => s.approximate).length
-  };
-}
-function mergeBrandColors(existing, incoming, max = 12) {
-  const have = new Set(existing.map((c) => c.toLowerCase()));
-  const merged = [...existing];
-  const added = [];
-  const already_present = [];
-  const not_added = [];
-  for (const c of incoming) {
-    if (have.has(c.toLowerCase())) already_present.push(c);
-    else if (merged.length >= max) not_added.push(c);
-    else {
-      merged.push(c);
-      have.add(c.toLowerCase());
-      added.push(c);
-    }
-  }
-  return { merged, added, already_present, not_added };
-}
-function checkSwatchPath(file) {
-  if (!path40.isAbsolute(file)) return "The swatch path must be absolute.";
-  if (path40.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
-  let st;
-  try {
-    st = fs41.statSync(file);
-  } catch {
-    return "No file at that path.";
-  }
-  if (!st.isFile()) return "That path is not a file.";
-  if (st.size === 0) return "The swatch file is empty.";
-  if (st.size > MAX_SWATCH_FILE_BYTES) return `The swatch file is larger than ${MAX_SWATCH_FILE_BYTES / (1024 * 1024)} MB.`;
-  return null;
-}
-function briefPath(projectPath) {
-  return path40.join(path40.dirname(projectPath), `${path40.basename(projectPath, path40.extname(projectPath))}.brief.json`);
-}
-function isEmpty(v) {
-  if (v === void 0 || v === null || v === "") return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === "object") return Object.keys(v).length === 0;
-  return false;
-}
-function readBrief(file) {
-  try {
-    const parsed = JSON.parse(fs41.readFileSync(file, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-function mergeBrief(current, patch, now) {
-  const next = { ...current ?? {} };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === void 0) continue;
-    if (isEmpty(v)) delete next[k];
-    else next[k] = v;
-  }
-  next.updated_at = now.toISOString();
-  return next;
-}
-function missingFields(brief) {
-  return BRIEF_FIELDS.filter((f) => isEmpty(brief?.[f]));
-}
-async function openProjectPath(ctx) {
-  const res = await ctx.bridge.evalRaw({
-    id: `${ctx.bridge.newOpId()}_brief_status`,
-    script: buildJsxCall("status", {}),
-    label: "ae_brief (project path)",
-    mutates: false,
-    toolName: "ae_brief"
-  });
-  return res.result.project_path;
-}
-async function parseSwatches(file, ctx) {
-  const bad4 = checkSwatchPath(file);
-  if (bad4) return { ok: false, error: "bad_swatch_file", message: bad4 };
-  let raw;
-  try {
-    const res = await ctx.bridge.callHost("briefParseSwatches", { path: file }, { label: "ae_brief (parse swatches)", mutates: false, toolName: "ae_brief" });
-    raw = res.result;
-  } catch (err) {
-    return { ok: false, error: "swatch_parse_failed", message: err instanceof Error ? err.message : String(err) };
-  }
-  const conv = convertSwatches(raw.values ?? []);
-  const report = {
-    path: file,
-    ase_version: raw.majorVersion != null ? `${raw.majorVersion}.${raw.minorVersion ?? 0}` : void 0,
-    swatch_count: raw.count ?? (raw.values ?? []).length,
-    ...raw.truncated ? { truncated: true } : {},
-    colors: conv.colors,
-    swatches: conv.swatches,
-    duplicates_removed: conv.duplicates_removed,
-    skipped: conv.skipped,
-    approximate_count: conv.approximate_count,
-    confirmed: false,
-    note: "The .ase file holds no colour names, so the colours are numbered in file order (swatches[].index). CMYK and LAB are converted without colour profiles: approximate." + (conv.colors.length > 12 ? " brand_colors holds at most 12 colours: only the first free slots are filled." : ""),
-    next: "Show these colours to the user (ae_ask_user) and, on a yes, call ae_brief again with import_swatches.confirm true and expect.project_path."
-  };
-  return { ok: true, report, colors: conv.colors };
-}
-function isLinear(c) {
-  return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
-}
-var fs41, path40, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
-var init_brief = __esm({
-  "src/tools/ext/brief.ts"() {
-    "use strict";
-    fs41 = __toESM(require("node:fs"), 1);
-    path40 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_jsx();
-    clamp01 = (x) => Math.min(1, Math.max(0, x));
-    isNum = (x) => typeof x === "number" && Number.isFinite(x);
-    toHex = (r, g, b) => "#" + [r, g, b].map((c) => Math.round(clamp01(c) * 255).toString(16).padStart(2, "0")).join("");
-    encodeSrgb = (lin) => {
-      const c = clamp01(lin);
-      return c <= 31308e-7 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
-    };
-    MAX_SWATCH_FILE_BYTES = 5 * 1024 * 1024;
-    BriefFieldsSchema = external_exports.object({
-      goal: external_exports.string().max(1e3).optional().describe("What the piece is for and the one thing it must get across."),
-      audience: external_exports.string().max(500).optional().describe("Who watches it, and where (platform, screen)."),
-      format: external_exports.object({
-        width: external_exports.number().int().positive().optional(),
-        height: external_exports.number().int().positive().optional(),
-        fps: external_exports.number().positive().optional(),
-        duration_s: external_exports.number().positive().optional()
-      }).optional().describe("Delivery size, frame rate and length."),
-      feel: external_exports.array(external_exports.string().min(1).max(40)).max(6).optional().describe("A few words for the feel, e.g. ['confident', 'clean', 'snappy']."),
-      references: external_exports.array(external_exports.string().min(1).max(500)).max(20).optional().describe("Links, file paths, or descriptions of work to match."),
-      brand_colors: external_exports.array(external_exports.string().regex(/^#[0-9a-fA-F]{6}$/, "colors are #rrggbb")).max(12).optional().describe("Brand colours as #rrggbb."),
-      fonts: external_exports.array(external_exports.string().min(1).max(100)).max(6).optional(),
-      do_not_change: external_exports.array(external_exports.string().min(1).max(300)).max(20).optional().describe("Layers, comps or decisions to leave alone."),
-      notes: external_exports.string().max(4e3).optional()
-    });
-    AeBriefSchema = external_exports.object({
-      set: BriefFieldsSchema.optional().describe(
-        "Fields to save. Omitted fields keep their value; an empty string or list clears one. Save only what the user said or confirmed."
-      ),
-      import_swatches: external_exports.object({
-        path: external_exports.string().min(1).max(1e3).describe("Absolute path to an Adobe Swatch Exchange (.ase) file."),
-        confirm: external_exports.boolean().default(false).describe(
-          "false (default): only list the colours the file holds, to show the user (ae_ask_user) and get a yes. true: add them to brand_colors (existing colours stay; new ones are appended up to the limit of 12)."
-        )
-      }).optional().describe(
-        "Read a client .ase palette through After Effects and offer its colours as #rrggbb for brand_colors. RGB and Gray are exact; CMYK and LAB are converted without colour profiles and flagged approximate. The file holds no colour names, so the colours are numbered in file order. Nothing is saved until confirm is true."
-      ),
-      expect: external_exports.object({ project_path: external_exports.string().min(1) }).optional().describe("Required with `set` or `import_swatches.confirm`: the open project's path, so the brief lands next to the right .aep.")
-    }).refine((v) => !v.set && v.import_swatches?.confirm !== true || v.expect !== void 0, { message: "Saving a brief needs expect.project_path." });
-    BRIEF_FIELDS = ["goal", "audience", "format", "feel", "references", "brand_colors", "fonts", "do_not_change"];
-    BRIEF_QUESTIONS = {
-      goal: { question: "What is this piece for, and what is the one thing it must get across?" },
-      audience: {
-        question: "Who will watch it, and where?",
-        options: [
-          { id: "social_vertical", label: "Social, vertical (Reels, TikTok, Shorts)" },
-          { id: "web_16x9", label: "YouTube or web, 16:9" },
-          { id: "broadcast", label: "Broadcast or TV" },
-          { id: "event", label: "Event screen or presentation" }
-        ]
-      },
-      format: { question: "What size, frame rate and length should it be delivered at?" },
-      feel: {
-        question: "Which words fit the feel?",
-        options: [
-          { id: "calm", label: "Calm" },
-          { id: "energetic", label: "Energetic" },
-          { id: "playful", label: "Playful" },
-          { id: "premium", label: "Premium" },
-          { id: "technical", label: "Technical" },
-          { id: "bold", label: "Bold" }
-        ],
-        multi_select: true
-      },
-      references: { question: "Is there any work (links or files) it should feel like?" },
-      brand_colors: { question: "Which brand colours should it use (hex codes)?" },
-      fonts: { question: "Which fonts should it use?" },
-      do_not_change: { question: "Is there anything I must leave alone?" }
-    };
-    AeTasteSchema = external_exports.object({
-      set: external_exports.object({
-        // Deliberately not EASE_CURVE_ARRAY_SCHEMA/MIN_HANDLE-bounded: [0, 0, 1, 1] (x1=0,
-        // x2=1) is a meaningful "clear to linear" sentinel here, checked by isLinear() below
-        // before it's ever applied as a curve - the tighter apply-time bound would reject it.
-        preferred_ease: external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1, { message: "curve x1 and x2 must be within 0..1" }).optional().describe("The user's default cubic-bezier [x1, y1, x2, y2], e.g. the one they picked with ae_ask_user. [0, 0, 1, 1] (linear) clears it."),
-        allow_linear_non_motion: external_exports.boolean().optional().describe("Linear timing on opacity and effect parameters is on purpose: the review stops flagging it."),
-        avoid_overshoot: external_exports.boolean().optional().describe("The user doesn't want overshoot: the review reports it as low instead of info."),
-        notes: external_exports.string().max(2e3).optional().describe("What the user has said about their taste, in their words. Replaces the earlier notes.")
-      }).optional().describe("Fields to change. Save only what the user said or confirmed.")
-    });
-    briefTools = [
-      {
-        name: "ae_brief",
-        description: "Read or save the open project's brief: goal, audience, format, feel, references, brand colours and fonts, and what not to change. It lives next to the .aep as <name>.brief.json, so it travels with the project. Call it at the start of any creative job. The result lists `missing` fields with `questions`; ask the ones that matter for the task, choices through ae_ask_user (pass the question and options as given) and open questions in the chat, then save the answers with `set`. Respect `do_not_change` in everything you do. Unsaved projects have no brief until they are saved. Never touches the AE project. `import_swatches` {path, confirm} reads a client .ase palette through After Effects and lists its colours as #rrggbb (RGB and Gray exact, CMYK and LAB approximate, no names, so they are numbered); show them to the user with ae_ask_user, then repeat with confirm true to merge them into brand_colors (existing colours are kept, 12 at most).",
-        schema: AeBriefSchema,
-        handler: async (args, ctx) => {
-          const projectPath = await openProjectPath(ctx);
-          const imp = args.import_swatches;
-          const writes = !!args.set || imp?.confirm === true;
-          const previewOnly = !!imp && !writes;
-          if (projectPath === "<unsaved>" && !previewOnly) {
-            return {
-              ok: false,
-              error: "unsaved_project",
-              message: "The project has not been saved, so there is nowhere to keep a brief yet. Ask the user to save it (or keep the brief in the chat for now)."
-            };
-          }
-          const file = projectPath === "<unsaved>" ? null : briefPath(projectPath);
-          let brief = file ? readBrief(file) : null;
-          let saved = false;
-          if (writes && normalizeGuardPath(args.expect.project_path) !== normalizeGuardPath(projectPath)) {
-            return {
-              ok: false,
-              error: "guard",
-              message: `The open project is ${projectPath}, not ${args.expect.project_path}. Re-read state; nothing was saved.`
-            };
-          }
-          let swatchReport;
-          let importColors;
-          if (imp) {
-            const parsed = await parseSwatches(imp.path, ctx);
-            if (!parsed.ok) return parsed;
-            swatchReport = parsed.report;
-            importColors = parsed.colors;
-          }
-          if (args.set) brief = mergeBrief(brief, args.set, /* @__PURE__ */ new Date());
-          if (imp?.confirm && importColors) {
-            const merge = mergeBrandColors(brief?.brand_colors ?? [], importColors);
-            brief = mergeBrief(brief, { brand_colors: merge.merged }, /* @__PURE__ */ new Date());
-            swatchReport = { ...swatchReport, confirmed: true, added: merge.added, already_present: merge.already_present, not_added: merge.not_added };
-          }
-          if (writes && file && brief) {
-            const tmp = `${file}.tmp-${process.pid}`;
-            fs41.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
-            fs41.renameSync(tmp, file);
-            saved = true;
-          }
-          const missing = missingFields(brief);
-          return {
-            ok: true,
-            project_path: projectPath,
-            brief_path: file,
-            exists: brief !== null,
-            saved,
-            brief,
-            missing,
-            questions: missing.map((field) => ({ field, ...BRIEF_QUESTIONS[field] })),
-            ...swatchReport ? { swatch_import: swatchReport } : {}
-          };
-        }
-      },
-      {
-        name: "ae_taste",
-        description: "Read or change the user's motion taste, kept across projects: a preferred ease curve, whether linear opacity and effect timing is deliberate, whether overshoot is unwanted, and notes in their words. ae_motion_review follows it (its fixes use the preferred curve's handle lengths). Read it before animating so first passes already match. Change it only on the user's word: after they pick an ease with ae_ask_user, ask whether it should become their default. Call with no arguments to read.",
-        schema: AeTasteSchema,
-        handler: async (args, ctx) => {
-          if (!ctx.settings) {
-            return { ok: false, error: "no_settings", message: "This server has no settings store, so taste can't be kept." };
-          }
-          let saved = false;
-          if (args.set) {
-            const patch = { ...args.set };
-            if (patch.preferred_ease && isLinear(patch.preferred_ease)) {
-              patch.preferred_ease = null;
-            }
-            ctx.settings.updateTaste(patch);
-            saved = true;
-          }
-          return { ok: true, saved, taste: ctx.settings.get().taste, settings_path: ctx.settings.path };
-        }
-      }
-    ];
-  }
-});
-
 // src/tools/ext/compsettings.ts
 function compareToBrief(info, match) {
   const out = [];
@@ -51537,11 +52957,11 @@ function compareToBrief(info, match) {
   return out;
 }
 function runGuideSteps(before, applied) {
-  const list = before.map((g) => ({ ...g }));
-  const touched = list.map(() => false);
+  const list2 = before.map((g) => ({ ...g }));
+  const touched = list2.map(() => false);
   for (const step2 of applied) {
     if (step2.action === "add") {
-      list.push({
+      list2.push({
         orientation_type: step2.orientation_type,
         orientation: step2.orientation,
         position: step2.position,
@@ -51551,19 +52971,19 @@ function runGuideSteps(before, applied) {
         added: true
       });
       touched.push(true);
-    } else if (step2.action === "set" && step2.index !== void 0 && list[step2.index]) {
-      const g = list[step2.index];
+    } else if (step2.action === "set" && step2.index !== void 0 && list2[step2.index]) {
+      const g = list2[step2.index];
       g.position = step2.position;
       touched[step2.index] = true;
       if (step2.position_kind !== void 0) g.position_kind = step2.position_kind;
       if (step2.color !== void 0) g.color = step2.color;
       if (step2.pinned !== void 0) g.pinned = step2.pinned;
     } else if (step2.action === "remove" && step2.index !== void 0) {
-      list.splice(step2.index, 1);
+      list2.splice(step2.index, 1);
       touched.splice(step2.index, 1);
     }
   }
-  return { list, touched };
+  return { list: list2, touched };
 }
 function checkDialogEdits(m, s, before, after, written, missing) {
   const frameTol = (after.frame_duration || 0.05) * 1.01 + 1e-6;
@@ -51884,7 +53304,7 @@ var init_compsettings = __esm({
     INT_KEYS = ["shutter_angle", "shutter_phase", "motion_blur_samples", "motion_blur_adaptive_limit"];
     FRAME_KEYS = ["display_start_time", "display_start_frame"];
     sameList2 = (a, b, tol = 0) => Array.isArray(a) && a.length === b.length && b.every((v, i) => Math.abs(a[i] - v) <= tol);
-    layerMap2 = (list) => new Map((list ?? []).map((l) => [l.id, l]));
+    layerMap2 = (list2) => new Map((list2 ?? []).map((l) => [l.id, l]));
     rounded = (n) => Math.round(n * 1e6) / 1e6;
     needsLayerState = (args) => {
       const st = args.settings;
@@ -52019,7 +53439,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs42.readFileSync(filePath, "utf8");
+  const text = fs43.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -52041,7 +53461,7 @@ function cellValue(target, cell) {
   if (target === "footage") {
     const p = String(cell).trim();
     if (!path41.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs42.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!fs43.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -52097,7 +53517,7 @@ function prepareRows(rows, mapping, namePattern2, templateName) {
   });
   return { prepared, problems, skipped };
 }
-function normText(s) {
+function normText2(s) {
   return s.replace(/\r\n?/g, "\n");
 }
 function checkBuild(prepared, mapping, read3) {
@@ -52117,7 +53537,7 @@ function checkBuild(prepared, mapping, read3) {
             offFrame.push({ comp: c.name, layer: m.column, bounds: b });
           }
         }
-        if (normText(String(got.text ?? "")) !== normText(String(expected))) {
+        if (normText2(String(got.text ?? "")) !== normText2(String(expected))) {
           mismatches.push({ path: where, expected, actual: got.text, message: `Text of ${where} reads back differently` });
         }
       } else if (m.target === "footage") {
@@ -52208,11 +53628,11 @@ async function templateInfo(ctx, compId) {
   });
   return res.result;
 }
-var fs42, path41, DataMappingSchema, AeBuildFromDataSchema, dataTools;
+var fs43, path41, DataMappingSchema, AeBuildFromDataSchema, dataTools;
 var init_data = __esm({
   "src/tools/ext/data.ts"() {
     "use strict";
-    fs42 = __toESM(require("node:fs"), 1);
+    fs43 = __toESM(require("node:fs"), 1);
     path41 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -52252,7 +53672,7 @@ var init_data = __esm({
         handler: async (args, ctx) => {
           let rows;
           if (args.data_path) {
-            if (!path41.isAbsolute(args.data_path) || !fs42.existsSync(args.data_path)) {
+            if (!path41.isAbsolute(args.data_path) || !fs43.existsSync(args.data_path)) {
               return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
             }
             try {
@@ -52533,7 +53953,7 @@ function walkPresetsUnfiltered(folders, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs43.readdirSync(dir, { withFileTypes: true });
+        entries = fs44.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
@@ -52575,11 +53995,11 @@ function findPresets(folders, filter, source) {
   const presets = matched.map(({ matchKey, ...rest }) => rest);
   return { presets, scanned: cached.scanned };
 }
-var fs43, path42, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
+var fs44, path42, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
 var init_effects = __esm({
   "src/tools/ext/effects.ts"() {
     "use strict";
-    fs43 = __toESM(require("node:fs"), 1);
+    fs44 = __toESM(require("node:fs"), 1);
     path42 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -52749,7 +54169,7 @@ var init_effects = __esm({
         description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in, and (best-known route, not yet probed live) how Layer Styles get onto a layer: save the layer with the style as an .ffx preset in AE, apply it here, then edit the style with ae_set_property on ['ADBE Layer Styles', '<style>/enabled', ...]. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
         schema: AeApplyPresetSchema,
         handler: async (args, ctx) => {
-          if (!path42.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs43.existsSync(args.preset_path)) {
+          if (!path42.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs44.existsSync(args.preset_path)) {
             return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
           }
           return runEffectWrite(args, ctx, {
@@ -53054,9 +54474,9 @@ var init_explore = __esm({
 });
 
 // src/tools/ext/inventory.ts
-function fontMatches(font, ref2) {
-  if (typeof ref2 === "string") return font.postscript === ref2;
-  return norm2(font.family) === norm2(ref2.family) && norm2(font.style) === norm2(ref2.style);
+function fontMatches(font, ref3) {
+  if (typeof ref3 === "string") return font.postscript === ref3;
+  return norm2(font.family) === norm2(ref3.family) && norm2(font.style) === norm2(ref3.style);
 }
 function checkpointRefusal(cp) {
   if (cp.status === "skipped") {
@@ -53252,8 +54672,8 @@ var init_inventory = __esm({
               { label: "ae_fonts(check)", mutates: false, toolName: "ae_fonts" }
             );
             const r5 = res2.result;
-            const list = r5.checked ?? [];
-            const problems = list.filter((c) => c.exists === false || c.is_substitute === true || c.glyphs?.supported === false).length;
+            const list2 = r5.checked ?? [];
+            const problems = list2.filter((c) => c.exists === false || c.is_substitute === true || c.glyphs?.supported === false).length;
             return { ...r5, problems };
           }
           if (action === "replace") return replaceFonts(args, ctx);
@@ -53469,11 +54889,11 @@ async function queued9(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs44, path43, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs45, path43, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs44 = __toESM(require("node:fs"), 1);
+    fs45 = __toESM(require("node:fs"), 1);
     path43 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -53512,7 +54932,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs44.mkdirSync(framesDir, { recursive: true });
+          fs45.mkdirSync(framesDir, { recursive: true });
           const label = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo2 = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -53608,7 +55028,7 @@ var init_key = __esm({
             const kl = run.info.keylight;
             const pairs2 = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
             const previewPath = path43.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs44.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            fs45.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
             const canMeasure = below.length === 0 && pairs2.every((p) => p.before !== null) && run.screen !== null;
             const perFrame = canMeasure ? pairs2.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -53999,8 +55419,8 @@ function createLayerMismatches(args, beforeRaw, afterRaw, written) {
   } else if (p?.bottom) {
     expectThat(m, made.index === after.numLayers, "layer.index", after.numLayers, made.index, "Layer is not at the bottom");
   } else if (p?.above || p?.below) {
-    const ref2 = resolveInStack(before, p.above ?? p.below);
-    const refNow = ref2 ? byId2(after, ref2.id) : void 0;
+    const ref3 = resolveInStack(before, p.above ?? p.below);
+    const refNow = ref3 ? byId2(after, ref3.id) : void 0;
     const want = refNow ? p.above ? refNow.index - 1 : refNow.index + 1 : void 0;
     if (want === void 0 && (capped2(before) || capped2(after))) return m;
     expectThat(m, want !== void 0 && made.index === want, "layer.index", want, made.index, p.above ? "Layer is not directly above its reference" : "Layer is not directly below its reference");
@@ -54478,6 +55898,9 @@ function reduceMismatches(ids, after, written) {
   for (const id of ids) expectThat(m, kept.has(id), `keep_comps[${id}]`, "present", "missing", `Comp ${id} is no longer in the project`);
   return m;
 }
+function isLogoName(name) {
+  return LOGO_WORD.test(name) && !LOGO_BACKING.test(name);
+}
 function styleFindings(layers, opts) {
   const out = [];
   for (const l of layers) {
@@ -54495,7 +55918,7 @@ function styleFindings(layers, opts) {
           severity: "low",
           kind: "small_text",
           layer,
-          message: `"${l.name}" is ${px} px${scaled ? ` on screen (${l.font_size} px text at ${Math.round((l.scale_factor ?? 1) * 1e3) / 10}% scale)` : ""}, under the ${opts.min_font_size} px minimum.`,
+          message: `"${l.name}" is ${px} px${scaled ? ` on screen (${l.font_size} px text at ${Math.round((l.scale_factor ?? 1) * 1e3) / 10}% scale)` : ""}, under the ${Math.round(opts.min_font_size * 10) / 10} px minimum${opts.min_font_note ? ` (${opts.min_font_note})` : ""}.`,
           font_size: l.font_size,
           ...scaled ? { screen_font_size: px } : {}
         });
@@ -54531,7 +55954,7 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs45.rmdirSync(cur);
+      fs46.rmdirSync(cur);
     } catch {
       return;
     }
@@ -54542,7 +55965,7 @@ function removeEmptyDirs(dir, top) {
   }
 }
 function cleanBriefStyle(brief) {
-  const list = (v) => {
+  const list2 = (v) => {
     if (Array.isArray(v)) return v;
     if (v === void 0 || v === null) return [];
     return [v];
@@ -54550,15 +55973,63 @@ function cleanBriefStyle(brief) {
   const colors = [];
   const fonts = [];
   const ignored = [];
-  for (const c of list(brief?.brand_colors)) {
+  for (const c of list2(brief?.brand_colors)) {
     if (typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c.trim())) colors.push(c.trim());
     else ignored.push(`brand colour ${JSON.stringify(c)}`);
   }
-  for (const f of list(brief?.fonts)) {
+  for (const f of list2(brief?.fonts)) {
     if (typeof f === "string" && f.trim() !== "") fonts.push(f.trim());
     else ignored.push(`font ${JSON.stringify(f)}`);
   }
   return { colors, fonts, ignored };
+}
+function platformAspectWarning(preset, width, height) {
+  const want = PRESET_ASPECT[preset];
+  if (want === void 0 || !(width > 0) || !(height > 0)) return null;
+  if (Math.abs(width / height / want - 1) <= 0.05) return null;
+  return {
+    severity: "low",
+    kind: "platform_aspect_mismatch",
+    layer: { index: 0, id: 0, name: "(comp)" },
+    message: `The ${PLATFORM_PRESETS[preset].label} preset is made for a different shape than this ${width}x${height} comp; its safe box is still applied as fractions of this size.`,
+    preset
+  };
+}
+function platformFindings(bounds, comp, preset, skipLayerIds = /* @__PURE__ */ new Set()) {
+  const out = [];
+  const box = safeRect(preset, comp.width, comp.height);
+  const label = PLATFORM_PRESETS[preset].label;
+  const reels = preset === "reels_9_16";
+  for (const b of bounds) {
+    if (!b.checkable || skipLayerIds.has(b.layer.id)) continue;
+    for (const s of b.samples) {
+      if (!s.visible || !s.rect) continue;
+      const [l, t, r, bt] = s.rect;
+      const area = (r - l) * (bt - t);
+      if (area <= 0 || area >= 0.8 * comp.width * comp.height) continue;
+      const px = (n) => Math.round(n);
+      const generic = [];
+      if (l < box.left - 0.5) generic.push(`left by ${px(box.left - l)} px`);
+      if (t < box.top - 0.5) generic.push(`top by ${px(box.top - t)} px`);
+      if (r > box.right + 0.5) generic.push(`right by ${px(r - box.right)} px`);
+      if (bt > box.bottom + 0.5) generic.push(`bottom by ${px(bt - box.bottom)} px`);
+      if (!generic.length) break;
+      const base = { layer: b.layer, time: Math.round(s.time * 1e3) / 1e3, preset, bounds: [px(l), px(t), px(r), px(bt)], safe_box: [px(box.left), px(box.top), px(box.right), px(box.bottom)] };
+      const what = b.kind === "text" ? "Text" : "Logo";
+      if (reels && bt > box.bottom + 0.5) {
+        out.push({ severity: "low", kind: "below_platform_ui", message: `${what} "${b.layer.name}" is below the platform UI line (y ${px(box.bottom)}) by ${px(bt - box.bottom)} px; captions, buttons and the account name cover it on ${label}.`, ...base });
+      }
+      if (reels && r > box.right + 0.5) {
+        out.push({ severity: "low", kind: "in_action_rail", message: `${what} "${b.layer.name}" reaches into the right action rail (x ${px(box.right)}) by ${px(r - box.right)} px on ${label}.`, ...base });
+      }
+      const rest = reels ? generic.filter((g) => !g.startsWith("bottom") && !g.startsWith("right")) : generic;
+      if (rest.length) {
+        out.push({ severity: "low", kind: "outside_platform_safe", message: `${what} "${b.layer.name}" is outside the ${label} safe box: past the ${rest.join(", ")}.`, ...base });
+      }
+      break;
+    }
+  }
+  return out;
 }
 async function consolidateFootageMode(args, ctx) {
   const read3 = { host: "exploreConsolidatePlan", args: {} };
@@ -54633,11 +56104,11 @@ async function reduceProjectMode(args, ctx) {
     })
   });
 }
-var fs45, path44, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, SAFE_AREA_MAX2, layoutTools;
+var fs46, path44, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs45 = __toESM(require("node:fs"), 1);
+    fs46 = __toESM(require("node:fs"), 1);
     path44 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -54647,6 +56118,7 @@ var init_layout = __esm({
     init_common();
     init_mutate();
     init_brief();
+    init_motion_spec();
     init_motion();
     init_write_runner();
     AeAlignSchema = external_exports.object({
@@ -54692,12 +56164,23 @@ var init_layout = __esm({
       fonts: external_exports.array(external_exports.string().min(1)).max(20).optional().describe("Instead of the brief's fonts."),
       color_tolerance: external_exports.number().min(0).max(100).optional().describe("Delta E (CIE76) within which a colour counts as the brand colour. Default 12."),
       neutrals_ok: external_exports.boolean().optional().describe("Black, white and greys pass the palette check. Default true."),
-      min_font_size: external_exports.number().positive().optional().describe("Flag text smaller than this, in pixels on screen: the text size times the layer's and its parents' Scale at the check time. Text-animator scale, 3D depth and nested-comp scale are not counted."),
+      min_font_size: external_exports.number().positive().optional().describe("Flag text smaller than this, in pixels on screen. Without it there is no size check, unless the brief's motion spec sets min_text_pct or platform, or platform is passed: then the relative floor applies (min_text_pct, default 2.6, % of the comp's short side). On screen means the text size times the layer's and its parents' Scale at the check time. Text-animator scale, 3D depth and nested-comp scale are not counted."),
       safe_area: external_exports.boolean().optional().describe("Check text layers against title safe at the check time. Default true."),
-      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Default 0.2, AE's."),
+      title_safe: external_exports.number().min(0).max(0.5).optional().describe("Default 0.2, AE's. Used when no platform preset applies."),
+      platform: external_exports.enum(PLATFORM_PRESET_IDS).optional().describe("Safe-zone preset for text and logo layers (footage, image, precomp, shape or solid layers named logo). Default: the brief's motion.platform if it sets one, else title safe. Passing it (or a brief platform) also turns on the relative text-size floor."),
       time: external_exports.number().optional().describe("When to check the safe area. Default the comp's current time.")
     });
+    LOGO_WORD = /(^|[^a-z])logo([^a-z]|$)/i;
+    BACKGROUND_NAME = /(^|[^a-z])(bg|background)([^a-z]|$)/i;
+    LOGO_BACKING = /(^|[^a-z])logo[\s_.-]*(bg|back|backing|background|plate|shadow|glow|mask|matte)([^a-z]|$)/i;
     SAFE_AREA_MAX2 = 50;
+    PRESET_ASPECT = {
+      landscape_16_9: 16 / 9,
+      reels_9_16: 9 / 16,
+      promo_9_16: 9 / 16,
+      feed_4_5: 4 / 5,
+      square_1_1: 1
+    };
     layoutTools = [
       {
         name: "ae_align",
@@ -54756,7 +56239,7 @@ var init_layout = __esm({
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
             if (!path44.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs45.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (fs46.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -54764,7 +56247,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs45.mkdirSync(path44.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs46.mkdirSync(path44.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -54784,7 +56267,7 @@ var init_layout = __esm({
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs45.statSync(args.path);
+                  const st = fs46.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -54813,7 +56296,7 @@ var init_layout = __esm({
       },
       {
         name: "ae_house_style_check",
-        description: "Check a comp against the house style: text in the brief's fonts (ae_brief) and not missing, colours of text, shapes and solids within color_tolerance (delta E) of a brand colour, text above a minimum size, and text inside title safe at the check time. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. Nested comps are checked by running it on them.",
+        description: `Check a comp against the house style: text in the brief's fonts (ae_brief) and not missing, colours of text, shapes and solids within color_tolerance (delta E) of a brand colour, text above a minimum size, and text inside title safe at the check time. The size check runs only when asked for: min_font_size (pixels on screen) always wins; otherwise a relative floor (the brief's motion.min_text_pct, default 2.6 % of the comp's short side) applies only when the brief's motion spec sets min_text_pct or platform, or the call passes platform; with none of those there is no size check. The result's min_text says which: { px, source: argument | brief | platform | off }. platform (or the brief's motion.platform) swaps title safe for a preset box (reels_9_16, promo_9_16, feed_4_5, square_1_1, landscape_16_9) for text and for logo layers (footage, image, precomp, shape or solid layers whose name has the word logo; "Logo BG" backings and full-frame layers are skipped), naming the edge crossed and the pixels; reels_9_16 also flags the bottom UI band and the right action rail, and a comp of another shape gets one warning. A layer already reported cut_off by the frame-edge test is not reported again for the platform box. promo_9_16 applies the 22 % title line (bottom 22 % kept clear), not the 15 % CTA line. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. Nested comps are checked by running it on them.`,
         schema: AeHouseStyleCheckSchema,
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
@@ -54823,14 +56306,19 @@ var init_layout = __esm({
             gathered = await ctx.queue.run(`ae_house_style_check(${args.comp_id})`, async () => {
               let n = 0;
               const read3 = (fn, hostArgs2, what) => ctx.bridge.evalRaw({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs2), label: `${label} (${what})`, mutates: false, toolName: label });
-              const status2 = (await read3("status", {}, "status")).result;
+              const status = (await read3("status", {}, "status")).result;
+              const brief2 = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
+              const salvaged = salvageMotionSpec(brief2?.motion);
+              const motion2 = { ...resolveMotionSpec(salvaged.spec), ...salvaged.warning ? { warning: salvaged.warning } : {} };
+              const platform2 = args.platform ?? (motion2.from_brief.includes("platform") ? motion2.platform : void 0);
               const scan2 = (await read3("styleScan", { comp_id: args.comp_id, time: args.time }, "scan")).result;
               const bounds2 = [];
               const unchecked2 = [];
               const texts = scan2.layers.filter((x) => x.kind === "text" && x.enabled);
+              const logos = platform2 !== void 0 && platform2 !== "title_safe" ? scan2.layers.filter((x) => x.kind !== "text" && x.enabled && isLogoName(x.name) && !(x.kind === "solid" && BACKGROUND_NAME.test(x.name))) : [];
               if (args.safe_area !== false) {
                 const t = args.time ?? scan2.time;
-                for (const l of texts.slice(0, SAFE_AREA_MAX2)) {
+                for (const l of [...texts.slice(0, SAFE_AREA_MAX2), ...logos.slice(0, SAFE_AREA_MAX2)]) {
                   try {
                     bounds2.push((await read3("layerBoundsAt", { comp_id: args.comp_id, layer: { id: l.id }, times: [t] }, `bounds ${l.name}`)).result);
                   } catch (err) {
@@ -54839,30 +56327,48 @@ var init_layout = __esm({
                   }
                 }
               }
-              return { status: status2, scan: scan2, bounds: bounds2, safeTotal: texts.length, unchecked: unchecked2 };
+              return { brief: brief2, motion: motion2, platform: platform2, scan: scan2, bounds: bounds2, safeTotal: texts.length, unchecked: unchecked2 };
             });
           } catch (err) {
             if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
             throw err;
           }
-          const { status, scan, bounds, safeTotal, unchecked } = gathered;
-          const brief = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
+          const { brief, motion, platform, scan, bounds, safeTotal, unchecked } = gathered;
+          const platformSource = args.platform ? "argument" : platform ? "brief" : "default";
+          const presetActive = platform !== void 0 && platform !== "title_safe";
           const cleaned = cleanBriefStyle(brief);
           const brandColors = args.brand_colors ?? cleaned.colors;
           const fonts = args.fonts ?? cleaned.fonts;
           const ignored = [...args.brand_colors ? [] : cleaned.ignored.filter((x) => x.startsWith("brand colour")), ...args.fonts ? [] : cleaned.ignored.filter((x) => x.startsWith("font"))];
+          const relativeFloor = minTextPx(motion, scan.width, scan.height);
+          let minText = { px: null, source: "off" };
+          if (args.min_font_size !== void 0) minText = { px: args.min_font_size, source: "argument" };
+          else if (motion.from_brief.includes("min_text_pct")) minText = { px: relativeFloor, source: "brief" };
+          else if (platform !== void 0) minText = { px: relativeFloor, source: "platform" };
           const findings = styleFindings(scan.layers, {
             brand_colors: brandColors,
             fonts,
             tolerance: args.color_tolerance ?? 12,
             neutrals_ok: args.neutrals_ok !== false,
-            min_font_size: args.min_font_size
+            ...minText.px !== null ? { min_font_size: minText.px } : {},
+            ...minText.source !== "argument" && minText.px !== null ? { min_font_note: `${motion.min_text_pct} % of the ${Math.min(scan.width, scan.height)} px short side` } : {}
           });
+          const cutOff = /* @__PURE__ */ new Set();
+          const edge = [];
           for (const b of bounds) {
+            if (!presetActive && b.kind !== "text") continue;
             for (const f of reviewBounds(b, { width: scan.width, height: scan.height }, { action: 0.1, title: args.title_safe ?? 0.2 })) {
-              findings.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind, layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
+              if (presetActive && f.kind === "outside_safe") continue;
+              if (f.kind === "cut_off") cutOff.add(f.layer.id);
+              edge.push({ severity: f.severity === "info" ? "low" : f.severity, kind: f.kind, layer: f.layer, message: f.message, bounds: f.bounds, suggested_shift: f.suggested_shift });
             }
           }
+          if (presetActive && platform) {
+            const warn = platformAspectWarning(platform, scan.width, scan.height);
+            if (warn) findings.push(warn);
+            if (args.safe_area !== false) findings.push(...platformFindings(bounds, { width: scan.width, height: scan.height }, platform, cutOff));
+          }
+          findings.push(...edge);
           const safeCut = args.safe_area !== false && safeTotal > SAFE_AREA_MAX2;
           const counts = { medium: 0, low: 0, info: 0 };
           for (const f of findings) counts[f.severity]++;
@@ -54871,7 +56377,10 @@ var init_layout = __esm({
             clean: findings.length === 0,
             used: { brand_colors: brandColors, fonts, from_brief: Boolean(brief) && !args.brand_colors && !args.fonts },
             ...ignored.length ? { ignored_brief_entries: ignored } : {},
-            ...scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape and solid layers; later layers were not checked." } : {},
+            ...motion.warning ? { motion_warning: motion.warning } : {},
+            min_text: { px: minText.px === null ? null : Math.round(minText.px * 10) / 10, source: minText.source },
+            platform: presetActive && platform ? { preset: platform, label: PLATFORM_PRESETS[platform].label, source: platformSource, box: Object.values(safeRect(platform, scan.width, scan.height)).map((n) => Math.round(n)) } : { preset: "title_safe", source: platform ? platformSource : "default", title_safe: args.title_safe ?? 0.2 },
+            ...scan.truncated === true ? { truncated: true, truncated_note: "The scan stops at 500 text, shape, solid and logo layers; later layers were not checked." } : {},
             ...safeCut ? { safe_area_truncated: true, safe_area_checked: SAFE_AREA_MAX2, safe_area_note: `Title safe was checked on the first ${SAFE_AREA_MAX2} of ${safeTotal} text layers.` } : {},
             ...unchecked.length ? { safe_area_unchecked: unchecked } : {},
             ...brandColors.length === 0 || fonts.length === 0 ? { note: `No brand ${brandColors.length === 0 ? "colours" : ""}${brandColors.length === 0 && fonts.length === 0 ? " or " : ""}${fonts.length === 0 ? "fonts" : ""} to check against: set them with ae_brief or pass them here.` } : {},
@@ -54892,12 +56401,12 @@ function cuesFromTranscript(t) {
     if (!path45.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs46.statSync(t.path);
+      stat = fs47.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs46.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs47.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -55052,10 +56561,10 @@ function unmatchedIndexes(indexes, numMarkers) {
   if (numMarkers === void 0) return [];
   return (indexes ?? []).filter((i) => i > numMarkers);
 }
-function selectForRemoval(list, args) {
+function selectForRemoval(list2, args) {
   const needle = args.comment_contains?.toLowerCase();
   const inRange = (t) => (args.start === void 0 || t >= args.start - 5e-4) && (args.end === void 0 || t <= args.end + 5e-4);
-  return list.filter((x) => {
+  return list2.filter((x) => {
     if (args.all) return true;
     if (args.indexes?.includes(x.index)) return true;
     if (needle !== void 0) return inRange(x.time) && x.comment.toLowerCase().includes(needle);
@@ -55094,11 +56603,11 @@ async function editMarkers(args, ctx) {
     })
   });
 }
-var fs46, path45, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
+var fs47, path45, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs46 = __toESM(require("node:fs"), 1);
+    fs47 = __toESM(require("node:fs"), 1);
     path45 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
@@ -55853,7 +57362,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs47.readFileSync(file, "utf8");
+    raw = fs48.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -55863,7 +57372,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs47.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs48.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -55877,8 +57386,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs47.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs47.renameSync(tmp, file);
+    fs48.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs48.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -56250,12 +57759,12 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto19, fs47, path46, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
+var crypto19, fs48, path46, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
     crypto19 = __toESM(require("node:crypto"), 1);
-    fs47 = __toESM(require("node:fs"), 1);
+    fs48 = __toESM(require("node:fs"), 1);
     path46 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -56345,7 +57854,7 @@ var init_multicomp = __esm({
       message: "name_pattern has a quantified group that holds a quantifier (like (a+)+), which can freeze After Effects. Simplify it."
     });
     LAYER_KEYS = /* @__PURE__ */ new Set(["layer", "layers", "parent", "matte", "above", "below", "target", "targets", "relative_to"]);
-    shortMismatches = (list) => (Array.isArray(list) ? list : []).slice(0, 5).map((m) => ({ path: String(m?.path ?? ""), message: String(m?.message ?? "").slice(0, 300) }));
+    shortMismatches = (list2) => (Array.isArray(list2) ? list2 : []).slice(0, 5).map((m) => ({ path: String(m?.path ?? ""), message: String(m?.message ?? "").slice(0, 300) }));
     memoryJobs = /* @__PURE__ */ new Map();
     activeJobs = /* @__PURE__ */ new Set();
     registryLookup2 = async (name) => {
@@ -56425,12 +57934,12 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process2, fs48, path47, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process2, fs49, path47, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     import_node_child_process2 = require("node:child_process");
-    fs48 = __toESM(require("node:fs"), 1);
+    fs49 = __toESM(require("node:fs"), 1);
     path47 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
@@ -56608,7 +58117,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs48.mkdirSync(outDir, { recursive: true });
+            fs49.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           const rawStdout = await runPowerShellScript2([
@@ -56674,7 +58183,7 @@ function namePattern(name, sequence) {
 }
 function listDir(dir) {
   try {
-    return fs49.readdirSync(dir);
+    return fs50.readdirSync(dir);
   } catch {
     return [];
   }
@@ -56728,7 +58237,7 @@ function appendVersionLog(projectPath, entries, notes) {
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs49.readFileSync(file, "utf8");
+    raw = fs50.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -56743,21 +58252,21 @@ function appendVersionLog(projectPath, entries, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs49.renameSync(file, aside);
+      fs50.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs49.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs49.renameSync(tmp, file);
+  fs50.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs50.renameSync(tmp, file);
   return file;
 }
-var fs49, path48, VERSION_RE, escapeRe3;
+var fs50, path48, VERSION_RE, escapeRe3;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs49 = __toESM(require("node:fs"), 1);
+    fs50 = __toESM(require("node:fs"), 1);
     path48 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
     escapeRe3 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -56765,10 +58274,10 @@ var init_versions = __esm({
 });
 
 // src/tools/ext/production.ts
-function findOverrideLike(list, name) {
-  const direct = (list ?? []).find((x) => x.name === name && x.kind !== "group");
+function findOverrideLike(list2, name) {
+  const direct = (list2 ?? []).find((x) => x.name === name && x.kind !== "group");
   if (direct) return direct;
-  for (const g of list ?? []) {
+  for (const g of list2 ?? []) {
     if (g.kind !== "group" || !g.children) continue;
     const hit = findOverrideLike(g.children, name);
     if (hit) return hit;
@@ -56827,9 +58336,9 @@ function shapeValueMismatches(want, got, path51) {
     return m;
   }
   const gotVerts = got.vertices;
-  const total = typeof got.num_vertices === "number" ? got.num_vertices : gotVerts.length;
-  if (total !== want.vertices.length) {
-    m.push({ path: `${path51}.vertices.length`, expected: want.vertices.length, actual: total, message: "The path has a different number of vertices" });
+  const total2 = typeof got.num_vertices === "number" ? got.num_vertices : gotVerts.length;
+  if (total2 !== want.vertices.length) {
+    m.push({ path: `${path51}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
     return m;
   }
   const lists = [["vertices", want.vertices], ["inTangents", want.inTangents], ["outTangents", want.outTangents]];
@@ -57455,11 +58964,11 @@ function sanitizeCheckpointLabel(label) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs50, path49, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs51, path49, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs50 = __toESM(require("node:fs"), 1);
+    fs51 = __toESM(require("node:fs"), 1);
     path49 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -57736,7 +59245,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs50.existsSync(actualProjectPath)) {
+              if (!fs51.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -57748,13 +59257,13 @@ var init_receipts2 = __esm({
               const ext2 = path49.extname(actualProjectPath) || ".aep";
               const baseName = path49.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs50.mkdirSync(checkpointDir, { recursive: true });
+              fs51.mkdirSync(checkpointDir, { recursive: true });
               const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
               const checkpointFileName = `${baseName}_${stamp3}_${safeLabel}${ext2}`;
               const checkpointPath = path49.join(checkpointDir, checkpointFileName);
-              fs50.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs50.statSync(checkpointPath);
+              fs51.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs51.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -57770,7 +59279,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs50.existsSync(checkpointPath)
+                  checkpoint_exists: fs51.existsSync(checkpointPath)
                 }
               });
               return {
@@ -57813,7 +59322,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs50.existsSync(checkpointDir)) {
+          if (!fs51.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -57821,10 +59330,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries = fs50.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries = fs51.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries.map((e) => {
             const fullPath = path49.join(checkpointDir, e.name);
-            const stat = fs50.statSync(fullPath);
+            const stat = fs51.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -57877,7 +59386,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs50.existsSync(args.checkpoint_path)) {
+              if (!fs51.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -57975,9 +59484,9 @@ var init_receipts2 = __esm({
 });
 
 // src/tools/ext/shapes.ts
-function applyMoves(names, moves) {
+function applyMoves(names, moves2) {
   const out = names.slice();
-  for (const m of moves) {
+  for (const m of moves2) {
     if (m.from < 1 || m.from > out.length || m.to < 1 || m.to > out.length) continue;
     const [item] = out.splice(m.from - 1, 1);
     out.splice(m.to - 1, 0, item);
@@ -58553,6 +60062,7 @@ var init_ext = __esm({
     init_deliver();
     init_loudness();
     init_legibility();
+    init_timing();
     init_variants();
     init_learntaste();
     init_projectsession();
@@ -58655,6 +60165,7 @@ var init_ext = __esm({
       ...deliverTools,
       ...loudnessTools,
       ...legibilityTools,
+      ...timingTools,
       ...variantsTools,
       ...learntasteTools,
       ...projectsessionTools,
@@ -59082,6 +60593,362 @@ function convertFieldSchema(schema) {
 // src/mcp-rpc.ts
 init_common();
 init_registry();
+
+// src/guidance/content.generated.ts
+var GUIDANCE_FILES = {
+  "NOTICE.md": '# Sources and licences\n\nThis skill is Chroma\'s own synthesis, written in its own words. It adapts ideas and numbers from\nthe sources below; where they disagreed, the choice made is noted in the text (mostly by the\n"register" table in SKILL.md). No source text was copied verbatim. Researched 2026-11-05.\n\n| Source | Licence | Used for |\n|---|---|---|\n| [lottiefiles/motion-design-skill](https://github.com/lottiefiles/motion-design-skill) | MIT, (c) 2025 LottieFiles | duration and easing tables, archetypes, springs, Disney principles with numbers, stagger budgets, the 1/3 rules, ambient loops, severity tiers, symptom fixes |\n| [charlie947/motion-graphics-skills](https://github.com/charlie947/motion-graphics-skills) | MIT, (c) Charlie Hills | brand-first workflow, facts discipline, the 8 s move/hold/return loop, effect techniques, safe zones and hero sizes, banned defaults, one-change revisions, delivery specs |\n| [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes): hyperframes-animation, hyperframes-core, general-video, motion-graphics, and the later `skills/hyperframes/references` | Apache-2.0, (c) HeyGen | ease by role, motion budget, transitions as handoffs, velocity matching and recipes, beat grid, reading time, type floors, captions, audio levels, beat shares, pacing and staleness, review loop (measure then look, contact sheets, P0-P2 notes), the "looks generated" list |\n| [Sunwood-ai-labs/hyperframes-motion-reel-skill](https://github.com/Sunwood-ai-labs/hyperframes-motion-reel-skill) | MIT, (c) 2026 Sunwood AI Labs | beat-grid-first timing, contrast of pace, text as image, motion-blur limits, state as a function of time |\n| [geekjourneyx/hyperframes-motion-director](https://github.com/geekjourneyx/hyperframes-motion-director) | AGPL-3.0 | **ideas only, paraphrased, nothing copied**: brief then confirm, stills before motion, layout as rectangles, vertical title tiers, hook timing gates, primitives chosen by meaning, inspectable transition midpoints, rendered-frame evidence, learning rules from defects |\n\nChanges from the sources: rewritten for any toolchain with After Effects as the main target\n(frame conversions, bezier to AE influence and speed, chroma-ae MCP tool mapping); conflicting\nadvice reconciled by register; web-, HTML- and GSAP-specific material removed.\n',
+  "SKILL.md": "---\nname: chroma-motion-director\ndescription: Direct and build motion pieces end to end: brief, numeric spec, still frames, choreography, sound, review and delivery, with measured timing, easing, stagger, transition, type, caption and audio rules. Use for any motion graphics, launch or promo film, social reel, explainer, title sequence, logo sting, lower third, stat or chart animation, kinetic type, or motion review, whether it is built in After Effects (through the chroma-ae MCP), Remotion, HyperFrames, Lottie or code. Also use to critique motion (\"it feels robotic / cheap / like slides / too fast\") and to turn adjectives into numbers. Trigger phrases: 'motion', 'animate', 'animation', 'promo', 'launch video', 'reel', 'sting', 'lower third', 'kinetic type', 'title sequence', 'explainer', 'easing', 'stagger', 'transition', 'make it feel premium', 'review this animation'.\nmetadata:\n  version: \"1.0.0\"\n  sources: see NOTICE.md\n---\n\n# Chroma motion director\n\nOne skill for directing motion, from a one-line brief to a delivered file. It merges eight\npublic skills (see `NOTICE.md`) and resolves where they disagree. The numbers are the point:\nevery rule below is meant to be measured, not admired.\n\n**Load only what the task needs:**\n\n| Task | Read |\n|---|---|\n| Any new piece | this file, then `references/spec.md` |\n| Timing, easing, springs, ms to frames, AE ease values | `references/timing-and-easing.md` |\n| Groups, stagger, cameras, transitions between scenes | `references/choreography.md` |\n| Text sizes, reading time, safe zones, layout, colour | `references/type-and-layout.md` |\n| Structure, beat shares, pacing, scene recipes | `references/story-and-pacing.md` |\n| Music, voice, sound effects, levels, captions | `references/sound-and-captions.md` |\n| Checking a piece, writing notes, the \"looks generated\" list | `references/review.md` |\n\nFor anything made for Chroma, `chroma-brand-guidelines` sets the look (palette, type, voice);\nthis skill sets the motion. In After Effects, drive the work through the `chroma-ae` MCP tools\n(`ae_motion_review`, `ae_contact_sheet`, `ae_check_legibility`, `ae_set_keyframe_ease`,\n`ae_stagger`, `ae_loudness_check` and so on) rather than raw JSX.\n\n## The process\n\nSix gates. Do not skip one because the brief is short; shrink it instead.\n\n1. **Brief, then stop.** One sentence of intent (what the viewer should feel or know at the\n   end), the audience, the format (size, fps, length, platform), the single message, the arc,\n   and what must not happen. Ask at most one clarifying question; where something is unknown,\n   write `ASK ME` rather than guess (never guess a hex colour or a fact). Show the beat sheet and\n   wait for a yes before building.\n2. **Spec: adjectives into numbers.** Write the piece's `MOTION.md` from\n   `references/spec.md`: register, signature ease, a three-tier duration palette, stagger,\n   overshoot budget, colour roles, type sizes, safe zones, the banned list, and the beat table.\n   \"Premium\" means 350-600 ms, ease (0.4, 0, 0.2, 1), no overshoot; it does not mean \"nice\".\n   A project that already has a `MOTION.md` or brand file: read it first and follow it.\n3. **Stills before motion.** Build the end state of every beat as a still and check it: one\n   hero, readable at phone size, inside the safe zones, nothing touching an edge it shouldn't.\n   Animate *from and to* those stills. A frame that fails as a still will not be saved by motion.\n4. **Choreograph.** One primary motion idea per scene, at most one supporting motion, one\n   signature moment per film. Ease by role, stagger by importance, overlap the next element when\n   the last is 30-50 % done, hand scenes off without fading out. Drive cuts and hits from one\n   beat grid when there is music.\n5. **Review: measure, then look.** Run the measured checks first (`references/review.md`), then\n   contact sheets: each beat's start and middle, a strip across every cut (\u22120.2 s to +0.2 s), and\n   the beat frames at phone width (360 px). Notes are `t=4.2s \xB7 where \xB7 problem \u2192 exact change \xB7\n   what stays`, ranked P0/P1/P2. Report only what you actually saw; say so when there is nothing.\n6. **Deliver and verify the file.** Check the rendered file, not the preview: duration, fps,\n   size, codec, colour range, loudness, frame 0 (it is the thumbnail: never black, never a lone\n   logo). State what was measured and what was only looked at.\n\n**Revisions:** one change per note. Keep the motion, timing and approved parts exactly as they\nare, and say what changed. Build exactly what was asked; offer extras instead of adding them.\n\n## Pick a register first\n\nMost conflicts between the sources disappear once the register is fixed. Pick one per piece\n(a 90/10 mix at most) and write it in the spec.\n\n| Register | Use for | Durations | Overshoot | Stagger, total | Character |\n|---|---|---|---|---|---|\n| **UI micro** | product UI in a demo, buttons, toggles, cards | 80-450 ms | 0-5 % | 20-60 ms, under 400 ms | quick, functional, no bounce on UI |\n| **Brand film** (default) | launches, promos, reels, titles, stings | moves 300-800 ms, reveals 0.8-1.6 s | 0 % premium, 3-10 % energetic | 40-120 ms, about 500 ms | arrive slow, leave clean, still when landed |\n| **Energetic** | social hooks, sport, music-led cuts | 150-400 ms | 10-25 % on position or scale only | 30-60 ms | beat-driven, hard accents, contrast of pace |\n| **Handmade** | editorial, explainer, collage, Vox-like | on twos (hold each pose 2 frames at 24 fps) | none | per element, loose | stepped, tactile, never smooth corporate easing |\n\nChroma's own work defaults to **brand film, premium**: no overshoot, no glow, no bounce,\nlanded type dead still.\n\n## Core rules (the short version)\n\n**Easing**\n- Out for arrivals, in for exits, in-out for moves between positions and for camera. Linear only\n  for rotation, progress, timers and genuinely mechanical motion.\n- Use at least three different eases in a piece; no more than two tweens with the same ease and\n  duration in a scene. Everything on one ease at 0.5 s is the clearest sign of generated motion.\n- Arrivals take long-tailed ease-outs (expo or quart out). Exits are 40-50 % shorter than\n  entrances and ease in.\n- Springs: damping ratio 0.7-0.85 reads premium, 0.4-0.6 playful, under 0.3 cartoon. Position\n  and scale may overshoot; opacity, colour and numbers never do.\n\n**Choreography**\n- One hero per moment; at most a third of a group moves at once. Dim the others to 40-60 %.\n- Stagger by importance, not by layer order: letters 1 frame apart, words 60-120 ms, list items\n  40-80 ms, and keep a group's total stagger near 500 ms so it reads as one beat.\n- Nothing travels more than a third of the frame without an intermediate key or an arc.\n- After a group resolves, leave 100-200 ms of stillness; a landed title stays dead still.\n- First move 0.1-0.3 s in, never at frame 0 of a scene unless it is a cut-in.\n\n**Transitions**\n- Hand off, don't fade out then in: the outgoing and incoming motion happen together, with the\n  ease mirrored across the seam (in on the way out, out on the way in) and the fastest frames at\n  the cut. Match direction, axis and the sign of any scale change across the cut.\n- Three to five kinds of transition per film, each with a cause on screen. One primary for\n  60-70 % of seams. At most a third are hard cuts. Never crossfade between two different worlds.\n- Every transition has a midpoint frame worth looking at. A blank midpoint is a failure.\n\n**Type**\n- Readable text is at least 2.6 % of the frame's short side (28 px at 1080). Titles 4-9 % of\n  frame height; hero words can fill 60-90 % of the width.\n- Hold a line 0.5 s + 0.3 s per word; the last line at least 2 s; at most 6 words a line.\n- Text is still before it has to be read. Animate text with a device (mask, split, scan,\n  compress, assemble, path handoff), not opacity plus a 20 px slide on everything.\n\n**Pace**\n- The hook is readable by 0.8-1.2 s; frame 0 is never empty. Something new every 2-4 s.\n  Alternate dense and still beats; the slowest scene is about three times the fastest.\n- Over 3 s with nothing changing is a dead stretch. Any single treatment goes stale after about\n  6 s.\n\n**Sound**\n- Voice leads; music sits about 14 % under it and is carved around it, not just ducked. Social\n  mixes at \u221216 to \u221214 LUFS, peaks at \u22121 dBTP or lower. A hit's peak lands one frame after its\n  picture. Effects only for real on-screen causes.\n\n**Content**\n- Every name, date and number on screen comes from an approved list. Sample data carries a\n  visible \"illustrative data\" label.\n- Deletion test for every element: if removing it changes nothing, remove it.\n\n## Working in After Effects\n\n- Convert ms to frames at the comp's frame rate before keying (200 ms is 6 f at 30 fps, 4.8 f\n  at 24, so round to 5 and say so). Beat frames come from the beat index, never accumulated.\n- Cubic-bezier eases become AE keyframe influence and speed: the table is in\n  `references/timing-and-easing.md`. Apply them with `ae_set_keyframe_ease`; check them with\n  `ae_motion_review` (linear keys, abrupt starts and stops, overshoot, speed jumps).\n- Seed every random (`seedRandom(n, true)` in expressions) so any frame renders the same.\n- Use `ae_contact_sheet` for the sheets in step 5, `ae_check_legibility` and `ae_measure_text`\n  for type, `ae_loudness_check` for levels, `ae_check_delivery_file` on the render.\n",
+  "references/choreography.md": `# Choreography, cameras and transitions
+
+## Groups
+
+- **One hero per moment.** The hero leads, with the largest displacement. Everything else is
+  secondary or still; dim non-heroes to 40-60 % opacity when the hero needs the stage.
+- **Density:** with three or more elements, at most a third move at the same time. Two or three
+  moving things at once is the attention budget.
+- **Distance:** nothing travels more than a third of the frame without an intermediate key or an
+  arc.
+- **One origin direction** for a group. Counter-motion, when used, runs at 20-30 % of the main
+  speed.
+- **Shared trigger:** elements meant to start together start within 50 ms of each other.
+- **Overlap:** start the next element when the previous is 30-50 % done. Methodical work uses 0 %
+  overlap, brisk 25 %, fluid 50 %, rapid 75 %.
+- **Resolve:** 100-200 ms of stillness after the group lands, then the next idea.
+- **Containers first:** a shell opens before its content arrives; text waits until there is room.
+- **Shared elements travel:** a title that moves from one layout to another is the same layer
+  moving, never a duplicate fading in.
+- **Depth by speed:** foreground 1.0x, mid 0.5x, background 0.2x, far 0.1x. One vanishing point
+  for every layer.
+
+## Stagger
+
+| Kind | Delay | Total |
+|---|---|---|
+| Letters | 1 frame | |
+| Words | 60-120 ms | |
+| List items, cards, rows | 40-80 ms | |
+| Bars in a chart | 60-100 ms, fills 0.8-1.2 s | |
+| Micro (UI) | 20-40 ms | under 200 ms |
+| Standard | 50-100 ms | under 400 ms |
+| Dramatic | 100-200 ms | under 600 ms |
+
+- A group's total stagger stays near 500 ms so it reads as one beat; longer than that and it
+  reads as a list being read out.
+- Order by importance, not by layer order. Patterns: from the centre, from the edges, seeded
+  random. Same ease for the whole group; only the start times differ.
+- Path draws: stagger segments at 70-80 % of a segment's duration so the line reads as one stroke;
+  draw with linear for a pen-like trace.
+- Per-word kinetic type: the slide distance can decay per word (80, 60, 50, 25, 12 px), as if the
+  camera is settling.
+
+## Scene shape
+
+Build 0-30 %, breathe 30-70 % (one small thing alive), resolve 70-100 %. The breathe phase is
+where a hold must still show one sign of life (a progress creep, a light sweep, a slow drift on
+the background), never a title that keeps moving.
+
+**Loops** (stings, covers, GIFs): move 0-2.2 s, hold 2.2-6.6 s, return 6.6-8.0 s on an 8 s loop;
+the last frame equals frame 0 exactly, and the return eases back rather than snapping. For a GIF,
+rotate the loop so the first frame is the finished picture. For a short B-roll cut, keep only the
+active move (about 1.4 s) and hold the end.
+
+## Cameras
+
+- One camera, or one parent null, carries the move; the content never moves to fake a camera.
+- A camera move eases in-out (sine or quad). Phased moves (pull back, focus, push) step in scale,
+  with a very slow continuous drift so the frame is never dead still while the camera is "on".
+- Punch-in or Ken Burns: scale and position on a wrapper or precomp, never on the footage layer
+  itself. A still image on screen gets at least a 1.00 to 1.04 scale over its beat.
+- Rack focus: blur and dim the off-focus layers; the change runs with the push, in the same
+  window.
+- A late, slow push-in that starts after the viewer has read the frame looks generated. Push
+  while the eye is still arriving.
+
+## Transitions
+
+**Principle:** the outgoing and incoming motion happen at the same time and the motion is the
+handoff. Do not fade out, then fade in. Only the final scene has an exit of its own.
+
+- **Velocity match:** cut at the fastest frame. The exit eases in, the entry eases out, and the
+  speeds on either side of the cut agree within about 5 %. Direction, axis and the sign of any
+  scale change match across the cut (a push stays a push).
+- **One current:** pick the film's dominant seam direction and never run two consecutive seams in
+  opposite directions.
+- **Variety with a cause:** 3-5 kinds per film, each with something on screen that causes it.
+  One primary kind for 60-70 % of seams, one or two accents. At most a third of seams are hard
+  cuts. Never crossfade between two different worlds.
+- **Placement:** the opening transition is the most distinctive (0.4-0.6 s); between related
+  points use the primary (about 0.3 s); a topic change uses a different kind; the climax is the
+  boldest and fastest; the wind-down is gentle (0.5-0.7 s); the outro is the slowest and simplest
+  (0.6-1.0 s).
+
+| Energy | Duration | Ease | Blur crossfade |
+|---|---|---|---|
+| Calm | 0.5-0.8 s | sine in-out | 20-30 px over 0.8-1.2 s |
+| Medium | 0.3-0.5 s | quad or cubic | 8-15 px over 0.4-0.6 s |
+| High | 0.15-0.3 s | quart or expo | 3-6 px over 0.2-0.3 s |
+
+Presets: instant 0.15 s \xB7 snappy 0.2 s \xB7 smooth 0.4 s \xB7 dramatic 0.5 s \xB7 gentle 0.6 s \xB7 luxe
+0.7 s.
+
+**Recipes**
+- **Whip:** exit 400 px with 24 px blur over 0.3 s on cubic in; entry from the other side with the
+  blur clearing over 0.3 s. A short smear version is 0.13-0.3 s.
+- **Zoom-through:** exit scale 1.0 to 1.2 with 10 px blur (text) or 18-20 px (full frame) over
+  0.2 s, cubic in; entry scale 0.75 to 1.0 over 0.5 s, expo out. Through a button: track to it
+  over 0.6 s, then scale 8 % to 250 % over 0.35 s on a strong ease in.
+- **Object becomes the world:** the object grows over about 0.65 s while the surroundings blur
+  15 px.
+- **Morph:** one shape becomes the next meaning over about 0.2 s, cubic out, with a horizontal
+  blur from 12 px to 0. A shape changing is premium; two pictures crossfading is cheap. Leave a
+  faint ghost of the start state when it helps the read.
+- **Cut the curve:** partial travel of about 12 % of the frame (230 px at 1920), exit quart in
+  over 0.2-0.4 s, entry quart out.
+- **Colour flood:** about 0.4 s, sine or quad in-out.
+- **Dip cut:** darken the outgoing frame about 40 % for 3 frames, then hard cut.
+- **Iris from a click:** 0.15 s.
+- **Velocity-matched blur cut:** exit 0.33 s quad in with blur to 30 px; entry 1.0 s quad out from
+  30 px.
+- Blinds: calm 4 horizontal or 6 vertical; medium 6-8 or 8; high 12-16 or 16. Avoid visible
+  repeating patterns (tiles, grids, dot arrays) as transitions; organic noise is fine.
+
+**Feedback mapping:** "too fast" usually means slow the zooms and pans to about 0.7x, not
+everything. "Feels like slides" means enter the next scene through an object already on screen.
+
+## Motion primitives by meaning
+
+Choose the device by what the moment means, not from a menu of effects:
+
+| Meaning | Device |
+|---|---|
+| Disclosure, reveal | mask or matte reveal (not opacity) |
+| A route, a process, a connection | path draw |
+| One scene replacing another | clip or shape wipe with a real midpoint |
+| A list | stagger, with a hold after it |
+| A number | count up, then lock; the number is the largest thing on screen |
+| A change of state | morph, or the same element moving |
+| Emphasis | a highlight band swept on after the text lands, or one scale pulse to about 1.12 |
+
+Lines and connectors are anchored at both ends to something with a job, or replaced by a signal
+on the component itself (a dot, an edge highlight, a progress strip).
+`,
+  "references/review.md": "# Review: measure, then look\n\nTrust the numbers over your eye, then use your eye for what numbers can't see.\n\n## 1. Measure\n\nRun these before anyone watches it. Each has a fix.\n\n| Check | Fails when | In AE (chroma-ae) |\n|---|---|---|\n| Linear spatial keys | position, scale or rotation of a non-mechanical element moves at constant speed | `ae_motion_review` |\n| Abrupt start or stop | speed jumps from or to zero without an ease | `ae_motion_review` |\n| One ease everywhere | more than two tweens in a scene share the same ease and duration | `ae_get_keyframes` across layers |\n| Wrong direction | an entrance eases in, or an exit eases out | `ae_get_keyframes` |\n| Overshoot where it shouldn't | opacity, colour or a counting number overshoots | `ae_motion_review` |\n| Exit too long | an exit is not 40-50 % shorter than its entrance | keyframe spans |\n| Stagger | sibling start offsets outside the table, or the group spread far over 500 ms | `ae_stagger` plan / keyframe starts |\n| Density | more than a third of a group moving at once | keyframe overlap |\n| First move at 0 | a scene's first move starts on its first frame | keyframe starts |\n| Unread line | a text layer is on screen for less than 0.5 s + 0.3 s per word | text layer in/out and word count |\n| Text below the floor | text under 2.6 % of the short side at its smallest on-screen scale | `ae_check_legibility`, `ae_measure_text` |\n| Outside safe zones | text or logo outside title-safe or the platform's bands | `ae_check_legibility`, `ae_house_style_check` |\n| Overlap | text overlapping text or the subject | `ae_check_text_overlap` |\n| Dead stretch | over 3 s with nothing changing | per-frame change across the timeline |\n| First frame empty | frame 0 is black, empty or a lone logo | `ae_snapshot_frame` at 0 |\n| Silent film | over 15 s with no sound | `ae_audio_analyze` |\n| Loudness | outside \u221216 to \u221214 LUFS or peaks over \u22121 dBTP | `ae_loudness_check` |\n| Loop seam | the last frame of a loop differs from frame 0 | `ae_compare_frames` |\n| Nothing moves | the biggest change against frame 0 is near zero in a \"motion\" piece | `ae_compare_frames` |\n| Late or out of order | an element appears after its intended time, or before one it should follow | markers against layer in-points |\n| Facts | a name or number on screen isn't on the approved list | text layers against the list |\n| Delivery | duration, fps, size, codec, colour range or audio streams differ from the spec | `ae_check_delivery_file`, `ae_verify_render` |\n\n## 2. Look\n\nThree contact sheets:\n\n1. **Beats:** each scene just after it starts, at its middle, and at every beat or hit.\n2. **Seams:** a strip across every cut, from \u22120.2 s to +0.2 s. Look for a jump in position,\n   scale or colour at the seam, a speed mismatch, and a blank midpoint.\n3. **Phone:** the beat frames at 360 px wide, with the sound off.\n\nDescribe each beat frame as a stranger would, in one sentence. Ask: does it read as what it is?\nDoes the subject separate from the background? Is anything you'd have to explain? Would the\npictures alone tell the story? Then the screenshot test: a good motion piece loses meaning when\nreduced to stills; slides don't.\n\nUse the rendered file for this, not the preview: the two can differ. Pull the same frames from\nthe render and compare them.\n\n## 3. Write notes\n\nOne line each:\n\n```\nt=4.2s \xB7 headline \xB7 lands then keeps scaling \u2192 stop the scale key at 4.0s \xB7 keep the ease and timing\n```\n\nRank them **P0** (breaks the read), **P1** (weakens it), **P2** (polish). Don't score out of 10.\nReport only what you actually saw; if there is nothing, say so. If the film feels busy, remove a\nthird of the motion before adding anything.\n\nOptionally ask a fresh agent to critique from only the brief and the sheets, without seeing the\nbuild, then compare.\n\nEnd with a short delivery note: the calls made, what was measured and what was only looked at,\nthe weakest shot, and any warnings deliberately kept and why. Every \"pass\" names the frame and\ntime it was checked on.\n\n## 4. Learn\n\nEach defect found late gets a cause and a rule: add it to the project's `MOTION.md` banned list\nor to the checks above, so it is caught earlier next time. The AE MCP's `ae_learn_taste` and\n`ae_taste_rules` keep these per project.\n\n## Looks generated\n\nThe tells. Any of these in a piece needs a reason.\n\n- Everything fades and slides up; every scene enters the same way; the same ease at 0.5 s on\n  everything.\n- Titles that keep drifting, breathing or scaling after they land; floating or pulsing loops on\n  titles or UI as fake life.\n- Bounce on UI; click rings; typewriter headlines (typing belongs inside an input box); glow and\n  bloom as decoration; gradients on text.\n- A dark void with small centred things; purple-to-blue backgrounds; glass cards; three cards in a\n  row; grids of KPI tiles; HUD corners; a logo docked in a corner.\n- Grey placeholder bars, stock icons, emoji, clip art, rockets and sparkles.\n- A late, slow push-in after the frame has been read.\n- Crossfades between unrelated worlds; a fade out then a fade in at every cut.\n- A pie chart, a legend, gridlines.\n\n## Symptoms to fixes\n\n| It feels | Try |\n|---|---|\n| Robotic | ease every spatial key, add arcs, offset starts by 50-150 ms |\n| Cheap or flat | a secondary layer, follow-through, 3-10 % overshoot on position or scale (not in premium) |\n| Too slow | shorten holds before shortening moves; check the duration tier for the register |\n| Too fast | slow the zooms and pans to about 0.7x, leave the rest |\n| Like slides | enter each scene through an object already on screen; vary the entrances |\n| Busy or distracting | one hero per moment; remove a third of the motion |\n| No personality | pick a register and a signature ease and use it for 80 % of moves |\n| Inconsistent | one duration palette, one entrance pattern, the same ease family per group |\n",
+  "references/sound-and-captions.md": `# Sound and captions
+
+## Voice
+
+- Narration runs 2.2-2.5 words a second. A scene of about 9 s carries about 19 words, 26 at most.
+  A 30-90 s piece is about 155 words or fewer.
+- Script first, then real timings: the recorded (or synthesised) voice's word timestamps set the
+  scene boundaries, not the written estimate. If the voice runs longer than the picture, trim the
+  script; never stretch the motion to fill.
+- Write numbers as they are spoken.
+
+## Music and effects
+
+- Voice leads. Music under voice sits at about 14 % volume and is **carved** (an EQ dip where the
+  voice lives, around 1-4 kHz), not just ducked. Drop the score entirely while the voice must be
+  heard clearly.
+- Music enters on its strongest bar and ends on a bar line with a short fade. Looping beds: 0.4 s
+  fade in, 1.5 s fade out. Anything over 15 s that tells a story gets a bed plus effects.
+- Effects only for real causes on screen: a click, a whoosh on a cut, a key tick, a pop, one
+  riser into the payoff. Each hit sits 3-6 dB above the bed. Rotate two or three takes of a
+  repeated sound.
+- Timing: a sound's peak lands one frame after its picture. A move that lands on a hit starts
+  40-190 ms early; a reaction starts 0-45 ms after it.
+- A bed whose energy is mostly under 150 Hz disappears on phone speakers.
+- A generated score is possible in code (low bed, a hit per shot, a lift at the end): kick as a
+  falling sine, hats as filtered noise, an impact as sub plus noise with a short decay.
+- Audio-reactive motion stays micro: text and logos pulse at most 5 % in scale, backgrounds
+  10-30 %. No equaliser bars, no strobing.
+- Never claim a beat analysis that did not happen; a hand-made beat map is fine if it says so.
+
+## Levels
+
+| Target | Value |
+|---|---|
+| Social and web mix | \u221216 to \u221214 LUFS integrated |
+| True peak | \u22121 dBTP or lower |
+| Speech level in a clean recording | roughly \u221226 to \u221216 dB |
+| Broadcast | the platform's spec (EBU R128 \u221223 LUFS, ATSC A/85 \u221224 LKFS) |
+
+EQ starting points: high-pass at 80 Hz for rumble; reduce mud at 250 Hz, \u22123 dB, Q 1.2; reduce
+boxiness at 400 Hz, \u22123 dB; clarity at 3 kHz, +2.5 dB; soften harshness at 3.2 kHz, \u22123 dB.
+Subtract before adding; the limiter goes last.
+
+## Captions
+
+- Group 2-3 words for high energy, 3-5 conversational, 4-6 calm. Break at the end of a sentence,
+  at a pause of 150 ms or more, or at the word limit.
+- One group on screen at a time. A group appears at or before its first word and leaves at or
+  after its last. The first caption starts 0.1-0.3 s in. Exit is a 0.12 s fade, then gone.
+- Never time two words as one entry.
+- Speech-to-text tools invent words over silence ("Thank you."): drop words that start inside a
+  trailing silence (silence below about \u221235 dB for 0.6 s or more).
+- Captions sit inside an 80 % title-safe box: 80-120 px from the bottom on 16:9, about 600-700 px
+  from the bottom on a 9:16 (above the platform UI).
+- Over footage, text partly behind a speaker reads best at 30-55 % covered; under 15 % it floats,
+  over 65 % it is eaten. Blend and scrim rules are in \`type-and-layout.md\`.
+
+## Review with and without sound
+
+Three passes: **silent** (can the story be followed with the sound off, at phone size?),
+**audio** (do the hits land on their causes?), **frame** (is each hit frame readable as a
+still?). Say which of these were measured and which were only judged by eye or ear; a loudness
+reading is a measurement, "the mix sounds fine" is not.
+`,
+  "references/spec.md": "# The spec: MOTION.md\n\nEvery piece gets a `MOTION.md` beside its project (in AE projects, next to the `.aep`). It turns\nthe brief's adjectives into numbers, and it is what the review checks against. Read an existing\none before touching the piece; if the brand has one, copy it in and only add the piece's beats.\n\nFill every field. Where the answer is unknown, write `ASK ME`; never invent a colour or a fact.\n\n```markdown\n# MOTION.md: <piece name>\n\n## Goal\nOne sentence: what the viewer feels or knows at the end.\nAudience: ...   Platform: ...   Sound: on / off by default\n\n## Format\nSize: 1920x1080 | 1080x1920 | 1080x1350 | 1080x1080     Fps: 24 | 25 | 30 | 60\nLength: ... s    Music: ... BPM (or none)    Safe zones: see type-and-layout.md for the format\n\n## Register\nbrand film / premium     (UI micro | brand film | energetic | handmade; at most a 90/10 mix)\n\n## Motion language\nSignature ease: (0.4, 0, 0.2, 1)  for about 80 % of moves\nArrival ease: expo out    Exit ease: cubic in, 40-50 % shorter than entrances\nCamera ease: sine in-out\nDurations: short 300 ms / medium 500 ms / long 800 ms   (in frames: ... / ... / ...)\nStagger: words 80 ms, items 60 ms, group total about 500 ms\nOvershoot: 0 % (position and scale only, never opacity, colour or numbers)\nEntrance pattern: mask reveal from below\nTransitions: primary = <kind> for most seams; accents = <kind>, <kind>; hard cuts at most 1/3\nMotion blur: fast moves only\n\n## Look\nColours (hex, with a role each): background ..., text ..., accent ..., data ...\nType: display <font> <weight>, body <font> <weight>; title ... px, body ... px, floor 2.6 % of short side\nTexture: grain / none     Background: never flat #000\n\n## Facts\nThe approved names, dates and numbers. Nothing else appears on screen.\nSample data: labelled \"illustrative data\" on every frame it appears.\n\n## Banned\nFive things this piece must never do (start from review.md \"Looks generated\").\n\n## Beats\n| # | Time (s or beats) | Role | On screen | Hero frame at | Enter / lock / exit / bridge | Sound |\n|---|---|---|---|---|---|---|\n| 1 | 0-1.2 | hook | ... | 0.8 | ... | hit at 0.8 |\n\n## Checks\nThe measured checks in review.md that apply, and any extra ones for this piece.\n```\n\n## Brand defaults\n\nFor Chroma's own pieces, the register is brand film, premium: signature ease (0.4, 0, 0.2, 1),\nno overshoot, no glow or bounce, type still once landed, colours and fonts from\n`chroma-brand-guidelines`, and the brand's spectrum used once per piece.\n",
+  "references/story-and-pacing.md": "# Story, structure and pacing\n\n## The brief\n\nBefore anything is built, the brief answers:\n\n- **Intent:** what the viewer feels or knows at the end, in one sentence.\n- **Essence:** the core point, the main tension, the emotional centre, the one word to amplify,\n  one visual metaphor.\n- **Format:** size, fps, length, platform, safe zones, sound on or off by default.\n- **Facts:** the approved list of names, dates and numbers that may appear.\n- **Arc** (below), **risks**, and **what must not happen**.\n\nThen a beat sheet: for each beat its time range, on-screen text, the hero-frame time (the frame\nthat has to work as a still), how text enters, locks, is emphasised, exits and bridges to the\nnext beat, and what would be lost if the motion were removed. Show it and wait for approval.\n\nTreat a short prompt as a seed: expand it into a world, a story, keywords, colour, type, shapes,\ncamera and sound, but anything the user specified wins. Don't settle on the safe option.\n\n## Arcs\n\n| Length | Arc |\n|---|---|\n| 10 s | hook, tension, reveal, CTA |\n| 15 s | hook, tension, reveal, proof, CTA |\n| 30 s | pattern interrupt, conflict, reveal, proof, outcome, CTA |\n| Launch, 20-45 s | hook 8 %, tension 12 %, reveal 8 % (placed 20-30 % in), proof 40 %, payoff 20 % (placed 60-80 % in), claim 8 %, end card 8 % (holds 2-3 s) |\n\nNarrative roles for scenes: hook, problem, product intro, key feature, benefits, social proof,\nCTA, brand outro. A product promo climbs a ladder: pain, mechanism, proof, confidence, CTA.\n\n**Reference durations:**\n- 15 s promo: hook 0-3 s, proof 3-11 s at about 2.5 s a point, end card 11-15 s.\n- 45 s launch: 0-4, 4-9, 9-17, 17-22, 22-32, 32-38, 38-45 s; the CTA holds at least 3 s.\n- Apple-style product film: 6-8 scenes of about 2.5 s.\n- Explainer: 8-14 shots, one sentence each; the question shown big and a first surprise within\n  5 s.\n\n## Pacing\n\n- **Hook:** the first readable thing by 0.8-1.2 s (about 0.5 s for an unnarrated sting). The\n  first 0-2 s name the first place the eye goes, the largest word or object, and a motion event\n  that stops the scroll. The first 2 s are the densest. Frame 0 is the thumbnail: never black,\n  never a lone logo.\n- **Rhythm:** shots average 1.8-3 s; montage cuts 0.13-0.8 s; a product demo holds one framing\n  7-10 s; vertical shots 1-2 s with a new beat every 2-4 s. Hold 0.3-0.75 s before a payoff.\n- **Contrast of pace:** fast, stop, explode; dense, release. Alternate high-motion and still\n  beats, and don't give every beat the same length. The slowest scene is about three times the\n  fastest.\n- **Staleness:** something new every 2-4 s. Over 3 s with nothing changing is a dead stretch. A\n  static card dies after about 8 s (stage a reveal inside anything over 15 s). Any single\n  treatment goes stale after about 6 s. Over a talking head, one card every 6-8 s (under a\n  minute), 8-12 s (up to 3 min), 12-20 s (up to 10 min).\n- **Pattern interrupt:** past about 2.5 s, change exactly one thing.\n- **Holds:** title 0.6-1.2 s after it lands \xB7 proof or stat 0.8-1.5 s \xB7 CTA at least 1 s and the\n  calmest hold in the film \xB7 after-state of a transformation at least 1.2 s.\n- **Music-led:** every cut, impact, title entrance and camera switch sits on a beat, half beat or\n  quarter beat. Write times in beats, not seconds.\n\n## Scene recipes\n\n- **Stat:** the count runs 1.2-1.6 s on a decelerating ease, then holds; a ring or bar finishes\n  with the count; the label appears after the number lands (value, then meaning). About 4-6 s in\n  all. No overshoot.\n- **Logo reveal:** 3-5 s. Vector logos draw on; raster logos reveal through a mask or a scale.\n  An underline or light sweep, then hold. Export with alpha for stings.\n- **Lower third:** 3-6 s. A bar wipes in from the left (scale X 0 to 100 %), the text slides up\n  behind it, hold, then slide out. Bottom 30 %, title-safe, alpha.\n- **Highlight a phrase:** the sentence slides up 52 px over 0.8 s (quart out), and after it has\n  settled a highlight band sweeps left to right over 0.5-1.5 s scaled to the phrase length. The\n  text is never zoomed to emphasise it.\n- **Title card (the breather):** one move, then a still hold of 3-5 s.\n- **Kinetic beat slam:** one beat list drives every entrance; each phrase gets its own entrance\n  (scale slam, side snap, rise and rotate), never the same punch-in reused; hits 0.35-0.6 s,\n  exits 0.25 s or less; end on a locked final frame.\n- **Press and success:** container scale 0.9 to 1.0 with 5-10 % overshoot over 200 ms, a tick\n  drawn over 150 ms starting 100 ms later, 400-500 ms in all.\n- **Loading or dashboard build:** skeleton at 0, hero at 100-250 ms, widgets from 200 ms at 60 ms\n  apart, chart at 350 ms, all landed by 500 ms, ambient from 650 ms.\n\n## Variants and references\n\n- Build the first 10 s in two or three styles and choose before building the rest.\n- Breaking down a reference in five lines: pace, what changes, type, colour and light, the one\n  idea. Take moves from a reference video and the look from a still; never copy a logo, copy or\n  palette. Note the exact source, at least three observed visual properties and what must not\n  drift from the story.\n",
+  "references/timing-and-easing.md": "# Timing and easing\n\n## Durations\n\n**By element (UI register):** tooltip 80-120 ms \xB7 button or toggle 120-180 ms \xB7 icon\n150-250 ms \xB7 card 200-350 ms \xB7 modal 300-400 ms \xB7 page 400-600 ms \xB7 dramatic reveal\n600-1200 ms \xB7 ambient loop 2-20 s. Hover under 100 ms, press under 150 ms, settle 200-300 ms,\nerror shake 300-400 ms with 2-3 swings of \xB110-15 px.\n\n**By speed tier (film register):** fast 0.15-0.3 s (energy) \xB7 medium 0.3-0.5 s \xB7 slow\n0.5-0.8 s (luxury) \xB7 very slow 0.8-2.0 s (cinematic). A fast move across the frame is\n0.3-0.6 s. A premium reveal is 0.8-1.6 s. A tween over 2.0 s is usually too slow unless it is a\ncamera drift or an ambient loop.\n\n**By distance:** scale the base duration by 0.8x at 50 px, 1.0x at 100 px, 1.3x at 200 px,\n1.6x at 400 px, 1.8-2.0x across the full frame.\n\n**By material:** rigid 1.2x and no overshoot \xB7 elastic 0.8x and 15-25 % \xB7 fluid 1.5x and 5 % \xB7\npaper 1.0x and 3-5 % \xB7 gas 2.0x and none \xB7 glass 0.9x and none.\n\n**Exits** are 40-50 % shorter than the entrance (0.4 s in, 0.25 s out) and ease in. **Landing\nis longer than leaving.** If entrances feel snappy to the point of glitching, slow the whole\npiece by about 1 s before tuning single moves.\n\n## Brand identity in three constants\n\nA piece (or a brand) has one **signature ease** used for about 80 % of moves, a **three-tier\nduration palette** (for example 200 / 300 / 450 ms) and **one entrance pattern**. Everything else\nis an accent. Write all three in the spec.\n\n| Archetype | Durations | Signature ease | Overshoot |\n|---|---|---|---|\n| Premium | 350-600 ms | (0.4, 0, 0.2, 1) | 0 % |\n| Corporate | 200-400 ms | (0.2, 0, 0, 1) | 0-3 % |\n| Playful | 150-300 ms | back out | 10-20 % |\n| Energetic | 100-250 ms | expo out | 15-30 % |\n\n## Ease by role\n\n| Role | Ease | Bezier |\n|---|---|---|\n| Arrival, hero or title | expo out / quart out | (0.16, 1, 0.3, 1) / (0.25, 1, 0.5, 1) |\n| Ordinary arrival | quad or cubic out | (0.2, 0, 0, 1) |\n| Exit | cubic in | (0.3, 0, 1, 1) |\n| Move between positions | cubic in-out | (0.65, 0, 0.35, 1) |\n| Camera, colour flood, crossfade | sine or quad in-out | (0.37, 0, 0.63, 1) |\n| Zoom-through, push into a cut | cubic in, strong | (0.5, 0, 0.75, 0) |\n| Ambient loop | sine in-out | (0.37, 0, 0.63, 1) |\n| Typing, counters, stepped looks | hold keys / steps | n/a |\n| Rotation, progress, timers | linear | (0, 0, 1, 1) |\n\nNamed presets worth keeping: Material standard (0.2, 0, 0, 1), emphasised (0.05, 0.7, 0.1, 1),\ndecelerate (0, 0, 0, 1), accelerate (0.3, 0, 1, 1); Apple (0.25, 0.1, 0.25, 1); gentle float\n(0.4, 0, 0.2, 1).\n\n**Emotion to motion:** joy, back out at 200-400 ms \xB7 calm, sine at 500-1000 ms \xB7 urgency, ease\nout at 100-200 ms \xB7 sadness, cubic in-out at 600-1200 ms \xB7 surprise, expo out at 150-300 ms \xB7\nelegance, (0.4, 0, 0.2, 1) at 400-700 ms. Angular paths read tense, curved friendly, rising\ngrowth, horizontal progress.\n\n## Springs and overshoot\n\n- Damping ratio 1.0 never bounces \xB7 0.7-0.85 premium \xB7 0.4-0.6 playful \xB7 under 0.3 cartoon.\n- Back-out strength: 1.2 elegant \xB7 1.7-2.0 the usual pop \xB7 2.5 playful.\n- Overshoot budget by context: success 5-10 % \xB7 feedback 2-5 % \xB7 celebration 15-25 % \xB7 error 0 %\n  \xB7 premium 0 %.\n- Only position and scale may overshoot. Opacity, colour and counting numbers never do (an\n  overshooting number reads as wrong data).\n- Press and release: scale 0.88 / 0.92 / 0.96 (dramatic / default / subtle), never below 0.85 or\n  above 0.98; press straight in, release on a spring.\n\n## Classic principles, with numbers\n\n- **Anticipation:** 100-200 ms at 10-20 % of the move, opposite direction. Skip it on moves\n  under 150 ms.\n- **Squash and stretch:** squash [1.2, 0.8], stretch [0.85, 1.15]; impact 2-4 frames, recovery\n  4-8 frames. Keep volume roughly constant.\n- **Follow-through:** children lag 50-150 ms; trailing parts stop 100-200 ms after the lead.\n- **Arcs:** push the path midpoint 10-20 px off the straight line.\n- **Exaggeration:** playful 15-25 % \xB7 energetic 20-30 % \xB7 corporate 0-5 % \xB7 premium 0 %.\n- **Layers of motion:** primary at 100 % amplitude; secondary at 30-50 %, 50-100 ms later, on a\n  different ease; ambient at 10-20 % (only on backgrounds, never on titles or UI).\n\n## Ambient (backgrounds only)\n\nBreathing scale 0.98-1.02 over 2-4 s (beyond \xB15 % it demands attention) \xB7 float \xB15-15 px over\n3-5 s, with layered periods such as 3.5 / 4.0 / 5.5 s so elements never sync \xB7 gradient shift\n8-20 s \xB7 shimmer sweep 1.5-2.5 s with 2-5 s between sweeps \xB7 slow background orbit 3-5\xB0 a\nsecond \xB7 fewer than 20 particles \xB7 ambient energy at most 20 % of the primary motion.\n\n## Motion blur\n\nOnly on fast, short moves (slams, whips, scale punches). Blur peaks at the fastest frame and\nreaches 0 at the settle, on the same ease and window as the move: 6-12 px on text-sized\nelements, 15-20 px full-frame, horizontal-only on a horizontal move. Never on text being read,\nslow moves or fades.\n\n## Milliseconds to frames\n\n| ms | 24 fps | 25 fps | 30 fps | 60 fps |\n|---|---|---|---|---|\n| 100 | 2.4 \u2192 2 | 2.5 \u2192 3 | 3 | 6 |\n| 150 | 3.6 \u2192 4 | 3.75 \u2192 4 | 4.5 \u2192 5 | 9 |\n| 200 | 4.8 \u2192 5 | 5 | 6 | 12 |\n| 250 | 6 | 6.25 \u2192 6 | 7.5 \u2192 8 | 15 |\n| 300 | 7.2 \u2192 7 | 7.5 \u2192 8 | 9 | 18 |\n| 400 | 9.6 \u2192 10 | 10 | 12 | 24 |\n| 500 | 12 | 12.5 \u2192 13 | 15 | 30 |\n| 800 | 19.2 \u2192 19 | 20 | 24 | 48 |\n| 1000 | 24 | 25 | 30 | 60 |\n\nRound to whole frames and keep keys on whole frames (sub-frame keys render unpredictably).\nUnder 24 fps a 100 ms move is two frames and reads as a cut; give it at least three.\n\n**Beat grid:** frames per beat = fps \xD7 60 / BPM. Compute beat *n* as `round(n \xD7 fps \xD7 60 / BPM)`,\nnever by adding a rounded beat repeatedly: at 128 BPM and 30 fps that drifts 2 frames in 32\nbeats. Cut on the beat, change layout on the bar.\n\n## Cubic-bezier to After Effects keyframe ease\n\nA bezier (x1, y1, x2, y2) between key A and key B, with the value changing by \u0394 over duration D\n(so the average speed is \u0394 / D):\n\n- **A, outgoing:** influence = x1 \xD7 100 %, speed = (y1 / x1) \xD7 \u0394 / D.\n- **B, incoming:** influence = (1 \u2212 x2) \xD7 100 %, speed = ((1 \u2212 y2) / (1 \u2212 x2)) \xD7 \u0394 / D.\n\nAE influence must be between 0.1 % and 100 %. A bezier with y outside 0-1 (back, elastic) has no\ntwo-key equivalent: add an overshoot key (for example 105 % at 70 % of the time, then settle) or\nuse a spring expression.\n\n| Ease | A out (influence / speed) | B in (influence / speed) |\n|---|---|---|\n| AE Easy Ease | 33.33 % / 0 | 33.33 % / 0 |\n| (0.2, 0, 0, 1) standard | 20 % / 0 | 100 % / 0 |\n| (0.4, 0, 0.2, 1) premium | 40 % / 0 | 80 % / 0 |\n| (0.16, 1, 0.3, 1) expo out | 16 % / 6.25 \xD7 avg | 70 % / 0 |\n| (0.25, 1, 0.5, 1) quart out | 25 % / 4 \xD7 avg | 50 % / 0 |\n| (0.3, 0, 1, 1) exit | 30 % / 0 | 0.1 % / 2-3 \xD7 avg (it leaves at speed; match the next shot's entry speed) |\n| (0.65, 0, 0.35, 1) in-out | 65 % / 0 | 65 % / 0 |\n\nFor multi-dimensional spatial properties, apply the ease to the speed graph (the whole move),\nnot per axis, unless the dimensions are separated.\n",
+  "references/type-and-layout.md": `# Type, layout and colour
+
+## Sizes
+
+**Floor:** readable text is at least 2.6 % of the frame's short side: 28 px at 1080, 50 px at
+1920 wide in a vertical. Check every text layer at its smallest scale on screen.
+
+| Role | Landscape 1920x1080 | Notes |
+|---|---|---|
+| Hero word | fills 60-90 % of the width | 1-2 words |
+| Title | 4-9 % of frame height (64-120 px) | at most 6 words a line |
+| Quiet line, subtitle | 2.5-4 % of height | |
+| Body | 28-42 px | 1-2 lines |
+| Label | 18-24 px only if it is not meant to be read; otherwise 28 px+ | |
+
+- Portrait type is landscape \xD7 1.3 (titles \xD7 1.35, stats \xD7 1.4).
+- Social feed headlines 90 px or more on 1080 wide; full-screen viewing headlines 60 px+, body
+  20 px+ is the absolute floor and only for viewing at full size.
+- Vertical title tiers by line length (1080x1920): 1 short line 118-156 px, line height
+  0.95-1.05 \xB7 a longer single line 96-118 px \xB7 two short lines 78-96 px \xB7 two longer lines
+  62-78 px \xB7 three lines or legal copy 48-62 px. Support text 30-44 px, CTA 28-40 px. 24-48 px
+  between title and support, 40-72 px between support and CTA, at least 72 px from a text block to
+  the edge of its field.
+- Tracking at display sizes \u22120.03 to \u22120.05 em. Weight contrast 300 against 900, not 400 against
+  700. Light text on dark: body weight about 350 and line height 0.05-0.1 more.
+- Numbers that count use tabular figures and round to the displayed precision.
+- Never let the text box be wider than the frame allows: fit it (\`ae_fit_text\`), don't rely on
+  manual line breaks in body copy.
+
+## Reading time
+
+- Hold a line 0.5 s + 0.3 s per word. The last line holds at least 2 s. A one- or two-word chapter
+  line can hold 0.4 s. A key element stays readable at least 0.3 s even in a montage.
+- A typographer's check: 3 s on screen must be readable in 2.
+- One line on screen at a time for titles (explainers can run to about 10 words).
+- Text is still before it has to be read. A landed title does not drift, breathe or scale.
+- Exit with a 0.13-0.25 s blur-out or a mirrored move, not a long fade.
+
+## Copy on screen
+
+- One idea per beat. Short, strong words; at most about five words on screen for social.
+- Kinetic type: 3-7 words a scene, 1-2 emphasis words, scenes tagged hook, build, punch, resolve.
+- On-screen text is shorter than the voiceover saying it.
+- Avoid launch clich\xE9s in copy: "introducing", "meet", "unlock", "seamless", "supercharge".
+
+## Safe zones
+
+| Format | Keep text and logos |
+|---|---|
+| Any | inside an 80 % title-safe box (10 % in from each edge) |
+| 16:9 captions | 80-120 px above the bottom |
+| 9:16 reels and shorts (1080x1920) | between y 168 and y 1330 for anything that matters; out of the right 120-130 px (the action rail); headline around y 360-520 |
+| 9:16 promo layout | CTA, subtitles and proof above the bottom 15 %; the main title above the bottom 22 %; avoid the top 8-10 % |
+| Lower third | inside the bottom 30 %, inside title-safe |
+| Picture-in-picture | inset 28 px from the edges |
+
+Below y 1330 on a vertical, only texture.
+
+## Layout
+
+- The hero of a shot fills at least 40 % of frame height or width (60-70 % for a single-object
+  shot). Small objects floating in empty space look like a template.
+- At least three layers per scene: background, content, accents. Two focal points at most. Anchor
+  things to edges rather than centring everything.
+- Write the layout as rectangles before building: text box, subject box, quiet zone, safe bottom,
+  motion bounds. A vertical text side often takes 42-48 % of the width as a quiet zone with the
+  subject opposite it, or the subject in the central 60 %.
+- Three or more beats with the same text box, the same entrance and the same rhythm look like
+  slides; change one of them.
+- Hook frames on short vertical pieces put the text impact in the centre or upper centre; keep
+  the lower half for CTA, proof and subject.
+- Overshooting or pulsing elements need clearance at their largest size.
+- Data: one number at a time, the biggest thing on screen, with a proportional visual (bar, ring).
+  Related stats share one visual space; only the value changes. Build a chart in reading order:
+  axis, reference line, data drawing in, one annotation. Highlight one series and grey the rest.
+  Avoid pie charts, dual axes, legends, gridlines and dashboards of six or more panels. Values
+  never change during a morph between chart types. Lines are drawn, not faded in.
+
+## Colour
+
+- Never a flat #000 background, and no full-screen linear gradients on dark: they band in H.264.
+  Use a solid with a glow, or a radial.
+- Atmosphere sits at 15-25 % opacity; 5 % vanishes after compression. Focal elements at full
+  saturation. Tint the neutrals.
+- Contrast for text meets WCAG AA (4.5:1 body, 3:1 large).
+- Move into the "success" colour rather than starting there; flash an error colour, then settle.
+- Over footage, pick the text blend by the brightness behind it: under 60 (of 255) screen, 60-180
+  overlay, over 180 normal with an opaque colour. Plain subtitles over anything brighter than 60
+  get a 30-40 % scrim sized to the text, never a full-width bar.
+`
+};
+
+// src/guidance/index.ts
+var GUIDANCE_URI_PREFIX = "chroma-ae://guidance/motion-director/";
+var DESCRIPTIONS = {
+  "SKILL.md": "Chroma motion director: workflow from brief to delivery, with the numbers.",
+  "NOTICE.md": "Sources and licences behind the motion guidance.",
+  "references/choreography.md": "Choreography: stagger, hierarchy, camera and layer motion rules.",
+  "references/review.md": "Review checklist: measure first, then look.",
+  "references/sound-and-captions.md": "Sound design, music sync and caption rules.",
+  "references/spec.md": "The numeric motion spec: fields and register defaults.",
+  "references/story-and-pacing.md": "Story beats and pacing for motion pieces.",
+  "references/timing-and-easing.md": "Durations, easing curves and timing numbers.",
+  "references/type-and-layout.md": "Type, layout and safe-zone rules for motion."
+};
+function titleOf(rel, text) {
+  const m = /^#\s+(.+)$/m.exec(text);
+  return m ? m[1].trim() : rel;
+}
+function listGuidanceResources() {
+  return Object.keys(GUIDANCE_FILES).sort().map((rel) => ({
+    uri: GUIDANCE_URI_PREFIX + rel,
+    name: titleOf(rel, GUIDANCE_FILES[rel]),
+    description: DESCRIPTIONS[rel] ?? `Motion guidance file ${rel}.`,
+    mimeType: "text/markdown",
+    text: GUIDANCE_FILES[rel]
+  }));
+}
+function readGuidance(uri) {
+  return listGuidanceResources().find((r) => r.uri === uri);
+}
+function skillBody() {
+  return GUIDANCE_FILES["SKILL.md"].replace(/^---\n[\s\S]*?\n---\n+/, "");
+}
+function reviewBody() {
+  return GUIDANCE_FILES["references/review.md"];
+}
+
+// src/mcp-rpc.ts
+var PROMPTS = [
+  {
+    name: "motion_director",
+    description: "Motion director guidance: brief, numeric spec, stills, choreography, sound, review and delivery, with measured timing, easing and stagger rules.",
+    arguments: [{ name: "task", description: "What you are about to make or fix (optional).", required: false }],
+    build: (task) => skillBody() + (task && task.trim() ? `
+
+Task: ${task.trim()}
+` : "")
+  },
+  {
+    name: "motion_review",
+    description: "Motion review checklist: measure the comp first, then judge by eye.",
+    arguments: [{ name: "comp", description: "Name or id of the comp to review (optional).", required: false }],
+    build: (comp) => reviewBody() + (comp && comp.trim() ? `
+
+Comp to review: ${comp.trim()}
+` : "")
+  }
+];
 var TOOL_MAP = new Map(
   ALL_TOOLS.map((t) => [t.name, t])
 );
@@ -59143,6 +61010,13 @@ async function handleSingleRpc(message, ctx) {
           protocolVersion,
           capabilities: {
             tools: {
+              listChanged: false
+            },
+            prompts: {
+              listChanged: false
+            },
+            resources: {
+              subscribe: false,
               listChanged: false
             }
           },
@@ -59230,6 +61104,57 @@ async function handleSingleRpc(message, ctx) {
           result: formatToolError(err)
         };
       }
+    }
+    case "prompts/list": {
+      return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) } };
+    }
+    case "prompts/get": {
+      const name = params.name;
+      const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : void 0;
+      if (!prompt) {
+        return makeErrorResponse(id, -32602, `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}`);
+      }
+      const rawArgs = params.arguments;
+      if (rawArgs !== void 0 && !isPlainObject2(rawArgs)) {
+        return makeErrorResponse(id, -32602, "Invalid params: `arguments` must be an object");
+      }
+      const arg = rawArgs?.[prompt.arguments[0].name];
+      if (arg !== void 0 && typeof arg !== "string") {
+        return makeErrorResponse(id, -32602, `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string`);
+      }
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          description: prompt.description,
+          messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }]
+        }
+      };
+    }
+    case "resources/list": {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resources: listGuidanceResources().map((r) => ({
+            uri: r.uri,
+            name: r.name,
+            description: r.description,
+            mimeType: r.mimeType
+          }))
+        }
+      };
+    }
+    case "resources/read": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        return makeErrorResponse(id, -32602, "Invalid params: `uri` must be a string");
+      }
+      const res = readGuidance(uri);
+      if (!res) {
+        return makeErrorResponse(id, -32002, `Resource not found: ${JSON.stringify(uri)}. Use resources/list.`);
+      }
+      return { jsonrpc: "2.0", id, result: { contents: [{ uri: res.uri, mimeType: res.mimeType, text: res.text }] } };
     }
     default: {
       return makeErrorResponse(

@@ -1,5 +1,43 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## Motion guidance branch, 2026-11-06 (`feat/motion-guidance`)
+
+Items 1-5 of `docs/MOTION-RESEARCH.md`, built by five Sonnet agents in separate worktrees, then
+reviewed by four fresh Sonnet reviewers and fixed (four fix rounds). Build, 4660 unit tests and
+the JSX lint pass; 174 tools. **Nothing here has run in After Effects yet.**
+
+- **Motion spec** (`server/src/motion-spec.ts`): a project's motion language as numbers, stored as
+  the brief's `motion` field (`ae_brief`). Registers `ui_micro`, `brand_film` (default),
+  `energetic`, `handmade` supply the defaults. `loadMotionSpec(ctx)` (brief.ts) reads the open
+  project's spec; a malformed stored spec keeps its valid fields and returns a `warning`.
+  `motion` merges one level deep; `motion: {}` clears it.
+- **Prompts and resources**: `mcp-rpc.ts` serves the chroma-motion-director skill as MCP prompts
+  (`motion_director`, `motion_review`) and resources (`chroma-ae://guidance/motion-director/...`).
+  The text is in `server/guidance/motion-director/`, compiled into
+  `server/src/guidance/content.generated.ts`; `node scripts/sync-guidance.mjs` refreshes both from
+  `~/.claude/skills/chroma-motion-director`, and a test fails when they drift. The stdio relay
+  advertises the same capabilities while AE is closed and serves cached prompt and resource lists
+  (one cache file per list); reads need AE.
+- **`ae_motion_review` choreography** (`choreography.ts`): ease monotony, entrance and exit
+  direction, exit/entrance ratio, a move on a layer's first frame, stagger spread and evenness,
+  density, landed text still moving, long tweens, and overshoot on opacity, colour or counting
+  numbers. A real stagger counts as one gesture for monotony and density; cameras, lights and
+  nulls are skipped for direction checks; position or scale overshoot up to 2 % stays info.
+- **`ae_timing_check`** (new, read-only; `timing.ts`, `host/ext/timing.jsx`): unread lines,
+  dead stretches, blank first frame (renders one frame), audio-free stretches over 15 s, and
+  on-screen numbers or names not in `motion.facts` (P0 only for an unapproved price or
+  percentage). Host reads are capped (500 layers, 3000 properties, 20000 keys); a capped layer
+  counts as changing from the cut-off, so it never invents a dead stretch. Any enabled expression
+  marks its layer as changing (a known false negative).
+- **`ae_house_style_check`**: `platform` presets (title_safe, landscape_16_9, reels_9_16 with the
+  bottom UI band and right rail, promo_9_16, feed_4_5, square_1_1) for text and logo layers
+  (footage, precomp, shape or solid named with the word "logo"). The text-size check stays off
+  unless `min_font_size`, a platform, or the brief's `min_text_pct`/`platform` asks for it, so
+  existing results don't change.
+
+To check live: run each of the three checks on a real comp with and without a brief `motion`
+block, and `prompts/list` / `resources/read` from a client.
+
 ## Live smoke, 2026-11-05 (read this first)
 
 `qa/smoke-mcp.mjs` ran on After Effects 26.2.1 on Windows, on a generated scratch project. Four runs: 112 of 501, 466 of 522, 518 of 527, 519 of 526. So statements below that a tool "has not run in AE" are out of date for what the smoke covers. The smoke checks that tools work and read back correctly; it does not judge how good a result looks, and it uses no real footage, so tracker, clean plate, grain and colour match quality on real shots is still untested.
