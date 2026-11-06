@@ -164,7 +164,7 @@ export function cueKeysMismatches(planned: PlannedKey[], afterRaw: unknown, writ
 
 // ---------- audio jobs ----------
 
-interface CompAudioInfo {
+export interface CompAudioInfo {
   comp_id: number;
   name: string;
   name_unique: boolean;
@@ -195,11 +195,11 @@ export interface AudioToolsOptions {
   pollMs?: number;
 }
 
-function sanitize(name: string): string {
+export function sanitize(name: string): string {
   return name.replace(/[^\w.-]+/g, "_").slice(0, 60) || "comp";
 }
 
-function stamp(): string {
+export function stamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 }
 

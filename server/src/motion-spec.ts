@@ -35,10 +35,21 @@ export const PLATFORM_PRESETS = {
   /** 16:9: captions 80-120 px above the bottom at 1080 high. */
   landscape_16_9: { label: "16:9 landscape", left: 0.1, right: 0.1, top: 0.1, bottom: 0.1 },
   /**
-   * 9:16 reels and shorts at 1080x1920: anything that matters between y 168 and y 1330,
-   * out of the right 120 px (the action rail).
+   * 9:16 at 1080x1920, the box that is safe on TikTok, Instagram Reels and YouTube Shorts at once
+   * (the union of their UI): y 288-1248, x 120-888. Approximate: the numbers come from the
+   * platforms' ad specs and third-party templates, not from a published contract. Re-check yearly.
    */
-  reels_9_16: { label: "9:16 reels / shorts / TikTok", left: 0.05, right: 120 / 1080, top: 168 / 1920, bottom: (1920 - 1330) / 1920 },
+  reels_9_16: { label: "9:16 safe on TikTok, Reels and Shorts (approximate)", left: 120 / 1080, right: 192 / 1080, top: 288 / 1920, bottom: 672 / 1920 },
+  /**
+   * TikTok alone at 1080x1920 (ad spec and templates, approximate, re-check yearly): top 240, bottom 660,
+   * left and right 120. The right rail widens to about 300 px below y 840; ae_captions_read flags that
+   * corner separately.
+   */
+  tiktok_9_16: { label: "9:16 TikTok (approximate)", left: 120 / 1080, right: 120 / 1080, top: 240 / 1920, bottom: 660 / 1920 },
+  /** Instagram Reels alone at 1080x1920 (ad spec and templates, approximate, re-check yearly): top 269, bottom 672, sides 65. */
+  instagram_reels_9_16: { label: "9:16 Instagram Reels (approximate)", left: 65 / 1080, right: 65 / 1080, top: 269 / 1920, bottom: 672 / 1920 },
+  /** YouTube Shorts alone at 1080x1920 (ad spec and templates, approximate, re-check yearly): top 288, bottom 672, left 48, right 192. */
+  youtube_shorts_9_16: { label: "9:16 YouTube Shorts (approximate)", left: 48 / 1080, right: 192 / 1080, top: 288 / 1920, bottom: 672 / 1920 },
   /** 9:16 promo layout: CTA above the bottom 15 %, title above the bottom 22 %, top 10 % clear. */
   promo_9_16: { label: "9:16 promo (title above the bottom 22 %)", left: 0.067, right: 0.12, top: 0.1, bottom: 0.22 },
   /** 4:5 feed posts. */

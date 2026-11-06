@@ -1,6 +1,6 @@
 # Attribution & Third-Party Notices
 
-`chroma-ae-mcp` borrows ideas, architectural patterns, and measured ExtendScript behaviors from two open-source reference implementations under the MIT License. Whole files have not been copied; specific mechanisms and discoveries have been adapted with attribution.
+`chroma-ae-mcp` borrows ideas, architectural patterns, and measured ExtendScript behaviors from two open-source reference implementations under the MIT License, and caption ideas from the open-source skills listed in sections 3 and 4. Whole files have not been copied; specific mechanisms and discoveries have been adapted with attribution. This repository is licensed AGPL-3.0-only.
 
 ---
 
@@ -86,3 +86,28 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## 3. Caption tools (ideas only; no code or text copied)
+
+- **github/awesome-copilot, `skills/caption-qa`** (MIT, https://github.com/github/awesome-copilot):
+  the idea of linting captions per standard (reading speed, line length, line count, time on screen,
+  gaps, overlaps) and of fixing timing before rewording. Reimplemented in TypeScript in
+  `server/src/caption-qa.ts` and the planner's fix order (`server/src/caption-rules.ts`), with our own
+  numbers in `server/src/caption-standards.ts`.
+- **vargHQ/skills, `caption-styles`** (MIT, https://github.com/vargHQ/skills): the families of social
+  caption looks (pop, pill, fill sweep) behind `ae_captions`' `look` option. Our own timings and values.
+- The numbers themselves are facts from the published guides (Netflix timed text style guide and timing
+  guidelines, BBC subtitle guidelines, DCMP Captioning Key, W3C WCAG 2.2), linked from
+  `server/src/caption-standards.ts` and the captions skill.
+
+The MIT licence text is in section 1; the copyright notices are in each source repository.
+
+## 4. Served guidance (MCP prompts and resources)
+
+`server/guidance/` holds copies of two Chroma skills, served as MCP prompts and resources:
+`motion-director` and `captions`. Each carries its own `NOTICE.md` listing the sources and licences
+it draws on, including **heygen-com/hyperframes** (Apache-2.0, https://github.com/heygen-com/hyperframes)
+and **clueso-ai/skills** (Apache-2.0) for caption workflow ideas. Both skills are written in Chroma's own
+words; nothing is quoted at length.

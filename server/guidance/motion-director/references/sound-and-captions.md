@@ -43,17 +43,21 @@ Subtract before adding; the limiter goes last.
 
 ## Captions
 
-- Group 2-3 words for high energy, 3-5 conversational, 4-6 calm. Break at the end of a sentence,
-  at a pause of 150 ms or more, or at the word limit.
-- One group on screen at a time. A group appears at or before its first word and leaves at or
-  after its last. The first caption starts 0.1-0.3 s in. Exit is a 0.12 s fade, then gone.
-- Never time two words as one entry.
-- Speech-to-text tools invent words over silence ("Thank you."): drop words that start inside a
-  trailing silence (silence below about −35 dB for 0.6 s or more).
-- Captions sit inside an 80 % title-safe box: 80-120 px from the bottom on 16:9, about 600-700 px
-  from the bottom on a 9:16 (above the platform UI).
-- Over footage, text partly behind a speaker reads best at 30-55 % covered; under 15 % it floats,
-  over 65 % it is eaten. Blend and scrim rules are in `type-and-layout.md`.
+The caption rules (standards, reading speed, line breaks, speakers, file formats, tools) live in
+the `captions` skill. This section covers only how captions meet the motion.
+
+- Time a caption to the speech, then check it against the beat grid: a caption change that lands
+  within a few frames of a cut or a hit looks planned; one that lands just off it looks like a
+  mistake. Move the caption, not the cut.
+- Keep captions out of the action: not over the speaker's mouth or eyes, the hero, or the
+  platform UI. Give them one fixed home so the eye learns where to look.
+- Caption motion is quiet. A fade or a short rise of 100-150 ms is enough; save big moves for
+  the hero. A word highlight starts a frame or two early.
+- One caption style per film: same font, size, colour roles and box. Change it only with the
+  scene, and on purpose.
+- Over footage with a busy background, use a backing box (60% black or more) before reaching for
+  blend modes.
+- Check captions in the silent pass: the film should work with the sound off.
 
 ## Review with and without sound
 

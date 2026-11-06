@@ -49,12 +49,12 @@
 |---|---|
 | Any | inside an 80 % title-safe box (10 % in from each edge) |
 | 16:9 captions | 80-120 px above the bottom |
-| 9:16 reels and shorts (1080x1920) | between y 168 and y 1330 for anything that matters; out of the right 120-130 px (the action rail); headline around y 360-520 |
+| 9:16 reels and shorts (1080x1920) | safe on TikTok, Reels and Shorts: x 120-888, y 288-1248 (approximate, from ad specs; per-app zones in the `captions` skill); below y 840 keep clear of the right rail (end text by x 780); headline around y 360-520 |
 | 9:16 promo layout | CTA, subtitles and proof above the bottom 15 %; the main title above the bottom 22 %; avoid the top 8-10 % |
 | Lower third | inside the bottom 30 %, inside title-safe |
 | Picture-in-picture | inset 28 px from the edges |
 
-Below y 1330 on a vertical, only texture.
+Below y 1248 on a vertical, only texture.
 
 ## Layout
 

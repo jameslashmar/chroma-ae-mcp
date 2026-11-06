@@ -312,6 +312,9 @@ describe("captionsMismatches", () => {
 
 // ---------- the guarded flow with a fake bridge ----------
 
+/** The comp frame rate the fake answers the frame-rate probe with. */
+let fakeFps = 25;
+
 function fakeAe(results: Record<string, unknown[]>) {
   const calls: Array<{ fn: string; script: string }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-captions-q-"));
@@ -320,6 +323,7 @@ function fakeAe(results: Record<string, unknown[]>) {
   const quarantine = new QuarantineStore(path.join(dir, "quarantine.json"));
   const host = new PanelHost({
     evalScript: async (script) => {
+      if (script.includes('"frame_rate_probe":true')) return { ok: true, result: { frameDuration: 1 / fakeFps }, durationMs: 1 };
       const fn = script.slice("__chromaAe.".length, script.indexOf("("));
       calls.push({ fn, script });
       if (fn === "checkGuard") return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: 1, comp_is_valid: true }, durationMs: 1 };
@@ -390,7 +394,7 @@ describe("ae_captions flow", () => {
       captionsApply: [{ created: [], updated: [], removed: [], timings: plan.captions.map((c) => [c.start, c.end]), warnings: [] }],
     });
     const out = await tool("ae_captions").handler(a, ok.ctx);
-    expect(out.outside_safe).toEqual([{ name: "Caption 001", width: 1200 }]);
+    expect(out.outside_safe).toEqual([{ name: "Caption 001", width: 1200, reason: "too_wide" }]);
     expect(out.warnings.join(" ")).toMatch(/outside the safe area/);
 
     // The read after the write throws: the write stands, the receipt says so.
@@ -400,6 +404,27 @@ describe("ae_captions flow", () => {
     expect(out2.applied).toBe(true);
     expect(out2.receipt.matches).toBe(false);
     expect(JSON.stringify(out2.receipt)).toMatch(/Do not resend/);
+  });
+
+  it("plans on the comp's own frame grid: a 30 fps comp snaps to 30 fps, and an unreadable rate writes nothing", async () => {
+    const off = JSON.stringify({ words: [{ text: "Hello", start: 0.43, end: 0.8, type: "word" }, { text: "there", start: 0.8, end: 1.2, type: "word" }] });
+    const a = AeCaptionsSchema.parse({ comp_id: 1, transcript: { text: off }, expect: expectArg });
+    const applied = (calls: Array<{ fn: string; script: string }>) => calls.filter((c) => c.fn === "captionsApply");
+    try {
+      fakeFps = 30;
+      const ok = fakeAe({ captionsRead: [readOf([]), readOf([])], captionsApply: [{ created: [], updated: [], removed: [], timings: [[13 / 30, 2]], warnings: [] }] });
+      await tool("ae_captions").handler(a, ok.ctx);
+      const sent = JSON.parse(applied(ok.calls)[0].script.slice(applied(ok.calls)[0].script.indexOf("(") + 1, -1));
+      expect(sent.captions[0].start).toBeCloseTo(13 / 30, 6);
+      expect(planCaptions({ ...a, frame_rate: 30 }).warnings.join(" ")).not.toMatch(/24 fps/);
+      fakeFps = Number.NaN;
+      const bad = fakeAe({});
+      const out = await tool("ae_captions").handler(a, bad.ctx);
+      expect(out).toMatchObject({ ok: false, error: "read_failed" });
+      expect(bad.calls).toEqual([]);
+    } finally {
+      fakeFps = 25;
+    }
   });
 
   it("returns bad_transcript before touching AE", async () => {
@@ -1067,9 +1092,10 @@ describe("captions.jsx: the background box", () => {
     apply(A, comp, { captions: [cap(1, 2, ["A"])], box: BOX });
     const text = comp.layer("Caption 001")!;
     text.rect = { left: -100, top: -50, width: 200, height: 50 };
-    text.transform("Position").setValue([540, 1520]);
+    text.transform("Position").setValue([540, 1540]);
     const read = () => A.captionsRead({ comp_id: comp.id, name_prefix: "Caption", mode: "layers", default_margins: DEFAULT_MARGINS });
-    // Text bottom at 1520 is inside (bottom 1536); the box's 24 px padding takes it to 1544.
+    // Text bottom at 1540 is past the safe bottom (1536) by less than a descender (0.3 x the font size), which is allowed
+    // for the text alone; the box's 24 px padding takes it to 1564, beyond that allowance.
     expect(read().captions[0].outside_safe).toBe(true);
     text.transform("Position").setValue([540, 1500]);
     expect(read().captions[0].outside_safe).toBe(false);
@@ -1300,5 +1326,15 @@ describe("captions font check", () => {
     const out = await tool("ae_captions").handler(AeCaptionsSchema.parse({ comp_id: 1, transcript: { text: WORDS_JSON }, expect: expectArg }), ctx);
     expect(out.warnings.join(" ")).toMatch(/substituted/);
     expect(out.font_check).toEqual({ name: "X", checked: true });
+  });
+});
+
+describe("captions from a sound-events-only transcript", () => {
+  it("plans the [sound] captions instead of refusing the file", async () => {
+    const { planCaptions } = await import("../src/tools/ext/captions.js");
+    const text = JSON.stringify({ words: [{ text: "(laughter)", start: 1, end: 2, type: "audio_event" }] });
+    const plan = planCaptions({ transcript: { text, format: "json" }, frame_rate: 25 } as never);
+    expect(plan.captions.map((c) => c.lines.join(" "))).toEqual(["[laughter]"]);
+    expect(plan.captions[0].kind).toBe("sound");
   });
 });

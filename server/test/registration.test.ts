@@ -7,7 +7,7 @@ import { ALL_TOOLS } from "../src/tools/registry.js";
 // missing from the automatic checkpoints.
 const READS = [
   "ae_annotate_frame", "ae_get_comp_settings", "ae_preflight", "ae_session_changes",
-  "ae_captions_plan", "ae_captions_read", "ae_rig_list", "ae_expr_recipes", "ae_measure_text", "ae_get_time_remap",
+  "ae_captions_plan", "ae_captions_read", "ae_transcribe", "ae_captions_export", "ae_captions_qa", "ae_rig_list", "ae_expr_recipes", "ae_measure_text", "ae_get_time_remap",
   "ae_scene_3d_report", "ae_explain_layer", "ae_describe_comp", "ae_get_footage_interpretation", "ae_path_read",
   "ae_memory_status",
   "ae_render_queue_inspect",

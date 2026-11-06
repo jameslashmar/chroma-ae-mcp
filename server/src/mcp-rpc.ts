@@ -7,7 +7,7 @@ import {
   type ToolDefinition,
 } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
-import { listGuidanceResources, readGuidance, reviewBody, skillBody } from "./guidance/index.js";
+import { captionsSkillBody, listGuidanceResources, readGuidance, reviewBody, skillBody } from "./guidance/index.js";
 
 export { ALL_TOOLS };
 
@@ -31,6 +31,13 @@ const PROMPTS: PromptDef[] = [
     description: "Motion review checklist: measure the comp first, then judge by eye.",
     arguments: [{ name: "comp", description: "Name or id of the comp to review (optional).", required: false }],
     build: (comp) => reviewBody() + (comp && comp.trim() ? `\n\nComp to review: ${comp.trim()}\n` : ""),
+  },
+  {
+    name: "captions",
+    description:
+      "Captions guidance: standards (Netflix, BBC, DCMP), reading speed, line and shot-change rules, SDH, platform safe zones, ASR clean-up, file formats, and the chroma-ae caption tools.",
+    arguments: [{ name: "task", description: "What you are captioning or checking (optional).", required: false }],
+    build: (task) => captionsSkillBody() + (task && task.trim() ? `\n\nTask: ${task.trim()}\n` : ""),
   },
 ];
 

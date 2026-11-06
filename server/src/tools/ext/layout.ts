@@ -334,6 +334,9 @@ const SAFE_AREA_MAX = 50;
 const PRESET_ASPECT: Partial<Record<PlatformPreset, number>> = {
   landscape_16_9: 16 / 9,
   reels_9_16: 9 / 16,
+  tiktok_9_16: 9 / 16,
+  instagram_reels_9_16: 9 / 16,
+  youtube_shorts_9_16: 9 / 16,
   promo_9_16: 9 / 16,
   feed_4_5: 4 / 5,
   square_1_1: 1,
@@ -364,7 +367,7 @@ export function platformFindings(bounds: LayerBounds[], comp: { width: number; h
   const out: StyleFinding[] = [];
   const box = safeRect(preset, comp.width, comp.height);
   const label = PLATFORM_PRESETS[preset].label;
-  const reels = preset === "reels_9_16";
+  const reels = preset === "reels_9_16" || preset === "tiktok_9_16" || preset === "instagram_reels_9_16" || preset === "youtube_shorts_9_16";
   for (const b of bounds) {
     if (!b.checkable || skipLayerIds.has(b.layer.id)) continue;
     for (const s of b.samples) {
@@ -613,7 +616,7 @@ export const layoutTools: ToolDefinition<any>[] = [
       "Check a comp against the house style: text in the brief's fonts (ae_brief) and not missing, colours of text, shapes and solids within color_tolerance (delta E) of a brand colour, " +
       "text above a minimum size, and text inside title safe at the check time. " +
       "The size check runs only when asked for: min_font_size (pixels on screen) always wins; otherwise a relative floor (the brief's motion.min_text_pct, default 2.6 % of the comp's short side) applies only when the brief's motion spec sets min_text_pct or platform, or the call passes platform; with none of those there is no size check. The result's min_text says which: { px, source: argument | brief | platform | off }. " +
-      "platform (or the brief's motion.platform) swaps title safe for a preset box (reels_9_16, promo_9_16, feed_4_5, square_1_1, landscape_16_9) for text and for logo layers (footage, image, precomp, shape or solid layers whose name has the word logo; \"Logo BG\" backings and full-frame layers are skipped), naming the edge crossed and the pixels; reels_9_16 also flags the bottom UI band and the right action rail, and a comp of another shape gets one warning. A layer already reported cut_off by the frame-edge test is not reported again for the platform box. promo_9_16 applies the 22 % title line (bottom 22 % kept clear), not the 15 % CTA line. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. " +
+      "platform (or the brief's motion.platform) swaps title safe for a preset box (reels_9_16 is the box safe on TikTok, Reels and Shorts together; tiktok_9_16, instagram_reels_9_16, youtube_shorts_9_16, promo_9_16, feed_4_5, square_1_1, landscape_16_9) for text and for logo layers (footage, image, precomp, shape or solid layers whose name has the word logo; \"Logo BG\" backings and full-frame layers are skipped), naming the edge crossed and the pixels; the 9:16 platform presets (not promo_9_16) also flag the bottom UI band and the right action rail, and a comp of another shape gets one warning. A layer already reported cut_off by the frame-edge test is not reported again for the platform box. promo_9_16 applies the 22 % title line (bottom 22 % kept clear), not the 15 % CTA line. brand_colors and fonts override the brief. Read-only; findings come most severe first, with the nearest brand colour for each off-palette one. " +
       "Nested comps are checked by running it on them.",
     schema: AeHouseStyleCheckSchema,
     handler: async (args: z.infer<typeof AeHouseStyleCheckSchema>, ctx: ToolContext) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFormat, parseTimecode, parseTranscript, segmentWords, transcriptCues, TranscriptError } from "../src/transcript.js";
+import { buildCaptions, detectFormat, parseCaptionTranscript, parseTimecode, parseTranscript, segmentWords, transcriptCues, TranscriptError } from "../src/transcript.js";
 
 const SRT = `1
 00:00:01,000 --> 00:00:02,500
@@ -114,5 +114,28 @@ describe("transcriptCues", () => {
       ["world.", 0.5, 1],
       ["Next.", 2.5, 2],
     ]);
+  });
+});
+
+describe("review fixes: sound-event-only transcripts", () => {
+  const EVENTS = JSON.stringify({ words: [{ text: "(applause)", start: 1, end: 3, type: "audio_event" }, { text: "(laughter)", start: 5, end: 6, type: "audio_event" }] });
+
+  it("parseTranscript (markers) still refuses it", () => {
+    expect(() => parseTranscript(EVENTS)).toThrow(/No timed lines/);
+  });
+
+  it("parseCaptionTranscript returns the events, and buildCaptions makes sound captions", () => {
+    const segs = parseCaptionTranscript(EVENTS);
+    const p = buildCaptions(segs, { frame_rate: 24 });
+    expect(p.captions.map((c) => c.lines.join(" "))).toEqual(["[applause]", "[laughter]"]);
+    expect(p.captions.every((c) => c.kind === "sound")).toBe(true);
+  });
+
+  it("with sound events off there is nothing to caption", () => {
+    expect(() => buildCaptions(parseCaptionTranscript(EVENTS), { sdh: { sound_events: false } })).toThrow();
+  });
+
+  it("still throws for a transcript with nothing in it", () => {
+    expect(() => parseCaptionTranscript(JSON.stringify({ words: [] }))).toThrow(/No timed lines/);
   });
 });

@@ -33,7 +33,7 @@ This is an internal Chroma tool, not a consumer product.
 
 **v0.5.0, released 2026-11-05** (signed ZXP on the [v0.5.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.5.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **174 tools** on `main` (0.5.0 shipped 173), all through the build, 4,665 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- **177 tools** on `main` (0.5.0 shipped 173), all through the build, 4,936 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
 - Live-tested on AE 26.2.1 and 26.3 on Windows. macOS should work but is untested.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
 
@@ -123,7 +123,7 @@ Full details, including what can't be undone: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Tools
 
-174 tools in 52 groups, from reads and writes to planar tracking, captions, batch renders and delivery checks, plus Chroma's motion-director guidance as MCP prompts and resources. The full list: [docs/TOOLS.md](docs/TOOLS.md).
+177 tools in 54 groups, from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Develop
 

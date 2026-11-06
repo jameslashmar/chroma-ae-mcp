@@ -56,6 +56,7 @@ export class TextDocument {
   fillColor = [1, 1, 1];
   applyStroke = false;
   strokeColor = [0, 0, 0];
+  fauxItalic = false;
   constructor(public text: string) {}
 }
 
@@ -101,6 +102,9 @@ interface Key {
  * Array` (bound to this realm's Array) is false. AE has one realm, so copy
  * them into this one on the way in.
  */
+let strictRefs = false;
+const invalid = () => new Error("Object is invalid");
+
 const local = (v: unknown): unknown => (Array.isArray(v) ? Array.from(v, local) : v);
 
 const lerp = (a: unknown, b: unknown, u: number): unknown => {
@@ -118,6 +122,8 @@ export class FakeProperty {
   propertyIndex = 1;
   parentProperty: FakeGroup | null = null;
   keys: Key[] = [];
+  /** Strict mode: set when a sibling was removed, until the property is fetched from its parent again. */
+  stale = false;
   constructor(
     public name: string,
     public matchName: string,
@@ -125,7 +131,11 @@ export class FakeProperty {
     public staticValue: unknown,
     public isSpatial = false
   ) {}
+  private live() {
+    if (this.stale) throw invalid();
+  }
   get numKeys() {
+    this.live();
     return this.keys.length;
   }
   private k(i: number): Key {
@@ -140,13 +150,16 @@ export class FakeProperty {
     return this.k(i).value;
   }
   get value() {
+    this.live();
     return this.keys.length ? this.valueAtTime(0, false) : this.staticValue;
   }
   setValue(v: unknown) {
+    this.live();
     if (this.keys.length) throw new Error("Can't setValue on a keyframed property");
     this.staticValue = local(v);
   }
   setValueAtTime(t: number, raw: unknown) {
+    this.live();
     const v = local(raw);
     const at = this.keys.findIndex((k) => Math.abs(k.time - t) < 1e-9);
     const ease = [new KeyframeEase(0, 16.666667)];
@@ -234,6 +247,7 @@ export class FakeProperty {
     return [0, 0, 0];
   }
   remove() {
+    this.live();
     this.parentProperty?.detach(this);
   }
   canAddToMotionGraphicsTemplate(_comp: FakeComp) {
@@ -330,6 +344,7 @@ const MORE_FACTORY: Record<string, (n: number) => FakeGroup | FakeProperty> = {
       new FakeGroup("Advanced", "ADBE Text Range Advanced", [
         P("Units", "ADBE Text Range Units", PropertyValueType.OneD, 1),
         P("Based On", "ADBE Text Range Type2", PropertyValueType.OneD, 1),
+        P("Amount", "ADBE Text Selector Max Amount", PropertyValueType.OneD, 100),
         P("Shape", "ADBE Text Range Shape", PropertyValueType.OneD, 1),
         P("Ease High", "ADBE Text Levels Max Ease", PropertyValueType.OneD, 0),
         P("Ease Low", "ADBE Text Levels Min Ease", PropertyValueType.OneD, 0),
@@ -337,26 +352,34 @@ const MORE_FACTORY: Record<string, (n: number) => FakeGroup | FakeProperty> = {
       ]),
     ]),
 };
+// The Fill effect (a colour control for templates).
+MORE_FACTORY["ADBE Fill"] = () => new FakeGroup("Fill", "ADBE Fill", [P("Color", "ADBE Fill-0002", PropertyValueType.COLOR, [1, 0, 0, 1])]);
 for (const [mn, [name, type, value]] of Object.entries(TEXT_ANIM_PROPS)) MORE_FACTORY[mn] = () => P(name, mn, type, value);
 void FakeMask;
 
 export class FakeGroup {
   propertyType: number;
   parentProperty: FakeGroup | null = null;
+  stale = false;
   constructor(public name: string, public matchName: string, public props: Array<FakeProperty | FakeGroup>, indexed = false) {
     this.propertyType = indexed ? PropertyType.INDEXED_GROUP : PropertyType.NAMED_GROUP;
     for (const p of props) p.parentProperty = this;
   }
   get numProperties() {
+    if (this.stale) throw invalid();
     return this.props.length;
   }
   property(sel: string | number) {
-    if (typeof sel === "number") return this.props[sel - 1] ?? null;
-    return this.props.find((p) => p.matchName === sel || p.name === sel) ?? null;
+    if (this.stale) throw invalid();
+    const found = typeof sel === "number" ? this.props[sel - 1] ?? null : this.props.find((p) => p.matchName === sel || p.name === sel) ?? null;
+    // Fetching a child again is how a script gets a usable reference after the tree changed.
+    if (found) found.stale = false;
+    return found;
   }
   addProperty(matchName: string) {
+    if (this.stale) throw invalid();
     const make = SHAPE_FACTORY[matchName] ?? MORE_FACTORY[matchName];
-    if (!make || this.propertyType !== PropertyType.INDEXED_GROUP) throw new Error(`Can't add ${matchName} to ${this.name}`);
+    if (!make || (this.propertyType !== PropertyType.INDEXED_GROUP && this.matchName !== "ADBE Effect Parade")) throw new Error(`Can't add ${matchName} to ${this.name}`);
     const made = make(this.props.filter((p) => p.matchName === matchName).length + 1);
     made.parentProperty = this;
     this.props.push(made);
@@ -364,8 +387,21 @@ export class FakeGroup {
   }
   detach(p: FakeProperty | FakeGroup) {
     this.props = this.props.filter((x) => x !== p);
+    // Strict mode: AE invalidates the references a script holds into a group whose children changed.
+    if (strictRefs) {
+      p.stale = true;
+      this.staleAll();
+    }
+  }
+  private staleAll() {
+    this.stale = true;
+    for (const c of this.props) {
+      c.stale = true;
+      if (c instanceof FakeGroup) c.staleAll();
+    }
   }
   remove() {
+    if (this.stale) throw invalid();
     this.parentProperty?.detach(this);
   }
 }
@@ -425,7 +461,10 @@ export class FakeLayer {
       );
     }
     this.group = new FakeGroup(name, "ADBE AV Layer", props);
-    if (comp.modernMattes) {
+    this.bindMattes();
+  }
+  private bindMattes() {
+    if (this.comp.modernMattes) {
       this.setTrackMatte = (matte, type) => {
         this.trackMatteLayer = matte;
         this.trackMatteType = type;
@@ -435,6 +474,29 @@ export class FakeLayer {
         this.trackMatteType = TrackMatteType.NO_TRACK_MATTE;
       };
     }
+  }
+  /**
+   * Strict mode precompose: AE leaves the moved layer a new object in the inner comp and the old one invalid.
+   * Returns the new layer; every read or write on this one throws "Object is invalid" from then on.
+   */
+  moveInto(inner: FakeComp): FakeLayer {
+    const fresh = Object.create(FakeLayer.prototype) as FakeLayer;
+    Object.assign(fresh, this);
+    fresh.comp = inner;
+    fresh.bindMattes();
+    const keys = new Set<string>([...Object.keys(this), "index", "containingComp", "isTrackMatte", "numProperties", "property", "transform", "sourceRectAtTime", "moveBefore", "moveAfter", "moveToEnd", "remove"]);
+    for (const k of keys) {
+      Object.defineProperty(this, k, {
+        configurable: true,
+        get() {
+          throw invalid();
+        },
+        set() {
+          throw invalid();
+        },
+      });
+    }
+    return fresh;
   }
   get index() {
     return this.comp.stack.indexOf(this) + 1;
@@ -459,7 +521,12 @@ export class FakeLayer {
   private overrides() {
     const src = this.source as FakeComp | null;
     if (!(src instanceof FakeComp) || !src.controllers.length) return null;
-    this.overrideGroup ??= new FakeGroup("Essential Properties", "ADBE Layer Overrides", src.controllers.map((c) => P(c, c, PropertyValueType.OneD, 0)));
+    // A controller that comes from a text property holds a TextDocument; the others are plain values.
+    this.overrideGroup ??= new FakeGroup(
+      "Essential Properties",
+      "ADBE Layer Overrides",
+      src.controllers.map((c) => (src.textControllers.has(c) ? P(c, c, PropertyValueType.TEXT_DOCUMENT, new TextDocument("")) : P(c, c, PropertyValueType.OneD, 0)))
+    );
     return this.overrideGroup;
   }
   transform(name: string) {
@@ -501,6 +568,8 @@ export class FakeComp extends CompItem {
   modernMattes = true;
   motionGraphicsTemplateName = "";
   controllers: string[] = [];
+  /** Names in `controllers` that are text properties (their Essential Property holds a TextDocument). */
+  textControllers = new Set<string>();
   layers: Record<string, (...a: any[]) => any>;
   constructor(public project: FakeProject, public name: string, public width = 640, public height = 360, public duration = 3) {
     super();
@@ -538,6 +607,8 @@ export class FakeComp extends CompItem {
         return add(l);
       },
       add: (item: any, dur?: number) => {
+        // AE refuses a comp that would hold itself, directly or through other comps (opt in: older tests build loops on purpose).
+        if (project.refuseCircularLayers && item instanceof FakeComp && item.holds(this)) throw new Error("Cannot add a composition to itself or to a composition that it contains (circular reference)");
         const l = new FakeLayer(this, item.name);
         l.source = item;
         l.rect = { left: 0, top: 0, width: item.width, height: item.height };
@@ -548,11 +619,26 @@ export class FakeComp extends CompItem {
         const moving = indexes.map((i) => this.stack[i - 1]);
         const first = this.stack[indexes[0] - 1];
         const inner = project.addComp(name, moveAll ? this.width : first.rect.width, moveAll ? this.height : first.rect.height, this.duration);
+        inner.frameRate = this.frameRate;
         const at = Math.min(...indexes) - 1;
         this.stack = this.stack.filter((l) => !moving.includes(l));
-        for (const l of moving) {
-          l.comp = inner;
-          inner.stack.push(l);
+        if (project.strictRefs) {
+          const made = new Map<FakeLayer, FakeLayer>();
+          for (const l of moving) {
+            const fresh = l.moveInto(inner);
+            made.set(l, fresh);
+            inner.stack.push(fresh);
+          }
+          // The moved layers keep their parents and mattes among themselves, as new objects.
+          for (const fresh of made.values()) {
+            if (fresh.parent && made.has(fresh.parent)) fresh.parent = made.get(fresh.parent) as FakeLayer;
+            if (fresh.trackMatteLayer && made.has(fresh.trackMatteLayer)) fresh.trackMatteLayer = made.get(fresh.trackMatteLayer) as FakeLayer;
+          }
+        } else {
+          for (const l of moving) {
+            l.comp = inner;
+            inner.stack.push(l);
+          }
         }
         const pl = new FakeLayer(this, name);
         pl.source = inner;
@@ -564,6 +650,13 @@ export class FakeComp extends CompItem {
   }
   get numLayers() {
     return this.stack.length;
+  }
+  /** Whether this comp is `other` or holds it through layer sources. */
+  holds(other: FakeComp, seen = new Set<FakeComp>()): boolean {
+    if (this === other) return true;
+    if (seen.has(this)) return false;
+    seen.add(this);
+    return this.stack.some((l) => l.source instanceof FakeComp && l.source.holds(other, seen));
   }
   remove() {
     this.project.all = this.project.all.filter((x) => x !== this);
@@ -643,7 +736,19 @@ export class FakeProject {
   rootFolder: FakeFolder;
   file: { fsName: string } | null = null;
   dirty = false;
+  /** LayerCollection.add throws for a circular comp reference, as AE does. Off by default. */
+  refuseCircularLayers = false;
+  /** Layers precomposed away and properties held across a sibling's removal throw "Object is invalid", as AE's do. Off by default. */
+  strictRefs = false;
   renderQueue = makeRenderQueue();
+  /** app.project.items: only addComp (name, w, h, pixel aspect, duration, frame rate). */
+  items = {
+    addComp: (name: string, w: number, h: number, _pa: number, dur: number, fps: number) => {
+      const c = this.addComp(name, w, h, dur);
+      c.frameRate = fps;
+      return c;
+    },
+  };
   constructor() {
     this.rootFolder = new FakeFolder(this, "Root");
   }
@@ -715,6 +820,7 @@ const HOST_DIR = path.resolve(__dirname, "../../../panel/host");
 /** Loads core.jsx and the given ext files into a fresh context over `project`. */
 export function loadHost(project: FakeProject, extFiles: string[], extra: Record<string, unknown> = {}) {
   const undo = { begun: 0, ended: 0 };
+  strictRefs = project.strictRefs;
   const G: Record<string, any> = {
     Array,
     CompItem,

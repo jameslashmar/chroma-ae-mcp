@@ -1,5 +1,147 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## Captions branch, 2026-11-06 (`feat/captions`)
+
+Caption standards, QA, export and transcription, built on the captions tools. Build, 4969 unit
+tests and the JSX lint (0 issues) pass; 177 tools in 54 groups. **Nothing here has run in After
+Effects yet.**
+
+- **Planner and standards** (`server/src/caption-standards.ts`, `caption-plan-options.ts`,
+  `caption-rules.ts`, `caption-cleanup.ts`, `caption-formats.ts`): `ae_captions_plan` groups words
+  into captions to a standard (`netflix_adult`, `netflix_kids`, `bbc`, `dcmp`, `social_9x16`),
+  fixes what breaks it (`fix: false` only reports), and takes shot changes (`cut_times`), clean-up,
+  social chunking (`max_words`, `single_word`), speakers, SDH and grammar-aware line breaks.
+- **QA and export** (`server/src/caption-qa.ts`, `tools/ext/captionsio.ts`): `ae_captions_qa`
+  lints a .srt, .vtt, plan or the comp's caption layers (read-only). `ae_captions_export` writes
+  SRT, WebVTT or TTML (IMSC 1.1 text profile) and reads the file back to check the cue count.
+- **Transcription** (`server/src/transcribe.ts`, `tools/ext/transcribe.ts`): `ae_transcribe` sends
+  a comp's audio, or a file, to ElevenLabs Scribe and writes the raw response to a transcript file.
+  It uploads client audio to a third-party US service, so it needs `confirm_upload: true`.
+- **`ae_captions`** (`tools/ext/captions.ts`, `panel/host/ext/captions.jsx`): modes `layers`,
+  `single`, `words` and `template`; looks `pop`, `pill_slide` and `fill_sweep`; speaker colours;
+  `parent_to_null`, `precompose`, `make_template` for a MOGRT.
+- **Safe areas, one source of truth** (`server/src/motion-spec.ts`, `PLATFORM_PRESETS`):
+  `reels_9_16` is now the box safe on all three apps (1080x1920: x 120-888, y 288-1248). New
+  presets: `tiktok_9_16`, `instagram_reels_9_16`, `youtube_shorts_9_16`. These are approximate,
+  from ad specs and third-party templates; re-check yearly.
+- **Behaviour change:** `ae_captions` on a 9:16 comp now defaults to `reels_9_16` (it was: bottom
+  20% clear). `ae_house_style_check`'s reels findings moved with the preset.
+- **Guidance** (`server/guidance/captions/`, `server/guidance/motion-director/`): the `captions`
+  skill is served as the `captions` prompt and resources (`chroma-ae://guidance/captions/...`);
+  `node scripts/sync-guidance.mjs` now syncs both skills. The motion-director `## Captions`
+  section was rewritten in our own words (the original was close to HyperFrames, Apache-2.0) and
+  now points to the captions skill. HyperFrames is credited in `server/guidance/motion-director/NOTICE.md`,
+  and `ATTRIBUTION.md` gains sections 3 and 4.
+- **How it was checked:** build, 4969 unit tests and JSX lint (0 issues). Host JSX ran against the
+  fake AE DOM only. ElevenLabs was never called (HTTP mocked).
+
+- **Live-test fixes, 2026-11-06 (After Effects 26.3)** (all covered by unit tests on the fake AE; the live
+  behaviour is unverified):
+  - `ae_captions` **`fit`** (`server/src/caption-fit.ts`, `captionsFit` in `captions.jsx`): layers and
+    single mode. The write is read back in a separate evalScript; a caption measured wider than the safe
+    area (centred text: the frame less twice the wider margin, less the box padding) is re-broken with
+    `breakLines` at the characters per line its pixels per character allow (up to `max_lines`; in single
+    mode up to the tallest caption, since the layer is placed for it), measured again, then scaled down
+    (floor 70% of the base size, kept as a warning beyond). Result: `refit: [{ name, action, from, to }]`,
+    `fit: { passes, receipts_ok }`, the final `outside_safe`. Not for words, template, or look
+    `pill_slide`; `fill_sweep` is only scaled. `fit` = `rebreak` | `shrink` | `none`; default both in that
+    order. Paragraph (box) text is skipped. `ae_captions_qa` from layers now reads with the same margins
+    as `ae_captions` (a 9:16 comp's reels box).
+  - **Stutters**: `the, the` now collapses (comma only; emphatic words such as `no, no` and `very, very`,
+    and sentence ends, stay).
+  - **Template mode**: `make_template` sizes the text from the target comp (6% of its short side), takes
+    `lines` (default 2) and grows a comp too short for them; instances are moved so the template's caption
+    sits where layers mode puts it (bottom of the safe area, or `layout.position`) whatever the line
+    count, and a warning says when the template comp would cut a caption's lower lines off at its edge.
+    Line breaks go in as `\r`. The cause of "only the first line shows" was the template comp's bottom
+    edge cutting the lines below the first baseline; unverified live.
+  - **Social chunking**: a full `max_words` chunk may take one extra word or pass its last word on to
+    the next chunk to avoid a weak end, prefers punctuation and pauses, and avoids a chunk that cannot
+    stay up the minimum time; the fix pass may merge up to `max_words + 1`.
+  - **`ae_captions_qa` without `frame_rate`**: inferred from the cue times (lowest of 23.976, 24, 25,
+    29.97, 30, 50, 59.94, 60 that every time sits on within 1 ms); `frame_rate_inferred` says so. When
+    none fits, 24 fps with a half-frame gap tolerance (and a warning).
+  - **`ae_transcribe` with `comp_id`**: `captionsAudioSource` (read only) checks that the comp has one
+    audible footage layer with no time remap, stretch, effects or Audio Levels change; then the file is
+    uploaded directly (`source: "footage_file"`, `offset` = the layer's start time, `audible_in_file`
+    when the layer trims it, passed on in `next` as `from_s`/`to_s`). `footage_shortcut: false` forces
+    aerender; the reasons for skipping come back as `footage_shortcut_skipped`.
+  - **Words mode spacing**: `sourceRectAtTime` measures ink, which ignores trailing spaces and starts at
+    each glyph's left side bearing, so ink widths (and ink widths of prefixes) never added up to the typeset
+    line. `measureLineAdvances` (`captions.jsx`) now measures, in ONE layer (left justified, same style and
+    time, text put back): the sentinel "|" alone, each word alone (its left bearing) and every prefix as
+    "w1 .. wk |"; prefix less sentinel is the advance of the words and spaces before it (the sentinel's
+    bearing and the first glyph's cancel). A word layer's text origin = line origin + that advance, and the
+    line is centred/justified by its advance width, so gaps are the typeset ones whatever the glyphs'
+    bearings. The measured space is only the fallback (with a warning). The `reels_9_16` rail warning in
+    words mode is real: the union of the word layers' bounds is judged, and a centred caption wider than
+    600 px on a 1080 frame reaches past 72% of the width.
+  - **Words mode re-chunk (stale measure)**: AE answers `sourceRectAtTime` with the previous text's rect in the script that changed the text, so a re-run that re-chunked (max_words 3 -> 4) laid reused word layers out from stale widths and garbled the render (a second identical run was clean). Now a caption whose word layers differ in count or text from the new words gets all-new word layers (the old ones are removed at the end and listed in `removed`; `created`/`removed` stay truthful); identical captions keep their layers. Cost: a hand-restyled word layer of a changed caption is rebuilt in the base style. Test: `host-jsx-captions-rechunk.test.ts` (models the stale measure).
+  - **Descender tolerance**: words mode `outside_safe` (union box) allows 0.3 x the word layers' font size
+    below the safe bottom, as layers mode did; `caption-fit.ts` exports `DESCENDER_SHARE` and the fit
+    judges the same way (width only). `outside_safe` entries from `fit` carry `reason`: `too_wide` or
+    `position` (a flag that is not about width: lines or placement).
+  - **Planner, short chunks**: with `fix` on, a caption under the minimum duration (or over max cps) that
+    cannot grow into a gap merges with the better neighbour (same speaker, no cut; the cleaner break at the
+    far side) even past `max_words`, up to `2 x max_words` and the standard's lines and characters per
+    line: change `action: "merged_over_max_words"`, rule `min_duration` or `cps`. Judged at the out-time
+    `enforceGaps` will leave (it used to drop a caption under the minimum after the merge pass). Not for
+    `single_word`.
+  - **Template fit** (`fit` not `none`, template mode): `captionsTemplateMeasure` (host; one undo group)
+    adds a temporary text layer to the template comp with the template's caption text document, sets
+    each caption's lines in it, reads `sourceRectAtTime` and removes the layer, so the template is left as
+    it was. Node (`fitTemplateCaptions`) compares the widest line (times the caption layer's scale) with
+    the template comp's width less its box padding; wider captions are re-broken (up to `max_lines` /
+    the standard's lines, and no more than the mapped line fields) BEFORE the write, measured again, and
+    still-too-wide ones come back as `template_overflow: [{ name, width, template_width }]` with a warning.
+    Result: `refit` (action `rebreak`), `template_fit: { method, template_width }`. If the temporary layer
+    cannot be made it estimates from the sample text's pixels per character (`method: "estimated"`).
+
+**Unverified live (check in AE)**
+
+- Words mode layout: `sourceRectAtTime` right after setting the text and the sentinel-based advances
+  (gaps equal between all pairs, e.g. "Rover Defender", "hero shots"); the left-justified bearing.
+- Template fit: the temporary text layer in the template comp (added, measured, removed; one undo step)
+  and that its widths match the instance on screen (animators, expressions or scale on the template's
+  text change the real width); a template with several text layers measures with `Caption` or the first.
+- `fit`: the second `captionsRead` after `captionsFit` sees the new text and size; a very wide display
+  face at the floor size; the box layer following a rebreak.
+- `ae_transcribe` footage shortcut: `FootageItem.file` and `File.exists` on real footage, solo and
+  mute rules, and an audio layer from a video file.
+- Template mode: Essential Properties on a fresh precomp instance, the controller names, and
+  `startTime`/`in`/`out` with a short template comp.
+- `parent_to_null`: world positions.
+- `precompose`: the return value, and a re-run into the precomp.
+- Looks: fractional Index selectors for `pop`; Characters Excluding Spaces and line breaks for
+  `fill_sweep`; pill position in parent space; `setTemporalEaseAtKey` dims.
+- `fauxItalic` on keyed Source Text.
+- `make_template`: controllers via `addToMotionGraphicsTemplateAs`, and a Fill effect surviving
+  into Premiere.
+- `ae_transcribe` against the real ElevenLabs API: model `scribe_v1`, field names, response shape,
+  and the Windows User environment variable lookup (check with `reg query`).
+
+**Deviations from the plan**
+
+- `ae_captions_export` default file name is `captions.<ext>`, unless the comp is the active comp
+  (`captionsRead` returns no comp name).
+- Transcription runs on the whole comp.
+- Clean-up defaults (music tokens, 0.05 s) apply only when a `cleanup` object is passed.
+- Grammar-aware line breaks are on by default. This changes some existing line breaks.
+
+- **Review:** two fresh Sonnet reviewers (planner/timing/exports; host JSX/ES3/undo rules), each given
+  the diff only, then two fix rounds. Planner: a later cut undid an earlier cut's snap; linger and gap
+  closing carried captions across a cut; in-times snapped onto a cut after their words had ended
+  (overlaps, zero gaps); ae_captions planned on an assumed 24 fps grid (now reads the comp's rate);
+  single_word split names; "I." missed in sentence case; strip_punctuation glued "and/or"; any short
+  word after a number counted as a unit; hyphen pairs ignored max_words; QA warned on captions that
+  end before a cut; sound-events-only transcripts were refused. A 12,000-transcript fuzz (all
+  standards, five frame rates, random cuts) finds no overlap, short gap or unreported straddle. Host:
+  a read of a layer after precompose moved it ("Object is invalid" inside the undo group); animator
+  groups held across remove(); words mode ignored new line breaks; stale speaker colour/italic on
+  re-runs; a moved control null shifted parented captions (now refused); template fields validated
+  after earlier instances were changed (now before); pop wiped user keys (now refused); unbounded name
+  lists. The fake AE can now invalidate stale references (`strictRefs`).
+
 ## Motion guidance branch, 2026-11-06 (`feat/motion-guidance`)
 
 Items 1-5 of `docs/MOTION-RESEARCH.md`, built by five Sonnet agents in separate worktrees, then

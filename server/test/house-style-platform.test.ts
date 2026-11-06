@@ -100,6 +100,9 @@ describe("ae_house_style_check platform presets", () => {
       title_safe: [1920, 1080],
       landscape_16_9: [1920, 1080],
       reels_9_16: [1080, 1920],
+      tiktok_9_16: [1080, 1920],
+      instagram_reels_9_16: [1080, 1920],
+      youtube_shorts_9_16: [1080, 1920],
       promo_9_16: [1080, 1920],
       feed_4_5: [1080, 1350],
       square_1_1: [1080, 1080],
@@ -128,10 +131,10 @@ describe("ae_house_style_check platform presets", () => {
       1080,
       1920,
       [
-        { name: "Caption", rect: [100, 1400, 600, 1500] },
+        { name: "Caption", rect: [130, 1400, 600, 1500] },
         { name: "Handle", rect: [900, 800, 1060, 860] },
-        { name: "Brand logo", kind: "shape", rect: [80, 1500, 280, 1560] },
-        { name: "Fine", rect: [100, 600, 500, 700] },
+        { name: "Brand logo", kind: "shape", rect: [130, 1500, 280, 1560] },
+        { name: "Fine", rect: [130, 600, 500, 700] },
       ],
       { platform: "reels_9_16" }
     );
@@ -139,8 +142,8 @@ describe("ae_house_style_check platform presets", () => {
     expect(by("below_platform_ui")).toEqual(["Caption", "Brand logo"]);
     expect(by("in_action_rail")).toEqual(["Handle"]);
     expect(by("outside_platform_safe")).toEqual([]);
-    expect(out.findings.find((f: any) => f.layer.name === "Caption").message).toMatch(/below the platform UI line \(y 1330\) by 170 px/);
-    expect(out.findings.find((f: any) => f.layer.name === "Handle").message).toMatch(/action rail.*by 100 px/);
+    expect(out.findings.find((f: any) => f.layer.name === "Caption").message).toMatch(/below the platform UI line \(y 1248\) by 252 px/);
+    expect(out.findings.find((f: any) => f.layer.name === "Handle").message).toMatch(/action rail.*by 172 px/);
   });
 
   it("warns once when the comp's shape does not match the preset", async () => {
@@ -215,11 +218,11 @@ describe("ae_house_style_check logos", () => {
       1080,
       1920,
       [
-        { name: "Logo", kind: "footage", rect: [80, 1500, 280, 1560] },
+        { name: "Logo", kind: "footage", rect: [130, 1500, 280, 1560] },
         { name: "End card logo", kind: "precomp", rect: [900, 800, 1060, 860] },
-        { name: "Dialogue", kind: "footage", rect: [80, 1500, 280, 1560] },
-        { name: "Logo BG", kind: "shape", rect: [80, 1500, 280, 1560] },
-        { name: "Logo bg", kind: "footage", rect: [80, 1500, 280, 1560] },
+        { name: "Dialogue", kind: "footage", rect: [130, 1500, 280, 1560] },
+        { name: "Logo BG", kind: "shape", rect: [130, 1500, 280, 1560] },
+        { name: "Logo bg", kind: "footage", rect: [130, 1500, 280, 1560] },
       ],
       { platform: "reels_9_16" }
     );
@@ -232,7 +235,7 @@ describe("ae_house_style_check logos", () => {
   });
 
   it("does not check logos without a platform preset", async () => {
-    const out = await run(1080, 1920, [{ name: "Logo", kind: "footage", rect: [80, 1500, 280, 1560] }]);
+    const out = await run(1080, 1920, [{ name: "Logo", kind: "footage", rect: [130, 1500, 280, 1560] }]);
     expect(kinds(out)).toEqual([]);
   });
 

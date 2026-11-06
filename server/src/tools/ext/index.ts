@@ -1,5 +1,7 @@
 import type { ToolDefinition } from "../common.js";
 import { captionsTools } from "./captions.js";
+import { transcribeTools } from "./transcribe.js";
+import { captionsioTools } from "./captionsio.js";
 import { rigTools } from "./rig.js";
 import { fittextTools } from "./fittext.js";
 import { staggerTools } from "./stagger.js";
@@ -105,6 +107,8 @@ export const extTools: ToolDefinition<any>[] = [
   ...preflightTools,
   ...sessionTools,
   ...captionsTools,
+  ...transcribeTools,
+  ...captionsioTools,
   ...rigTools,
   ...fittextTools,
   ...staggerTools,
