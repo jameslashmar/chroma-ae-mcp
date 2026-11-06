@@ -17,7 +17,7 @@ function tempDir(prefix: string): string {
   return dir;
 }
 afterEach(() => {
-  for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const SCRIBE = {

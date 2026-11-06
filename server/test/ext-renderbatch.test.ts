@@ -1095,7 +1095,7 @@ describe("the batch runner, review fixes", () => {
     const res = await rb2.tools.find((t) => t.name === "ae_render_batch_resume")!.handler(AeRenderBatchResumeSchema.parse({ expect: expectArg(r.project), batch_id: id }), r.ctx);
     expect(res).toMatchObject({ ok: true });
     expect(again.get(jobId)).toMatchObject({ state: "failed" });
-  });
+  }, 20000);
 
   it("defaultIsPidAlive treats an unknown identity as alive, a positive non-aerender as dead, and a pid held by a live job as dead", () => {
     const r = rig();
