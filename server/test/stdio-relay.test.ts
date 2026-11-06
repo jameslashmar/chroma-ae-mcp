@@ -5,6 +5,8 @@ import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { handleRpc } from "../src/mcp-rpc.js";
+import type { ToolContext } from "../src/tools/common.js";
 
 const RELAY = path.resolve(__dirname, "../../panel/tools/stdio-relay.cjs");
 const TOOLS = [{ name: "ae_status", description: "status", inputSchema: { type: "object" } }];
@@ -191,6 +193,46 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const tools = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-cache.json"), "utf8"));
     expect(tools).toEqual({ tools: TOOLS });
     expect(fs.readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("serves prompts/get and resources/read while AE is closed, from the text the panel served", async () => {
+    const { dir, dataDir } = home();
+    const ctx = {} as ToolContext;
+    // The real MCP handler stands in for the panel, so the cached text is exactly what it serves.
+    const server = http.createServer((req, res) => {
+      let text = "";
+      req.on("data", (c) => (text += c));
+      req.on("end", async () => {
+        const out = await handleRpc(JSON.parse(text), ctx);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(out));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+
+    await runRelay(dir, port, [{ jsonrpc: "2.0", id: 1, method: "prompts/list" }]);
+    expect(fs.existsSync(path.join(dataDir, "relay-contents-cache.json"))).toBe(true);
+    expect(fs.readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+
+    const skill = "chroma-ae://guidance/motion-director/SKILL.md";
+    const asks = [
+      { jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: skill } },
+      { jsonrpc: "2.0", id: 2, method: "prompts/get", params: { name: "motion_director" } },
+      { jsonrpc: "2.0", id: 3, method: "prompts/get", params: { name: "motion_director", arguments: { task: "  a 6 s logo sting " } } },
+      { jsonrpc: "2.0", id: 4, method: "prompts/get", params: { name: "motion_review", arguments: { comp: "Main" } } },
+      { jsonrpc: "2.0", id: 5, method: "resources/read", params: { uri: "chroma-ae://guidance/nope.md" } },
+      { jsonrpc: "2.0", id: 6, method: "prompts/get", params: { name: "nope" } },
+    ];
+    const offline = await runRelay(dir, await closedPort(), asks);
+    for (const i of [0, 1, 2, 3]) {
+      const online = (await handleRpc(asks[i], ctx)) as any;
+      expect(offline[i].result).toEqual(online.result);
+    }
+    expect(offline[2].result.messages[0].content.text).toMatch(/Task: a 6 s logo sting\n$/);
+    expect(offline[4].error.code).toBe(-32002);
+    expect(offline[5].error.code).toBe(-32602);
   });
 
   it("reports the version in VERSION when offline", async () => {

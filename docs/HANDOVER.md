@@ -17,12 +17,16 @@ the JSX lint pass; 174 tools. **Nothing here has run in After Effects yet.**
   `server/src/guidance/content.generated.ts`; `node scripts/sync-guidance.mjs` refreshes both from
   `~/.claude/skills/chroma-motion-director`, and a test fails when they drift. The stdio relay
   advertises the same capabilities while AE is closed and serves cached prompt and resource lists
-  (one cache file per list); reads need AE.
+  (one cache file per list). After a list reply it also fetches every resource and prompt into
+  `relay-contents-cache.json` (each prompt twice, once with a marker argument), so
+  `resources/read` and `prompts/get` work offline with exactly the panel's text.
 - **`ae_motion_review` choreography** (`choreography.ts`): ease monotony, entrance and exit
   direction, exit/entrance ratio, a move on a layer's first frame, stagger spread and evenness,
   density, landed text still moving, long tweens, and overshoot on opacity, colour or counting
   numbers. A real stagger counts as one gesture for monotony and density; cameras, lights and
   nulls are skipped for direction checks; position or scale overshoot up to 2 % stays info.
+  Overshoot keyed by hand (0 -> 115 -> 100: a key past where the move settles, then a return of
+  at most 35 % of the move) is measured too, one finding per key.
 - **`ae_timing_check`** (new, read-only; `timing.ts`, `host/ext/timing.jsx`): unread lines,
   dead stretches, blank first frame (renders one frame), audio-free stretches over 15 s, and
   on-screen numbers or names not in `motion.facts` (P0 only for an unapproved price or
@@ -35,8 +39,11 @@ the JSX lint pass; 174 tools. **Nothing here has run in After Effects yet.**
   unless `min_font_size`, a platform, or the brief's `min_text_pct`/`platform` asks for it, so
   existing results don't change.
 
-To check live: run each of the three checks on a real comp with and without a brief `motion`
-block, and `prompts/list` / `resources/read` from a client.
+Checked live on AE 26 (PRISM, 2026-11-06): the three checks on 16:9, 9:16 and a choreography
+test comp, with and without a brief `motion` block; prompts and resources over HTTP; the relay
+with AE running and closed. The live run found the keyed-overshoot gap and the offline-read gap,
+both fixed above and re-checked in AE. Test project: Dropbox
+`ClaudeProjects/chroma-ae-mcp/_work/live-check-motion/`.
 
 ## Live smoke, 2026-11-05 (read this first)
 

@@ -246,6 +246,36 @@ describe("choreography: overshoot by property type", () => {
     expect(over?.severity).toBe("low");
     expect(over?.message).toMatch(/allows 5%/);
   });
+  it("catches overshoot keyed by hand (0 -> 115 -> 100) against the register", () => {
+    const keyed = prop({ layer: L(1), match: "ADBE Scale", keys: [[0, 0], [0.4, 115], [0.7, 100]] });
+    const f = review(keyed, spec({ register: "brand_film" })).filter((x) => x.kind === "overshoot");
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ severity: "medium", keys: [2] });
+    expect(f[0].message).toMatch(/keyed 15(\.0+)? past where it settles at key 2/);
+    expect(f[0].message).toMatch(/15% of the move/);
+    const lenient = review(keyed, spec({ register: "energetic" })).find((x) => x.kind === "overshoot");
+    expect(lenient?.severity).toBe("info");
+  });
+  it("reports a uniform scale overshoot once, not per dimension", () => {
+    const keyed = prop({ layer: L(1), match: "ADBE Scale", keys: [[0, 0], [0.4, 115], [0.7, 100]] });
+    for (const k of keyed.samples.keys) k.value = [k.value[0], k.value[0]];
+    keyed.samples.values = keyed.samples.values.map((v) => [v[0], v[0]]);
+    const f = review(keyed, spec({ register: "brand_film" })).filter((x) => x.kind === "overshoot");
+    expect(f).toHaveLength(1);
+    expect(f[0].message).not.toMatch(/dimension/);
+  });
+  it("leaves out-and-back moves and holds alone", () => {
+    const back = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 0], [1, 300], [2, 0]] });
+    expect(review(back, spec({ register: "brand_film" })).filter((x) => x.kind === "overshoot")).toHaveLength(0);
+    const steps = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 0], [1, 300], [2, 300], [3, 500]] });
+    expect(review(steps, spec({ register: "brand_film" })).filter((x) => x.kind === "overshoot")).toHaveLength(0);
+  });
+  it("makes a keyed opacity dip back medium in any register", () => {
+    const dip = prop({ layer: L(1), match: "ADBE Opacity", keys: [[0, 0], [0.3, 100], [0.5, 80]] });
+    const f = review(dip, spec({ register: "energetic" })).find((x) => x.kind === "overshoot");
+    expect(f?.severity).toBe("medium");
+    expect(f?.message).toMatch(/Opacity never overshoots/);
+  });
   it("is the old info level without a spec", () => {
     const f = reviewProperty(opacity.samples, opacity.analysis, sampleSpeeds(opacity.samples), opacity.path, { comp_id: 7, project_path: "x.aep" });
     expect(f.find((x) => x.kind === "overshoot")?.severity).toBe("info");

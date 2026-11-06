@@ -17,6 +17,7 @@ import type { ResolvedMotionSpec } from "../../motion-spec.js";
 import { loadMotionSpec } from "./brief.js";
 import {
   CHOREOGRAPHY_CHECKS,
+  keyedOvershoots,
   overshootKind,
   overshootPct,
   reviewChoreography,
@@ -941,6 +942,47 @@ export function reviewProperty(
     });
   }
 
+  // Overshoot keyed by hand (0 -> 115 -> 100): measured against the register's budget.
+  if (choreo && choreo.enabled !== false) {
+    const kind = overshootKind({ samples: s, effect_name: choreo.effectName });
+    const max = choreo.spec.overshoot_max_pct;
+    // One finding per key: a uniform scale overshoots on both dimensions at once.
+    const byKey = new Map<number, ReturnType<typeof keyedOvershoots>[number] & { dims: number }>();
+    for (const o of keyedOvershoots(s)) {
+      const prev = byKey.get(o.key);
+      if (!prev) byKey.set(o.key, { ...o, dims: 1 });
+      else byKey.set(o.key, o.pct > prev.pct ? { ...o, dims: prev.dims + 1 } : { ...prev, dims: prev.dims + 1 });
+    }
+    for (const o of byKey.values()) {
+      const pctText = `${Math.round(o.pct * 10) / 10}% of the move`;
+      let severity: FindingSeverity;
+      let note: string;
+      if (kind === "opacity" || kind === "colour" || kind === "number") {
+        severity = "medium";
+        const what = kind === "number" ? "A counting number" : kind === "colour" ? "Colour" : "Opacity";
+        note = `${what} never overshoots (${pctText}): it reads as wrong data or a flash. Key it straight to its final value.`;
+      } else if (kind === "motion" && o.pct > (max === 0 ? OVERSHOOT_SETTLE_TOLERANCE_PCT : max)) {
+        const lenient = choreo.spec.register === "handmade" || choreo.spec.register === "energetic";
+        severity = max === 0 && !lenient ? "medium" : "low";
+        note = `That is ${pctText}; the ${choreo.spec.register} register allows ${max}% on position and scale. ${max === 0 ? "Remove the overshoot key and ease into the final value." : "Bring the overshoot key closer to the final value."}`;
+      } else if (kind === "motion") {
+        severity = "info";
+        note = `That is ${pctText}, inside the ${choreo.spec.register} register's ${max}% budget.`;
+      } else {
+        continue;
+      }
+      findings.push({
+        ...base,
+        severity,
+        kind: "overshoot",
+        keys: [o.key],
+        time: r3(o.time),
+        message:
+          `${s.property.name}${s.values[0].length > 1 && o.dims === 1 ? ` (dimension ${o.dimension})` : ""} is keyed ${formatNumber(o.past)} past where it settles at key ${o.key} (${r3(o.time)}s). ` + note,
+      });
+    }
+  }
+
   // One finding per property, however many of its keys are off the frame grid.
   const fps = s.comp.fps > 0 ? s.comp.fps : 25;
   const offGrid = s.keys
@@ -1384,7 +1426,7 @@ export const motionTools: ToolDefinition<any>[] = [
     name: "ae_motion_review",
     description:
       "READ-ONLY. Reviews a comp's animation the way an animator would, and lists what to fix. Every keyframed property (up to 200) is sampled once per frame with expressions applied, and checked for: " +
-      "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values (info for a bounce on position or scale within the register's budget; medium on opacity, colour or a counting number, and past the budget); keys that sit between frames. " +
+      "constant-speed (linear) moves; motion that starts or stops at full speed; abrupt speed changes at a key; overshoot past the keyframe values, or keyed by hand as a key past where the move settles (info for a bounce on position or scale within the register's budget; medium on opacity, colour or a counting number, and past the budget); keys that sit between frames. " +
       "Choreography checks (from keyframe data, no render; thresholds from the brief's motion spec, see ae_brief, else the brand_film defaults; `checks` picks a subset): ease_monotony (more than max_same_ease tweens sharing one ease and duration), direction (an entrance that eases in only, an exit that eases out only), exit_ratio (exit not the spec's fraction of its entrance), frame_zero (a move starting on the layer's first frame), stagger (uneven offsets or spread over the budget among siblings), density (over a third of siblings moving at once), landed_text (text still moving after it landed, or wiggle/loop expressions on it), long_tween (a position move longer than the register allows). The result's `spec` shows the register and thresholds used; the handmade register relaxes monotony and the linear checks. " +
       "Findings are sorted most severe first. Medium means motion properties (position, scale, rotation); linear opacity or effect keys are low, since they are often deliberate. Each finding names the layer, property, keys and time. " +
       "Most carry `fix`: a ready ae_set_keyframe_ease call with easy_ease, or with the handle lengths of the user's preferred ease when ae_taste has one. The review also follows ae_taste on linear opacity and effect timing and on overshoot; `taste` in the result shows what applied. " +

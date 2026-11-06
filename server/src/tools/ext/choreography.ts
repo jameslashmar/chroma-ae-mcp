@@ -91,6 +91,39 @@ export function overshootPct(s: PropertySamples, o: { dimension: number; below_k
   return span > 1e-9 ? (past / span) * 100 : 100;
 }
 
+/** A return smaller than this share of the move before it reads as a settle, not a deliberate move back. */
+const KEYED_SETTLE_MAX_RETURN = 0.35;
+
+/**
+ * Overshoot built from keyframes (0 -> 115 -> 100): a key past where the move settles, then a
+ * short return to the resting key. The sampled curve never leaves the key range here, so the
+ * curve check cannot see it. Out-and-back moves (0 -> 100 -> 0) return too far to count.
+ */
+export function keyedOvershoots(
+  s: PropertySamples,
+): Array<{ dimension: number; key: number; time: number; past: number; pct: number }> {
+  const out: Array<{ dimension: number; key: number; time: number; past: number; pct: number }> = [];
+  const keys = s.keys;
+  if (keys.length < 3) return out;
+  const dims = keys[0].value.length;
+  for (let d = 0; d < dims; d++) {
+    const vals = keys.map((k) => k.value[d]);
+    const span = Math.max(...vals) - Math.min(...vals);
+    const tol = Math.max(1e-3, span * 1e-3);
+    for (let i = 1; i + 1 < keys.length; i++) {
+      const rise = vals[i] - vals[i - 1];
+      const ret = vals[i + 1] - vals[i];
+      if (Math.abs(rise) <= tol || Math.abs(ret) <= tol) continue;
+      if (Math.sign(rise) === Math.sign(ret)) continue;
+      if (Math.abs(ret) > KEYED_SETTLE_MAX_RETURN * Math.abs(rise)) continue;
+      const travel = Math.abs(vals[i + 1] - vals[i - 1]);
+      const pct = travel > 1e-9 ? (Math.abs(ret) / travel) * 100 : 100;
+      out.push({ dimension: d, key: keys[i].index, time: keys[i].time, past: Math.abs(ret), pct });
+    }
+  }
+  return out;
+}
+
 function influence(list: PropertyKey["in_ease"]): number | null {
   return list && list.length ? list[0].influence : null;
 }

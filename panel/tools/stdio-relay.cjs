@@ -10,8 +10,9 @@
 //   never see an in-flight evalScript abandoned.
 // - While AE is closed, initialize is answered here (with the panel's
 //   capabilities: tools, prompts, resources) and tools/list, prompts/list and
-//   resources/list come from the last lists the panel served, so everything
-//   stays registered and a call or a read tells the user to start AE.
+//   resources/list come from the last lists the panel served, and prompts/get
+//   and resources/read from the guidance text it served, so everything stays
+//   registered and readable; a tool call tells the user to start AE.
 "use strict";
 
 const fs = require("fs");
@@ -159,6 +160,77 @@ function writeListCache(key, list) {
   }
 }
 
+// The guidance text behind the prompts and resources, so prompts/get and resources/read work
+// while AE is closed too. Filled whenever the panel serves a prompt or resource list: each
+// resource is read, and each prompt is fetched twice, without its argument and with
+// ARG_MARK in it, so an argument given offline lands exactly where the panel would put it.
+// Shape: { resources: { <uri>: contents[] }, prompts: { <name>: { arg, plain, marked } } }.
+const CONTENT_CACHE = "contents";
+const ARG_MARK = "\u0000chroma-relay-arg\u0000";
+
+function readContentCache() {
+  try {
+    const c = JSON.parse(fs.readFileSync(cachePath(CONTENT_CACHE), "utf8"));
+    if (c && typeof c === "object" && c.resources && c.prompts) return c;
+  } catch {
+    // no cache yet
+  }
+  return null;
+}
+
+function writeContentCache(c) {
+  try {
+    const file = cachePath(CONTENT_CACHE);
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(c));
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    log("could not cache the guidance text: " + err.message);
+  }
+}
+
+let prefetched = false;
+let prefetchId = 0;
+
+async function ask(method, params) {
+  const res = await post(JSON.stringify({ jsonrpc: "2.0", id: "relay-prefetch-" + ++prefetchId, method, params }));
+  const body = JSON.parse(res.text);
+  if (!body || !body.result) throw new Error(method + " failed: " + JSON.stringify(body && body.error));
+  return body.result;
+}
+
+// Once per process, after the panel answered a list: fetch every prompt and resource it serves.
+async function prefetchContents() {
+  if (prefetched) return;
+  prefetched = true;
+  try {
+    const cache = { resources: {}, prompts: {} };
+    const resources = (await ask("resources/list", {})).resources || [];
+    for (const r of resources) {
+      if (r && typeof r.uri === "string") cache.resources[r.uri] = (await ask("resources/read", { uri: r.uri })).contents;
+    }
+    const prompts = (await ask("prompts/list", {})).prompts || [];
+    for (const p of prompts) {
+      if (!p || typeof p.name !== "string") continue;
+      const arg = Array.isArray(p.arguments) && p.arguments[0] ? p.arguments[0].name : null;
+      const entry = { arg, plain: await ask("prompts/get", { name: p.name }), marked: null };
+      if (arg) entry.marked = await ask("prompts/get", { name: p.name, arguments: { [arg]: ARG_MARK } });
+      cache.prompts[p.name] = entry;
+    }
+    writeContentCache(cache);
+  } catch (err) {
+    prefetched = false;
+    log("could not fetch the guidance text: " + (err && err.message ? err.message : String(err)));
+  }
+}
+
+// prompts/get from the cache: the plain text, or the marked one with the argument put in.
+function cachedPrompt(entry, args) {
+  const value = entry.arg && args && typeof args[entry.arg] === "string" ? args[entry.arg].trim() : "";
+  if (!value || !entry.marked) return entry.plain;
+  return JSON.parse(JSON.stringify(entry.marked), (_k, v) => (typeof v === "string" ? v.split(ARG_MARK).join(value) : v));
+}
+
 // The reply for one message while the panel cannot answer, or null to send nothing.
 function offlineReply(msg, reason) {
   if (!hasId(msg)) return null;
@@ -198,11 +270,23 @@ function offlineReply(msg, reason) {
     }
     case "tools/call":
       return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: reason }], isError: true } };
+    case "resources/read":
+    case "prompts/get": {
+      const cache = readContentCache();
+      if (!cache) return { jsonrpc: "2.0", id, error: { code: -32000, message: reason } };
+      if (msg.method === "resources/read") {
+        const contents = typeof params.uri === "string" ? cache.resources[params.uri] : undefined;
+        if (contents) return { jsonrpc: "2.0", id, result: { contents } };
+        return { jsonrpc: "2.0", id, error: { code: -32002, message: "Resource not found: " + JSON.stringify(params.uri) + ". Use resources/list." } };
+      }
+      const entry = typeof params.name === "string" ? cache.prompts[params.name] : undefined;
+      if (entry) return { jsonrpc: "2.0", id, result: cachedPrompt(entry, params.arguments) };
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: unknown prompt " + JSON.stringify(params.name) + ". Available: " + Object.keys(cache.prompts).join(", ") } };
+    }
     default:
       if (KNOWN_METHODS.indexOf(msg.method) < 0) {
         return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found: " + String(msg.method) } };
       }
-      // prompts/get and resources/read need the panel.
       return { jsonrpc: "2.0", id, error: { code: -32000, message: reason } };
   }
 }
@@ -241,6 +325,8 @@ async function relay(message) {
     writeListCache(listKey, body.result[listKey]);
   }
   send(body);
+  // After the reply, so the client never waits on it; the process stays up until it is written.
+  if (listKey === "prompts" || listKey === "resources") await prefetchContents();
 }
 
 let pending = 0;
