@@ -762,6 +762,9 @@ export function fixEase(taste: ReviewTaste | undefined): { ease: unknown; name: 
   };
 }
 
+/** Where a register allows no overshoot, a settle this small (bezier handles, rounding) is still only info. */
+const OVERSHOOT_SETTLE_TOLERANCE_PCT = 2;
+
 /**
  * Finds what an animator would flag in one property, from its samples and
  * their analysis. Thresholds are relative to each segment's own peak speed,
@@ -919,7 +922,7 @@ export function reviewProperty(
         severity = "medium";
         const what = kind === "number" ? "A counting number" : kind === "colour" ? "Colour" : "Opacity";
         note = `${what} never overshoots (${pctText}): it reads as wrong data or a flash. Use an ease without overshoot on these keys.`;
-      } else if (kind === "motion" && pct > max) {
+      } else if (kind === "motion" && pct > (max === 0 ? OVERSHOOT_SETTLE_TOLERANCE_PCT : max)) {
         const lenient = choreo.spec.register === "handmade" || choreo.spec.register === "energetic";
         severity = max === 0 && !lenient ? "medium" : "low";
         note = `That is ${pctText}; the ${choreo.spec.register} register allows ${max}% on position and scale. ${max === 0 ? "Use an ease without overshoot." : "Reduce the bounce."}`;

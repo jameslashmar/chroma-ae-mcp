@@ -219,7 +219,7 @@ describe("choreography: overshoot by property type", () => {
   const review = (p: ReturnType<typeof prop>, s = spec()) =>
     reviewProperty(p.samples, p.analysis, sampleSpeeds(p.samples), p.path, { comp_id: 7, project_path: "x.aep" }, undefined, { spec: s, effectName: p.effect_name });
   const opacity = prop({ layer: L(1), match: "ADBE Opacity", keys: [[0, 0], [1, 100]], overshoot: 0.12 });
-  const position = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 0], [1, 300]], overshoot: 0.1 });
+  const position = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 0], [1, 300]], overshoot: 0.3 });
 
   it("raises opacity overshoot from info to medium", () => {
     const f = review(opacity).filter((x) => x.kind === "overshoot");
@@ -307,6 +307,62 @@ describe("choreography: density", () => {
     const layers = [1, 2, 3, 4, 5, 6].map((i) => info(i, { in_point: i <= 3 ? 0 : 5 }));
     const props = [1, 2].map((i) => pos(i, 2, 2.6)); // 2 of the 3 on screen
     expect(kinds(run(props, layers, spec(), ["density"]))).toEqual(["density"]);
+  });
+});
+
+describe("choreography: review fixes", () => {
+  const six = [1, 2, 3, 4, 5, 6];
+  it("does not flag a well-made stagger as density, but still flags unrelated simultaneous moves", () => {
+    const staggered = six.map((i) => pos(i, 0.5 + (i - 1) * 0.1, 1.2 + (i - 1) * 0.1, "easeout"));
+    const layers = six.map((i) => info(i));
+    expect(run(staggered, layers, spec(), ["density"])).toHaveLength(0);
+    const together = six.map((i) => pos(i, 0.5, 1.2, "easeout"));
+    expect(kinds(run(together, layers, spec(), ["density"]))).toEqual(["density"]);
+  });
+  it("counts layers by id, so six layers all named Card are six elements", () => {
+    const props = six.map((i) => {
+      const p = pos(i, 0.5, 1.2, "easeout");
+      p.samples.layer.name = "Card";
+      return p;
+    });
+    const layers = six.map((i) => info(i, { name: "Card" }));
+    const f = run(props, layers, spec(), ["density"]);
+    expect(kinds(f)).toEqual(["density"]);
+    expect(f[0].message).toMatch(/6 of 6 sibling layers.*Card, Card/);
+  });
+  it("skips cameras, lights and nulls in direction, exit ratio and first-frame checks", () => {
+    const push = [pos(1, 0, 2, "easein")];
+    for (const kind of ["camera", "light", "null"] as const) {
+      expect(run(push, [info(1, { kind })], spec(), ["direction", "exit_ratio", "frame_zero"])).toHaveLength(0);
+    }
+    expect(run(push, [info(1)], spec(), ["direction", "frame_zero"]).length).toBeGreaterThan(0);
+  });
+  it("treats BG, Background and Card BG as backgrounds but not Back button", () => {
+    const props = [pos(1, 2, 2.6), pos(2, 2, 2.6)];
+    const mk = (name: string) => [info(1), info(2), info(3, { name, width: 100, height: 100 })];
+    const names = ["BG", "Background", "BG plate", "Card BG", "Backdrop shape"];
+    for (const n of names) expect(run(props, mk(n), spec(), ["density"])).toHaveLength(0);
+    // With the third layer counted, 2 of 3 are moving.
+    expect(kinds(run(props, mk("Back button"), spec(), ["density"]))).toEqual(["density"]);
+  });
+  it("matches counting words on the effect and property name, not the layer name", () => {
+    const onStats = prop({ layer: L(1, "Stats panel"), match: "ADBE Slider Control-0001", keys: [[0, 0], [1, 100]], overshoot: 0.1, effect_name: "Blur radius" });
+    const f = reviewProperty(onStats.samples, onStats.analysis, sampleSpeeds(onStats.samples), onStats.path, { comp_id: 7, project_path: "x.aep" }, undefined, { spec: spec(), effectName: onStats.effect_name });
+    expect(f.find((x) => x.kind === "overshoot")?.severity).toBe("info");
+  });
+  describe("overshoot settle tolerance", () => {
+    const sev = (frac: number, s = spec()) => {
+      const p = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 0], [1, 300]], overshoot: frac });
+      return reviewProperty(p.samples, p.analysis, sampleSpeeds(p.samples), p.path, { comp_id: 7, project_path: "x.aep" }, undefined, { spec: s }).find((x) => x.kind === "overshoot")?.severity;
+    };
+    it("keeps a 1 % settle info and a 5 % one medium where the register allows none", () => {
+      expect(sev(0.1, spec({ register: "brand_film" }))).toBe("info"); // about 0.8 %
+      expect(sev(0.25, spec({ register: "brand_film" }))).toBe("medium"); // about 5 %
+    });
+    it("is unchanged for a non-zero budget", () => {
+      expect(sev(0.5, spec({ register: "energetic" }))).toBe("info"); // about 20 %
+      expect(sev(0.8, spec({ register: "energetic" }))).toBe("low"); // about 43 %
+    });
   });
 });
 
