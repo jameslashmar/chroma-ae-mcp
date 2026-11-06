@@ -163,4 +163,4 @@ Ideas and small pieces are borrowed (MIT) from [Engine-Room-Games/after-effects-
 
 ## License
 
-MIT. See `LICENSE`. Third-party notices are in `ATTRIBUTION.md`.
+Copyright (c) 2026 Chroma Studios. Licensed under the GNU Affero General Public License v3.0 (`AGPL-3.0-only`); see `LICENSE`. If you distribute a modified version, or run one for others over a network, you must make its source available under the same licence. Code borrowed from other projects keeps its MIT licence; the notices are in `ATTRIBUTION.md`.
