@@ -78,7 +78,7 @@ export function overshootKind(prop: { samples: PropertySamples; effect_name?: st
   const m = prop.samples.property.matchName;
   if (m === "ADBE Opacity") return "opacity";
   if (prop.samples.property.value_type === "COLOR") return "colour";
-  if (m === "ADBE Slider Control-0001" && COUNT_WORDS.test(`${prop.effect_name ?? ""} ${prop.samples.property.name} ${prop.samples.layer.name}`)) return "number";
+  if (m === "ADBE Slider Control-0001" && COUNT_WORDS.test(`${prop.effect_name ?? ""} ${prop.samples.property.name}`)) return "number";
   if (MOVE_NAMES.has(m)) return "motion";
   return "other";
 }
@@ -174,13 +174,8 @@ function easeMonotony(tweens: Tween[], infos: Map<number, LayerInfo>, spec: Reso
   // A staggered group shares one ease by design (one gesture, offset starts): it counts as one
   // tween here, so a well-made stagger is not reported as monotony.
   const staggerExtras = new Set<Tween>();
-  for (const run of siblingRuns(tweens, infos, frame)) {
-    const byStart = [...run.members].sort((a, b) => a.start - b.start);
-    const spread = byStart[byStart.length - 1].start - byStart[0].start;
-    // Only a real stagger: offset starts within twice the group budget (stagger_spread reports
-    // the slow ones). Siblings seconds apart are separate gestures and still count.
-    if (spread <= frame || spread > (2 * spec.stagger_ms.group_total_max) / 1000) continue;
-    byStart.slice(1).forEach((t) => staggerExtras.add(t));
+  for (const run of staggerRuns(tweens, infos, spec, frame)) {
+    [...run.members].sort((a, b) => a.start - b.start).slice(1).forEach((t) => staggerExtras.add(t));
   }
   const pool = moves(tweens, frame).filter((t) => !staggerExtras.has(t));
   const used = new Set<Tween>();
@@ -348,6 +343,18 @@ function siblingRuns(tweens: Tween[], infos: Map<number, LayerInfo>, frame: numb
   return runs;
 }
 
+/**
+ * Sibling runs that are a real stagger: offset starts within twice the group budget (stagger
+ * reports the slow ones). Siblings seconds apart are separate gestures and are not included.
+ */
+function staggerRuns(tweens: Tween[], infos: Map<number, LayerInfo>, spec: ResolvedMotionSpec, frame: number): SiblingRun[] {
+  return siblingRuns(tweens, infos, frame).filter((run) => {
+    const starts = run.members.map((t) => t.start);
+    const spread = Math.max(...starts) - Math.min(...starts);
+    return spread > frame && spread <= (2 * spec.stagger_ms.group_total_max) / 1000;
+  });
+}
+
 function stagger(tweens: Tween[], infos: Map<number, LayerInfo>, spec: ResolvedMotionSpec, frame: number): MotionFinding[] {
   const out: MotionFinding[] = [];
   for (const run of siblingRuns(tweens, infos, frame)) {
@@ -375,12 +382,13 @@ function stagger(tweens: Tween[], infos: Map<number, LayerInfo>, spec: ResolvedM
 }
 
 function isBackground(info: LayerInfo, comp: ChoreoInput["comp"]): boolean {
-  if (/\b(bg|back(ground|drop)?)\b/i.test(info.name)) return true;
+  const n = info.name.trim();
+  if (/^(bg|background|backdrop)(?![a-z0-9])/i.test(n) || /(?<![a-z0-9])(bg|background|backdrop)$/i.test(n)) return true;
   if (info.kind === "text" || info.width === null || info.height === null) return false;
   return info.width * info.height >= 0.9 * comp.width * comp.height;
 }
 
-function density(tweens: Tween[], input: ChoreoInput, frame: number): MotionFinding[] {
+function density(tweens: Tween[], input: ChoreoInput, infos: Map<number, LayerInfo>, spec: ResolvedMotionSpec, frame: number): MotionFinding[] {
   const out: MotionFinding[] = [];
   const mt = tweens.filter((t) => t.eased && (t.cls === "move" || t.cls === "opacity"));
   const byParent = new Map<number | null, LayerInfo[]>();
@@ -388,28 +396,42 @@ function density(tweens: Tween[], input: ChoreoInput, frame: number): MotionFind
     if (l.kind === "camera" || l.kind === "light" || l.kind === "null" || isBackground(l, input.comp)) continue;
     byParent.set(l.parent, [...(byParent.get(l.parent) ?? []), l]);
   }
+  // A stagger run counts as one moving element, keyed by its first member's layer id.
+  const elementOf = new Map<number, number>();
+  const runSize = new Map<number, number>();
+  for (const run of staggerRuns(tweens, infos, spec, frame)) {
+    const lead = run.members[0].layer.id;
+    run.members.forEach((t) => elementOf.set(t.layer.id, lead));
+    runSize.set(lead, run.members.length);
+  }
+  const elem = (t: Tween) => elementOf.get(t.layer.id) ?? t.layer.id;
   for (const [parent, group] of byParent) {
     if (group.length < 3) continue;
     const ids = new Set(group.map((l) => l.id));
+    const nameOf = new Map(group.map((l) => [l.id, l.name]));
     const gt = mt.filter((t) => ids.has(t.layer.id));
-    let worst: { t: number; moving: string[]; onScreen: number } | null = null;
+    let worst: { t: number; moving: number[]; onScreen: number } | null = null;
     for (const at of gt.map((t) => t.start + frame / 2)) {
       const onScreen = group.filter((l) => (l.in_point === null || l.in_point <= at + 1e-6) && (l.out_point === null || l.out_point > at));
       if (onScreen.length < 3) continue;
-      const moving = new Set(gt.filter((t) => t.start <= at && t.end > at).map((t) => t.layer.name));
-      if (moving.size / onScreen.length > 1 / 3 && moving.size >= 2 && (!worst || moving.size / onScreen.length > worst.moving.length / worst.onScreen)) {
-        worst = { t: at, moving: [...moving], onScreen: onScreen.length };
+      const moving = [...new Set(gt.filter((t) => t.start <= at && t.end > at).map(elem))];
+      if (moving.length / onScreen.length > 1 / 3 && moving.length >= 2 && (!worst || moving.length / onScreen.length > worst.moving.length / worst.onScreen)) {
+        worst = { t: at, moving, onScreen: onScreen.length };
       }
     }
     if (!worst) continue;
     const share = worst.moving.length / worst.onScreen;
-    const first = gt.find((t) => worst!.moving.includes(t.layer.name))!;
+    const first = gt.find((t) => worst!.moving.includes(elem(t)))!;
+    const names = worst.moving.map((id) => {
+      const n = runSize.get(id) ?? 1;
+      return n > 1 ? `${nameOf.get(id) ?? id} and ${n - 1} more in a stagger` : (nameOf.get(id) ?? String(id));
+    });
     out.push(
       finding(
         first,
         share >= 2 / 3 && worst.onScreen >= 4 ? "medium" : "low",
         "density",
-        `${worst.moving.length} of ${worst.onScreen} sibling layers${parent === null ? "" : " under one parent"} are moving at ${r2(worst.t)}s (${Math.round(share * 100)}%): ${list(worst.moving)}. More than a third moving at once reads as noise; stagger them or let one lead and the rest hold.`,
+        `${worst.moving.length} of ${worst.onScreen} sibling layers${parent === null ? "" : " under one parent"} are moving at ${r2(worst.t)}s (${Math.round(share * 100)}%): ${names.join(", ")}. More than a third moving at once reads as noise; stagger them or let one lead and the rest hold.`,
         r2(worst.t)
       )
     );
@@ -471,13 +493,18 @@ export function reviewChoreography(input: ChoreoInput, spec: ResolvedMotionSpec,
   const frame = 1 / (input.comp.fps > 0 ? input.comp.fps : 25);
   const infos = new Map(input.layers.map((l) => [l.id, l]));
   const tweens = extractTweens(input.props);
+  // Cameras, lights and nulls are not drawn elements: entrance, exit and first-frame rules skip them.
+  const drawn = tweens.filter((t) => {
+    const k = infos.get(t.layer.id)?.kind;
+    return k !== "camera" && k !== "light" && k !== "null";
+  });
   const out: MotionFinding[] = [];
   if (on.has("ease_monotony")) out.push(...easeMonotony(tweens, infos, spec, frame));
-  if (on.has("direction")) out.push(...direction(tweens, infos, frame));
-  if (on.has("exit_ratio")) out.push(...exitRatio(tweens, infos, spec, frame));
-  if (on.has("frame_zero")) out.push(...frameZero(tweens, infos, input.comp.fps > 0 ? input.comp.fps : 25));
+  if (on.has("direction")) out.push(...direction(drawn, infos, frame));
+  if (on.has("exit_ratio")) out.push(...exitRatio(drawn, infos, spec, frame));
+  if (on.has("frame_zero")) out.push(...frameZero(drawn, infos, input.comp.fps > 0 ? input.comp.fps : 25));
   if (on.has("stagger")) out.push(...stagger(tweens, infos, spec, frame));
-  if (on.has("density")) out.push(...density(tweens, input, frame));
+  if (on.has("density")) out.push(...density(tweens, input, infos, spec, frame));
   if (on.has("landed_text")) out.push(...landedText(tweens, input, infos, frame));
   if (on.has("long_tween")) out.push(...longTween(tweens, input, spec));
   return out;
