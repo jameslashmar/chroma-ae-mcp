@@ -68907,7 +68907,7 @@ var SUPPORTED_PROTOCOL_VERSIONS = [
 ];
 var DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 var SERVER_NAME = "chroma-ae-mcp";
-var SERVER_VERSION = "0.6.0";
+var SERVER_VERSION = "0.7.0";
 function makeErrorResponse(id, code, message, data) {
   const error = { code, message };
   if (data !== void 0) {

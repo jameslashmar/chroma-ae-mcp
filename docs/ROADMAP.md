@@ -47,6 +47,13 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.0** (Emre's PR #10, live-checked on AE 26.3):
+- render inside After Effects (`ae_render_queue_render`, `ae_render_queue_render_status`) for when aerender can't run, with pre-checks for missing frames, existing outputs and busy GPUs;
+- a core tool list for Claude Desktop (`CHROMA_AE_MCP_TOOLSET=core`: 33 tools plus search, schema and invoke gateways) and a panel button that sets it;
+- AE-busy refusals instead of long queues, startup diagnosis in the relay, safer popup answers (scaled displays fixed in the live check);
+- batch import with interpretation and rules (gapped sequences are skipped with their ranges), many-item interpretation;
+- layouts: `ae_describe_comp layout: true` and `ae_layout_apply` (regions, fill / contain, clip masks, feed comps, camera copies).
+
 **Done in 0.6.0:**
 - motion guidance: the chroma-motion-director skill served as MCP prompts and resources (also through the stdio relay while AE is closed), `ae_brief` motion specs read by `ae_motion_review` (choreography, keyed overshoot), `ae_timing_check` and `ae_house_style_check` (platform safe zones);
 - captions: standards that fix timing, grammar-aware breaks, cut snapping, clean-up, word-by-word and template output, speaker colours and SDH labels, looks, automatic fit, and three new tools: `ae_transcribe` (ElevenLabs Scribe), `ae_captions_export` (SRT, VTT, TTML) and `ae_captions_qa`; the standalone `captions` skill is served as guidance too;
