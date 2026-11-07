@@ -2,6 +2,18 @@
 
 Everything below is built and unit-tested against fakes. **None of it has run in real After Effects.** Work through it in order, with the user present, on a throwaway project (never a client project). Tick an item only after you saw it happen; write what you saw next to anything that disagrees with the code or the docs.
 
+## First live session (PRISM, AE 26.3, 2026-11-07)
+
+Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Desktop from a phone (250 % scaling). What was seen:
+
+- **Render in AE:** job id at once, status running then finished, output right (5 s, 125 frames; 30 s, 750 frames); nothing queued is refused; the gate refuses other tools in under 10 ms and lifts when the job ends; `sequence_check` block refuses with the exact gap and warn starts anyway; AE's frame count of a gapped sequence (30) is the first-to-last range. An existing output is refused; with `overwrite: true` AE asks "already exists. Overwrite?" and the render waits; OK there is refused without both flags, Cancel leaves the item QUEUED and the file unchanged. After Effects restarting mid-render reads as `lost` with a clear note.
+- **Not good:** a render started by script **locked AE's UI**, so the Stop button could not be reached; ending AE was the only way out (seen over Remote Desktop: confirm at a desk). Two 3-minute 1080p H.264 renders grew AE to 33 then 79 GB of RAM without writing a frame (one crashed AE); ProRes of the same comps rendered fine. A render into a Dropbox folder ended with AE's "Failed to write XMP metadata" popup, answered with `ae_dialog_respond`.
+- **AE busy:** with a popup open, `ae_status` answered in 0.8 s, named the popup and the stuck operation, and sent nothing.
+- **Dialogs:** fixed in this session. On a scaled display the capture kept only the dialog's top-left corner (DPI-unaware script), so OCR read just the title and a re-list gave a false `dialog_changed`; the ring and pill limits were 100 %-only. Now per-monitor DPI aware with limits scaled by the window's DPI: the full text, OK as default by its ring, and `post_enter` / `post_escape` closing AE-painted dialogs all worked live.
+- **Import:** fixed in this session. A sequence with missing frames stopped `ae_import_assets` behind AE's modal "is missing N frames" warning for minutes. Gapped sequences are now left out by default with exact ranges (`missing_frames: "import"` imports them anyway), and the watcher waits for the gap to fill. Both paths seen working live; a file already in the project is skipped.
+- **Layout:** camera copy through `copyToComp` (a native AE two-node camera, not Cinema 4D) is identical in every key time and value, expression, orientation, rotation, zoom, focus and aperture; exactly one layer arrives, on top. A three-region master (fill with clip, contain with bars, make_feed) placed and rendered correctly; a comp containing itself is refused before any write.
+- **Not run:** B (Claude Desktop), E, F beyond the gap checks, G, the Stop button result, one Ctrl+Z of a layout, rollback after a forced failure, a Cinema 4D camera.
+
 ## A. Render in AE
 
 - [ ] The panel bundle is built (`npm run bundle`) and the dev panel loads it.

@@ -68,9 +68,9 @@ const READ_BACK_TIMEOUT_MS = 120_000;
 const MAX_TEXT = 2000;
 export const RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
 const STOP_TEXT =
-  "The user stops it with the Stop button in After Effects' Render Queue panel; the item then reads USER_STOPPED. " +
+  "Measured live (AE 26.3, 2026-11-07, over Remote Desktop): a render started by script LOCKS After Effects' UI for its whole length, so the user could NOT reach the Stop button; ending After Effects was the only way out. " +
   "A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. " +
-  "Whether After Effects' UI stays clickable during a render started by script is not measured, so on a dirty project ask the user to save first.";
+  "So keep these renders short, save a dirty project first, and prefer ae_aerender_start (or Media Encoder) for long renders. A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.";
 
 // ---------- job record ----------
 
@@ -534,7 +534,7 @@ export function planStart(queue: QueueRead | null, overwrite: boolean, live: Liv
           code: "output_exists",
           item_index: it.index,
           file: m.file,
-          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (whether After Effects then prompts or silently overwrites is not measured).`,
+          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (After Effects then asks "Overwrite?" and the render waits until it is answered).`,
         });
       }
       job.outputs.push({ item_index: it.index, comp_id: it.comp_id, module: m.index, file: m.file, sequence });
@@ -616,7 +616,7 @@ export const AeRenderQueueRenderSchema = z.object({
     .max(48)
     .default(12)
     .describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
-  overwrite: z.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool; whether After Effects then prompts or silently overwrites is not measured."),
+  overwrite: z.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool. After Effects then asks \"<file> already exists. Overwrite?\" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was."),
   sequence_check: SequenceCheckSchema,
   expect: ExpectSchema,
 });
@@ -897,12 +897,12 @@ export const rqrenderTools: ToolDefinition<any>[] = [
     description:
       "Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. " +
       "Use it when `ae_aerender_start` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. " +
-      "Prefer `ae_aerender_start` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST (the Stop button's behaviour is not measured). " +
+      "Prefer `ae_aerender_start` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST: After Effects' UI is locked for the whole render and the Stop button cannot be reached (measured), so a render cannot be stopped short of ending After Effects. Keep these renders short. " +
       "NEVER ask the user to press Render in the Render Queue panel: call this instead. " +
       "While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. " +
       "These keep working: `ae_render_queue_render_status` (state, elapsed, output files, any blocking popup; it never touches AE), `ae_dialogs`, `ae_dialog_respond`, `ae_diagnostics`; `ae_status` answers with the render state; `ae_ask_user` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. " +
       "Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads `lost`. " +
-      "Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since \"Save in subfolder\" can make it at render time; nothing is created); or an output file already exists (unless `overwrite: true`; nothing is ever deleted, and whether After Effects then prompts is not measured). " +
+      "Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since \"Save in subfolder\" can make it at render time; nothing is created); or an output file already exists (unless `overwrite: true`; nothing is ever deleted, and After Effects then asks \"<file> already exists. Overwrite?\" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was). " +
       "A queued aerender job or batch item is held (not started) while the render runs. " +
       "When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run `ae_verify_render` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. " +
       "Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning, the render still starts; `sequence_check: \"block\"` refuses (also when the check could not finish), \"off\" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. " +

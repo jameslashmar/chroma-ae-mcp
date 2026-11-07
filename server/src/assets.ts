@@ -9,6 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { missingRanges } from "./seqscan.js";
 
 export const DEFAULT_ASSET_FOLDER = "_assets";
 export const DEFAULT_ASSET_BIN = "_Assets";
@@ -54,6 +55,18 @@ export interface AssetCandidate {
   interpret?: Record<string, unknown>;
   /** The scan stopped at its file limit in this candidate's folder: a sequence here may be missing frames. */
   incomplete?: boolean;
+  /**
+   * Frames missing between the first and last frame of a sequence. After Effects shows a modal
+   * "is missing N frames" warning when such a sequence is imported, and the import waits on it.
+   */
+  missing?: { count: number; ranges: Array<[number, number]>; truncated: boolean };
+}
+
+/** The frames missing between a sequence's first and last frame, from its frame numbers; undefined when none are. */
+export function sequenceGaps(frameNumbers: number[]): AssetCandidate["missing"] {
+  const sorted = frameNumbers.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  const r = missingRanges(sorted, 20);
+  return r.missing > 0 ? { count: r.missing, ranges: r.ranges, truncated: r.truncated } : undefined;
 }
 
 /** What a scan saw. `truncated` means more importable files than the limit: the result is incomplete. */
@@ -195,6 +208,7 @@ export function scanAssets(
         arrivedMs: times.arrivedMs,
         firstFrame: Number(SEQ_RE.exec(g[0].name)?.[2]),
         lastFrame: Number(SEQ_RE.exec(g[g.length - 1].name)?.[2]),
+        ...gapField(g.map((f) => Number(SEQ_RE.exec(f.name)?.[2]))),
       });
     }
     for (const f of singles) {
@@ -338,6 +352,7 @@ export function candidatesFromPaths(
           arrivedMs: times.arrivedMs,
           firstFrame: Number(sequenceKey(first.name)?.digits),
           lastFrame: Number(sequenceKey(group[group.length - 1].name)?.digits),
+          ...gapField(group.map((f) => Number(sequenceKey(f.name)?.digits))),
           ...(normPath(first.full) !== normPath(full) ? { given } : {}),
         });
         continue;
@@ -459,4 +474,9 @@ export function shapeImportResult<I extends ImportedRow, F extends FailedRow>(in
     failed_total: input.failed.length,
     failed_truncated: input.failed.length > IMPORT_ROWS,
   };
+}
+
+function gapField(frameNumbers: number[]): { missing?: AssetCandidate["missing"] } {
+  const missing = sequenceGaps(frameNumbers);
+  return missing ? { missing } : {};
 }

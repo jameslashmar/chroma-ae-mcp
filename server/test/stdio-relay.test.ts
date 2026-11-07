@@ -89,6 +89,10 @@ async function runRelay(
   delete baseEnv.CHROMA_AE_MCP_TOOLSET;
   delete baseEnv.CHROMA_AE_MCP_DIAGNOSE;
   delete baseEnv.CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS;
+  // Windows env names are case-insensitive, and Git Bash upper-cases them (COMMONPROGRAMFILES(X86)).
+  // Drop every spelling of the keys overridden below, or the child gets both and the real one can win.
+  const overridden = ["LOCALAPPDATA", "APPDATA", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMFILES", "HOME", "USERPROFILE", "CHROMA_AE_MCP_PORT"];
+  for (const k of Object.keys(baseEnv)) if (overridden.includes(k.toUpperCase())) delete baseEnv[k];
   const child = childProcess.spawn(process.execPath, [opts.relay ?? RELAY], {
     env: {
       ...baseEnv,

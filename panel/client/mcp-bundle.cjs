@@ -4139,13 +4139,451 @@ var init_zod = __esm({
   }
 });
 
+// src/seqscan.ts
+function parseFrameName(name) {
+  const m = FRAME_RE.exec(name);
+  if (!m) return null;
+  if (m[2].length > MAX_DIGITS) return null;
+  return { prefix: m[1], digits: m[2], suffix: m[3] };
+}
+function missingRanges(sorted, maxRanges) {
+  const ranges = [];
+  let missing = 0;
+  let truncated = false;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1] - 1;
+    if (gap <= 0) continue;
+    missing += gap;
+    if (ranges.length < maxRanges) ranges.push([sorted[i - 1] + 1, sorted[i] - 1]);
+    else truncated = true;
+  }
+  return { missing, ranges, truncated };
+}
+function formatRanges(ranges, digits, maxChars) {
+  const pad = (n) => digits > 0 ? String(n).padStart(digits, "0") : String(n);
+  let out = "";
+  for (let i = 0; i < ranges.length; i++) {
+    const [a, b] = ranges[i];
+    const part2 = a === b ? pad(a) : `${pad(a)}-${pad(b)}`;
+    const next = out === "" ? part2 : `${out}, ${part2}`;
+    if (next.length > maxChars) return out === "" ? `${part2.slice(0, Math.max(0, maxChars - 3))}...` : `${out}, ...`;
+    out = next;
+  }
+  return out;
+}
+function patternOf(prefix, suffix, digits, padded) {
+  return `${prefix}[${padded ? "#".repeat(digits) : "#"}]${suffix}`;
+}
+function paddedWidthsOf(leadingZeroWidths, shortestPlain) {
+  return [...leadingZeroWidths].filter((w) => shortestPlain >= w).sort((a, b) => a - b);
+}
+function widthFor(digits, padded) {
+  if (isPaddedDigits(digits)) return padded.includes(digits.length) ? digits.length : null;
+  let best = null;
+  for (const w of padded) if (w <= digits.length) best = w;
+  return best;
+}
+function groupFrames(names, opts = {}) {
+  const ci = opts.caseInsensitive === true;
+  const maxRanges = opts.maxRanges ?? DEFAULT_MAX_RANGES;
+  const parsed = [];
+  const zeroWidths = /* @__PURE__ */ new Map();
+  const shortestPlain = /* @__PURE__ */ new Map();
+  for (const name of names) {
+    const p = parseFrameName(name);
+    if (!p) continue;
+    const stem2 = fold(p.prefix, ci) + "\0" + fold(p.suffix, ci);
+    parsed.push({ p, stem: stem2 });
+    if (isPaddedDigits(p.digits)) {
+      let set2 = zeroWidths.get(stem2);
+      if (!set2) zeroWidths.set(stem2, set2 = /* @__PURE__ */ new Set());
+      set2.add(p.digits.length);
+    } else {
+      const cur = shortestPlain.get(stem2);
+      if (cur === void 0 || p.digits.length < cur) shortestPlain.set(stem2, p.digits.length);
+    }
+  }
+  const paddedByStem = /* @__PURE__ */ new Map();
+  for (const [stem2, widths] of zeroWidths) paddedByStem.set(stem2, paddedWidthsOf(widths, shortestPlain.get(stem2) ?? Infinity));
+  const groups = /* @__PURE__ */ new Map();
+  for (const { p, stem: stem2 } of parsed) {
+    const w = widthFor(p.digits, paddedByStem.get(stem2) ?? []);
+    const padded = w !== null;
+    const key = `${stem2}\0${padded ? w : "*"}`;
+    let g = groups.get(key);
+    if (!g) groups.set(key, g = { prefix: p.prefix, suffix: p.suffix, digits: padded ? w : p.digits.length, padded, nums: [] });
+    g.nums.push(Number(p.digits));
+    if (!padded && p.digits.length < g.digits) g.digits = p.digits.length;
+  }
+  const out = [];
+  for (const [key, g] of groups) {
+    g.nums.sort((a, b) => a - b);
+    const numbers2 = [];
+    for (const n of g.nums) if (numbers2.length === 0 || numbers2[numbers2.length - 1] !== n) numbers2.push(n);
+    const gaps = missingRanges(numbers2, maxRanges);
+    out.push({
+      key,
+      prefix: g.prefix,
+      suffix: g.suffix,
+      digits: g.digits,
+      padded: g.padded,
+      pattern: patternOf(g.prefix, g.suffix, g.digits, g.padded),
+      numbers: numbers2,
+      first: numbers2[0],
+      last: numbers2[numbers2.length - 1],
+      on_disk: numbers2.length,
+      missing: gaps.missing,
+      missing_ranges: gaps.ranges,
+      ranges_truncated: gaps.truncated
+    });
+  }
+  out.sort((a, b) => a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0);
+  return out;
+}
+function findGroup(groups, fileName, opts = {}) {
+  const ci = opts.caseInsensitive === true;
+  const p = parseFrameName(fileName);
+  if (!p) return null;
+  const prefix = fold(p.prefix, ci);
+  const suffix = fold(p.suffix, ci);
+  const same = groups.filter((g) => fold(g.prefix, ci) === prefix && fold(g.suffix, ci) === suffix);
+  const padded = same.filter((g) => g.padded).map((g) => g.digits);
+  const w = widthFor(p.digits, padded);
+  if (w !== null) return same.find((g) => g.padded && g.digits === w) ?? null;
+  return same.find((g) => !g.padded) ?? null;
+}
+function frameName(g, n) {
+  return g.prefix + (g.padded ? String(n).padStart(g.digits, "0") : String(n)) + g.suffix;
+}
+function cloudHint(dir) {
+  for (const seg of dir.split(/[\\/]+/)) if (CLOUD_SEGMENT.test(seg)) return "cloud-synced folder: gaps may be unsynced files";
+  return void 0;
+}
+function emptyRow(over) {
+  return { item_ids: [], item_names: [], missing: 0, missing_ranges: [], ranges_truncated: false, missing_text: "", newest_age_s: null, writing: false, ...over };
+}
+function within(fn, ms) {
+  if (hungFsCalls >= HUNG_FS_LIMIT) return Promise.resolve({ done: false });
+  return new Promise((resolve7, reject) => {
+    let p;
+    try {
+      p = Promise.resolve(fn());
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    let abandoned = false;
+    const settled = () => {
+      if (abandoned) hungFsCalls = Math.max(0, hungFsCalls - 1);
+      abandoned = false;
+    };
+    if (ms <= 0) {
+      abandoned = true;
+      hungFsCalls++;
+      p.then(settled, settled);
+      resolve7({ done: false });
+      return;
+    }
+    const timer = setTimeout(() => {
+      abandoned = true;
+      hungFsCalls++;
+      resolve7({ done: false });
+    }, ms);
+    p.then(
+      (value) => {
+        clearTimeout(timer);
+        settled();
+        resolve7({ done: true, value });
+      },
+      (err) => {
+        clearTimeout(timer);
+        settled();
+        reject(err);
+      }
+    );
+  });
+}
+async function checkSequences(inputs, io, opts = {}) {
+  const started = io.now();
+  const budget = opts.budgetMs ?? 4e3;
+  const settleS = opts.settleS ?? 30;
+  const maxRanges = Math.max(1, opts.maxRanges ?? DEFAULT_MAX_RANGES);
+  const maxEntries = opts.maxEntries ?? 2e5;
+  const concurrency = Math.max(1, opts.concurrency ?? 2);
+  const ci = opts.caseInsensitive ?? (process.platform === "win32" || process.platform === "darwin");
+  const liveDirs = new Set((opts.liveDirs ?? []).map((d) => normDir(d, ci)));
+  const remaining = () => budget - (io.now() - started);
+  const rows = [];
+  const unchecked = [];
+  let uncheckedCount = 0;
+  let futureIgnored = 0;
+  let unmatchedNames = 0;
+  const notes = [];
+  const skip = (label) => {
+    uncheckedCount++;
+    if (unchecked.length < MAX_UNCHECKED_NAMED) unchecked.push(label);
+  };
+  const byDir = /* @__PURE__ */ new Map();
+  for (const inp of inputs) {
+    if (!inp.file) continue;
+    if (!parseFrameName(path.basename(inp.file))) {
+      unmatchedNames++;
+      skip(inp.name ?? path.basename(inp.file));
+      continue;
+    }
+    const dir = path.dirname(inp.file);
+    const list2 = byDir.get(dir);
+    if (list2) list2.push(inp);
+    else byDir.set(dir, [inp]);
+  }
+  async function doDir(dir, list2) {
+    const skipAll = () => {
+      for (const i of list2) skip(i.name ?? i.file);
+    };
+    if (remaining() <= 0) return skipAll();
+    let names;
+    try {
+      const listed = await within(() => io.readdir(dir, maxEntries), remaining());
+      if (!listed.done) return skipAll();
+      if (listed.value.truncated) {
+        const reason = `too many entries (more than ${maxEntries})`;
+        rows.push(...rowsForInputs(list2, (inp) => emptyRow({ pattern: path.basename(inp.file), dir, state: "unreadable", reason })));
+        return;
+      }
+      names = listed.value.names;
+    } catch (err) {
+      const code = err?.code;
+      const reason = code === "ENOENT" || code === "ENOTDIR" ? "folder not found" : `cannot list the folder (${err instanceof Error ? err.message : String(err)})`.slice(0, 300);
+      rows.push(...rowsForInputs(list2, (inp) => emptyRow({ pattern: path.basename(inp.file), dir, state: "unreadable", reason })));
+      return;
+    }
+    const groups = groupFrames(names, { caseInsensitive: ci, maxRanges });
+    const accs = /* @__PURE__ */ new Map();
+    for (const inp of list2) {
+      const g = findGroup(groups, path.basename(inp.file), { caseInsensitive: ci });
+      const key = g ? g.key : `?${path.basename(inp.file)}`;
+      let a = accs.get(key);
+      if (!a) accs.set(key, a = { group: g, dir, ids: /* @__PURE__ */ new Set(), names: [], firstInputFile: inp.file });
+      if (typeof inp.item_id === "number") a.ids.add(inp.item_id);
+      if (inp.name && a.names.length < MAX_ITEMS_PER_ROW && !a.names.includes(inp.name)) a.names.push(inp.name);
+      if (a.aeFrames === void 0 && typeof inp.ae_frames === "number") a.aeFrames = inp.ae_frames;
+    }
+    const cloud = cloudHint(dir);
+    const dirLive = liveDirs.has(normDir(dir, ci));
+    for (const a of accs.values()) {
+      const g = a.group;
+      if (!g) {
+        rows.push(emptyRow({ pattern: path.basename(a.firstInputFile), dir, state: "unreadable", reason: "the footage's own file is not in the folder listing", item_ids: [...a.ids].slice(0, MAX_ITEMS_PER_ROW), item_names: a.names }));
+        continue;
+      }
+      if (g.on_disk === 1 && a.aeFrames !== void 0 && a.aeFrames > 1) {
+        unmatchedNames++;
+        skip(a.names[0] ?? path.basename(a.firstInputFile));
+        continue;
+      }
+      const sample = g.numbers.slice(-STAT_SAMPLE_HIGH);
+      if (g.missing > 0) {
+        const firstGapAbove = g.numbers.find((n, i) => i > 0 && n - g.numbers[i - 1] > 1);
+        if (firstGapAbove !== void 0 && !sample.includes(firstGapAbove)) sample.push(firstGapAbove);
+      }
+      let newest = null;
+      let statAbandoned = false;
+      for (const n of sample) {
+        if (remaining() <= 0) break;
+        try {
+          const r = await within(() => io.stat(path.join(dir, frameName(g, n))), remaining());
+          if (!r.done) {
+            statAbandoned = true;
+            break;
+          }
+          const s = r.value;
+          const t = Math.max(s.mtimeMs, s.ctimeMs, s.birthtimeMs);
+          if (!Number.isFinite(t)) continue;
+          if ((t - io.now()) / 1e3 > CLOCK_SKEW_S) {
+            futureIgnored++;
+            continue;
+          }
+          if (newest === null || t > newest) newest = t;
+        } catch {
+        }
+      }
+      const ageKnown = newest !== null;
+      const ageS = newest === null ? null : Math.max(0, Math.round((io.now() - newest) / 1e3 * 10) / 10);
+      let writing = false;
+      let writingReason;
+      if (ageS !== null && ageS < settleS) {
+        writing = true;
+        writingReason = `the newest frame is ${ageS} s old (under ${settleS} s)`;
+      } else if (dirLive) {
+        writing = true;
+        writingReason = "a render started by this server writes into this folder";
+      }
+      const span = g.last - g.first + 1;
+      const aeShort = a.aeFrames !== void 0 && a.aeFrames - span > 1;
+      let state;
+      if (writing) state = "writing";
+      else if ((g.missing > 0 || aeShort || statAbandoned) && !ageKnown) state = "unknown";
+      else if (g.missing > 0) state = a.aeFrames !== void 0 && g.missing > 1 && Math.abs(a.aeFrames - g.on_disk) <= 1 && a.aeFrames < span - 1 ? "sparse" : "gaps";
+      else if (aeShort) state = "short";
+      else if (g.on_disk === 1) state = "single_frame";
+      else state = "complete";
+      const row = {
+        pattern: g.pattern,
+        dir,
+        item_ids: [...a.ids].slice(0, MAX_ITEMS_PER_ROW),
+        item_names: a.names,
+        first: g.first,
+        last: g.last,
+        on_disk: g.on_disk,
+        missing: g.missing,
+        missing_ranges: g.missing_ranges,
+        ranges_truncated: g.ranges_truncated,
+        missing_text: formatRanges(g.missing_ranges, g.padded ? g.digits : 0, MAX_TEXT_CHARS),
+        state,
+        newest_age_s: ageS,
+        writing,
+        ...writingReason ? { writing_reason: writingReason } : {},
+        ...cloud ? { dir_hint: cloud } : {}
+      };
+      if (a.aeFrames !== void 0) {
+        row.ae_frames = a.aeFrames;
+        if (Math.abs(a.aeFrames - span) > 1) {
+          row.ae_range_differs = true;
+          row.hint = a.aeFrames > span ? `After Effects counts about ${a.aeFrames} frames but the folder holds ${g.first}-${g.last}: trailing or leading frames may be missing, or the footage was built from an earlier file list (a guess from AE's duration, not measured)` : `After Effects counts about ${a.aeFrames} frames and the folder holds ${g.first}-${g.last}: the footage may have been built from an earlier file list (reload with ae_replace_footage; a guess, not measured)`;
+        }
+      }
+      rows.push(row);
+    }
+  }
+  const queue = [...byDir.entries()];
+  let next = 0;
+  const workers = [];
+  for (let w = 0; w < Math.min(concurrency, queue.length); w++) {
+    workers.push(
+      (async () => {
+        for (; ; ) {
+          const i = next++;
+          if (i >= queue.length) return;
+          try {
+            await doDir(queue[i][0], queue[i][1]);
+          } catch (err) {
+            rows.push(emptyRow({ pattern: queue[i][0], dir: queue[i][0], state: "unreadable", reason: err instanceof Error ? err.message.slice(0, 300) : "unexpected error" }));
+          }
+        }
+      })()
+    );
+  }
+  await Promise.all(workers);
+  rows.sort((a, b) => b.missing - a.missing || (a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0));
+  const shown = rows.slice(0, MAX_ROWS);
+  const count = (s) => rows.filter((r) => r.state === s).length;
+  const unreadable3 = count("unreadable");
+  const unknownAge = count("unknown");
+  const fsPaused = hungFsCalls >= HUNG_FS_LIMIT;
+  if (fsPaused) notes.unshift(FS_PAUSED_NOTE);
+  const incomplete = uncheckedCount > 0 || unreadable3 > 0 || unknownAge > 0;
+  if (uncheckedCount > 0) notes.push(`${uncheckedCount} footage item${uncheckedCount === 1 ? " was" : "s were"} not checked (time budget, or a file name that could not be matched).`);
+  if (unmatchedNames > 0) notes.push(`${unmatchedNames} file name${unmatchedNames === 1 ? " has" : "s have"} text after the frame number or no other frame next to ${unmatchedNames === 1 ? "it" : "them"}, so the sequence could not be matched; they were not called complete.`);
+  if (unknownAge > 0) notes.push(`${unknownAge} sequence${unknownAge === 1 ? "" : "s"} with gaps could not be checked for "still being written" (time budget): not known whether the gaps will fill in.`);
+  if (futureIgnored > 0) notes.push(`${futureIgnored} file time${futureIgnored === 1 ? " is" : "s are"} in the future (clock skew) and was ignored.`);
+  notes.push("Only gaps between the first and last frame on disk are found; a sequence that starts late or ends early looks complete unless After Effects' frame count says otherwise (a guess).");
+  notes.push(`A render this server did not start (another app, a farm) is only recognised by a newest frame under ${settleS} s old; frames that take longer than that to render look finished.`);
+  return {
+    checked: rows.length - unreadable3,
+    with_gaps: count("gaps"),
+    writing: count("writing"),
+    unreadable: unreadable3,
+    sparse: count("sparse"),
+    short: count("short"),
+    unknown_age: unknownAge,
+    incomplete: incomplete || fsPaused,
+    ...fsPaused ? { fs_paused: true } : {},
+    sequences: shown,
+    sequences_total: rows.length,
+    unchecked,
+    unchecked_count: uncheckedCount,
+    truncated: rows.length > shown.length,
+    notes,
+    elapsed_ms: io.now() - started
+  };
+}
+function rowsForInputs(list2, make) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const inp of list2) {
+    const key = path.basename(inp.file);
+    let r = byName.get(key);
+    if (!r) byName.set(key, r = make(inp));
+    if (typeof inp.item_id === "number" && r.item_ids.length < MAX_ITEMS_PER_ROW && !r.item_ids.includes(inp.item_id)) r.item_ids.push(inp.item_id);
+    if (inp.name && r.item_names.length < MAX_ITEMS_PER_ROW && !r.item_names.includes(inp.name)) r.item_names.push(inp.name);
+  }
+  return [...byName.values()];
+}
+var fs, path, FRAME_RE, MAX_DIGITS, isPaddedDigits, DEFAULT_MAX_RANGES, fold, MAX_ROWS, MAX_TEXT_CHARS, STAT_SAMPLE_HIGH, CLOCK_SKEW_S, MAX_ITEMS_PER_ROW, MAX_UNCHECKED_NAMED, CLOUD_SEGMENT, normDir, hungFsCalls, HUNG_FS_LIMIT, FS_PAUSED_NOTE, nodeSeqIo, seqscanDeps;
+var init_seqscan = __esm({
+  "src/seqscan.ts"() {
+    "use strict";
+    fs = __toESM(require("node:fs"), 1);
+    path = __toESM(require("node:path"), 1);
+    FRAME_RE = /^(.*?)(\d+)(\.[^./\\]+)$/;
+    MAX_DIGITS = 15;
+    isPaddedDigits = (digits) => digits.length > 1 && digits.charAt(0) === "0";
+    DEFAULT_MAX_RANGES = 20;
+    fold = (s, ci) => {
+      const n = s.normalize("NFC");
+      return ci ? n.toLowerCase() : n;
+    };
+    MAX_ROWS = 100;
+    MAX_TEXT_CHARS = 400;
+    STAT_SAMPLE_HIGH = 8;
+    CLOCK_SKEW_S = 5;
+    MAX_ITEMS_PER_ROW = 10;
+    MAX_UNCHECKED_NAMED = 10;
+    CLOUD_SEGMENT = /^(dropbox|onedrive|icloud|google ?drive)\b/i;
+    normDir = (d, ci) => fold(path.resolve(d).replace(/[\\/]+$/, ""), ci);
+    hungFsCalls = 0;
+    HUNG_FS_LIMIT = 2;
+    FS_PAUSED_NOTE = "File checks are paused: earlier ones never returned, most likely a network share that is not answering. Restarting the panel (or After Effects) clears it; until then sequences are not checked.";
+    nodeSeqIo = {
+      /** opendir with an early stop, so a folder with millions of names is not listed whole. */
+      readdir: async (dir, limit) => {
+        const d = await fs.promises.opendir(dir);
+        const names = [];
+        let truncated = false;
+        try {
+          for await (const ent of d) {
+            if (names.length >= limit) {
+              truncated = true;
+              break;
+            }
+            if (!ent.isDirectory()) names.push(ent.name);
+          }
+        } finally {
+          await d.close().catch(() => void 0);
+        }
+        return { names, truncated };
+      },
+      stat: async (file) => {
+        const s = await fs.promises.stat(file);
+        return { mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs, birthtimeMs: s.birthtimeMs };
+      },
+      now: () => Date.now()
+    };
+    seqscanDeps = { io: nodeSeqIo, liveDirs: () => [] };
+  }
+});
+
 // src/assets.ts
+function sequenceGaps(frameNumbers) {
+  const sorted = frameNumbers.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  const r = missingRanges(sorted, 20);
+  return r.missing > 0 ? { count: r.missing, ranges: r.ranges, truncated: r.truncated } : void 0;
+}
 function ext(name) {
-  return path.extname(name).slice(1).toLowerCase();
+  return path2.extname(name).slice(1).toLowerCase();
 }
 function statFile(f) {
   try {
-    const st = fs.statSync(f.full);
+    const st = fs2.statSync(f.full);
     f.mtimeMs = st.mtimeMs;
     f.arrivedMs = Math.max(st.mtimeMs, st.ctimeMs || 0, st.birthtimeMs || 0);
     return true;
@@ -4193,7 +4631,7 @@ function scanAssets(root, opts = {}) {
   const walk = (dir, rel, depth) => {
     let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = fs2.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -4201,7 +4639,7 @@ function scanAssets(root, opts = {}) {
     const relKey = rel.join("/");
     for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (e.name.startsWith(".")) continue;
-      const full = path.join(dir, e.name);
+      const full = path2.join(dir, e.name);
       if (e.isDirectory()) {
         if (recursive && depth < MAX_DEPTH && !e.name.startsWith("_")) walk(full, [...rel, e.name], depth + 1);
         continue;
@@ -4217,7 +4655,7 @@ function scanAssets(root, opts = {}) {
     const singles = [];
     for (const f of files) {
       const m = sequences ? SEQ_RE.exec(f.name) : null;
-      if (m && SEQUENCE_EXT.has(m[3].toLowerCase()) && m[2].length >= MIN_DIGITS && m[2].length <= MAX_DIGITS && !/[vV]$/.test(m[1])) {
+      if (m && SEQUENCE_EXT.has(m[3].toLowerCase()) && m[2].length >= MIN_DIGITS && m[2].length <= MAX_DIGITS2 && !/[vV]$/.test(m[1])) {
         const key = `${m[1]}\0${m[2].length}\0${m[3].toLowerCase()}`;
         const list2 = groups.get(key);
         if (list2) list2.push(f);
@@ -4239,7 +4677,8 @@ function scanAssets(root, opts = {}) {
         mtimeMs: times.mtimeMs,
         arrivedMs: times.arrivedMs,
         firstFrame: Number(SEQ_RE.exec(g[0].name)?.[2]),
-        lastFrame: Number(SEQ_RE.exec(g[g.length - 1].name)?.[2])
+        lastFrame: Number(SEQ_RE.exec(g[g.length - 1].name)?.[2]),
+        ...gapField(g.map((f) => Number(SEQ_RE.exec(f.name)?.[2])))
       });
     }
     for (const f of singles) {
@@ -4281,7 +4720,7 @@ function pickNewAssets(candidates, inProject, now, settleMs, sequenceSettleMs = 
 }
 function sequenceKey(name) {
   const m = SEQ_RE.exec(name);
-  if (!m || !SEQUENCE_EXT.has(m[3].toLowerCase()) || m[2].length < MIN_DIGITS || m[2].length > MAX_DIGITS || /[vV]$/.test(m[1])) return null;
+  if (!m || !SEQUENCE_EXT.has(m[3].toLowerCase()) || m[2].length < MIN_DIGITS || m[2].length > MAX_DIGITS2 || /[vV]$/.test(m[1])) return null;
   return { key: `${m[1]}\0${m[2].length}\0${m[3].toLowerCase()}`, digits: m[2] };
 }
 function candidatesFromPaths(paths, opts = {}) {
@@ -4295,9 +4734,9 @@ function candidatesFromPaths(paths, opts = {}) {
     if (!hit) {
       hit = [];
       try {
-        for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        for (const e of fs2.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
           if (!e.isFile()) continue;
-          hit.push({ name: e.name, full: path.join(dir, e.name), mtimeMs: 0, arrivedMs: 0 });
+          hit.push({ name: e.name, full: path2.join(dir, e.name), mtimeMs: 0, arrivedMs: 0 });
         }
       } catch {
       }
@@ -4306,10 +4745,10 @@ function candidatesFromPaths(paths, opts = {}) {
     return hit;
   };
   for (const given of paths) {
-    const full = path.resolve(given);
+    const full = path2.resolve(given);
     let st;
     try {
-      st = fs.statSync(full);
+      st = fs2.statSync(full);
     } catch {
       missing.push({ path: given, error: "file not found" });
       continue;
@@ -4322,13 +4761,13 @@ function candidatesFromPaths(paths, opts = {}) {
       missing.push({ path: given, error: `.${ext(full) || "(none)"} is not a type this tool imports` });
       continue;
     }
-    const subfolder = opts.root ? path.relative(opts.root, path.dirname(full)).split(path.sep).filter((x) => x && x !== "..") : [];
-    const key = sequenceKey(path.basename(full));
+    const subfolder = opts.root ? path2.relative(opts.root, path2.dirname(full)).split(path2.sep).filter((x) => x && x !== "..") : [];
+    const key = sequenceKey(path2.basename(full));
     if (opts.sequences !== false && key) {
-      const groupKey = `${path.dirname(full)}|${key.key}`;
+      const groupKey = `${path2.dirname(full)}|${key.key}`;
       let group = groupCache.get(groupKey);
       if (!group) {
-        group = listDir2(path.dirname(full)).filter((f) => sequenceKey(f.name)?.key === key.key);
+        group = listDir2(path2.dirname(full)).filter((f) => sequenceKey(f.name)?.key === key.key);
         groupCache.set(groupKey, group);
       }
       if (group.length >= MIN_SEQUENCE_FRAMES) {
@@ -4346,6 +4785,7 @@ function candidatesFromPaths(paths, opts = {}) {
           arrivedMs: times.arrivedMs,
           firstFrame: Number(sequenceKey(first.name)?.digits),
           lastFrame: Number(sequenceKey(group[group.length - 1].name)?.digits),
+          ...gapField(group.map((f) => Number(sequenceKey(f.name)?.digits))),
           ...normPath(first.full) !== normPath(full) ? { given } : {}
         });
         continue;
@@ -4368,7 +4808,7 @@ function globToRegExp(glob) {
   return new RegExp(`^${body}$`, "i");
 }
 function ruleName(c) {
-  const base = path.basename(c.path);
+  const base = path2.basename(c.path);
   if (!c.sequence) return base;
   const m = SEQ_RE.exec(base);
   return m ? `${m[1]}.${m[3]}` : base;
@@ -4423,12 +4863,17 @@ function shapeImportResult(input) {
     failed_truncated: input.failed.length > IMPORT_ROWS
   };
 }
-var fs, path, DEFAULT_ASSET_FOLDER, DEFAULT_ASSET_BIN, IMPORTABLE, SEQUENCE_EXT, SEQ_RE, MIN_SEQUENCE_FRAMES, MIN_DIGITS, MAX_DIGITS, MAX_SCAN_FILES, MAX_DEPTH, STAT_LAST_FRAMES, STAT_GAPS, MAX_SINGLE_STATS, IMPORT_ROWS, IMPORT_PATHS;
+function gapField(frameNumbers) {
+  const missing = sequenceGaps(frameNumbers);
+  return missing ? { missing } : {};
+}
+var fs2, path2, DEFAULT_ASSET_FOLDER, DEFAULT_ASSET_BIN, IMPORTABLE, SEQUENCE_EXT, SEQ_RE, MIN_SEQUENCE_FRAMES, MIN_DIGITS, MAX_DIGITS2, MAX_SCAN_FILES, MAX_DEPTH, STAT_LAST_FRAMES, STAT_GAPS, MAX_SINGLE_STATS, IMPORT_ROWS, IMPORT_PATHS;
 var init_assets = __esm({
   "src/assets.ts"() {
     "use strict";
-    fs = __toESM(require("node:fs"), 1);
-    path = __toESM(require("node:path"), 1);
+    fs2 = __toESM(require("node:fs"), 1);
+    path2 = __toESM(require("node:path"), 1);
+    init_seqscan();
     DEFAULT_ASSET_FOLDER = "_assets";
     DEFAULT_ASSET_BIN = "_Assets";
     IMPORTABLE = /* @__PURE__ */ new Set([
@@ -4466,7 +4911,7 @@ var init_assets = __esm({
     SEQ_RE = /^(.*?)(\d+)\.([A-Za-z0-9]+)$/;
     MIN_SEQUENCE_FRAMES = 3;
     MIN_DIGITS = 3;
-    MAX_DIGITS = 7;
+    MAX_DIGITS2 = 7;
     MAX_SCAN_FILES = 1e5;
     MAX_DEPTH = 6;
     STAT_LAST_FRAMES = 8;
@@ -5000,29 +5445,29 @@ var init_receipts = __esm({
 // src/quarantine.ts
 function defaultDataDir() {
   if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA || path2.join(os.homedir(), "AppData", "Local");
-    return path2.join(localAppData, "chroma-ae-mcp");
+    const localAppData = process.env.LOCALAPPDATA || path3.join(os.homedir(), "AppData", "Local");
+    return path3.join(localAppData, "chroma-ae-mcp");
   }
   if (process.platform === "darwin") {
-    return path2.join(
+    return path3.join(
       os.homedir(),
       "Library",
       "Application Support",
       "chroma-ae-mcp"
     );
   }
-  return path2.join(os.homedir(), ".local", "share", "chroma-ae-mcp");
+  return path3.join(os.homedir(), ".local", "share", "chroma-ae-mcp");
 }
 function defaultQuarantineFilePath() {
-  return path2.join(defaultDataDir(), "quarantine.json");
+  return path3.join(defaultDataDir(), "quarantine.json");
 }
-var fs2, os, path2, QuarantineBlockedError, QuarantineStore;
+var fs3, os, path3, QuarantineBlockedError, QuarantineStore;
 var init_quarantine = __esm({
   "src/quarantine.ts"() {
     "use strict";
-    fs2 = __toESM(require("node:fs"), 1);
+    fs3 = __toESM(require("node:fs"), 1);
     os = __toESM(require("node:os"), 1);
-    path2 = __toESM(require("node:path"), 1);
+    path3 = __toESM(require("node:path"), 1);
     QuarantineBlockedError = class extends Error {
       kind = "quarantined";
       entries;
@@ -5102,10 +5547,10 @@ var init_quarantine = __esm({
       }
       loadFromDisk() {
         try {
-          if (!fs2.existsSync(this.filePath)) {
+          if (!fs3.existsSync(this.filePath)) {
             return;
           }
-          const raw = fs2.readFileSync(this.filePath, "utf8");
+          const raw = fs3.readFileSync(this.filePath, "utf8");
           const parsed = JSON.parse(raw);
           const list2 = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.entries) ? parsed.entries : [];
           for (const item of list2) {
@@ -5124,12 +5569,12 @@ var init_quarantine = __esm({
         }
       }
       saveToDisk() {
-        const dir = path2.dirname(this.filePath);
-        fs2.mkdirSync(dir, { recursive: true, mode: 448 });
+        const dir = path3.dirname(this.filePath);
+        fs3.mkdirSync(dir, { recursive: true, mode: 448 });
         const payload = JSON.stringify({ entries: this.list() }, null, 2);
         const tmpFile = `${this.filePath}.tmp-${process.pid}`;
-        fs2.writeFileSync(tmpFile, payload, { encoding: "utf8", mode: 384 });
-        fs2.renameSync(tmpFile, this.filePath);
+        fs3.writeFileSync(tmpFile, payload, { encoding: "utf8", mode: 384 });
+        fs3.renameSync(tmpFile, this.filePath);
       }
     };
   }
@@ -5138,7 +5583,7 @@ var init_quarantine = __esm({
 // src/tools/common.ts
 function dataDirOf(ctx) {
   if (ctx.dataDir) return ctx.dataDir;
-  if (ctx.settings) return path3.dirname(ctx.settings.path);
+  if (ctx.settings) return path4.dirname(ctx.settings.path);
   return defaultDataDir();
 }
 function formatToolResponse(data) {
@@ -5222,11 +5667,11 @@ function formatToolError(err) {
     ]
   };
 }
-var path3, AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema;
+var path4, AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema;
 var init_common = __esm({
   "src/tools/common.ts"() {
     "use strict";
-    path3 = __toESM(require("node:path"), 1);
+    path4 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_quarantine();
@@ -5712,7 +6157,7 @@ function sanitizeTasteRules(raw) {
   return [...byId3.values()].slice(-MAX_TASTE_RULES);
 }
 function defaultSettingsFilePath() {
-  return path4.join(defaultDataDir(), "settings.json");
+  return path5.join(defaultDataDir(), "settings.json");
 }
 function cloneTaste(t) {
   const copy = { ...t, preferred_ease: t.preferred_ease ? [...t.preferred_ease] : null };
@@ -5729,12 +6174,12 @@ function cloneDefaults() {
 function isCurve(v) {
   return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number" && Number.isFinite(n)) && v[0] >= MIN_HANDLE && v[0] <= 1 && v[2] >= 0 && v[2] <= 1 - MIN_HANDLE;
 }
-var fs3, path4, TASTE_RULE_KINDS, TASTE_CONFIDENCE, MAX_TASTE_RULES, DEFAULT_SETTINGS, MIN_HANDLE, SettingsStore;
+var fs4, path5, TASTE_RULE_KINDS, TASTE_CONFIDENCE, MAX_TASTE_RULES, DEFAULT_SETTINGS, MIN_HANDLE, SettingsStore;
 var init_settings = __esm({
   "src/settings.ts"() {
     "use strict";
-    fs3 = __toESM(require("node:fs"), 1);
-    path4 = __toESM(require("node:path"), 1);
+    fs4 = __toESM(require("node:fs"), 1);
+    path5 = __toESM(require("node:path"), 1);
     init_quarantine();
     TASTE_RULE_KINDS = [
       "ease_influence",
@@ -5801,8 +6246,8 @@ var init_settings = __esm({
       }
       loadFromDisk() {
         try {
-          if (!fs3.existsSync(this.filePath)) return;
-          const parsed = JSON.parse(fs3.readFileSync(this.filePath, "utf8"));
+          if (!fs4.existsSync(this.filePath)) return;
+          const parsed = JSON.parse(fs4.readFileSync(this.filePath, "utf8"));
           const ac = parsed?.auto_checkpoint;
           if (ac && typeof ac === "object") {
             if (typeof ac.enabled === "boolean") this.settings.auto_checkpoint.enabled = ac.enabled;
@@ -5830,10 +6275,10 @@ var init_settings = __esm({
         }
       }
       saveToDisk() {
-        fs3.mkdirSync(path4.dirname(this.filePath), { recursive: true, mode: 448 });
+        fs4.mkdirSync(path5.dirname(this.filePath), { recursive: true, mode: 448 });
         const tmpFile = `${this.filePath}.tmp-${process.pid}`;
-        fs3.writeFileSync(tmpFile, JSON.stringify(this.settings, null, 2), { encoding: "utf8", mode: 384 });
-        fs3.renameSync(tmpFile, this.filePath);
+        fs4.writeFileSync(tmpFile, JSON.stringify(this.settings, null, 2), { encoding: "utf8", mode: 384 });
+        fs4.renameSync(tmpFile, this.filePath);
       }
     };
   }
@@ -5854,10 +6299,10 @@ function oversizedSteps(steps) {
   return out;
 }
 function projectSkillsRoot(projectPath) {
-  return path5.join(path5.dirname(projectPath), PROJECT_SKILLS_DIR);
+  return path6.join(path6.dirname(projectPath), PROJECT_SKILLS_DIR);
 }
 function globalSkillsRoot(dataDir) {
-  return path5.join(dataDir, "skills");
+  return path6.join(dataDir, "skills");
 }
 function parseSkillMd(text) {
   const meta = {};
@@ -5884,12 +6329,12 @@ function formatSkillMd(meta, instructions) {
   return lines.join("\n");
 }
 function readSkillDir(dir, scope) {
-  if (!fs4.existsSync(path5.join(dir, "SKILL.md"))) return null;
+  if (!fs5.existsSync(path6.join(dir, "SKILL.md"))) return null;
   try {
     return readSkillFiles(dir, scope);
   } catch (err) {
     return {
-      name: path5.basename(dir),
+      name: path6.basename(dir),
       description: "",
       mutates: true,
       scope,
@@ -5901,13 +6346,13 @@ function readSkillDir(dir, scope) {
   }
 }
 function readSkillFiles(dir, scope) {
-  const { meta, body } = parseSkillMd(fs4.readFileSync(path5.join(dir, "SKILL.md"), "utf8"));
-  const name = path5.basename(dir);
-  const steps = fs4.readdirSync(dir).map((f) => ({ f, m: STEP_RE.exec(f) })).filter((x) => x.m !== null).sort((a, b) => Number(a.m[1]) - Number(b.m[1])).map(({ f }) => {
-    const full = path5.join(dir, f);
-    const size = fs4.statSync(full).size;
+  const { meta, body } = parseSkillMd(fs5.readFileSync(path6.join(dir, "SKILL.md"), "utf8"));
+  const name = path6.basename(dir);
+  const steps = fs5.readdirSync(dir).map((f) => ({ f, m: STEP_RE.exec(f) })).filter((x) => x.m !== null).sort((a, b) => Number(a.m[1]) - Number(b.m[1])).map(({ f }) => {
+    const full = path6.join(dir, f);
+    const size = fs5.statSync(full).size;
     if (size > MAX_STEP_BYTES) throw new Error(`${full} is over ${MAX_STEP_BYTES / 1024} KB`);
-    return { file: f, code: fs4.readFileSync(full, "utf8").replace(/^﻿/, "") };
+    return { file: f, code: fs5.readFileSync(full, "utf8").replace(/^﻿/, "") };
   });
   return {
     name,
@@ -5927,12 +6372,12 @@ function listSkills(roots2) {
   for (const { scope, root } of roots2) {
     let entries;
     try {
-      entries = fs4.readdirSync(root, { withFileTypes: true });
+      entries = fs5.readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const e of entries.filter((d) => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-      const skill = readSkillDir(path5.join(root, e.name), scope);
+      const skill = readSkillDir(path6.join(root, e.name), scope);
       if (!skill || seen.has(e.name)) continue;
       seen.add(e.name);
       out.push(skill);
@@ -5942,8 +6387,8 @@ function listSkills(roots2) {
 }
 function findSkill(roots2, name) {
   for (const { scope, root } of roots2) {
-    const dir = path5.join(root, name);
-    const skill = fs4.existsSync(dir) ? readSkillDir(dir, scope) : null;
+    const dir = path6.join(root, name);
+    const skill = fs5.existsSync(dir) ? readSkillDir(dir, scope) : null;
     if (skill) return skill;
   }
   return null;
@@ -5952,21 +6397,21 @@ function writeSkill(root, meta, instructions, steps, overwrite) {
   if (!isValidSkillName(meta.name)) {
     throw new Error(`Bad skill name "${meta.name}": use lowercase letters, digits and dashes (not a Windows device name like con or nul).`);
   }
-  const dir = path5.join(root, meta.name);
-  const exists = fs4.existsSync(path5.join(dir, "SKILL.md"));
+  const dir = path6.join(root, meta.name);
+  const exists = fs5.existsSync(path6.join(dir, "SKILL.md"));
   if (exists && !overwrite) {
     throw new Error(`A skill named "${meta.name}" already exists in ${root}. Pass overwrite: true to replace it.`);
   }
-  fs4.mkdirSync(dir, { recursive: true });
-  for (const f of fs4.readdirSync(dir)) if (STEP_RE.test(f)) fs4.unlinkSync(path5.join(dir, f));
+  fs5.mkdirSync(dir, { recursive: true });
+  for (const f of fs5.readdirSync(dir)) if (STEP_RE.test(f)) fs5.unlinkSync(path6.join(dir, f));
   const files = [];
   steps.forEach((code, i) => {
     const file = `${i + 1}.jsx`;
-    fs4.writeFileSync(path5.join(dir, file), code.endsWith("\n") ? code : `${code}
+    fs5.writeFileSync(path6.join(dir, file), code.endsWith("\n") ? code : `${code}
 `, "utf8");
     files.push(file);
   });
-  fs4.writeFileSync(path5.join(dir, "SKILL.md"), formatSkillMd(meta, instructions), "utf8");
+  fs5.writeFileSync(path6.join(dir, "SKILL.md"), formatSkillMd(meta, instructions), "utf8");
   files.unshift("SKILL.md");
   return { dir, replaced: exists, files };
 }
@@ -5980,12 +6425,12 @@ function recordedRunJsx(opId) {
 function recentRunJsx() {
   return recorded.slice().reverse();
 }
-var fs4, path5, SKILL_NAME_RE, RESERVED_SKILL_NAME_RE, PROJECT_SKILLS_DIR, STEP_RE, MAX_STEP_BYTES, MAX_RECORDED, recorded;
+var fs5, path6, SKILL_NAME_RE, RESERVED_SKILL_NAME_RE, PROJECT_SKILLS_DIR, STEP_RE, MAX_STEP_BYTES, MAX_RECORDED, recorded;
 var init_skills = __esm({
   "src/skills.ts"() {
     "use strict";
-    fs4 = __toESM(require("node:fs"), 1);
-    path5 = __toESM(require("node:path"), 1);
+    fs5 = __toESM(require("node:fs"), 1);
+    path6 = __toESM(require("node:path"), 1);
     SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
     RESERVED_SKILL_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
     PROJECT_SKILLS_DIR = "ae-skills";
@@ -6026,454 +6471,21 @@ var init_read_back = __esm({
 });
 
 // src/win-exe.ts
-function powershellExe(env = process.env, exists = fs5.existsSync) {
+function powershellExe(env = process.env, exists = fs6.existsSync) {
   const root = env.SystemRoot || env.windir || "C:\\Windows";
-  const full = path6.win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const full = path7.win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   try {
     if (exists(full)) return full;
   } catch {
   }
   return "powershell.exe";
 }
-var fs5, path6;
+var fs6, path7;
 var init_win_exe = __esm({
   "src/win-exe.ts"() {
     "use strict";
-    fs5 = __toESM(require("node:fs"), 1);
-    path6 = __toESM(require("node:path"), 1);
-  }
-});
-
-// src/seqscan.ts
-function parseFrameName(name) {
-  const m = FRAME_RE.exec(name);
-  if (!m) return null;
-  if (m[2].length > MAX_DIGITS2) return null;
-  return { prefix: m[1], digits: m[2], suffix: m[3] };
-}
-function missingRanges(sorted, maxRanges) {
-  const ranges = [];
-  let missing = 0;
-  let truncated = false;
-  for (let i = 1; i < sorted.length; i++) {
-    const gap = sorted[i] - sorted[i - 1] - 1;
-    if (gap <= 0) continue;
-    missing += gap;
-    if (ranges.length < maxRanges) ranges.push([sorted[i - 1] + 1, sorted[i] - 1]);
-    else truncated = true;
-  }
-  return { missing, ranges, truncated };
-}
-function formatRanges(ranges, digits, maxChars) {
-  const pad = (n) => digits > 0 ? String(n).padStart(digits, "0") : String(n);
-  let out = "";
-  for (let i = 0; i < ranges.length; i++) {
-    const [a, b] = ranges[i];
-    const part2 = a === b ? pad(a) : `${pad(a)}-${pad(b)}`;
-    const next = out === "" ? part2 : `${out}, ${part2}`;
-    if (next.length > maxChars) return out === "" ? `${part2.slice(0, Math.max(0, maxChars - 3))}...` : `${out}, ...`;
-    out = next;
-  }
-  return out;
-}
-function patternOf(prefix, suffix, digits, padded) {
-  return `${prefix}[${padded ? "#".repeat(digits) : "#"}]${suffix}`;
-}
-function paddedWidthsOf(leadingZeroWidths, shortestPlain) {
-  return [...leadingZeroWidths].filter((w) => shortestPlain >= w).sort((a, b) => a - b);
-}
-function widthFor(digits, padded) {
-  if (isPaddedDigits(digits)) return padded.includes(digits.length) ? digits.length : null;
-  let best = null;
-  for (const w of padded) if (w <= digits.length) best = w;
-  return best;
-}
-function groupFrames(names, opts = {}) {
-  const ci = opts.caseInsensitive === true;
-  const maxRanges = opts.maxRanges ?? DEFAULT_MAX_RANGES;
-  const parsed = [];
-  const zeroWidths = /* @__PURE__ */ new Map();
-  const shortestPlain = /* @__PURE__ */ new Map();
-  for (const name of names) {
-    const p = parseFrameName(name);
-    if (!p) continue;
-    const stem2 = fold(p.prefix, ci) + "\0" + fold(p.suffix, ci);
-    parsed.push({ p, stem: stem2 });
-    if (isPaddedDigits(p.digits)) {
-      let set2 = zeroWidths.get(stem2);
-      if (!set2) zeroWidths.set(stem2, set2 = /* @__PURE__ */ new Set());
-      set2.add(p.digits.length);
-    } else {
-      const cur = shortestPlain.get(stem2);
-      if (cur === void 0 || p.digits.length < cur) shortestPlain.set(stem2, p.digits.length);
-    }
-  }
-  const paddedByStem = /* @__PURE__ */ new Map();
-  for (const [stem2, widths] of zeroWidths) paddedByStem.set(stem2, paddedWidthsOf(widths, shortestPlain.get(stem2) ?? Infinity));
-  const groups = /* @__PURE__ */ new Map();
-  for (const { p, stem: stem2 } of parsed) {
-    const w = widthFor(p.digits, paddedByStem.get(stem2) ?? []);
-    const padded = w !== null;
-    const key = `${stem2}\0${padded ? w : "*"}`;
-    let g = groups.get(key);
-    if (!g) groups.set(key, g = { prefix: p.prefix, suffix: p.suffix, digits: padded ? w : p.digits.length, padded, nums: [] });
-    g.nums.push(Number(p.digits));
-    if (!padded && p.digits.length < g.digits) g.digits = p.digits.length;
-  }
-  const out = [];
-  for (const [key, g] of groups) {
-    g.nums.sort((a, b) => a - b);
-    const numbers2 = [];
-    for (const n of g.nums) if (numbers2.length === 0 || numbers2[numbers2.length - 1] !== n) numbers2.push(n);
-    const gaps = missingRanges(numbers2, maxRanges);
-    out.push({
-      key,
-      prefix: g.prefix,
-      suffix: g.suffix,
-      digits: g.digits,
-      padded: g.padded,
-      pattern: patternOf(g.prefix, g.suffix, g.digits, g.padded),
-      numbers: numbers2,
-      first: numbers2[0],
-      last: numbers2[numbers2.length - 1],
-      on_disk: numbers2.length,
-      missing: gaps.missing,
-      missing_ranges: gaps.ranges,
-      ranges_truncated: gaps.truncated
-    });
-  }
-  out.sort((a, b) => a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0);
-  return out;
-}
-function findGroup(groups, fileName, opts = {}) {
-  const ci = opts.caseInsensitive === true;
-  const p = parseFrameName(fileName);
-  if (!p) return null;
-  const prefix = fold(p.prefix, ci);
-  const suffix = fold(p.suffix, ci);
-  const same = groups.filter((g) => fold(g.prefix, ci) === prefix && fold(g.suffix, ci) === suffix);
-  const padded = same.filter((g) => g.padded).map((g) => g.digits);
-  const w = widthFor(p.digits, padded);
-  if (w !== null) return same.find((g) => g.padded && g.digits === w) ?? null;
-  return same.find((g) => !g.padded) ?? null;
-}
-function frameName(g, n) {
-  return g.prefix + (g.padded ? String(n).padStart(g.digits, "0") : String(n)) + g.suffix;
-}
-function cloudHint(dir) {
-  for (const seg of dir.split(/[\\/]+/)) if (CLOUD_SEGMENT.test(seg)) return "cloud-synced folder: gaps may be unsynced files";
-  return void 0;
-}
-function emptyRow(over) {
-  return { item_ids: [], item_names: [], missing: 0, missing_ranges: [], ranges_truncated: false, missing_text: "", newest_age_s: null, writing: false, ...over };
-}
-function within(fn, ms) {
-  if (hungFsCalls >= HUNG_FS_LIMIT) return Promise.resolve({ done: false });
-  return new Promise((resolve7, reject) => {
-    let p;
-    try {
-      p = Promise.resolve(fn());
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    let abandoned = false;
-    const settled = () => {
-      if (abandoned) hungFsCalls = Math.max(0, hungFsCalls - 1);
-      abandoned = false;
-    };
-    if (ms <= 0) {
-      abandoned = true;
-      hungFsCalls++;
-      p.then(settled, settled);
-      resolve7({ done: false });
-      return;
-    }
-    const timer = setTimeout(() => {
-      abandoned = true;
-      hungFsCalls++;
-      resolve7({ done: false });
-    }, ms);
-    p.then(
-      (value) => {
-        clearTimeout(timer);
-        settled();
-        resolve7({ done: true, value });
-      },
-      (err) => {
-        clearTimeout(timer);
-        settled();
-        reject(err);
-      }
-    );
-  });
-}
-async function checkSequences(inputs, io, opts = {}) {
-  const started = io.now();
-  const budget = opts.budgetMs ?? 4e3;
-  const settleS = opts.settleS ?? 30;
-  const maxRanges = Math.max(1, opts.maxRanges ?? DEFAULT_MAX_RANGES);
-  const maxEntries = opts.maxEntries ?? 2e5;
-  const concurrency = Math.max(1, opts.concurrency ?? 2);
-  const ci = opts.caseInsensitive ?? (process.platform === "win32" || process.platform === "darwin");
-  const liveDirs = new Set((opts.liveDirs ?? []).map((d) => normDir(d, ci)));
-  const remaining = () => budget - (io.now() - started);
-  const rows = [];
-  const unchecked = [];
-  let uncheckedCount = 0;
-  let futureIgnored = 0;
-  let unmatchedNames = 0;
-  const notes = [];
-  const skip = (label) => {
-    uncheckedCount++;
-    if (unchecked.length < MAX_UNCHECKED_NAMED) unchecked.push(label);
-  };
-  const byDir = /* @__PURE__ */ new Map();
-  for (const inp of inputs) {
-    if (!inp.file) continue;
-    if (!parseFrameName(path7.basename(inp.file))) {
-      unmatchedNames++;
-      skip(inp.name ?? path7.basename(inp.file));
-      continue;
-    }
-    const dir = path7.dirname(inp.file);
-    const list2 = byDir.get(dir);
-    if (list2) list2.push(inp);
-    else byDir.set(dir, [inp]);
-  }
-  async function doDir(dir, list2) {
-    const skipAll = () => {
-      for (const i of list2) skip(i.name ?? i.file);
-    };
-    if (remaining() <= 0) return skipAll();
-    let names;
-    try {
-      const listed = await within(() => io.readdir(dir, maxEntries), remaining());
-      if (!listed.done) return skipAll();
-      if (listed.value.truncated) {
-        const reason = `too many entries (more than ${maxEntries})`;
-        rows.push(...rowsForInputs(list2, (inp) => emptyRow({ pattern: path7.basename(inp.file), dir, state: "unreadable", reason })));
-        return;
-      }
-      names = listed.value.names;
-    } catch (err) {
-      const code = err?.code;
-      const reason = code === "ENOENT" || code === "ENOTDIR" ? "folder not found" : `cannot list the folder (${err instanceof Error ? err.message : String(err)})`.slice(0, 300);
-      rows.push(...rowsForInputs(list2, (inp) => emptyRow({ pattern: path7.basename(inp.file), dir, state: "unreadable", reason })));
-      return;
-    }
-    const groups = groupFrames(names, { caseInsensitive: ci, maxRanges });
-    const accs = /* @__PURE__ */ new Map();
-    for (const inp of list2) {
-      const g = findGroup(groups, path7.basename(inp.file), { caseInsensitive: ci });
-      const key = g ? g.key : `?${path7.basename(inp.file)}`;
-      let a = accs.get(key);
-      if (!a) accs.set(key, a = { group: g, dir, ids: /* @__PURE__ */ new Set(), names: [], firstInputFile: inp.file });
-      if (typeof inp.item_id === "number") a.ids.add(inp.item_id);
-      if (inp.name && a.names.length < MAX_ITEMS_PER_ROW && !a.names.includes(inp.name)) a.names.push(inp.name);
-      if (a.aeFrames === void 0 && typeof inp.ae_frames === "number") a.aeFrames = inp.ae_frames;
-    }
-    const cloud = cloudHint(dir);
-    const dirLive = liveDirs.has(normDir(dir, ci));
-    for (const a of accs.values()) {
-      const g = a.group;
-      if (!g) {
-        rows.push(emptyRow({ pattern: path7.basename(a.firstInputFile), dir, state: "unreadable", reason: "the footage's own file is not in the folder listing", item_ids: [...a.ids].slice(0, MAX_ITEMS_PER_ROW), item_names: a.names }));
-        continue;
-      }
-      if (g.on_disk === 1 && a.aeFrames !== void 0 && a.aeFrames > 1) {
-        unmatchedNames++;
-        skip(a.names[0] ?? path7.basename(a.firstInputFile));
-        continue;
-      }
-      const sample = g.numbers.slice(-STAT_SAMPLE_HIGH);
-      if (g.missing > 0) {
-        const firstGapAbove = g.numbers.find((n, i) => i > 0 && n - g.numbers[i - 1] > 1);
-        if (firstGapAbove !== void 0 && !sample.includes(firstGapAbove)) sample.push(firstGapAbove);
-      }
-      let newest = null;
-      let statAbandoned = false;
-      for (const n of sample) {
-        if (remaining() <= 0) break;
-        try {
-          const r = await within(() => io.stat(path7.join(dir, frameName(g, n))), remaining());
-          if (!r.done) {
-            statAbandoned = true;
-            break;
-          }
-          const s = r.value;
-          const t = Math.max(s.mtimeMs, s.ctimeMs, s.birthtimeMs);
-          if (!Number.isFinite(t)) continue;
-          if ((t - io.now()) / 1e3 > CLOCK_SKEW_S) {
-            futureIgnored++;
-            continue;
-          }
-          if (newest === null || t > newest) newest = t;
-        } catch {
-        }
-      }
-      const ageKnown = newest !== null;
-      const ageS = newest === null ? null : Math.max(0, Math.round((io.now() - newest) / 1e3 * 10) / 10);
-      let writing = false;
-      let writingReason;
-      if (ageS !== null && ageS < settleS) {
-        writing = true;
-        writingReason = `the newest frame is ${ageS} s old (under ${settleS} s)`;
-      } else if (dirLive) {
-        writing = true;
-        writingReason = "a render started by this server writes into this folder";
-      }
-      const span = g.last - g.first + 1;
-      const aeShort = a.aeFrames !== void 0 && a.aeFrames - span > 1;
-      let state;
-      if (writing) state = "writing";
-      else if ((g.missing > 0 || aeShort || statAbandoned) && !ageKnown) state = "unknown";
-      else if (g.missing > 0) state = a.aeFrames !== void 0 && g.missing > 1 && Math.abs(a.aeFrames - g.on_disk) <= 1 && a.aeFrames < span - 1 ? "sparse" : "gaps";
-      else if (aeShort) state = "short";
-      else if (g.on_disk === 1) state = "single_frame";
-      else state = "complete";
-      const row = {
-        pattern: g.pattern,
-        dir,
-        item_ids: [...a.ids].slice(0, MAX_ITEMS_PER_ROW),
-        item_names: a.names,
-        first: g.first,
-        last: g.last,
-        on_disk: g.on_disk,
-        missing: g.missing,
-        missing_ranges: g.missing_ranges,
-        ranges_truncated: g.ranges_truncated,
-        missing_text: formatRanges(g.missing_ranges, g.padded ? g.digits : 0, MAX_TEXT_CHARS),
-        state,
-        newest_age_s: ageS,
-        writing,
-        ...writingReason ? { writing_reason: writingReason } : {},
-        ...cloud ? { dir_hint: cloud } : {}
-      };
-      if (a.aeFrames !== void 0) {
-        row.ae_frames = a.aeFrames;
-        if (Math.abs(a.aeFrames - span) > 1) {
-          row.ae_range_differs = true;
-          row.hint = a.aeFrames > span ? `After Effects counts about ${a.aeFrames} frames but the folder holds ${g.first}-${g.last}: trailing or leading frames may be missing, or the footage was built from an earlier file list (a guess from AE's duration, not measured)` : `After Effects counts about ${a.aeFrames} frames and the folder holds ${g.first}-${g.last}: the footage may have been built from an earlier file list (reload with ae_replace_footage; a guess, not measured)`;
-        }
-      }
-      rows.push(row);
-    }
-  }
-  const queue = [...byDir.entries()];
-  let next = 0;
-  const workers = [];
-  for (let w = 0; w < Math.min(concurrency, queue.length); w++) {
-    workers.push(
-      (async () => {
-        for (; ; ) {
-          const i = next++;
-          if (i >= queue.length) return;
-          try {
-            await doDir(queue[i][0], queue[i][1]);
-          } catch (err) {
-            rows.push(emptyRow({ pattern: queue[i][0], dir: queue[i][0], state: "unreadable", reason: err instanceof Error ? err.message.slice(0, 300) : "unexpected error" }));
-          }
-        }
-      })()
-    );
-  }
-  await Promise.all(workers);
-  rows.sort((a, b) => b.missing - a.missing || (a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0));
-  const shown = rows.slice(0, MAX_ROWS);
-  const count = (s) => rows.filter((r) => r.state === s).length;
-  const unreadable3 = count("unreadable");
-  const unknownAge = count("unknown");
-  const fsPaused = hungFsCalls >= HUNG_FS_LIMIT;
-  if (fsPaused) notes.unshift(FS_PAUSED_NOTE);
-  const incomplete = uncheckedCount > 0 || unreadable3 > 0 || unknownAge > 0;
-  if (uncheckedCount > 0) notes.push(`${uncheckedCount} footage item${uncheckedCount === 1 ? " was" : "s were"} not checked (time budget, or a file name that could not be matched).`);
-  if (unmatchedNames > 0) notes.push(`${unmatchedNames} file name${unmatchedNames === 1 ? " has" : "s have"} text after the frame number or no other frame next to ${unmatchedNames === 1 ? "it" : "them"}, so the sequence could not be matched; they were not called complete.`);
-  if (unknownAge > 0) notes.push(`${unknownAge} sequence${unknownAge === 1 ? "" : "s"} with gaps could not be checked for "still being written" (time budget): not known whether the gaps will fill in.`);
-  if (futureIgnored > 0) notes.push(`${futureIgnored} file time${futureIgnored === 1 ? " is" : "s are"} in the future (clock skew) and was ignored.`);
-  notes.push("Only gaps between the first and last frame on disk are found; a sequence that starts late or ends early looks complete unless After Effects' frame count says otherwise (a guess).");
-  notes.push(`A render this server did not start (another app, a farm) is only recognised by a newest frame under ${settleS} s old; frames that take longer than that to render look finished.`);
-  return {
-    checked: rows.length - unreadable3,
-    with_gaps: count("gaps"),
-    writing: count("writing"),
-    unreadable: unreadable3,
-    sparse: count("sparse"),
-    short: count("short"),
-    unknown_age: unknownAge,
-    incomplete: incomplete || fsPaused,
-    ...fsPaused ? { fs_paused: true } : {},
-    sequences: shown,
-    sequences_total: rows.length,
-    unchecked,
-    unchecked_count: uncheckedCount,
-    truncated: rows.length > shown.length,
-    notes,
-    elapsed_ms: io.now() - started
-  };
-}
-function rowsForInputs(list2, make) {
-  const byName = /* @__PURE__ */ new Map();
-  for (const inp of list2) {
-    const key = path7.basename(inp.file);
-    let r = byName.get(key);
-    if (!r) byName.set(key, r = make(inp));
-    if (typeof inp.item_id === "number" && r.item_ids.length < MAX_ITEMS_PER_ROW && !r.item_ids.includes(inp.item_id)) r.item_ids.push(inp.item_id);
-    if (inp.name && r.item_names.length < MAX_ITEMS_PER_ROW && !r.item_names.includes(inp.name)) r.item_names.push(inp.name);
-  }
-  return [...byName.values()];
-}
-var fs6, path7, FRAME_RE, MAX_DIGITS2, isPaddedDigits, DEFAULT_MAX_RANGES, fold, MAX_ROWS, MAX_TEXT_CHARS, STAT_SAMPLE_HIGH, CLOCK_SKEW_S, MAX_ITEMS_PER_ROW, MAX_UNCHECKED_NAMED, CLOUD_SEGMENT, normDir, hungFsCalls, HUNG_FS_LIMIT, FS_PAUSED_NOTE, nodeSeqIo, seqscanDeps;
-var init_seqscan = __esm({
-  "src/seqscan.ts"() {
-    "use strict";
     fs6 = __toESM(require("node:fs"), 1);
     path7 = __toESM(require("node:path"), 1);
-    FRAME_RE = /^(.*?)(\d+)(\.[^./\\]+)$/;
-    MAX_DIGITS2 = 15;
-    isPaddedDigits = (digits) => digits.length > 1 && digits.charAt(0) === "0";
-    DEFAULT_MAX_RANGES = 20;
-    fold = (s, ci) => {
-      const n = s.normalize("NFC");
-      return ci ? n.toLowerCase() : n;
-    };
-    MAX_ROWS = 100;
-    MAX_TEXT_CHARS = 400;
-    STAT_SAMPLE_HIGH = 8;
-    CLOCK_SKEW_S = 5;
-    MAX_ITEMS_PER_ROW = 10;
-    MAX_UNCHECKED_NAMED = 10;
-    CLOUD_SEGMENT = /^(dropbox|onedrive|icloud|google ?drive)\b/i;
-    normDir = (d, ci) => fold(path7.resolve(d).replace(/[\\/]+$/, ""), ci);
-    hungFsCalls = 0;
-    HUNG_FS_LIMIT = 2;
-    FS_PAUSED_NOTE = "File checks are paused: earlier ones never returned, most likely a network share that is not answering. Restarting the panel (or After Effects) clears it; until then sequences are not checked.";
-    nodeSeqIo = {
-      /** opendir with an early stop, so a folder with millions of names is not listed whole. */
-      readdir: async (dir, limit) => {
-        const d = await fs6.promises.opendir(dir);
-        const names = [];
-        let truncated = false;
-        try {
-          for await (const ent of d) {
-            if (names.length >= limit) {
-              truncated = true;
-              break;
-            }
-            if (!ent.isDirectory()) names.push(ent.name);
-          }
-        } finally {
-          await d.close().catch(() => void 0);
-        }
-        return { names, truncated };
-      },
-      stat: async (file) => {
-        const s = await fs6.promises.stat(file);
-        return { mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs, birthtimeMs: s.birthtimeMs };
-      },
-      now: () => Date.now()
-    };
-    seqscanDeps = { io: nodeSeqIo, liveDirs: () => [] };
   }
 });
 
@@ -12338,6 +12350,9 @@ var init_assets2 = __esm({
       rules: external_exports.array(RuleSchema).max(20).optional().describe("Per-file interpretation: for each setting the first rule whose match fits wins over `interpret`."),
       max_seconds: external_exports.number().min(5).max(110).optional().describe("Time budget, checked between files (default 45). What is left is listed under not_attempted_paths; call again to continue."),
       allow_writing: external_exports.boolean().optional().describe("With paths: import files changed in the last 2 s (sequences 10 s) too. Default false: they wait, as in a folder scan."),
+      missing_frames: external_exports.enum(["skip", "import"]).optional().describe(
+        "Image sequences with frames missing between the first and last frame. skip (default): left out and listed under missing_frames with the exact ranges, because After Effects stops the import with a modal 'is missing N frames' warning that waits until someone answers it. import: imported anyway; the warning then appears and blocks AE until it is answered (ae_dialogs reads it; its only button is OK)."
+      ),
       dry_run: external_exports.boolean().optional().describe("List what would be imported, with the interpretation each file would get, without importing."),
       watch: external_exports.boolean().optional().describe(`Turn auto-import on or off: while on, files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported into ${DEFAULT_ASSET_BIN} within seconds. Persists across restarts.`),
       expect: external_exports.object({ project_path: external_exports.string().min(1) }).describe("The open project's path; the import is refused if another project is open.")
@@ -12441,8 +12456,17 @@ var init_assets2 = __esm({
           if (candidates.length === 0) return null;
           const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
           const now = (this.opts.now ?? Date.now)();
-          const { fresh, already } = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+          const picked = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+          const { already } = picked;
           for (const c of already) seen.add(normPath(c.path));
+          for (const c of picked.fresh) {
+            if (!c.missing) continue;
+            const gk = `gap:${normPath(c.path)}:${c.missing.count}`;
+            if (this.tooBig.has(gk)) continue;
+            this.tooBig.add(gk);
+            this.opts.log?.("warn", `Asset watch: ${c.path} is missing ${c.missing.count} frame(s); it is imported once they arrive (or import it with ae_import_assets missing_frames: "import")`);
+          }
+          const fresh = picked.fresh.filter((c) => !c.missing);
           if (fresh.length === 0) return null;
           const res = await importAssetFiles(this.ctx, projectPath, DEFAULT_ASSET_BIN, fresh.slice(0, MAX_IMPORT), "asset_watch");
           for (const i of res.imported) seen.add(normPath(i.path));
@@ -12458,12 +12482,13 @@ var init_assets2 = __esm({
       ...plan(c),
       ...c.frames !== void 0 ? { frames: c.frames } : {},
       ...c.firstFrame !== void 0 ? { first_frame: c.firstFrame, last_frame: c.lastFrame } : {},
-      ...c.given ? { given: c.given } : {}
+      ...c.given ? { given: c.given } : {},
+      ...c.missing ? { missing: c.missing.count } : {}
     });
     assetsTools = [
       {
         name: "ae_import_assets",
-        description: `Import staged assets: files in the asset folder (${DEFAULT_ASSET_FOLDER}/ next to the open .aep unless \`folder\` says otherwise), or exactly the files in \`paths\`, that are not in the project yet go into the ${DEFAULT_ASSET_BIN} bin (\`bin\`, or an existing project folder by \`target_folder_id\`), with subfolders mirrored and numbered stills (shot_0001.png ...; at least 3 frames, 3-7 digits, not v002-style versions) as one sequence, which waits until 10 s after its newest frame so a render in progress is not imported half-done. Save generated or delivered files (images, renders, voice-overs) there, then call this; files already in the project are skipped, and files still being written wait. \`interpret\` (alpha, field separation, pulldown, conform_frame_rate, loop, pixel_aspect) and \`rules\` (by name pattern, extension, sequence or subfolder) set each file's interpretation in the same undo step: a setting a file can't take (alpha on a file without alpha, a frame rate on a still) is skipped and listed on its row, and a failed interpretation never fails the import. Footage colour profiles are not scriptable; the project's working space is in ae_project_settings. More than 200 new files (frames of a sequence count as one) are refused with a report: use a subfolder as \`folder\`, or \`paths\`. A tree with more than 100000 importable files is cut by the scan; the folders it cut are left out and listed under incomplete_folders. \`max_seconds\` (default 45) is checked between files: a long batch stops there, may be two undo steps, and lists the rest under not_attempted_paths; call again to continue (imported files are skipped). A file that throws is listed under failed with its stage (import or interpret) and the files before it stay imported in the same undo step. The lists are capped at 100 rows with totals. After Effects dialogs are never suppressed: read them with ae_dialogs. \`watch: true\` turns on auto-import: files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported within seconds, until \`watch: false\` (turn it on only when the user wants it; it imports without interpretation). The import is one undo group guarded by \`expect\`, with an auto checkpoint, and the bin and each applied setting are read back in separate evalScripts. ` + AGENT_SAFETY_GUIDANCE,
+        description: `Import staged assets: files in the asset folder (${DEFAULT_ASSET_FOLDER}/ next to the open .aep unless \`folder\` says otherwise), or exactly the files in \`paths\`, that are not in the project yet go into the ${DEFAULT_ASSET_BIN} bin (\`bin\`, or an existing project folder by \`target_folder_id\`), with subfolders mirrored and numbered stills (shot_0001.png ...; at least 3 frames, 3-7 digits, not v002-style versions) as one sequence, which waits until 10 s after its newest frame so a render in progress is not imported half-done. Save generated or delivered files (images, renders, voice-overs) there, then call this; files already in the project are skipped, and files still being written wait. \`interpret\` (alpha, field separation, pulldown, conform_frame_rate, loop, pixel_aspect) and \`rules\` (by name pattern, extension, sequence or subfolder) set each file's interpretation in the same undo step: a setting a file can't take (alpha on a file without alpha, a frame rate on a still) is skipped and listed on its row, and a failed interpretation never fails the import. Footage colour profiles are not scriptable; the project's working space is in ae_project_settings. More than 200 new files (frames of a sequence count as one) are refused with a report: use a subfolder as \`folder\`, or \`paths\`. A tree with more than 100000 importable files is cut by the scan; the folders it cut are left out and listed under incomplete_folders. \`max_seconds\` (default 45) is checked between files: a long batch stops there, may be two undo steps, and lists the rest under not_attempted_paths; call again to continue (imported files are skipped). A file that throws is listed under failed with its stage (import or interpret) and the files before it stay imported in the same undo step. The lists are capped at 100 rows with totals. A sequence with frames missing between its first and last frame is left out and listed under missing_frames with the ranges, because After Effects would stop the import with a modal warning (missing_frames: "import" imports it anyway). After Effects dialogs are never suppressed: read them with ae_dialogs. \`watch: true\` turns on auto-import: files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported within seconds, until \`watch: false\` (turn it on only when the user wants it; it imports without interpretation). The import is one undo group guarded by \`expect\`, with an auto checkpoint, and the bin and each applied setting are read back in separate evalScripts. ` + AGENT_SAFETY_GUIDANCE,
         schema: AeImportAssetsSchema,
         handler: async (args, ctx) => {
           const current = await readFootagePaths(ctx, "ae_import_assets (footage)", "ae_import_assets");
@@ -12520,10 +12545,20 @@ var init_assets2 = __esm({
           const { already, settling } = picked;
           const shared = args.interpret;
           const rules = args.rules;
-          const fresh = picked.fresh.map((c) => {
+          const gapped = args.missing_frames === "import" ? [] : picked.fresh.filter((c) => c.missing);
+          const fresh = picked.fresh.filter((c) => gapped.indexOf(c) === -1).map((c) => {
             const interpret = interpretWanted ? resolveInterpret(c, shared, rules) : void 0;
             return interpret ? { ...c, interpret } : c;
           });
+          const gapRows = gapped.slice(0, LIST_ROWS).map((c) => ({
+            path: c.path,
+            frames: c.frames,
+            first_frame: c.firstFrame,
+            last_frame: c.lastFrame,
+            missing: c.missing?.count,
+            missing_ranges: (c.missing?.ranges ?? []).map(([a, b]) => a === b ? String(a) : `${a}-${b}`).join(", ") + (c.missing?.truncated ? ", ..." : "")
+          }));
+          const importedGapped = args.missing_frames === "import" ? picked.fresh.filter((c) => c.missing) : [];
           for (const c of fresh) {
             if (!c.interpret) continue;
             const ok = InterpretSettingsSchema.safeParse(c.interpret);
@@ -12554,7 +12589,13 @@ var init_assets2 = __esm({
               singles_not_checked: scanStats.unchecked_singles,
               singles_message: `${scanStats.unchecked_singles} single file(s) were not looked at: a scan checks at most ${MAX_SINGLE_STATS} single files. Use a subfolder as \`folder\`, or \`paths\`.`
             } : {},
-            ...watch ? { watch } : {}
+            ...watch ? { watch } : {},
+            ...gapped.length > 0 ? {
+              missing_frames: gapRows,
+              ...gapped.length > LIST_ROWS ? { missing_frames_total: gapped.length } : {},
+              missing_frames_message: `${gapped.length} sequence(s) have frames missing and were not imported: After Effects would stop the import with a modal "is missing N frames" warning. Re-render the missing frames, or call again with missing_frames: "import" and answer the warning (ae_dialogs).`
+            } : {},
+            ...importedGapped.length > 0 && !args.dry_run ? { missing_frames_note: `${importedGapped.length} sequence(s) with missing frames are imported: After Effects shows an "is missing N frames" warning for each, and the import waits until it is answered. Read it with ae_dialogs.` } : {}
           };
           if (args.dry_run || fresh.length === 0) {
             const empty = shapeImportResult({ requested: fresh.length + scanFailed.length, imported: [], failed: scanFailed, skipped_existing: already.length, still_writing: settling.length });
@@ -14747,7 +14788,7 @@ function hasPillBorders(png, label, wordHeight) {
 function nearRing(r, g, b) {
   return Math.abs(r - RING_RGB[0]) <= RING_TOLERANCE && Math.abs(g - RING_RGB[1]) <= RING_TOLERANCE && Math.abs(b - RING_RGB[2]) <= RING_TOLERANCE;
 }
-function findRings(png) {
+function findRings(png, scale = 1) {
   const { width, height, data } = png;
   const mask = new Uint8Array(width * height);
   for (let p = 0; p < width * height; p++) {
@@ -14792,13 +14833,13 @@ function findRings(png) {
     const w = x2 - x1 + 1;
     const h = y2 - y1 + 1;
     const aspect = w / h;
-    if (count >= RING_MIN_PIXELS && aspect >= RING_MIN_ASPECT && aspect <= RING_MAX_ASPECT && h >= RING_MIN_HEIGHT && h <= RING_MAX_HEIGHT) {
+    if (count >= RING_MIN_PIXELS * scale && aspect >= RING_MIN_ASPECT && aspect <= RING_MAX_ASPECT && h >= RING_MIN_HEIGHT * scale && h <= RING_MAX_HEIGHT * scale) {
       found.push({ x1, y1, x2, y2 });
     }
   }
   return found;
 }
-function otherPillOnRow(png, label, wordHeight) {
+function otherPillOnRow(png, label, wordHeight, scale = 1) {
   const y = Math.round((label.y1 + label.y2) / 2);
   if (y < 0 || y >= png.height) return true;
   const values = [];
@@ -14816,10 +14857,15 @@ function otherPillOnRow(png, label, wordHeight) {
       bg = l;
     }
   });
-  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK;
+  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK * scale;
   const from = label.x1 - reach;
   const to = label.x2 + reach;
-  for (let x = 2; x < png.width - 2; x++) {
+  const edgeMax = Math.max(2, Math.round(0.05 * png.width));
+  let left = 2;
+  while (left < edgeMax && Math.abs(values[left] - bg) >= OUTLINE_MIN_CONTRAST) left++;
+  let right = png.width - 3;
+  while (right > png.width - 1 - edgeMax && Math.abs(values[right] - bg) >= OUTLINE_MIN_CONTRAST) right--;
+  for (let x = left; x <= right; x++) {
     if (x >= from && x <= to) continue;
     if (Math.abs(values[x] - bg) >= OUTLINE_MIN_CONTRAST) return true;
   }
@@ -14830,6 +14876,7 @@ function noButtons(infos) {
   return { buttons: [], default_index: null, default_source: null, body_text: body };
 }
 function analysePaintedDialog(lines, png, size) {
+  const scale = size && finite(size.scale) && size.scale >= 1 && size.scale <= 5 ? size.scale : 1;
   const infos = [];
   for (const l of Array.isArray(lines) ? lines : []) {
     const info = infoOf(l);
@@ -14870,7 +14917,7 @@ function analysePaintedDialog(lines, png, size) {
   }
   if (candidates.length < 2 && bodyInfos.length > 0) {
     const margin = median(bodyInfos.map((i) => Math.min(...i.words.map((w) => w.x))));
-    if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE) return noButtons(infos);
+    if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE * scale) return noButtons(infos);
   }
   if (png) {
     for (const c of candidates) {
@@ -14888,7 +14935,7 @@ function analysePaintedDialog(lines, png, size) {
   let source = null;
   let ringCount = 0;
   if (png) {
-    const rings = findRings(png);
+    const rings = findRings(png, scale);
     ringCount = rings.length;
     if (rings.length === 1) {
       const ring = rings[0];
@@ -14904,7 +14951,7 @@ function analysePaintedDialog(lines, png, size) {
       }
     }
   }
-  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight) : void 0;
+  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale) : void 0;
   if (defaultIndex === null && buttons.length === 1 && png && ringCount === 0) {
     const c = candidates[0];
     if (!otherPill) {
@@ -15159,7 +15206,8 @@ function normalizeRawDialog(raw, meta) {
     }
     const analysis = analysePaintedDialog(sanitizeOcrLines(raw.ocr_lines), pixels, {
       width: boundingRect.width,
-      height: boundingRect.height
+      height: boundingRect.height,
+      scale: typeof raw.dpi === "number" && raw.dpi >= 96 && raw.dpi <= 96 * 5 ? raw.dpi / 96 : 1
     });
     buttons = analysis.buttons.map((b) => {
       const name = normalizeOcrLabel(b.name);
@@ -28270,7 +28318,7 @@ function planSamples(frames, count) {
   const pairs2 = sortedStarts.map((k) => [pos.get(k), pos.get(k + 1)]);
   return { indexes, pairs: pairs2, dense: false };
 }
-function sequenceGaps(names, firstName) {
+function sequenceGaps2(names, firstName) {
   const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(firstName);
   if (!m) return null;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -28847,7 +28895,7 @@ async function scrubFile(args, ctx) {
   let sequenceInfo = null;
   if (sequence) {
     try {
-      sequenceInfo = sequenceGaps(fs29.readdirSync(path30.dirname(file)), path30.basename(file));
+      sequenceInfo = sequenceGaps2(fs29.readdirSync(path30.dirname(file)), path30.basename(file));
     } catch {
       sequenceInfo = null;
     }
@@ -32599,7 +32647,7 @@ function planStart(queue, overwrite, live = []) {
           code: "output_exists",
           item_index: it.index,
           file: m.file,
-          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (whether After Effects then prompts or silently overwrites is not measured).`
+          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (After Effects then asks "Overwrite?" and the render waits until it is answered).`
         });
       }
       job.outputs.push({ item_index: it.index, comp_id: it.comp_id, module: m.index, file: m.file, sequence });
@@ -32891,7 +32939,7 @@ var init_rqrender = __esm({
     READ_BACK_TIMEOUT_MS = 12e4;
     MAX_TEXT = 2e3;
     RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
-    STOP_TEXT = "The user stops it with the Stop button in After Effects' Render Queue panel; the item then reads USER_STOPPED. A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. Whether After Effects' UI stays clickable during a render started by script is not measured, so on a dirty project ask the user to save first.";
+    STOP_TEXT = "Measured live (AE 26.3, 2026-11-07, over Remote Desktop): a render started by script LOCKS After Effects' UI for its whole length, so the user could NOT reach the Stop button; ending After Effects was the only way out. A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. So keep these renders short, save a dirty project first, and prefer ae_aerender_start (or Media Encoder) for long renders. A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.";
     RenderJobStore = class {
       constructor(filePath) {
         this.filePath = filePath;
@@ -32986,7 +33034,7 @@ var init_rqrender = __esm({
     SEQ_TOKEN = /\[(#+)\]/;
     AeRenderQueueRenderSchema = external_exports.object({
       max_hours: external_exports.number().min(1).max(48).default(12).describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
-      overwrite: external_exports.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool; whether After Effects then prompts or silently overwrites is not measured."),
+      overwrite: external_exports.boolean().optional().describe(`Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool. After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was.`),
       sequence_check: SequenceCheckSchema,
       expect: ExpectSchema
     });
@@ -32997,7 +33045,7 @@ var init_rqrender = __esm({
     rqrenderTools = [
       {
         name: "ae_render_queue_render",
-        description: `Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. Use it when \`ae_aerender_start\` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. Prefer \`ae_aerender_start\` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST (the Stop button's behaviour is not measured). NEVER ask the user to press Render in the Render Queue panel: call this instead. While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. These keep working: \`ae_render_queue_render_status\` (state, elapsed, output files, any blocking popup; it never touches AE), \`ae_dialogs\`, \`ae_dialog_respond\`, \`ae_diagnostics\`; \`ae_status\` answers with the render state; \`ae_ask_user\` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads \`lost\`. Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since "Save in subfolder" can make it at render time; nothing is created); or an output file already exists (unless \`overwrite: true\`; nothing is ever deleted, and whether After Effects then prompts is not measured). A queued aerender job or batch item is held (not started) while the render runs. When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run \`ae_verify_render\` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold \`sequence_check\` (a warning, the render still starts; \`sequence_check: "block"\` refuses (also when the check could not finish), "off" skips) and \`resource_warnings\` (GPU nearly full, or another app such as Cinema 4D running). If \`resource_warnings\` is present, tell the user before continuing. \`max_hours\` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. Stopping: ${STOP_TEXT} Jobs are kept on disk; if the service restarts during a render the job reads \`lost\` and you must look at After Effects. ` + AGENT_SAFETY_GUIDANCE,
+        description: `Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. Use it when \`ae_aerender_start\` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. Prefer \`ae_aerender_start\` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST: After Effects' UI is locked for the whole render and the Stop button cannot be reached (measured), so a render cannot be stopped short of ending After Effects. Keep these renders short. NEVER ask the user to press Render in the Render Queue panel: call this instead. While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. These keep working: \`ae_render_queue_render_status\` (state, elapsed, output files, any blocking popup; it never touches AE), \`ae_dialogs\`, \`ae_dialog_respond\`, \`ae_diagnostics\`; \`ae_status\` answers with the render state; \`ae_ask_user\` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads \`lost\`. Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since "Save in subfolder" can make it at render time; nothing is created); or an output file already exists (unless \`overwrite: true\`; nothing is ever deleted, and After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was). A queued aerender job or batch item is held (not started) while the render runs. When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run \`ae_verify_render\` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold \`sequence_check\` (a warning, the render still starts; \`sequence_check: "block"\` refuses (also when the check could not finish), "off" skips) and \`resource_warnings\` (GPU nearly full, or another app such as Cinema 4D running). If \`resource_warnings\` is present, tell the user before continuing. \`max_hours\` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. Stopping: ${STOP_TEXT} Jobs are kept on disk; if the service restarts during a render the job reads \`lost\` and you must look at After Effects. ` + AGENT_SAFETY_GUIDANCE,
         schema: AeRenderQueueRenderSchema,
         handler: async (args, ctx) => {
           ctx.quarantine.assertClear();

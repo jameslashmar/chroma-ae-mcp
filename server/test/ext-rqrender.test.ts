@@ -170,7 +170,8 @@ describe("rqrender schemas and descriptions", () => {
     expect(d).toMatch(/TELL THE USER FIRST/);
     expect(d).toMatch(/NEVER ask the user to press Render/);
     expect(d).toMatch(/Stop button/);
-    expect(d).toMatch(/not measured/);
+    expect(d).toMatch(/Stop button cannot be reached/);
+    expect(d).toMatch(/Overwrite\?/);
     expect(d).toMatch(/unsaved/i);
     const s = tool("ae_render_queue_render_status").description;
     expect(s).toMatch(/NEVER touches After Effects/);

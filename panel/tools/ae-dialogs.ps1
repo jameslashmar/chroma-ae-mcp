@@ -29,6 +29,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Per-monitor DPI awareness, before any window call. A DPI-unaware process gets scaled-down window
+# rects on a scaled display while PrintWindow draws at full size, so the capture kept only the
+# dialog's top-left corner (OCR read just the title) and the rect drifted between calls
+# (a false dialog_changed). Seen live on PRISM, 2026-11-07.
+try {
+    Add-Type -Namespace ChromaDpi -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(System.IntPtr hWnd);' -ErrorAction Stop
+    # -4 = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (Windows 10 1703+). Fails harmlessly elsewhere.
+    [void][ChromaDpi.Native]::SetProcessDpiAwarenessContext([IntPtr](-4))
+} catch { }
+
 function Write-JsonOut([hashtable]$Obj) {
     $json = $Obj | ConvertTo-Json -Compress -Depth 10
     # Escape everything outside ASCII: stdout may be a legacy code page (ibm850), which would corrupt it.
@@ -512,7 +522,11 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
                     $wr = New-Object ChromaWin32+RECT
                     if ([ChromaWin32]::GetWindowRect([IntPtr]$hwndVal, [ref]$wr)) { $winRect = "$($wr.Left),$($wr.Top),$($wr.Right),$($wr.Bottom)" }
                 } catch {}
+                # The window's DPI (96 = 100 %): the painted-dialog geometry scales its pixel limits by it.
+                $dpi = 0
+                try { $dpi = [int][ChromaDpi.Native]::GetDpiForWindow([IntPtr]$hwndVal) } catch {}
                 $dialogs += @{
+                    dpi          = $dpi
                     win_rect     = $winRect
                     text_source  = $textSource
                     handle       = $hwndVal

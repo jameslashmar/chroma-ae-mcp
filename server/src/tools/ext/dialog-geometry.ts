@@ -158,7 +158,7 @@ function nearRing(r: number, g: number, b: number): boolean {
 }
 
 /** Every connected ring-coloured cluster that looks like a button's outline (none, one or several). */
-export function findRings(png: PngPixels): Box[] {
+export function findRings(png: PngPixels, scale = 1): Box[] {
   const { width, height, data } = png;
   const mask = new Uint8Array(width * height);
   for (let p = 0; p < width * height; p++) {
@@ -203,7 +203,8 @@ export function findRings(png: PngPixels): Box[] {
     const w = x2 - x1 + 1;
     const h = y2 - y1 + 1;
     const aspect = w / h;
-    if (count >= RING_MIN_PIXELS && aspect >= RING_MIN_ASPECT && aspect <= RING_MAX_ASPECT && h >= RING_MIN_HEIGHT && h <= RING_MAX_HEIGHT) {
+    // The pixel limits are for 100 % display scaling; the capture is in physical pixels, so they grow with it.
+    if (count >= RING_MIN_PIXELS * scale && aspect >= RING_MIN_ASPECT && aspect <= RING_MAX_ASPECT && h >= RING_MIN_HEIGHT * scale && h <= RING_MAX_HEIGHT * scale) {
       found.push({ x1, y1, x2, y2 });
     }
   }
@@ -214,7 +215,7 @@ export function findRings(png: PngPixels): Box[] {
  * True when the row at the label's mid-height shows something besides this label and its own pill: another
  * pill or label that OCR did not read. The columns within the label's pill reach are ignored.
  */
-export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number): boolean {
+export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number, scale = 1): boolean {
   const y = Math.round((label.y1 + label.y2) / 2);
   if (y < 0 || y >= png.height) return true;
   const values: number[] = [];
@@ -232,10 +233,17 @@ export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number): 
       bg = l;
     }
   });
-  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK;
+  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK * scale;
   const from = label.x1 - reach;
   const to = label.x2 + reach;
-  for (let x = 2; x < png.width - 2; x++) {
+  // Skip the window's own edge: the capture can include the near-black resize border Windows draws outside
+  // the dialog (about 7 px at 100 %), which is not a pill. Only a short run at each edge is trimmed.
+  const edgeMax = Math.max(2, Math.round(0.05 * png.width));
+  let left = 2;
+  while (left < edgeMax && Math.abs(values[left] - bg) >= OUTLINE_MIN_CONTRAST) left++;
+  let right = png.width - 3;
+  while (right > png.width - 1 - edgeMax && Math.abs(values[right] - bg) >= OUTLINE_MIN_CONTRAST) right--;
+  for (let x = left; x <= right; x++) {
     if (x >= from && x <= to) continue;
     if (Math.abs(values[x] - bg) >= OUTLINE_MIN_CONTRAST) return true;
   }
@@ -262,8 +270,9 @@ function noButtons(infos: LineInfo[]): PaintedAnalysis {
 export function analysePaintedDialog(
   lines: OcrLine[],
   png: PngPixels | null,
-  size?: { width: number; height: number }
+  size?: { width: number; height: number; scale?: number }
 ): PaintedAnalysis {
+  const scale = size && finite(size.scale) && size.scale >= 1 && size.scale <= 5 ? size.scale : 1;
   const infos: LineInfo[] = [];
   for (const l of Array.isArray(lines) ? lines : []) {
     const info = infoOf(l);
@@ -311,7 +320,7 @@ export function analysePaintedDialog(
   }
   if (candidates.length < 2 && bodyInfos.length > 0) {
     const margin = median(bodyInfos.map((i) => Math.min(...i.words.map((w) => w.x))));
-    if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE) return noButtons(infos);
+    if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE * scale) return noButtons(infos);
   }
 
   // 3. The pill borders (second signal, needs the screenshot).
@@ -336,7 +345,7 @@ export function analysePaintedDialog(
   let source: PaintedAnalysis["default_source"] = null;
   let ringCount = 0;
   if (png) {
-    const rings = findRings(png);
+    const rings = findRings(png, scale);
     ringCount = rings.length;
     if (rings.length === 1) {
       const ring = rings[0];
@@ -354,7 +363,7 @@ export function analysePaintedDialog(
   }
   // With one button read, does the row show another pill OCR missed? Computed for the ringed case too: a lone ringed OK is not
   // an unread Cancel.
-  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight) : undefined;
+  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale) : undefined;
   if (defaultIndex === null && buttons.length === 1 && png && ringCount === 0) {
     const c = candidates[0];
     if (!otherPill) {

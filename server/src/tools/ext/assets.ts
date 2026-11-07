@@ -90,6 +90,12 @@ export const AeImportAssetsSchema = z
     rules: z.array(RuleSchema).max(20).optional().describe("Per-file interpretation: for each setting the first rule whose match fits wins over `interpret`."),
     max_seconds: z.number().min(5).max(110).optional().describe("Time budget, checked between files (default 45). What is left is listed under not_attempted_paths; call again to continue."),
     allow_writing: z.boolean().optional().describe("With paths: import files changed in the last 2 s (sequences 10 s) too. Default false: they wait, as in a folder scan."),
+    missing_frames: z
+      .enum(["skip", "import"])
+      .optional()
+      .describe(
+        "Image sequences with frames missing between the first and last frame. skip (default): left out and listed under missing_frames with the exact ranges, because After Effects stops the import with a modal 'is missing N frames' warning that waits until someone answers it. import: imported anyway; the warning then appears and blocks AE until it is answered (ae_dialogs reads it; its only button is OK)."
+      ),
     dry_run: z.boolean().optional().describe("List what would be imported, with the interpretation each file would get, without importing."),
     watch: z
       .boolean()
@@ -385,8 +391,19 @@ export class AssetWatcher {
       if (candidates.length === 0) return null;
       const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
       const now = (this.opts.now ?? Date.now)();
-      const { fresh, already } = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+      const picked = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+      const { already } = picked;
       for (const c of already) seen.add(normPath(c.path));
+      // A sequence with missing frames would stop AE behind its modal "is missing N frames" warning with no one
+      // there to answer it: it waits (not marked seen) until the gap is filled, and the log says so once per gap.
+      for (const c of picked.fresh) {
+        if (!c.missing) continue;
+        const gk = `gap:${normPath(c.path)}:${c.missing.count}`;
+        if (this.tooBig.has(gk)) continue;
+        this.tooBig.add(gk);
+        this.opts.log?.("warn", `Asset watch: ${c.path} is missing ${c.missing.count} frame(s); it is imported once they arrive (or import it with ae_import_assets missing_frames: "import")`);
+      }
+      const fresh = picked.fresh.filter((c) => !c.missing);
       if (fresh.length === 0) return null;
       const res = await importAssetFiles(this.ctx, projectPath, DEFAULT_ASSET_BIN, fresh.slice(0, MAX_IMPORT), "asset_watch");
       for (const i of res.imported) seen.add(normPath(i.path));
@@ -405,6 +422,7 @@ const dryRow = (c: AssetCandidate & { given?: string }) => ({
   ...(c.frames !== undefined ? { frames: c.frames } : {}),
   ...(c.firstFrame !== undefined ? { first_frame: c.firstFrame, last_frame: c.lastFrame } : {}),
   ...(c.given ? { given: c.given } : {}),
+  ...(c.missing ? { missing: c.missing.count } : {}),
 });
 
 export const assetsTools: ToolDefinition<any>[] = [
@@ -414,7 +432,7 @@ export const assetsTools: ToolDefinition<any>[] = [
       `Import staged assets: files in the asset folder (${DEFAULT_ASSET_FOLDER}/ next to the open .aep unless \`folder\` says otherwise), or exactly the files in \`paths\`, that are not in the project yet go into the ${DEFAULT_ASSET_BIN} bin (\`bin\`, or an existing project folder by \`target_folder_id\`), with subfolders mirrored and numbered stills (shot_0001.png ...; at least 3 frames, 3-7 digits, not v002-style versions) as one sequence, which waits until 10 s after its newest frame so a render in progress is not imported half-done. ` +
       "Save generated or delivered files (images, renders, voice-overs) there, then call this; files already in the project are skipped, and files still being written wait. " +
       "`interpret` (alpha, field separation, pulldown, conform_frame_rate, loop, pixel_aspect) and `rules` (by name pattern, extension, sequence or subfolder) set each file's interpretation in the same undo step: a setting a file can't take (alpha on a file without alpha, a frame rate on a still) is skipped and listed on its row, and a failed interpretation never fails the import. Footage colour profiles are not scriptable; the project's working space is in ae_project_settings. " +
-      "More than 200 new files (frames of a sequence count as one) are refused with a report: use a subfolder as `folder`, or `paths`. A tree with more than 100000 importable files is cut by the scan; the folders it cut are left out and listed under incomplete_folders. `max_seconds` (default 45) is checked between files: a long batch stops there, may be two undo steps, and lists the rest under not_attempted_paths; call again to continue (imported files are skipped). A file that throws is listed under failed with its stage (import or interpret) and the files before it stay imported in the same undo step. The lists are capped at 100 rows with totals. After Effects dialogs are never suppressed: read them with ae_dialogs. " +
+      "More than 200 new files (frames of a sequence count as one) are refused with a report: use a subfolder as `folder`, or `paths`. A tree with more than 100000 importable files is cut by the scan; the folders it cut are left out and listed under incomplete_folders. `max_seconds` (default 45) is checked between files: a long batch stops there, may be two undo steps, and lists the rest under not_attempted_paths; call again to continue (imported files are skipped). A file that throws is listed under failed with its stage (import or interpret) and the files before it stay imported in the same undo step. The lists are capped at 100 rows with totals. A sequence with frames missing between its first and last frame is left out and listed under missing_frames with the ranges, because After Effects would stop the import with a modal warning (missing_frames: \"import\" imports it anyway). After Effects dialogs are never suppressed: read them with ae_dialogs. " +
       `\`watch: true\` turns on auto-import: files that arrive in ${DEFAULT_ASSET_FOLDER}/ next to whichever project is open are imported within seconds, until \`watch: false\` (turn it on only when the user wants it; it imports without interpretation). ` +
       "The import is one undo group guarded by `expect`, with an auto checkpoint, and the bin and each applied setting are read back in separate evalScripts. " +
       AGENT_SAFETY_GUIDANCE,
@@ -479,10 +497,24 @@ export const assetsTools: ToolDefinition<any>[] = [
       // Resolve each file's interpretation; a bad combination refuses the call before anything is written.
       const shared = args.interpret as Record<string, unknown> | undefined;
       const rules = args.rules as ImportRule[] | undefined;
-      const fresh = picked.fresh.map((c) => {
-        const interpret = interpretWanted ? resolveInterpret(c, shared, rules) : undefined;
-        return interpret ? { ...c, interpret } : c;
-      });
+      // A sequence with missing frames stops the import behind AE's modal "is missing N frames" warning
+      // (seen live, AE 26.3): it is left out unless missing_frames is "import".
+      const gapped = args.missing_frames === "import" ? [] : picked.fresh.filter((c) => c.missing);
+      const fresh = picked.fresh
+        .filter((c) => gapped.indexOf(c) === -1)
+        .map((c) => {
+          const interpret = interpretWanted ? resolveInterpret(c, shared, rules) : undefined;
+          return interpret ? { ...c, interpret } : c;
+        });
+      const gapRows = gapped.slice(0, LIST_ROWS).map((c) => ({
+        path: c.path,
+        frames: c.frames,
+        first_frame: c.firstFrame,
+        last_frame: c.lastFrame,
+        missing: c.missing?.count,
+        missing_ranges: (c.missing?.ranges ?? []).map(([a, b]) => (a === b ? String(a) : `${a}-${b}`)).join(", ") + (c.missing?.truncated ? ", ..." : ""),
+      }));
+      const importedGapped = args.missing_frames === "import" ? picked.fresh.filter((c) => c.missing) : [];
       for (const c of fresh) {
         if (!c.interpret) continue;
         const ok = InterpretSettingsSchema.safeParse(c.interpret);
@@ -518,6 +550,16 @@ export const assetsTools: ToolDefinition<any>[] = [
             }
           : {}),
         ...(watch ? { watch } : {}),
+        ...(gapped.length > 0
+          ? {
+              missing_frames: gapRows,
+              ...(gapped.length > LIST_ROWS ? { missing_frames_total: gapped.length } : {}),
+              missing_frames_message: `${gapped.length} sequence(s) have frames missing and were not imported: After Effects would stop the import with a modal "is missing N frames" warning. Re-render the missing frames, or call again with missing_frames: "import" and answer the warning (ae_dialogs).`,
+            }
+          : {}),
+        ...(importedGapped.length > 0 && !args.dry_run
+          ? { missing_frames_note: `${importedGapped.length} sequence(s) with missing frames are imported: After Effects shows an "is missing N frames" warning for each, and the import waits until it is answered. Read it with ae_dialogs.` }
+          : {}),
       };
       if (args.dry_run || fresh.length === 0) {
         const empty = shapeImportResult({ requested: fresh.length + scanFailed.length, imported: [], failed: scanFailed, skipped_existing: already.length, still_writing: settling.length });

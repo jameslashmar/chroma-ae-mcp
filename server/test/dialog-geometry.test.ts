@@ -224,6 +224,49 @@ describe("findRings limits", () => {
   it("the progress-bar blue is not a ring", () => {
     expect(findRings(makeImage([], { bar: true }))).toHaveLength(0);
   });
+  it("scales its pixel limits with the display: the 152x80 ring of a 250 % capture is found only at scale 2.5", () => {
+    // Measured live on PRISM (AE 26.3, 240 dpi): the lone OK's ring was 152x80, 5 px thick.
+    const big = makeImage([], { width: 1222, height: 684, rects: [{ x1: 984, y1: 518, x2: 1135, y2: 597, t: 5 }] });
+    expect(findRings(big)).toHaveLength(0);
+    expect(findRings(big, 2.5)).toHaveLength(1);
+    // and a 100 % ring is not lost at scale 1
+    expect(findRings(ring(76, 40), 1)).toHaveLength(1);
+  });
+});
+
+describe("otherPillOnRow and the window edge", () => {
+  it("the near-black resize border at each edge of the capture is not another pill", () => {
+    const png = makeImage([{ cx: 311, cy: 257, w: 70 }]);
+    const label = { x1: 300, y1: 250, x2: 322, y2: 264 };
+    expect(otherPillOnRow(png, label, 14)).toBe(false);
+    // paint a 7 px near-black frame on both sides, as a capture of the whole window rect can show
+    for (let y = 0; y < png.height; y++) {
+      for (const x of [0, 1, 2, 3, 4, 5, 6, png.width - 7, png.width - 6, png.width - 5, png.width - 4, png.width - 3, png.width - 2, png.width - 1]) {
+        const i = (y * png.width + x) * 4;
+        png.data[i] = png.data[i + 1] = png.data[i + 2] = 0;
+      }
+    }
+    expect(otherPillOnRow(png, label, 14)).toBe(false);
+  });
+});
+
+describe("analysePaintedDialog at a scaled display", () => {
+  it("a lone OK at 250 %: default by its ring with scale 2.5, unknown at scale 1", () => {
+    const lines = [
+      line(word("After", 100, 170, 90, 35), word("Effects", 200, 170, 130, 35)),
+      line(word("After", 100, 285, 70, 30), word("warning:", 180, 285, 120, 30), word("missing", 310, 285, 120, 30)),
+      line(word("1021).", 100, 330, 80, 30), word("preferences.", 190, 330, 160, 30)),
+      line(word("0K", 1039, 549, 39, 21)),
+    ];
+    const png = makeImage([], { width: 1222, height: 684, rects: [{ x1: 984, y1: 518, x2: 1135, y2: 597, t: 5 }, { x1: 996, y1: 526, x2: 1123, y2: 589, t: 3, rgb: [200, 200, 200] }] });
+    const at1 = analysePaintedDialog(lines, png, { width: 1222, height: 684 });
+    expect(at1.default_index).toBeNull();
+    const at25 = analysePaintedDialog(lines, png, { width: 1222, height: 684, scale: 2.5 });
+    expect(at25.buttons.map((b) => b.name)).toEqual(["0K"]);
+    expect(at25.default_source).toBe("ring");
+    expect(at25.buttons[0].default).toBe(true);
+    expect(at25.other_pill_unread).toBe(false);
+  });
 });
 
 // ---------- synthetic reproductions of the layouts measured on real AE 26 screenshots ----------

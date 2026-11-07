@@ -356,6 +356,19 @@ describe("scanning", () => {
     for (const n of [3, 4, 5, 9]) touch(path.join(root, `s_${String(n).padStart(4, "0")}.exr`));
     const [seq] = scanAssets(root);
     expect(seq).toMatchObject({ sequence: true, frames: 4, firstFrame: 3, lastFrame: 9 });
+    expect(seq.missing).toEqual({ count: 3, ranges: [[6, 8]], truncated: false });
+  });
+
+  it("records the missing frames of a sequence from a scan and from explicit paths; a whole sequence has none", () => {
+    const root = tempDir("chroma-gaps-");
+    for (let n = 1001; n <= 1050; n++) if (n !== 1020 && n !== 1021 && n !== 1033) touch(path.join(root, "g", `seq_${n}.png`));
+    for (let n = 1; n <= 5; n++) touch(path.join(root, "w", `whole_${String(n).padStart(4, "0")}.png`));
+    const found = scanAssets(root);
+    const g = found.find((c) => path.basename(c.path) === "seq_1001.png")!;
+    expect(g.missing).toEqual({ count: 3, ranges: [[1020, 1021], [1033, 1033]], truncated: false });
+    expect(found.find((c) => path.basename(c.path) === "whole_0001.png")!.missing).toBeUndefined();
+    const fromPaths = candidatesFromPaths([path.join(root, "g", "seq_1040.png")], { root }).candidates[0];
+    expect(fromPaths.missing?.count).toBe(3);
   });
 
   it("an explicit list gets the scan's sequence rule, finds the first frame, and reports missing files", () => {
@@ -792,6 +805,39 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     expect(out.receipt.mismatches.some((m: any) => m.path.endsWith(".loop"))).toBe(true);
   });
 
+  it("a sequence with missing frames is left out with its ranges by default, and imported with a note when asked", async () => {
+    const root = tempDir("chroma-imp-gap-");
+    for (let n = 1001; n <= 1010; n++) if (n !== 1004 && n !== 1005) touch(path.join(root, `seq_${n}.png`));
+    touch(path.join(root, "m.mov"));
+    const project = path.join(root, "Show.aep");
+    const paths = [path.join(root, "seq_1001.png"), path.join(root, "m.mov")];
+
+    const skip = importBridge(project, { footage: [] });
+    const out: any = await importTool.handler(AeImportAssetsSchema.parse({ paths, allow_writing: true, expect: { project_path: project } }), skip.ctx);
+    const write = skip.calls.find((c) => c.fn === "importAssets")!.args;
+    expect(write.items.map((i: any) => path.basename(i.path))).toEqual(["m.mov"]);
+    expect(out.missing_frames).toEqual([
+      { path: path.join(root, "seq_1001.png"), frames: 8, first_frame: 1001, last_frame: 1010, missing: 2, missing_ranges: "1004-1005" },
+    ]);
+    expect(out.missing_frames_message).toMatch(/not imported/);
+
+    const imp = importBridge(project, { footage: [] });
+    const out2: any = await importTool.handler(
+      AeImportAssetsSchema.parse({ paths, allow_writing: true, missing_frames: "import", expect: { project_path: project } }),
+      imp.ctx
+    );
+    expect(imp.calls.find((c) => c.fn === "importAssets")!.args.items.map((i: any) => path.basename(i.path)).sort()).toEqual(["m.mov", "seq_1001.png"]);
+    expect(out2.missing_frames).toBeUndefined();
+    expect(out2.missing_frames_note).toMatch(/is missing N frames/);
+
+    // a dry run lists it as left out too, and sends no write
+    const dry = importBridge(project, { footage: [] });
+    const out3: any = await importTool.handler(AeImportAssetsSchema.parse({ paths, allow_writing: true, dry_run: true, expect: { project_path: project } }), dry.ctx);
+    expect(out3.to_import.map((r: any) => path.basename(r.path))).toEqual(["m.mov"]);
+    expect(out3.missing_frames[0].missing_ranges).toBe("1004-1005");
+    expect(dry.calls.some((c) => c.fn === "importAssets")).toBe(false);
+  });
+
   it("a dry run shows the interpretation each file would get and sends no write", async () => {
     const root = tempDir("chroma-imp-");
     touch(path.join(root, "_assets", "a.mov"));
@@ -910,6 +956,28 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     const watcher = new AssetWatcher(ctx, { log: (_l, m) => logs.push(m) });
     expect(await watcher.tick()).toEqual({ imported: 200, failed: 0 });
     expect(logs.join("\n")).toMatch(/1 more new file\(s\) wait for the next look/);
+  }, 40_000);
+
+  it("the watcher leaves a sequence with missing frames out, logs it once, and imports it when the gap is filled", async () => {
+    const root = tempDir("chroma-watch-gap-");
+    const assets = path.join(root, "_assets");
+    fs.mkdirSync(assets);
+    for (let n = 1001; n <= 1006; n++) if (n !== 1003) touch(path.join(assets, `g_${n}.png`));
+    touch(path.join(assets, "logo.png"));
+    const project = path.join(root, "Show.aep");
+    const { ctx, calls } = importBridge(project, { footage: [] });
+    ctx.settings!.updateAssetWatch({ enabled: true, since: new Date(Date.now() - 3_600_000).toISOString() });
+    const logs: string[] = [];
+    // A clock two minutes ahead: every file is past the settle time (a sequence waits 10 s after its newest frame).
+    const watcher = new AssetWatcher(ctx, { log: (_l, m) => logs.push(m), now: () => Date.now() + 120_000 });
+    expect(await watcher.tick()).toEqual({ imported: 1, failed: 0 });
+    expect(calls.filter((c) => c.fn === "importAssets")[0].args.items.map((i: any) => path.basename(i.path))).toEqual(["logo.png"]);
+    expect(await watcher.tick()).toBeNull();
+    expect(logs.filter((l) => /is missing 1 frame/.test(l))).toHaveLength(1);
+    // the missing frame lands: the sequence is imported on a later look
+    touch(path.join(assets, "g_1003.png"));
+    expect(await watcher.tick()).toEqual({ imported: 1, failed: 0 });
+    expect(calls.filter((c) => c.fn === "importAssets")[1].args.items.map((i: any) => path.basename(i.path))).toEqual(["g_1001.png"]);
   }, 40_000);
 
   it("the watcher logs files left at the host's time budget instead of dropping them", async () => {

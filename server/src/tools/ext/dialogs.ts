@@ -56,6 +56,8 @@ export interface DialogBoundingRect {
 
 export interface RawPs1Dialog {
   handle: number;
+  /** The window's DPI from GetDpiForWindow (96 = 100 %); 0 or missing when unknown. */
+  dpi?: number;
   title?: string;
   class?: string;
   isModal?: boolean;
@@ -97,6 +99,8 @@ export type DialogKind = "info" | "question" | "destructive";
 
 export interface EnrichedDialog {
   handle: number;
+  /** The window's DPI from GetDpiForWindow (96 = 100 %); 0 or missing when unknown. */
+  dpi?: number;
   title: string;
   class: string;
   isModal: boolean;
@@ -146,6 +150,8 @@ export type Ps1RespondOutput =
 
 interface SeenDialogMeta {
   handle: number;
+  /** The window's DPI from GetDpiForWindow (96 = 100 %); 0 or missing when unknown. */
+  dpi?: number;
   first_seen: string;
   caused_by_op: string | null;
   title: string;
@@ -242,6 +248,8 @@ export function resetDialogsState(): void {
  */
 export function recordDialogSeenForTest(meta: {
   handle: number;
+  /** The window's DPI from GetDpiForWindow (96 = 100 %); 0 or missing when unknown. */
+  dpi?: number;
   caused_by_op: string | null;
   first_seen?: string;
   title?: string;
@@ -546,6 +554,7 @@ function normalizeRawDialog(
     const analysis = analysePaintedDialog(sanitizeOcrLines(raw.ocr_lines), pixels, {
       width: boundingRect.width,
       height: boundingRect.height,
+      scale: typeof raw.dpi === "number" && raw.dpi >= 96 && raw.dpi <= 96 * 5 ? raw.dpi / 96 : 1,
     });
     buttons = analysis.buttons.map((b) => {
       const name = normalizeOcrLabel(b.name);
@@ -811,6 +820,8 @@ export function evaluateRespondPolicy(params: {
 function appendResponseLog(entry: {
   time: string;
   handle: number;
+  /** The window's DPI from GetDpiForWindow (96 = 100 %); 0 or missing when unknown. */
+  dpi?: number;
   title: string;
   text_excerpt: string;
   button: string;
