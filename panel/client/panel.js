@@ -429,6 +429,16 @@
         );
       }
 
+      // "Clear render lock" shows only while the render gate is shut.
+      if ($clearLockBtn) {
+        var locked = !!(body.renderLock && typeof body.renderLock === "object");
+        $clearLockBtn.hidden = !locked;
+        if (!locked) {
+          clearLockArmed = false;
+          $clearLockBtn.textContent = "Clear render lock";
+        }
+      }
+
       if (body.busy || body.inFlight) {
         setBadge("Working", "busy");
       } else {
@@ -496,6 +506,8 @@
   // (its CLI), Claude Desktop, Cursor and Codex (the stdio relay).
   var $registerClients = typeof document !== "undefined" ? document.getElementById("register-clients") : null;
   var $diagnosticsBtn = typeof document !== "undefined" ? document.getElementById("diagnostics-btn") : null;
+  var $clearLockBtn = typeof document !== "undefined" ? document.getElementById("clear-render-lock-btn") : null;
+  var clearLockArmed = false;
   var register = null;
 
   function loadRegister() {
@@ -655,6 +667,31 @@
         renderRegister();
       }
     );
+  }
+
+  // Two clicks: the first arms it, the second sends. Only the user can press it; no tool can.
+  function bindClearRenderLock() {
+    if (!$clearLockBtn) return;
+    $clearLockBtn.addEventListener("click", function () {
+      if (!clearLockArmed) {
+        clearLockArmed = true;
+        $clearLockBtn.textContent = "Click again: After Effects is NOT rendering";
+        return;
+      }
+      clearLockArmed = false;
+      $clearLockBtn.disabled = true;
+      requestService("POST", "/admin/clear-render-lock", function (err, statusCode, body) {
+        $clearLockBtn.disabled = false;
+        $clearLockBtn.textContent = "Clear render lock";
+        if (err || statusCode !== 200 || !body || body.ok !== true) {
+          var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
+          logUi("err", "Clearing the render lock failed: " + why);
+          return;
+        }
+        logUi("ok", body.cleared ? "Render lock cleared (job " + body.cleared.job_id + ")" : "There was no render lock");
+        pollHealth();
+      });
+    });
   }
 
   function bindDiagnostics() {
@@ -1304,6 +1341,7 @@
     bindSetupActions();
     bindAskActions();
     bindDiagnostics();
+    bindClearRenderLock();
     bindUpdate();
     bindRegisterToggle();
     renderRegister();

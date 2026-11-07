@@ -14,6 +14,7 @@ import { interpretTools } from "./interpret.js";
 import { pathsTools } from "./paths.js";
 import { memoryTools } from "./memory.js";
 import { rqeditTools } from "./rqedit.js";
+import { rqrenderTools } from "./rqrender.js";
 import { renderbatchTools } from "./renderbatch.js";
 import { collectTools } from "./collect.js";
 import { deliverTools } from "./deliver.js";
@@ -121,6 +122,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...pathsTools,
   ...memoryTools,
   ...rqeditTools,
+  ...rqrenderTools,
   ...renderbatchTools,
   ...collectTools,
   ...deliverTools,

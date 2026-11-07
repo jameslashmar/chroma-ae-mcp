@@ -459,7 +459,7 @@ export const mutateTools: ToolDefinition<any>[] = [
       "system.callSystem, File/Folder .execute, file writes and deletes (File/Folder remove, rename, copy, create, write, open for writing), " +
       "dialogs (alert, confirm, prompt, File.openDialog, ScriptUI; use ae_ask_user, never app.beginSuppressDialogs, see ae_dialogs), sockets, $.evalFile, #include, $.sleep, " +
       "app.quit/restart, app.scheduleTask, app.watchFolder, app.newProject/open/openFast and project.close (use ae_project_session), project.save() in any form (use ae_save, with save_as for another file), File properties such as item.file.remove(), " +
-      "renderQueue.render (use ae_aerender_start), app.purge (use ae_memory_purge), Team Project methods. " +
+      "renderQueue.render (use ae_render_queue_render, or ae_aerender_start), app.purge (use ae_memory_purge), Team Project methods. " +
       "With `mutates: false` it also refuses writes (setValue, addProperty, layers.add, remove, duplicate, ...): set `mutates: true` and `expect`. " +
       "The lint is a best-effort guard rail, not a sandbox: eval() of a built string or obj['member'] is not caught, and you remain responsible for what the code does. " +
       "The result's `op_id` can be passed to ae_skill_save to keep a script that worked as a reusable skill. " +

@@ -391,6 +391,15 @@
     }
   }
 
+  // The render gate of ae_render_queue_render, read from the MCP bundle once it is loaded:
+  // { info: { job_id, state, ... }, message } while the gate is shut, else null. Never throws.
+  function currentRenderLock() {
+    try {
+      if (panelMcp && typeof panelMcp.renderLock === "function") return panelMcp.renderLock() || null;
+    } catch (e) {}
+    return null;
+  }
+
   function sendJson(res, statusCode, payload) {
     if (res.writableEnded) return;
     var body = JSON.stringify(payload);
@@ -488,7 +497,31 @@
         panelVersion: PANEL_VERSION,
         inFlight: inFlight
           ? { id: inFlight.id, label: inFlight.label, startedAt: inFlight.startedAt }
-          : null
+          : null,
+        renderLock: (function () {
+          var lock = currentRenderLock();
+          return lock ? { job_id: lock.info.job_id, state: lock.info.state } : null;
+        })()
+      });
+      return;
+    }
+
+    // The panel's "Clear render lock" button: the user's way out of a render gate that will not lift.
+    if (req.method === "POST" && reqUrl === "/admin/clear-render-lock") {
+      readRequestBody(req, res, function () {
+        if (!panelMcp || typeof panelMcp.clearRenderLock !== "function") {
+          sendJson(res, 503, { ok: false, error: { kind: "unavailable", message: "The MCP bundle is not loaded" } });
+          return;
+        }
+        var cleared = null;
+        try {
+          cleared = panelMcp.clearRenderLock();
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: { kind: "internal", message: e && e.message ? e.message : String(e) } });
+          return;
+        }
+        if (cleared) log("warn", "Render lock cleared by the user (job " + String(cleared.job_id) + ")");
+        sendJson(res, 200, { ok: true, cleared: cleared ? { job_id: cleared.job_id, state: cleared.state } : null });
       });
       return;
     }
@@ -649,6 +682,18 @@
           ? parsedBody.label
           : "eval";
         var raw = parsedBody.raw === true;
+
+        // While After Effects renders for ae_render_queue_render it cannot answer: an eval sent now
+        // would only sit in the queue behind the render. Refuse it at once; nothing is sent.
+        var renderLock = currentRenderLock();
+        if (renderLock) {
+          sendJson(res, 200, {
+            id: id,
+            ok: false,
+            error: { kind: "queued", message: renderLock.message }
+          });
+          return;
+        }
 
         enqueueEval(id, parsedBody.script, label, function (statusCode, payload) {
           sendJson(res, statusCode, payload);

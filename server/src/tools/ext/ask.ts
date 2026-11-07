@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import type { AskAnswer, AskQuestion } from "../../asks.js";
+import { renderGate } from "../../render-gate.js";
 import type { ToolDefinition } from "../common.js";
 import { EASE_CURVE_ARRAY_SCHEMA } from "./animate.js";
 
@@ -133,7 +134,7 @@ export const askTools: ToolDefinition<any>[] = [
   {
     name: "ae_ask_user",
     description:
-      "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed. " +
+      "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). " +
       "Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. " +
       "For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. " +
       "Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project.",
@@ -177,7 +178,8 @@ export const askTools: ToolDefinition<any>[] = [
         allow_other: args.allow_other ?? true,
         ...(args.context ? { context: args.context } : {}),
       });
-      if (ctx.cep) {
+      // Opening the panel calls CEP, which may block while a render holds After Effects: the question is queued either way and the open panel polls for it.
+      if (ctx.cep && !renderGate.active()) {
         try {
           await ctx.cep.openExtension(PANEL_EXTENSION_ID);
         } catch {

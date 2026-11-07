@@ -25,6 +25,7 @@ import {
 import { BridgeError } from "../../host.js";
 import { buildJsxCall, normalizeGuardPath } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
+import { renderGate } from "../../render-gate.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../common.js";
 import { autoCheckpoint, verifyTargetGuard } from "../mutate.js";
@@ -184,6 +185,8 @@ export class AssetWatcher {
     const settings = this.ctx.settings?.get().asset_watch;
     if (!settings?.enabled || this.busy) return null;
     if (this.ctx.quarantine.isQuarantined) return null;
+    // After Effects is busy rendering for ae_render_queue_render: skip quietly, nothing is sent.
+    if (renderGate.active()) return null;
     const clock = this.opts.now ?? Date.now;
     if (clock() < this.skipUntil) return null;
     this.busy = true;
@@ -196,6 +199,8 @@ export class AssetWatcher {
       }
       return out;
     } catch (err) {
+      // A render started while this look was running: not a failure of the watcher.
+      if (renderGate.active()) return null;
       this.failures++;
       this.skipUntil = clock() + Math.min(BACKOFF_BASE_MS * Math.pow(2, this.failures - 1), BACKOFF_MAX_MS);
       if (this.failures === 1) this.opts.log?.("warn", `Asset watch: ${err instanceof Error ? err.message : String(err)} (retrying with backoff)`);

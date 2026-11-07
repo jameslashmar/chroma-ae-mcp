@@ -539,7 +539,8 @@ describe("wave 5 props leftovers", () => {
       plain.ctx
     );
     expect(plain.calls.find((c) => c.fn === "batchValidate")!.args.allow_substitute).toBe(false);
-  });
+    // The first call loads the whole tool registry: over 5 s when the suite runs in parallel.
+  }, 20_000);
 });
 
 describe("ae_render_templates save and the session log", () => {

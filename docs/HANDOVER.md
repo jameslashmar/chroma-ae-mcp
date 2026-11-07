@@ -1,5 +1,19 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## Render in After Effects, 2026-11-07 (`feat/render-in-ae`)
+
+Why: aerender (`ae_aerender_start`) fails to start on this PC most of the time (see "Open problem: aerender" below), and the only other way to start a render, `RenderQueue.render()`, is refused in `ae_run_jsx` because it blocks the bridge. Agents therefore told the user to press Render. Now they call a tool.
+
+- **`ae_render_queue_render`** (`server/src/tools/ext/rqrender.ts`, host `rqeditRender` / `rqeditRenderResult` in `panel/host/ext/rqedit.jsx`): starts AE's own render of the queued items and RETURNS AT ONCE with a job id. A read inside the queue lease first refuses a queue that is rendering, nothing QUEUED, an output with no file, a missing folder, or an existing file (unless `overwrite`; nothing is ever deleted or created). It renders the open project as it is (unsaved or dirty is fine: one advantage over aerender). A background promise then sends one long mutating evalScript (`render()` only returns when the render ends; `max_hours` 1-48, default 12) and holds the queue lease for the whole render. No undo group, no checkpoint.
+- **`ae_render_queue_render_status`**: a Node-only read (no evalScript): state, elapsed, per output exists / bytes / mtime / frame count, popups through `listBlockingDialogs({ screenshots: false })`. After the end the item statuses and `ae_verify_render`.
+- **The render gate** (`server/src/render-gate.ts`): while the render runs AE cannot answer, so every other eval is refused at once with a `queued`-kind BridgeError ("After Effects is rendering (job X, started ...)"), at two doors: `SingleWriterQueue.acquire` (callHost, `runGuardedWrite`, every `ctx.queue.run`; waiters already queued are dropped) and `evalRaw` of both transports. Nothing is sent to AE, nothing is quarantined, nothing counts as an applied write. `ae_status` answers with the render state; `ae_diagnostics` reports `render_gate`; the asset watcher skips quietly; the session bridge hook leaves the render's own eval alone. The render eval has no quarantine on timeout and no write-ahead record (it changes no project data).
+- **Timeout**: the job reads `unknown`, nothing is resent or stopped, and the gate stays shut (state "unknown") until the panel service reports nothing in flight (`serviceInfo().inFlight === null`), then lifts and notes that the statuses were never read.
+- **Still rendering / stuck gate**: if the read-back says the queue or an item is RENDERING or WILL_CONTINUE, the gate stays shut and the read repeats (5 s, up to 30 min), then the job reads `unknown` with a gate the idle probe does not lift. The refusal message and the status tool say that restarting AE clears a gate AE no longer needs; the panel footer shows a user-only "Clear render lock" button (two clicks, `POST /admin/clear-render-lock`) only while the gate is shut. Only the panel service runs the tool (`ctx.serviceInfo`); `POST /eval` is refused while the gate is shut; a queued aerender / batch spawn is held by the aerender start gate meanwhile. The start check also refuses more than 100 QUEUED items or a cut-short read, NEEDS_OUTPUT items checked to render, duplicate outputs, and outputs a running aerender job or batch is going to write. After the read-back the session baseline is re-taken so the next write does not report the render as the user's change.
+- **Restart**: jobs are in `<data dir>/renders/rq-render-jobs.json`; one still "running" when a service starts is `lost` ("look at After Effects").
+- **Texts**: the `ae_run_jsx` lint, its description, the skills text and the aerender "never started rendering" message now name `ae_render_queue_render`. `renderQueue.render` stays refused in `ae_run_jsx`.
+- **Checked**: build, unit tests (a fake bridge whose render eval resolves later, the gate, no quarantine, a failed read-back, a timeout, a restart, status without evalRaw) and the JSX lint. `qa/smoke-mcp.mjs` has an opt-in step (`CHROMA_SMOKE_RENDER_IN_AE=1`). **Nothing here has run in After Effects.** The panel bundle (`panel/client/mcp-bundle.cjs`) was not rebuilt: run `npm run bundle` in `server/` before installing.
+- **Not measured in AE**: see the `rqrender` entry in the list of behaviours relied on but not measured (further down).
+
 ## Captions branch, 2026-11-06 (`feat/captions`)
 
 Caption standards, QA, export and transcription, built on the captions tools. Build, 4969 unit
@@ -501,7 +515,7 @@ These calls exist in ExtendScript. `server/src/jsx-safety-lint.ts` refuses them 
 
 | Refused call | Why, and what is used instead |
 |---|---|
-| `RenderQueue.render` (and pause / stop, Media Encoder queueing) | `ae_aerender_start` (a comp, `rq_index` or `whole_queue`) and `ae_render_batch` render in the background. Refused because `render()` blocks the bridge and Media Encoder queueing leaves AE |
+| `RenderQueue.render` (and pause / stop, Media Encoder queueing) from `ae_run_jsx` | `ae_render_queue_render` (AE's own render of the queued items as a tracked job, with a gate that refuses other tools meanwhile), `ae_aerender_start` (a comp, `rq_index` or `whole_queue`) and `ae_render_batch` (background processes). Refused in `ae_run_jsx` because a bare `render()` blocks the bridge for the whole render with no job, no gate and no way to report; Media Encoder queueing leaves AE. A script can stop a render only from an `onStatusChanged` or `app.onError` callback set up before `render()` starts (AE Scripting Guide, `RenderQueue.stopRendering`); `ae_render_queue_render` sets none up, so the user presses Stop in AE |
 | Opening, closing and creating projects, `Project.save(file)` from `ae_run_jsx` | `ae_project_session`, and `ae_save` with `save_as` or `increment`. Refused because they swap the project without the unsaved-changes check, can open a dialog, and skip the backup copy, the overwrite checks and the session record |
 | Dialogs, file writes and deletes, sockets, running programs, quitting, `$.sleep`, `app.purge`, Team Project calls from `ae_run_jsx` | Refused because they block the bridge, leave AE or need the user's yes. The lint names the tool: `ae_ask_user`, `ae_dialogs`, `ae_memory_purge`, the dedicated tools. Not a sandbox: `eval()` of a built string and `obj['member']` get through |
 
@@ -756,6 +770,17 @@ Each line is a guess the code makes or works around. Where the code can work eit
 - Template names like `H.264 - Match Render Settings - 15 Mbps` and `Apple ProRes 422 HQ` exist on the machine.
 - Editing a DONE item is allowed; output module numbering after `remove()`.
 - `Folder.getFiles(mask)` finds frames for the overwrite refusal; file names arrive URI-encoded.
+
+**rqrender** (`ae_render_queue_render`)
+- The Render Queue panel (Stop button) stays usable while a script-started `render()` runs.
+- `render()` keeps one evalScript open for hours without CEP or the panel cutting it off; `status`, `elapsedSeconds` and the output files read as expected afterwards.
+- With `overwrite: true`, whether AE prompts about an existing file or overwrites it silently.
+- What `render()` does on an unsaved project (a Save dialog is possible; `ae_dialogs` reads it).
+- A popup during the render can be read by `ae_dialogs` (it reads from outside AE).
+- The stdio relay (`dist/index.js` stdio to the panel) reaches the panel with `http.request` and no timeout, posting to `/mcp`; it was not measured for a request that long. The dev stdio server (`BridgeClient`, Node fetch, 300 s headers timeout) would read a long render as unreachable, so `ae_render_queue_render` is refused there (no `ctx.serviceInfo`) and `POST /eval` is refused while the gate is shut.
+- Whether "Save in subfolder" makes its folder at render time (a missing folder under an existing parent is only a warning).
+- A service reload during a render: port 7790 stays closed until the render ends (`ensureCoreJsxLoaded` waits on AE before `tryListen`); the job reads `lost`. Boot order is unchanged.
+- Whether `ae_open_panel` / `ae_list_panels` (direct `__adobe_cep__` calls) block during a render: they are refused while the gate is shut; `ae_ask_user` skips only its panel-open call.
 
 **renderbatch**
 - `aerender -s/-e` count from 0 or from the display start (the plan warns for a non-zero display start).

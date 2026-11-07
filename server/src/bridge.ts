@@ -20,6 +20,7 @@ import {
 import { buildJsxCall, type HostFunctionName } from "./jsx.js";
 import { defaultDataDir, type QuarantineStore } from "./quarantine.js";
 import { QueueWaitError, type SingleWriterQueue } from "./queue.js";
+import { renderGate } from "./render-gate.js";
 
 export {
   BridgeError,
@@ -176,6 +177,9 @@ export class BridgeClient implements HostTransport {
     mutates?: boolean;
     toolName?: string;
   }): Promise<EvalSuccessResponse<T>> {
+    // While AE renders for ae_render_queue_render it cannot answer: refuse at once, send nothing.
+    renderGate.check(params.id);
+    const isRender = renderGate.isRenderOp(params.id);
     const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const headers = this.buildHeaders();
 
@@ -193,7 +197,7 @@ export class BridgeClient implements HostTransport {
       });
     } catch (err) {
       if (isFetchTimeout(err)) {
-        if (params.mutates && this.quarantine) {
+        if (params.mutates && this.quarantine && !isRender) {
           this.quarantine.add({
             op_id: params.id,
             tool: params.toolName ?? params.label,
@@ -211,7 +215,7 @@ export class BridgeClient implements HostTransport {
               timeoutMs / 1000
             )}s: outcome unknown. ` +
             `Do NOT resend this request — it may still be running or have completed in After Effects.` +
-            (params.mutates
+            (params.mutates && !isRender
               ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.`
               : ""),
         });
@@ -263,6 +267,7 @@ export class BridgeClient implements HostTransport {
     args: unknown,
     opts: CallHostOptions
   ): Promise<{ id: string; result: T; durationMs: number }> {
+    renderGate.check(opts.opId);
     if (opts.mutates && this.quarantine) {
       this.quarantine.assertClear();
     }

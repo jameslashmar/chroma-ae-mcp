@@ -16,6 +16,10 @@
 //   installed ones, size, channels, audio, file name) on the item and/or on
 //   duplicates of it, one spec per item
 // - rqeditSpecs (read): which specs of a library this AE can meet
+// - rqeditRender: RenderQueue.render(), AE's own render of the queued items (no undo
+//   group: not undoable). It returns only when the render ends, so the server sends it in
+//   one long evalScript (ae_render_queue_render) and reads the result separately:
+// - rqeditRenderResult (read): item status, elapsed time and output files after a render
 //
 // What AE allows: the output module Format (and so the codec) is readable but
 // not settable; it changes only through OutputModule.applyTemplate with a
@@ -1648,6 +1652,87 @@
       }
     });
     return { source_index: args.item_index, comp_id: compIdNow, in_place: inPlace, results: results };
+  };
+
+  // ---------- render (ae_render_queue_render) ----------
+
+  function countStatus(rq, wanted) {
+    var n = 0;
+    var i;
+    var want = statusEnumValue(wanted);
+    if (want === undefined) return -1;
+    for (i = 1; i <= rq.numItems; i++) {
+      try {
+        if (rq.item(i).status === want) n++;
+      } catch (e1) {}
+    }
+    return n;
+  }
+
+  // Starts AE's own render of the queued items, the same as pressing Render.
+  // RenderQueue.render() returns only when the render has ended (done, stopped
+  // by the user, or an error), so the server calls this in one long evalScript
+  // and reads the result in a separate one (rqeditRenderResult). No undo group:
+  // a render is not undoable. Nothing here changes the project; the server has
+  // already checked the queue and the output files.
+  A.rqeditRender = function (args) {
+    var rq = app.project.renderQueue;
+    if (rq.rendering === true) {
+      fail("busy", "The Render Queue is already rendering.");
+    }
+    var queued = countStatus(rq, "QUEUED");
+    if (queued === 0) {
+      fail("nothing_queued", "No Render Queue item is QUEUED.");
+    }
+    var started = new Date().getTime();
+    rq.render();
+    return { returned: true, queued_items: queued, elapsed_ms: new Date().getTime() - started };
+  };
+
+  // Item status, elapsed time and output files after a render. args: indexes (1-based queue indexes), comp_ids (the comp each index held when the render started).
+  A.rqeditRenderResult = function (args) {
+    args = args || {};
+    var rq = app.project.renderQueue;
+    var idx = args.indexes || [];
+    var comps = args.comp_ids || [];
+    var items = [];
+    var i;
+    for (i = 0; i < idx.length && i < MAX_ITEMS; i++) {
+      var n = idx[i];
+      var row = { index: n, comp_id: null, status: null, comp_matches: false };
+      try {
+        if (n < 1 || n > rq.numItems) {
+          row.error = "No render queue item " + n + " (the queue has " + rq.numItems + ")";
+          items.push(row);
+          continue;
+        }
+        var it = rq.item(n);
+        row.comp_id = it.comp.id;
+        row.comp_name = String(it.comp.name);
+        row.comp_matches = comps[i] === undefined || comps[i] === null || comps[i] === it.comp.id;
+        row.status = statusName(it.status);
+        try {
+          row.elapsed_seconds = it.elapsedSeconds;
+        } catch (e1) {}
+        try {
+          if (it.startTime) row.start_time_ms = it.startTime.getTime();
+        } catch (e2) {}
+        var mods = [];
+        var o;
+        for (o = 1; o <= it.numOutputModules && o <= MAX_MODULES; o++) {
+          try {
+            mods.push({ index: o, file: fsNameOf(it.outputModule(o)) });
+          } catch (e3) {
+            mods.push({ index: o, error: msgOf(e3) });
+          }
+        }
+        row.output_modules = mods;
+      } catch (e4) {
+        row.error = msgOf(e4);
+      }
+      items.push(row);
+    }
+    return { rendering: rq.rendering === true, numItems: rq.numItems, items: items };
   };
 
   G.__chromaAe = A;

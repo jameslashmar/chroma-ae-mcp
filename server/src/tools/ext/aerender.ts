@@ -15,6 +15,7 @@ import {
 } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
 import { preflightRefusal, runPreflightGate, type GateSummary } from "./preflight.js";
+import { renderGate } from "../../render-gate.js";
 
 export const WINDOWS_FALLBACK_AERENDER =
   "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
@@ -1139,6 +1140,11 @@ export class AerenderStartGate {
   }
 
   private blocker(): GateBlocker | null {
+    // While After Effects renders for ae_render_queue_render, a new aerender (a second AfterFX.com engine on the same project and outputs) is held.
+    const rendering = renderGate.active();
+    if (rendering) {
+      return { text: `After Effects is rendering for ae_render_queue_render (job ${rendering.job_id}); this aerender job starts after it` };
+    }
     let running = 0;
     let firstRunning = "";
     for (const c of this.ctls.values()) {
@@ -1508,7 +1514,7 @@ export class AerenderStartGate {
       this.schedulePump(0);
       return;
     }
-    const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again.`;
+    const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: call ae_render_queue_render, which starts After Effects' own render of the queued items (tell the user first that After Effects will be busy until it ends).`;
     this.note(ctl, `AERENDER WATCHDOG: ${message}`);
     this.registry.update(ctl.jobId, {
       state: "failed",
@@ -2081,6 +2087,7 @@ export function createAerenderTools(
         "Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. " +
         "Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one's engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state \"running\" with phase \"queued\" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job's engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). " +
         "Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender's \"Launching After Effects...\") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level \"errors\" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. " +
+        "If aerender fails to start (\"never started rendering\") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects' own render of the queued Render Queue items; it keeps AE busy, so tell the user first). Never ask the user to press Render. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args: AeAerenderStartArgs, ctx: ToolContext) => {

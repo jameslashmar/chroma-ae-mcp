@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
 import { defaultDataDir } from "../../quarantine.js";
+import { renderGate } from "../../render-gate.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   type CepExtensionInfo,
@@ -224,6 +225,8 @@ export const panelsTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeListPanelsSchema,
     handler: async (args, ctx) => {
+      // Calls CEP directly and then After Effects: not proven safe while a render holds AE.
+      renderGate.check();
       if (!ctx.cep) {
         return { ok: false, error: "cep_unavailable" };
       }
@@ -315,6 +318,8 @@ export const panelsTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeOpenPanelSchema,
     handler: async (args, ctx) => {
+      // Calls CEP directly (extension_id) or After Effects (name): not proven safe while a render holds AE.
+      renderGate.check();
       if (args.extension_id) {
         if (!ctx.cep) {
           return { ok: false, error: "cep_unavailable" };

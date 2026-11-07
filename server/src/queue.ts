@@ -1,3 +1,5 @@
+import { renderGate } from "./render-gate.js";
+
 export type QueueErrorKind = "queued";
 
 export class QueueWaitError extends Error {
@@ -58,6 +60,13 @@ export class SingleWriterQueue {
   }
 
   acquire(op: string): Promise<QueueLease> {
+    // While After Effects renders for ae_render_queue_render nothing else can reach it:
+    // refuse now instead of waiting behind the render's lease (see render-gate.ts).
+    try {
+      renderGate.check();
+    } catch (err) {
+      return Promise.reject(err);
+    }
     if (this.holder === null && this.depth === 0) {
       this.holder = op;
       return Promise.resolve(this.createLease(op, 0, null));
@@ -94,6 +103,23 @@ export class SingleWriterQueue {
 
       this.waiting.push(waiter);
     });
+  }
+
+  /**
+   * Drops every operation still waiting for its turn (never the holder). Used when a render
+   * takes the queue for hours: they would otherwise wait out the 600 s limit for nothing.
+   */
+  rejectWaiting(makeError: (op: string) => Error): number {
+    let n = 0;
+    for (const w of this.waiting) {
+      if (w.done) continue;
+      w.done = true;
+      w.cleanup();
+      w.reject(makeError(w.op));
+      n++;
+    }
+    this.waiting = [];
+    return n;
   }
 
   async run<T>(op: string, fn: (lease: QueueLease) => Promise<T>): Promise<T> {

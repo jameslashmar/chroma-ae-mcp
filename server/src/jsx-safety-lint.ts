@@ -88,8 +88,8 @@ const REFUSE_RULES: Rule[] = [
   { re: /\.\s*importFileWithDialog\s*\(/g, member: "importFileWithDialog", message: "opens a dialog", use: "ae_import_footage" },
 
   // Render queue
-  { re: /\brenderQueue\s*\.\s*(?:render|pauseRendering|stopRendering)\s*\(/g, member: "renderQueue.render", message: "render() blocks the bridge for the whole render", use: "ae_aerender_start" },
-  { re: /\.\s*onStatusChanged\b/g, member: "onStatusChanged", message: "only fires during an in-app render, which blocks the bridge", use: "ae_aerender_start" },
+  { re: /\brenderQueue\s*\.\s*(?:render|pauseRendering|stopRendering)\s*\(/g, member: "renderQueue.render", message: "render() blocks the bridge for the whole render (ae_render_queue_render starts it as a tracked background job; ae_aerender_start renders in a separate process)", use: "ae_render_queue_render" },
+  { re: /\.\s*onStatusChanged\b/g, member: "onStatusChanged", message: "only fires during an in-app render, which blocks the bridge", use: "ae_render_queue_render" },
   { re: /\.\s*(?:queueInAME|canQueueInAME)\b/g, member: "queueInAME", message: "hands the render to a program outside After Effects", use: NONE },
   { re: /\.\s*\w*Team[Pp]roject\w*\s*\(/g, member: "Team Project methods", message: "Team Projects are out of scope", use: NONE },
 ];
@@ -178,7 +178,7 @@ export function lintJsxSafety(code: string, opts: { mutates: boolean }): SafetyF
   const rqNames = aliasNames(stripped, /([A-Za-z_$][\w$]*)\s*=\s*[\w$.\s]*\brenderQueue(?![\w$])(?!\s*\.)/g);
   if (rqNames.length > 0) {
     const re = new RegExp(BARE + "(?:" + rqNames.map(escapeRe).join("|") + ")\\s*\\.\\s*(?:render|pauseRendering|stopRendering)\\s*\\(", "g");
-    for (const m of stripped.matchAll(re)) push(m.index ?? 0, m[0].length, "renderQueue.render", "render() blocks the bridge for the whole render", "ae_aerender_start", "refuse");
+    for (const m of stripped.matchAll(re)) push(m.index ?? 0, m[0].length, "renderQueue.render", "render() blocks the bridge for the whole render", "ae_render_queue_render", "refuse");
   }
   const projNames = aliasNames(stripped, /([A-Za-z_$][\w$]*)\s*=\s*app\s*\.\s*project(?![\w$])(?!\s*\.)/g);
   if (projNames.length > 0) {

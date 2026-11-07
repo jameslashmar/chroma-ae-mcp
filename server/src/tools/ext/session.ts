@@ -35,6 +35,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { SLOW_TIMEOUT_MS, type HostTransport } from "../../host.js";
 import { buildJsxCall, pathsMatchForGuard } from "../../jsx.js";
+import { renderGate } from "../../render-gate.js";
 import type { QuarantineStore } from "../../quarantine.js";
 import { type ExpectGuard, type ToolContext, type ToolDefinition } from "../common.js";
 
@@ -1085,7 +1086,8 @@ export function installSessionBridgeHook(bridge: HostTransport): () => void {
   const original: EvalRaw = target.evalRaw.bind(bridge);
   const hooked = (async (p: Parameters<EvalRaw>[0]) => {
     const t = tracker;
-    if (!t || p.mutates !== true) return original(p);
+    // The render of ae_render_queue_render is not a project edit and keeps After Effects busy for hours: no snapshots around it.
+    if (!t || p.mutates !== true || renderGate.isRenderOp(p.id)) return original(p);
     const opensProject = typeof p.script === "string" && p.script.includes("openProject(");
     if (t.isInflight(p.id)) {
       // A guarded write already did its own bookkeeping; only the reopen marker is the hook's.

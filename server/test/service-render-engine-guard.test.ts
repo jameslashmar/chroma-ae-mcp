@@ -318,3 +318,141 @@ describe("service shutdown stops the MCP bundle's background work", () => {
     expect(rec().watcherStops).toBe(1);
   });
 });
+
+describe("service routes while the render gate is shut", () => {
+  let root = "";
+  let extDir = "";
+  let service: { shutdown: () => void } | null = null;
+  const savedEnv: Record<string, string | undefined> = {};
+  const envKeys = ["LOCALAPPDATA", "HOME", "USERPROFILE", "CHROMA_AE_MCP_PORT", "CHROMA_AE_MCP_FORCE_START"];
+  const PORT = 47917;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-lock-"));
+    extDir = path.join(root, "ext");
+    fs.mkdirSync(path.join(extDir, "client"), { recursive: true });
+    for (const k of envKeys) savedEnv[k] = process.env[k];
+    process.env.LOCALAPPDATA = root;
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    process.env.CHROMA_AE_MCP_FORCE_START = "1";
+    process.env.CHROMA_AE_MCP_PORT = String(PORT);
+    (globalThis as Record<string, any>).__fakeLock = { lock: null, cleared: 0 };
+    class FakeCSInterface {
+      evalScript(): void {}
+      getSystemPath(): string {
+        return "file:///" + extDir.split(path.sep).join("/");
+      }
+      getHostEnvironment(): { appVersion: string } {
+        return { appVersion: "26.0" };
+      }
+    }
+    (globalThis as Record<string, unknown>).window = { CSInterface: FakeCSInterface, ChromaAeCommon: common, addEventListener: () => {} };
+    fs.writeFileSync(
+      path.join(extDir, "client", "mcp-bundle.cjs"),
+      [
+        "exports.createPanelMcp = function () {",
+        "  var st = globalThis.__fakeLock;",
+        "  return {",
+        "    handleHttp: function () {}, asks: {}, ctx: {}, assetWatcher: { stop: function () {} }, stop: function () {},",
+        "    renderLock: function () { return st.lock; },",
+        "    clearRenderLock: function () { st.cleared++; var l = st.lock; st.lock = null; return l ? l.info : null; }",
+        "  };",
+        "};",
+      ].join("\n")
+    );
+  });
+
+  afterEach(() => {
+    try {
+      service?.shutdown();
+    } catch {
+      /* ignore */
+    }
+    service = null;
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).__fakeLock;
+    delete require.cache[servicePath];
+    for (const k of envKeys) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const st = () => (globalThis as Record<string, any>).__fakeLock as { lock: any; cleared: number };
+
+  async function boot(): Promise<string> {
+    delete require.cache[servicePath];
+    service = require(servicePath) as { shutdown: () => void };
+    const tokenFile = path.join(root, "chroma-ae-mcp", "token");
+    for (let i = 0; i < 300; i++) {
+      try {
+        const t = fs.readFileSync(tokenFile, "utf8").trim();
+        if (t) {
+          // The port is bound once /health answers.
+          const r = await call("GET", "/health", t).catch(() => null);
+          if (r && r.status === 200) return t;
+        }
+      } catch {
+        /* not yet */
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error("service did not start");
+  }
+
+  function call(method: string, route: string, token: string, body?: unknown): Promise<{ status: number; json: any }> {
+    return new Promise((resolve, reject) => {
+      const payload = body === undefined ? "" : JSON.stringify(body);
+      const req = http.request(
+        { host: "127.0.0.1", port: PORT, path: route, method, headers: { Host: `127.0.0.1:${PORT}`, Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+        (res) => {
+          let data = "";
+          res.on("data", (c) => (data += c));
+          res.on("end", () => {
+            try {
+              resolve({ status: res.statusCode ?? 0, json: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode ?? 0, json: data });
+            }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.end(payload);
+    });
+  }
+
+  it("POST /eval is refused at once while the gate is shut, and /health reports the lock", async () => {
+    const token = await boot();
+    st().lock = { info: { job_id: "rqjob_1", state: "rendering" }, message: "After Effects is rendering (job rqjob_1)." };
+    const evalRes = await call("POST", "/eval", token, { id: "x", script: "1", label: "t" });
+    expect(evalRes.json).toMatchObject({ id: "x", ok: false, error: { kind: "queued" } });
+    expect(evalRes.json.error.message).toMatch(/rendering/);
+    const health = await call("GET", "/health", token);
+    expect(health.json.renderLock).toEqual({ job_id: "rqjob_1", state: "rendering" });
+    expect(health.json.busy).toBe(false); // nothing was queued behind the render
+    st().lock = null;
+    expect((await call("GET", "/health", token)).json.renderLock).toBeNull();
+  });
+
+  it("POST /admin/clear-render-lock clears it for the user and says what it cleared", async () => {
+    const token = await boot();
+    st().lock = { info: { job_id: "rqjob_2", state: "unknown" }, message: "m" };
+    const res = await call("POST", "/admin/clear-render-lock", token, {});
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true, cleared: { job_id: "rqjob_2" } });
+    expect(st().cleared).toBe(1);
+    const again = await call("POST", "/admin/clear-render-lock", token, {});
+    expect(again.json).toMatchObject({ ok: true, cleared: null });
+  });
+
+  it("the panel shows the Clear render lock button only from the health answer", () => {
+    const html = fs.readFileSync(path.join(repoRoot, "panel", "client", "index.html"), "utf8");
+    expect(html).toMatch(/id="clear-render-lock-btn"[^>]*hidden/);
+    const js = fs.readFileSync(path.join(repoRoot, "panel", "client", "panel.js"), "utf8");
+    expect(js).toMatch(/body\.renderLock/);
+    expect(js).toMatch(/\/admin\/clear-render-lock/);
+  });
+});

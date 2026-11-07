@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { z } from "zod";
 import { buildJsxCall } from "../../jsx.js";
+import { renderGate, renderGateMessage } from "../../render-gate.js";
 import { dataDirOf, type ToolContext, type ToolDefinition } from "../common.js";
 import { formatBackupTimestamp } from "../mutate.js";
 import { describeBlockingDialogs } from "./dialogs.js";
@@ -71,6 +72,8 @@ export function pickEnvironment(detail: unknown): Record<string, unknown> {
 
 /** Waits for AE's status up to `ms`; the eval is never aborted, only no longer waited for. */
 async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<AeStatusAnswer> {
+  const rendering = renderGate.active();
+  if (rendering) return { answered: false, error: renderGateMessage(rendering) };
   let call = pendingStatus.get(ctx);
   if (!call) {
     call = ctx.bridge
@@ -158,6 +161,7 @@ export async function writeDiagnostics(
     write_queue: { depth: ctx.queue.depth, in_flight: ctx.queue.inFlight },
     quarantined: quarantine.length,
     open_dialogs: dialogs.length,
+    render_gate: renderGate.active(),
   };
   const sections: Array<[string, unknown]> = [
     ["Summary", summary],

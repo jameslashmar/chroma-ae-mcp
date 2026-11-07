@@ -11,6 +11,7 @@ const READS = [
   "ae_scene_3d_report", "ae_explain_layer", "ae_describe_comp", "ae_get_footage_interpretation", "ae_path_read",
   "ae_memory_status",
   "ae_render_queue_inspect",
+  "ae_render_queue_render_status",
   "ae_delivery_specs",
   "ae_check_delivery_file",
   "ae_render_batch_plan",
@@ -89,6 +90,8 @@ const WRITES_WITH_CHECKPOINT = [
 const WRITES_WITHOUT_CHECKPOINT = [
   "ae_memory_purge",
   "ae_render_batch", "ae_render_batch_resume", "ae_render_batch_cancel",
+  // Starts AE's own render: not a project change, so no checkpoint.
+  "ae_render_queue_render",
   "ae_collect_relink",
   "ae_view",
 ];

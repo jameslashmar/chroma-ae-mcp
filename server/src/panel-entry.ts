@@ -8,6 +8,7 @@ import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
+import { renderGate, renderGateMessage, type RenderGateInfo } from "./render-gate.js";
 import { SettingsStore } from "./settings.js";
 import { installSessionBridgeHook, installSessionTracking } from "./tools/ext/session.js";
 import type { CepBridge, ToolContext } from "./tools/common.js";
@@ -96,6 +97,10 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   stop: () => void;
   /** For the panel's Save diagnostics button (POST /admin/diagnostics). */
   saveDiagnostics: () => Promise<{ path: string; summary: Record<string, unknown> }>;
+  /** The render gate while it is shut (ae_render_queue_render), with the message tools get; null when open. service.js refuses POST /eval and shows the panel's "Clear render lock" button from it. */
+  renderLock: () => { info: RenderGateInfo; message: string } | null;
+  /** The user's way out of a render gate that will not lift (the panel's button). Returns the cleared gate, or null when it was open. */
+  clearRenderLock: () => RenderGateInfo | null;
 } {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
@@ -119,6 +124,12 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     serviceInfo: opts.serviceInfo,
     log: opts.log,
   };
+
+  // After a render call timed out the gate stays shut until the panel service has nothing in flight again.
+  renderGate.setIdleProbe(() => {
+    const info = opts.serviceInfo?.();
+    return info !== undefined && "inFlight" in info && info.inFlight === null;
+  });
 
   // What the user changed between the agent's writes, and a write-ahead record
   // so a write cut short by an AE crash is reported rather than retried.
@@ -241,5 +252,10 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       assetWatcher.stop();
     },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
+    renderLock: () => {
+      const info = renderGate.active();
+      return info ? { info, message: renderGateMessage(info) } : null;
+    },
+    clearRenderLock: () => renderGate.clear(),
   };
 }

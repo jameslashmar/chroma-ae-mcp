@@ -206,7 +206,7 @@ export const skillsTools: ToolDefinition<any>[] = [
       "Save an AE skill: a description, instructions, and ExtendScript steps that run in order. Steps come from `steps` (function bodies, as for ae_run_jsx) or from `from_op_ids`, the op_ids of ae_run_jsx calls that worked in this session, so a script that did the job is kept exactly as it ran. " +
       "Each step sees `args` (the run's arguments), `prev` (what the previous step returned) and `results`. Write steps that take what varies (text, colours, comp_id, layer names) from `args`, not hard-coded. " +
       "Steps are checked for ES3 (no let, const, arrow functions, template strings, class, or chained ternaries) and refused with the line if they break it. " +
-      "They also pass the same best-effort safety lint as ae_run_jsx (a guard rail, not a sandbox): steps that call system.callSystem, File.execute, file writes or deletes, dialogs, ScriptUI, $.sleep, app.quit, renderQueue.render, project open/close and the like are refused with the dedicated tool to use instead, and in a skill with mutates false so are writes (setValue, addProperty, ...). " +
+      "They also pass the same best-effort safety lint as ae_run_jsx (a guard rail, not a sandbox): steps that call system.callSystem, File.execute, file writes or deletes, dialogs, ScriptUI, $.sleep, app.quit, renderQueue.render (use ae_render_queue_render), project open/close and the like are refused with the dedicated tool to use instead, and in a skill with mutates false so are writes (setValue, addProperty, ...). " +
       "Save only when the user asks for it or agrees. Never touches the AE project.",
     schema: AeSkillSaveSchema,
     handler: async (args: z.infer<typeof AeSkillSaveSchema>, ctx) => {

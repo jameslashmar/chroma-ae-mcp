@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderGate } from "../src/render-gate.js";
 import {
   AerenderJobRegistry,
   cancelAerenderJob,
@@ -162,6 +163,7 @@ function rig(over: { max_running?: number; engine_wait_ms?: number; engine_cache
 
 const dirs: string[] = [];
 afterEach(() => {
+  renderGate.reset();
   while (dirs.length > 0) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 function make(over?: Parameters<typeof rig>[0]) {
@@ -171,6 +173,23 @@ function make(over?: Parameters<typeof rig>[0]) {
 }
 
 describe("aerender start gate", () => {
+  it("holds a new job while After Effects renders for ae_render_queue_render, and starts it when the gate opens", () => {
+    const r = make();
+    renderGate.begin({ job_id: "rqjob_1", op_id: "op_1", started_at: "t" });
+    const rec = r.launch("A");
+    expect(rec.phase).toBe("queued");
+    expect(rec.pid).toBeNull();
+    expect(rec.queued_reason).toContain("ae_render_queue_render");
+    expect(r.children).toHaveLength(0);
+    r.advance(60_000); // the poll runs again and again; the job still waits
+    expect(r.children).toHaveLength(0);
+    expect(r.registry.get(rec.job_id)!.phase).toBe("queued");
+    renderGate.end("rqjob_1");
+    r.advance(2_000);
+    expect(r.children).toHaveLength(1);
+    expect(r.registry.get(rec.job_id)!.phase).toBe("spawned");
+  });
+
   it("starts at once when nothing runs, with no cool-down owed and no engine alive", () => {
     const r = make();
     const rec = r.launch();

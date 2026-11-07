@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { renderGate, renderGateMessage } from "../render-gate.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   LayerSelectorSchema,
@@ -95,6 +96,17 @@ export const readTools: ToolDefinition<any>[] = [
       AGENT_SAFETY_GUIDANCE,
     schema: AeStatusSchema,
     handler: async (args, ctx) => {
+      // After Effects is busy with ae_render_queue_render: answer with the render state, send nothing to it.
+      const rendering = renderGate.active();
+      if (rendering) {
+        const health = ctx.bridge.health ? await ctx.bridge.health().catch(() => null) : null;
+        return {
+          health,
+          rendering: { job_id: rendering.job_id, op_id: rendering.op_id, started_at: rendering.started_at, state: rendering.state },
+          message: renderGateMessage(rendering),
+          quarantine: ctx.quarantine.list(),
+        };
+      }
       const health = ctx.bridge.health
         ? await ctx.bridge.health()
         : { ok: true, transport: "panel" as const };

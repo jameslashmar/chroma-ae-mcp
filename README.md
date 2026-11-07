@@ -33,7 +33,7 @@ This is an internal Chroma tool, not a consumer product.
 
 **v0.6.0, released 2026-11-06** (signed ZXP on the [v0.6.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.6.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **177 tools**, all through the build, 4,979 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- **177 tools in the released 0.6.0** (179 on `main` after it: `ae_render_queue_render` and `ae_render_queue_render_status` are unreleased), all through the build, 4,979 unit tests in 0.6.0 and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
 - Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions were checked live on AE 26.3. macOS should work but is untested.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
 
@@ -123,7 +123,7 @@ Full details, including what can't be undone: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Tools
 
-177 tools in 54 groups, from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
+179 tools in 55 groups (the last two, `ae_render_queue_render` and its status, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Develop
 

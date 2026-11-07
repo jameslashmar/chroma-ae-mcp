@@ -2167,6 +2167,61 @@ async function main() {
     await call("ae_save", { expect });
   }
 
+  // ---------- ae_render_queue_render: AE's own render in the background (OPT-IN: it keeps AE busy; not run live yet) ----------
+  // Set CHROMA_SMOKE_RENDER_IN_AE=1 to run it. A 0.2 s PNG sequence item is rendered by AE itself; meanwhile every AE tool must be refused
+  // at once (not hang, not quarantine), the status tool must answer, and the steps after this one must still work.
+  if (process.env.CHROMA_SMOKE_RENDER_IN_AE !== "1") {
+    skip("ae_render_queue_render / ae_render_queue_render_status", "opt-in: set CHROMA_SMOKE_RENDER_IN_AE=1 (After Effects is busy for the render)");
+  } else if (!pngTemplate) {
+    skip("ae_render_queue_render / ae_render_queue_render_status", "no PNG output module template to keep the render to a few frames");
+  } else {
+    r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "rqrender_a.mov"), expect });
+    const rIdx = r.index;
+    check("ae_render_queue_add (item for ae_render_queue_render)", r.applied && typeof rIdx === "number", `index ${rIdx}`);
+    const rq0 = await call("ae_render_queue_inspect", { item_index: rIdx });
+    const rComp = rq0.items?.[0]?.comp_id;
+    r = await call("ae_render_queue_edit", {
+      item_index: rIdx,
+      comp_id: rComp,
+      time_span: { start: 0, duration: 0.2 },
+      output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, "rqrender_[#####].png") }],
+      queued: true,
+      expect,
+    });
+    check("ae_render_queue_edit (item for ae_render_queue_render)", okWrite(r), why(r));
+    // Refusals first: nothing may start. The wrong project path is a guard refusal.
+    r = await call("ae_render_queue_render", { expect: { project_path: "C:\no\such\project.aep" } });
+    check("ae_render_queue_render (wrong project is refused)", refused(r), why(r).slice(0, 120));
+    r = await call("ae_render_queue_render", { expect });
+    const rJob = r.job_id;
+    check("ae_render_queue_render (returns at once with a job id)", r.ok === true && r.started === true && r.state === "running" && typeof rJob === "string", brief(r).slice(0, 200));
+    if (rJob) {
+      const t0 = Date.now();
+      r = await call("ae_get_project", {});
+      check("ae_get_project (during the render: refused at once, not sent to AE)", refused(r) && /rendering/i.test(why(r) + JSON.stringify(r)) && Date.now() - t0 < 5000, `${Date.now() - t0} ms; ${why(r).slice(0, 100)}`);
+      r = await call("ae_status", {});
+      check("ae_status (during the render: answers with the render state)", Boolean(r.rendering) || /rendering/i.test(JSON.stringify(r)), js(r.rendering ?? r, 120));
+      let st = await call("ae_render_queue_render_status", { job_id: rJob });
+      for (let i = 0; i < 150 && st.state === "running"; i++) {
+        await sleep(2000);
+        st = await call("ae_render_queue_render_status", { job_id: rJob });
+      }
+      check("ae_render_queue_render_status (finished, item DONE, frames on disk)", st.state === "finished" && st.render_ok === true && (st.outputs ?? []).every((o) => o.exists && o.bytes > 0), `${st.state}; ${st.summary ?? st.error ?? ""}`.slice(0, 220));
+      // AE answers again: later steps must work, and nothing was quarantined.
+      r = await call("ae_get_project", {});
+      check("ae_get_project (after the render: AE answers again)", !r.__isError && Array.isArray(r.items ?? r.tree ?? r.children ?? [r]), brief(r).slice(0, 120));
+      r = await call("ae_status", {});
+      check("ae_status (after the render: no quarantine)", !r.rendering && (r.quarantine ?? []).length === 0, js(r.quarantine ?? [], 120));
+      r = await call("ae_verify_render", { path: path.join(RENDER, "rqrender_00000.png"), sequence: true, expect: { ...expect, comp_id: COMP } });
+      check("ae_verify_render (a frame from ae_render_queue_render)", r.ok === true, brief(r).slice(0, 160));
+    }
+    // Remove the DONE item again so the later steps see the queue they expect.
+    const rq1 = await call("ae_render_queue_inspect", {});
+    const doneItem = (rq1.items ?? []).find((i) => i.comp_id === rComp && i.status === "done" && /rqrender_/.test(String(i.output_modules?.[0]?.file)));
+    if (doneItem) await call("ae_render_queue_edit", { remove: [{ index: doneItem.index, comp_id: doneItem.comp_id }], expect });
+    await call("ae_save", { expect });
+  }
+
   // ---------- wave 3: render batch (a frozen copy of the saved project, aerender in the background) ----------
   const rbOut = path.join(ROOT, "batch_out");
   let batchSpec = null;

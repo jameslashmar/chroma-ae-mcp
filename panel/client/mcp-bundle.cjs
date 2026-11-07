@@ -445,8 +445,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path55, errorMaps, issueData } = params;
-      const fullPath = [...path55, ...issueData.path || []];
+      const { data, path: path56, errorMaps, issueData } = params;
+      const fullPath = [...path56, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -754,11 +754,11 @@ var init_types = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path55, key) {
+      constructor(parent, value, path56, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path55;
+        this._path = path56;
         this._key = key;
       }
       get path() {
@@ -4364,11 +4364,129 @@ var init_jsx = __esm({
   }
 });
 
+// src/render-gate.ts
+function renderGateMessage(info) {
+  if (info.state === "unknown") {
+    let why = "the render call timed out, so its outcome is unknown";
+    if (info.cause === "read_back_timeout") why = "the read of the result after the render timed out, so its outcome is unknown";
+    if (info.cause === "still_rendering") why = "After Effects still reported rendering after the render call returned";
+    return `After Effects may still be busy rendering (job ${info.job_id}, started ${info.started_at}): ${why}. Nothing was sent to After Effects. Look at After Effects and ae_render_queue_render_status; other tools can't reach AE until this clears. ` + RESTART_HINT;
+  }
+  return `After Effects is rendering (job ${info.job_id}, started ${info.started_at}). Nothing was sent to it. Check ae_render_queue_render_status; other tools can't reach AE until it ends. ` + RESTART_HINT;
+}
+var RenderGate, RESTART_HINT, renderGate;
+var init_render_gate = __esm({
+  "src/render-gate.ts"() {
+    "use strict";
+    init_host();
+    RenderGate = class {
+      current = null;
+      idleProbe = null;
+      onLift = null;
+      onClear = null;
+      /** Closes the gate. Call it inside the queue lease, before the render's eval is sent. */
+      begin(info, onLift, onClear) {
+        if (this.active()) throw new Error("A render job already holds the gate.");
+        this.current = { ...info, state: "rendering" };
+        this.onLift = onLift ?? null;
+        this.onClear = onClear ?? null;
+      }
+      /**
+       * Opens the gate (the render ended, or the panel can no longer be reached). Never throws.
+       * With a job id it only opens that job's gate, so a late finish of an old job cannot
+       * open the gate of a newer one.
+       */
+      end(jobId) {
+        if (jobId !== void 0 && this.current && this.current.job_id !== jobId) return;
+        this.current = null;
+        this.onLift = null;
+        this.onClear = null;
+      }
+      /**
+       * The user's way out of a gate that will not lift (the panel's "Clear render lock" button).
+       * Not for tools. Returns the cleared gate, or null when it was open.
+       */
+      clear() {
+        const cur = this.current;
+        if (!cur) return null;
+        const cb = this.onClear;
+        this.current = null;
+        this.onLift = null;
+        this.onClear = null;
+        try {
+          cb?.(cur);
+        } catch {
+        }
+        return cur;
+      }
+      /** The render's outcome is unknown (its eval timed out, its read-back timed out, or After Effects still says it renders): it may still be busy. */
+      markUnknown(cause = "render_timeout") {
+        if (this.current) this.current = { ...this.current, state: "unknown", cause, sticky: cause === "still_rendering" };
+      }
+      /**
+       * True when the panel service has nothing in flight. Only asked in the
+       * "unknown" state; without a probe that state lasts until the service restarts.
+       */
+      setIdleProbe(probe) {
+        this.idleProbe = probe;
+      }
+      /** The gate's info while it is shut, else null. Lifts an "unknown" gate whose probe says AE is idle again. */
+      active() {
+        const cur = this.current;
+        if (!cur) return null;
+        if (cur.state === "unknown" && !cur.sticky && this.idleProbe) {
+          let idle = false;
+          try {
+            idle = this.idleProbe();
+          } catch {
+            idle = false;
+          }
+          if (idle) {
+            const lifted = cur;
+            const cb = this.onLift;
+            this.current = null;
+            this.onLift = null;
+            try {
+              cb?.(lifted);
+            } catch {
+            }
+            return null;
+          }
+        }
+        return cur;
+      }
+      /** Is this eval one of the render's own? */
+      isRenderOp(id) {
+        const cur = this.current;
+        if (!cur || typeof id !== "string") return false;
+        return id === cur.op_id || id.startsWith(`${cur.op_id}_`);
+      }
+      /** Refuses at once (BridgeError "queued") unless the gate is open or `id` is the render's own eval. */
+      check(id) {
+        const cur = this.active();
+        if (!cur) return;
+        if (this.isRenderOp(id)) return;
+        throw new BridgeError({ kind: "queued", op_id: id, message: renderGateMessage(cur) });
+      }
+      /** For tests: forgets everything. */
+      reset() {
+        this.current = null;
+        this.onLift = null;
+        this.onClear = null;
+        this.idleProbe = null;
+      }
+    };
+    RESTART_HINT = 'If After Effects is no longer rendering and this does not clear, restarting After Effects clears it (the user can also press "Clear render lock" in the Chroma AE MCP panel).';
+    renderGate = new RenderGate();
+  }
+});
+
 // src/queue.ts
 var QueueWaitError, DEFAULT_MAX_WAIT_MS, SingleWriterQueue;
 var init_queue = __esm({
   "src/queue.ts"() {
     "use strict";
+    init_render_gate();
     QueueWaitError = class extends Error {
       kind = "queued";
       op;
@@ -4399,6 +4517,11 @@ var init_queue = __esm({
         return this.holder;
       }
       acquire(op) {
+        try {
+          renderGate.check();
+        } catch (err) {
+          return Promise.reject(err);
+        }
         if (this.holder === null && this.depth === 0) {
           this.holder = op;
           return Promise.resolve(this.createLease(op, 0, null));
@@ -4428,6 +4551,22 @@ var init_queue = __esm({
           };
           this.waiting.push(waiter);
         });
+      }
+      /**
+       * Drops every operation still waiting for its turn (never the holder). Used when a render
+       * takes the queue for hours: they would otherwise wait out the 600 s limit for nothing.
+       */
+      rejectWaiting(makeError) {
+        let n = 0;
+        for (const w of this.waiting) {
+          if (w.done) continue;
+          w.done = true;
+          w.cleanup();
+          w.reject(makeError(w.op));
+          n++;
+        }
+        this.waiting = [];
+        return n;
       }
       async run(op, fn) {
         const lease = await this.acquire(op);
@@ -5145,7 +5284,7 @@ function lintJsxSafety(code, opts) {
   const rqNames = aliasNames(stripped, /([A-Za-z_$][\w$]*)\s*=\s*[\w$.\s]*\brenderQueue(?![\w$])(?!\s*\.)/g);
   if (rqNames.length > 0) {
     const re = new RegExp(BARE + "(?:" + rqNames.map(escapeRe).join("|") + ")\\s*\\.\\s*(?:render|pauseRendering|stopRendering)\\s*\\(", "g");
-    for (const m of stripped.matchAll(re)) push2(m.index ?? 0, m[0].length, "renderQueue.render", "render() blocks the bridge for the whole render", "ae_aerender_start", "refuse");
+    for (const m of stripped.matchAll(re)) push2(m.index ?? 0, m[0].length, "renderQueue.render", "render() blocks the bridge for the whole render", "ae_render_queue_render", "refuse");
   }
   const projNames = aliasNames(stripped, /([A-Za-z_$][\w$]*)\s*=\s*app\s*\.\s*project(?![\w$])(?!\s*\.)/g);
   if (projNames.length > 0) {
@@ -5242,8 +5381,8 @@ var init_jsx_safety_lint = __esm({
       { re: /\.\s*saveWithDialog\s*\(/g, member: "saveWithDialog", message: "opens a dialog", use: "ae_save with save_as: { path }" },
       { re: /\.\s*importFileWithDialog\s*\(/g, member: "importFileWithDialog", message: "opens a dialog", use: "ae_import_footage" },
       // Render queue
-      { re: /\brenderQueue\s*\.\s*(?:render|pauseRendering|stopRendering)\s*\(/g, member: "renderQueue.render", message: "render() blocks the bridge for the whole render", use: "ae_aerender_start" },
-      { re: /\.\s*onStatusChanged\b/g, member: "onStatusChanged", message: "only fires during an in-app render, which blocks the bridge", use: "ae_aerender_start" },
+      { re: /\brenderQueue\s*\.\s*(?:render|pauseRendering|stopRendering)\s*\(/g, member: "renderQueue.render", message: "render() blocks the bridge for the whole render (ae_render_queue_render starts it as a tracked background job; ae_aerender_start renders in a separate process)", use: "ae_render_queue_render" },
+      { re: /\.\s*onStatusChanged\b/g, member: "onStatusChanged", message: "only fires during an in-app render, which blocks the bridge", use: "ae_render_queue_render" },
       { re: /\.\s*(?:queueInAME|canQueueInAME)\b/g, member: "queueInAME", message: "hands the render to a program outside After Effects", use: NONE },
       { re: /\.\s*\w*Team[Pp]roject\w*\s*\(/g, member: "Team Project methods", message: "Team Projects are out of scope", use: NONE }
     ];
@@ -7306,7 +7445,7 @@ function createAerenderTools(options = {}) {
   return [
     {
       name: "ae_aerender_start",
-      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. ' + AGENT_SAFETY_GUIDANCE,
+      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. If aerender fails to start ("never started rendering") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects\' own render of the queued Render Queue items; it keeps AE busy, so tell the user first). Never ask the user to press Render. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
@@ -7591,6 +7730,7 @@ var init_aerender = __esm({
     init_common();
     init_mutate();
     init_preflight();
+    init_render_gate();
     WINDOWS_FALLBACK_AERENDER = "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
     MACOS_FALLBACK_AERENDER = "/Applications/Adobe After Effects 2026/aerender";
     AerenderJobRegistry = class {
@@ -7814,6 +7954,10 @@ var init_aerender = __esm({
         return false;
       }
       blocker() {
+        const rendering = renderGate.active();
+        if (rendering) {
+          return { text: `After Effects is rendering for ae_render_queue_render (job ${rendering.job_id}); this aerender job starts after it` };
+        }
         let running = 0;
         let firstRunning = "";
         for (const c of this.ctls.values()) {
@@ -8149,7 +8293,7 @@ AERENDER SPAWN ERROR: ${err.message}
           this.schedulePump(0);
           return;
         }
-        const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again.`;
+        const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: call ae_render_queue_render, which starts After Effects' own render of the queued items (tell the user first that After Effects will be busy until it ends).`;
         this.note(ctl, `AERENDER WATCHDOG: ${message}`);
         this.registry.update(ctl.jobId, {
           state: "failed",
@@ -8766,7 +8910,7 @@ function installSessionBridgeHook(bridge) {
   const original = target.evalRaw.bind(bridge);
   const hooked = async (p) => {
     const t = tracker;
-    if (!t || p.mutates !== true) return original(p);
+    if (!t || p.mutates !== true || renderGate.isRenderOp(p.id)) return original(p);
     const opensProject = typeof p.script === "string" && p.script.includes("openProject(");
     if (t.isInflight(p.id)) {
       try {
@@ -8872,6 +9016,7 @@ var init_session = __esm({
     init_zod();
     init_host();
     init_jsx();
+    init_render_gate();
     MAX_SNAPSHOTS = 10;
     MAX_STEPS = 200;
     MAX_TOUCHED = 20;
@@ -9699,7 +9844,7 @@ var init_mutate = __esm({
     mutateTools = [
       {
         name: "ae_run_jsx",
-        description: "Execute ExtendScript code (the body of a function; use `return` to return a value). When `mutates: true`, `expect` is required, the script runs inside a single undo group (`label`), and a separate read-back evalScript produces a before/after receipt of `expect.comp_id` (or project summary). Note: `app.executeCommand` silently does nothing through CEP; use DOM methods instead (e.g. `layer.duplicate()`). Never use chained ternaries (`a ? b : c ? d : e`) in ExtendScript as it parses them left-associatively; use `if/else`. A static safety lint runs first and refuses code that calls members which break the hard limits, naming the dedicated tool each time: system.callSystem, File/Folder .execute, file writes and deletes (File/Folder remove, rename, copy, create, write, open for writing), dialogs (alert, confirm, prompt, File.openDialog, ScriptUI; use ae_ask_user, never app.beginSuppressDialogs, see ae_dialogs), sockets, $.evalFile, #include, $.sleep, app.quit/restart, app.scheduleTask, app.watchFolder, app.newProject/open/openFast and project.close (use ae_project_session), project.save() in any form (use ae_save, with save_as for another file), File properties such as item.file.remove(), renderQueue.render (use ae_aerender_start), app.purge (use ae_memory_purge), Team Project methods. With `mutates: false` it also refuses writes (setValue, addProperty, layers.add, remove, duplicate, ...): set `mutates: true` and `expect`. The lint is a best-effort guard rail, not a sandbox: eval() of a built string or obj['member'] is not caught, and you remain responsible for what the code does. The result's `op_id` can be passed to ae_skill_save to keep a script that worked as a reusable skill. " + AGENT_SAFETY_GUIDANCE,
+        description: "Execute ExtendScript code (the body of a function; use `return` to return a value). When `mutates: true`, `expect` is required, the script runs inside a single undo group (`label`), and a separate read-back evalScript produces a before/after receipt of `expect.comp_id` (or project summary). Note: `app.executeCommand` silently does nothing through CEP; use DOM methods instead (e.g. `layer.duplicate()`). Never use chained ternaries (`a ? b : c ? d : e`) in ExtendScript as it parses them left-associatively; use `if/else`. A static safety lint runs first and refuses code that calls members which break the hard limits, naming the dedicated tool each time: system.callSystem, File/Folder .execute, file writes and deletes (File/Folder remove, rename, copy, create, write, open for writing), dialogs (alert, confirm, prompt, File.openDialog, ScriptUI; use ae_ask_user, never app.beginSuppressDialogs, see ae_dialogs), sockets, $.evalFile, #include, $.sleep, app.quit/restart, app.scheduleTask, app.watchFolder, app.newProject/open/openFast and project.close (use ae_project_session), project.save() in any form (use ae_save, with save_as for another file), File properties such as item.file.remove(), renderQueue.render (use ae_render_queue_render, or ae_aerender_start), app.purge (use ae_memory_purge), Team Project methods. With `mutates: false` it also refuses writes (setValue, addProperty, layers.add, remove, duplicate, ...): set `mutates: true` and `expect`. The lint is a best-effort guard rail, not a sandbox: eval() of a built string or obj['member'] is not caught, and you remain responsible for what the code does. The result's `op_id` can be passed to ae_skill_save to keep a script that worked as a reusable skill. " + AGENT_SAFETY_GUIDANCE,
         schema: AeRunJsxSchema,
         handler: async (args, ctx) => {
           const unsafe = lintJsxSafety(args.code, { mutates: args.mutates });
@@ -10176,6 +10321,7 @@ var init_assets2 = __esm({
     init_host();
     init_jsx();
     init_queue();
+    init_render_gate();
     init_receipts();
     init_common();
     init_mutate();
@@ -10219,6 +10365,7 @@ var init_assets2 = __esm({
         const settings = this.ctx.settings?.get().asset_watch;
         if (!settings?.enabled || this.busy) return null;
         if (this.ctx.quarantine.isQuarantined) return null;
+        if (renderGate.active()) return null;
         const clock = this.opts.now ?? Date.now;
         if (clock() < this.skipUntil) return null;
         this.busy = true;
@@ -10231,6 +10378,7 @@ var init_assets2 = __esm({
           }
           return out;
         } catch (err) {
+          if (renderGate.active()) return null;
           this.failures++;
           this.skipUntil = clock() + Math.min(BACKOFF_BASE_MS * Math.pow(2, this.failures - 1), BACKOFF_MAX_MS);
           if (this.failures === 1) this.opts.log?.("warn", `Asset watch: ${err instanceof Error ? err.message : String(err)} (retrying with backoff)`);
@@ -10902,6 +11050,8 @@ function pickEnvironment(detail) {
   return out;
 }
 async function aeStatusWithin(ctx, ms) {
+  const rendering = renderGate.active();
+  if (rendering) return { answered: false, error: renderGateMessage(rendering) };
   let call2 = pendingStatus.get(ctx);
   if (!call2) {
     call2 = ctx.bridge.evalRaw({
@@ -10969,7 +11119,8 @@ async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
     service_in_flight: service.inFlight ?? null,
     write_queue: { depth: ctx.queue.depth, in_flight: ctx.queue.inFlight },
     quarantined: quarantine.length,
-    open_dialogs: dialogs.length
+    open_dialogs: dialogs.length,
+    render_gate: renderGate.active()
   };
   const sections = [
     ["Summary", summary3],
@@ -11017,6 +11168,7 @@ var init_diagnostics = __esm({
     path12 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
+    init_render_gate();
     init_common();
     init_mutate();
     init_dialogs();
@@ -13085,8 +13237,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path55, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path55, expected, actual, message });
+function expectThat(mismatches, ok, path56, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path56, expected, actual, message });
 }
 var init_write_runner = __esm({
   "src/tools/ext/write-runner.ts"() {
@@ -22091,10 +22243,10 @@ function zoomFromLens(compWidth, lens) {
 function angleOfViewFromZoom(compWidth, zoom) {
   return 2 * Math.atan(compWidth / 2 / zoom) * 180 / Math.PI;
 }
-function expectSpan(m, path55, l, duration) {
-  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path55}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
+function expectSpan(m, path56, l, duration) {
+  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path56}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
   if (typeof l.out_point === "number" && typeof duration === "number") {
-    expectThat(m, l.out_point >= duration - 0.05, `${path55}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
+    expectThat(m, l.out_point >= duration - 0.05, `${path56}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
   }
 }
 function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
@@ -22184,30 +22336,30 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
     near_far_blur_multiplier: cam.near_far_blur_multiplier
   };
   for (const c of w.changes) {
-    const path55 = `camera.${c.key}`;
+    const path56 = `camera.${c.key}`;
     if (c.key === "depth_of_field") {
-      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path55, c.value === 1, cam.dof, "Depth of field is not as asked");
+      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path56, c.value === 1, cam.dof, "Depth of field is not as asked");
     } else if (c.key === "focus_expression") {
-      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path55, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
+      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path56, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
     } else if (c.key === "nodes") {
-      expectThat(m, cam.two_node === (c.value === "two"), path55, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
+      expectThat(m, cam.two_node === (c.value === "two"), path56, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
     } else if (c.keyed) {
       const field = keyField[c.key];
       const nowKeys = field ? cam.num_keys?.[field] : void 0;
       const wasKeys = field && was ? was.num_keys?.[field] : void 0;
       if (typeof nowKeys === "number" && typeof wasKeys === "number") {
         const want = wasKeys + (c.replaced_key ? 0 : 1);
-        expectThat(m, nowKeys === want, `${path55}.num_keys`, want, nowKeys, "The new keyframe is not there");
+        expectThat(m, nowKeys === want, `${path56}.num_keys`, want, nowKeys, "The new keyframe is not there");
       }
       const wantV = c.value;
       const keyedV = field ? cam.values_at?.[field] : void 0;
       if (typeof wantV === "number") {
-        expectThat(m, near2(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path55}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
+        expectThat(m, near2(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path56}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
       }
     } else {
       const got = valueOf[c.key];
       const want = c.value;
-      expectThat(m, near2(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path55, want, got, `${c.key} differs from what was asked`);
+      expectThat(m, near2(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path56, want, got, `${c.key} differs from what was asked`);
     }
     if (c.key === "focus_distance" && !c.keyed) {
       expectThat(m, cam.expressions.focus_distance === void 0, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
@@ -23991,14 +24143,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path55, target, taste, choreo) {
+function reviewProperty(s, analysis, speeds, path56, target, taste, choreo) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path55 }
+    property: { name: s.property.name, path: path56 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix2 = (keys, extra = {}) => ({
@@ -24006,7 +24158,7 @@ function reviewProperty(s, analysis, speeds, path55, target, taste, choreo) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path55,
+      path: path56,
       keys,
       ease: easeArg,
       ...extra,
@@ -25575,7 +25727,7 @@ function measureFrame(png, index = 0) {
   const bx = Math.max(2, Math.round(w * EDGE_BAND));
   const by = Math.max(2, Math.round(h * EDGE_BAND));
   let lumaSum = 0;
-  let clip3 = 0;
+  let clip4 = 0;
   let top = 0;
   let bottom = 0;
   let left = 0;
@@ -25591,7 +25743,7 @@ function measureFrame(png, index = 0) {
       const a = data[i + 3];
       const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       lumaSum += luma * a / 255;
-      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip3++;
+      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip4++;
       const inLeft = x < bx;
       const inRight = x >= w - bx;
       if (inTop || inBottom || inLeft || inRight) {
@@ -25612,7 +25764,7 @@ function measureFrame(png, index = 0) {
     kind,
     flags: analysis.flags,
     mean_luma: round42(lumaSum / (255 * total2)),
-    clip_frac: round42(clip3 / total2),
+    clip_frac: round42(clip4 / total2),
     edges: {
       top: round42(top / Math.max(1, by * w)),
       bottom: round42(bottom / Math.max(1, by * w)),
@@ -26873,12 +27025,12 @@ function pathChecksum(p) {
   }
   return Math.round(sum * 1e3) / 1e3;
 }
-function comparePoints(expected, actual, path55, m) {
+function comparePoints(expected, actual, path56, m) {
   for (let i = 0; i < expected.length; i++) {
     const a = actual[i];
     const e = expected[i];
     if (!a || Math.abs(a[0] - e[0]) > PATH_TOLERANCE || Math.abs(a[1] - e[1]) > PATH_TOLERANCE) {
-      m.push({ path: `${path55}[${i}]`, expected: e, actual: a, message: `${path55} differs from what was written at vertex ${i + 1}` });
+      m.push({ path: `${path56}[${i}]`, expected: e, actual: a, message: `${path56} differs from what was written at vertex ${i + 1}` });
       return;
     }
   }
@@ -27353,14 +27505,14 @@ var init_paths = __esm({
         description: "Read one path as JSON: a mask path or a free path ('ADBE Vector Shape - Group') in a shape layer's top-level group, with vertices, inTangents, outTangents and closed (up to 500 vertices, `truncated` says if more), its keyframe times, expression state, feather-point count (masks) and path direction (shapes). include_operators also lists the group's Trim Paths, Offset Paths and Repeater values and keys. Rectangles, ellipses and stars have no vertices and are refused. Read-only: never changes the time, selection or anything else in the project. " + AGENT_SAFETY_GUIDANCE,
         schema: AePathReadSchema,
         handler: async (args, ctx) => {
-          const path55 = await readPath(ctx, "ae_path_read", args);
-          if (!args.include_operators || !args.target.shape || !path55) return path55;
+          const path56 = await readPath(ctx, "ae_path_read", args);
+          if (!args.include_operators || !args.target.shape || !path56) return path56;
           const ops = await ctx.bridge.callHost(
             "pathsOperators",
-            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path55.group?.index } },
+            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path56.group?.index } },
             readOpts("ae_path_read", `ae_path_read(${args.comp_id}) operators`)
           );
-          return { ...path55, operators: ops.result };
+          return { ...path56, operators: ops.result };
         }
       },
       {
@@ -27369,24 +27521,24 @@ var init_paths = __esm({
         schema: AePathWriteSchema,
         handler: async (args, ctx) => {
           let current = null;
-          let path55;
+          let path56;
           try {
             if (args.operation === "set") {
-              path55 = toPathData(args.path);
+              path56 = toPathData(args.path);
             } else {
               current = await readPath(ctx, "ae_path_write", args);
               if (!current) return badArgs("The path could not be read.");
               if (current.path.truncated) return badArgs(`The path has ${current.path.vertexCount} vertices; only paths of up to ${MAX_PATH_VERTICES2} can be changed here.`);
               if (current.numKeys > 0 && args.time === void 0) return badArgs(`The path is keyframed (${current.numKeys} keys); give \`time\` to write a key at that time.`);
               if (current.expression.enabled) return badArgs("The path has an expression, which overrides any value written here; remove it first (ae_path_link with unlink).");
-              path55 = applyPathOperation(args, toData(current));
+              path56 = applyPathOperation(args, toData(current));
             }
           } catch (err) {
             if (err instanceof PathMathError) return badArgs(err.message);
             throw err;
           }
           if (args.dry_run) {
-            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path55.vertices.length, path: path55, source: current?.path };
+            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path56.vertices.length, path: path56, source: current?.path };
           }
           const base = current && { count: current.path.vertexCount, checksum: pathChecksum(current.path) };
           return runGuardedWrite(ctx, {
@@ -27400,7 +27552,7 @@ var init_paths = __esm({
               args: {
                 comp_id: args.comp_id,
                 target: args.target,
-                path: path55,
+                path: path56,
                 time: args.time,
                 base,
                 allow_vertex_count_change: args.allow_vertex_count_change,
@@ -27410,7 +27562,7 @@ var init_paths = __esm({
                 label: `Path ${args.operation}`
               }
             },
-            check: (_before, after, w) => pathWriteMismatches(path55, after, args, w),
+            check: (_before, after, w) => pathWriteMismatches(path56, after, args, w),
             present: (_before, after, w) => ({ ...w, path: asReadout(after)?.path, numKeys: asReadout(after)?.numKeys })
           });
         }
@@ -29973,6 +30125,738 @@ var init_renderbatch = __esm({
   }
 });
 
+// src/tools/ext/rqrender.ts
+function clip2(s) {
+  return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + "..." : s;
+}
+function renderTimeoutMs(maxHours) {
+  return Math.min(Math.round(maxHours * 36e5), MAX_TIMEOUT_MS);
+}
+function jobsFileFor(ctx) {
+  return path29.join(dataDirOf(ctx), "renders", RQ_RENDER_JOBS_FILE);
+}
+function storeFor(ctx) {
+  const file = jobsFileFor(ctx);
+  let s = stores.get(file);
+  if (!s) {
+    s = new RenderJobStore(file);
+    stores.set(file, s);
+  }
+  return s;
+}
+function isSequencePath2(p) {
+  return SEQ_TOKEN.test(path29.basename(p));
+}
+function escapeRe2(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function sequenceRegex2(fileName) {
+  const m = SEQ_TOKEN.exec(fileName);
+  if (!m) return new RegExp(`^${escapeRe2(fileName)}$`, "i");
+  const before = fileName.slice(0, m.index);
+  const after = fileName.slice(m.index + m[0].length);
+  return new RegExp(`^${escapeRe2(before)}\\d{${m[1].length},}${escapeRe2(after)}$`, "i");
+}
+function statOutput(o) {
+  const dir = path29.dirname(o.file);
+  const sequence = o.sequence ?? isSequencePath2(o.file);
+  const out = {
+    item_index: o.item_index,
+    module: o.module,
+    file: o.file,
+    sequence,
+    folder_exists: false,
+    exists: false,
+    bytes: 0,
+    mtime: null
+  };
+  try {
+    out.folder_exists = fs29.statSync(dir).isDirectory();
+  } catch {
+    return out;
+  }
+  try {
+    if (!sequence) {
+      const st = fs29.statSync(o.file);
+      if (st.isFile()) {
+        out.exists = true;
+        out.bytes = st.size;
+        out.mtime = st.mtime.toISOString();
+      }
+      return out;
+    }
+    const re = sequenceRegex2(path29.basename(o.file));
+    let frames = 0;
+    let bytes = 0;
+    let newest = 0;
+    let statted = 0;
+    for (const name of fs29.readdirSync(dir)) {
+      if (!re.test(name)) continue;
+      frames++;
+      if (statted >= MAX_OUTPUT_FILES_STAT) {
+        out.truncated = true;
+        continue;
+      }
+      statted++;
+      try {
+        const st = fs29.statSync(path29.join(dir, name));
+        if (!st.isFile()) continue;
+        bytes += st.size;
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch {
+      }
+    }
+    out.frame_count = frames;
+    out.exists = frames > 0;
+    out.bytes = bytes;
+    out.mtime = newest > 0 ? new Date(newest).toISOString() : null;
+  } catch {
+  }
+  return out;
+}
+function liveOutputsFrom(registry) {
+  const out = [];
+  try {
+    for (const j of registry.list()) {
+      if (j.state !== "running") continue;
+      const files = j.output_paths && j.output_paths.length > 0 ? j.output_paths : j.output_path ? [j.output_path] : [];
+      const real = files.filter((f) => typeof f === "string" && f.length > 0 && !f.startsWith("<"));
+      if (j.whole_queue === true && real.length === 0) {
+        out.push({ file: "", owner: `aerender job ${j.job_id} (it renders the whole Render Queue)` });
+      }
+      for (const f of real) out.push({ file: f, owner: `aerender job ${j.job_id}` });
+    }
+  } catch {
+  }
+  try {
+    const store = new BatchStore(path29.join(registry.rendersDir, "batches"));
+    for (const b of store.list(20)) {
+      if (b.state !== "running") continue;
+      for (const it of b.items) {
+        if (it.state !== "pending" && it.state !== "running") continue;
+        for (const f of outputsOf(it)) out.push({ file: f, owner: `render batch ${b.batch_id}` });
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+function planStart(queue, overwrite, live = []) {
+  const refusals = [];
+  const warnings = [];
+  const items = [];
+  if (!queue) {
+    return {
+      items,
+      refusals: [{ code: "nothing_queued", message: "The Render Queue could not be read." }],
+      warnings
+    };
+  }
+  if (queue.rendering === true) {
+    refusals.push({ code: "already_rendering", message: "After Effects' Render Queue is already rendering (started by a person or another tool). Nothing was started." });
+  }
+  if (queue.truncated === true) {
+    refusals.push({
+      code: "queue_truncated",
+      message: `The Render Queue read stopped at ${queue.items.length} of ${queue.numItems} items, so the rest were not checked and render() would still render them. Nothing was started. Remove or unqueue items first.`
+    });
+  }
+  const queued10 = queue.items.filter((i) => i.status === "queued");
+  for (const it of queue.items) {
+    if (it.status === "needs_output" && it.render === true) {
+      refusals.push({
+        code: "needs_output",
+        item_index: it.index,
+        message: `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) is checked to render but has no output (NEEDS_OUTPUT), so Render would stop at it. Give it an output file with ae_render_queue_edit (output_modules[].file) or uncheck it. Nothing was started.`
+      });
+    }
+  }
+  if (queued10.length === 0) {
+    refusals.push({
+      code: "nothing_queued",
+      message: "No Render Queue item is QUEUED, so Render would do nothing. Queue one with ae_render_queue_edit (queued: true) or add one with ae_render_queue_add. A finished (DONE) item cannot be queued again (After Effects locks it): make a fresh copy of it with ae_render_queue_duplicate."
+    });
+  }
+  if (queued10.length > MAX_ITEMS2) {
+    refusals.push({
+      code: "too_many_items",
+      message: `${queued10.length} items are QUEUED; this tool checks and reports at most ${MAX_ITEMS2}, and render() renders all of them. Nothing was started. Unqueue some items.`
+    });
+  }
+  const seen = /* @__PURE__ */ new Map();
+  const liveByKey = /* @__PURE__ */ new Map();
+  let liveUnknown = null;
+  for (const l of live) {
+    if (l.file === "") liveUnknown = l.owner;
+    else liveByKey.set(pathKey(l.file), l.owner);
+  }
+  if (liveUnknown) {
+    refusals.push({ code: "output_in_use", message: `${liveUnknown} is running, so its outputs are not known and could be the same files. Wait for it or cancel it. Nothing was started.` });
+  }
+  for (const it of queued10.slice(0, MAX_ITEMS2)) {
+    const job = { index: it.index, comp_id: it.comp_id, comp_name: it.comp_name, outputs: [] };
+    if (it.output_modules_truncated === true) {
+      refusals.push({
+        code: "queue_truncated",
+        item_index: it.index,
+        message: `Render Queue item ${it.index} has more output modules than were read, so the unread ones were not checked. Nothing was started. Remove extra output modules.`
+      });
+    }
+    for (const m of it.output_modules ?? []) {
+      const where = `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) output module ${m.index}`;
+      if (typeof m.file !== "string" || m.file.length === 0) {
+        refusals.push({ code: "no_output_file", item_index: it.index, message: `${where} has no output file. Give it one with ae_render_queue_edit (output_modules[].file).` });
+        continue;
+      }
+      const key = pathKey(m.file);
+      const earlier = seen.get(key);
+      if (earlier) {
+        refusals.push({
+          code: "duplicate_output",
+          item_index: it.index,
+          file: m.file,
+          message: `${where} writes the same file as ${earlier} (${m.file}); they would overwrite each other. Give each its own file with ae_render_queue_edit.`
+        });
+      } else {
+        seen.set(key, where);
+      }
+      const owner = liveByKey.get(key);
+      if (owner) {
+        refusals.push({ code: "output_in_use", item_index: it.index, file: m.file, message: `${where}: ${owner} is going to write ${m.file}. Wait for it, cancel it, or change the file. Nothing was started.` });
+      }
+      const sequence = isSequencePath2(m.file);
+      const stat = statOutput({ item_index: it.index, module: m.index, file: m.file, sequence });
+      if (!stat.folder_exists) {
+        const dir = path29.dirname(m.file);
+        let parentExists = false;
+        try {
+          parentExists = fs29.statSync(path29.dirname(dir)).isDirectory();
+        } catch {
+          parentExists = false;
+        }
+        if (!parentExists) {
+          refusals.push({ code: "folder_missing", item_index: it.index, file: m.file, message: `${where}: the folder ${dir} and its parent do not exist. Nothing is created for you; make the folder or change the file.` });
+          continue;
+        }
+        warnings.push(
+          `${where}: the folder ${dir} does not exist yet, but its parent does. After Effects can make a subfolder at render time ("Save in subfolder"), so this is not refused; if it does not, the render stops at this item. Nothing is created for you.`
+        );
+      } else if (stat.exists && !overwrite) {
+        refusals.push({
+          code: "output_exists",
+          item_index: it.index,
+          file: m.file,
+          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (whether After Effects then prompts or silently overwrites is not measured).`
+        });
+      }
+      job.outputs.push({ item_index: it.index, comp_id: it.comp_id, module: m.index, file: m.file, sequence });
+    }
+    items.push(job);
+  }
+  return { items, refusals, warnings };
+}
+function stillRendering(read3) {
+  if (!read3) return false;
+  if (read3.rendering === true) return true;
+  return (read3.items ?? []).some((r) => r.status === "rendering" || r.status === "will_continue");
+}
+function judgeResult(items, read3, readBackError) {
+  const statuses = [];
+  for (const it of items) {
+    const row = read3?.items?.find((r) => r.index === it.index);
+    statuses.push({
+      index: it.index,
+      comp_id: row?.comp_id ?? null,
+      comp_name: row?.comp_name ?? it.comp_name,
+      status: row?.status ?? null,
+      ...typeof row?.elapsed_seconds === "number" ? { elapsed_seconds: row.elapsed_seconds } : {},
+      ...row && row.comp_matches === false ? { comp_matches: false } : {},
+      ...row?.error ? { error: clip2(row.error) } : {}
+    });
+  }
+  const outputs = [];
+  for (const it of items) for (const o of it.outputs) outputs.push(statOutput(o));
+  const result = { item_statuses: statuses, outputs, ...readBackError ? { read_back_error: clip2(readBackError) } : {} };
+  if (!read3) {
+    return { result, ok: false, summary: `The render call returned, but the item statuses could not be read back (${clip2(readBackError ?? "no answer")}). Look at After Effects' Render Queue panel; the output files on disk are listed.` };
+  }
+  if (stillRendering(read3)) {
+    return { result, ok: false, summary: "After Effects still reports that it is rendering (the Render Queue, or an item is RENDERING or WILL_CONTINUE), so the render is not over. Look at After Effects." };
+  }
+  const bad4 = statuses.filter((s) => s.status !== "done");
+  const stopped = statuses.filter((s) => s.status === "user_stopped");
+  const errored = statuses.filter((s) => s.status === "err_stopped");
+  const emptyOutputs = outputs.filter((o) => !o.exists || o.bytes <= 0);
+  const moved = statuses.filter((s) => s.comp_matches === false);
+  if (moved.length > 0) {
+    return { result, ok: false, summary: "The Render Queue changed during the render (an item now holds a different comp), so the statuses may not be the ones started. Look at After Effects." };
+  }
+  if (errored.length > 0) {
+    return { result, ok: false, summary: `Stopped by an error on item(s) ${errored.map((s) => s.index).join(", ")} (ERR_STOPPED). See the render log in After Effects; ae_verify_render can check what was written.` };
+  }
+  if (stopped.length > 0) {
+    return { result, ok: false, summary: `Stopped by the user on item(s) ${stopped.map((s) => s.index).join(", ")} (USER_STOPPED). Files already written are on disk (see outputs).` };
+  }
+  if (bad4.length > 0) {
+    return { result, ok: false, summary: `Item(s) ${bad4.map((s) => `${s.index} (${s.status ?? "unknown"})`).join(", ")} did not reach DONE.` };
+  }
+  if (emptyOutputs.length > 0) {
+    return { result, ok: false, summary: `Every item reads DONE, but ${emptyOutputs.length} output(s) are missing or empty on disk (see outputs). Look at After Effects and check the output path.` };
+  }
+  return { result, ok: true, summary: `All ${statuses.length} item(s) reached DONE and every output exists on disk.` };
+}
+function beginRenderGate(store, info, lease) {
+  renderGate.begin(
+    info,
+    () => store.update(info.job_id, {
+      note: "The panel has nothing in flight again, so After Effects answers; the item statuses may never have been read. Look at After Effects' Render Queue panel and the output files, and call ae_render_queue_inspect."
+    }),
+    () => {
+      const cur = store.get(info.job_id);
+      store.update(info.job_id, {
+        ...cur && cur.state === "running" ? { state: "unknown", finished_at: (/* @__PURE__ */ new Date()).toISOString() } : {},
+        note: "The user cleared the render lock in the panel. Nothing was resent or stopped; After Effects may still be rendering. Look at After Effects' Render Queue panel and the output files."
+      });
+      lease?.release();
+    }
+  );
+}
+function errMessage2(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+async function runRenderJob(p) {
+  const { ctx, store, jobId, opId, items } = p;
+  let keepGate = false;
+  try {
+    await rqrenderDeps.defer();
+    let evalProblem = null;
+    try {
+      await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall("rqeditRender", {}),
+        label: "ae_render_queue_render (render)",
+        mutates: true,
+        toolName: "ae_render_queue_render",
+        timeoutMs: p.timeoutMs
+      });
+    } catch (err) {
+      evalProblem = { kind: err instanceof BridgeError ? err.kind : "other", message: errMessage2(err) };
+    }
+    if (evalProblem && evalProblem.kind === "timeout") {
+      keepGate = true;
+      renderGate.markUnknown("render_timeout");
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        error: clip2(evalProblem.message),
+        note: "The render call reached its time limit, so its outcome is unknown. After Effects may still be rendering. Nothing was resent and nothing was stopped. Look at After Effects' Render Queue panel; other tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders, restarting it clears this."
+      });
+      return;
+    }
+    if (evalProblem && evalProblem.kind === "unreachable") {
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        error: clip2(evalProblem.message),
+        note: "The panel could not be reached while the render ran, so its outcome is unknown. Look at After Effects. Nothing was resent."
+      });
+      return;
+    }
+    let read3 = null;
+    let readBackError;
+    let stillGoing = false;
+    const deadline = rqrenderDeps.now() + rqrenderDeps.stillRenderingMaxMs;
+    for (let n = 1; ; n++) {
+      try {
+        const res = await ctx.bridge.evalRaw({
+          id: n === 1 ? `${opId}_after` : `${opId}_after${n}`,
+          script: buildJsxCall("rqeditRenderResult", { indexes: items.map((i) => i.index), comp_ids: items.map((i) => i.comp_id) }),
+          label: "ae_render_queue_render (read-back)",
+          mutates: false,
+          toolName: "ae_render_queue_render",
+          timeoutMs: rqrenderDeps.readBackTimeoutMs
+        });
+        read3 = res.result ?? null;
+      } catch (err) {
+        read3 = null;
+        readBackError = errMessage2(err);
+        if (err instanceof BridgeError && err.kind === "timeout") {
+          keepGate = true;
+          renderGate.markUnknown("read_back_timeout");
+        }
+        break;
+      }
+      if (!stillRendering(read3)) break;
+      if (rqrenderDeps.now() >= deadline) {
+        stillGoing = true;
+        break;
+      }
+      await rqrenderDeps.sleep(rqrenderDeps.stillRenderingPollMs);
+    }
+    const judged = judgeResult(items, read3, readBackError);
+    if (stillGoing) {
+      keepGate = true;
+      renderGate.markUnknown("still_rendering");
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        ok: false,
+        summary: judged.summary,
+        result: judged.result,
+        note: "The render call returned, but After Effects kept reporting that it is rendering, so the outcome is unknown and other tools stay refused. Look at After Effects' Render Queue panel. If it no longer renders, restarting After Effects (or the user's Clear render lock button in the panel) clears this."
+      });
+      return;
+    }
+    if (evalProblem) {
+      store.update(jobId, {
+        state: "failed",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        ok: false,
+        error: clip2(evalProblem.message),
+        summary: `After Effects raised an error from the render call: ${clip2(evalProblem.message)}. ${judged.summary}`,
+        result: judged.result
+      });
+    } else {
+      store.update(jobId, { state: "finished", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: judged.ok, summary: judged.summary, result: judged.result });
+    }
+    if (read3 && !keepGate) {
+      try {
+        const rec = store.get(jobId);
+        await noteUiWrite(ctx, {
+          opId: `${opId}_rebase`,
+          toolName: "ae_render_queue_render",
+          label: "ae_render_queue_render (session baseline)",
+          expect: { project_path: rec?.project_path ?? "<unsaved>" }
+        });
+      } catch {
+      }
+    }
+  } catch (err) {
+    try {
+      store.update(jobId, { state: "failed", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: false, error: clip2(errMessage2(err)), summary: "The render job's bookkeeping failed; look at After Effects and the output files." });
+    } catch {
+    }
+  } finally {
+    if (!keepGate) renderGate.end(jobId);
+    p.lease.release();
+  }
+}
+function elapsedSeconds(rec, nowMs) {
+  const start = Date.parse(rec.started_at);
+  const end = rec.state === "running" || !rec.finished_at ? nowMs : Date.parse(rec.finished_at);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round((end - start) / 1e3)) : 0;
+}
+async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
+  const nowMs = now();
+  const outputs = [];
+  for (const it of rec.items) for (const o of it.outputs) outputs.push(statOutput(o));
+  const totalBytes = outputs.reduce((n, o) => n + o.bytes, 0);
+  const startMs = Date.parse(rec.started_at);
+  const writtenSince = outputs.filter((o) => o.mtime !== null && Date.parse(o.mtime) >= startMs).length;
+  const prev = store.lastSeen.get(rec.job_id);
+  store.lastSeen.set(rec.job_id, { bytes: totalBytes, at: nowMs });
+  const out = {
+    ok: true,
+    job_id: rec.job_id,
+    state: rec.state,
+    started_at: rec.started_at,
+    ...rec.finished_at ? { finished_at: rec.finished_at } : {},
+    elapsed_seconds: elapsedSeconds(rec, nowMs),
+    max_hours: rec.max_hours,
+    project_path: rec.project_path,
+    items: rec.items.map((i) => ({ index: i.index, comp_id: i.comp_id, comp_name: i.comp_name })),
+    outputs
+  };
+  const gate = renderGate.active();
+  if (gate) {
+    out.gate = { job_id: gate.job_id, state: gate.state, ...gate.cause ? { cause: gate.cause } : {} };
+    out.gate_note = "Other tools are refused while this gate is shut. If After Effects no longer renders and it does not clear, restarting After Effects clears it; the user can also press Clear render lock in the Chroma AE MCP panel (shown only while the gate is shut).";
+  }
+  if (rec.state === "running") {
+    out.sign_of_life = {
+      files_written_since_start: writtenSince,
+      total_bytes: totalBytes,
+      ...prev ? { grew_since_last_check: totalBytes > prev.bytes, seconds_since_last_check: Math.round((nowMs - prev.at) / 1e3) } : {},
+      note: "After Effects gives no percentage while it renders for a script. A new or growing output file is a sign of life, not progress; a movie may only be written at the end."
+    };
+    out.message = "Rendering. Other tools can't reach After Effects until it ends; this tool does not touch it.";
+    out.stop = STOP_TEXT;
+  } else {
+    if (rec.ok !== void 0) out.render_ok = rec.ok;
+    if (rec.summary) out.summary = rec.summary;
+    if (rec.error) out.error = rec.error;
+    if (rec.note) out.note = rec.note;
+    if (rec.result) {
+      out.item_statuses = rec.result.item_statuses;
+      if (rec.result.read_back_error) out.read_back_error = rec.result.read_back_error;
+    }
+    if (rec.state === "finished" || rec.state === "failed") {
+      out.next = "Check one real output frame or file with ae_verify_render (path: a single existing file, with expect) once the gate is open; an image sequence path with [#####] is not a file, so give one real frame such as the first.";
+    }
+  }
+  if (includeDialogs) {
+    try {
+      const d = await rqrenderDeps.listDialogs({ screenshots: false });
+      if (d.ok) out.dialogs = (d.dialogs ?? []).slice(0, 20);
+      else out.dialogs_error = clip2(d.error ?? "could not be read");
+      if (d.ok && (d.dialogs?.length ?? 0) > 0) {
+        out.dialogs_note = "A popup is open in After Effects. Read it with ae_dialogs; answer with ae_dialog_respond only under the user's rules. Never suppressed.";
+      }
+    } catch (err) {
+      out.dialogs_error = clip2(errMessage2(err));
+    }
+  }
+  return out;
+}
+var crypto11, fs29, path29, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, rqrenderTools;
+var init_rqrender = __esm({
+  "src/tools/ext/rqrender.ts"() {
+    "use strict";
+    crypto11 = __toESM(require("node:crypto"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_render_gate();
+    init_common();
+    init_mutate();
+    init_aerender();
+    init_dialogs();
+    init_renderbatch();
+    init_rqedit();
+    init_session();
+    MAX_JOBS_KEPT = 30;
+    MAX_OUTPUT_FILES_STAT = 2e4;
+    MAX_ITEMS2 = 100;
+    STILL_RENDERING_MAX_MS = 30 * 6e4;
+    STILL_RENDERING_POLL_MS = 5e3;
+    MAX_TIMEOUT_MS = 2147e6;
+    READ_BACK_TIMEOUT_MS = 12e4;
+    MAX_TEXT = 2e3;
+    RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
+    STOP_TEXT = "The user stops it with the Stop button in After Effects' Render Queue panel; the item then reads USER_STOPPED. A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. Whether After Effects' UI stays clickable during a render started by script is not measured, so on a dirty project ask the user to save first.";
+    RenderJobStore = class {
+      constructor(filePath) {
+        this.filePath = filePath;
+        this.load();
+      }
+      jobs = /* @__PURE__ */ new Map();
+      settled = /* @__PURE__ */ new Map();
+      /** Sizes seen by the last status call, to say whether files grew since. Memory only. */
+      lastSeen = /* @__PURE__ */ new Map();
+      load() {
+        try {
+          if (!fs29.existsSync(this.filePath)) return;
+          const parsed = JSON.parse(fs29.readFileSync(this.filePath, "utf8"));
+          const list2 = Array.isArray(parsed.jobs) ? parsed.jobs : [];
+          let changed = false;
+          for (const raw of list2) {
+            if (!raw || typeof raw !== "object" || typeof raw.job_id !== "string") continue;
+            const rec = { ...raw };
+            if (rec.state === "running") {
+              rec.state = "lost";
+              rec.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+              rec.note = "The panel service restarted while this render was running, so nobody is tracking it any more. After Effects may still be rendering, or may have finished or stopped: look at After Effects' Render Queue panel and at the output files. Nothing was resent.";
+              changed = true;
+            }
+            this.jobs.set(rec.job_id, rec);
+          }
+          if (changed) this.save();
+        } catch {
+        }
+      }
+      save() {
+        try {
+          fs29.mkdirSync(path29.dirname(this.filePath), { recursive: true });
+          const keep = this.list().slice(-MAX_JOBS_KEPT);
+          const payload = JSON.stringify({ jobs: keep }, null, 2);
+          const tmp = `${this.filePath}.tmp-${process.pid}-${crypto11.randomBytes(3).toString("hex")}`;
+          try {
+            fs29.writeFileSync(tmp, payload, "utf8");
+            fs29.renameSync(tmp, this.filePath);
+          } catch {
+            fs29.writeFileSync(this.filePath, payload, "utf8");
+            try {
+              fs29.rmSync(tmp, { force: true });
+            } catch {
+            }
+          }
+        } catch {
+        }
+      }
+      list() {
+        return Array.from(this.jobs.values()).sort((a, b) => a.started_at.localeCompare(b.started_at));
+      }
+      get(jobId) {
+        return this.jobs.get(jobId);
+      }
+      create(rec) {
+        this.jobs.set(rec.job_id, { ...rec });
+        this.save();
+      }
+      update(jobId, patch) {
+        const cur = this.jobs.get(jobId);
+        if (!cur) return;
+        this.jobs.set(jobId, { ...cur, ...patch, job_id: cur.job_id });
+        this.save();
+      }
+      /** The running job, else the newest one. */
+      latest() {
+        const all = this.list();
+        return all.find((j) => j.state === "running") ?? all[all.length - 1];
+      }
+      trackSettled(jobId, p) {
+        this.settled.set(jobId, p);
+      }
+      /** Resolves when the background run of a job has finished (for tests). */
+      done(jobId) {
+        return this.settled.get(jobId) ?? Promise.resolve();
+      }
+    };
+    stores = /* @__PURE__ */ new Map();
+    rqrenderDeps = {
+      listDialogs: listBlockingDialogs,
+      /** Outputs that running aerender jobs and batches are going to write. */
+      liveOutputs: () => liveOutputsFrom(getDefaultAerenderRegistry()),
+      /** One macrotask, so the tool's reply is sent before the render eval is. */
+      defer: () => new Promise((resolve4) => setTimeout(resolve4, 0)),
+      sleep: (ms) => new Promise((resolve4) => setTimeout(resolve4, ms)),
+      now: () => Date.now(),
+      readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
+      stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
+      stillRenderingPollMs: STILL_RENDERING_POLL_MS
+    };
+    SEQ_TOKEN = /\[(#+)\]/;
+    AeRenderQueueRenderSchema = external_exports.object({
+      max_hours: external_exports.number().min(1).max(48).default(12).describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
+      overwrite: external_exports.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool; whether After Effects then prompts or silently overwrites is not measured."),
+      expect: ExpectSchema
+    });
+    AeRenderQueueRenderStatusSchema = external_exports.object({
+      job_id: external_exports.string().min(1).max(100).optional().describe("A job id from ae_render_queue_render. Default: the running job, else the newest."),
+      include_dialogs: external_exports.boolean().default(true).optional().describe("Also list popups blocking After Effects (read from outside AE; screenshots are not taken). Default true.")
+    });
+    rqrenderTools = [
+      {
+        name: "ae_render_queue_render",
+        description: `Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. Use it when \`ae_aerender_start\` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. Prefer \`ae_aerender_start\` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST (the Stop button's behaviour is not measured). NEVER ask the user to press Render in the Render Queue panel: call this instead. While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. These keep working: \`ae_render_queue_render_status\` (state, elapsed, output files, any blocking popup; it never touches AE), \`ae_dialogs\`, \`ae_dialog_respond\`, \`ae_diagnostics\`; \`ae_status\` answers with the render state; \`ae_ask_user\` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads \`lost\`. Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since "Save in subfolder" can make it at render time; nothing is created); or an output file already exists (unless \`overwrite: true\`; nothing is ever deleted, and whether After Effects then prompts is not measured). A queued aerender job or batch item is held (not started) while the render runs. When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run \`ae_verify_render\` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. \`max_hours\` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. Stopping: ${STOP_TEXT} Jobs are kept on disk; if the service restarts during a render the job reads \`lost\` and you must look at After Effects. ` + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueRenderSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          if (!ctx.serviceInfo) {
+            return {
+              ok: false,
+              started: false,
+              refused: [
+                {
+                  code: "not_in_panel",
+                  message: "This tool runs only inside the After Effects panel service. The dev stdio server reaches the panel with fetch, whose 300 s timeout would read a long render as unreachable and lift the render gate mid-render. Nothing was started."
+                }
+              ]
+            };
+          }
+          const store = storeFor(ctx);
+          const gate = renderGate.active();
+          if (gate) {
+            return { ok: false, started: false, refused: [{ code: "already_rendering", message: renderGateMessage(gate) }], job_id: gate.job_id };
+          }
+          const maxHours = args.max_hours ?? 12;
+          const opId = ctx.bridge.newOpId();
+          let lease;
+          try {
+            lease = await ctx.queue.acquire("ae_render_queue_render");
+          } catch (err) {
+            if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+            throw err;
+          }
+          let handedOff = false;
+          try {
+            const guard = await verifyTargetGuard(ctx, args.expect, opId);
+            const readRes = await ctx.bridge.evalRaw({
+              id: `${opId}_read`,
+              script: buildJsxCall("rqeditRead", { settings: false }),
+              label: "ae_render_queue_render (read)",
+              mutates: false,
+              toolName: "ae_render_queue_render"
+            });
+            let live = [];
+            try {
+              live = rqrenderDeps.liveOutputs();
+            } catch {
+              live = [];
+            }
+            const plan2 = planStart(readRes.result ?? null, args.overwrite === true, live);
+            if (plan2.refusals.length > 0) {
+              return {
+                ok: false,
+                started: false,
+                refused: plan2.refusals,
+                message: "Nothing was started. Fix the reasons above and call again."
+              };
+            }
+            const jobId = `rqjob_${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
+            const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+            const projectPath = guard.project_path ?? args.expect.project_path;
+            store.create({
+              job_id: jobId,
+              op_id: opId,
+              state: "running",
+              started_at: startedAt,
+              max_hours: maxHours,
+              project_path: projectPath,
+              overwrite: args.overwrite === true,
+              items: plan2.items
+            });
+            const info = { job_id: jobId, op_id: opId, started_at: startedAt };
+            beginRenderGate(store, info, lease);
+            ctx.queue.rejectWaiting(() => new BridgeError({ kind: "queued", message: renderGateMessage({ ...info, state: "rendering" }) }));
+            const timeoutMs = renderTimeoutMs(maxHours);
+            handedOff = true;
+            const run = runRenderJob({ ctx, store, jobId, opId, lease, timeoutMs, items: plan2.items });
+            store.trackSettled(jobId, run);
+            void run.catch(() => void 0);
+            return {
+              ok: true,
+              started: true,
+              job_id: jobId,
+              state: "running",
+              started_at: startedAt,
+              max_hours: maxHours,
+              project_path: projectPath,
+              renders: "the open project exactly as it is now (unsaved or dirty changes included)",
+              items: plan2.items,
+              ...plan2.warnings.length > 0 ? { warnings: plan2.warnings } : {},
+              note: "The render runs in After Effects in the background of this call. After Effects is busy until it ends and the user cannot work in it; every other AE tool is refused meanwhile. Poll ae_render_queue_render_status (it never touches AE). " + STOP_TEXT
+            };
+          } finally {
+            if (!handedOff) lease.release();
+          }
+        }
+      },
+      {
+        name: "ae_render_queue_render_status",
+        description: "Where a render started by ae_render_queue_render is: state (running, finished, failed, unknown, lost), elapsed time, and for every output file whether it exists, its bytes and mtime and, for an image sequence, the frame count; plus any popup blocking After Effects (screenshots are not taken). It NEVER touches After Effects (no evalScript), so it answers during the render. While it renders, After Effects gives no percentage: a new or growing file is a sign of life, not progress. After the end it gives each item's status (DONE, ERR_STOPPED, USER_STOPPED), its elapsed time and a verdict, and suggests ae_verify_render. A job `lost` was cut off by a service restart: look at After Effects. `unknown` means the render call hit its time limit, its read-back timed out, or After Effects kept reporting that it renders. While the gate is shut the answer says that restarting After Effects clears it if AE no longer renders. Changes nothing.",
+        schema: AeRenderQueueRenderStatusSchema,
+        handler: async (args, ctx) => {
+          const store = storeFor(ctx);
+          const rec = args.job_id ? store.get(args.job_id) : store.latest();
+          if (!rec) {
+            return {
+              ok: false,
+              error: args.job_id ? "unknown_job" : "no_jobs",
+              message: args.job_id ? `No render job ${args.job_id}.` : "No render has been started with ae_render_queue_render yet.",
+              ...renderGate.active() ? { gate: renderGate.active() } : {}
+            };
+          }
+          return describeJob(ctx, store, rec, args.include_dialogs !== false);
+        }
+      }
+    ];
+  }
+});
+
 // src/tools/ext/collect.ts
 function formatBytes(n) {
   if (!Number.isFinite(n)) return "?";
@@ -29992,7 +30876,7 @@ function pathKey2(p, caseInsensitive = WIN_OR_MAC) {
 function safeSegment(name, max = 120) {
   let s = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
   if (!s || s === "." || s === "..") s = "_";
-  const ext2 = path29.extname(s);
+  const ext2 = path30.extname(s);
   const stem = ext2 ? s.slice(0, -ext2.length) : s;
   const room = Math.max(1, max - ext2.length);
   let out = (stem.length > room ? stem.slice(0, room) : stem) + ext2;
@@ -30020,20 +30904,20 @@ function matchFrames(names, base, caseInsensitive = WIN_OR_MAC) {
 }
 async function resolveSource(file, sequence) {
   let warning;
-  if (sequence && splitFrameName(path29.basename(file))) {
-    const dir = path29.dirname(file);
+  if (sequence && splitFrameName(path30.basename(file))) {
+    const dir = path30.dirname(file);
     let names = [];
     try {
-      names = await fs29.promises.readdir(dir);
+      names = await fs30.promises.readdir(dir);
     } catch {
       names = [];
     }
-    const frames = matchFrames(names, path29.basename(file));
+    const frames = matchFrames(names, path30.basename(file));
     if (frames.length > 0) {
       const files = [];
       try {
         for (let i = 0; i < frames.length; i += 64) {
-          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile(path29.join(dir, f.name)))));
+          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile(path30.join(dir, f.name)))));
         }
       } catch (err) {
         return { files: [], error: `a frame could not be read: ${err instanceof Error ? err.message : String(err)}` };
@@ -30042,12 +30926,12 @@ async function resolveSource(file, sequence) {
       const last = frames[frames.length - 1].number;
       const distinct = new Set(frames.map((f) => f.number)).size;
       const res = { files, frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct) } };
-      if (files.length === 1) res.warning = `${path29.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
+      if (files.length === 1) res.warning = `${path30.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
       return res;
     }
-    warning = `the frames next to ${path29.basename(file)} could not be listed: only this file is collected`;
+    warning = `the frames next to ${path30.basename(file)} could not be listed: only this file is collected`;
   } else if (sequence) {
-    warning = `${path29.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
+    warning = `${path30.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
   }
   try {
     const one = { files: [await statFile(file)] };
@@ -30059,9 +30943,9 @@ async function resolveSource(file, sequence) {
   }
 }
 function sourceKey(file, sequence) {
-  const f = sequence ? splitFrameName(path29.basename(file)) : null;
+  const f = sequence ? splitFrameName(path30.basename(file)) : null;
   if (!f) return pathKey2(file);
-  return `${pathKey2(path29.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
+  return `${pathKey2(path30.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
 }
 function planCollect(entries, resolved, opts = {}) {
   const refs = [];
@@ -30109,17 +30993,17 @@ function planCollect(entries, resolved, opts = {}) {
         let destDir = base;
         let destFirst = "";
         if (res.files.length > 0) {
-          if (ref3.sequence && res.files.length >= 1 && splitFrameName(path29.basename(ref3.file))) {
-            const folder = unique(takenDirs, `${base}/${safeSegment(path29.basename(path29.dirname(ref3.file)) || "sequence")}`, (r) => [r, ""]);
+          if (ref3.sequence && res.files.length >= 1 && splitFrameName(path30.basename(ref3.file))) {
+            const folder = unique(takenDirs, `${base}/${safeSegment(path30.basename(path30.dirname(ref3.file)) || "sequence")}`, (r) => [r, ""]);
             destDir = folder;
-            destFirst = `${folder}/${safeSegment(path29.basename(res.files[0].path))}`;
+            destFirst = `${folder}/${safeSegment(path30.basename(res.files[0].path))}`;
           } else {
-            const rel = unique(takenFiles, `${base}/${safeSegment(path29.basename(ref3.file))}`, (r) => {
-              const ext2 = path29.extname(r);
+            const rel = unique(takenFiles, `${base}/${safeSegment(path30.basename(ref3.file))}`, (r) => {
+              const ext2 = path30.extname(r);
               return [ext2 ? r.slice(0, -ext2.length) : r, ext2];
             });
             destFirst = rel;
-            destDir = path29.posix.dirname(rel);
+            destDir = path30.posix.dirname(rel);
           }
         }
         phys = { dest_dir: destDir, dest_first: destFirst };
@@ -30167,7 +31051,7 @@ function planCollect(entries, resolved, opts = {}) {
     const roleOf = plan2.sources.some((o) => o.key === g.key && o.role === "main") ? "main" : "proxy";
     for (let i = 0; i < res.files.length; i++) {
       const f = res.files[i];
-      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path29.basename(f.path))}`;
+      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path30.basename(f.path))}`;
       plan2.files.push({ source: f.path, path: rel, bytes: f.bytes, mtime_ms: f.mtimeMs, role: roleOf, item_ids: [...ids] });
       plan2.bytes += f.bytes;
     }
@@ -30190,9 +31074,9 @@ async function writeZip(zipPath, inputs, opts = {}) {
     for (const input of inputs) {
       const name = Buffer.from(input.name, "utf8");
       if (name.length > 65535) throw new Error(`zip name too long: ${input.name.slice(0, 80)}`);
-      const size = input.data ? input.data.length : (await fs29.promises.stat(input.file)).size;
+      const size = input.data ? input.data.length : (await fs30.promises.stat(input.file)).size;
       const zip64 = opts.forceZip64 === true || size >= ZIP64_AT;
-      const ext2 = path29.extname(input.name).toLowerCase();
+      const ext2 = path30.extname(input.name).toLowerCase();
       const method = STORED_EXT.has(ext2) || size === 0 ? 0 : 8;
       const { time, date } = dosDateTime(input.mtime);
       const offset = out.offset;
@@ -30231,7 +31115,7 @@ async function writeZip(zipPath, inputs, opts = {}) {
           out.write(chunk).then(() => cb(), cb);
         }
       });
-      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs29.createReadStream(input.file);
+      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs30.createReadStream(input.file);
       if (method === 8) await (0, import_promises.pipeline)(source, counter, zlib.createDeflateRaw({ level: 6 }), sink);
       else await (0, import_promises.pipeline)(source, counter, sink);
       if (!zip64 && (usize >= U32_MAX || csize >= U32_MAX)) throw new Error(`${input.name} grew past 4 GB while it was zipped`);
@@ -30302,16 +31186,16 @@ async function writeZip(zipPath, inputs, opts = {}) {
     await out.write(e);
     const total2 = out.offset;
     await out.close();
-    await fs29.promises.rename(part2, zipPath);
+    await fs30.promises.rename(part2, zipPath);
     return { path: zipPath, entries: central.length, bytes: total2, zip64: needZip64 || central.some((r) => r.zip64) };
   } catch (err) {
     await out.close().catch(() => void 0);
-    await fs29.promises.rm(part2, { force: true }).catch(() => void 0);
+    await fs30.promises.rm(part2, { force: true }).catch(() => void 0);
     throw err;
   }
 }
 async function readZipDirectory(zipPath) {
-  const fh = await fs29.promises.open(zipPath, "r");
+  const fh = await fs30.promises.open(zipPath, "r");
   try {
     const size = (await fh.stat()).size;
     const tailLen = Math.min(size, 65557 + 20);
@@ -30394,7 +31278,7 @@ async function verifyZip(zipPath, expected) {
   } catch (err) {
     return { ok: false, entries: 0, zip64: false, errors: [`the central directory could not be read: ${err instanceof Error ? err.message : String(err)}`] };
   }
-  const fh = await fs29.promises.open(zipPath, "r");
+  const fh = await fs30.promises.open(zipPath, "r");
   const seen = /* @__PURE__ */ new Set();
   try {
     for (const e of dir.entries) {
@@ -30407,11 +31291,11 @@ async function verifyZip(zipPath, expected) {
       }
       const start = e.offset + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
       const crc = new Crc32();
-      const sha = crypto11.createHash("sha1");
+      const sha = crypto12.createHash("sha1");
       let n = 0;
       try {
         if (e.csize > 0) {
-          const raw = fs29.createReadStream(zipPath, { start, end: start + e.csize - 1 });
+          const raw = fs30.createReadStream(zipPath, { start, end: start + e.csize - 1 });
           const stream = e.method === 8 ? raw.pipe(zlib.createInflateRaw()) : e.method === 0 ? raw : null;
           if (!stream) {
             note(`${e.name}: unsupported method ${e.method}`);
@@ -30445,9 +31329,9 @@ async function verifyZip(zipPath, expected) {
   return { ok: errors.length === 0, entries: dir.entries.length, zip64: dir.zip64, errors };
 }
 async function sha1File(p) {
-  const h = crypto11.createHash("sha1");
+  const h = crypto12.createHash("sha1");
   await (0, import_promises.pipeline)(
-    fs29.createReadStream(p),
+    fs30.createReadStream(p),
     new import_node_stream.Writable({
       write(chunk, _enc, cb) {
         h.update(chunk);
@@ -30458,9 +31342,9 @@ async function sha1File(p) {
   return h.digest("hex");
 }
 async function copyHashed(src, dest, mtimeMs) {
-  await fs29.promises.mkdir(path29.dirname(dest), { recursive: true });
+  await fs30.promises.mkdir(path30.dirname(dest), { recursive: true });
   const part2 = `${dest}.part`;
-  const hash = crypto11.createHash("sha1");
+  const hash = crypto12.createHash("sha1");
   let bytes = 0;
   const tap = new import_node_stream.Transform({
     transform(chunk, _enc, cb) {
@@ -30470,12 +31354,12 @@ async function copyHashed(src, dest, mtimeMs) {
     }
   });
   try {
-    await (0, import_promises.pipeline)(fs29.createReadStream(src), tap, fs29.createWriteStream(part2));
-    await fs29.promises.rename(part2, dest);
+    await (0, import_promises.pipeline)(fs30.createReadStream(src), tap, fs30.createWriteStream(part2));
+    await fs30.promises.rename(part2, dest);
     const when = new Date(mtimeMs);
-    await fs29.promises.utimes(dest, when, when).catch(() => void 0);
+    await fs30.promises.utimes(dest, when, when).catch(() => void 0);
   } catch (err) {
-    await fs29.promises.rm(part2, { force: true }).catch(() => void 0);
+    await fs30.promises.rm(part2, { force: true }).catch(() => void 0);
     throw err;
   }
   return { sha1: hash.digest("hex"), bytes };
@@ -30484,27 +31368,27 @@ function buildMappings(m, dest) {
   const out = [];
   for (const s of m.sources) {
     if (!s.dest_first) continue;
-    const to = path29.join(dest, ...s.dest_first.split("/"));
+    const to = path30.join(dest, ...s.dest_first.split("/"));
     for (const from of s.ae_files) out.push({ from, to, sequence: s.sequence, role: s.role, item_ids: s.item_ids });
   }
   return out;
 }
 function manifestPath(dest) {
-  return path29.join(dest, "manifest.json");
+  return path30.join(dest, "manifest.json");
 }
 async function readManifest(dest) {
   try {
-    const m = JSON.parse(await fs29.promises.readFile(manifestPath(dest), "utf8"));
+    const m = JSON.parse(await fs30.promises.readFile(manifestPath(dest), "utf8"));
     return m && m.version === 1 && Array.isArray(m.files) && Array.isArray(m.sources) ? m : null;
   } catch {
     return null;
   }
 }
 async function writeFileAtomic(p, text) {
-  await fs29.promises.mkdir(path29.dirname(p), { recursive: true });
+  await fs30.promises.mkdir(path30.dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  await fs29.promises.writeFile(tmp, text, "utf8");
-  await fs29.promises.rename(tmp, p);
+  await fs30.promises.writeFile(tmp, text, "utf8");
+  await fs30.promises.rename(tmp, p);
 }
 function diffManifests(prev, files) {
   if (!prev) return null;
@@ -30553,21 +31437,21 @@ async function resolveAll(entries, opts) {
   return out;
 }
 function destFolder(project2, dest) {
-  return path29.resolve(dest ?? path29.join(path29.dirname(project2), "_collect"));
+  return path30.resolve(dest ?? path30.join(path30.dirname(project2), "_collect"));
 }
 function destProblem(dest) {
-  if (dest !== void 0 && !path29.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
+  if (dest !== void 0 && !path30.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
   return null;
 }
 async function inspectDest(dest) {
   let st;
   try {
-    st = await fs29.promises.stat(dest);
+    st = await fs30.promises.stat(dest);
   } catch {
     return { exists: false, isDir: false, empty: true, manifest: null };
   }
   if (!st.isDirectory()) return { exists: true, isDir: false, empty: false, manifest: null };
-  const names = await fs29.promises.readdir(dest).catch(() => []);
+  const names = await fs30.promises.readdir(dest).catch(() => []);
   const onlyOwnReports = names.length > 0 && names.every((n) => OWN_REPORT_FILES.has(n.toLowerCase()));
   return { exists: true, isDir: true, empty: names.length === 0 || onlyOwnReports, manifest: await readManifest(dest) };
 }
@@ -30625,11 +31509,11 @@ async function collectFilesBody(args, ctx, hold) {
   const problem = savedProblem(state);
   if (problem) return bad2(problem);
   const project2 = state.project_path;
-  if (!fs29.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
+  if (!fs30.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
   const badDest = destProblem(args.dest);
   if (badDest) return bad2(badDest);
   const dest = destFolder(project2, args.dest);
-  const aepDest = path29.join(dest, path29.basename(project2));
+  const aepDest = path30.join(dest, path30.basename(project2));
   if (pathKey2(aepDest) === pathKey2(project2)) return bad2("dest is the project's own folder: the copy would overwrite the .aep. Pick another folder.");
   const dry = args.dry_run !== false;
   const destInfo = await inspectDest(dest);
@@ -30670,11 +31554,11 @@ async function collectFilesBody(args, ctx, hold) {
   const plan2 = planCollect(foot.entries, resolved, args);
   const warnings = [];
   if (destIssue) warnings.push(destIssue);
-  const longest = plan2.files.reduce((n, f) => Math.max(n, path29.join(dest, f.path).length), 0);
+  const longest = plan2.files.reduce((n, f) => Math.max(n, path30.join(dest, f.path).length), 0);
   if (process.platform === "win32" && longest > 240) warnings.push(`Some collected paths are ${longest} characters long; Windows may refuse paths past 259. Pick a shorter dest.`);
-  const sameFolder = plan2.files.filter((f) => pathKey2(path29.join(dest, f.path)) === pathKey2(f.source));
+  const sameFolder = plan2.files.filter((f) => pathKey2(path30.join(dest, f.path)) === pathKey2(f.source));
   if (sameFolder.length) warnings.push(`${sameFolder.length} file(s) already sit at their collected path: they are left alone.`);
-  const projectBytes = fs29.statSync(project2).size;
+  const projectBytes = fs30.statSync(project2).size;
   const summary3 = summarisePlan(plan2, foot.noFile, warnings);
   if (dry) {
     return {
@@ -30695,8 +31579,8 @@ async function collectFilesBody(args, ctx, hold) {
   const keepAep = !!prev?.relinked && pathKey2(prev.project.path) === pathKey2(project2);
   const t0 = Date.now();
   const deadline = t0 + (args.max_seconds ?? 50) * 1e3;
-  await fs29.promises.mkdir(dest, { recursive: true });
-  const aepStat = fs29.statSync(project2);
+  await fs30.promises.mkdir(dest, { recursive: true });
+  const aepStat = fs30.statSync(project2);
   let aepNote;
   if (keepAep) {
     aepNote = "kept: the copy there is already relinked (restart: true copies the .aep again)";
@@ -30717,7 +31601,7 @@ async function collectFilesBody(args, ctx, hold) {
       created: prev?.created ?? (/* @__PURE__ */ new Date()).toISOString(),
       updated: (/* @__PURE__ */ new Date()).toISOString(),
       complete: complete2,
-      project: { path: project2, name: path29.basename(project2) },
+      project: { path: project2, name: path30.basename(project2) },
       ae: state.ae,
       options: { only_used: args.only_used === true, include_proxies: args.include_proxies !== false },
       relinked: keepAep,
@@ -30729,7 +31613,7 @@ async function collectFilesBody(args, ctx, hold) {
         dest_first: s.dest_first,
         frames: s.resolved.frames
       })),
-      files: [...files, { source: project2, path: path29.basename(project2), bytes: fs29.existsSync(aepDest) ? fs29.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
+      files: [...files, { source: project2, path: path30.basename(project2), bytes: fs30.existsSync(aepDest) ? fs30.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
       not_collected: NOT_COLLECTED
     };
     await writeFileAtomic(manifestPath(dest), JSON.stringify(m));
@@ -30741,13 +31625,13 @@ async function collectFilesBody(args, ctx, hold) {
       stoppedEarly = true;
       break;
     }
-    const target = path29.join(dest, ...f.path.split("/"));
+    const target = path30.join(dest, ...f.path.split("/"));
     try {
       if (pathKey2(target) === pathKey2(f.source)) {
         f.sha1 = await sha1File(f.source);
         continue;
       }
-      const st = await fs29.promises.stat(target).catch(() => null);
+      const st = await fs30.promises.stat(target).catch(() => null);
       if (st && st.size === f.bytes && Math.abs(st.mtimeMs - f.mtime_ms) < 2e3) {
         const was = prevSha.get(f.path);
         f.sha1 = was && was.bytes === f.bytes ? was.sha1 : await sha1File(target);
@@ -30775,21 +31659,21 @@ async function collectFilesBody(args, ctx, hold) {
   let zipInfo = null;
   if (complete) {
     const aepEntry = manifest.files.find((f) => f.role === "project");
-    if (aepEntry && fs29.existsSync(aepDest)) {
+    if (aepEntry && fs30.existsSync(aepDest)) {
       aepEntry.sha1 = await sha1File(aepDest);
-      aepEntry.bytes = fs29.statSync(aepDest).size;
+      aepEntry.bytes = fs30.statSync(aepDest).size;
       await writeFileAtomic(manifestPath(dest), JSON.stringify(manifest));
     }
     if (args.report !== "none") {
       try {
-        const file = path29.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
-        const lastStamp = await fs29.promises.readFile(path29.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
-        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs29.existsSync(file)) {
+        const file = path30.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
+        const lastStamp = await fs30.promises.readFile(path30.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
+        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs30.existsSync(file)) {
           reportInfo = { path: file, unchanged: true, note: "The collect has not changed since the last report: it was kept as the baseline for the next diff." };
         } else {
           const r = await buildReport2(ctx, { dest, hash_outputs: true, manifest, deadline }, tool);
           await writeFileAtomic(file, args.report === "json" ? JSON.stringify(r, null, 2) : renderReportMarkdown(r));
-          await writeFileAtomic(path29.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
+          await writeFileAtomic(path30.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
           reportInfo = { path: file };
         }
       } catch (err) {
@@ -30829,7 +31713,7 @@ async function collectFilesBody(args, ctx, hold) {
 }
 function zipStamp(m) {
   const rows = m.files.map((f) => [f.path, f.bytes, f.sha1]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-  return crypto11.createHash("sha1").update(JSON.stringify(rows)).digest("hex");
+  return crypto12.createHash("sha1").update(JSON.stringify(rows)).digest("hex");
 }
 async function zipStep(dest, manifest, deadline) {
   const zipPath = `${dest}.zip`;
@@ -30848,12 +31732,12 @@ async function zipStep(dest, manifest, deadline) {
     job = void 0;
   }
   if (!job) {
-    const stored = await fs29.promises.readFile(stampPath, "utf8").catch(() => null);
-    const st = stored !== null && stored.trim() === stamp3 ? await fs29.promises.stat(zipPath).catch(() => null) : null;
+    const stored = await fs30.promises.readFile(stampPath, "utf8").catch(() => null);
+    const st = stored !== null && stored.trim() === stamp3 ? await fs30.promises.stat(zipPath).catch(() => null) : null;
     if (st) {
       return { ok: true, path: zipPath, bytes: st.size, bytes_human: formatBytes(st.size), verified: true, verify_errors: [], up_to_date: true, note: "The zip already verified against this manifest: it was not written again." };
     }
-    if (stored === null && fs29.existsSync(zipPath)) {
+    if (stored === null && fs30.existsSync(zipPath)) {
       return { ok: false, status: "conflict", path: zipPath, error: "conflict", message: `${zipPath} already exists and was not written by this tool, so it was left alone. Move or rename it and call again.` };
     }
     const fresh = { stamp: stamp3, state: "running", promise: Promise.resolve(), result: null };
@@ -30880,20 +31764,20 @@ async function zipStep(dest, manifest, deadline) {
   return job.result ?? { ok: false, error: "The zip job ended without a result." };
 }
 async function zipCollect(dest, manifest, stamp3) {
-  const root = path29.basename(dest);
+  const root = path30.basename(dest);
   const zipPath = `${dest}.zip`;
   const inputs = [];
   const expected = /* @__PURE__ */ new Map();
   for (const f of manifest.files) {
-    const abs = path29.join(dest, ...f.path.split("/"));
-    const st = await fs29.promises.stat(abs);
+    const abs = path30.join(dest, ...f.path.split("/"));
+    const st = await fs30.promises.stat(abs);
     const name = `${root}/${f.path}`;
     inputs.push({ name, file: abs, mtime: st.mtime });
     expected.set(name, { bytes: st.size, sha1: f.sha1 });
   }
   for (const extra of ["manifest.json", "collect-report.md", "collect-report.json"]) {
-    const abs = path29.join(dest, extra);
-    if (fs29.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs29.statSync(abs).mtime });
+    const abs = path30.join(dest, extra);
+    if (fs30.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs30.statSync(abs).mtime });
   }
   await writeFileAtomic(`${zipPath}.stamp`, `pending ${stamp3}`);
   const written = await writeZip(zipPath, inputs);
@@ -30902,18 +31786,18 @@ async function zipCollect(dest, manifest, stamp3) {
   return { ok: check.ok, path: zipPath, entries: written.entries, bytes: written.bytes, bytes_human: formatBytes(written.bytes), zip64: written.zip64, verified: check.ok, verify_errors: check.errors };
 }
 async function statSequenceOutput(pattern) {
-  const dir = path29.dirname(pattern);
-  const base = path29.basename(pattern);
+  const dir = path30.dirname(pattern);
+  const base = path30.basename(pattern);
   const m = FRAME_TOKEN.exec(base);
-  const re = new RegExp(`^${escapeRe2(base.slice(0, m.index))}\\d{${m[1].length},}${escapeRe2(base.slice(m.index + m[0].length))}$`, WIN_OR_MAC ? "i" : "");
-  const names = await fs29.promises.readdir(dir);
+  const re = new RegExp(`^${escapeRe3(base.slice(0, m.index))}\\d{${m[1].length},}${escapeRe3(base.slice(m.index + m[0].length))}$`, WIN_OR_MAC ? "i" : "");
+  const names = await fs30.promises.readdir(dir);
   let frames = 0;
   let bytes = 0;
   let oldest = Infinity;
   let newest = 0;
   for (const n of names) {
     if (!re.test(n)) continue;
-    const st = await fs29.promises.stat(path29.join(dir, n)).catch(() => null);
+    const st = await fs30.promises.stat(path30.join(dir, n)).catch(() => null);
     if (!st || !st.isFile()) continue;
     frames++;
     bytes += st.size;
@@ -30948,7 +31832,7 @@ async function buildReport2(ctx, opts, toolName) {
   const project2 = info.project_path;
   let pStat = null;
   try {
-    pStat = project2 === "<unsaved>" ? null : fs29.statSync(project2);
+    pStat = project2 === "<unsaved>" ? null : fs30.statSync(project2);
   } catch {
     pStat = null;
   }
@@ -30981,7 +31865,7 @@ async function buildReport2(ctx, opts, toolName) {
   let notHashed = 0;
   for (const o of info.render_outputs.slice(0, MAX_LIST3)) {
     const row = { comp: o.comp, status: o.status, output_module: o.output_module, file: o.file, exists: false, bytes: null, mtime: null, newer_than_project: null, sha1: null };
-    if (o.file && FRAME_TOKEN.test(path29.basename(o.file))) {
+    if (o.file && FRAME_TOKEN.test(path30.basename(o.file))) {
       try {
         const seqInfo = await statSequenceOutput(o.file);
         row.frames = seqInfo.frames;
@@ -30995,7 +31879,7 @@ async function buildReport2(ctx, opts, toolName) {
       }
     } else if (o.file) {
       try {
-        const st = await fs29.promises.stat(o.file);
+        const st = await fs30.promises.stat(o.file);
         row.exists = st.isFile();
         row.bytes = st.size;
         row.mtime = st.mtime.toISOString();
@@ -31018,7 +31902,7 @@ async function buildReport2(ctx, opts, toolName) {
   if (project2 !== "<unsaved>") {
     const dir = checkpointDirFor(project2);
     try {
-      const names = (await fs29.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
+      const names = (await fs30.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
       checkpoints = { dir, count: names.length, latest: names.slice(-5).reverse() };
     } catch {
       checkpoints = { dir, count: 0, latest: [] };
@@ -31027,7 +31911,7 @@ async function buildReport2(ctx, opts, toolName) {
   const m = opts.manifest === void 0 ? await readManifest(opts.dest) : opts.manifest;
   const report = {
     generated: (/* @__PURE__ */ new Date()).toISOString(),
-    project: { path: project2, name: path29.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
+    project: { path: project2, name: path30.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
     ae: info.ae,
     comps: info.comps,
     comps_truncated: info.comps_truncated,
@@ -31047,7 +31931,7 @@ async function buildReport2(ctx, opts, toolName) {
   };
   let prev = null;
   try {
-    prev = JSON.parse(await fs29.promises.readFile(path29.join(opts.dest, "collect-report.json"), "utf8"));
+    prev = JSON.parse(await fs30.promises.readFile(path30.join(opts.dest, "collect-report.json"), "utf8"));
   } catch {
     prev = null;
   }
@@ -31116,9 +32000,9 @@ async function reportHandler(args, ctx) {
   let writeError = null;
   if (args.write !== false) {
     try {
-      written = path29.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
+      written = path30.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
       await writeFileAtomic(written, format === "json" ? JSON.stringify(report, null, 2) : renderReportMarkdown(report));
-      await writeFileAtomic(path29.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
+      await writeFileAtomic(path30.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
     } catch (err) {
       writeError = `The report could not be written: ${err instanceof Error ? err.message : String(err)}`;
       written = null;
@@ -31130,8 +32014,8 @@ async function reportHandler(args, ctx) {
     format,
     written,
     write_error: writeError,
-    markdown: text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) : text,
-    truncated: text.length > MAX_TEXT
+    markdown: text.length > MAX_TEXT2 ? text.slice(0, MAX_TEXT2) : text,
+    truncated: text.length > MAX_TEXT2
   };
 }
 function markReopenedSafely2() {
@@ -31233,12 +32117,12 @@ async function relinkHandler(args, ctx) {
   if (!manifest) return bad2(`No manifest in ${dest}. Run ae_collect_files with dry_run false first.`);
   if (!manifest.complete) return bad2("The collect is not complete. Call ae_collect_files again until it says complete.");
   if (pathKey2(manifest.project.path) !== pathKey2(original)) return bad2(`The collect in ${dest} is of ${manifest.project.path}, not the open project.`);
-  const copyPath = path29.join(dest, manifest.project.name);
-  if (!fs29.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
+  const copyPath = path30.join(dest, manifest.project.name);
+  if (!fs30.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
   if (manifest.relinked) return bad2("The copy is already relinked. Run ae_collect_files with restart: true to copy the .aep again first.");
   const mappings = buildMappings(manifest, dest);
   if (mappings.length === 0) return bad2("The manifest has nothing to relink.");
-  const missing = mappings.filter((x) => !fs29.existsSync(x.to));
+  const missing = mappings.filter((x) => !fs30.existsSync(x.to));
   if (missing.length) return bad2(`${missing.length} collected file(s) are missing from ${dest}: ${missing[0].to}`, { missing: missing.slice(0, 20).map((x) => x.to) });
   let reduceTo;
   if (args.reduce_to_comp_ids?.length) {
@@ -31361,7 +32245,7 @@ async function relinkHandler(args, ctx) {
           const aep = m2.files.find((f) => f.role === "project");
           if (aep) {
             aep.sha1 = await sha1File(copyPath);
-            aep.bytes = fs29.statSync(copyPath).size;
+            aep.bytes = fs30.statSync(copyPath).size;
           }
           await writeFileAtomic(manifestPath(dest), JSON.stringify(m2));
         } catch (err) {
@@ -31397,13 +32281,13 @@ async function relinkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto11, fs29, path29, import_node_stream, import_promises, zlib, MAX_LIST3, MAX_TEXT, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED, statFile, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe2, MAX_ITEM_MISMATCHES, collectTools;
+var crypto12, fs30, path30, import_node_stream, import_promises, zlib, MAX_LIST3, MAX_TEXT2, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED, statFile, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe3, MAX_ITEM_MISMATCHES, collectTools;
 var init_collect = __esm({
   "src/tools/ext/collect.ts"() {
     "use strict";
-    crypto11 = __toESM(require("node:crypto"), 1);
-    fs29 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    crypto12 = __toESM(require("node:crypto"), 1);
+    fs30 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
     import_node_stream = require("node:stream");
     import_promises = require("node:stream/promises");
     zlib = __toESM(require("node:zlib"), 1);
@@ -31418,9 +32302,9 @@ var init_collect = __esm({
     init_session();
     init_write_runner();
     MAX_LIST3 = 500;
-    MAX_TEXT = 2e4;
+    MAX_TEXT2 = 2e4;
     WIN_OR_MAC = process.platform === "win32" || process.platform === "darwin";
-    DestSchema = external_exports.string().min(1).refine((p) => path29.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
+    DestSchema = external_exports.string().min(1).refine((p) => path30.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
     AeCollectFilesSchema = external_exports.object({
       dest: DestSchema,
       dry_run: external_exports.boolean().optional().describe("Default true: report total bytes, the files, duplicates and what can't be collected, and copy nothing. Pass false to copy."),
@@ -31448,7 +32332,7 @@ var init_collect = __esm({
     });
     RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
     statFile = async (p) => {
-      const st = await fs29.promises.stat(p);
+      const st = await fs30.promises.stat(p);
       if (!st.isFile()) throw new Error("not a file");
       return { path: p, bytes: st.size, mtimeMs: st.mtimeMs };
     };
@@ -31508,7 +32392,7 @@ var init_collect = __esm({
       ws;
       failure = null;
       constructor(p) {
-        this.ws = fs29.createWriteStream(p);
+        this.ws = fs30.createWriteStream(p);
         this.ws.on("error", (e) => {
           this.failure = e;
         });
@@ -31540,7 +32424,7 @@ var init_collect = __esm({
     zipJobs = /* @__PURE__ */ new Map();
     HASH_LIMIT = 512 * 1024 * 1024;
     FRAME_TOKEN = /\[(#+)\]/;
-    escapeRe2 = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    escapeRe3 = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     MAX_ITEM_MISMATCHES = 50;
     collectTools = [
       {
@@ -31631,7 +32515,7 @@ function findingsOf(res) {
     else if (o.where && typeof o.where === "object") where = o.where.layer ?? o.where.item ?? o.where.comp ?? o.where.path;
     else if (typeof o.layer === "string") where = o.layer;
     else if (typeof o.time === "number") where = `t=${o.time}s`;
-    out.push({ severity: String(o.severity ?? "note"), message: clip2(message, 300), ...where !== void 0 ? { where: clip2(where, 200) } : {} });
+    out.push({ severity: String(o.severity ?? "note"), message: clip3(message, 300), ...where !== void 0 ? { where: clip3(where, 200) } : {} });
   }
   return out;
 }
@@ -31656,7 +32540,7 @@ function leftoverOf(kind, r, problems) {
     }
   }
   if ((kind === "scrub" || kind === "verify") && problems.some((m) => m?.path === "cleanup")) {
-    return `The ${kind} could not clean up after itself: ${clip2(problems.find((m) => m?.path === "cleanup")?.message ?? "cleanup failed", 200)} ${stray}`;
+    return `The ${kind} could not clean up after itself: ${clip3(problems.find((m) => m?.path === "cleanup")?.message ?? "cleanup failed", 200)} ${stray}`;
   }
   return null;
 }
@@ -31676,11 +32560,11 @@ function classifyStageResult(kind, res) {
     };
   }
   if (kind === "loudness" && r.ok === false && r.error === "no_audio") {
-    return { status: "warn", summary: `No audio to measure: ${clip2(r.message ?? "the comp has no layer with audio switched on", 300)}`, findings: [] };
+    return { status: "warn", summary: `No audio to measure: ${clip3(r.message ?? "the comp has no layer with audio switched on", 300)}`, findings: [] };
   }
   if (r.ok === false || typeof r.error === "string") {
     const error = typeof r.error === "string" ? r.error : "failed";
-    const message = typeof r.message === "string" ? ` ${clip2(r.message, 400)}` : "";
+    const message = typeof r.message === "string" ? ` ${clip3(r.message, 400)}` : "";
     const reached = r.applied === true;
     return { status: "blocked", summary: `${error}:${message}`.trim(), findings: findingsOf(r), ...reached ? { unverified: true, applied: true } : {} };
   }
@@ -31690,11 +32574,11 @@ function classifyStageResult(kind, res) {
       const text = failed.map((c) => `${c.what}: expected ${JSON.stringify(c.expected)}, got ${JSON.stringify(c.actual)}`).join("; ");
       return {
         status: "blocked",
-        summary: `The render does not match the comp${text ? ` (${clip2(text, 400)})` : ""}.`,
-        findings: failed.slice(0, MAX_FINDINGS2).map((c) => ({ severity: "blocker", message: clip2(`${c.what}: expected ${JSON.stringify(c.expected)}, got ${JSON.stringify(c.actual)}${c.note ? ` (${c.note})` : ""}`, 300) }))
+        summary: `The render does not match the comp${text ? ` (${clip3(text, 400)})` : ""}.`,
+        findings: failed.slice(0, MAX_FINDINGS2).map((c) => ({ severity: "blocker", message: clip3(`${c.what}: expected ${JSON.stringify(c.expected)}, got ${JSON.stringify(c.actual)}${c.note ? ` (${c.note})` : ""}`, 300) }))
       };
     }
-    return { status: "blocked", summary: "The read-back differs from what was asked.", findings: mismatches.slice(0, MAX_FINDINGS2).map((m) => ({ severity: "blocker", message: clip2(m?.message ?? "mismatch", 300) })) };
+    return { status: "blocked", summary: "The read-back differs from what was asked.", findings: mismatches.slice(0, MAX_FINDINGS2).map((m) => ({ severity: "blocker", message: clip3(m?.message ?? "mismatch", 300) })) };
   }
   const findings = findingsOf(r);
   const counts = countsText2(r.counts);
@@ -31704,7 +32588,7 @@ function classifyStageResult(kind, res) {
     }
     if (r.verdict !== null && typeof r.verdict === "object") {
       const v = r.verdict;
-      const advice = Array.isArray(v.advice) && typeof v.advice[0] === "string" ? ` ${clip2(v.advice[0], 300)}` : "";
+      const advice = Array.isArray(v.advice) && typeof v.advice[0] === "string" ? ` ${clip3(v.advice[0], 300)}` : "";
       const lufs = typeof r.measurement?.integrated_lufs === "number" ? `${r.measurement.integrated_lufs} LUFS` : "";
       const tp = typeof r.measurement?.true_peak_dbtp === "number" ? `, true peak ${r.measurement.true_peak_dbtp} dBTP` : "";
       if (v.measurable === false) return { status: "blocked", summary: `The loudness could not be measured (silent or below the gate).${advice}`, findings };
@@ -31724,17 +32608,17 @@ function classifyStageResult(kind, res) {
     if (r.dry_run === true) return { status: "warn", summary: "Dry run: nothing was copied. Set dry_run false in the collect stage's args.", findings };
     const zip = r.zip && typeof r.zip === "object" ? r.zip : null;
     if (zip && zip.ok !== true) {
-      const why = zip.status === "running" ? "is still being written in the background; retry asks again for the result" : `failed: ${clip2(zip.message ?? zip.error ?? "it did not verify against the manifest", 300)}`;
+      const why = zip.status === "running" ? "is still being written in the background; retry asks again for the result" : `failed: ${clip3(zip.message ?? zip.error ?? "it did not verify against the manifest", 300)}`;
       return { status: "blocked", summary: `The files were copied but the zip ${why}.`, findings };
     }
     if (zip && zip.verified === false) {
-      return { status: "blocked", summary: `The files were copied but the zip did not verify against the manifest${Array.isArray(zip.verify_errors) && zip.verify_errors[0] ? `: ${clip2(zip.verify_errors[0], 200)}` : ""}.`, findings };
+      return { status: "blocked", summary: `The files were copied but the zip did not verify against the manifest${Array.isArray(zip.verify_errors) && zip.verify_errors[0] ? `: ${clip3(zip.verify_errors[0], 200)}` : ""}.`, findings };
     }
     const gaps = [];
     if (typeof r.problems_total === "number" && r.problems_total > 0) gaps.push(`${r.problems_total} problem(s) with the footage`);
     if (typeof r.no_file_items_total === "number" && r.no_file_items_total > 0) gaps.push(`${r.no_file_items_total} item(s) with no file`);
     if (Array.isArray(r.sequences_with_gaps) && r.sequences_with_gaps.length > 0) gaps.push(`${r.sequences_with_gaps.length} sequence(s) with gaps`);
-    if (r.report && typeof r.report === "object" && typeof r.report.error === "string") gaps.push(`the report was not written (${clip2(r.report.error, 150)})`);
+    if (r.report && typeof r.report === "object" && typeof r.report.error === "string") gaps.push(`the report was not written (${clip3(r.report.error, 150)})`);
     const copied = `collected${typeof r.files_total === "number" ? ` ${r.files_total} file(s)` : ""}`;
     if (gaps.length > 0) return { status: "warn", summary: `${copied}, but ${gaps.join("; ")}`, findings };
     return { status: "ok", summary: copied, findings };
@@ -31884,13 +32768,13 @@ function summarizeStages(stages) {
   return s;
 }
 function describeError(err) {
-  if (err instanceof QuarantineBlockedError) return { error: "quarantine", message: clip2(err.message), applied: false };
-  if (err instanceof QueueWaitError) return { error: "queued", message: clip2(err.message), applied: false };
+  if (err instanceof QuarantineBlockedError) return { error: "quarantine", message: clip3(err.message), applied: false };
+  if (err instanceof QueueWaitError) return { error: "queued", message: clip3(err.message), applied: false };
   if (err instanceof BridgeError) {
-    if (err.kind === "guard" || err.kind === "queued") return { error: err.kind, message: clip2(err.message), applied: false };
-    return { error: err.kind, message: clip2(err.message), applied: "unknown" };
+    if (err.kind === "guard" || err.kind === "queued") return { error: err.kind, message: clip3(err.message), applied: false };
+    return { error: err.kind, message: clip3(err.message), applied: "unknown" };
   }
-  return { error: "error", message: clip2(err instanceof Error ? err.message : String(err)), applied: "unknown" };
+  return { error: "error", message: clip3(err instanceof Error ? err.message : String(err)), applied: "unknown" };
 }
 function nextHint(run) {
   const cur = currentStage(run);
@@ -31914,17 +32798,17 @@ function renderReport(run) {
   head3.push(`Delivery report: ${run.recipe}`);
   head3.push(`Run ${run.id}, ${run.state}. Project ${run.project_path}${run.comp_name ? `, comp "${run.comp_name}"` : ""}${run.ae_version ? `, After Effects ${run.ae_version}` : ""}.`);
   head3.push(`Started ${run.created_at}, last change ${run.updated_at}.`);
-  if (run.stop_reason) head3.push(`Stopped: ${clip2(run.stop_reason, 600)}`);
+  if (run.stop_reason) head3.push(`Stopped: ${clip3(run.stop_reason, 600)}`);
   head3.push("");
   head3.push("Stages");
   const withKids = run.stages.filter((s) => (s.children ?? []).length > 0).length;
   const perStage = Math.max(5, Math.min(MAX_SHOWN, Math.floor(MAX_SHOWN * 2 / Math.max(1, withKids))));
-  const row = (c) => `    ${clip2(c.output, 120)}: ${c.status}${c.summary ? ` - ${clip2(c.summary, 120)}` : ""}`;
+  const row = (c) => `    ${clip3(c.output, 120)}: ${c.status}${c.summary ? ` - ${clip3(c.summary, 120)}` : ""}`;
   const outs = [];
   if (run.outputs.length > 0) {
     outs.push("");
     outs.push("Outputs");
-    for (const o of run.outputs.slice(0, MAX_SHOWN * 2)) outs.push(`- ${clip2(o.path ?? "(no path)", 150)}${o.job_id ? ` (job ${o.job_id})` : ""}`);
+    for (const o of run.outputs.slice(0, MAX_SHOWN * 2)) outs.push(`- ${clip3(o.path ?? "(no path)", 150)}${o.job_id ? ` (job ${o.job_id})` : ""}`);
     if (run.outputs.length > MAX_SHOWN * 2) outs.push(`and ${run.outputs.length - MAX_SHOWN * 2} more (${run.outputs.length} in all)`);
   }
   const headText = head3.join("\n");
@@ -31942,14 +32826,14 @@ function renderReport(run) {
     return { s, kids, bad: bad4, good, top: [], findings: [], badShown: [], goodShown: [] };
   });
   for (const b of blocks) {
-    const lines = [`- ${b.s.id} (${b.s.tool}): ${b.s.status}${b.s.summary ? ` - ${clip2(b.s.summary, 400)}` : ""}`];
-    if (b.s.acknowledged) lines.push(`    accepted by hand: ${clip2(b.s.acknowledged, 300)}`);
-    if (b.s.checkpoint && b.s.checkpoint.path) lines.push(`    checkpoint ${b.s.checkpoint.status}: ${clip2(b.s.checkpoint.path, 200)}`);
+    const lines = [`- ${b.s.id} (${b.s.tool}): ${b.s.status}${b.s.summary ? ` - ${clip3(b.s.summary, 400)}` : ""}`];
+    if (b.s.acknowledged) lines.push(`    accepted by hand: ${clip3(b.s.acknowledged, 300)}`);
+    if (b.s.checkpoint && b.s.checkpoint.path) lines.push(`    checkpoint ${b.s.checkpoint.status}: ${clip3(b.s.checkpoint.path, 200)}`);
     for (const l of lines) if (take(l)) b.top.push(l);
   }
   for (const b of blocks) {
     for (const f of (b.s.findings ?? []).slice(0, 5)) {
-      const l = `    [${f.severity}] ${clip2(f.message, 200)}${f.where ? ` (${clip2(f.where, 100)})` : ""}`;
+      const l = `    [${f.severity}] ${clip3(f.message, 200)}${f.where ? ` (${clip3(f.where, 100)})` : ""}`;
       if (take(l)) b.findings.push(l);
     }
   }
@@ -31973,7 +32857,7 @@ function schemaAcceptsKey(schema, key) {
   return true;
 }
 function deliverPath(projectPath) {
-  return path30.join(path30.dirname(projectPath), `${path30.basename(projectPath, path30.extname(projectPath))}.deliver.json`);
+  return path31.join(path31.dirname(projectPath), `${path31.basename(projectPath, path31.extname(projectPath))}.deliver.json`);
 }
 function unreadable(err) {
   if (err instanceof StoreUnreadableError) return { ok: false, error: err.kind, applied: false, message: err.message };
@@ -31982,7 +32866,7 @@ function unreadable(err) {
 function readStoreFile(file) {
   let raw;
   try {
-    raw = fs30.readFileSync(file, "utf8");
+    raw = fs31.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -31992,7 +32876,7 @@ function readStoreFile(file) {
     if (parsed && Array.isArray(parsed.recipes) && Array.isArray(parsed.runs)) return { version: 1, recipes: parsed.recipes, runs: parsed.runs };
   } catch {
   }
-  fs30.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs31.renameSync(file, `${file}.${Date.now()}.bak`);
   return null;
 }
 function loadStore(projectPath) {
@@ -32029,14 +32913,14 @@ function saveStore(projectPath, store) {
   const file = deliverPath(projectPath);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    fs30.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs30.renameSync(tmp, file);
+    fs31.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs31.renameSync(tmp, file);
     unsavedStores.delete(projectPath);
     return { file };
   } catch (e) {
     unsavedStores.add(projectPath);
     try {
-      fs30.unlinkSync(tmp);
+      fs31.unlinkSync(tmp);
     } catch {
     }
     return { file: null, error: e.message };
@@ -32048,7 +32932,7 @@ function storeNotes(projectPath, saved) {
   return {};
 }
 function newRunId() {
-  return `dl_${Date.now().toString(36)}_${crypto12.randomBytes(3).toString("hex")}`;
+  return `dl_${Date.now().toString(36)}_${crypto13.randomBytes(3).toString("hex")}`;
 }
 async function readProject(ctx, toolName, projectPath, extra = {}) {
   const res = await ctx.bridge.callHost("deliverRead", { ...extra, expect: { project_path: projectPath } }, { label: `${toolName} (read project)`, mutates: false, toolName });
@@ -32158,7 +33042,7 @@ function expectOf(env) {
 }
 function fileStamp(file) {
   try {
-    const st = fs30.statSync(file);
+    const st = fs31.statSync(file);
     return `${st.size}:${st.mtimeMs}`;
   } catch {
     return null;
@@ -32202,7 +33086,7 @@ async function invoke(env, tool, def, extra = {}) {
   const parsed = tool.schema.safeParse(args);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
-    return { outcome: { status: "blocked", summary: `${def.tool} rejects the stage's arguments (${clip2(why, 300)}). Fix them in the recipe and retry.`, findings: [] }, raw: null };
+    return { outcome: { status: "blocked", summary: `${def.tool} rejects the stage's arguments (${clip3(why, 300)}). Fix them in the recipe and retry.`, findings: [] }, raw: null };
   }
   let raw = await tool.handler(parsed.data, env.ctx);
   if (def.kind === "preflight") {
@@ -32246,7 +33130,7 @@ async function maybeCheckpoint(env, st) {
     const parsed = tool.schema.safeParse({ expect: expectOf(env), label: `deliver ${st.id}`.slice(0, 80) });
     if (!parsed.success) throw new Error("ae_checkpoint_create rejected its arguments");
     const r = await tool.handler(parsed.data, env.ctx);
-    if (r && typeof r === "object" && (r.ok === false || typeof r.error === "string")) throw new Error(clip2(r.message ?? r.error));
+    if (r && typeof r === "object" && (r.ok === false || typeof r.error === "string")) throw new Error(clip3(r.message ?? r.error));
     const p = typeof r?.checkpoint_path === "string" ? r.checkpoint_path : void 0;
     st.checkpoint = { status: "created", ...p ? { path: p } : {} };
     env.run.checkpoints_taken++;
@@ -32300,14 +33184,14 @@ async function runPerOutput(env, st, tool) {
           children.push({
             output: outputLabel(out),
             status: "blocked",
-            summary: clip2(`unchecked: it was rendered from comp "${out.comp}", which ${ids.length === 0 ? compsCut ? "was not found in the comp list, which the host cut short" : "is not in the project" : "has several comps of that name"}. Set args.comp_id on the verify stage or check the file by hand.`, 300)
+            summary: clip3(`unchecked: it was rendered from comp "${out.comp}", which ${ids.length === 0 ? compsCut ? "was not found in the comp list, which the host cut short" : "is not in the project" : "has several comps of that name"}. Set args.comp_id on the verify stage or check the file by hand.`, 300)
           });
           continue;
         }
         extra.comp_id = ids[0];
       }
       const { outcome } = await invoke(env, tool, def, extra);
-      children.push({ output: outputLabel(out), status: outcome.status, summary: clip2(outcome.summary, 300) });
+      children.push({ output: outputLabel(out), status: outcome.status, summary: clip3(outcome.summary, 300) });
       findings.push(...outcome.findings);
       if (outcome.unverified) unverified = true;
       if (outcome.applied) st.applied = true;
@@ -32315,7 +33199,7 @@ async function runPerOutput(env, st, tool) {
       const d = describeError(err);
       const lookupFailed = inLookup;
       inLookup = false;
-      children.push({ output: outputLabel(out), status: "blocked", summary: clip2(`${d.error}: ${d.message}`, 300) });
+      children.push({ output: outputLabel(out), status: "blocked", summary: clip3(`${d.error}: ${d.message}`, 300) });
       if (d.applied === "unknown" && !lookupFailed && st.applied !== true) st.applied = "unknown";
       if (err instanceof BridgeError && err.kind !== "evalscript_error" || err instanceof QuarantineBlockedError || err instanceof QueueWaitError) {
         if (lookupFailed && typeof err === "object" && err !== null) lookupErrors.add(err);
@@ -32395,7 +33279,7 @@ async function runStage(env, st) {
   for (const k of ["summary", "findings", "children", "error", "applied", "checkpoint", "finished_at", "job_ids", "batch_id", "live"]) delete st[k];
   const invalid = validateStageDef(def);
   if (invalid) {
-    Object.assign(st, { status: "blocked", error: "invalid_stage", applied: false, summary: `invalid_stage: ${clip2(invalid, 300)} The stage was not run. Fix the recipe with ae_deliver_recipe and retry.` });
+    Object.assign(st, { status: "blocked", error: "invalid_stage", applied: false, summary: `invalid_stage: ${clip3(invalid, 300)} The stage was not run. Fix the recipe with ae_deliver_recipe and retry.` });
     st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
     return;
   }
@@ -32456,7 +33340,7 @@ async function pollLoudness(env, st) {
     st.findings = outcome.findings;
     st.finished_at = (/* @__PURE__ */ new Date()).toISOString();
   } catch (err) {
-    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read the audio render ${jobId}: ${describeError(err).message}. Check it with ${st.def.tool} (job_id), then retry or skip.`, 400) });
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip3(`Could not read the audio render ${jobId}: ${describeError(err).message}. Check it with ${st.def.tool} (job_id), then retry or skip.`, 400) });
   }
 }
 async function pollBatch(env, st) {
@@ -32472,12 +33356,12 @@ async function pollBatch(env, st) {
     if (!parsed.success) throw new Error("ae_render_batch_status rejected the batch id");
     r = await status.handler(parsed.data, env.ctx);
   } catch (err) {
-    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render batch ${batchId}: ${describeError(err).message}. Check it with ae_render_batch_status.`, 400) });
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip3(`Could not read render batch ${batchId}: ${describeError(err).message}. Check it with ae_render_batch_status.`, 400) });
     return;
   }
   if (r === null || typeof r !== "object" || r.ok === false) {
     const why = r && typeof r === "object" && typeof r.message === "string" ? r.message : "no answer";
-    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render batch ${batchId}: ${why}`, 400) });
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip3(`Could not read render batch ${batchId}: ${why}`, 400) });
     return;
   }
   const items = Array.isArray(r.items) ? r.items : [];
@@ -32489,7 +33373,7 @@ async function pollBatch(env, st) {
   st.children = items.slice(0, MAX_OUTPUTS).map((i) => ({
     output: typeof i?.output_path === "string" ? i.output_path : `item ${String(i?.index)}`,
     status: itemStatus(i?.state),
-    summary: clip2(`${String(i?.state)}${typeof i?.percent === "number" ? ` ${Math.round(i.percent)}%` : ""}${typeof i?.error === "string" ? `: ${i.error}` : ""}`, 300)
+    summary: clip3(`${String(i?.state)}${typeof i?.percent === "number" ? ` ${Math.round(i.percent)}%` : ""}${typeof i?.error === "string" ? `: ${i.error}` : ""}`, 300)
   }));
   const done = items.filter((i) => i?.state === "succeeded").length;
   const failedItems = items.filter((i) => i?.state === "failed" || i?.state === "cancelled");
@@ -32524,7 +33408,7 @@ async function pollBatch(env, st) {
   Object.assign(st, {
     status: "blocked",
     error: state === "failed" ? "render_failed" : "batch_stopped",
-    summary: clip2(`Render batch ${batchId} ${state}.${detail}${tail}`, 600)
+    summary: clip3(`Render batch ${batchId} ${state}.${detail}${tail}`, 600)
   });
 }
 async function pollJobs(env, st) {
@@ -32563,9 +33447,9 @@ async function pollJobs(env, st) {
   }));
   if (failed.length > 0) {
     const f = failed[0];
-    Object.assign(st, { status: "blocked", error: "render_failed", summary: clip2(`Render job ${f.job_id} failed (exit code ${String(f.exit_code)}). ${f.log_tail ? `Log tail: ${f.log_tail}` : ""}`, 600) });
+    Object.assign(st, { status: "blocked", error: "render_failed", summary: clip3(`Render job ${f.job_id} failed (exit code ${String(f.exit_code)}). ${f.log_tail ? `Log tail: ${f.log_tail}` : ""}`, 600) });
   } else if (unknown.length > 0) {
-    Object.assign(st, { status: "error", error: "job_unknown", summary: clip2(`Could not read render job ${unknown[0].job_id}: ${unknown[0].error ?? "unknown state"}. Check it by hand.`, 400) });
+    Object.assign(st, { status: "error", error: "job_unknown", summary: clip3(`Could not read render job ${unknown[0].job_id}: ${unknown[0].error ?? "unknown state"}. Check it by hand.`, 400) });
   } else if (running.length > 0) {
     const pct2 = running.map((s) => s.percent).filter((p) => typeof p === "number");
     st.summary = `${running.length} of ${states.length} render job${states.length === 1 ? "" : "s"} still running${pct2.length ? ` (${Math.round(pct2.reduce((a, b) => a + b, 0) / pct2.length)}%)` : ""}`;
@@ -32779,7 +33663,7 @@ async function deliverStep(args, ctx) {
             notes.push(`render batch ${s.batch_id} is cancelled, but ${unconfirmed} aerender process(es) could not be confirmed stopped and may still be writing; check them with ae_render_batch_status, then ae_aerender_cancel or stop them by hand`);
           } else if (answer && typeof answer === "object" && answer.cancelled === true) notes.push(`cancelled render batch ${s.batch_id}`);
           else if (answer && typeof answer === "object" && answer.already_finished === true) notes.push(`render batch ${s.batch_id} had already finished (${String(answer.state)}); nothing to cancel`);
-          else if (answer && typeof answer === "object" && answer.ok === false) notes.push(`render batch ${s.batch_id} was not cancelled: ${String(answer.error ?? "refused")}${typeof answer.message === "string" ? ` (${clip2(answer.message, 200)})` : ""}`);
+          else if (answer && typeof answer === "object" && answer.ok === false) notes.push(`render batch ${s.batch_id} was not cancelled: ${String(answer.error ?? "refused")}${typeof answer.message === "string" ? ` (${clip3(answer.message, 200)})` : ""}`);
           else notes.push(`render batch ${s.batch_id}: ae_render_batch_cancel did not say it cancelled anything; check it with ae_render_batch_status`);
         } catch (err) {
           notes.push(`could not cancel render batch ${s.batch_id}: ${describeError(err).message}`);
@@ -32859,7 +33743,7 @@ async function deliverStep(args, ctx) {
   }
   if (args.action === "skip") {
     stopped.acknowledged = args.acknowledge;
-    stopped.summary = `skipped (was ${stopped.status}${stopped.summary ? `: ${clip2(stopped.summary, 200)}` : ""})`;
+    stopped.summary = `skipped (was ${stopped.status}${stopped.summary ? `: ${clip3(stopped.summary, 200)}` : ""})`;
     stopped.status = "skipped";
     stopped.finished_at = (/* @__PURE__ */ new Date()).toISOString();
     persist(env);
@@ -32923,13 +33807,13 @@ async function deliverStatus(args, ctx) {
     ...run.state === "done" && project2.dirty ? run.project_dirty_at_end === true ? { note: "The delivery ended with unsaved changes made by its own stages (a verify or scrub imports and removes a file). Save the project before relying on the file on disk." } : { note: "The project has unsaved changes made after this delivery ran; the delivered files may not match it." } : {}
   });
 }
-var crypto12, fs30, path30, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip2, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
+var crypto13, fs31, path31, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip3, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
 var init_deliver = __esm({
   "src/tools/ext/deliver.ts"() {
     "use strict";
-    crypto12 = __toESM(require("node:crypto"), 1);
-    fs30 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
+    crypto13 = __toESM(require("node:crypto"), 1);
+    fs31 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_quarantine();
@@ -33010,7 +33894,7 @@ var init_deliver = __esm({
       list: external_exports.boolean().optional().describe("List the runs (newest first) instead of showing one."),
       expect: DeliverExpectSchema
     });
-    clip2 = (s, n = 500) => {
+    clip3 = (s, n = 500) => {
       const str = typeof s === "string" ? s : String(s);
       return str.length > n ? `${str.slice(0, n)}...` : str;
     };
@@ -33472,16 +34356,16 @@ function pruneOldRenders(dir, now = Date.now()) {
   let removed = 0;
   let names = [];
   try {
-    names = fs31.readdirSync(dir);
+    names = fs32.readdirSync(dir);
   } catch {
     return 0;
   }
   for (const n of names) {
     if (!/^loudness_.+\.(aif|aiff|aifc|wav)(\.json)?$/i.test(n)) continue;
-    const p = path31.join(dir, n);
+    const p = path32.join(dir, n);
     try {
-      if (now - fs31.statSync(p).mtimeMs > RENDER_KEEP_MS) {
-        fs31.unlinkSync(p);
+      if (now - fs32.statSync(p).mtimeMs > RENDER_KEEP_MS) {
+        fs32.unlinkSync(p);
         removed++;
       }
     } catch {
@@ -33526,7 +34410,7 @@ function applyHint(m, std, verdict) {
   };
 }
 async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECONDS2, wholeFile = false) {
-  const stat = fs31.statSync(file);
+  const stat = fs32.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES2) {
     const mb = MAX_AUDIO_BYTES2 / 1048576;
     throw new AudioDecodeError(
@@ -33535,7 +34419,7 @@ async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECON
   }
   let decoded;
   try {
-    decoded = decodeAudioChannels(await fs31.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
+    decoded = decodeAudioChannels(await fs32.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
   } catch (err) {
     if (wholeFile && err instanceof AudioDecodeError && err.message.includes("use start/end")) {
       const cut = err.message.replace(" (use start/end)", "").replace(". Measure a shorter range", "").replace(/[.;]\s*$/, "");
@@ -33576,7 +34460,7 @@ function createLoudnessTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs31.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs32.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -33627,7 +34511,7 @@ function createLoudnessTools(options = {}) {
         const choice = { standard: args.standard, target_lufs: args.target_lufs, true_peak_max_db: args.true_peak_max_db, tolerance_lu: args.tolerance_lu };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path31.isAbsolute(args.audio_path) || !fs31.existsSync(args.audio_path)) {
+          if (!path32.isAbsolute(args.audio_path) || !fs32.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -33664,10 +34548,10 @@ function createLoudnessTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; measure at most ${MAX_ANALYSIS_SECONDS2 / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path31.join(rendersDir(), "audio");
-        fs31.mkdirSync(dir, { recursive: true });
+        const dir = path32.join(rendersDir(), "audio");
+        fs32.mkdirSync(dir, { recursive: true });
         pruneOldRenders(dir);
-        const outputPath = path31.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto13.randomBytes(3).toString("hex")}.aif`);
+        const outputPath = path32.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto14.randomBytes(3).toString("hex")}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -33684,7 +34568,7 @@ function createLoudnessTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs31.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs32.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, choice);
@@ -33763,13 +34647,13 @@ function createLoudnessTools(options = {}) {
     }
   ];
 }
-var fs31, crypto13, path31, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
+var fs32, crypto14, path32, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
 var init_loudness = __esm({
   "src/tools/ext/loudness.ts"() {
     "use strict";
-    fs31 = __toESM(require("node:fs"), 1);
-    crypto13 = __toESM(require("node:crypto"), 1);
-    path31 = __toESM(require("node:path"), 1);
+    fs32 = __toESM(require("node:fs"), 1);
+    crypto14 = __toESM(require("node:crypto"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_host();
@@ -34464,8 +35348,8 @@ function summarise3(entries) {
   return { verdict, checked: entries.length, pass: count("pass"), fail: failed.length, inconclusive: count("inconclusive"), worst };
 }
 function writeOverlay(framesDir, compId, time, png) {
-  const file = path32.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto14.randomBytes(4).toString("hex")}.png`);
-  fs32.writeFileSync(file, encodePng(png));
+  const file = path33.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto15.randomBytes(4).toString("hex")}.png`);
+  fs33.writeFileSync(file, encodePng(png));
   return file;
 }
 function overlapReport(read3, minShare) {
@@ -34487,7 +35371,7 @@ function overlapReport(read3, minShare) {
 async function estimateHandler(args, ctx) {
   const tool = "ae_estimate_legibility";
   const framesDir = defaultFramesDir();
-  fs32.mkdirSync(framesDir, { recursive: true });
+  fs33.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const label = `${tool}(${args.comp_id})`;
   const judging = { required: { level: args.level, minRatio: args.min_ratio, largeTextPx: args.large_text_px }, tolerance: args.tolerance };
@@ -34509,7 +35393,7 @@ async function estimateHandler(args, ctx) {
         const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: read4.times[ti], frameIndex: ti, framesDir, toolName: tool });
         frames.push(snap);
       } catch (err) {
-        frames.push({ error: errMessage2(err) });
+        frames.push({ error: errMessage3(err) });
         if (isAeBlocked(err)) blocked = true;
       }
     }
@@ -34561,11 +35445,11 @@ async function estimateHandler(args, ctx) {
           try {
             annotated = writeOverlay(framesDir, comp.id, time, drawLegibilityOverlay(img, comp, timeEntries, overlays, args.max_size));
           } catch (err) {
-            annotateError = errMessage2(err);
+            annotateError = errMessage3(err);
           }
         }
       } catch (err) {
-        timeError = errMessage2(err);
+        timeError = errMessage3(err);
         timeEntries.length = 0;
         overlays = [];
         for (const l of items) {
@@ -34693,7 +35577,7 @@ async function checkHandler(args, ctx) {
       const sessionFields = await noteBeforeWrite(ctx, note);
       proofLayerIds = tested.map((l) => l.id);
       const before = await state("before");
-      fs32.mkdirSync(framesDir, { recursive: true });
+      fs33.mkdirSync(framesDir, { recursive: true });
       beginInflight(note);
       let begun;
       try {
@@ -34767,7 +35651,7 @@ async function checkHandler(args, ctx) {
               try {
                 annotated = writeOverlay(framesDir, comp.id, pair.time, drawLegibilityOverlay(orig, comp, timeEntries, overlaps2, args.max_size));
               } catch (err) {
-                annotateError = errMessage2(err);
+                annotateError = errMessage3(err);
               }
             }
             timeResults.push({
@@ -34783,14 +35667,14 @@ async function checkHandler(args, ctx) {
             if (isAeBlocked(err)) blocked = true;
             timeEntries.length = 0;
             for (const l of rows) {
-              timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: `this time could not be measured: ${errMessage2(err)}` });
+              timeEntries.push({ layer: head(l), time, status: "inconclusive", measured: "none", reason: `this time could not be measured: ${errMessage3(err)}` });
             }
-            timeResults.push({ time, error: errMessage2(err), layers: timeEntries, overlaps: overlaps2 });
+            timeResults.push({ time, error: errMessage3(err), layers: timeEntries, overlaps: overlaps2 });
           }
           entries.push(...timeEntries);
         }
       } catch (err) {
-        timeResults = [...timeResults, { error: errMessage2(err), layers: [], overlaps: [] }];
+        timeResults = [...timeResults, { error: errMessage3(err), layers: [], overlaps: [] }];
       }
       let cleanupError = null;
       let removed = false;
@@ -34809,7 +35693,7 @@ async function checkHandler(args, ctx) {
         });
         removed = end.result?.removed === true;
       } catch (err) {
-        cleanupError = errMessage2(err);
+        cleanupError = errMessage3(err);
       } finally {
         endInflight(removeId);
         endInflight(opId);
@@ -34863,13 +35747,13 @@ async function checkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto14, fs32, path32, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r25, r35, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage2, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
+var crypto15, fs33, path33, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r25, r35, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage3, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
 var init_legibility = __esm({
   "src/tools/ext/legibility.ts"() {
     "use strict";
-    crypto14 = __toESM(require("node:crypto"), 1);
-    fs32 = __toESM(require("node:fs"), 1);
-    path32 = __toESM(require("node:path"), 1);
+    crypto15 = __toESM(require("node:crypto"), 1);
+    fs33 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -34976,7 +35860,7 @@ var init_legibility = __esm({
     AMBER = [255, 176, 0, 255];
     INK2 = [16, 16, 16, 255];
     MAGENTA = [255, 0, 255, 96];
-    errMessage2 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage3 = (err) => err instanceof Error ? err.message : String(err);
     NOTES_COMMON = [
       "Boxes are each text layer's sourceRectAtTime moved through its transforms and parents: the whole layer, not single glyphs. Text inside precomps, 3D text and text parented to a 3D layer are not checked (listed as not checkable).",
       "Ratios are WCAG 2.x contrast ratios on the PNG's pixel values taken as sRGB. Whether AE writes sRGB with colour management on (OCIO, linear blending, 16/32 bpc) is unmeasured: in a wide-gamut or linear-light project the figures can be off."
@@ -35454,7 +36338,7 @@ function analyzeTiming(host, spec, checks, range) {
 async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
   const stage = { confirmations: /* @__PURE__ */ new Map() };
   const framesDir = defaultFramesDir();
-  fs33.mkdirSync(framesDir, { recursive: true });
+  fs34.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const tool = "ae_timing_check";
   let blocked = false;
@@ -35468,7 +36352,7 @@ async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
         const f = firstFrameFinding(a, range[0], fps);
         if (f) stage.finding = f;
       } catch (err) {
-        stage.first_frame = { time_s: r36(range[0]), error: errMessage3(err) };
+        stage.first_frame = { time_s: r36(range[0]), error: errMessage4(err) };
         if (err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued")) blocked = true;
       }
     }
@@ -35490,7 +36374,7 @@ async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
         }
         stage.confirmations.set(si, { identical, max_mean_abs_diff: Math.round(worst * 1e6) / 1e6, frames: paths });
       } catch (err) {
-        stage.confirmations.set(si, { error: errMessage3(err) });
+        stage.confirmations.set(si, { error: errMessage4(err) });
         if (err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued")) blocked = true;
       }
     }
@@ -35587,11 +36471,11 @@ async function timingCheckHandler(args, ctx) {
     notes
   };
 }
-var fs33, TIMING_CHECKS, MIN_VISIBLE_OPACITY, SILENT_AFTER_S, MAX_CONFIRM_STRETCHES, MAX_LINES_LISTED, EPS3, AeTimingCheckSchema, SEVERITY_RANK3, r36, ref2, total, CONTROLLERS, normText, NUM_RE, MONTHS, COMPOSITE_RES, PHONE_RE, NAME_WORD, LEAD_STOP, CONNECT, normName, COMMON_COPY_WORDS, nameWords, isMoneyOrPercent, errMessage3, timingTools;
+var fs34, TIMING_CHECKS, MIN_VISIBLE_OPACITY, SILENT_AFTER_S, MAX_CONFIRM_STRETCHES, MAX_LINES_LISTED, EPS3, AeTimingCheckSchema, SEVERITY_RANK3, r36, ref2, total, CONTROLLERS, normText, NUM_RE, MONTHS, COMPOSITE_RES, PHONE_RE, NAME_WORD, LEAD_STOP, CONNECT, normName, COMMON_COPY_WORDS, nameWords, isMoneyOrPercent, errMessage4, timingTools;
 var init_timing = __esm({
   "src/tools/ext/timing.ts"() {
     "use strict";
-    fs33 = __toESM(require("node:fs"), 1);
+    fs34 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_queue();
@@ -35743,7 +36627,7 @@ var init_timing = __esm({
     ]);
     nameWords = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     isMoneyOrPercent = (t) => t.kind === "number" && (/^[£$€]/.test(t.text) || /%$/.test(t.text));
-    errMessage3 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage4 = (err) => err instanceof Error ? err.message : String(err);
     timingTools = [
       {
         name: "ae_timing_check",
@@ -35883,12 +36767,12 @@ function keyExtrasMismatches(extras, keys, afterSnapshot) {
   const kfs = afterSnapshot?.keyframes ?? [];
   const truncated = afterSnapshot?.truncated === true;
   const compare = (key, field, want, got, same) => {
-    const path55 = `keyframes[${key}].${field}`;
+    const path56 = `keyframes[${key}].${field}`;
     if (same === void 0 || got === void 0) {
-      unverified.push(path55);
+      unverified.push(path56);
       return;
     }
-    if (!same) mismatches.push({ path: path55, expected: want, actual: got, message: `Expected ${path55} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
+    if (!same) mismatches.push({ path: path56, expected: want, actual: got, message: `Expected ${path56} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
   };
   const flags = [
     ["spatial_continuous", "spatialContinuous"],
@@ -36051,14 +36935,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path55 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path56 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path55,
+          path: path56,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path55} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path56} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -36089,13 +36973,13 @@ function typedTextChecks(set2, justify, afterObj, coveredPaths = []) {
   for (const group of ["typography", "paragraph", "box"]) {
     const got = afterObj[group] ?? {};
     for (const [key, value] of Object.entries(want[group])) {
-      const path55 = `${group}.${key}`;
-      if (coveredPaths.includes(path55) || mixed.includes(path55) || got[key] === void 0) {
-        unverified.push(path55);
+      const path56 = `${group}.${key}`;
+      if (coveredPaths.includes(path56) || mixed.includes(path56) || got[key] === void 0) {
+        unverified.push(path56);
         continue;
       }
-      expected[path55] = value;
-      actual[path55] = got[key];
+      expected[path56] = value;
+      actual[path56] = got[key];
     }
   }
   return { expected, actual, unverified };
@@ -37209,10 +38093,10 @@ var init_animate = __esm({
 
 // src/tools/ext/ask.ts
 function checkImagePath(p) {
-  if (!path33.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!path34.isAbsolute(p)) return `image_path must be absolute: ${p}`;
   if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
   try {
-    const st = fs34.statSync(p);
+    const st = fs35.statSync(p);
     if (!st.isFile()) return `image_path is not a file: ${p}`;
     if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
   } catch {
@@ -37255,13 +38139,14 @@ function presentAnswer(q, a) {
 function sameCurve(a, b) {
   return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
 }
-var fs34, path33, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
+var fs35, path34, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
 var init_ask = __esm({
   "src/tools/ext/ask.ts"() {
     "use strict";
-    fs34 = __toESM(require("node:fs"), 1);
-    path33 = __toESM(require("node:path"), 1);
+    fs35 = __toESM(require("node:fs"), 1);
+    path34 = __toESM(require("node:path"), 1);
     init_zod();
+    init_render_gate();
     init_animate();
     PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
     DEFAULT_WAIT_SECONDS = 120;
@@ -37300,7 +38185,7 @@ var init_ask = __esm({
     askTools = [
       {
         name: "ae_ask_user",
-        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed. Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project.",
+        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project.",
         schema: AeAskUserSchema,
         handler: async (args, ctx) => {
           const asks = ctx.asks;
@@ -37338,7 +38223,7 @@ var init_ask = __esm({
             allow_other: args.allow_other ?? true,
             ...args.context ? { context: args.context } : {}
           });
-          if (ctx.cep) {
+          if (ctx.cep && !renderGate.active()) {
             try {
               await ctx.cep.openExtension(PANEL_EXTENSION_ID);
             } catch {
@@ -37521,14 +38406,14 @@ function promoteMismatches(beforeRaw, afterRaw, written) {
 }
 function saveSet(ctx, rec) {
   try {
-    fs35.mkdirSync(setsDir(ctx), { recursive: true });
+    fs36.mkdirSync(setsDir(ctx), { recursive: true });
     const tmp = `${setFile(ctx, rec.set_id)}.${process.pid}.tmp`;
     try {
-      fs35.writeFileSync(tmp, JSON.stringify(rec, null, 2));
-      fs35.renameSync(tmp, setFile(ctx, rec.set_id));
+      fs36.writeFileSync(tmp, JSON.stringify(rec, null, 2));
+      fs36.renameSync(tmp, setFile(ctx, rec.set_id));
     } catch (err) {
       try {
-        fs35.rmSync(tmp, { force: true });
+        fs36.rmSync(tmp, { force: true });
       } catch {
       }
       throw err;
@@ -37540,7 +38425,7 @@ function saveSet(ctx, rec) {
 }
 function loadSet(ctx, id) {
   try {
-    return JSON.parse(fs35.readFileSync(setFile(ctx, id), "utf8"));
+    return JSON.parse(fs36.readFileSync(setFile(ctx, id), "utf8"));
   } catch {
     return null;
   }
@@ -37554,7 +38439,7 @@ function normProjectPath(p) {
 }
 function dropSet(ctx, id) {
   try {
-    fs35.rmSync(setFile(ctx, id), { force: true });
+    fs36.rmSync(setFile(ctx, id), { force: true });
   } catch {
   }
 }
@@ -37570,9 +38455,9 @@ function logPick(ctx, rec, pickedId, cleanup) {
       rejected: rec.variants.filter((v) => v.id !== pickedId).map((v) => ({ id: v.id, label: v.label, ops: v.ops })),
       cleanup
     };
-    const file = path34.join(dataDirOf(ctx), "variant-picks.jsonl");
-    fs35.mkdirSync(path34.dirname(file), { recursive: true });
-    fs35.appendFileSync(file, `${JSON.stringify(entry)}
+    const file = path35.join(dataDirOf(ctx), "variant-picks.jsonl");
+    fs36.mkdirSync(path35.dirname(file), { recursive: true });
+    fs36.appendFileSync(file, `${JSON.stringify(entry)}
 `);
     return file;
   } catch {
@@ -37591,10 +38476,10 @@ function clampRenderTime(time, duration, fps) {
 }
 async function renderVariants(ctx, setId, original, copies, times, tileSize) {
   const out = { times, variants: [], errors: [] };
-  const framesDir = path34.join(dataDirOf(ctx), "frames");
+  const framesDir = path35.join(dataDirOf(ctx), "frames");
   const shots = /* @__PURE__ */ new Map();
   try {
-    fs35.mkdirSync(framesDir, { recursive: true });
+    fs36.mkdirSync(framesDir, { recursive: true });
     const opId = ctx.bridge.newOpId();
     await ctx.queue.run(`ae_variants(${original.comp_id}) frames`, async () => {
       for (const c of copies) {
@@ -37629,8 +38514,8 @@ async function renderVariants(ctx, setId, original, copies, times, tileSize) {
         rendered.frames.push({ time: shot.time, path: shot.path, flags: analysis.flags });
         return { image: resizeArea(full, layout.tileWidth, layout.tileHeight), label: `${upper(c.variant_id)} ${shot.time.toFixed(2)}s`, flagged: analysis.flags.length > 0 };
       });
-      const strip2 = path34.join(framesDir, `variant_${setId}_${c.variant_id}_${crypto15.randomBytes(3).toString("hex")}.png`);
-      fs35.writeFileSync(strip2, encodePng(buildContactSheet(tiles, layout)));
+      const strip2 = path35.join(framesDir, `variant_${setId}_${c.variant_id}_${crypto16.randomBytes(3).toString("hex")}.png`);
+      fs36.writeFileSync(strip2, encodePng(buildContactSheet(tiles, layout)));
       rendered.strip_path = strip2;
       allTiles.push(...tiles);
       columns = Math.max(columns, list2.length);
@@ -37644,8 +38529,8 @@ async function renderVariants(ctx, setId, original, copies, times, tileSize) {
           padded.push(own[i] ?? { image: resizeArea({ width: 1, height: 1, data: Buffer.from([24, 24, 24, 255]) }, layout.tileWidth, layout.tileHeight), flagged: false });
         }
       }
-      const sheet = path34.join(framesDir, `variants_${setId}_${crypto15.randomBytes(3).toString("hex")}.png`);
-      fs35.writeFileSync(sheet, encodePng(buildContactSheet(padded, layout)));
+      const sheet = path35.join(framesDir, `variants_${setId}_${crypto16.randomBytes(3).toString("hex")}.png`);
+      fs36.writeFileSync(sheet, encodePng(buildContactSheet(padded, layout)));
       out.sheet_path = sheet;
     }
   } catch (err) {
@@ -37673,13 +38558,13 @@ async function askWhich(ctx, variants, rendered, args, compName, folderName = VA
     return { ask: { ok: false, error: "ask_failed", message: err instanceof Error ? err.message : String(err) } };
   }
 }
-var crypto15, fs35, path34, VARIANTS_FOLDER, MAX_TARGETS, MAX_PROBE_KEYS, EASE_PRESETS, Layers2, PropertyPath2, ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp, VariantOpSchema, VariantSchema, CleanupSchema2, SetIdSchema, AeVariantsSchema, AeVariantsPickSchema, AeVariantsDiscardSchema, asRead2, near4, setsDir, setFile, upper, hostVariants, probesOf, variantsTools;
+var crypto16, fs36, path35, VARIANTS_FOLDER, MAX_TARGETS, MAX_PROBE_KEYS, EASE_PRESETS, Layers2, PropertyPath2, ColorOp, SetValueOp, OffsetOp, ShiftTimeOp, EaseOp, CompDurationOp, VariantOpSchema, VariantSchema, CleanupSchema2, SetIdSchema, AeVariantsSchema, AeVariantsPickSchema, AeVariantsDiscardSchema, asRead2, near4, setsDir, setFile, upper, hostVariants, probesOf, variantsTools;
 var init_variants = __esm({
   "src/tools/ext/variants.ts"() {
     "use strict";
-    crypto15 = __toESM(require("node:crypto"), 1);
-    fs35 = __toESM(require("node:fs"), 1);
-    path34 = __toESM(require("node:path"), 1);
+    crypto16 = __toESM(require("node:crypto"), 1);
+    fs36 = __toESM(require("node:fs"), 1);
+    path35 = __toESM(require("node:path"), 1);
     init_zod();
     init_common();
     init_animate();
@@ -37790,8 +38675,8 @@ var init_variants = __esm({
     });
     asRead2 = (v) => v && typeof v === "object" ? v : null;
     near4 = (a, b, tol = 1e-3) => Math.abs(a - b) <= tol + 1e-6 * Math.max(Math.abs(a), Math.abs(b));
-    setsDir = (ctx) => path34.join(dataDirOf(ctx), "variants");
-    setFile = (ctx, id) => path34.join(setsDir(ctx), `${id}.json`);
+    setsDir = (ctx) => path35.join(dataDirOf(ctx), "variants");
+    setFile = (ctx, id) => path35.join(setsDir(ctx), `${id}.json`);
     upper = (s) => s.toUpperCase();
     hostVariants = (variants) => variants.map((v) => ({ id: v.id, label: v.label, ops: toHostOps(v.ops) }));
     probesOf = (copies) => (copies ?? []).flatMap((c) => c.probes.map((p) => ({ ...p, comp_id: c.comp_id })));
@@ -37807,7 +38692,7 @@ var init_variants = __esm({
             const res = await ctx.bridge.callHost("variantsPlan", { comp_id: args.comp_id, variants, folder_name: folder }, { label: `ae_variants(${args.comp_id}) dry run`, mutates: false, toolName: "ae_variants" });
             return { ok: true, ...res.result };
           }
-          const setId = `vs_${crypto15.randomBytes(4).toString("hex")}`;
+          const setId = `vs_${crypto16.randomBytes(4).toString("hex")}`;
           let unverified = 0;
           const result = await runGuardedWrite(ctx, {
             toolName: "ae_variants",
@@ -38430,11 +39315,11 @@ function emptyLedger() {
   return { version: 1, baselines: [], evidence: {}, proposals: {}, applied: {} };
 }
 function ledgerPath(ctx) {
-  return path35.join(dataDirOf(ctx), "learn-taste.json");
+  return path36.join(dataDirOf(ctx), "learn-taste.json");
 }
 function loadLedger(file) {
   try {
-    const parsed = JSON.parse(fs36.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs37.readFileSync(file, "utf8"));
     const base = emptyLedger();
     if (Array.isArray(parsed.baselines)) base.baselines = parsed.baselines.filter((b) => b && typeof b.id === "string" && b.snapshot && Array.isArray(b.snapshot.layers)).slice(-MAX_BASELINES);
     if (parsed.evidence && typeof parsed.evidence === "object") {
@@ -38451,10 +39336,10 @@ function loadLedger(file) {
   }
 }
 function saveLedger(file, ledger) {
-  fs36.mkdirSync(path35.dirname(file), { recursive: true, mode: 448 });
+  fs37.mkdirSync(path36.dirname(file), { recursive: true, mode: 448 });
   const tmp = `${file}.tmp-${process.pid}`;
-  fs36.writeFileSync(tmp, JSON.stringify(ledger), { encoding: "utf8", mode: 384 });
-  fs36.renameSync(tmp, file);
+  fs37.writeFileSync(tmp, JSON.stringify(ledger), { encoding: "utf8", mode: 384 });
+  fs37.renameSync(tmp, file);
 }
 function baselineKey(projectPath, compId) {
   return `${normalizeGuardPath(projectPath)}|${compId}`;
@@ -38793,12 +39678,12 @@ async function rulesHandler(args, ctx) {
     message: "Saved. ae_taste shows them. Only preferred_ease and avoid_overshoot are enforced by ae_motion_review today; the other rules are for you to read before animating."
   };
 }
-var fs36, path35, round, MAX_LISTED_VALUES, SERIES, RULE_SERIES, MAX_SAMPLES_PER_SERIES, pct, clamp, pairs, easePairs, numbers, MAX_BASELINES, MAX_ENTRIES_PER_SERIES, AeTasteBaselineSchema, AeLearnTasteSchema, AeTasteRulesSchema, CAVEATS, learntasteTools;
+var fs37, path36, round, MAX_LISTED_VALUES, SERIES, RULE_SERIES, MAX_SAMPLES_PER_SERIES, pct, clamp, pairs, easePairs, numbers, MAX_BASELINES, MAX_ENTRIES_PER_SERIES, AeTasteBaselineSchema, AeLearnTasteSchema, AeTasteRulesSchema, CAVEATS, learntasteTools;
 var init_learntaste = __esm({
   "src/tools/ext/learntaste.ts"() {
     "use strict";
-    fs36 = __toESM(require("node:fs"), 1);
-    path35 = __toESM(require("node:path"), 1);
+    fs37 = __toESM(require("node:fs"), 1);
+    path36 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     init_settings();
@@ -38902,21 +39787,21 @@ function recoveryDirs(projectPath, projectDir, autoSaveDir) {
   if (projectDir) {
     base = projectDir;
   } else if (projectPath !== "<unsaved>") {
-    let dir = path36.dirname(projectPath);
-    const leaf = path36.basename(dir);
-    if (leaf === "_mcp_checkpoints" || leaf === "_mcp_backups" || AUTO_SAVE_FOLDER.test(leaf)) dir = path36.dirname(dir);
+    let dir = path37.dirname(projectPath);
+    const leaf = path37.basename(dir);
+    if (leaf === "_mcp_checkpoints" || leaf === "_mcp_backups" || AUTO_SAVE_FOLDER.test(leaf)) dir = path37.dirname(dir);
     base = dir;
   }
   if (autoSaveDir) out.push({ source: "auto_save", dir: autoSaveDir });
   if (base) {
     try {
-      for (const e of fs37.readdirSync(base, { withFileTypes: true })) {
-        if (e.isDirectory() && AUTO_SAVE_FOLDER.test(e.name)) out.push({ source: "auto_save", dir: path36.join(base, e.name) });
+      for (const e of fs38.readdirSync(base, { withFileTypes: true })) {
+        if (e.isDirectory() && AUTO_SAVE_FOLDER.test(e.name)) out.push({ source: "auto_save", dir: path37.join(base, e.name) });
       }
     } catch {
     }
-    out.push({ source: "backup", dir: path36.join(base, "_mcp_backups") });
-    out.push({ source: "checkpoint", dir: path36.join(base, "_mcp_checkpoints") });
+    out.push({ source: "backup", dir: path37.join(base, "_mcp_backups") });
+    out.push({ source: "checkpoint", dir: path37.join(base, "_mcp_checkpoints") });
   }
   return out;
 }
@@ -38926,7 +39811,7 @@ function scanRecoveryFiles(dirs, projectFileMtimeMs, nowMs, info) {
   for (const { source, dir } of dirs) {
     let entries;
     try {
-      entries = fs37.readdirSync(dir, { withFileTypes: true });
+      entries = fs38.readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -38937,11 +39822,11 @@ function scanRecoveryFiles(dirs, projectFileMtimeMs, nowMs, info) {
         info?.capped_dirs.push(dir);
         break;
       }
-      const full = path36.join(dir, e.name);
+      const full = path37.join(dir, e.name);
       if (seen.has(full)) continue;
       seen.add(full);
       try {
-        const st = fs37.statSync(full);
+        const st = fs38.statSync(full);
         files.push({
           source,
           name: e.name,
@@ -39061,7 +39946,7 @@ function keepOwnBackups(saved, deps) {
   const bp = saved && typeof saved === "object" ? saved.backup_path : null;
   if (typeof bp !== "string" || bp.length === 0) return;
   policyState.own_backups.push(bp);
-  const remove = deps.removeFile ?? ((f) => fs37.unlinkSync(f));
+  const remove = deps.removeFile ?? ((f) => fs38.unlinkSync(f));
   while (policyState.own_backups.length > MAX_POLICY_BACKUPS) {
     const old = policyState.own_backups.shift();
     try {
@@ -39192,7 +40077,7 @@ async function leaveAndRun(ctx, args, kind, target) {
   }
   const verdict = leaveVerdict(state.dirty, args.if_dirty, state.project_path);
   if (!verdict.proceed) return needsUserResult(state, verdict.reason ?? "The open project has unsaved changes.");
-  if (kind === "open" && target && !fs37.existsSync(target)) {
+  if (kind === "open" && target && !fs38.existsSync(target)) {
     throw new BridgeError({ kind: "guard", message: `Project file does not exist on disk: "${target}".`, expected: { path: target }, actual: { exists: false } });
   }
   const hostName = kind === "open" ? "projectsessionOpen" : kind === "new" ? "projectsessionNew" : "projectsessionClose";
@@ -39246,16 +40131,16 @@ function markReopened() {
   }
 }
 function backupProjectFile(projectPath) {
-  if (projectPath === "<unsaved>" || !fs37.existsSync(projectPath)) return null;
+  if (projectPath === "<unsaved>" || !fs38.existsSync(projectPath)) return null;
   try {
-    const ext2 = path36.extname(projectPath) || ".aep";
-    const base = path36.basename(projectPath, ext2);
-    const dir = path36.join(path36.dirname(projectPath), "_mcp_backups");
-    fs37.mkdirSync(dir, { recursive: true });
+    const ext2 = path37.extname(projectPath) || ".aep";
+    const base = path37.basename(projectPath, ext2);
+    const dir = path37.join(path37.dirname(projectPath), "_mcp_backups");
+    fs38.mkdirSync(dir, { recursive: true });
     const stem = `${base}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
-    let target = path36.join(dir, `${stem}${ext2}`);
-    for (let n = 2; fs37.existsSync(target); n++) target = path36.join(dir, `${stem}-${n}${ext2}`);
-    fs37.copyFileSync(projectPath, target);
+    let target = path37.join(dir, `${stem}${ext2}`);
+    for (let n = 2; fs38.existsSync(target); n++) target = path37.join(dir, `${stem}-${n}${ext2}`);
+    fs38.copyFileSync(projectPath, target);
     return target;
   } catch (err) {
     throw new BridgeError({
@@ -39272,14 +40157,14 @@ async function recover(ctx, args) {
   let projectMtime = null;
   if (state.project_path !== "<unsaved>") {
     try {
-      projectMtime = fs37.statSync(state.project_path).mtimeMs;
+      projectMtime = fs38.statSync(state.project_path).mtimeMs;
     } catch {
       projectMtime = null;
     }
   }
   const scan = { capped_dirs: [] };
   const files = scanRecoveryFiles(dirs, projectMtime, Date.now(), scan);
-  const base = state.project_path === "<unsaved>" ? null : path36.basename(state.project_path, path36.extname(state.project_path)).toLowerCase();
+  const base = state.project_path === "<unsaved>" ? null : path37.basename(state.project_path, path37.extname(state.project_path)).toLowerCase();
   for (const f of files) f.same_project = base === null ? null : f.name.toLowerCase().startsWith(base);
   if (base !== null) {
     const ordered = [...files.filter((f) => f.same_project), ...files.filter((f) => !f.same_project)];
@@ -39308,7 +40193,7 @@ async function recover(ctx, args) {
   return {
     project_path: state.project_path,
     dirty: state.dirty,
-    searched: dirs.map((d) => ({ source: d.source, dir: d.dir, exists: fs37.existsSync(d.dir) })),
+    searched: dirs.map((d) => ({ source: d.source, dir: d.dir, exists: fs38.existsSync(d.dir) })),
     files: files.slice(0, limit),
     total: files.length,
     truncated: files.length > limit,
@@ -39374,12 +40259,12 @@ async function autosave(ctx, args) {
     hint: notFound.length > 0 ? "Some Auto-Save preference keys were not found under the names probed (they are undocumented). Pass `probe` to look up others, or ask the user to check Edit > Preferences > Auto-Save." : "AE's own Auto-Save writes rolling copies without touching the project file; prefer it. Ask the user before changing it."
   };
 }
-var fs37, path36, ACTIONS, ABSOLUTE_PATH, MAX_RECOVERY_FILES, MAX_SCAN_PER_DIR, MIN_POLICY_MINUTES, MAX_POLICY_BACKUPS, AUTO_SAVE_FOLDER, SetPrefsSchema, PolicySchema, ProbeSchema, AeProjectSessionSchema, summary, stateOf2, TOOL2, TICK_MS, policyState, defaultMtime, defaultDialogs, defaultSave, projectsessionTools;
+var fs38, path37, ACTIONS, ABSOLUTE_PATH, MAX_RECOVERY_FILES, MAX_SCAN_PER_DIR, MIN_POLICY_MINUTES, MAX_POLICY_BACKUPS, AUTO_SAVE_FOLDER, SetPrefsSchema, PolicySchema, ProbeSchema, AeProjectSessionSchema, summary, stateOf2, TOOL2, TICK_MS, policyState, defaultMtime, defaultDialogs, defaultSave, projectsessionTools;
 var init_projectsession = __esm({
   "src/tools/ext/projectsession.ts"() {
     "use strict";
-    fs37 = __toESM(require("node:fs"), 1);
-    path36 = __toESM(require("node:path"), 1);
+    fs38 = __toESM(require("node:fs"), 1);
+    path37 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -39484,7 +40369,7 @@ var init_projectsession = __esm({
     };
     defaultMtime = (p) => {
       try {
-        return fs37.statSync(p).mtimeMs;
+        return fs38.statSync(p).mtimeMs;
       } catch {
         return null;
       }
@@ -40319,12 +41204,12 @@ async function queued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs38, path37, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
+var fs39, path38, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
 var init_track = __esm({
   "src/tools/ext/track.ts"() {
     "use strict";
-    fs38 = __toESM(require("node:fs"), 1);
-    path37 = __toESM(require("node:path"), 1);
+    fs39 = __toESM(require("node:fs"), 1);
+    path38 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -40432,7 +41317,7 @@ var init_track = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs38.mkdirSync(framesDir, { recursive: true });
+          fs39.mkdirSync(framesDir, { recursive: true });
           const patchSize = (args.pattern_size ?? 31) | 1;
           const opts = {
             patchSize,
@@ -40480,14 +41365,14 @@ var init_track = __esm({
                   points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
                 }
               }
-              fs38.rmSync(snap.path, { force: true });
+              fs39.rmSync(snap.path, { force: true });
               if (lostAt2) break;
             }
             return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast };
           });
           const { points, lostAt } = tracked;
-          const previewPath = path37.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
-          fs38.writeFileSync(
+          const previewPath = path38.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
+          fs39.writeFileSync(
             previewPath,
             encodePng(
               drawTrackPreview(
@@ -40573,22 +41458,22 @@ var init_track = __esm({
 
 // src/tools/ext/planar.ts
 function tracksDir() {
-  return path38.join(path38.dirname(defaultFramesDir()), "tracks");
+  return path39.join(path39.dirname(defaultFramesDir()), "tracks");
 }
 function newTrackId() {
-  return `trk_${Date.now().toString(36)}_${crypto16.randomBytes(3).toString("hex")}`;
+  return `trk_${Date.now().toString(36)}_${crypto17.randomBytes(3).toString("hex")}`;
 }
 function saveTrack(track) {
   if (!TRACK_ID.test(track.track_id)) throw new Error(`Bad track id "${track.track_id}"`);
   const dir = tracksDir();
-  fs39.mkdirSync(dir, { recursive: true });
-  const file = path38.join(dir, `${track.track_id}.json`);
+  fs40.mkdirSync(dir, { recursive: true });
+  const file = path39.join(dir, `${track.track_id}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs39.writeFileSync(tmp, JSON.stringify(track));
-  fs39.renameSync(tmp, file);
+  fs40.writeFileSync(tmp, JSON.stringify(track));
+  fs40.renameSync(tmp, file);
   try {
-    const entries = fs39.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs39.statSync(path38.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
-    for (const old of entries.slice(KEEP_TRACKS)) fs39.rmSync(path38.join(dir, old.n), { force: true });
+    const entries = fs40.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs40.statSync(path39.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const old of entries.slice(KEEP_TRACKS)) fs40.rmSync(path39.join(dir, old.n), { force: true });
   } catch {
   }
   return file;
@@ -40596,7 +41481,7 @@ function saveTrack(track) {
 function loadTrack(trackId) {
   if (!TRACK_ID.test(trackId)) return null;
   try {
-    const t = JSON.parse(fs39.readFileSync(path38.join(tracksDir(), `${trackId}.json`), "utf8"));
+    const t = JSON.parse(fs40.readFileSync(path39.join(tracksDir(), `${trackId}.json`), "utf8"));
     if (t.version !== 1 || !Array.isArray(t.frames) || !Array.isArray(t.ref_points)) return null;
     return t;
   } catch {
@@ -40622,9 +41507,9 @@ function platesFolderFor(projectPath) {
   if (!projectPath || projectPath === "<unsaved>") {
     throw new PlanarError("refused", "The project has not been saved, so there is no folder to put plates next to. Save it first.");
   }
-  const dir = path38.dirname(projectPath);
-  const name = path38.basename(projectPath, path38.extname(projectPath));
-  return path38.join(dir, `${name} chroma plates`) + path38.sep;
+  const dir = path39.dirname(projectPath);
+  const name = path39.basename(projectPath, path39.extname(projectPath));
+  return path39.join(dir, `${name} chroma plates`) + path39.sep;
 }
 function createRenderBudget(opts) {
   const started = Date.now();
@@ -40744,7 +41629,7 @@ async function withIsolatedPlate(ctx, opId, a, fn) {
       });
       removed = end.result?.removed === true;
     } catch (err) {
-      error = errMessage4(err);
+      error = errMessage5(err);
     } finally {
       if (a.note) endInflight(unisolateId);
     }
@@ -40997,9 +41882,9 @@ function drawTrackSheet(tiles, o) {
   return sheet;
 }
 function writeSheet(framesDir, tag, png) {
-  fs39.mkdirSync(framesDir, { recursive: true });
-  const file = path38.join(framesDir, `track_${tag}.png`);
-  fs39.writeFileSync(file, encodePng(png));
+  fs40.mkdirSync(framesDir, { recursive: true });
+  const file = path39.join(framesDir, `track_${tag}.png`);
+  fs40.writeFileSync(file, encodePng(png));
   return file;
 }
 function buildLayerKeys(a) {
@@ -41336,7 +42221,7 @@ async function trackMulti(ctx, args) {
   const toolName = "ae_track_multi";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs39.mkdirSync(framesDir, { recursive: true });
+  fs40.mkdirSync(framesDir, { recursive: true });
   const label = `ae_track_multi(${args.comp_id})`;
   const budget = createRenderBudget({ maxRenders: args.max_frames, maxSeconds: args.max_seconds });
   let stored = null;
@@ -41413,7 +42298,7 @@ async function trackMulti(ctx, args) {
         try {
           return decodePngFile(s.path);
         } finally {
-          fs39.rmSync(s.path, { force: true });
+          fs40.rmSync(s.path, { force: true });
         }
       };
       const cached = stored ? LIVE.get(stored.track_id) : void 0;
@@ -41524,7 +42409,7 @@ async function trackMulti(ctx, args) {
             png = await snap(times[i], (dir === "forward" ? 1 : 100001) + i);
             mustAdvance = false;
           } catch (err) {
-            run_.renderError = errMessage4(err);
+            run_.renderError = errMessage5(err);
             run_.blocked = isBlocked(err);
             break;
           }
@@ -41584,7 +42469,7 @@ async function trackMulti(ctx, args) {
           if (lf) tiles.push({ image: lf.png, frame: lf.frame, label: `t=${r26(lf.frame.time)}` });
           previewPath = writeSheet(framesDir, `${track2.track_id}_${opId}`, drawTrackSheet(tiles, { quad, patchSize: o.pattern_size, compSize }));
         } catch (err) {
-          previewError = errMessage4(err);
+          previewError = errMessage5(err);
         }
       }
       return { track: track2, notes: notes2, previewPath, previewError, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
@@ -41606,7 +42491,7 @@ async function trackMulti(ctx, args) {
         return {
           failure: {
             error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage4(err),
+            message: errMessage5(err),
             temp: made,
             checkpoint,
             sessionFields
@@ -41692,19 +42577,19 @@ async function trackMulti(ctx, args) {
       try {
         result.apply = await applyTrackTo(ctx, { compId: args.comp_id, track, target: args.apply, expect, toolName });
       } catch (err) {
-        result.apply = { applied: false, error: err instanceof PlanarError ? err.code : "failed", message: errMessage4(err) };
+        result.apply = { applied: false, error: err instanceof PlanarError ? err.code : "failed", message: errMessage5(err) };
       }
     }
   }
   return result;
 }
-var crypto16, fs39, path38, PlanarError, fail2, errMessage4, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto17, fs40, path39, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
-    crypto16 = __toESM(require("node:crypto"), 1);
-    fs39 = __toESM(require("node:fs"), 1);
-    path38 = __toESM(require("node:path"), 1);
+    crypto17 = __toESM(require("node:crypto"), 1);
+    fs40 = __toESM(require("node:fs"), 1);
+    path39 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -41727,7 +42612,7 @@ var init_planar = __esm({
       }
     };
     fail2 = (e) => ({ ok: false, error: e.code, message: e.message });
-    errMessage4 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage5 = (err) => err instanceof Error ? err.message : String(err);
     r26 = (v) => Math.round(v * 100) / 100;
     r4 = (v) => Math.round(v * 1e4) / 1e4;
     yieldLoop = () => new Promise((r) => setImmediate(r));
@@ -41735,7 +42620,7 @@ var init_planar = __esm({
     KEEP_TRACKS = 200;
     MAX_TRACK_FRAMES2 = 3e3;
     MAX_KEYS = 3e3;
-    trackFilePath = (trackId) => path38.join(tracksDir(), `${trackId}.json`);
+    trackFilePath = (trackId) => path39.join(tracksDir(), `${trackId}.json`);
     BLURRINESS_PER_SIGMA = 2.5;
     blurrinessFromSigma = (sigmaPx) => sigmaPx * BLURRINESS_PER_SIGMA;
     sigmaFromBlurriness = (blurriness) => blurriness / BLURRINESS_PER_SIGMA;
@@ -41848,7 +42733,7 @@ var init_planar = __esm({
             );
           } catch (err) {
             this.trackers.push(null);
-            this.dropped.push({ index: i, reason: errMessage4(err) });
+            this.dropped.push({ index: i, reason: errMessage5(err) });
           }
         });
       }
@@ -42048,14 +42933,14 @@ var init_planar = __esm({
                     try {
                       tiles.push({ image: decodePngFile(s.path), frame: f, label: `t=${r26(f.time)}` });
                     } finally {
-                      fs39.rmSync(s.path, { force: true });
+                      fs40.rmSync(s.path, { force: true });
                     }
                     await yieldLoop();
                   }
                   const refPts = track.ref_points;
                   previewPath = writeSheet(framesDir, `${track.track_id}_${opId}`, drawTrackSheet(tiles, { quad: boundingQuad(refPts), patchSize: 31, compSize: track.comp_size }));
                 } catch (err) {
-                  previewError = errMessage4(err);
+                  previewError = errMessage5(err);
                 }
               }
               return { track, info: info2, previewPath, previewError };
@@ -43673,7 +44558,7 @@ async function runWithPlateCopy(ctx, spec) {
     const sessionFields = await noteBeforeWrite(ctx, note);
     proofIds = prepared.layers.map((l) => l.id);
     const before = await state("before");
-    fs40.mkdirSync(spec.framesDir, { recursive: true });
+    fs41.mkdirSync(spec.framesDir, { recursive: true });
     beginInflight(note);
     let begun;
     try {
@@ -43696,7 +44581,7 @@ async function runWithPlateCopy(ctx, spec) {
       if (typeof copyId !== "number") throw new Error("AE returned no id for the temporary comp, so nothing was rendered");
       value = await spec.body(copyId, prepared.prep, opId);
     } catch (err) {
-      bodyError = errMessage5(err);
+      bodyError = errMessage6(err);
     }
     let cleanupError = null;
     let removed = false;
@@ -43713,7 +44598,7 @@ async function runWithPlateCopy(ctx, spec) {
       });
       removed = end.result?.removed === true;
     } catch (err) {
-      cleanupError = errMessage5(err);
+      cleanupError = errMessage6(err);
     } finally {
       endInflight(removeId);
       endInflight(opId);
@@ -43931,7 +44816,7 @@ async function patchCheckHandler(args, ctx) {
               await yieldLoop2();
             } catch (err) {
               if (isAeBlocked2(err)) blocked = true;
-              notes.push(`The probe frame next to ${time}s could not be rendered: ${errMessage5(err)}`);
+              notes.push(`The probe frame next to ${time}s could not be rendered: ${errMessage6(err)}`);
             }
           }
           const metrics = analyseFrame({ time: pair.time, composite: orig, plate, neighbour, polyComp: poly, comp, opts: fopts, featherPx: feathers[ti] });
@@ -43960,7 +44845,7 @@ async function patchCheckHandler(args, ctx) {
           }
         } catch (err) {
           if (isAeBlocked2(err)) blocked = true;
-          frames.push(unusable(time, `this time could not be measured: ${errMessage5(err)}`));
+          frames.push(unusable(time, `this time could not be measured: ${errMessage6(err)}`));
         }
       }
       let slip = null;
@@ -43970,7 +44855,7 @@ async function patchCheckHandler(args, ctx) {
           slip = measureSlip(slipFrames, slipPoly0, { patchSize: PATCH_SIZE, searchPx: 16, features: 8, scale: imgScale, gapPx: (args.ring_gap_px + halfFeather) * imgScale, ringPx: args.ring_px * imgScale });
           await yieldLoop2();
         } catch (err) {
-          slip = { status: "not_measurable", reason: `slip failed: ${errMessage5(err)}`, patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
+          slip = { status: "not_measurable", reason: `slip failed: ${errMessage6(err)}`, patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
         }
       } else if (!notes.some((n) => n.startsWith("Slip"))) {
         slip = { status: "not_measurable", reason: "fewer than two frames could be measured", patch_features: 0, ring_features: 0, start_time: null, series: [], max_slip_px: null };
@@ -44024,10 +44909,10 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
   let seriesPath;
   let seriesError;
   try {
-    fs40.mkdirSync(framesDir, { recursive: true });
+    fs41.mkdirSync(framesDir, { recursive: true });
     seriesPath = writeJson2(framesDir, "patchcheck", comp.id, { comp: head2({ index: 0, id: comp.id, name: comp.name }), sampled: body.plan, thresholds, frames: body.frames, slip: body.slip, checks: judged.checks, series });
   } catch (err) {
-    seriesError = errMessage5(err);
+    seriesError = errMessage6(err);
   }
   let sheet;
   let sheetError;
@@ -44060,7 +44945,7 @@ async function finishPatchCheck(args, run, thresholds, fopts, framesDir) {
         sheet = { path: writePngFile(framesDir, "patchcheck_sheet", comp.id, out), frames: items.map((i) => ({ label: i.label, time: r27(i.time) })) };
       } else sheetError = "no frame could be drawn";
     } catch (err) {
-      sheetError = errMessage5(err);
+      sheetError = errMessage6(err);
     }
   }
   const notes = [
@@ -44272,7 +45157,7 @@ async function collectRegionStats(p) {
       prev = img;
     } catch (err) {
       if (isAeBlocked2(err)) blocked = true;
-      regions.forEach((_, ri) => rows[ri].push({ time, usable: false, reason: `this time could not be measured: ${errMessage5(err)}` }));
+      regions.forEach((_, ri) => rows[ri].push({ time, usable: false, reason: `this time could not be measured: ${errMessage6(err)}` }));
     }
   }
   return { rows, firstFrame, firstTime, blocked, notes, budget: budgetReport(budget, { renders: p.maxRenders, seconds: p.maxSeconds }, budgetSkipped), budgetSkipped };
@@ -44372,7 +45257,7 @@ async function regionStatsHandler(args, ctx) {
         if (err instanceof PlanarError) return { refused: { ok: false, error: err.code, message: err.message } };
         throw err;
       }
-      fs40.mkdirSync(framesDir, { recursive: true });
+      fs41.mkdirSync(framesDir, { recursive: true });
       const s = await collectRegionStats({ ctx, opId, toolName, framesDir, compId: args.comp_id, info: i, plan: pl, regions, linear, ...budgetArgs });
       return { i, pl, s };
     });
@@ -44389,14 +45274,14 @@ async function regionStatsHandler(args, ctx) {
   let regionsPng;
   const fileErrors = [];
   try {
-    fs40.mkdirSync(framesDir, { recursive: true });
+    fs41.mkdirSync(framesDir, { recursive: true });
     seriesPath = writeJson2(framesDir, "regionstats", comp.id, {
       comp: { id: comp.id, name: comp.name },
       sampled: plan2,
       regions: regions.map((r, ri) => ({ name: r.name, shape: r.shape, ring: r.ring ?? null, rows: stats.rows[ri], summary: summaries[ri] }))
     });
   } catch (err) {
-    fileErrors.push(`series file: ${errMessage5(err)}`);
+    fileErrors.push(`series file: ${errMessage6(err)}`);
   }
   if (args.graph) {
     try {
@@ -44406,7 +45291,7 @@ async function regionStatsHandler(args, ctx) {
       }).filter((l) => l.values.length > 0);
       if (lines.length > 0) graphPath = writePngFile(framesDir, "regionstats_graph", comp.id, drawSeriesGraph(lines));
     } catch (err) {
-      fileErrors.push(`graph: ${errMessage5(err)}`);
+      fileErrors.push(`graph: ${errMessage6(err)}`);
     }
   }
   if (args.draw_regions && stats.firstFrame && stats.firstTime !== null) {
@@ -44416,7 +45301,7 @@ async function regionStatsHandler(args, ctx) {
       const drawn = regions.map((r) => ({ name: r.name, polygon: placedAt(r.shape, r.track, t0).polygon, ring: r.ring })).filter((r) => r.polygon !== null);
       regionsPng = writePngFile(framesDir, "regionstats_regions", comp.id, drawRegionsOverlay(frame, comp, drawn, args.max_size));
     } catch (err) {
-      fileErrors.push(`regions picture: ${errMessage5(err)}`);
+      fileErrors.push(`regions picture: ${errMessage6(err)}`);
     }
   }
   const measured = Math.max(0, ...stats.rows.map((r) => r.filter((x) => x.usable).length));
@@ -44467,13 +45352,13 @@ async function regionStatsHandler(args, ctx) {
     ...copyTail
   };
 }
-var crypto17, fs40, path39, MAX_SAMPLES, Num, PtSchema, RegionShapeSchema, HomographySchema, RegionTrackSchema, RegionTrackInputSchema, budgetFields, timesField2, SamplingFields, LumaSpace, AePatchCheckSchema, RegionDefSchema, AeRegionStatsSchema, r27, r37, r42, errMessage5, OUT_CAP, yieldLoop2, head2, MIN_POP_JUMP, unusable, scalePoly, severity, topTimes, CELL_BG, INK3, LABEL_BG, LINE_COLOURS, runQueued6, BLOCKED_NOTE2, writeJson2, writePngFile, BUDGET_SKIP, PATCH_SIZE, SLIP_MEMORY_CAP, PROBE_NOTE, COLOUR_NOTE, REGION_COLOURS, patchcheckTools;
+var crypto18, fs41, path40, MAX_SAMPLES, Num, PtSchema, RegionShapeSchema, HomographySchema, RegionTrackSchema, RegionTrackInputSchema, budgetFields, timesField2, SamplingFields, LumaSpace, AePatchCheckSchema, RegionDefSchema, AeRegionStatsSchema, r27, r37, r42, errMessage6, OUT_CAP, yieldLoop2, head2, MIN_POP_JUMP, unusable, scalePoly, severity, topTimes, CELL_BG, INK3, LABEL_BG, LINE_COLOURS, runQueued6, BLOCKED_NOTE2, writeJson2, writePngFile, BUDGET_SKIP, PATCH_SIZE, SLIP_MEMORY_CAP, PROBE_NOTE, COLOUR_NOTE, REGION_COLOURS, patchcheckTools;
 var init_patchcheck = __esm({
   "src/tools/ext/patchcheck.ts"() {
     "use strict";
-    crypto17 = __toESM(require("node:crypto"), 1);
-    fs40 = __toESM(require("node:fs"), 1);
-    path39 = __toESM(require("node:path"), 1);
+    crypto18 = __toESM(require("node:crypto"), 1);
+    fs41 = __toESM(require("node:fs"), 1);
+    path40 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -44579,7 +45464,7 @@ var init_patchcheck = __esm({
     r27 = (v) => Math.round(v * 100) / 100;
     r37 = (v) => Math.round(v * 1e3) / 1e3;
     r42 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage5 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage6 = (err) => err instanceof Error ? err.message : String(err);
     OUT_CAP = 500;
     yieldLoop2 = () => new Promise((r) => setImmediate(r));
     head2 = (l) => ({ index: l.index, id: l.id, name: l.name });
@@ -44611,13 +45496,13 @@ var init_patchcheck = __esm({
     };
     BLOCKED_NOTE2 = "AE stopped responding during a render (often a modal dialog); the remaining frames were not rendered. Check ae_dialogs, then run again.";
     writeJson2 = (framesDir, tag, compId, data) => {
-      const file = path39.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.json`);
-      fs40.writeFileSync(file, JSON.stringify(data));
+      const file = path40.join(framesDir, `${tag}_c${compId}_${crypto18.randomBytes(4).toString("hex")}.json`);
+      fs41.writeFileSync(file, JSON.stringify(data));
       return file;
     };
     writePngFile = (framesDir, tag, compId, png) => {
-      const file = path39.join(framesDir, `${tag}_c${compId}_${crypto17.randomBytes(4).toString("hex")}.png`);
-      fs40.writeFileSync(file, encodePng(png));
+      const file = path40.join(framesDir, `${tag}_c${compId}_${crypto18.randomBytes(4).toString("hex")}.png`);
+      fs41.writeFileSync(file, encodePng(png));
       return file;
     };
     BUDGET_SKIP = "render budget reached";
@@ -44971,9 +45856,9 @@ function drawStabSheet(tiles, compSize, maxTile = 480) {
   return sheet;
 }
 function writeSheet2(dir, tag, png) {
-  fs41.mkdirSync(dir, { recursive: true });
-  const file = path40.join(dir, `stabilize_${tag}.png`);
-  fs41.writeFileSync(file, encodePng(png));
+  fs42.mkdirSync(dir, { recursive: true });
+  const file = path41.join(dir, `stabilize_${tag}.png`);
+  fs42.writeFileSync(file, encodePng(png));
   return file;
 }
 function meanAbsDiff(a, b) {
@@ -45192,7 +46077,7 @@ async function renderShot(ctx, opId, compId, time, index, framesDir, toolName) {
     const png = decodePngFile(s.path);
     return { time, gray: toGray(png), image: png };
   } finally {
-    fs41.rmSync(s.path, { force: true });
+    fs42.rmSync(s.path, { force: true });
   }
 }
 async function stabilize(ctx, args) {
@@ -45246,7 +46131,7 @@ async function stabilize(ctx, args) {
           await yieldLoop3();
         }
       } catch (err) {
-        beforeError = errMessage6(err);
+        beforeError = errMessage7(err);
       }
     }
     return { track: based, info, refTime: refTime2, ins: ins2, target: target2, plan: plan3, times, sheetTimes: sheetTimes2, before, beforeError };
@@ -45362,7 +46247,7 @@ async function stabilize(ctx, args) {
             budget.spend();
             afterRenders++;
           } catch (err) {
-            verifyError = errMessage6(err);
+            verifyError = errMessage7(err);
             break;
           }
           await yieldLoop3();
@@ -45416,11 +46301,11 @@ async function stabilize(ctx, args) {
           if (sheetShots.length > 0) afterSheet = writeSheet2(framesDir, `${opId}_after`, drawStabSheet(tiles(sheetShots, expectedAt, "after"), comp));
           if (sheetShots.length < prep.sheetTimes.length || prep.before.length < prep.sheetTimes.length) sheetError ??= "The render budget ran out before every sheet frame was rendered; raise max_renders.";
         } catch (err) {
-          sheetError ??= errMessage6(err);
+          sheetError ??= errMessage7(err);
         }
       }
     } catch (err) {
-      verifyError ??= errMessage6(err);
+      verifyError ??= errMessage7(err);
     }
   }
   if (residual && residual.rms_px !== null) {
@@ -45667,7 +46552,7 @@ async function roundtripBuild(ctx, args) {
           await yieldLoop3();
         }
       } catch (err) {
-        beforeError = errMessage6(err);
+        beforeError = errMessage7(err);
       }
     }
     return { track: based, info, refTime: refTime2, ins: ins2, plan: plan3, pad: pad2, sheetTimes: sheetTimes2, before, beforeError };
@@ -45771,7 +46656,7 @@ async function roundtripBuild(ctx, args) {
       if (measured) guideSuspected = guidePlateRenders(pictureDiff, refFrameTime);
       if (guideSuspected) notes.push(`picture_change is above ${GUIDE_DIFF_THRESHOLD} at a frame away from the reference: the guide plate probably renders in the shot comp (the rig should leave the picture unchanged). Remove the rig and build it again with guide_mode opacity_switch.`);
     } catch (err) {
-      sheetError ??= errMessage6(err);
+      sheetError ??= errMessage7(err);
     }
   }
   if (args.sheet && guideSuspected === void 0) notes.push("The guide-plate check was not measured: no frame away from the reference was compared (the render budget ran out, a sheet render failed, or the frames could not be read); raise max_renders and run again.");
@@ -45852,12 +46737,12 @@ async function roundtripRemove(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs41, path40, r28, r43, errMessage6, yieldLoop3, fail3, MAX_KEYS2, RESIDUAL_TARGET_PX, RIG_SCOPE, TRANSFORM_FX_PARAMS, TILE_FX_PARAMS, zoomAbout, MAX_SEARCH_ZOOM, AeStabilizeSchema, sampleIdx2, sampleTimes, uniqSorted, AeStabilizeRoundtripSchema, defaultPad, GUIDE_DIFF_THRESHOLD, patchOutline, stabilizeTools;
+var fs42, path41, r28, r43, errMessage7, yieldLoop3, fail3, MAX_KEYS2, RESIDUAL_TARGET_PX, RIG_SCOPE, TRANSFORM_FX_PARAMS, TILE_FX_PARAMS, zoomAbout, MAX_SEARCH_ZOOM, AeStabilizeSchema, sampleIdx2, sampleTimes, uniqSorted, AeStabilizeRoundtripSchema, defaultPad, GUIDE_DIFF_THRESHOLD, patchOutline, stabilizeTools;
 var init_stabilize = __esm({
   "src/tools/ext/stabilize.ts"() {
     "use strict";
-    fs41 = __toESM(require("node:fs"), 1);
-    path40 = __toESM(require("node:path"), 1);
+    fs42 = __toESM(require("node:fs"), 1);
+    path41 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -45872,7 +46757,7 @@ var init_stabilize = __esm({
     init_write_runner();
     r28 = (v) => Math.round(v * 100) / 100;
     r43 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage6 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage7 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop3 = () => new Promise((r) => setImmediate(r));
     fail3 = (e) => ({ ok: false, error: e.code, message: e.message });
     MAX_KEYS2 = 3e3;
@@ -46326,9 +47211,9 @@ function drawSheet(tiles, o) {
   return sheet;
 }
 function writeSheetFile(dir, tag, sheet) {
-  fs42.mkdirSync(dir, { recursive: true });
-  const file = path41.join(dir, `cleanplate_${tag}.png`);
-  fs42.writeFileSync(file, encodePng(sheet));
+  fs43.mkdirSync(dir, { recursive: true });
+  const file = path42.join(dir, `cleanplate_${tag}.png`);
+  fs43.writeFileSync(file, encodePng(sheet));
   return file;
 }
 async function queued4(ctx, label, opId, fn) {
@@ -46389,7 +47274,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     try {
       return decodePngFile(s.path);
     } finally {
-      fs42.rmSync(s.path, { force: true });
+      fs43.rmSync(s.path, { force: true });
     }
   };
   for (let i = 0; i < plan2.times.length; i++) {
@@ -46418,7 +47303,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
     try {
       png = await snap(t, i);
     } catch (err) {
-      renderError = errMessage7(err);
+      renderError = errMessage8(err);
       break;
     }
     rendered++;
@@ -46501,7 +47386,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
         spatial = findSpatialSources(toGray(png), png.width / compSize[0], bPoly, { ringPx, count: 3, clearancePx: mp.expansion + mp.feather / 2 });
       }
     } catch (err) {
-      renderError = renderError ?? errMessage7(err);
+      renderError = renderError ?? errMessage8(err);
     }
   }
   if (moving && best) temporal.push(...temporalSources(scored, { fps, step: plan2.step, count: 3 }));
@@ -46515,7 +47400,7 @@ async function pickCore(ctx, args, opId, info, renderCompId, track, regionTime, 
       });
       sheet = writeSheetFile(framesDir, `pick_${opId}`, drawSheet(tiles, { cols: 3, compSize }));
     } catch (err) {
-      sheetError = errMessage7(err);
+      sheetError = errMessage8(err);
     }
   }
   return {
@@ -46541,7 +47426,7 @@ async function pick(ctx, args) {
   const toolName = "ae_cleanplate_pick";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs42.mkdirSync(framesDir, { recursive: true });
+  fs43.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName}(${args.comp_id})`;
   checkRegion(args.region);
   if (args.start !== void 0 && args.end !== void 0 && args.end < args.start) throw badArgs2("end is before start.");
@@ -46588,7 +47473,7 @@ async function pick(ctx, args) {
     } catch (err) {
       const temp2 = err.plateTemp;
       if (temp2) await noteWritten(ctx, note);
-      if (temp2) return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage7(err), temp: temp2, checkpoint, sessionFields } };
+      if (temp2) return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage8(err), temp: temp2, checkpoint, sessionFields } };
       throw err;
     }
   });
@@ -46669,9 +47554,9 @@ function tempMismatch(temp) {
 }
 function uniqueStillPath(dir, plateName, frame) {
   const base = `${sanitize3(plateName)} still f${frame}`;
-  let file = path41.join(dir, `${base}.png`);
-  for (let n = 2; fs42.existsSync(file) && n < 1e3; n++) file = path41.join(dir, `${base} ${n}.png`);
-  if (fs42.existsSync(file)) throw new PlanarError("refused", `Every name '${base} N.png' up to 999 is taken in ${dir}; nothing was overwritten. Move or delete old stills there.`);
+  let file = path42.join(dir, `${base}.png`);
+  for (let n = 2; fs43.existsSync(file) && n < 1e3; n++) file = path42.join(dir, `${base} ${n}.png`);
+  if (fs43.existsSync(file)) throw new PlanarError("refused", `Every name '${base} N.png' up to 999 is taken in ${dir}; nothing was overwritten. Move or delete old stills there.`);
   return file;
 }
 function planSetup(a) {
@@ -46725,7 +47610,7 @@ async function renderTiles(ctx, opId, tag, compId, times, framesDir, toolName) {
       const fit = fitWithin(png.width, png.height, 720);
       out.push({ time: times[i], image: resizeArea(png, fit.width, fit.height) });
     } finally {
-      fs42.rmSync(s.path, { force: true });
+      fs43.rmSync(s.path, { force: true });
     }
     await yieldLoop4();
   }
@@ -46821,7 +47706,7 @@ async function setupBuild(ctx, args) {
   const toolName = "ae_cleanplate_setup";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs42.mkdirSync(framesDir, { recursive: true });
+  fs43.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName}(${args.comp_id})`;
   const regionList = args.regions ?? (args.region ? [args.region] : []);
   regionList.forEach((r, i) => checkRegion(r, regionList.length > 1 ? `regions[${i}]` : "region"));
@@ -46950,7 +47835,7 @@ async function setupBuild(ctx, args) {
     try {
       before = await renderTiles(ctx, opId, "before", args.comp_id, times, framesDir, toolName);
     } catch (err) {
-      beforeError = errMessage7(err);
+      beforeError = errMessage8(err);
     }
     let stillPath;
     let isolate = null;
@@ -46965,15 +47850,15 @@ async function setupBuild(ctx, args) {
       sessionFields = await noteBeforeWrite(ctx, note);
       let made = "";
       try {
-        fs42.mkdirSync(dir, { recursive: true });
+        fs43.mkdirSync(dir, { recursive: true });
         const iso = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers: [{ index: plate.index, id: plate.id }], expect: expectGuard, toolName, note }, async (copyId) => {
           const s = await captureCompFrame({ ctx, opId, compId: copyId, time: refTime, frameIndex: 0, framesDir, toolName });
           try {
             const target = uniqueStillPath(dir, plate.name, Math.round(refTime * fps));
-            fs42.copyFileSync(s.path, target, fs42.constants.COPYFILE_EXCL);
+            fs43.copyFileSync(s.path, target, fs43.constants.COPYFILE_EXCL);
             made = target;
           } finally {
-            fs42.rmSync(s.path, { force: true });
+            fs43.rmSync(s.path, { force: true });
           }
         });
         isolate = iso.temp;
@@ -46981,18 +47866,18 @@ async function setupBuild(ctx, args) {
         stillPath = made;
         const png = decodePngFile(stillPath);
         if (png.width !== c2.width || png.height !== c2.height) {
-          fs42.rmSync(stillPath, { force: true });
+          fs43.rmSync(stillPath, { force: true });
           throw new PlanarError("refused", `The rendered still is ${png.width}x${png.height} and the comp is ${c2.width}x${c2.height}: the comp's resolution is not Full. Nothing was imported.`);
         }
       } catch (err) {
         const temp = err.plateTemp ?? isolate;
         if (!temp) throw err;
         if (!isolate) await noteWritten(ctx, note);
-        if (made && fs42.existsSync(made) && !stillPath) fs42.rmSync(made, { force: true });
+        if (made && fs43.existsSync(made) && !stillPath) fs43.rmSync(made, { force: true });
         return {
           failure: {
             error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage7(err),
+            message: errMessage8(err),
             temp,
             checkpoint,
             sessionFields
@@ -47104,7 +47989,7 @@ async function setupBuild(ctx, args) {
       sheetError = sheetError ?? "The before frames could not be rendered, so there is no before/after sheet.";
     }
   } catch (err) {
-    sheetError = errMessage7(err);
+    sheetError = errMessage8(err);
   }
   const w = result;
   const readPatch = kept.inspect?.patch ?? null;
@@ -47173,7 +48058,7 @@ async function setupReload(ctx, args) {
   const toolName = "ae_cleanplate_setup";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs42.mkdirSync(framesDir, { recursive: true });
+  fs43.mkdirSync(framesDir, { recursive: true });
   const label = `${toolName} reload(${args.comp_id})`;
   const expectGuard = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const prep = await queued4(ctx, `${label} prepare`, opId, async () => {
@@ -47185,7 +48070,7 @@ async function setupReload(ctx, args) {
     try {
       before = await renderTiles(ctx, opId, "before", args.comp_id, times, framesDir, toolName);
     } catch (e) {
-      err = errMessage7(e);
+      err = errMessage8(e);
     }
     return { info, times, before, err };
   });
@@ -47221,7 +48106,7 @@ async function setupReload(ctx, args) {
       sheetPath = writeSheetFile(framesDir, `reload_${opId}`, drawSheet(tiles, { cols: after.length, compSize: size }));
     }
   } catch (e) {
-    sheetError = errMessage7(e);
+    sheetError = errMessage8(e);
   }
   const w = result;
   return {
@@ -47239,12 +48124,12 @@ async function setupReload(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs42, path41, r29, r44, errMessage7, yieldLoop4, failOut, badArgs2, OUT_CAP2, MAX_CLONE_FRAMES, MAX_CLONE_POINTS, MAX_MASK_PX, MAX_REGIONS, SHEET_TILE, KAPPA, MIN_COVERAGE, CLEAN_SCALE, OCCLUDED_BELOW, CLEAN_FROM, snapFrame2, RegionTimeField, AeCleanplatePickSchema, OffsetSchema, AeCleanplateSetupSchema, sanitize3, CHAIN_NOTE, cleanplateTools;
+var fs43, path42, r29, r44, errMessage8, yieldLoop4, failOut, badArgs2, OUT_CAP2, MAX_CLONE_FRAMES, MAX_CLONE_POINTS, MAX_MASK_PX, MAX_REGIONS, SHEET_TILE, KAPPA, MIN_COVERAGE, CLEAN_SCALE, OCCLUDED_BELOW, CLEAN_FROM, snapFrame2, RegionTimeField, AeCleanplatePickSchema, OffsetSchema, AeCleanplateSetupSchema, sanitize3, CHAIN_NOTE, cleanplateTools;
 var init_cleanplate = __esm({
   "src/tools/ext/cleanplate.ts"() {
     "use strict";
-    fs42 = __toESM(require("node:fs"), 1);
-    path41 = __toESM(require("node:path"), 1);
+    fs43 = __toESM(require("node:fs"), 1);
+    path42 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -47263,7 +48148,7 @@ var init_cleanplate = __esm({
     init_write_runner();
     r29 = (v) => Math.round(v * 100) / 100;
     r44 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage7 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage8 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop4 = () => new Promise((r) => setImmediate(r));
     failOut = (e) => ({ ok: false, error: e.code, message: e.message });
     badArgs2 = (message) => new PlanarError("bad_args", message);
@@ -48124,8 +49009,8 @@ function safeName(name) {
   return (s || "plate").slice(0, 60);
 }
 function uniquePath(dir, stem, ext2) {
-  let target = path42.join(dir, `${stem}${ext2}`);
-  for (let n = 2; fs43.existsSync(target); n++) target = path42.join(dir, `${stem}_${n}${ext2}`);
+  let target = path43.join(dir, `${stem}${ext2}`);
+  for (let n = 2; fs44.existsSync(target); n++) target = path43.join(dir, `${stem}_${n}${ext2}`);
   return target;
 }
 function planSamples3(o) {
@@ -48336,7 +49221,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
     budget.spend();
     const png = decodePngFile(snapped.path);
     try {
-      fs43.rmSync(snapped.path, { force: true });
+      fs44.rmSync(snapped.path, { force: true });
     } catch {
     }
     await yieldLoop5();
@@ -48365,7 +49250,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
         } catch (err) {
           failures++;
           consecutive++;
-          lastFailure = errMessage8(err);
+          lastFailure = errMessage9(err);
           return null;
         }
       },
@@ -48408,18 +49293,18 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   }
   const finish2 = async () => {
     const fill = await fillFromGathered(fillInput, gathered);
-    fs43.mkdirSync(folder, { recursive: true });
+    fs44.mkdirSync(folder, { recursive: true });
     const stem = `${safeName(plate.name)}_f${frame}_inpaint`;
     const pngPath = uniquePath(folder, stem, ".png");
-    fs43.writeFileSync(pngPath, encodePng(toPng(fill.image)), { flag: "wx" });
+    fs44.writeFileSync(pngPath, encodePng(toPng(fill.image)), { flag: "wx" });
     let previewPath = null;
     if (args.preview) {
       try {
         previewPath = uniquePath(folder, `${stem}_preview`, ".png");
-        fs43.writeFileSync(previewPath, encodePng(previewSheet(fill)), { flag: "wx" });
+        fs44.writeFileSync(previewPath, encodePng(previewSheet(fill)), { flag: "wx" });
       } catch (err) {
         previewPath = null;
-        notes.push(`The preview could not be written: ${errMessage8(err)}`);
+        notes.push(`The preview could not be written: ${errMessage9(err)}`);
       }
     }
     let placement = null;
@@ -48535,12 +49420,12 @@ function inpaintMismatches(beforeRaw, afterRaw, written, placed, want) {
   }
   return m;
 }
-var fs43, path42, import_pngjs3, PlaceSchema, AeInpaintPlateSchema, r210, errMessage8, yieldLoop5, refuse, CLASS_COLORS, SAMPLE_MEMORY_BUDGET, PATCH_NAME, inpaintTools;
+var fs44, path43, import_pngjs3, PlaceSchema, AeInpaintPlateSchema, r210, errMessage9, yieldLoop5, refuse, CLASS_COLORS, SAMPLE_MEMORY_BUDGET, PATCH_NAME, inpaintTools;
 var init_inpaint = __esm({
   "src/tools/ext/inpaint.ts"() {
     "use strict";
-    fs43 = __toESM(require("node:fs"), 1);
-    path42 = __toESM(require("node:path"), 1);
+    fs44 = __toESM(require("node:fs"), 1);
+    path43 = __toESM(require("node:path"), 1);
     import_pngjs3 = __toESM(require_png(), 1);
     init_zod();
     init_host();
@@ -48594,7 +49479,7 @@ var init_inpaint = __esm({
       expect: ExpectSchema
     });
     r210 = (v) => Math.round(v * 100) / 100;
-    errMessage8 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage9 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop5 = () => new Promise((r) => setImmediate(r));
     refuse = (code, message) => ({ ok: false, error: code, message });
     CLASS_COLORS = {
@@ -48616,7 +49501,7 @@ var init_inpaint = __esm({
           try {
             polys = args.regions.map(regionPolygon);
           } catch (err) {
-            return refuse(err.code ?? "bad_args", errMessage8(err));
+            return refuse(err.code ?? "bad_args", errMessage9(err));
           }
           const toolName = "ae_inpaint_plate";
           const opId = ctx.bridge.newOpId();
@@ -48635,7 +49520,7 @@ var init_inpaint = __esm({
             }
             const made = err?.plateTemp;
             const code = err instanceof PlanarError || err instanceof InpaintError ? err.code : "failed";
-            return { ...refuse(code, errMessage8(err)), plate_copy: made ?? state.temp, plate_checkpoint: state.checkpoint, ...state.sessionFields };
+            return { ...refuse(code, errMessage9(err)), plate_copy: made ?? state.temp, plate_checkpoint: state.checkpoint, ...state.sessionFields };
           }
           const place = built.placement;
           try {
@@ -48668,7 +49553,7 @@ var init_inpaint = __esm({
               ok: false,
               applied: false,
               error: code,
-              message: `The fill was made but the still was not imported: ${errMessage8(err)}${unsure ? " AE did not answer in time, so the import may still have run: look in the Project panel before trying again." : ""} The fill image was saved at ${built.pngPath}; import it by hand or call the tool again.`,
+              message: `The fill was made but the still was not imported: ${errMessage9(err)}${unsure ? " AE did not answer in time, so the import may still have run: look in the Project panel before trying again." : ""} The fill image was saved at ${built.pngPath}; import it by hand or call the tool again.`,
               ...unsure ? { write_state: "unknown" } : {},
               png_path: built.pngPath,
               fill: built.report,
@@ -48959,7 +49844,7 @@ async function planFollow(ctx, a) {
         shape = stripShape(transformShape(regionToShape2(a.newMask.region), inv));
       } catch (err) {
         if (err instanceof PlanarError) throw err;
-        throw new PlanarError("refused", errMessage9(err));
+        throw new PlanarError("refused", errMessage10(err));
       }
     }
     const plan2 = {
@@ -49184,12 +50069,12 @@ async function writeFollow(ctx, a, plan2, expect, label) {
 function writeOutcomeNotes(result, notes) {
   if (result.feather_fallback) {
     notes.push(
-      `AE rejected the path with its variable-feather arrays (${errMessage9(result.feather_error)}), so it was written again without them: ${String(result.feather_points_dropped)} feather point(s) were dropped. Re-create the variable feather by hand or with ae_path_write.`
+      `AE rejected the path with its variable-feather arrays (${errMessage10(result.feather_error)}), so it was written again without them: ${String(result.feather_points_dropped)} feather point(s) were dropped. Re-create the variable feather by hand or with ae_path_write.`
     );
   }
-  if (result.path_error) notes.push(`The path could not be written: ${errMessage9(result.path_error)}. The mask exists; the receipt shows what it holds.`);
-  if (result.interpolation_error) notes.push(`The keys were written but could not be set to linear: ${errMessage9(result.interpolation_error)}.`);
-  if (result.work_area_error) notes.push(`The work area could not be set (${errMessage9(result.work_area_error)}); it was put back as it was. Set it by hand.`);
+  if (result.path_error) notes.push(`The path could not be written: ${errMessage10(result.path_error)}. The mask exists; the receipt shows what it holds.`);
+  if (result.interpolation_error) notes.push(`The keys were written but could not be set to linear: ${errMessage10(result.interpolation_error)}.`);
+  if (result.work_area_error) notes.push(`The work area could not be set (${errMessage10(result.work_area_error)}); it was put back as it was. Set it by hand.`);
 }
 function followSummary(plan2, result) {
   const t = plan2.track;
@@ -49579,7 +50464,7 @@ async function cafPrep(ctx, args) {
     notes: plan2.notes
   };
 }
-var r38, r46, errMessage9, fail4, MAX_FRAMES, BEZIER_WARN_PX, VERTEX_TOL, KAPPA2, MAX_WRITE_POINTS, snapToFrame2, MASK_MODES, MATTE_TYPES, MaskRefSchema, RangeSchema, FeatherSchema, TRACK_FIELDS, AeMaskFollowSchema, AeGarbageMatteSchema, AeCafPrepSchema, stripShape, roundShape, pick2, near6, toPair, mattesTools;
+var r38, r46, errMessage10, fail4, MAX_FRAMES, BEZIER_WARN_PX, VERTEX_TOL, KAPPA2, MAX_WRITE_POINTS, snapToFrame2, MASK_MODES, MATTE_TYPES, MaskRefSchema, RangeSchema, FeatherSchema, TRACK_FIELDS, AeMaskFollowSchema, AeGarbageMatteSchema, AeCafPrepSchema, stripShape, roundShape, pick2, near6, toPair, mattesTools;
 var init_mattes = __esm({
   "src/tools/ext/mattes.ts"() {
     "use strict";
@@ -49594,7 +50479,7 @@ var init_mattes = __esm({
     init_write_runner();
     r38 = (v) => Math.round(v * 1e3) / 1e3;
     r46 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage9 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage10 = (err) => err instanceof Error ? err.message : String(err);
     fail4 = (e) => ({ ok: false, error: e.code, message: e.message });
     MAX_FRAMES = MAX_TRACK_FRAMES2 - 1;
     BEZIER_WARN_PX = 0.5;
@@ -50134,7 +51019,7 @@ function writeFailure(err, base, what) {
     ok: false,
     applied: false,
     error: kind,
-    message: `${what} was not written: ${errMessage10(err)}${unsure ? " AE did not answer in time, so the write may still have run: read the layer before trying again." : ""}`,
+    message: `${what} was not written: ${errMessage11(err)}${unsure ? " AE did not answer in time, so the write may still have run: read the layer before trying again." : ""}`,
     ...unsure ? { write_state: "unknown" } : {}
   };
 }
@@ -50160,7 +51045,7 @@ function makeSnap(ctx, opId, toolName, framesDir, budget, pick4) {
     try {
       return decodePngFile(s.path);
     } finally {
-      fs44.rmSync(s.path, { force: true });
+      fs45.rmSync(s.path, { force: true });
     }
   };
 }
@@ -50189,7 +51074,7 @@ async function plateRun(ctx, spec) {
     const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
     const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
     const sessionFields = await noteBeforeWrite(ctx, note);
-    fs44.mkdirSync(framesDir, { recursive: true });
+    fs45.mkdirSync(framesDir, { recursive: true });
     const budget = createRenderBudget({ maxRenders: spec.maxRenders, maxSeconds: spec.maxSeconds });
     let bodyError = null;
     let value = null;
@@ -50213,7 +51098,7 @@ async function plateRun(ctx, spec) {
           try {
             return { ok: true, v: await spec.body(env, prepared.prep) };
           } catch (err) {
-            return { ok: false, error: errMessage10(err), blocked: isAeBlocked3(err) };
+            return { ok: false, error: errMessage11(err), blocked: isAeBlocked3(err) };
           }
         }
       );
@@ -50224,7 +51109,7 @@ async function plateRun(ctx, spec) {
       const made = err?.plateTemp;
       if (!made) throw err;
       temp = made;
-      bodyError = errMessage10(err);
+      bodyError = errMessage11(err);
     }
     try {
       await noteAfterWrite(ctx, note, { addStep: true });
@@ -50255,7 +51140,7 @@ async function compLease(ctx, toolName, label, compId, budgetOpts, fn) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   return queued7(ctx, label, opId, async () => {
-    fs44.mkdirSync(framesDir, { recursive: true });
+    fs45.mkdirSync(framesDir, { recursive: true });
     const budget = createRenderBudget(budgetOpts);
     const snap = makeSnap(ctx, opId, toolName, framesDir, budget, () => compId);
     return fn((time) => snap("comp", time), opId);
@@ -50289,25 +51174,25 @@ function regionPolygon2(region) {
   return regionToPolygon(region);
 }
 function writePng(framesDir, tag, compId, png) {
-  fs44.mkdirSync(framesDir, { recursive: true });
-  const file = path43.join(framesDir, `${tag}_c${compId}_${crypto18.randomBytes(4).toString("hex")}.png`);
-  fs44.writeFileSync(file, encodePng(png));
+  fs45.mkdirSync(framesDir, { recursive: true });
+  const file = path44.join(framesDir, `${tag}_c${compId}_${crypto19.randomBytes(4).toString("hex")}.png`);
+  fs45.writeFileSync(file, encodePng(png));
   return file;
 }
 function stateDir() {
-  return path43.join(path43.dirname(defaultFramesDir()), "patchfit");
+  return path44.join(path44.dirname(defaultFramesDir()), "patchfit");
 }
 function saveState(id, state) {
   if (!STATE_ID.test(id)) throw new Error(`Bad continue id "${id}"`);
   const dir = stateDir();
-  fs44.mkdirSync(dir, { recursive: true });
-  const file = path43.join(dir, `${id}.json`);
+  fs45.mkdirSync(dir, { recursive: true });
+  const file = path44.join(dir, `${id}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs44.writeFileSync(tmp, JSON.stringify(state));
-  fs44.renameSync(tmp, file);
+  fs45.writeFileSync(tmp, JSON.stringify(state));
+  fs45.renameSync(tmp, file);
   try {
-    const entries = fs44.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs44.statSync(path43.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
-    for (const old of entries.slice(KEEP_STATES)) fs44.rmSync(path43.join(dir, old.n), { force: true });
+    const entries = fs45.readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => ({ n, t: fs45.statSync(path44.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const old of entries.slice(KEEP_STATES)) fs45.rmSync(path44.join(dir, old.n), { force: true });
   } catch {
   }
   return file;
@@ -50315,7 +51200,7 @@ function saveState(id, state) {
 function loadState(id) {
   if (!STATE_ID.test(id)) return null;
   try {
-    return JSON.parse(fs44.readFileSync(path43.join(stateDir(), `${id}.json`), "utf8"));
+    return JSON.parse(fs45.readFileSync(path44.join(stateDir(), `${id}.json`), "utf8"));
   } catch {
     return null;
   }
@@ -50335,7 +51220,7 @@ async function verifyRows(snap, times, poly, track, o) {
       const seam = seamColour(img, scalePoly2(at.poly, s), o.gapPx * s, o.ringPx * s);
       rows.push(seam ? { time: r47(t), ...seam } : { time: r47(t), skipped: "the seam bands hold too few pixels" });
     } catch (err) {
-      rows.push({ time: r47(t), skipped: errMessage10(err) });
+      rows.push({ time: r47(t), skipped: errMessage11(err) });
       if (isAeBlocked3(err)) break;
     }
   }
@@ -50516,7 +51401,7 @@ async function colorMatchHandler(args, ctx) {
           verify: args.verify,
           fits: plan2.times.map(() => null)
         };
-        const id = `pfc_${Date.now().toString(36)}_${crypto18.randomBytes(3).toString("hex")}`;
+        const id = `pfc_${Date.now().toString(36)}_${crypto19.randomBytes(3).toString("hex")}`;
         return { prep: { stored, continueId: id, track, poly: regionPolygon2(args.region), resumed: false } };
       } catch (err) {
         if (err instanceof PlanarError) return { refuse: { ok: false, error: err.code, message: err.message, comp } };
@@ -50573,7 +51458,7 @@ async function colorMatchHandler(args, ctx) {
           retries[i] = (retries[i] ?? 0) + 1;
           renderFailed++;
           if (retries[i] >= MAX_RENDER_RETRIES) {
-            st.fits[i] = { ok: false, reason: `render failed ${retries[i]} times: ${errMessage10(err)}`, gain: [1, 1, 1], offset: [0, 0, 0], rms: 0, pixels: 0, visible: 0 };
+            st.fits[i] = { ok: false, reason: `render failed ${retries[i]} times: ${errMessage11(err)}`, gain: [1, 1, 1], offset: [0, 0, 0], rms: 0, pixels: 0, visible: 0 };
           } else {
             skippedByBudget++;
           }
@@ -50764,7 +51649,7 @@ async function finishColor(ctx, args, run, body, tail, o) {
       const a = meanAbsOf(after);
       result.verify = { frames: body.verifyTimes.map(r47), before: body.before, after, mean_seam_difference_before: b, mean_seam_difference_after: a, improved: b !== null && a !== null ? a < b : null };
     } catch (err) {
-      result.verify = { error: errMessage10(err), before: body.before };
+      result.verify = { error: errMessage11(err), before: body.before };
     }
   }
   return result;
@@ -51046,7 +51931,7 @@ async function grainHandler(args, ctx) {
           return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0], temporal: 0, frames: 0 }, last: lastImg };
         });
       } catch (err2) {
-        tuneFailure = `Round ${round5} could not render: ${errMessage10(err2)}`;
+        tuneFailure = `Round ${round5} could not render: ${errMessage11(err2)}`;
         break;
       }
       patchNow = measured.set;
@@ -51089,8 +51974,8 @@ async function grainHandler(args, ctx) {
           present: (_b, _a, w) => ({ intensity_before: w.intensity_before, intensity: w.intensity })
         });
       } catch (err2) {
-        tuneFailure = `Tuning round ${round5 + 1} was not written: ${errMessage10(err2)}${err2 instanceof BridgeError && err2.kind === "timeout" ? " AE did not answer in time, so it may still have run: read the grain layer's Intensity." : ""} The grain stays at Intensity ${intensity}.`;
-        rounds[rounds.length - 1].tune_failure = errMessage10(err2);
+        tuneFailure = `Tuning round ${round5 + 1} was not written: ${errMessage11(err2)}${err2 instanceof BridgeError && err2.kind === "timeout" ? " AE did not answer in time, so it may still have run: read the grain layer's Intensity." : ""} The grain stays at Intensity ${intensity}.`;
+        rounds[rounds.length - 1].tune_failure = errMessage11(err2);
         break;
       }
       intensity = next;
@@ -51441,17 +52326,17 @@ async function finishHandler(args, ctx) {
       result.crops_note = "Left: the patch before, right: after, 2x.";
     }
   } catch (err) {
-    result.crops_error = errMessage10(err);
+    result.crops_error = errMessage11(err);
   }
   return result;
 }
-var crypto18, fs44, path43, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, GRAIN_SIGMA_PER_INTENSITY, r211, r39, r47, errMessage10, yieldLoop6, clamp2, median4, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
+var crypto19, fs45, path44, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, GRAIN_SIGMA_PER_INTENSITY, r211, r39, r47, errMessage11, yieldLoop6, clamp2, median4, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
 var init_patchfit = __esm({
   "src/tools/ext/patchfit.ts"() {
     "use strict";
-    crypto18 = __toESM(require("node:crypto"), 1);
-    fs44 = __toESM(require("node:fs"), 1);
-    path43 = __toESM(require("node:path"), 1);
+    crypto19 = __toESM(require("node:crypto"), 1);
+    fs45 = __toESM(require("node:fs"), 1);
+    path44 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -51482,7 +52367,7 @@ var init_patchfit = __esm({
     r211 = (v) => Math.round(v * 100) / 100;
     r39 = (v) => Math.round(v * 1e3) / 1e3;
     r47 = (v) => Math.round(v * 1e4) / 1e4;
-    errMessage10 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage11 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop6 = () => new Promise((r) => setImmediate(r));
     clamp2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     median4 = (a) => {
@@ -51497,7 +52382,7 @@ var init_patchfit = __esm({
     LOST_REASON = "the track lost the plate at this time";
     CHANNEL_KEYS = ["red", "green", "blue"];
     r4e = (v) => Math.round(v * 1e6) / 1e6;
-    fail5 = (e) => ({ ok: false, error: e instanceof PlanarError ? e.code : "failed", message: errMessage10(e) });
+    fail5 = (e) => ({ ok: false, error: e instanceof PlanarError ? e.code : "failed", message: errMessage11(e) });
     BLOCKED_NOTE3 = "AE stopped responding during a render (often a modal dialog); the remaining frames were not rendered. Check ae_dialogs, then continue.";
     STATE_ID = /^[A-Za-z0-9_-]{1,80}$/;
     LayerSel = LayerSelectorSchema;
@@ -52355,9 +53240,9 @@ function drawBeforeAfterSheet(before, after, maxTile) {
   return sheet;
 }
 function writePng2(framesDir, tag, png) {
-  fs45.mkdirSync(framesDir, { recursive: true });
-  const file = path44.join(framesDir, `${tag}.png`);
-  fs45.writeFileSync(file, encodePng(png));
+  fs46.mkdirSync(framesDir, { recursive: true });
+  const file = path45.join(framesDir, `${tag}.png`);
+  fs46.writeFileSync(file, encodePng(png));
   return file;
 }
 async function queued8(ctx, label, opId, fn) {
@@ -52393,14 +53278,14 @@ async function renderFrame(ctx, opId, compId, time, index, framesDir, toolName) 
   try {
     return { image: decodePngFile(s.path), time: s.time };
   } finally {
-    fs45.rmSync(s.path, { force: true });
+    fs46.rmSync(s.path, { force: true });
   }
 }
 async function screenCorners(ctx, args) {
   const toolName = "ae_screen_corners";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  fs45.mkdirSync(framesDir, { recursive: true });
+  fs46.mkdirSync(framesDir, { recursive: true });
   const label = `ae_screen_corners(${args.comp_id})`;
   const isolate = args.isolate_layers;
   const expect = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
@@ -52449,7 +53334,7 @@ async function screenCorners(ctx, args) {
           await noteAfterWrite(ctx, note, { addStep: true });
         } catch {
         }
-        return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage11(err), temp: made, checkpoint, sessionFields } };
+        return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage12(err), temp: made, checkpoint, sessionFields } };
       }
       await noteAfterWrite(ctx, note, { addStep: true });
     } else {
@@ -52484,7 +53369,7 @@ async function screenCorners(ctx, args) {
       analysed = await analyse();
     } catch (err) {
       if (!temp) throw err;
-      return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage11(err), temp, checkpoint, sessionFields } };
+      return { failure: { error: err instanceof PlanarError ? err.code : "failed", message: errMessage12(err), temp, checkpoint, sessionFields } };
     }
     const { scale: scale2, snap: snap2, snapped: snapped2, points: points2, excursions: excursions2, trackNote } = analysed;
     return { comp: comp2, refTime: frame.time, scale: scale2, frame: frame.image, snap: snap2, snapped: snapped2, points: points2, excursions: excursions2, trackNote, temp, checkpoint, sessionFields };
@@ -52528,7 +53413,7 @@ async function screenCorners(ctx, args) {
     try {
       previewPath = writePng2(framesDir, `screencorners_${opId}`, drawCornersPreview(ran.frame, [comp.width, comp.height], { guesses: args.corners, snapped, edges: sidesToDraw, points, maxSize: args.max_size }));
     } catch (err) {
-      previewError = errMessage11(err);
+      previewError = errMessage12(err);
     }
   }
   const cornerRows = snap.corners.map((c, i) => {
@@ -52800,7 +53685,7 @@ async function measureLook(ctx, p) {
       }
     } catch (err) {
       if (isAeBlocked4(err)) out.blocked = true;
-      out.skipped.push(`${r212(t)} s: ${errMessage11(err)}`);
+      out.skipped.push(`${r212(t)} s: ${errMessage12(err)}`);
     }
   }
   out.frames_measured = p02s.length;
@@ -52828,7 +53713,7 @@ async function measureLook(ctx, p) {
         }
       } catch (err) {
         if (isAeBlocked4(err)) break;
-        out.skipped.push(`insert at ${r212(at[i])} s: ${errMessage11(err)}`);
+        out.skipped.push(`insert at ${r212(at[i])} s: ${errMessage12(err)}`);
       }
     }
     if (blacks.length > 0) out.insert = { black: median5(blacks), white: median5(whites), frames: blacks.length, source: "measured" };
@@ -52921,7 +53806,7 @@ async function screenReplace(ctx, args) {
     const planned = needMeasure ? planSampleTimes({ times: okFrames2.map((f) => f.time), refTime: refTime2, sheet: sheet2.map((s) => s.time), maxSamples: args.max_samples, maxRenders: args.max_renders }) : { times: sheet2.map((s) => s.time).slice(0, args.max_renders), trimmed: sheet2.length > args.max_renders };
     const keep = /* @__PURE__ */ new Map();
     for (const s of sheet2) keep.set(s.time, null);
-    fs45.mkdirSync(framesDir, { recursive: true });
+    fs46.mkdirSync(framesDir, { recursive: true });
     let measure2 = null;
     if (planned.times.length > 0) {
       measure2 = await measureLook(ctx, {
@@ -53133,7 +54018,7 @@ async function screenReplace(ctx, args) {
       if (png) sheetPath = writePng2(framesDir, `screenreplace_${opId}`, png);
       else sheetError = "no frame could be rendered for the sheet";
     } catch (err) {
-      sheetError = errMessage11(err);
+      sheetError = errMessage12(err);
     }
   }
   if (sheetError) notes.push(`The before / after sheet could not be made: ${sheetError}`);
@@ -53180,12 +54065,12 @@ async function screenReplace(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs45, path44, r212, r310, r48, clamp3, errMessage11, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES, median5, mean2, MIN_EDGE, distToLine, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round24, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
+var fs46, path45, r212, r310, r48, clamp3, errMessage12, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES, median5, mean2, MIN_EDGE, distToLine, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round24, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
 var init_screenrep = __esm({
   "src/tools/ext/screenrep.ts"() {
     "use strict";
-    fs45 = __toESM(require("node:fs"), 1);
-    path44 = __toESM(require("node:path"), 1);
+    fs46 = __toESM(require("node:fs"), 1);
+    path45 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -53206,7 +54091,7 @@ var init_screenrep = __esm({
     r310 = (v) => Math.round(v * 1e3) / 1e3;
     r48 = (v) => Math.round(v * 1e4) / 1e4;
     clamp3 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    errMessage11 = (err) => err instanceof Error ? err.message : String(err);
+    errMessage12 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop7 = () => new Promise((r) => setImmediate(r));
     failure = (e) => ({ ok: false, error: e.code, message: e.message });
     snapFrame3 = (t, fps) => Math.round(t * fps) / fps;
@@ -53610,7 +54495,7 @@ function pickOpFields(v) {
 }
 function opProblems(op) {
   const out = [];
-  const bad4 = (message, path55) => out.push({ message, path: path55 });
+  const bad4 = (message, path56) => out.push({ message, path: path56 });
   const allowed = new Set(ACTION_FIELDS[op.action]);
   for (const k of ALL_OP_FIELDS) {
     if (!allowed.has(k) && op[k] !== void 0) bad4(`${k} does not apply to the ${op.action} action.`, k);
@@ -53898,7 +54783,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("true: report what would be made and every refusal, change nothing. Default false, except deep duplicates (default true)."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path55) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path55] });
+      const bad4 = (message, path56) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path56] });
       if (v.duration !== void 0 && v.duration_frames !== void 0) bad4("Give duration (seconds) or duration_frames, not both.", "duration_frames");
       if (v.bg_color !== void 0 && parseBgColor(v.bg_color) === null) bad4("bg_color must be [r, g, b] in 0..1 or '#rrggbb'.", "bg_color");
       if (v.mode === "new") {
@@ -53972,7 +54857,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("Default TRUE: report the plan and every refusal and change nothing. Pass false to apply it."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path55) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path55 });
+      const bad4 = (message, path56) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path56 });
       const flatKeys = ALL_OP_FIELDS.filter((k) => v[k] !== void 0);
       if (v.ops !== void 0) {
         if (v.action !== void 0 || flatKeys.length > 0) bad4("Give ops or a single action with its fields, not both.", ["ops"]);
@@ -55377,7 +56262,7 @@ var init_layerops = __esm({
       expect: ExpectSchema
     });
     AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
-      const bad4 = (message, path55) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path55 ? [path55] : void 0 });
+      const bad4 = (message, path56) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path56 ? [path56] : void 0 });
       const allowed = new Set(ACTION_FIELDS2[v.action]);
       for (const key of ALL_ACTION_FIELDS) {
         if (!allowed.has(key) && v[key] !== void 0) bad4(`${key} does not apply to the ${v.action} action.`, key);
@@ -55611,8 +56496,8 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
   if (!before || !after || !Array.isArray(w.targets) || w.no_op) return m;
   const find = (r, t) => r.properties.find((p) => keyOf2(p.layer_id, p.path, p.follower) === keyOf2(t.layer_id, t.path, t.follower));
   const ctx = { snap: w.snap, frame_duration: w.frame_duration, span: w.span, pivot: w.pivot };
-  const push2 = (path55, expected, actual, message) => {
-    if (m.length < MAX_MISMATCHES2) m.push({ path: path55, expected, actual, message });
+  const push2 = (path56, expected, actual, message) => {
+    if (m.length < MAX_MISMATCHES2) m.push({ path: path56, expected, actual, message });
   };
   const source = w.targets.find((t) => t.role === "source");
   for (const t of w.targets) {
@@ -55791,7 +56676,7 @@ var init_timeline = __esm({
     });
     readOf5 = (v) => v && typeof v === "object" && Array.isArray(v.properties) ? v : null;
     closeNumber = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
-    keyOf2 = (layerId, path55, follower) => `${layerId}|${path55.join("")}|${follower ?? ""}`;
+    keyOf2 = (layerId, path56, follower) => `${layerId}|${path56.join("")}|${follower ?? ""}`;
     transformTool = {
       name: "ae_keyframes_transform",
       description: "Retime keyframes without losing anything: shift (seconds or frames), scale time around a pivot, reverse, move so the first key lands at a time, or copy to another property (optionally relative to its value). Targets are {layer, path} pairs, or keys: 'selected' for the keys selected in the timeline (resolved to explicit properties and indexes; check them in the dry run). A filter narrows to a time range or key indexes. All moved keys move together as one block (a reverse mirrors the whole span, move_to puts the earliest key at the time), across every target. AE has no move-key call, so each property's keys are rebuilt: value, in and out interpolation, ease per dimension, spatial tangents, continuity, auto-bezier, roving, label and selection are kept; a reverse swaps in and out (and flips the sign of ease speed on non-spatial one-, two- and three-dimensional properties; spatial, Color and Shape speeds have no sign and stay as they are), a scale divides ease speed by the factor and keeps influence. Moved keys snap to whole frames unless snap is false. Two keys landing on one frame, a locked layer, a keyframe-less target or a property with over 500 keys are refused before anything changes. A separated Position (X/Y/Z) moves per dimension. Warns about expressions that read key(n) / nearestKey, roving keys (AE retimes those), and keys landing outside the comp. dry_run returns the planned times per key. The read-back (a separate evalScript) compares each key's time (roving keys excepted: AE retimes those), value, interpolation, eases and tangents. expect is required unless dry_run. " + AGENT_SAFETY_GUIDANCE,
@@ -56421,7 +57306,7 @@ function parseCsv(text) {
   });
 }
 function parseDataFile(filePath) {
-  const text = fs46.readFileSync(filePath, "utf8");
+  const text = fs47.readFileSync(filePath, "utf8");
   if (/\.csv$/i.test(filePath)) return parseCsv(text);
   const parsed = JSON.parse(text.replace(/^﻿/, ""));
   const rows = Array.isArray(parsed) ? parsed : parsed?.rows;
@@ -56442,8 +57327,8 @@ function cellValue(target, cell) {
   if (target === "text") return { value: String(cell) };
   if (target === "footage") {
     const p = String(cell).trim();
-    if (!path45.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
-    if (!fs46.existsSync(p)) return { error: `file not found: ${p}` };
+    if (!path46.isAbsolute(p)) return { error: `"${p}" is not an absolute path` };
+    if (!fs47.existsSync(p)) return { error: `file not found: ${p}` };
     return { value: p.replace(/\\/g, "/") };
   }
   if (target === "color") {
@@ -56610,12 +57495,12 @@ async function templateInfo(ctx, compId) {
   });
   return res.result;
 }
-var fs46, path45, DataMappingSchema, AeBuildFromDataSchema, dataTools;
+var fs47, path46, DataMappingSchema, AeBuildFromDataSchema, dataTools;
 var init_data = __esm({
   "src/tools/ext/data.ts"() {
     "use strict";
-    fs46 = __toESM(require("node:fs"), 1);
-    path45 = __toESM(require("node:path"), 1);
+    fs47 = __toESM(require("node:fs"), 1);
+    path46 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -56654,7 +57539,7 @@ var init_data = __esm({
         handler: async (args, ctx) => {
           let rows;
           if (args.data_path) {
-            if (!path45.isAbsolute(args.data_path) || !fs46.existsSync(args.data_path)) {
+            if (!path46.isAbsolute(args.data_path) || !fs47.existsSync(args.data_path)) {
               return { ok: false, error: "bad_data", message: `Not an existing absolute path: ${args.data_path}` };
             }
             try {
@@ -56935,22 +57820,22 @@ function walkPresetsUnfiltered(folders, source) {
       if (depth > MAX_PRESET_DEPTH || scanned >= MAX_PRESET_FILES) return;
       let entries;
       try {
-        entries = fs47.readdirSync(dir, { withFileTypes: true });
+        entries = fs48.readdirSync(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const e of entries) {
-        const full = path46.join(dir, e.name);
+        const full = path47.join(dir, e.name);
         if (e.isDirectory()) {
           walk(full, depth + 1);
         } else if (/\.ffx$/i.test(e.name)) {
           scanned++;
-          const rawCategory = path46.relative(folder.path, dir).split(path46.sep).join("/");
+          const rawCategory = path47.relative(folder.path, dir).split(path47.sep).join("/");
           const name = e.name.replace(/\.ffx$/i, "");
           all.push({
             name,
             path: full,
-            category: rawCategory || path46.basename(folder.path),
+            category: rawCategory || path47.basename(folder.path),
             matchKey: `${rawCategory}/${name}`.toLowerCase(),
             source: kind
           });
@@ -56977,12 +57862,12 @@ function findPresets(folders, filter, source) {
   const presets = matched.map(({ matchKey, ...rest }) => rest);
   return { presets, scanned: cached.scanned };
 }
-var fs47, path46, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
+var fs48, path47, EffectSelectorSchema, InputLayerValueSchema, EffectParamSchema, ParamsSchema, AeAddEffectSchema, AeSetEffectSchema, AeRemoveEffectSchema, AeApplyPresetSchema, AeListPresetsSchema, stackKey, LAYER_STYLE_NAMES, MAX_PRESET_FILES, MAX_PRESET_DEPTH, PRESET_CACHE_TTL_MS, presetCache, PRESET_HINT, LAYER_STYLES_HINT, effectsTools;
 var init_effects = __esm({
   "src/tools/ext/effects.ts"() {
     "use strict";
-    fs47 = __toESM(require("node:fs"), 1);
-    path46 = __toESM(require("node:path"), 1);
+    fs48 = __toESM(require("node:fs"), 1);
+    path47 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -57151,12 +58036,12 @@ var init_effects = __esm({
         description: "Apply an animation preset (.ffx) to one layer, as Animation > Apply Animation Preset does, in one undo group guarded by `expect`. AE applies presets to the selected layers, so the target is selected alone for the call and the user's selection is restored. Presets can add effects, keyframes and expressions; the result lists the effects added (read back in a separate evalScript). This is how custom-data parameters such as Colorama's Output Cycle get in, and (best-known route, not yet probed live) how Layer Styles get onto a layer: save the layer with the style as an .ffx preset in AE, apply it here, then edit the style with ae_set_property on ['ADBE Layer Styles', '<style>/enabled', ...]. Find presets with ae_list_presets. " + AGENT_SAFETY_GUIDANCE,
         schema: AeApplyPresetSchema,
         handler: async (args, ctx) => {
-          if (!path46.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs47.existsSync(args.preset_path)) {
+          if (!path47.isAbsolute(args.preset_path) || !/\.ffx$/i.test(args.preset_path) || !fs48.existsSync(args.preset_path)) {
             return { ok: false, error: "bad_preset", message: `Not an existing absolute .ffx path: ${args.preset_path}` };
           }
           return runEffectWrite(args, ctx, {
             toolName: "ae_apply_preset",
-            label: `ae_apply_preset(${path46.basename(args.preset_path)})`,
+            label: `ae_apply_preset(${path47.basename(args.preset_path)})`,
             host: "applyPreset",
             hostArgs: (a, expect) => ({ comp_id: a.comp_id, layer: a.layer, preset_path: a.preset_path.replace(/\\/g, "/"), expect }),
             check: (_a, before, after) => effectCount(after) >= effectCount(before) ? [] : [{ path: "effects.length", expected: `>= ${effectCount(before)}`, actual: effectCount(after), message: "Applying the preset removed effects" }],
@@ -57871,12 +58756,12 @@ async function queued9(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs48, path47, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs49, path48, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs48 = __toESM(require("node:fs"), 1);
-    path47 = __toESM(require("node:path"), 1);
+    fs49 = __toESM(require("node:fs"), 1);
+    path48 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -57914,7 +58799,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs48.mkdirSync(framesDir, { recursive: true });
+          fs49.mkdirSync(framesDir, { recursive: true });
           const label = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo2 = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -58009,8 +58894,8 @@ var init_key = __esm({
           const analyse = () => {
             const kl = run.info.keylight;
             const pairs2 = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
-            const previewPath = path47.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs48.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            const previewPath = path48.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
+            fs49.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
             const canMeasure = below.length === 0 && pairs2.every((p) => p.before !== null) && run.screen !== null;
             const perFrame = canMeasure ? pairs2.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -58936,12 +59821,12 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs49.rmdirSync(cur);
+      fs50.rmdirSync(cur);
     } catch {
       return;
     }
-    if (path48.resolve(cur) === path48.resolve(top)) return;
-    const up = path48.dirname(cur);
+    if (path49.resolve(cur) === path49.resolve(top)) return;
+    const up = path49.dirname(cur);
     if (up === cur) return;
     cur = up;
   }
@@ -59086,12 +59971,12 @@ async function reduceProjectMode(args, ctx) {
     })
   });
 }
-var fs49, path48, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
+var fs50, path49, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs49 = __toESM(require("node:fs"), 1);
-    path48 = __toESM(require("node:path"), 1);
+    fs50 = __toESM(require("node:fs"), 1);
+    path49 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -59223,8 +60108,8 @@ var init_layout = __esm({
         schema: AeExportMogrtSchema,
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
-            if (!path48.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs49.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (!path49.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
+            if (fs50.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -59232,7 +60117,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs49.mkdirSync(path48.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs50.mkdirSync(path49.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -59244,15 +60129,15 @@ var init_layout = __esm({
                 });
               } catch (err) {
                 const refused = err instanceof BridgeError && (err.kind === "evalscript_error" || err.kind === "guard");
-                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path48.dirname(args.path), createdDir);
+                if (refused && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path49.dirname(args.path), createdDir);
                 throw err;
               }
               const r = res.result;
-              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path48.dirname(args.path), createdDir);
+              if (!r.exported && createdDir !== void 0 && args.path !== void 0) removeEmptyDirs(path49.dirname(args.path), createdDir);
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs49.statSync(args.path);
+                  const st = fs50.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -59383,15 +60268,15 @@ var init_layout = __esm({
 function cuesFromTranscript(t) {
   let text = t.text;
   if (t.path !== void 0) {
-    if (!path49.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    if (!path50.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs50.statSync(t.path);
+      stat = fs51.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs50.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs51.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -59588,12 +60473,12 @@ async function editMarkers(args, ctx) {
     })
   });
 }
-var fs50, path49, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
+var fs51, path50, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs50 = __toESM(require("node:fs"), 1);
-    path49 = __toESM(require("node:path"), 1);
+    fs51 = __toESM(require("node:fs"), 1);
+    path50 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
     init_common();
@@ -60330,10 +61215,10 @@ function summarize(comps) {
   return s;
 }
 function hashFingerprint(fp) {
-  return crypto19.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
+  return crypto20.createHash("sha1").update(JSON.stringify(fp)).digest("hex").slice(0, 16);
 }
 function jobsPath(projectPath) {
-  return path50.join(path50.dirname(projectPath), `${path50.basename(projectPath, path50.extname(projectPath))}.jobs.json`);
+  return path51.join(path51.dirname(projectPath), `${path51.basename(projectPath, path51.extname(projectPath))}.jobs.json`);
 }
 function rememberJob(job) {
   memoryJobs.delete(job.id);
@@ -60347,7 +61232,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs51.readFileSync(file, "utf8");
+    raw = fs52.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -60357,7 +61242,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs51.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs52.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -60371,8 +61256,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs51.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs51.renameSync(tmp, file);
+    fs52.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs52.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -60389,7 +61274,7 @@ function loadJob(projectPath, id) {
   return memoryJobs.get(id) ?? null;
 }
 function newJobId() {
-  return `mc_${Date.now().toString(36)}_${crypto19.randomBytes(3).toString("hex")}`;
+  return `mc_${Date.now().toString(36)}_${crypto20.randomBytes(3).toString("hex")}`;
 }
 function planFromProbe(comps, names, probe) {
   const byId3 = new Map(probe.map((p) => [p.id, p]));
@@ -60744,13 +61629,13 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto19, fs51, path50, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
+var crypto20, fs52, path51, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
-    crypto19 = __toESM(require("node:crypto"), 1);
-    fs51 = __toESM(require("node:fs"), 1);
-    path50 = __toESM(require("node:path"), 1);
+    crypto20 = __toESM(require("node:crypto"), 1);
+    fs52 = __toESM(require("node:fs"), 1);
+    path51 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -60870,7 +61755,7 @@ function defaultUiDir() {
   if (runtimeOverrides2.uiDir) {
     return runtimeOverrides2.uiDir;
   }
-  return path51.join(defaultDataDir(), "ui");
+  return path52.join(defaultDataDir(), "ui");
 }
 function runPowerShellScript2(ps1Args) {
   if (runtimeOverrides2.ps1Runner) {
@@ -60919,15 +61804,16 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process2, fs52, path51, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process2, fs53, path52, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     import_node_child_process2 = require("node:child_process");
-    fs52 = __toESM(require("node:fs"), 1);
-    path51 = __toESM(require("node:path"), 1);
+    fs53 = __toESM(require("node:fs"), 1);
+    path52 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
+    init_render_gate();
     init_common();
     init_dialogs();
     CURATED_NATIVE_PANELS = [
@@ -60981,6 +61867,7 @@ var init_panels = __esm({
         description: "READ-ONLY. Lists installed CEP extensions and native After Effects Window-menu panels with their ExtendScript command IDs (cmdId). Note: Native Window-menu commands toggle and their open/closed state cannot be queried via scripting; use ae_ui_screenshot to verify visibility. " + AGENT_SAFETY_GUIDANCE,
         schema: AeListPanelsSchema,
         handler: async (args, ctx) => {
+          renderGate.check();
           if (!ctx.cep) {
             return { ok: false, error: "cep_unavailable" };
           }
@@ -61039,6 +61926,7 @@ var init_panels = __esm({
         description: "Opens an After Effects CEP extension or native Window-menu panel. CEP extensions (via extension_id) open directly and never toggle. IMPORTANT: Native Window-menu commands (via name) toggle (calling them when already open will close the panel). To prevent accidental closure, opening a native panel without allow_toggle: true is refused. First use ae_ui_screenshot to verify the panel is closed, then pass allow_toggle: true. " + AGENT_SAFETY_GUIDANCE,
         schema: AeOpenPanelSchema,
         handler: async (args, ctx) => {
+          renderGate.check();
           if (args.extension_id) {
             if (!ctx.cep) {
               return { ok: false, error: "cep_unavailable" };
@@ -61102,7 +61990,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs52.mkdirSync(outDir, { recursive: true });
+            fs53.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           const rawStdout = await runPowerShellScript2([
@@ -61155,41 +62043,41 @@ function versionToken(name) {
 function namePattern(name, sequence) {
   const tok = versionToken(name);
   if (!tok) return null;
-  let after = escapeRe3(tok.after);
+  let after = escapeRe4(tok.after);
   let frameAware = false;
   if (sequence) {
     const fm = /^(.*?)(\d+)(\.[^.]+)$/.exec(tok.after);
     if (fm) {
-      after = `${escapeRe3(fm[1])}\\d+${escapeRe3(fm[3])}`;
+      after = `${escapeRe4(fm[1])}\\d+${escapeRe4(fm[3])}`;
       frameAware = true;
     }
   }
-  return { re: new RegExp(`^${escapeRe3(tok.before)}(\\d{1,5})${after}$`, process.platform === "win32" ? "i" : ""), frameAware };
+  return { re: new RegExp(`^${escapeRe4(tok.before)}(\\d{1,5})${after}$`, process.platform === "win32" ? "i" : ""), frameAware };
 }
 function listDir(dir) {
   try {
-    return fs53.readdirSync(dir);
+    return fs54.readdirSync(dir);
   } catch {
     return [];
   }
 }
 function findVersions(file, sequence) {
-  const dir = path52.dirname(file);
-  const base = path52.basename(file);
+  const dir = path53.dirname(file);
+  const base = path53.basename(file);
   const own = versionToken(base);
-  const dirName = path52.basename(dir);
+  const dirName = path53.basename(dir);
   const dirTok = versionToken(dirName);
   const byVersion = /* @__PURE__ */ new Map();
   const add = (v, p) => byVersion.set(v, [...byVersion.get(v) ?? [], p]);
   if (dirTok && sequence && (!own || own.number === dirTok.number)) {
-    const parent = path52.dirname(dir);
-    const dirRe = new RegExp(`^${escapeRe3(dirTok.before)}(\\d{1,5})${escapeRe3(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
+    const parent = path53.dirname(dir);
+    const dirRe = new RegExp(`^${escapeRe4(dirTok.before)}(\\d{1,5})${escapeRe4(dirTok.after)}$`, process.platform === "win32" ? "i" : "");
     for (const sib of listDir(parent)) {
       const m = dirRe.exec(sib);
       if (!m) continue;
-      const ext2 = path52.extname(base).toLowerCase();
-      for (const f of listDir(path52.join(parent, sib))) {
-        if (path52.extname(f).toLowerCase() === ext2) add(Number(m[1]), path52.join(parent, sib, f));
+      const ext2 = path53.extname(base).toLowerCase();
+      for (const f of listDir(path53.join(parent, sib))) {
+        if (path53.extname(f).toLowerCase() === ext2) add(Number(m[1]), path53.join(parent, sib, f));
       }
     }
     return { current: dirTok.number, versions: firstOfEach(byVersion) };
@@ -61199,7 +62087,7 @@ function findVersions(file, sequence) {
   if (!pat) return { current: null, versions: [] };
   for (const n of listDir(dir)) {
     const m = pat.re.exec(n);
-    if (m) add(Number(m[1]), path52.join(dir, n));
+    if (m) add(Number(m[1]), path53.join(dir, n));
   }
   return { current: own.number, versions: firstOfEach(byVersion) };
 }
@@ -61214,15 +62102,15 @@ function planVersion(file, sequence, want) {
   return { current, latest, target, newer };
 }
 function versionLogPath(projectPath) {
-  const ext2 = path52.extname(projectPath);
-  return path52.join(path52.dirname(projectPath), `${path52.basename(projectPath, ext2)}.versions.json`);
+  const ext2 = path53.extname(projectPath);
+  return path53.join(path53.dirname(projectPath), `${path53.basename(projectPath, ext2)}.versions.json`);
 }
 function appendVersionLog(projectPath, entries, notes) {
   const file = versionLogPath(projectPath);
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs53.readFileSync(file, "utf8");
+    raw = fs54.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -61237,24 +62125,24 @@ function appendVersionLog(projectPath, entries, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs53.renameSync(file, aside);
+      fs54.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs53.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs53.renameSync(tmp, file);
+  fs54.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs54.renameSync(tmp, file);
   return file;
 }
-var fs53, path52, VERSION_RE, escapeRe3;
+var fs54, path53, VERSION_RE, escapeRe4;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs53 = __toESM(require("node:fs"), 1);
-    path52 = __toESM(require("node:path"), 1);
+    fs54 = __toESM(require("node:fs"), 1);
+    path53 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
-    escapeRe3 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    escapeRe4 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 });
 
@@ -61314,16 +62202,16 @@ function sameFootage(a, b, sequence) {
   const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
   return dir(a) === dir(b) && ver(a) === ver(b);
 }
-function shapeValueMismatches(want, got, path55) {
+function shapeValueMismatches(want, got, path56) {
   const m = [];
   if (!isObject(got) || !Array.isArray(got.vertices)) {
-    m.push({ path: path55, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
+    m.push({ path: path56, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
     return m;
   }
   const gotVerts = got.vertices;
   const total2 = typeof got.num_vertices === "number" ? got.num_vertices : gotVerts.length;
   if (total2 !== want.vertices.length) {
-    m.push({ path: `${path55}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
+    m.push({ path: `${path56}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
     return m;
   }
   const lists = [["vertices", want.vertices], ["inTangents", want.inTangents], ["outTangents", want.outTangents]];
@@ -61333,27 +62221,27 @@ function shapeValueMismatches(want, got, path55) {
     if (!Array.isArray(gotList)) continue;
     for (let i = 0; i < wantList.length && i < gotList.length; i++) {
       if (!closeEnough2(wantList[i][0], gotList[i][0]) || !closeEnough2(wantList[i][1], gotList[i][1])) {
-        m.push({ path: `${path55}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
+        m.push({ path: `${path56}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
         break;
       }
     }
   }
   if (want.closed !== void 0 && typeof got.closed === "boolean") {
-    expectThat(m, got.closed === want.closed, `${path55}.closed`, want.closed, got.closed, "The path's closed flag differs");
+    expectThat(m, got.closed === want.closed, `${path56}.closed`, want.closed, got.closed, "The path's closed flag differs");
   }
   return m;
 }
-function markerValueMismatches(want, got, path55) {
+function markerValueMismatches(want, got, path56) {
   const m = [];
   if (!isObject(got)) {
-    m.push({ path: path55, expected: "a marker", actual: got, message: "The marker could not be read back" });
+    m.push({ path: path56, expected: "a marker", actual: got, message: "The marker could not be read back" });
     return m;
   }
-  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path55}.comment`, want.comment, got.comment, "Marker comment differs");
-  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path55}.duration`, want.duration, got.duration, "Marker duration differs");
-  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path55}.label`, want.label, got.label, "Marker label differs");
+  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path56}.comment`, want.comment, got.comment, "Marker comment differs");
+  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path56}.duration`, want.duration, got.duration, "Marker duration differs");
+  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path56}.label`, want.label, got.label, "Marker label differs");
   for (const f of ["chapter", "url", "cuePointName"]) {
-    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path55}.${f}`, want[f], got[f], `Marker ${f} differs`);
+    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path56}.${f}`, want[f], got[f], `Marker ${f} differs`);
   }
   return m;
 }
@@ -61949,12 +62837,12 @@ function sanitizeCheckpointLabel(label) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs54, path53, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs55, path54, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs54 = __toESM(require("node:fs"), 1);
-    path53 = __toESM(require("node:path"), 1);
+    fs55 = __toESM(require("node:fs"), 1);
+    path54 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -62230,7 +63118,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs54.existsSync(actualProjectPath)) {
+              if (!fs55.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -62239,16 +63127,16 @@ var init_receipts2 = __esm({
                   actual: { project_path: actualProjectPath }
                 });
               }
-              const ext2 = path53.extname(actualProjectPath) || ".aep";
-              const baseName = path53.basename(actualProjectPath, ext2);
+              const ext2 = path54.extname(actualProjectPath) || ".aep";
+              const baseName = path54.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs54.mkdirSync(checkpointDir, { recursive: true });
+              fs55.mkdirSync(checkpointDir, { recursive: true });
               const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
               const checkpointFileName = `${baseName}_${stamp3}_${safeLabel}${ext2}`;
-              const checkpointPath = path53.join(checkpointDir, checkpointFileName);
-              fs54.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs54.statSync(checkpointPath);
+              const checkpointPath = path54.join(checkpointDir, checkpointFileName);
+              fs55.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs55.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -62264,7 +63152,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs54.existsSync(checkpointPath)
+                  checkpoint_exists: fs55.existsSync(checkpointPath)
                 }
               });
               return {
@@ -62307,7 +63195,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs54.existsSync(checkpointDir)) {
+          if (!fs55.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -62315,10 +63203,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries = fs54.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries = fs55.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries.map((e) => {
-            const fullPath = path53.join(checkpointDir, e.name);
-            const stat = fs54.statSync(fullPath);
+            const fullPath = path54.join(checkpointDir, e.name);
+            const stat = fs55.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -62371,7 +63259,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs54.existsSync(args.checkpoint_path)) {
+              if (!fs55.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -62875,7 +63763,7 @@ var init_skills2 = __esm({
       },
       {
         name: "ae_skill_save",
-        description: "Save an AE skill: a description, instructions, and ExtendScript steps that run in order. Steps come from `steps` (function bodies, as for ae_run_jsx) or from `from_op_ids`, the op_ids of ae_run_jsx calls that worked in this session, so a script that did the job is kept exactly as it ran. Each step sees `args` (the run's arguments), `prev` (what the previous step returned) and `results`. Write steps that take what varies (text, colours, comp_id, layer names) from `args`, not hard-coded. Steps are checked for ES3 (no let, const, arrow functions, template strings, class, or chained ternaries) and refused with the line if they break it. They also pass the same best-effort safety lint as ae_run_jsx (a guard rail, not a sandbox): steps that call system.callSystem, File.execute, file writes or deletes, dialogs, ScriptUI, $.sleep, app.quit, renderQueue.render, project open/close and the like are refused with the dedicated tool to use instead, and in a skill with mutates false so are writes (setValue, addProperty, ...). Save only when the user asks for it or agrees. Never touches the AE project.",
+        description: "Save an AE skill: a description, instructions, and ExtendScript steps that run in order. Steps come from `steps` (function bodies, as for ae_run_jsx) or from `from_op_ids`, the op_ids of ae_run_jsx calls that worked in this session, so a script that did the job is kept exactly as it ran. Each step sees `args` (the run's arguments), `prev` (what the previous step returned) and `results`. Write steps that take what varies (text, colours, comp_id, layer names) from `args`, not hard-coded. Steps are checked for ES3 (no let, const, arrow functions, template strings, class, or chained ternaries) and refused with the line if they break it. They also pass the same best-effort safety lint as ae_run_jsx (a guard rail, not a sandbox): steps that call system.callSystem, File.execute, file writes or deletes, dialogs, ScriptUI, $.sleep, app.quit, renderQueue.render (use ae_render_queue_render), project open/close and the like are refused with the dedicated tool to use instead, and in a skill with mutates false so are writes (setValue, addProperty, ...). Save only when the user asks for it or agrees. Never touches the AE project.",
         schema: AeSkillSaveSchema,
         handler: async (args, ctx) => {
           let steps;
@@ -63044,6 +63932,7 @@ var init_ext = __esm({
     init_paths();
     init_memory();
     init_rqedit();
+    init_rqrender();
     init_renderbatch();
     init_collect();
     init_deliver();
@@ -63149,6 +64038,7 @@ var init_ext = __esm({
       ...pathsTools,
       ...memoryTools,
       ...rqeditTools,
+      ...rqrenderTools,
       ...renderbatchTools,
       ...collectTools,
       ...deliverTools,
@@ -63220,6 +64110,7 @@ var init_read = __esm({
   "src/tools/read.ts"() {
     "use strict";
     init_zod();
+    init_render_gate();
     init_common();
     AeStatusSchema = external_exports.object({
       detail: external_exports.boolean().optional().describe(
@@ -63265,6 +64156,16 @@ var init_read = __esm({
         description: "Read panel health (/health), AE version, current project path (or '<unsaved>'), dirty flag, active comp {id, name}, selected layers, and the server quarantine list. With `detail: true` it adds `detail`: the active item of any kind (a footage or folder too), the Project panel selection, the active comp's time and frame and work area, the selected properties as {layer_id, layer_index, path, name, match_name, is_group, selected_keys} (path is the format ae_set_property takes), the viewer, tool, build, UI language, GPU, OS and project revision, plus warnings (rendering disabled makes ae_snapshot_frame, ae_contact_sheet and ae_ui_screenshot show stale or blank frames) and `missing` (members this AE version does not have). Selection can change between this read and a write: act on explicit ids and indexes with `expect`. " + AGENT_SAFETY_GUIDANCE,
         schema: AeStatusSchema,
         handler: async (args, ctx) => {
+          const rendering = renderGate.active();
+          if (rendering) {
+            const health2 = ctx.bridge.health ? await ctx.bridge.health().catch(() => null) : null;
+            return {
+              health: health2,
+              rendering: { job_id: rendering.job_id, op_id: rendering.op_id, started_at: rendering.started_at, state: rendering.state },
+              message: renderGateMessage(rendering),
+              quarantine: ctx.quarantine.list()
+            };
+          }
           const health = ctx.bridge.health ? await ctx.bridge.health() : { ok: true, transport: "panel" };
           const hostStatus = await ctx.bridge.callHost(
             "status",
@@ -63501,7 +64402,7 @@ function validCurve(curve) {
 init_assets2();
 init_diagnostics();
 init_dialogs();
-var path54 = __toESM(require("node:path"), 1);
+var path55 = __toESM(require("node:path"), 1);
 
 // src/schema.ts
 init_zod();
@@ -64072,11 +64973,12 @@ async function handleRpc(message, ctx) {
 }
 
 // src/panel-host.ts
-var crypto20 = __toESM(require("node:crypto"), 1);
+var crypto21 = __toESM(require("node:crypto"), 1);
 init_dialogs();
 init_host();
 init_jsx();
 init_queue();
+init_render_gate();
 var DESCRIBE_DIALOGS_BUDGET_MS = 4e3;
 var PanelTimeoutSignal = class extends Error {
   constructor() {
@@ -64106,7 +65008,7 @@ var PanelHost = class {
     }
   }
   newOpId() {
-    return `op_${Date.now()}_${crypto20.randomBytes(4).toString("hex")}`;
+    return `op_${Date.now()}_${crypto21.randomBytes(4).toString("hex")}`;
   }
   /**
    * Calls the panel's evalScript queue, racing against a timeout via setTimeout.
@@ -64114,6 +65016,8 @@ var PanelHost = class {
    * and NEVER cancels the underlying evalScript promise.
    */
   async evalRaw(params) {
+    renderGate.check(params.id);
+    const isRender = renderGate.isRenderOp(params.id);
     const timeoutMs = params.timeoutMs ?? this.defaultTimeoutMs;
     const startedAt = Date.now();
     let rawPromise;
@@ -64144,7 +65048,7 @@ var PanelHost = class {
       payload = await Promise.race([rawPromise, timeoutPromise]);
     } catch (err) {
       if (err instanceof PanelTimeoutSignal) {
-        if (params.mutates && this.quarantine) {
+        if (params.mutates && this.quarantine && !isRender) {
           this.quarantine.add({
             op_id: params.id,
             tool: params.toolName ?? params.label,
@@ -64181,7 +65085,7 @@ var PanelHost = class {
           actual: blocking.length > 0 ? { blocking_dialogs: blocking } : void 0,
           message: `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
             timeoutMs / 1e3
-          )}s: outcome unknown. Do NOT resend this request \u2014 it may still be running or have completed in After Effects.` + (params.mutates ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.` : "") + dialogNote
+          )}s: outcome unknown. Do NOT resend this request \u2014 it may still be running or have completed in After Effects.` + (params.mutates && !isRender ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.` : "") + dialogNote
         });
       }
       if (err instanceof BridgeError) {
@@ -64230,6 +65134,7 @@ var PanelHost = class {
    * Executes a host function `__chromaAe.<fn>(args)` through the single-writer queue.
    */
   async callHost(fn, args, opts) {
+    renderGate.check(opts.opId);
     if (opts.mutates && this.quarantine) {
       this.quarantine.assertClear();
     }
@@ -64267,6 +65172,7 @@ var PanelHost = class {
 // src/panel-entry.ts
 init_quarantine();
 init_queue();
+init_render_gate();
 init_settings();
 init_session();
 function sendResponse(res, statusCode, headers, body) {
@@ -64305,7 +65211,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path54.join(resolvedDataDir, "quarantine.json")
+    path55.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -64318,12 +65224,16 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path54.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path55.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo,
     log: opts.log
   };
+  renderGate.setIdleProbe(() => {
+    const info = opts.serviceInfo?.();
+    return info !== void 0 && "inFlight" in info && info.inFlight === null;
+  });
   if (opts.sessionTracking !== false) {
     try {
       installSessionTracking({ dataDir: resolvedDataDir, quarantine });
@@ -64425,7 +65335,12 @@ function createPanelMcp(opts) {
     stop: () => {
       assetWatcher.stop();
     },
-    saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.())
+    saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
+    renderLock: () => {
+      const info = renderGate.active();
+      return info ? { info, message: renderGateMessage(info) } : null;
+    },
+    clearRenderLock: () => renderGate.clear()
   };
 }
 // Annotate the CommonJS export names for ESM import in node:

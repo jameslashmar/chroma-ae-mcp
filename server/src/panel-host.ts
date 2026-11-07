@@ -11,6 +11,7 @@ import {
 import { buildJsxCall, type HostFunctionName } from "./jsx.js";
 import type { QuarantineStore } from "./quarantine.js";
 import { QueueWaitError, type SingleWriterQueue } from "./queue.js";
+import { renderGate } from "./render-gate.js";
 
 export type PanelEvalScriptSuccess = {
   ok: true;
@@ -101,6 +102,9 @@ export class PanelHost implements HostTransport {
     mutates?: boolean;
     toolName?: string;
   }): Promise<EvalSuccessResponse<T>> {
+    // While AE renders for ae_render_queue_render it cannot answer: refuse at once, send nothing.
+    renderGate.check(params.id);
+    const isRender = renderGate.isRenderOp(params.id);
     const timeoutMs = params.timeoutMs ?? this.defaultTimeoutMs;
     const startedAt = Date.now();
 
@@ -138,7 +142,8 @@ export class PanelHost implements HostTransport {
       payload = await Promise.race([rawPromise, timeoutPromise]);
     } catch (err) {
       if (err instanceof PanelTimeoutSignal) {
-        if (params.mutates && this.quarantine) {
+        // The render's own eval has no quarantine: the render job and the gate handle its unknown outcome.
+        if (params.mutates && this.quarantine && !isRender) {
           this.quarantine.add({
             op_id: params.id,
             tool: params.toolName ?? params.label,
@@ -187,7 +192,7 @@ export class PanelHost implements HostTransport {
               timeoutMs / 1000
             )}s: outcome unknown. ` +
             `Do NOT resend this request — it may still be running or have completed in After Effects.` +
-            (params.mutates
+            (params.mutates && !isRender
               ? ` Op "${params.id}" has been placed in quarantine; call ae_status, inspect state with read tools, then ae_acknowledge.`
               : "") +
             dialogNote,
@@ -250,6 +255,7 @@ export class PanelHost implements HostTransport {
     args: unknown,
     opts: CallHostOptions
   ): Promise<{ id: string; result: T; durationMs: number }> {
+    renderGate.check(opts.opId);
     if (opts.mutates && this.quarantine) {
       this.quarantine.assertClear();
     }
