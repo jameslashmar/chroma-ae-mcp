@@ -16,6 +16,9 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - [ ] **aerender jobs that never start:** 7 of the last smoke run's jobs hung at the version or launch line (AE 26.2.1). Lead: engines left idle after aerender exits, now ended by the server; confirm by starting a second aerender beside an idle engine, then rerun the smoke test.
 - [ ] **macOS popup reading:** written (`panel/tools/ae-dialogs-mac.js`, through System Events, needing Accessibility permission for After Effects); not yet tried on a Mac.
 - [ ] **A self-hosted CI runner** on a machine with AE. The workflow and `qa/ci-live.mjs` are ready; a runner has to be set up and registered.
+- [ ] **Render in AE can't be stopped** (PR #10 live check, 2026-11-07): a render started by `ae_render_queue_render` locked AE's UI, so the Stop button couldn't be reached (seen over phone Remote Desktop; confirm at a desk). Options: an `onStatusChanged` callback that can call `stopRendering`, or a hard length cap.
+- [ ] **Long H.264 renders in AE ran out of memory:** two 3-minute 1080p H.264 renders grew AE to 33 and 79 GB without writing a frame (one crashed AE); ProRes of the same comps was fine. Find out whether that is AE's H.264 path; warn or refuse long H.264 in `ae_render_queue_render`.
+- [ ] **Rest of `qa/LIVE-CHECKLIST.md`:** Claude Desktop with the core toolset, one Ctrl+Z of a layout, layout rollback, a Cinema 4D camera through `copyToComp`, and sections E, F and G.
 - [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. They need the VoxMark and Gulp repos on the machine that runs them.
 
 - [ ] **Follow-ups from the busy, dialog, pre-check and layout work (none of it has run in After Effects yet; see `qa/LIVE-CHECKLIST.md`):**
