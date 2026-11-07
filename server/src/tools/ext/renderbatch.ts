@@ -32,6 +32,7 @@
  * an item runs, a stall detector that only advises ae_aerender_cancel.
  */
 
+import { powershellExe } from "../../win-exe.js";
 import * as childProcess from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -60,6 +61,8 @@ import {
   type SpawnLike,
 } from "./aerender.js";
 import { preflightRefusal, runPreflightGate, type GateSummary } from "./preflight.js";
+import { blockCode, finishSequenceCheck, liveDirsFromJobs, prepareSequenceCheck, sequenceStepFrom, SequenceCheckSchema, type PreparedSequenceCheck, type SequenceCheckResult } from "./seqcheck.js";
+import { resourceWarningsForRender } from "../../system-resources.js";
 
 const MAX_ITEMS = 500;
 const MAX_STRING = 20_000;
@@ -238,6 +241,7 @@ export const AeRenderBatchStartSchema = z
     ...policyFields,
     ...runFields,
     preflight: z.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
+    sequence_check: SequenceCheckSchema,
     allow_dirty: z
       .boolean()
       .optional()
@@ -903,7 +907,7 @@ export async function getFreeBytes(dir: string, platform: NodeJS.Platform = proc
     if (platform === "win32") {
       const letter = driveLetterOf(dir);
       if (!letter) return null;
-      const out = await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-PSDrive -Name ${letter}).Free`]);
+      const out = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", `(Get-PSDrive -Name ${letter}).Free`]);
       const text = out.trim();
       if (!/^\d+$/.test(text)) return null;
       const n = Number(text);
@@ -1676,6 +1680,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
       name: "ae_render_batch",
       description:
         "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the processes that can run at once) and one process at a time (the limit counts every aerender job this server runs; the start gate allows only one aerender at a time, so concurrency above 1 is capped to 1, and each item starts 20 s after the one before it ended and not while that one's After Effects engine is still alive; that gap is in the ETA). " +
+        "Also checks the project's image sequences for missing frames (a line in `warnings` and `sequence_check`; the batch still starts; `sequence_check: \"block\"` refuses, also when the check could not finish; \"off\" skips) and reads the GPU (`resource_warnings`: GPU nearly full, or another app such as Cinema 4D running; if present, tell the user before continuing). " +
         "Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). " +
         "Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). " +
         "State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. " +
@@ -1688,8 +1693,10 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
         const job = normaliseJob(args);
         type Ready =
           | { ok: false; [k: string]: unknown }
-          | { ok: true; project_path: string; aerenderBin: string; items: PlannedItem[]; warnings: string[]; preflight?: GateSummary; project_sig: string | null };
+          | { ok: true; project_path: string; aerenderBin: string; items: PlannedItem[]; warnings: string[]; preflight?: GateSummary; project_sig: string | null; sequence_prep: PreparedSequenceCheck | null };
         let ready: Ready;
+        // Before the lease: the probe takes about a second and must not hold the queue.
+        const resourceWarnings = await resourceWarningsForRender();
         try {
           ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps${job.queue_items.length > 0 ? `, ${job.queue_items.length} queue items` : ""})`, async (): Promise<Ready> => {
             ctx.quarantine.assertClear();
@@ -1762,10 +1769,13 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
                 opId,
                 comp_names: job.comps.length > 0 ? job.comps : undefined,
                 ...(queueCompIds.length > 0 ? { comp_ids: queueCompIds } : {}),
+                sequence_check: "off",
               });
               if (gate.blocked) return preflightRefusal("ae_render_batch", gate.summary);
               preflight = gate.summary;
             }
+            // Image sequences with missing frames: the footage is listed here (it needs AE); the folders are read after the lease is released.
+            const sequencePrep = args.sequence_check === "off" ? null : await prepareSequenceCheck(ctx, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()), tolerant: true });
             const aerenderBin = resolveAerenderPath({
               platform: options.platform,
               afterFxPath: options.afterFxPath ?? st.afterfx_path ?? st.app_path,
@@ -1773,12 +1783,21 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
               existsSync: options.existsSync,
             });
             if (st.dirty === true) warnings.push("The project had unsaved changes; the batch renders the last saved file on disk.");
-            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig };
+            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig, sequence_prep: sequencePrep };
           });
         } catch (err) {
           return queued(err, opId);
         }
         if (!ready.ok) return ready;
+
+        // Node only from here: the eval queue is free while the folders are read and the project is copied.
+        let sequenceCheck: SequenceCheckResult | undefined;
+        if (ready.sequence_prep) {
+          const seq = sequenceStepFrom(args.sequence_check, "ae_render_batch", await finishSequenceCheck(ready.sequence_prep, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()) }));
+          if (seq.block && seq.check) return { ok: false, error: blockCode(seq.check), applied: false, message: seq.blockMessage, sequence_check: seq.check };
+          ready.warnings.push(...seq.warnings);
+          sequenceCheck = seq.check;
+        }
 
         // Node only from here: the eval queue is free while the project is copied.
         const store = getStore();
@@ -1854,6 +1873,8 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           warnings: after.warnings,
           notices: saveNotice ? [...after.notices, saveNotice] : after.notices,
           ...(ready.preflight ? { preflight: ready.preflight } : {}),
+          ...(sequenceCheck ? { sequence_check: sequenceCheck } : {}),
+          ...(resourceWarnings.length > 0 ? { resource_warnings: resourceWarnings } : {}),
           next: "Poll ae_render_batch_status with this batch_id. The renders run in the background; the After Effects project is untouched.",
         };
       },
@@ -1925,7 +1946,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
       name: "ae_render_batch_resume",
       description:
         "Continue a stopped, failed or interrupted render batch from its frozen project copy. Items that finished and whose output still verifies (exists, not empty, written after the item started; an image sequence must have all its frames) are kept, and so are items skipped on purpose (if_output_exists 'skip': their files are never overwritten by a resume, whatever policy it passes); an item whose runner died is adopted when its aerender ended cleanly or its log says it finished; failed, cancelled and unstarted items run again, a failed item's partial file included. " +
-        "Takes expect so the right project is open, refuses while an aerender of the batch is still alive, and can change concurrency, max_cpu_percent, on_error, stall_minutes and if_output_exists for the rest of the run. Does not change the After Effects project. " +
+        "Takes expect so the right project is open, refuses while an aerender of the batch is still alive, and can change concurrency, max_cpu_percent, on_error, stall_minutes and if_output_exists for the rest of the run. Does not re-check image sequences (start did). If `resource_warnings` is present (GPU nearly full, or another app such as Cinema 4D running), tell the user before continuing. Does not change the After Effects project. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeRenderBatchResumeSchema,
       handler: async (args: AeRenderBatchResumeArgs, ctx: ToolContext) => {
@@ -1960,6 +1981,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
         }
         const rec = runner.reconcile(batch);
         if (!rec.ok) return { ok: false, error: "still_running", applied: false, message: rec.message };
+        const resumeResourceWarnings = await resourceWarningsForRender();
         batch.options = resolveOptions(args, batch.options.aerender_path, batch.options);
         batch.notices.push(`Resumed at ${new Date(now()).toISOString()}: ${rec.kept} kept (${rec.skipped_kept} of them skipped on purpose), ${rec.recovered} adopted, ${rec.reset} to render again.`);
         try {
@@ -1990,6 +2012,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
           counts: countStates(after.items),
           items: after.items.slice(0, MAX_ITEMS).map(itemView),
           notices: (saveNotice ? [...after.notices, saveNotice] : after.notices).slice(-50),
+          ...(resumeResourceWarnings.length > 0 ? { resource_warnings: resumeResourceWarnings } : {}),
         };
       },
     },

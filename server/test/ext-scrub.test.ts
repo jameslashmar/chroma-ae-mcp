@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { PNG } from "pngjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BridgeError } from "../src/host.js";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
@@ -725,6 +726,36 @@ describe("ae_scrub_check on a render file", () => {
     const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 2, expect: GUARD }), ctx);
     expect(res).toMatchObject({ ok: true, imported_state: "left", left_in_project: { item_id: 7, comp_id: 8 } });
     expect(res.problems[0].message).toMatch(/still in the project/);
+  }, 30_000);
+
+  it("after a capture timeout the removal of the imported render and comp is still sent, as a must-send cleanup", async () => {
+    const file = movie();
+    const { ctx, calls } = fakeAe(flow(), (k) => frameData(k));
+    const real = ctx.bridge.evalRaw.bind(ctx.bridge);
+    const sent: Array<{ fn: string; mustSend: boolean | undefined }> = [];
+    (ctx.bridge as any).evalRaw = async (params: any) => {
+      const fn = String(params.script).slice("__chromaAe.".length, String(params.script).indexOf("("));
+      sent.push({ fn, mustSend: params.mustSend });
+      if (fn === "snapshotFrame") throw new BridgeError({ kind: "timeout", message: "timed out" });
+      return real(params);
+    };
+    const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 3, expect: GUARD }), ctx);
+    expect(calls).toContain("scrubRemove");
+    expect(sent.find((x) => x.fn === "scrubRemove")).toMatchObject({ mustSend: true });
+    expect(res.imported_state).toBe("removed");
+  }, 30_000);
+
+  it("a removal that times out is unknown (it is still queued and runs when AE answers), not left", async () => {
+    const file = movie();
+    const { ctx } = fakeAe(flow(), (k) => frameData(k));
+    const real = ctx.bridge.evalRaw.bind(ctx.bridge);
+    (ctx.bridge as any).evalRaw = async (params: any) => {
+      if (String(params.script).startsWith("__chromaAe.scrubRemove(")) throw new BridgeError({ kind: "timeout", message: "timed out" });
+      return real(params);
+    };
+    const res: any = await tool.handler(AeScrubCheckSchema.parse({ path: file, samples: 3, expect: GUARD }), ctx);
+    expect(res.imported_state).toBe("unknown");
+    expect(res.left_in_project).toMatchObject({ item_id: 7, comp_id: 8 });
   }, 30_000);
 
   it("does not throw after the import when the removal fails: it reports the leftover items", async () => {

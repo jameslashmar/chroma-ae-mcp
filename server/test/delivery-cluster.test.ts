@@ -242,7 +242,7 @@ describe("ae_dialogs OCR labels", () => {
   });
 
   // ae-dialogs.ps1 (Get-NormalizedLabel): lower-case, 0 read as o, anything but letters and spaces dropped;
-  // Cancel/No/Close go out as Escape, OK/Yes/Continue as Enter and only for a dialog's one button.
+  // Cancel/No/Close go out as Escape (No and Close only when no Cancel is on the row); OK/Yes/Continue go out as Enter only when it is the default button (outlined, or the lone button).
   const btn = (name: string) => ({ name, automationId: "", enabled: true });
 
   it("a lone Cancel, No or Close is answered with Escape, not Enter", () => {
@@ -303,7 +303,11 @@ describe("ae_dialog_respond on an AE-painted two-button dialog", () => {
   });
 
   it("says so in the description", () => {
-    expect(dtool("ae_dialog_respond").description).toMatch(/two-button AE-painted dialog can only be cancelled unattended/);
+    // Wording changed with the default-button work: the default (outlined) button or Cancel, not "the only button".
+    const d = dtool("ae_dialog_respond").description;
+    expect(d).toMatch(/DEFAULT button/);
+    expect(d).toMatch(/button_not_default/);
+    expect(d).toMatch(/dialog_changed/);
     expect(dtool("ae_dialogs").description).toMatch(/0K is corrected to OK/);
   });
 });

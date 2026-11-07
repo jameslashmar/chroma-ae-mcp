@@ -242,8 +242,8 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
 
         ctx.quarantine.assertClear();
         const opId = ctx.bridge.newOpId();
-        const call = <T,>(suffix: string, fn: string, a: Record<string, unknown>, mutates: boolean) =>
-          ctx.bridge.evalRaw<T>({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_verify_render (${suffix})`, mutates, toolName: "ae_verify_render" });
+        const call = <T,>(suffix: string, fn: string, a: Record<string, unknown>, mutates: boolean, mustSend = false) =>
+          ctx.bridge.evalRaw<T>({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_verify_render (${suffix})`, mutates, mustSend, toolName: "ae_verify_render" });
         try {
           return await ctx.queue.run("ae_verify_render", async () => {
             ctx.quarantine.assertClear();
@@ -256,29 +256,27 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
             // reported with what happened to the imported item, so a caller never imports twice.
             const problems: ReceiptMismatch[] = [];
             let render: RenderInfo | null = null;
-            let readErr: unknown;
             try {
               // Read in its own evalScript, after the import.
               render = (await call<RenderInfo>("read", "verifyRead", { item_id: imported.item_id }, false)).result;
             } catch (err) {
-              readErr = err;
               problems.push(readBackMismatch(opId, "reading the imported render failed", err));
             }
-            // removed: confirmed gone; kept: keep_imported; left: not removed (AE looked blocked, or the
-            // removal failed or didn't take); unknown: removed, but the check afterwards failed.
+            // removed: confirmed gone; kept: keep_imported; left: the removal failed or didn't take; unknown: the removal timed out
+            // (it is still queued and runs when AE answers) or the check afterwards failed.
             let itemState: "removed" | "kept" | "left" | "unknown" = "kept";
-            // After a timeout or a lost bridge AE is probably blocked: a cleanup would only queue behind it.
-            const blocked = readErr instanceof BridgeError && (readErr.kind === "timeout" || readErr.kind === "unreachable");
-            if (!args.keep_imported && blocked) itemState = "left";
-            if (!args.keep_imported && !blocked) {
+            // The removal is sent even after a timeout or a lost bridge (mustSend): it waits for AE and then takes the item out,
+            // as the other cleanups do. The only reason to skip it was that it used to queue behind a blocked eval.
+            if (!args.keep_imported) {
               let removeErr: unknown;
               try {
-                await call("remove", "verifyRemove", { item_id: imported.item_id, expect, label: "Verify render: remove" }, true);
+                await call("remove", "verifyRemove", { item_id: imported.item_id, expect, label: "Verify render: remove" }, true, true);
               } catch (err) {
                 removeErr = err;
               }
               if (removeErr !== undefined) {
-                itemState = "left";
+                // A timed-out removal is still queued behind AE's eval and runs when AE is free: its outcome is not "left".
+                itemState = removeErr instanceof BridgeError && removeErr.kind === "timeout" ? "unknown" : "left";
                 problems.push(readBackMismatch(opId, `removing the imported render (item ${imported.item_id}) failed`, removeErr));
               } else {
                 // Read back in a separate evalScript: the item must be gone.

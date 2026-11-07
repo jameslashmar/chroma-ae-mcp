@@ -18,6 +18,13 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - [ ] **A self-hosted CI runner** on a machine with AE. The workflow and `qa/ci-live.mjs` are ready; a runner has to be set up and registered.
 - [ ] **QA:** VoxMark scenarios 4–5 (they need generated WAV fixtures), then Gulp scenarios 1–5. They need the VoxMark and Gulp repos on the machine that runs them.
 
+- [ ] **Follow-ups from the busy, dialog, pre-check and layout work (none of it has run in After Effects yet; see `qa/LIVE-CHECKLIST.md`):**
+  - a service-side drop of queued items after N s;
+  - a busy door in the HTTP `bridge.ts`;
+  - rate-limiting identical refused calls;
+  - limiting sequence gaps to AE's range once `file` = first frame is confirmed;
+  - tightening `caused_by_op` so reads and quiet polls get no credit.
+
 **Out of scope:** Deadline submission and the Premiere round trip: both leave After Effects.
 
 **Left for when a job needs them:** single-layer snapshots, matching a reference frame, a project JSON export, several AE instances, and failure recovery by id. Layer ops, audio levels and fades and the rest of the earlier list are now typed tools.

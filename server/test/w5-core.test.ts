@@ -26,6 +26,7 @@ import {
 } from "../src/tools/mutate.js";
 import { AeGetLayerPropsSchema, AeStatusSchema, readTools } from "../src/tools/read.js";
 import { getSessionTracker, installSessionTracking, resetSessionTracking, type SessionSnapshot } from "../src/tools/ext/session.js";
+import { resetResourceCache, resourceDeps } from "../src/system-resources.js";
 import { pickEnvironment } from "../src/tools/ext/diagnostics.js";
 import { disablePolicyForSwitch, setAutosavePolicy, stopAutosavePolicy } from "../src/tools/ext/projectsession.js";
 import {
@@ -1397,7 +1398,8 @@ describe("ae_status detail", () => {
     const { ctx, calls } = statusCtx();
     const out: any = await status.handler(status.schema.parse({ detail: true }), ctx);
     expect(calls).toEqual(["status", "statusDetail"]);
-    expect(out.detail).toEqual({ active_item: null, warnings: [] });
+    expect(out.detail).toMatchObject({ active_item: null, warnings: [] });
+    expect(out.detail.resources).toBeDefined();
     expect(out.aeVersion).toBe("26");
   });
 
@@ -1411,6 +1413,33 @@ describe("ae_status detail", () => {
     const out: any = await status.handler(status.schema.parse({ detail: true }), ctx);
     expect(out.aeVersion).toBe("26");
     expect(out.detail.error).toContain("AE busy");
+  });
+
+  it("adds detail.resources from the GPU probe, with no queue on the context, and not in the default reply", async () => {
+    resetResourceCache();
+    const prevRun = resourceDeps.run;
+    resourceDeps.run = async () => ({
+      ok: true,
+      counters: true,
+      adapters: [{ luid: "0", used_mb: 23000 }],
+      totals: [{ name: "0", total_mb: 24000 }],
+      processes: [{ pid: 4, name: "AfterFX", gpu_mb: 500 }],
+    });
+    try {
+      const { ctx } = statusCtx();
+      expect(ctx.queue).toBeUndefined();
+      const out: any = await status.handler(status.schema.parse({ detail: true }), ctx);
+      expect(out.detail.resources).toBeDefined();
+      expect(typeof out.detail.resources.supported).toBe("boolean");
+      expect(Array.isArray(out.detail.resources.warnings)).toBe(true);
+      expect(out.detail.active_item).toBeNull();
+      const plain: any = await status.handler(status.schema.parse({}), ctx);
+      expect(plain.detail).toBeUndefined();
+      expect(status.description).toContain("detail.resources");
+    } finally {
+      resourceDeps.run = prevRun;
+      resetResourceCache();
+    }
   });
 
   it("lists the new host functions without changing the first twelve", () => {

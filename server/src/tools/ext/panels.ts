@@ -1,3 +1,4 @@
+import { powershellExe } from "../../win-exe.js";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -147,7 +148,7 @@ function runPowerShellScript(ps1Args: string[]): Promise<string> {
 
   return new Promise<string>((resolve) => {
     execFile(
-      "powershell.exe",
+      powershellExe(),
       fullArgs,
       {
         windowsHide: true,

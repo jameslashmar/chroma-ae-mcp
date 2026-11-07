@@ -1160,8 +1160,8 @@ async function scrubFile(args: AeScrubCheckArgs, ctx: ToolContext) {
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
   const expect = { project_path: (args.expect as NonNullable<typeof args.expect>).project_path, comp_id: args.expect?.comp_id };
-  const call = <T,>(suffix: string, fn: string, a: Record<string, unknown>, mutates: boolean) =>
-    ctx.bridge.evalRaw<T>({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_scrub_check (${suffix})`, mutates, toolName: "ae_scrub_check" });
+  const call = <T,>(suffix: string, fn: string, a: Record<string, unknown>, mutates: boolean, mustSend = false) =>
+    ctx.bridge.evalRaw<T>({ id: `${opId}_${suffix}`, script: buildJsxCall(fn, a), label: `ae_scrub_check (${suffix})`, mutates, mustSend, toolName: "ae_scrub_check" });
 
   const run = await runQueued(ctx, "ae_scrub_check", opId, async () => {
     ctx.quarantine.assertClear();
@@ -1220,16 +1220,17 @@ async function scrubFile(args: AeScrubCheckArgs, ctx: ToolContext) {
     }
 
     // Remove the comp and the item, then read in a separate evalScript that both are gone.
-    // After a timeout or a lost bridge AE is probably blocked: a cleanup would only queue behind it.
+    // The removal is sent even after a timeout or a lost bridge (mustSend): it waits for AE and then takes the temporary comp
+    // out, as the other cleanups do. The only reason to skip it was that it used to queue behind a blocked eval.
     let state: "removed" | "left" | "unknown" | "kept_in_use" = "removed";
     let keptInUse = false;
-    if (cap?.aborted) state = "left";
-    if (state === "removed") {
+    {
       try {
-        const rm = (await call<{ item_kept?: boolean }>("remove", "scrubRemove", { item_id: imported.item_id, comp_id: imported.comp_id, expect, label: "Scrub check: remove" }, true)).result;
+        const rm = (await call<{ item_kept?: boolean }>("remove", "scrubRemove", { item_id: imported.item_id, comp_id: imported.comp_id, expect, label: "Scrub check: remove" }, true, true)).result;
         keptInUse = rm?.item_kept === true;
       } catch (err) {
-        state = "left";
+        // A timed-out removal is still queued behind AE's eval and runs when AE is free: its outcome is not "left".
+        state = err instanceof BridgeError && err.kind === "timeout" ? "unknown" : "left";
         problems.push(readBackMismatch(opId, `removing the temporary comp (${imported.comp_id}) and the imported render (item ${imported.item_id}) failed`, err));
       }
     }

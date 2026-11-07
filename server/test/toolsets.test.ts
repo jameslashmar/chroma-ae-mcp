@@ -28,7 +28,7 @@ import {
 import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../src/tools/common.js";
 
 /** The size budget for the core tools/list JSON plus the core `instructions` (about 20k tokens). */
-const CORE_BUDGET_CHARS = 75_000;
+const CORE_BUDGET_CHARS = 82_000;
 
 /** A bridge that fails the test if anything reaches After Effects. */
 function noAeCtx(log?: (level: string, msg: string) => void): ToolContext {
@@ -87,7 +87,7 @@ describe("tool groups", () => {
 describe("core name list", () => {
   it("names only tools that exist, once each, and none of the meta-tools", () => {
     const names = new Set(ALL_TOOLS.map((t) => t.name));
-    expect(CORE_TOOL_NAMES).toHaveLength(32);
+    expect(CORE_TOOL_NAMES).toHaveLength(33);
     expect(new Set(CORE_TOOL_NAMES).size).toBe(CORE_TOOL_NAMES.length);
     for (const n of CORE_TOOL_NAMES) expect(names.has(n), n).toBe(true);
     for (const m of META_TOOL_NAMES) expect(names.has(m), m).toBe(false);

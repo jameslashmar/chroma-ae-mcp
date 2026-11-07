@@ -23,6 +23,7 @@ import type { ReceiptMismatch } from "../../receipts.js";
 import { BridgeError } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
+import { readResources, resourceWarnings, type ResourceReport } from "../../system-resources.js";
 import { buildReceipt } from "../../receipts.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ExpectGuard, type ToolContext, type ToolDefinition } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
@@ -158,6 +159,8 @@ export interface PreflightInput {
   freeBytes: number;
   warnAboveMb?: number;
   minFreeMb?: number;
+  /** The GPU and other-app reading (system-resources.ts); absent: no GPU check. */
+  resources?: ResourceReport;
 }
 
 export const DEFAULT_MIN_FREE_MB = 1024;
@@ -179,7 +182,18 @@ export function preflightWarnings(input: PreflightInput): { ready: boolean; warn
       );
     }
   }
-  return { ready: warnings.length === 0, warnings };
+  // The GPU (only when the caller passed a report, i.e. asked for a pre-flight): its warnings are added after the RAM ones.
+  // Level "high" makes the pre-flight not ready, "warn" only adds the text, and so does After Effects holding most of the VRAM
+  // itself (closing another app would not help). A GPU that could not be read is said so: ready is not silently true.
+  const memoryProblems = warnings.length;
+  const r = input.resources;
+  let gpuBlocks = false;
+  if (r) {
+    warnings.push(...resourceWarnings(r, "status"));
+    gpuBlocks = r.level === "high" && !r.ae_holds_most;
+    if (!r.supported) warnings.push(`GPU memory could not be read${r.probe_error ? ` (${r.probe_error})` : " on this system"}, so it was not checked.`);
+  }
+  return { ready: memoryProblems === 0 && !gpuBlocks, warnings };
 }
 
 /** What the receipt checks after a purge: the project is the same one, and the host did what it reported. */
@@ -207,6 +221,7 @@ export const memoryTools: ToolDefinition<any>[] = [
       "Memory report: After Effects' app.memoryInUse, the panel's Node memory (not AE's), the system's free and total RAM, which purge targets this AE supports, " +
       "and any preference keys you name (Memory & Cache keys are undocumented; a missing key reads exists: false). " +
       "Give warn_above_mb and/or min_free_mb for a pre-flight check before a heavy batch or render: `preflight.ready` is false with the reasons in `warnings`. " +
+      "With warn_above_mb or min_free_mb the pre-flight also reads GPU memory and the process list (Windows; macOS lists apps only): GPU memory nearly full (`ready` false from 93 %, unless After Effects itself holds it), or another app such as Cinema 4D or Blender running, adds a warning, and a GPU that could not be read is said so; tell the user. " +
       "Read-only: changes nothing in AE. app.memoryInUse's relation to Task Manager is unmeasured, so treat it as a trend.",
     schema: AeMemoryStatusSchema,
     handler: async (args: z.infer<typeof AeMemoryStatusSchema>, ctx) => {
@@ -217,7 +232,11 @@ export const memoryTools: ToolDefinition<any>[] = [
       });
       const ae = res.result;
       const server = readServerMemory();
+      // The GPU probe takes about a second: only when the caller asked for a pre-flight check.
+      const wantsPreflight = args.warn_above_mb !== undefined || args.min_free_mb !== undefined;
+      const resources = wantsPreflight ? await readResources() : undefined;
       const preflight = preflightWarnings({
+        resources,
         aeBytes: ae?.memory_in_use_bytes ?? null,
         freeBytes: server.system_free_bytes,
         warnAboveMb: args.warn_above_mb,

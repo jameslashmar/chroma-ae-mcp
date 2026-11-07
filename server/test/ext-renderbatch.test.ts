@@ -49,6 +49,9 @@ import {
   type RenderbatchRead,
 } from "../src/tools/ext/renderbatch.js";
 import { FakeProject, loadHost } from "./support/fake-ae.js";
+import { footagePage, makeSequence, useOldFiles } from "./support/seq-fixtures.js";
+import { resetResourceCache, resourceDeps } from "../src/system-resources.js";
+import { seqscanDeps } from "../src/seqscan.js";
 
 const NO_GATE = { cool_down_ms: 0, list_engines: () => [], max_running: 8 };
 
@@ -295,7 +298,7 @@ describe("render batch pure logic", () => {
       return file === "df" ? "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 100 50 50 50% /\n" : "123456789\n";
     };
     expect(await getFreeBytes("D:\\out", "win32", run)).toBe(123456789);
-    expect(calls[0][0]).toBe("powershell.exe");
+    expect(calls[0][0]).toMatch(/powershell.exe$/i);
     expect(calls[0].join(" ")).toContain("(Get-PSDrive -Name D).Free");
     expect(await getFreeBytes("\\\\nas\\share", "win32", run)).toBeNull();
     expect(await getFreeBytes(os.tmpdir(), "darwin", run)).toBe(50 * 1024);
@@ -437,7 +440,7 @@ interface Rig {
   gate: { p?: Promise<void> };
 }
 
-function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; read?: Partial<RenderbatchRead>; gateOpts?: ConstructorParameters<typeof AerenderJobRegistry>[1] } = {}): Rig {
+function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; read?: Partial<RenderbatchRead>; gateOpts?: ConstructorParameters<typeof AerenderJobRegistry>[1]; footage?: unknown; itemsFail?: boolean } = {}): Rig {
   const dir = tmp();
   const project = path.join(dir, "job.aep");
   fs.writeFileSync(project, "aep-bytes");
@@ -456,6 +459,8 @@ function rig(opts: { dirty?: boolean; comps?: CompRead[]; openProject?: string; 
       calls.push(fn);
       if (fn === "status") return { ok: true, result: { aeVersion: "26.0", project_path: openPath, dirty: opts.dirty ?? false }, durationMs: 1 };
       if (fn === "checkGuard") return { ok: true, result: { ok: true, project_path: openPath, comp_id: 1, comp_is_valid: true }, durationMs: 1 };
+      if (fn === "preflightItems" && opts.itemsFail) return { ok: false as const, error: { kind: "unreachable", message: "panel gone" } };
+      if (fn === "preflightItems") return { ok: true, result: opts.footage ?? footagePage([]), durationMs: 1 };
       if (fn === "renderbatchRead") {
         const want = (JSON.parse(script.slice(script.indexOf("(") + 1, script.lastIndexOf(")"))) as { comp_names: string[] }).comp_names;
         const result: RenderbatchRead = {
@@ -553,7 +558,8 @@ describe("ae_render_batch", () => {
   it("guards, reads in separate calls, freezes the project and starts the first item with a CPU cap", async () => {
     const r = rig();
     const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
-    expect(r.calls).toEqual(["status", "renderbatchRead"]);
+    // preflightItems: the pre-render sequence check lists the footage once (sequence_check defaults to warn).
+    expect(r.calls).toEqual(["status", "renderbatchRead", "preflightItems"]);
     expect(out).toMatchObject({ ok: true, applied: true, state: "running", counts: { running: 1, pending: 1 } });
     expect(fs.readFileSync(out.frozen_project, "utf8")).toBe("aep-bytes");
     expect(out.frozen_project).not.toBe(r.project);
@@ -843,7 +849,7 @@ describe("the batch runner", () => {
     expect(s.free_space.status).toBe("ok");
     expect(fs.readFileSync(r.rb.getStore().jsonPath(id), "utf8")).toBe(before);
     expect(r.spawned).toHaveLength(1);
-    expect(r.calls.filter((c) => c !== "status" && c !== "renderbatchRead")).toEqual([]);
+    expect(r.calls.filter((c) => c !== "status" && c !== "renderbatchRead" && c !== "preflightItems")).toEqual([]);
     expect(s.runner_active).toBe(false); // autoTick is off in tests, so nothing holds a timer
     expect(s.advice).toContain("ae_render_batch_resume");
     const list = await r.tool("ae_render_batch_status").handler({}, r.ctx);
@@ -1463,7 +1469,8 @@ describe("w5render: batch with queue items through a fake bridge", () => {
   it("starts the item with -rqindex and its outputs, no -comp, -output, templates or -s/-e", async () => {
     const r = queueRig();
     const out = await r.tool("ae_render_batch").handler(args(r), r.ctx);
-    expect(r.calls).toEqual(["status", "renderbatchRead"]);
+    // preflightItems: the pre-render sequence check lists the footage once (sequence_check defaults to warn).
+    expect(r.calls).toEqual(["status", "renderbatchRead", "preflightItems"]);
     expect(out).toMatchObject({ ok: true, state: "running", counts: { running: 1 } });
     expect(out.items[0]).toMatchObject({ rq_index: 2, output_paths: r.files, spec: "rq2", comp: "Hero" });
     const a = r.spawned[0].args;
@@ -1717,5 +1724,103 @@ describe("renderbatch.jsx: Render Queue items", () => {
     const job = normaliseJob({ queue_items: [{ rq_index: 2, item_comp_id: hero.id }], output_dir: "C:/out" });
     const errs = validatePlan(job, r, expandItems(job, [], 0, r.queue_items), []).errors;
     expect(errs.map((e) => e.code)).toEqual(["rq_item_no_output"]);
+  });
+});
+
+// ---------- gaps in image sequences, and the GPU ----------
+
+describe("ae_render_batch: missing frames in image sequences and the GPU", () => {
+  let restore: (() => void) | null = null;
+  const savedDeps = { ...resourceDeps };
+  afterEach(() => {
+    restore?.();
+    restore = null;
+    Object.assign(resourceDeps, savedDeps);
+    resetResourceCache();
+  });
+  const gappy = () => {
+    const first = makeSequence(path.join(tmp(), "seq"), { skip: [3, 4] });
+    const old = useOldFiles();
+    restore = old.restore;
+    return footagePage([{ file: first, name: "plate" }]);
+  };
+  const probe = (usedGb: number) => {
+    resetResourceCache();
+    Object.assign(resourceDeps, {
+      platform: () => "win32" as const,
+      run: async () => ({ ok: true, adapters: [{ luid: "a", used_mb: usedGb * 1024 }], totals: [{ name: "RTX 4090", total_mb: 24 * 1024 }], processes: [{ pid: 41264, name: "Cinema 4D", gpu_mb: 9000 }] }),
+    });
+  };
+
+  it("warns by default: a line in warnings and sequence_check, and the batch starts", async () => {
+    const r = rig({ footage: gappy() });
+    const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
+    expect(out).toMatchObject({ ok: true, applied: true, state: "running" });
+    expect(out.sequence_check).toMatchObject({ with_gaps: 1 });
+    expect(out.warnings.join(" ")).toMatch(/missing frames.*0003-0004/);
+    expect(r.spawned).toHaveLength(1);
+  });
+
+  it("block refuses before the project is copied: nothing started, no batch folder", async () => {
+    const r = rig({ footage: gappy() });
+    const out = await r.tool("ae_render_batch").handler(startArgs(r, { sequence_check: "block" }), r.ctx);
+    expect(out).toMatchObject({ ok: false, error: "sequence_gaps", applied: false });
+    expect(r.spawned).toHaveLength(0);
+    expect(fs.existsSync(path.join(r.dir, "renders", "batches"))).toBe(false);
+  });
+
+  it("a footage list that cannot be read never refuses a warn: the batch starts with the error in sequence_check; block refuses", async () => {
+    const r = rig({ itemsFail: true });
+    const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
+    expect(out).toMatchObject({ ok: true, applied: true, state: "running" });
+    expect(out.sequence_check.error).toMatch(/panel gone/);
+    expect(out.warnings.join(" ")).toMatch(/Sequence check incomplete/);
+    const b = rig({ itemsFail: true });
+    const refused = await b.tool("ae_render_batch").handler(startArgs(b, { sequence_check: "block" }), b.ctx);
+    expect(refused).toMatchObject({ ok: false, error: "sequence_check_incomplete", applied: false });
+    expect(refused.message).toMatch(/could not be checked/);
+    expect(b.spawned).toHaveLength(0);
+  });
+
+  it("reads the folders after the queue lease is released, before the project is copied", async () => {
+    const r = rig({ footage: gappy() });
+    let held: boolean | null = null;
+    const wrapped = seqscanDeps.io;
+    seqscanDeps.io = { ...wrapped, readdir: async (d, limit) => ((held = r.ctx.queue.inFlight !== null), wrapped.readdir(d, limit)) };
+    const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
+    expect(held).toBe(false);
+    expect(out.ok).toBe(true);
+  });
+
+  it("off reads neither the footage list nor any folder", async () => {
+    const r = rig({ footage: gappy() });
+    const out = await r.tool("ae_render_batch").handler(startArgs(r, { sequence_check: "off" }), r.ctx);
+    expect(out.ok).toBe(true);
+    expect(out.sequence_check).toBeUndefined();
+    expect(r.calls).not.toContain("preflightItems");
+  });
+
+  it("adds resource_warnings at start and at resume, and none when the card has room", async () => {
+    probe(22.5);
+    const r = rig();
+    const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
+    expect(out.ok).toBe(true);
+    expect(out.resource_warnings[0]).toMatch(/94 % full.*Cinema 4D \(pid 41264\)/);
+    expect(r.tool("ae_render_batch").description).toMatch(/if present, tell the user before continuing/);
+    // resume
+    const id = out.batch_id as string;
+    r.finish(r.rb.getStore().get(id)!.items[0].job_id!, false, false);
+    await r.rb.getRunner().tick(id);
+    const resumed = await r.tool("ae_render_batch_resume").handler(AeRenderBatchResumeSchema.parse({ expect: expectArg(r.project), batch_id: id }), r.ctx);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.resource_warnings[0]).toMatch(/94 % full/);
+    expect(r.tool("ae_render_batch_resume").description).toMatch(/resource_warnings/);
+    probe(6);
+    resetResourceCache();
+    Object.assign(resourceDeps, { run: async () => ({ ok: true, adapters: [{ luid: "a", used_mb: 6 * 1024 }], totals: [{ name: "x", total_mb: 24 * 1024 }], processes: [] }) });
+    const r2 = rig();
+    const quiet = await r2.tool("ae_render_batch").handler(startArgs(r2), r2.ctx);
+    expect(quiet.ok).toBe(true);
+    expect("resource_warnings" in quiet).toBe(false);
   });
 });

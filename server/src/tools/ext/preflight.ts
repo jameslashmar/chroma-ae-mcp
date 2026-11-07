@@ -27,6 +27,7 @@ import { z } from "zod";
 import { BridgeError } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
+import { checkSequences, FS_PAUSED_NOTE, seqscanDeps, type SeqInput, type SeqReport, type SeqRow } from "../../seqscan.js";
 import type { ToolContext, ToolDefinition } from "../common.js";
 
 // ---------- host shapes ----------
@@ -88,6 +89,10 @@ export interface FootageInfo {
   used_n: number;
   used_in: number[];
   proxy: { use: boolean; file: string | null; missing: boolean } | null;
+  /** An image sequence on disk (the host's guess from the file name and type). */
+  sequence?: boolean;
+  /** After Effects' duration * frame rate, a guess at the frames it built the item from. */
+  ae_frames?: number;
 }
 
 export interface ItemsPage {
@@ -352,7 +357,7 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 const MAX_SESSIONS = 4;
 
 export interface ScanOptions {
-  scope: "delivery" | "health";
+  scope: "delivery" | "health" | "sequences";
   comp_ids?: number[];
   comp_names?: string[];
   force_eval: boolean;
@@ -366,6 +371,14 @@ export interface ScanOptions {
   planned_output?: string;
   /** false (the render tools' gate): skip output checks on items already in the queue; only planned_output is checked. Default true. */
   check_queue_outputs?: boolean;
+  /** false: do not look for missing frames in image sequences. Default true. */
+  sequence_check?: boolean;
+  /** Folder-read budget for the sequence step. */
+  sequence_budget_ms?: number;
+  /** A newest frame younger than this many seconds means still being written. Default 30. */
+  settle_s?: number;
+  /** Most missing-frame ranges listed per sequence. Default 20. */
+  max_ranges?: number;
 }
 
 interface CompStats {
@@ -427,6 +440,10 @@ export interface ScanState {
   forced_evals: number;
   force_capped: number;
   slices: number;
+  /** Set by attachSequences after the scan; the findings read it. */
+  sequence_report: SeqReport | null;
+  /** scope sequences reads no project settings: the open project's path from `status`, for the stale-cursor check. */
+  status_path: string | null;
 }
 
 export function newScanState(opts: ScanOptions, now = Date.now()): ScanState {
@@ -436,7 +453,8 @@ export function newScanState(opts: ScanOptions, now = Date.now()): ScanState {
     last_used: now,
     opts,
     namer: buildNameChecker(opts.naming),
-    phase: "project",
+    // scope sequences reads the footage list only: no project settings, no layers.
+    phase: opts.scope === "sequences" ? "items" : "project",
     project: null,
     items_offset: 0,
     items_total: 0,
@@ -470,6 +488,8 @@ export function newScanState(opts: ScanOptions, now = Date.now()): ScanState {
     forced_evals: 0,
     force_capped: 0,
     slices: 0,
+    sequence_report: null,
+    status_path: null,
   };
 }
 
@@ -480,7 +500,7 @@ const appliesTo = (s: ScanState, what: "comps" | "footage" | "layers") => (s.opt
 /** One evalScript on a host function; the caller decides how (callHost, or evalRaw inside its lease). */
 export type ScanCall = <T>(host: string, args: Record<string, unknown>, what: string) => Promise<T>;
 
-export function makeScanCall(ctx: ToolContext, opId: string, toolName: string): ScanCall {
+export function makeScanCall(ctx: ToolContext, opId: string, toolName: string, timeoutMs?: number): ScanCall {
   let n = 0;
   return async <T,>(host: string, args: Record<string, unknown>, what: string) => {
     const res = await ctx.bridge.evalRaw<T>({
@@ -489,6 +509,7 @@ export function makeScanCall(ctx: ToolContext, opId: string, toolName: string): 
       label: `${toolName} (${what})`,
       mutates: false,
       toolName,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     return res.result;
   };
@@ -557,7 +578,10 @@ async function step(s: ScanState, call: ScanCall): Promise<void> {
       if (s.footage.length < MAX_STORED_FOOTAGE) s.footage.push(f);
       else s.footage_dropped++;
     }
-    if (page.next_offset === null) {
+    if (page.next_offset === null && o.scope === "sequences") {
+      // Footage only: no comp roots, no layer reads.
+      s.phase = "done";
+    } else if (page.next_offset === null) {
       resolveRoots(s);
       s.phase = s.queue.length > 0 ? "layers" : "safe";
     } else {
@@ -900,6 +924,114 @@ function footageFindings(s: ScanState): Finding[] {
   return out;
 }
 
+// ---------- image sequences ----------
+
+const SEQUENCE_FINDINGS_MAX = 50;
+
+/** Sequence footage worth a folder check: a file on disk, used by a checked comp (or by one the scan did not reach). A missing file is footage_missing, not repeated here. */
+export function sequenceInputs(s: ScanState): SeqInput[] {
+  const out: SeqInput[] = [];
+  for (const f of s.footage) {
+    if (f.kind !== "footage" || f.sequence !== true || f.missing || !f.file || f.used_n === 0) continue;
+    if (s.opts.scope !== "sequences" && !(inScope(s, f.used_in) || f.used_in.length < f.used_n)) continue;
+    out.push({ file: f.file, item_id: f.id, name: f.name, ...(typeof f.ae_frames === "number" ? { ae_frames: f.ae_frames } : {}) });
+  }
+  return out;
+}
+
+/**
+ * Reads the folders of the scan's image sequences and keeps the result for the
+ * findings. Async and bounded (a few seconds of Node file reads, no After
+ * Effects); call it after the scan finished and before buildFindings. Never throws.
+ */
+export async function attachSequences(s: ScanState): Promise<void> {
+  if (s.opts.sequence_check === false) return;
+  try {
+    s.sequence_report = await checkSequences(sequenceInputs(s), seqscanDeps.io, {
+      budgetMs: s.opts.sequence_budget_ms ?? 4000,
+      settleS: s.opts.settle_s,
+      maxRanges: s.opts.max_ranges,
+      liveDirs: seqscanDeps.liveDirs(),
+    });
+  } catch {
+    s.sequence_report = null;
+  }
+}
+
+function rowName(r: SeqRow): string {
+  return r.item_names[0] ?? r.pattern;
+}
+
+function sequenceFindings(s: ScanState): Finding[] {
+  const rep = s.sequence_report;
+  const out: Finding[] = [];
+  if (!rep) return out;
+  const fix: Fix = { tool: "ae_replace_footage", hint: "Wait for the render that writes the frames to finish, then reload the footage (ae_replace_footage action reload), or re-render the missing frames." };
+  const rows = rep.sequences.filter((r) => r.state === "gaps" || r.state === "short" || r.state === "unknown" || r.state === "writing" || r.state === "unreadable" || r.state === "sparse");
+  for (const r of rows.slice(0, SEQUENCE_FINDINGS_MAX)) {
+    const where = { ...(r.item_ids[0] !== undefined ? { item_id: r.item_ids[0] } : {}), item: rowName(r) };
+    const ranges = r.missing_text ? `${r.missing_text}${r.ranges_truncated ? ", ..." : ""}` : "";
+    const extra = `${r.dir_hint ? ` (${r.dir_hint})` : ""}${r.hint ? ` ${r.hint}.` : ""}`;
+    if (r.state === "gaps") {
+      out.push({
+        severity: "warning",
+        code: "sequence_gaps",
+        message: `Sequence "${rowName(r)}": ${r.missing} frame${r.missing === 1 ? "" : "s"} missing between ${r.first} and ${r.last} (${ranges}); ${r.on_disk} on disk.${extra}`,
+        where,
+        count: r.missing,
+        fix,
+      });
+    } else if (r.state === "sparse") {
+      out.push({
+        severity: "note",
+        code: "sequence_sparse",
+        message: `Sequence "${rowName(r)}" has gaps in its numbering (${r.missing} numbers between ${r.first} and ${r.last}), but After Effects counts about the files on disk (${r.on_disk}): an every-nth-frame sequence or an alphabetical import. Not treated as missing frames.`,
+        where,
+      });
+    } else if (r.state === "short") {
+      out.push({
+        severity: "warning",
+        code: "sequence_short",
+        message: `Sequence "${rowName(r)}": After Effects counts about ${r.ae_frames} frames but the folder holds ${r.first}-${r.last} (${r.on_disk} files): trailing or leading frames may have been lost.${extra}`,
+        where,
+        confidence: "low",
+        fix,
+      });
+    } else if (r.state === "unknown") {
+      out.push({
+        severity: "warning",
+        code: "sequence_unknown",
+        message: `Sequence "${rowName(r)}" has ${r.missing > 0 ? `${r.missing} missing frame${r.missing === 1 ? "" : "s"} (${ranges})` : "fewer frames than After Effects counts"}, but the time ran out before it could be read whether it is still being written.`,
+        where,
+        confidence: "low",
+      });
+    } else if (r.state === "writing") {
+      out.push({
+        severity: r.missing > 0 ? "warning" : "note",
+        code: "sequence_writing",
+        message:
+          `Sequence "${rowName(r)}" is still being written (${r.writing_reason ?? "recently written"}).` +
+          (r.missing > 0 ? ` ${r.missing} frame${r.missing === 1 ? "" : "s"} below the highest written frame are not there yet (${ranges}); they may be out of order from a multi-frame render.` : "") +
+          extra,
+        where,
+        ...(r.missing > 0 ? { count: r.missing } : {}),
+      });
+    } else {
+      out.push({ severity: "warning", code: "sequence_unreadable", message: `Sequence "${rowName(r)}" could not be checked in ${r.dir}: ${r.reason ?? "unknown reason"}.`, where });
+    }
+  }
+  if (rows.length > SEQUENCE_FINDINGS_MAX) {
+    out.push({ severity: "note", code: "sequence_gaps", message: `${rows.length - SEQUENCE_FINDINGS_MAX} more sequences have gaps, are being written or could not be read.`, count: rows.length - SEQUENCE_FINDINGS_MAX });
+  }
+  if (rep.fs_paused) {
+    out.push({ severity: "warning", code: "sequence_check_paused", message: FS_PAUSED_NOTE });
+  }
+  if (rep.unchecked_count > 0) {
+    out.push({ severity: "note", code: "sequence_not_checked", message: `${rep.unchecked_count} footage item${rep.unchecked_count === 1 ? " was" : "s were"} not checked for missing frames (${rep.fs_paused ? "file checks are paused, see above" : "time budget, or a file name that could not be matched"}).`, count: rep.unchecked_count });
+  }
+  return out;
+}
+
 function layerIssueFindings(s: ScanState): Finding[] {
   const out: Finding[] = [];
   const fontLayers = new Map<string, StoredIssue[]>();
@@ -1184,6 +1316,7 @@ function healthFindings(s: ScanState): Finding[] {
 }
 
 export function buildFindings(s: ScanState): Finding[] {
+  if (s.opts.scope === "sequences") return sortFindings(sequenceFindings(s));
   const all: Finding[] = [];
   for (const u of s.unresolved) {
     all.push({ severity: "blocker", code: "comp_not_found", message: `The ${u} was not found in the project.`, fix: { tool: "ae_get_project", hint: "List the project's comps." } });
@@ -1194,7 +1327,7 @@ export function buildFindings(s: ScanState): Finding[] {
   for (const name of s.skipped_comps) {
     all.push({ severity: "note", code: "comp_vanished", message: `Comp "${name}" was deleted while the scan ran and was skipped.` });
   }
-  all.push(...projectFindings(s), ...renderQueueFindings(s), ...footageFindings(s), ...layerIssueFindings(s), ...titleSafeFindings(s), ...namingFindings(s));
+  all.push(...projectFindings(s), ...renderQueueFindings(s), ...footageFindings(s), ...sequenceFindings(s), ...layerIssueFindings(s), ...titleSafeFindings(s), ...namingFindings(s));
   if (s.opts.force_eval && s.force_capped > 0) {
     all.push({
       severity: "note",
@@ -1332,6 +1465,43 @@ export function buildReport(s: ScanState, complete: boolean, slicesThisCall: num
   };
 }
 
+/** The result of scope "sequences": the footage list and the folder check, nothing else. */
+export function buildSequencesReport(s: ScanState, complete: boolean, slicesThisCall: number) {
+  const all = buildFindings(s);
+  const rep = s.sequence_report;
+  return {
+    ok: true as const,
+    scope: "sequences" as const,
+    complete,
+    ...(complete ? {} : { cursor: s.id, next: "Call ae_preflight again with this cursor to continue." }),
+    counts: countSeverities(all),
+    progress: { items_scanned: s.phase === "items" ? s.items_offset : s.items_total, items_total: s.items_total, slices_this_call: slicesThisCall },
+    footage_listed: s.footage.length,
+    sequence_footage: sequenceInputs(s).length,
+    scope_note: "Every image sequence that some comp uses; comp_ids and comp_names are not applied (that needs the layer scan, delivery scope). Only gaps between the first and last frame on disk are found.",
+    sequences: rep
+      ? {
+          checked: rep.checked,
+          with_gaps: rep.with_gaps,
+          writing: rep.writing,
+          unreadable: rep.unreadable,
+          sparse: rep.sparse,
+          short: rep.short,
+          unknown_age: rep.unknown_age,
+          incomplete: rep.incomplete,
+          rows: rep.sequences,
+          truncated: rep.truncated,
+          sequences_total: rep.sequences_total,
+          unchecked: rep.unchecked,
+          unchecked_count: rep.unchecked_count,
+          notes: rep.notes,
+          elapsed_ms: rep.elapsed_ms,
+        }
+      : null,
+    findings: all.slice(0, MAX_FINDINGS),
+  };
+}
+
 // ---------- sessions ----------
 
 const sessions = new Map<string, ScanState>();
@@ -1394,9 +1564,9 @@ const ProjectSpecSchema = z
 
 export const AePreflightSchema = z.object({
   scope: z
-    .enum(["delivery", "health"])
+    .enum(["delivery", "health", "sequences"])
     .optional()
-    .describe("delivery (default): the gate before a render, with blockers, warnings and notes. health: the scale map (counts per comp, heaviest comps, nesting, duplicate footage, huge comps, renderers) plus the same findings."),
+    .describe("delivery (default): the gate before a render, with blockers, warnings and notes. health: the scale map (counts per comp, heaviest comps, nesting, duplicate footage, huge comps, renderers) plus the same findings. sequences: only the missing-frame check of the project's image sequences (exact ranges from the folders, a sequence still being written reported as writing; no layer reads)."),
   comp_ids: z.array(z.number().int()).min(1).max(50).optional().describe("Check only these comps and the comps they nest. Default: the comps in the render queue (delivery, when the queue has items) or every comp."),
   comp_names: z.array(z.string().min(1).max(200)).min(1).max(50).optional().describe("Same as comp_ids, by name (the first comp of that name; a duplicate name is reported)."),
   force_eval: z
@@ -1409,6 +1579,9 @@ export const AePreflightSchema = z.object({
   project_spec: ProjectSpecSchema.optional(),
   top: z.number().int().min(1).max(50).optional().describe("How many of the heaviest comps health lists. Default 10."),
   max_nesting: z.number().int().min(1).max(20).optional().describe("Comps that nest more levels of comps than this are noted (health). Default 5."),
+  sequence_check: z.enum(["warn", "off"]).optional().describe("Whether to look for missing frames in image sequences (code sequence_gaps, a warning; sequence_writing for one still being written). Default warn; off skips it. Always on for scope sequences."),
+  settle_s: z.number().int().min(1).max(600).optional().describe("A sequence whose newest frame is younger than this many seconds counts as still being written. Default 30."),
+  max_ranges: z.number().int().min(1).max(200).optional().describe("Most missing-frame ranges listed per sequence (the count stays exact). Default 20."),
   cursor: z
     .string()
     .regex(/^pf_[0-9a-f]{10}$/)
@@ -1420,7 +1593,10 @@ export const AePreflightSchema = z.object({
 
 export type AePreflightArgs = z.infer<typeof AePreflightSchema>;
 
-export function normaliseOptions(args: Pick<AePreflightArgs, "scope" | "comp_ids" | "comp_names" | "force_eval" | "check_title_safe" | "title_safe" | "naming" | "project_spec" | "top" | "max_nesting">, planned_output?: string): ScanOptions {
+export function normaliseOptions(
+  args: Pick<AePreflightArgs, "scope" | "comp_ids" | "comp_names" | "force_eval" | "check_title_safe" | "title_safe" | "naming" | "project_spec" | "top" | "max_nesting"> & Partial<Pick<AePreflightArgs, "sequence_check" | "settle_s" | "max_ranges">>,
+  planned_output?: string
+): ScanOptions {
   const scope = args.scope ?? "delivery";
   return {
     scope,
@@ -1434,6 +1610,10 @@ export function normaliseOptions(args: Pick<AePreflightArgs, "scope" | "comp_ids
     top: args.top ?? 10,
     max_nesting: args.max_nesting ?? 5,
     planned_output,
+    sequence_check: args.sequence_check !== "off",
+    sequence_budget_ms: scope === "sequences" ? 8000 : 4000,
+    settle_s: args.settle_s,
+    max_ranges: args.max_ranges,
   };
 }
 
@@ -1445,6 +1625,8 @@ export interface GateOptions {
   comp_ids?: number[];
   comp_names?: string[];
   planned_output?: string;
+  /** "off": skip the missing-frame check (a render tool that runs its own). Default warn. */
+  sequence_check?: "warn" | "off";
 }
 
 export interface GateSummary {
@@ -1465,10 +1647,11 @@ export interface GateSummary {
  */
 export async function runPreflightGate(ctx: ToolContext, o: GateOptions): Promise<{ blocked: boolean; summary: GateSummary }> {
   // Items already in the queue are not the caller's concern here: the tool brings its own output (aerender's -output overrides too).
-  const opts: ScanOptions = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names, force_eval: true }, o.planned_output), check_queue_outputs: false };
+  const opts: ScanOptions = { ...normaliseOptions({ scope: "delivery", comp_ids: o.comp_ids, comp_names: o.comp_names, force_eval: true, sequence_check: o.sequence_check }, o.planned_output), check_queue_outputs: false };
   const state = newScanState(opts);
   const call = makeScanCall(ctx, o.opId, o.toolName);
   const { complete } = await runScan(state, call, { maxSlices: 300, deadline: Date.now() + 60_000 });
+  if (complete) await attachSequences(state);
   const findings = buildFindings(state);
   const counts = countSeverities(findings);
   const summary: GateSummary = {
@@ -1506,26 +1689,31 @@ export const preflightTools: ToolDefinition<any>[] = [
       "default or badly named comps, footage and layers (AE's English defaults like 'Comp 1', or your template/pattern), duplicate comp names, render-queue items without an output file or whose folder is missing, and unsaved changes. " +
       "Each finding is a blocker, warning or note with the layer/item it is on and the tool that fixes it. scope 'health' is the scale map: counts per comp, the heaviest comps, nesting depth, duplicate footage paths, huge comps, the renderer per comp, " +
       "the project's colour settings (checked against project_spec when given). It reads in slices and keeps going under a cursor, so a 5000-item project never runs one long script; if the result has a cursor, call again with it. " +
+      "Image sequences: the folders are read for missing frames (code sequence_gaps, a warning with exact ranges; a sequence still being written is sequence_writing, not a failure); scope 'sequences' runs only that check. " +
       "Expressions: by default only the error state AE already holds is read; force_eval makes AE evaluate each one first. ae_render_queue_add and ae_aerender_start take preflight: true to run this and refuse on a blocker. " +
       "Changes nothing in After Effects.",
     schema: AePreflightSchema,
     handler: async (args: AePreflightArgs, ctx: ToolContext) => {
       const opId = ctx.bridge.newOpId();
       const limits: ScanLimits = { maxSlices: args.max_slices ?? 60, deadline: Date.now() + (args.budget_ms ?? 40000) };
+      if (args.cursor === undefined && args.scope === "sequences" && args.sequence_check === "off") {
+        return { ok: false, error: "sequence_check_off", message: "scope \"sequences\" is the missing-frame check; sequence_check \"off\" would return nothing. Drop one of them." };
+      }
       try {
-        return await ctx.queue.run("ae_preflight", async () => {
+        const ran = await ctx.queue.run("ae_preflight", async () => {
           const call = makeScanCall(ctx, opId, "ae_preflight");
           let state: ScanState;
           if (args.cursor !== undefined) {
             expireSessions(Date.now());
             const stored = sessions.get(args.cursor);
             if (!stored) {
-              return { ok: false, error: "cursor_unknown", message: "No scan with that cursor (it finished, expired after 15 minutes, or the panel restarted). Start again without a cursor." };
+              return { early: { ok: false, error: "cursor_unknown", message: "No scan with that cursor (it finished, expired after 15 minutes, or the panel restarted). Start again without a cursor." } };
             }
             const here = await call<{ project_path: string }>("status", {}, "status");
-            if (stored.project && here.project_path !== stored.project.project_path) {
+            const was = stored.project ? stored.project.project_path : stored.status_path;
+            if (was !== null && here.project_path !== was) {
               sessions.delete(args.cursor);
-              return { ok: false, error: "cursor_stale", message: `The open project changed (was ${stored.project.project_path}, now ${here.project_path}). Start again without a cursor.` };
+              return { early: { ok: false, error: "cursor_stale", message: `The open project changed (was ${was}, now ${here.project_path}). Start again without a cursor.` } };
             }
             state = stored;
             state.last_used = Date.now();
@@ -1534,6 +1722,8 @@ export const preflightTools: ToolDefinition<any>[] = [
             sessions.set(state.id, state);
           } else {
             state = newScanState(normaliseOptions(args));
+            // The sequences scope reads no project info; remember which project it started on.
+            if (state.opts.scope === "sequences") state.status_path = (await call<{ project_path: string }>("status", {}, "status")).project_path;
           }
           const { complete, slices } = await runScan(state, call, limits);
           if (complete) sessions.delete(state.id);
@@ -1546,8 +1736,12 @@ export const preflightTools: ToolDefinition<any>[] = [
             sessions.delete(state.id);
             sessions.set(state.id, state);
           }
-          return buildReport(state, complete, slices);
+          return { state, complete, slices };
         });
+        if ("early" in ran) return ran.early;
+        // The folder reads need no After Effects: they run after the queue lease is released.
+        if (ran.complete) await attachSequences(ran.state);
+        return ran.state.opts.scope === "sequences" ? buildSequencesReport(ran.state, ran.complete, ran.slices) : buildReport(ran.state, ran.complete, ran.slices);
       } catch (err) {
         if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
         throw err;

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { BridgeError } from "../src/host.js";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
@@ -96,6 +97,52 @@ describe("ae_verify_render flow", () => {
     expect(calls).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyRead"]);
     expect(res).toMatchObject({ ok: true, matches: true, imported_item: null, project_changed: true });
     expect(res.checks.find((c: { what: string }) => c.what === "frames")).toMatchObject({ expected: 50, ok: true });
+  });
+
+  it("after the read of the imported render times out, the removal is still sent, as a must-send cleanup", async () => {
+    const dir = tempDir("chroma-verify-");
+    const out = path.join(dir, "edit.mov");
+    fs.writeFileSync(out, "movie");
+    const tool = createVerifyTools({ getJob: () => ({ state: "succeeded", output_path: out, comp_name: "Edit", start_frame: 0, end_frame: 49 } as any) })[0];
+    let gone = false;
+    const { ctx, calls } = fakeAe((fn) => {
+      if (fn === "verifyCompInfo") return comp;
+      if (fn === "verifyImport") return { item_id: 9 };
+      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      gone = true;
+      return { removed: 9 };
+    });
+    const real = ctx.bridge.evalRaw.bind(ctx.bridge);
+    const sent: Array<{ fn: string; mustSend: boolean | undefined }> = [];
+    let reads = 0;
+    (ctx.bridge as any).evalRaw = async (params: any) => {
+      const fn = String(params.script).slice("__chromaAe.".length, String(params.script).indexOf("("));
+      sent.push({ fn, mustSend: params.mustSend });
+      if (fn === "verifyRead" && reads++ === 0) throw new BridgeError({ kind: "timeout", message: "timed out" });
+      return real(params);
+    };
+    await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_1", expect: GUARD }), ctx);
+    expect(calls).toContain("verifyRemove");
+    expect(sent.find((x) => x.fn === "verifyRemove")).toMatchObject({ mustSend: true });
+  });
+
+  it("a removal that times out is unknown, not left: it is still queued and runs when AE answers", async () => {
+    const dir = tempDir("chroma-verify-");
+    const out = path.join(dir, "edit.mov");
+    fs.writeFileSync(out, "movie");
+    const tool = createVerifyTools({ getJob: () => ({ state: "succeeded", output_path: out, comp_name: "Edit", start_frame: 0, end_frame: 49 } as any) })[0];
+    const { ctx } = fakeAe((fn) => {
+      if (fn === "verifyCompInfo") return comp;
+      if (fn === "verifyImport") return { item_id: 9 };
+      return render({ frames: 50 });
+    });
+    const real = ctx.bridge.evalRaw.bind(ctx.bridge);
+    (ctx.bridge as any).evalRaw = async (params: any) => {
+      if (String(params.script).startsWith("__chromaAe.verifyRemove(")) throw new BridgeError({ kind: "timeout", message: "timed out" });
+      return real(params);
+    };
+    const res: any = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_1", expect: GUARD }), ctx);
+    expect(res.imported_item_state ?? res.imported_state).toBe("unknown");
   });
 
   it("refuses an unfinished job and a missing file before touching AE", async () => {

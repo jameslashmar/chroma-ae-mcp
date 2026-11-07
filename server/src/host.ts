@@ -115,6 +115,8 @@ export interface HostTransport {
     timeoutMs?: number;
     mutates?: boolean;
     toolName?: string;
+    /** Skip the busy door (cleanup after a timed-out eval). Ignored by transports without one. */
+    mustSend?: boolean;
   }): Promise<EvalSuccessResponse<T>>;
   callHost<T = unknown>(
     fn: HostFunctionName,

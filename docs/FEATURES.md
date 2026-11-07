@@ -47,7 +47,7 @@ Everything else stays in `ae_run_jsx`.
 | One tool across many comps, with a job record | ✅ (0.4) `ae_multi_comp_apply`: one whitelisted guarded write tool over comp ids, a folder, nested comps or a name pattern; an ok/skipped/failed/unverified row per comp, a frozen job in `<project>.jobs.json`, `resume_job_id`, dry run. | (done) | Our own. |
 | Project session: open, close, save policy, Auto-Save | ✅ (0.4) `ae_project_session`. A tool that closes or reopens a project tells the session tracker, so earlier undo steps are reported as gone. | (done) | |
 | Memory and cache | ✅ (0.4) `ae_memory_status`, `ae_memory_purge`: memory in use, preferences by key, purge of image, snapshot, RAM or undo caches, or all (undo, ram and all need a saved, clean project and the user's yes). | (done) | |
-| A short tool list for hosts that do not defer tool schemas (the `core` toolset) | ✅ | (done) | 32 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`, chosen per request by `X-Chroma-Toolset`; `CHROMA_AE_MCP_TOOLSET=core` on the relay sets it, and the Claude Desktop entry gets it from the panel's **Add to Claude Desktop** button (it also switches an existing entry that has no toolset; Claude Code, Cursor and Codex are registered without it). The full 179-tool list stays the default. Whether Claude Desktop defers tool schemas itself is unconfirmed, which is why this exists. See `docs/TOOLS.md`. |
+| A short tool list for hosts that do not defer tool schemas (the `core` toolset) | ✅ | (done) | 33 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`, chosen per request by `X-Chroma-Toolset`; `CHROMA_AE_MCP_TOOLSET=core` on the relay sets it, and the Claude Desktop entry gets it from the panel's **Add to Claude Desktop** button (it also switches an existing entry that has no toolset; Claude Code, Cursor and Codex are registered without it). The full 180-tool list stays the default. Whether Claude Desktop defers tool schemas itself is unconfirmed, which is why this exists. See `docs/TOOLS.md`. |
 | Panel-hosted MCP over HTTP, signed ZXP, copyable setup command, stable token | ✅ (0.2) | (done) | See `docs/V02-PANEL-MCP.md`. |
 | Save As, and Increment and Save | ✅ (0.4) `ae_save` with `save_as: { path }` (the only way to save an untitled project) or `increment: true` (the next free `name_vNNN.aep`); `save_as` overwrites only with `save_as.overwrite`, `increment` never overwrites; the session tracker is told the project moved | (done) | |
 
@@ -198,6 +198,20 @@ Built on the tracker and frame analysis in the MCP's own Node code: AE renders f
 | Make a patch match the shot's light and grain | ✅ (0.4) `ae_patch_color_match`, `ae_patch_grain`, `ae_patch_finish` | (done) | Keyed Levels or Exposure from a tracked ring; Add Grain or Match Grain tuned in rounds; sit-in blur, feather, motion blur, quality. Chunked with `continue_id`; `dry_run` measures only. |
 | Check a patch over time | ✅ (0.4) `ae_patch_check`, `ae_region_stats` | (done) | Leakage, seam, flicker, pops, drift, frozen grain, slip, sharpness; region statistics over time. A render budget per call. Thresholds were tuned on synthetic plates only. |
 | Replace a screen or sign | ✅ (0.4) `ae_screen_corners`, `ae_screen_replace` | (done) | Corners snapped to edges, aspect estimated; the insert is pinned from the track with levels and blur matched to the screen. Hands crossing the screen need the user's own roto. |
+
+## 11. Busy handling, dialogs, render pre-checks, import and layout (branch `feat/render-in-ae`, unreleased)
+
+**None of this has run in real After Effects yet.** It is built and unit-tested against fakes; `qa/LIVE-CHECKLIST.md` lists what a supervised live session has to confirm.
+
+| Capability | Status | Priority | Notes |
+|---|---|---|---|
+| Say at once that AE is busy, and why | ✅ (0.4) built, not live-tested | (done) | `ae-activity.ts` `describeBusy`: a call is refused with 'After Effects is busy' (nothing sent, nothing quarantined) and `ae_status` answers within 10 s with `ae_answered:false` and `busy` (cause, popups, how long). |
+| Say why the panel cannot be reached | ✅ (0.4) built, not live-tested | (done) | `panel/tools/relay-diagnose.cjs` (exit 0 / 2, `--json`, ten codes) and the relay's own text for a tool call; `CHROMA_AE_MCP_DIAGNOSE=off` or `quick`. Two AE versions: the first keeps port 7790, the other panel says so. |
+| Popups: default button, kind, re-read before the key | ✅ (0.4) built, not live-tested | (done) | `ae_dialogs` marks the default button and a `kind`; `ae_dialog_respond` answers an AE-painted dialog only after it was listed, re-reads it, and posts the key through `ae-dialogs.ps1 -Key`. No SendKeys tier. |
+| Pre-render checks: missing frames and GPU | ✅ (0.4) built, not live-tested | (done) | `sequence_check` (warn, off, block) and `resource_warnings` on `ae_render_queue_render`, `ae_aerender_start` and `ae_render_batch`; `ae_preflight` `scope:"sequences"`; GPU memory and other renderers under `ae_status` `detail.resources`. Windows counters only; macOS gives nothing. |
+| Import a folder or list of files, with interpretation, in one undo step | ✅ (0.4) built, not live-tested | (done) | `ae_import_assets` `paths`, `interpret`, `rules`, `target_folder_id`, `max_seconds`; now also in the core list. |
+| Interpret many footage items at once | ✅ (0.4) built, not live-tested | (done) | `ae_set_footage_interpretation` `item_ids` with `overrides`, strict by default. |
+| Read a template's layout and fill it | ✅ (0.4) built, not live-tested | (done) | `ae_describe_comp` `layout:true` and `ae_layout_apply` (regions, copies of cameras with `verified:false`). Camera copy through `Layer.copyToComp` is the least certain part. |
 
 ## The P1 slice (v0.2): done
 

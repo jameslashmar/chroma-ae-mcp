@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { ReceiptMismatch } from "../../receipts.js";
-import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ToolDefinition } from "../common.js";
+import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 // ---------- read shape ----------
@@ -262,41 +262,117 @@ const AlphaSchema = z
   .refine((a) => a.invert === undefined || a.mode !== "ignore", { message: "invert has no effect while alpha is ignored." })
   .describe("Alpha interpretation. Only for footage that has an alpha channel.");
 
+/** The interpretation settings, shared by ae_set_footage_interpretation and ae_import_assets. */
+export const InterpretShape = {
+  alpha: AlphaSchema.optional(),
+  field_separation: z.enum(FIELD_MODES).optional().describe("Field order of interlaced footage. Not for stills."),
+  high_quality_field_separation: z.boolean().optional().describe("High quality field separation. Needs field separation on."),
+  pulldown: z
+    .enum(PULLDOWN_CHOICES)
+    .optional()
+    .describe(
+      "Pulldown phase to remove ('off' removes none), or 'guess_3_2' / 'guess_24p_advance' to let AE guess (it sets the fields and frame rate itself, so run it alone). " +
+        "A phase needs field separation on; the tool sets the order fields, then pulldown, then conform rate."
+    ),
+  conform_frame_rate: z.number().min(0).max(99).optional().describe("Conform to this frame rate; 0 = the footage's own rate (not while a pulldown is removed). 29.97 footage conformed to 30 plays fast."),
+  loop: z.number().int().min(1).max(9999).optional().describe("How many times the footage loops. Not for stills."),
+  pixel_aspect: z.number().min(0.01).max(100).optional().describe("Pixel aspect ratio, 1 = square."),
+};
+
+export interface InterpretSettings {
+  alpha?: { mode?: (typeof ALPHA_MODES)[number]; premul_color?: number[]; invert?: boolean };
+  field_separation?: (typeof FIELD_MODES)[number];
+  high_quality_field_separation?: boolean;
+  pulldown?: (typeof PULLDOWN_CHOICES)[number];
+  conform_frame_rate?: number;
+  loop?: number;
+  pixel_aspect?: number;
+}
+
+export const INTERPRET_KEYS = Object.keys(InterpretShape) as Array<keyof InterpretSettings>;
+
+const hasAnySetting = (v: InterpretSettings) => INTERPRET_KEYS.some((k) => v[k] !== undefined);
+const GUESS_MESSAGE = "A pulldown 'guess' sets the fields and frame rate itself; run it alone, then adjust in a second call.";
+const guessNotAlone = (v: InterpretSettings) =>
+  (v.pulldown === "guess_3_2" || v.pulldown === "guess_24p_advance") &&
+  (v.field_separation !== undefined || v.high_quality_field_separation !== undefined || v.conform_frame_rate !== undefined);
+
+/** Settings that one item or one import can take as a whole: at least one, and a guess alone. */
+export const InterpretSettingsSchema = z
+  .object(InterpretShape)
+  .strict()
+  .refine(hasAnySetting, { message: "Give at least one setting." })
+  .refine((v) => !guessNotAlone(v as InterpretSettings), { message: GUESS_MESSAGE });
+
+/** The settings in effect for one item: the shared ones, each field replaced by the item's override. */
+export function mergeInterpret(shared: InterpretSettings, override?: InterpretSettings): InterpretSettings {
+  const out: Record<string, unknown> = {};
+  for (const k of INTERPRET_KEYS) if (shared[k] !== undefined) out[k] = shared[k];
+  if (override) for (const k of INTERPRET_KEYS) if (override[k] !== undefined) out[k] = override[k];
+  return out as InterpretSettings;
+}
+
+// An override is item_id plus any of the settings. The schema stays loose so the published tool text does not
+// repeat every setting a second time (that was +1.3k characters on a core tool); the settings are checked in superRefine.
+const OverrideSchema = z.object({ item_id: z.number().int() }).passthrough();
+
+type SetShape = InterpretSettings & {
+  item_id?: number;
+  item_ids?: number[];
+  overrides?: Array<InterpretSettings & { item_id: number }>;
+  strict?: boolean;
+};
+
+/** Everything wrong with a set call's shape, as messages. Empty when it is fine. */
+function setProblems(v: SetShape): string[] {
+  const out: string[] = [];
+  if ((v.item_id === undefined) === (v.item_ids === undefined)) out.push("Give exactly one of item_id and item_ids.");
+  if (v.item_id !== undefined) {
+    if (v.overrides !== undefined || v.strict !== undefined) out.push("overrides and strict go with item_ids.");
+    if (!hasAnySetting(v)) out.push("Give at least one setting to change.");
+    if (guessNotAlone(v)) out.push(GUESS_MESSAGE);
+    return out;
+  }
+  const ids = v.item_ids ?? [];
+  if (new Set(ids).size !== ids.length) out.push("item_ids lists an item twice.");
+  const ov = new Map<number, InterpretSettings>();
+  for (const o of v.overrides ?? []) {
+    if (ov.has(o.item_id)) out.push(`overrides lists item ${o.item_id} twice.`);
+    if (!ids.includes(o.item_id)) out.push(`overrides names item ${o.item_id}, which is not in item_ids.`);
+    ov.set(o.item_id, o);
+  }
+  if (guessNotAlone(v)) out.push(GUESS_MESSAGE);
+  for (const id of ids) {
+    const merged = mergeInterpret(v, ov.get(id));
+    if (!hasAnySetting(merged)) out.push(`Item ${id} has no setting: give shared settings or an override for it.`);
+    else if (guessNotAlone(merged)) out.push(`Item ${id}: ${GUESS_MESSAGE}`);
+  }
+  return out;
+}
+
 export const AeSetFootageInterpretationSchema = z
   .object({
-    item_id: z.number().int().describe("Project item id of the footage (from a file; not a solid or placeholder)."),
-    alpha: AlphaSchema.optional(),
-    field_separation: z.enum(FIELD_MODES).optional().describe("Field order of interlaced footage. Not for stills."),
-    high_quality_field_separation: z.boolean().optional().describe("High quality field separation. Needs field separation on."),
-    pulldown: z
-      .enum(PULLDOWN_CHOICES)
-      .optional()
-      .describe(
-        "Pulldown phase to remove ('off' removes none), or 'guess_3_2' / 'guess_24p_advance' to let AE guess (it sets the fields and frame rate itself, so run it alone). " +
-          "A phase needs field separation on; the tool sets the order fields, then pulldown, then conform rate."
-      ),
-    conform_frame_rate: z.number().min(0).max(99).optional().describe("Conform to this frame rate; 0 = the footage's own rate (not while a pulldown is removed). 29.97 footage conformed to 30 plays fast."),
-    loop: z.number().int().min(1).max(9999).optional().describe("How many times the footage loops. Not for stills."),
-    pixel_aspect: z.number().min(0.01).max(100).optional().describe("Pixel aspect ratio, 1 = square."),
+    item_id: z.number().int().optional().describe("Project item id of the footage (from a file; not a solid or placeholder). One item; for many use item_ids."),
+    item_ids: z.array(z.number().int()).min(1).max(200).optional().describe("Many items, one undo step; the settings below apply to each."),
+    ...InterpretShape,
+    overrides: z.array(OverrideSchema).max(200).optional().describe("With item_ids: {item_id, ...settings} per item, replacing the shared value (alpha whole)."),
+    strict: z.boolean().optional().describe("With item_ids, default true: one item that can't take its settings refuses all. false: write the rest."),
     expect: ExpectSchema,
   })
-  .refine(
-    (v) =>
-      v.alpha !== undefined ||
-      v.field_separation !== undefined ||
-      v.high_quality_field_separation !== undefined ||
-      v.pulldown !== undefined ||
-      v.conform_frame_rate !== undefined ||
-      v.loop !== undefined ||
-      v.pixel_aspect !== undefined,
-    { message: "Give at least one setting to change." }
-  )
-  .refine(
-    (v) =>
-      !(v.pulldown === "guess_3_2" || v.pulldown === "guess_24p_advance") ||
-      (v.field_separation === undefined && v.high_quality_field_separation === undefined && v.conform_frame_rate === undefined),
-    { message: "A pulldown 'guess' sets the fields and frame rate itself; run it alone, then adjust in a second call." }
-  );
+  .superRefine((v, ctx) => {
+    // Overrides are loose in the schema; each one is checked here as the settings it carries.
+    let bad = false;
+    for (const o of (v.overrides ?? []) as Array<{ item_id: number } & Record<string, unknown>>) {
+      const { item_id, ...rest } = o;
+      const parsed = InterpretSettingsSchema.safeParse(rest);
+      if (!parsed.success) {
+        bad = true;
+        for (const issue of parsed.error.issues) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Override for item ${item_id}: ${issue.message}` });
+      }
+    }
+    if (bad) return;
+    for (const message of setProblems(v as unknown as SetShape)) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  });
 
 export const AeFootageProxySchema = z
   .object({
@@ -333,7 +409,7 @@ type ProxyArgs = z.infer<typeof AeFootageProxySchema>;
 
 const sameColor = (a: number[] | undefined, b: number[]) => !!a && a.length >= 3 && b.every((v, i) => Math.abs(a[i] - v) <= 1e-3);
 
-export function interpretMismatches(args: SetArgs, beforeRaw: unknown, afterRaw: unknown): ReceiptMismatch[] {
+export function interpretMismatches(args: InterpretSettings & { item_id: number }, beforeRaw: unknown, afterRaw: unknown): ReceiptMismatch[] {
   const m: ReceiptMismatch[] = [];
   const before = itemOf(readOf(beforeRaw), args.item_id);
   const after = itemOf(readOf(afterRaw), args.item_id);
@@ -431,7 +507,145 @@ export function proxyMismatches(args: ProxyArgs, beforeRaw: unknown, afterRaw: u
 
 // ---------- tools ----------
 
-const readCall = (itemIds: number[]) => ({ host: "interpretRead", args: { item_ids: itemIds, include_render_queue: false } });
+const readCall = (itemIds: number[], compact = false) => ({ host: "interpretRead", args: { item_ids: itemIds, include_render_queue: false, ...(compact ? { compact: true } : {}) } });
+
+interface BatchHostResult extends Record<string, unknown> {
+  refused?: boolean;
+  no_op?: boolean;
+  strict?: boolean;
+  rejected?: Array<{ item_id: number; name?: string; reason: string }>;
+  failed?: Array<{ item_id: number; name?: string; message: string; restored?: boolean; expected?: unknown; actual?: unknown }>;
+  changed_items?: Array<{ item_id: number; name?: string; changed: string[] }>;
+  no_change_items?: Array<{ item_id: number; name?: string }>;
+}
+
+const BATCH_ROWS = 100;
+const BATCH_MISMATCHES = 50;
+
+function setOne(args: SetArgs & { item_id: number }, ctx: ToolContext) {
+  return runGuardedWrite(ctx, {
+    toolName: "ae_set_footage_interpretation",
+    label: `ae_set_footage_interpretation(${args.item_id})`,
+    expect: args.expect,
+    read: () => readCall([args.item_id]),
+    write: {
+      host: "interpretApply",
+      args: {
+        item_id: args.item_id,
+        alpha: args.alpha,
+        field_separation: args.field_separation,
+        high_quality_field_separation: args.high_quality_field_separation,
+        pulldown: args.pulldown,
+        conform_frame_rate: args.conform_frame_rate,
+        loop: args.loop,
+        pixel_aspect: args.pixel_aspect,
+        label: "Interpret footage",
+      },
+    },
+    check: (before, after) => interpretMismatches(args, before, after),
+    present: (_before, after, w) => {
+      const item = itemOf(readOf(after), args.item_id);
+      return { item_id: args.item_id, changed: w.changed, no_change: w.no_change, item, findings: item ? interpretationFindings(item) : [] };
+    },
+  });
+}
+
+const rejectedReply = (rejected: BatchHostResult["rejected"]) => ({
+  ok: false as const,
+  error: "interpretation_rejected",
+  applied: false as const,
+  message: `${(rejected ?? []).length} item(s) can't take these settings, so nothing was written. Fix them, drop them from item_ids, or pass strict: false to write the others.`,
+  rejected: (rejected ?? []).slice(0, BATCH_ROWS),
+  rejected_total: (rejected ?? []).length,
+  rejected_truncated: (rejected ?? []).length > BATCH_ROWS,
+});
+
+const RECEIPT_FULL_READS = 20;
+
+/** Above 20 items the receipt keeps the reads of the items that have a mismatch only, with the count: 200 full reads were 158 KB. */
+function trimBatchReceipt<T>(result: T, requested: number): T {
+  const r = result as unknown as { receipt?: { before?: unknown; after?: unknown; mismatches?: Array<{ path: string }> } };
+  const receipt = r.receipt;
+  if (!receipt || requested <= RECEIPT_FULL_READS) return result;
+  const bad = new Set<number>();
+  for (const mm of receipt.mismatches ?? []) {
+    const hit = /^items\[(\d+)\]/.exec(mm.path);
+    if (hit) bad.add(Number(hit[1]));
+  }
+  const shrink = (v: unknown) => {
+    const read = readOf(v);
+    if (!read) return v;
+    return { items_read: read.items.length, items: read.items.filter((i) => bad.has(i.id)), trimmed: true };
+  };
+  return { ...r, receipt: { ...receipt, before: shrink(receipt.before), after: shrink(receipt.after) } } as unknown as T;
+}
+
+/** Many items in one undo step. Strict (default): one refusal writes nothing, and costs no checkpoint. */
+async function setBatch(args: SetArgs, ctx: ToolContext) {
+  const ids = [...new Set(args.item_ids ?? [])];
+  const overrides = new Map<number, InterpretSettings>((args.overrides ?? []).map((o) => [o.item_id, o as unknown as InterpretSettings]));
+  const settings = new Map<number, InterpretSettings>(ids.map((id) => [id, mergeInterpret(args, overrides.get(id))]));
+  const items = ids.map((id) => ({ item_id: id, ...settings.get(id) }));
+  const strict = args.strict !== false;
+  const hostArgs = { items, strict, label: "Interpret footage (batch)" };
+  if (strict) {
+    // Plan everything first with no write: a refusal costs no checkpoint and no undo step.
+    const plan = await ctx.bridge.callHost<BatchHostResult>(
+      "interpretBatch",
+      { ...hostArgs, plan_only: true, expect: args.expect },
+      { label: `ae_set_footage_interpretation(${ids.length} items, plan)`, mutates: false, toolName: "ae_set_footage_interpretation" }
+    );
+    if (plan.result.refused) return rejectedReply(plan.result.rejected);
+  }
+  const result = await runGuardedWrite<BatchHostResult>(ctx, {
+    toolName: "ae_set_footage_interpretation",
+    label: `ae_set_footage_interpretation(${ids.length} items)`,
+    expect: args.expect,
+    read: () => readCall(ids, true),
+    write: { host: "interpretBatch", args: hostArgs },
+    check: (before, after, w) => {
+      const m: ReceiptMismatch[] = [];
+      let more = 0;
+      for (const row of [...(w.changed_items ?? []), ...(w.no_change_items ?? [])]) {
+        const found = interpretMismatches({ item_id: row.item_id, ...settings.get(row.item_id) }, before, after);
+        for (const x of found) {
+          if (m.length < BATCH_MISMATCHES) m.push({ ...x, path: `items[${row.item_id}].${x.path}` });
+          else more++;
+        }
+      }
+      // A write that threw is a mismatch too: the receipt must not read green over footage the call touched.
+      for (const f of w.failed ?? []) {
+        m.push({
+          path: `items[${f.item_id}]`,
+          expected: "the settings applied",
+          actual: f.restored === false ? "failed and NOT fully put back" : "failed and put back",
+          message: `${f.name ?? `item ${f.item_id}`}: ${f.message}`,
+        });
+      }
+      if (more > 0) m.push({ path: "items", expected: "no more mismatches", actual: more, message: `${more} more mismatch(es) not listed (the first ${BATCH_MISMATCHES} are shown)` });
+      return m;
+    },
+    present: (_before, after, w) => {
+      if (w.refused) return { ...rejectedReply(w.rejected), applied: false };
+      const read = readOf(after);
+      const changed = w.changed_items ?? [];
+      const rejected = w.rejected ?? [];
+      const failed = w.failed ?? [];
+      return {
+        batch: true,
+        summary: { requested: ids.length, changed: changed.length, no_change: (w.no_change_items ?? []).length, rejected: rejected.length, failed: failed.length },
+        items: changed.slice(0, BATCH_ROWS).map((c) => ({ ...c, item: itemOf(read, c.item_id) ? { alpha_mode: itemOf(read, c.item_id)?.alpha_mode, conform_frame_rate: itemOf(read, c.item_id)?.conform_frame_rate } : undefined })),
+        items_truncated: changed.length > BATCH_ROWS,
+        rejected: rejected.slice(0, BATCH_ROWS),
+        rejected_truncated: rejected.length > BATCH_ROWS,
+        failed: failed.slice(0, BATCH_ROWS),
+        failed_truncated: failed.length > BATCH_ROWS,
+        no_op: w.no_op === true,
+      };
+    },
+  });
+  return trimBatchReceipt(result, ids.length);
+}
 
 export const interpretTools: ToolDefinition<any>[] = [
   {
@@ -476,35 +690,11 @@ export const interpretTools: ToolDefinition<any>[] = [
       "Set a footage item's interpretation without the dialog, in one undo group guarded by `expect`: alpha (ignore, straight, premultiplied with matte colour, invert, or AE's guess), field separation and high quality, pulldown removal (a phase, or AE's 3:2 / 24p advance guess), conform frame rate, loop and pixel aspect. " +
       "Everything is checked before After Effects is touched: stills, items without alpha or video, missing files, ranges, and the order rules (a pulldown needs fields on, conform 0 needs the pulldown off). The writes then run in dependency order (fields, then pulldown, then conform), and if one throws the old values are put back. " +
       "The read-back (a separate evalScript) checks each setting and that loop, pixel aspect, alpha, fields, pulldown, conform rate and the proxy switch you did not ask for stayed as they were (conform 0 may read back as the native rate: both are accepted); the result lists `findings` for the item afterwards. " +
-      "Guessing (alpha or pulldown) chooses values by looking at the footage: the receipt shows what it chose. Per-footage colour profiles are not scriptable. " +
+      "Guessing (alpha or pulldown) chooses values by looking at the footage: the receipt shows what it chose. Per-footage colour profiles are not scriptable (only the project's working space is: ae_project_settings). " +
+      "Many items (20 or more): item_ids (up to 200) with the same settings, and overrides for the odd ones, is ONE undo step and one receipt. By default (strict) every item is checked first and one that can't take its settings refuses the whole call with the list, writing nothing; strict: false writes the rest and lists rejected. An item whose write throws is put back and listed under failed; the others stay. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeSetFootageInterpretationSchema,
-    handler: (args: SetArgs, ctx) =>
-      runGuardedWrite(ctx, {
-        toolName: "ae_set_footage_interpretation",
-        label: `ae_set_footage_interpretation(${args.item_id})`,
-        expect: args.expect,
-        read: () => readCall([args.item_id]),
-        write: {
-          host: "interpretApply",
-          args: {
-            item_id: args.item_id,
-            alpha: args.alpha,
-            field_separation: args.field_separation,
-            high_quality_field_separation: args.high_quality_field_separation,
-            pulldown: args.pulldown,
-            conform_frame_rate: args.conform_frame_rate,
-            loop: args.loop,
-            pixel_aspect: args.pixel_aspect,
-            label: "Interpret footage",
-          },
-        },
-        check: (before, after) => interpretMismatches(args, before, after),
-        present: (_before, after, w) => {
-          const item = itemOf(readOf(after), args.item_id);
-          return { item_id: args.item_id, changed: w.changed, no_change: w.no_change, item, findings: item ? interpretationFindings(item) : [] };
-        },
-      }),
+    handler: (args: SetArgs, ctx) => (args.item_ids ? setBatch(args, ctx) : setOne({ ...args, item_id: args.item_id as number }, ctx)),
   },
   {
     name: "ae_footage_proxy",

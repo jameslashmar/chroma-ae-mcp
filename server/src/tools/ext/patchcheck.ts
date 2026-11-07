@@ -1815,6 +1815,7 @@ async function runWithPlateCopy<P, T>(ctx: ToolContext, spec: PlateCopySpec<P, T
         script: buildJsxCall("patchcheckEnd", { copy_id: copyId, expect }),
         label: `${spec.label} (remove copy)`,
         mutates: true,
+        mustSend: true,
         toolName: spec.toolName,
       });
       removed = (end.result as { removed?: boolean } | undefined)?.removed === true;

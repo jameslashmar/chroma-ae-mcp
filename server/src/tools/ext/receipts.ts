@@ -567,6 +567,7 @@ export const AUTO_CHECKPOINT_TOOLS = [
   "ae_text_backdrop",
   "ae_stagger",
   "ae_stagger_layout",
+  "ae_layout_apply",
   "ae_time_remap",
   "ae_camera_rig",
   "ae_explain_layer_proof",

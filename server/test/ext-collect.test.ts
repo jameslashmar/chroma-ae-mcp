@@ -232,7 +232,9 @@ describe("names and sequences", () => {
     const s = makeScene();
     const r = await resolveSource(s.entries[2].file, true);
     expect(r.files).toHaveLength(4);
-    expect(r.frames).toEqual({ count: 4, first: 1, last: 5, gaps: 1 });
+    expect(r.frames).toMatchObject({ count: 4, first: 1, last: 5, gaps: 1 });
+    // The exact range of the gap (frame 4 is the one missing), padded the way the files are.
+    expect(r.frames).toMatchObject({ missing_ranges: [[4, 4]], ranges_truncated: false, digits: 4 });
     expect((await resolveSource(path.join(s.root, "nope.mov"), false)).error).toMatch(/not on disk/);
   });
 });
@@ -550,6 +552,8 @@ describe("ae_collect_files", () => {
     expect(out.total_bytes).toBe(8200 + 3000);
     expect(out.placeholders).toHaveLength(1);
     expect(out.sequences_with_gaps).toHaveLength(1);
+    // Exact ranges as well as the count (frame 0004 is the one missing), padded the way the files are; the old count stays.
+    expect(out.sequences_with_gaps[0]).toMatchObject({ missing_frames: 1, first: 1, last: 5, missing_ranges: [[4, 4]], missing_text: "0004" });
     expect(out.not_collected.length).toBeGreaterThan(0);
     expect(fs.existsSync(s.dest)).toBe(false);
     expect(calls.every((c) => ["collectState", "collectFootage"].includes(c.fn))).toBe(true);

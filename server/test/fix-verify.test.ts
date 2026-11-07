@@ -118,7 +118,7 @@ describe("imported item is cleaned up (C90)", () => {
     expect(res.message).toMatch(/item 9 \(kept\)/);
   });
 
-  it("skips the cleanup after a timeout and names the leftover item", async () => {
+  it("still sends the cleanup after a timeout (it waits for AE), and names the item when it cannot be confirmed gone", async () => {
     const calls: string[] = [];
     const queue = new SingleWriterQueue();
     const quarantine = new QuarantineStore(path.join(tempDir("chroma-fixverify-q-"), "quarantine.json"));
@@ -134,8 +134,9 @@ describe("imported item is cleaned up (C90)", () => {
       quarantine,
     });
     const res: any = await tool.handler(AeVerifyRenderSchema.parse({ path: movie(), comp_id: 1, expect: GUARD }), { bridge: host, queue, quarantine } as ToolContext);
-    expect(calls).not.toContain("verifyRemove");
-    expect(res).toMatchObject({ ok: false, error: "read_failed", imported_item: 9, imported_item_state: "left" });
+    expect(calls).toContain("verifyRemove");
+    // AE still does not answer the check that the item is gone: its state is unknown and the item is named.
+    expect(res).toMatchObject({ ok: false, error: "read_failed", imported_item: 9, imported_item_state: "unknown" });
   });
 
   it("returns the checks and reports the item when the removal fails after a good read", async () => {

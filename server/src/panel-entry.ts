@@ -113,6 +113,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     queue,
     quarantine,
     describeDialogs: describeBlockingDialogs,
+    serviceInfo: opts.serviceInfo,
   });
   const ctx: ToolContext = {
     bridge: host,

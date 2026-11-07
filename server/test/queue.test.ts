@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { QueueWaitError, SingleWriterQueue } from "../src/queue.js";
 
 describe("SingleWriterQueue", () => {
@@ -79,5 +79,90 @@ describe("SingleWriterQueue", () => {
 
     releaseFirst();
     await expect(p1).resolves.toBe("done");
+  });
+});
+
+describe("SingleWriterQueue: who holds it and for how long", () => {
+  it("snapshot names the holder, since when, and the depth", async () => {
+    const queue = new SingleWriterQueue({ maxWaitMs: 5000 });
+    expect(queue.snapshot()).toEqual({ holder: null, holderSince: null, depth: 0 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const before = Date.now();
+    const p1 = queue.run("op1", () => gate);
+    const p2 = queue.run("op2", async () => {});
+    const snap = queue.snapshot();
+    expect(snap.holder).toBe("op1");
+    expect(snap.holderSince).toBeGreaterThanOrEqual(before);
+    expect(snap.depth).toBe(1);
+    release();
+    await Promise.all([p1, p2]);
+    expect(queue.snapshot()).toEqual({ holder: null, holderSince: null, depth: 0 });
+  });
+
+  it("the wait error says how long the holder has been running", async () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new SingleWriterQueue({ maxWaitMs: 9 * 60_000 });
+      void queue.run("ae_export_mogrt", () => new Promise<void>(() => {}));
+      const waiting = queue.run("ae_get_comp", async () => {});
+      const caught = waiting.catch((e) => e);
+      await vi.advanceTimersByTimeAsync(9 * 60_000 + 1);
+      const err = (await caught) as QueueWaitError;
+      expect(err).toBeInstanceOf(QueueWaitError);
+      expect(err.message).toContain('behind "ae_export_mogrt" (running 9 min)');
+      expect(err.behindRunningMs).toBeGreaterThanOrEqual(9 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("SingleWriterQueue: the wait guard", () => {
+  it("refuses a waiter the guard objects to, drops it from the queue, and leaves the holder alone", async () => {
+    const queue = new SingleWriterQueue({ maxWaitMs: 5000 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const holder = queue.run("holder", () => gate);
+    queue.setWaitGuard(async (op) => (op === "waiter" ? new Error("popup is open") : null));
+    let ran = false;
+    const waiter = queue.run("waiter", async () => {
+      ran = true;
+    });
+    await expect(waiter).rejects.toThrow("popup is open");
+    expect(ran).toBe(false);
+    expect(queue.depth).toBe(0);
+    expect(queue.inFlight).toBe("holder");
+    // An operation the guard lets through still waits its turn.
+    const ok = queue.run("fine", async () => "done");
+    release();
+    await holder;
+    await expect(ok).resolves.toBe("done");
+  });
+
+  it("is not asked when nothing has to wait", async () => {
+    const queue = new SingleWriterQueue();
+    let asked = 0;
+    queue.setWaitGuard(async () => {
+      asked++;
+      return null;
+    });
+    await queue.run("alone", async () => {});
+    expect(asked).toBe(0);
+  });
+
+  it("a guard that throws does not refuse anyone", async () => {
+    const queue = new SingleWriterQueue();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const holder = queue.run("holder", () => gate);
+    queue.setWaitGuard(async () => {
+      throw new Error("probe failed");
+    });
+    const next = queue.run("next", async () => "ran");
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await holder;
+    await expect(next).resolves.toBe("ran");
   });
 });

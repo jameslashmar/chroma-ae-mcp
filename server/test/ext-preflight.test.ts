@@ -9,6 +9,7 @@ import type { ToolContext } from "../src/tools/common.js";
 import { createAerenderTools } from "../src/tools/ext/aerender.js";
 import {
   AePreflightSchema,
+  attachSequences,
   buildFindings,
   buildNameChecker,
   clearPreflightSessions,
@@ -34,6 +35,8 @@ import {
   type ProjectInfo,
 } from "../src/tools/ext/preflight.js";
 import { renderTools } from "../src/tools/render.js";
+import { nodeSeqIo, seqscanDeps } from "../src/seqscan.js";
+import { makeSequence, useOldFiles } from "./support/seq-fixtures.js";
 import {
   FakeGroup,
   FakeProperty,
@@ -1308,5 +1311,273 @@ describe("preflight.jsx glyph coverage and layer kinds", () => {
       ["Mesh", "parametric_mesh"],
       ["Model", "model_3d"],
     ]);
+  });
+});
+
+// ---------- image sequences ----------
+
+describe("ae_preflight: missing frames in image sequences", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+  const seqWorld = (opts: { skip?: number[]; ageS?: number; extra?: Partial<FootageInfo>; name?: string } = {}) => {
+    const first = makeSequence(fs.mkdtempSync(path.join(os.tmpdir(), "chroma-pfseq-")), { skip: opts.skip ?? [7, 8, 12] });
+    tmpDirs.push(path.dirname(first));
+    const old = useOldFiles(opts.ageS ?? 3600);
+    restore = old.restore;
+    const h = world({
+      comps: [{ info: comp(1, "Main"), layers: ["BG"] }],
+      footage: [footage(2, opts.name ?? "A_beauty.[0001-0020].exr", { file: first, used_in: [1], sequence: true, ae_frames: 20, ...opts.extra })],
+    });
+    return { h, first, old };
+  };
+  const run = (ctx: ToolContext, args: Record<string, unknown> = {}) => tool.handler(AePreflightSchema.parse({ comp_ids: [1], check_title_safe: false, ...args }), ctx) as Promise<any>;
+
+  it("adds sequence_gaps (a warning, never a blocker) with the exact ranges", async () => {
+    const { h } = seqWorld();
+    const { ctx } = fakeAe(h);
+    const r = await run(ctx);
+    const f = find(r, "sequence_gaps");
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("warning");
+    expect(f[0].message).toContain('"A_beauty.[0001-0020].exr": 3 frames missing between 1 and 20 (0007-0008, 0012)');
+    expect(f[0].where).toMatchObject({ item_id: 2 });
+    expect(f[0].fix?.tool).toBe("ae_replace_footage");
+    expect(r.counts.blocker).toBe(0);
+    expect(r.verdict).toBe("warnings");
+  });
+
+  it("reports a sequence still being written as writing, with the gaps flagged as maybe not there yet", async () => {
+    const { h } = seqWorld({ ageS: 3 });
+    const { ctx } = fakeAe(h);
+    const r = await run(ctx);
+    expect(codes(r)).not.toContain("sequence_gaps");
+    const f = find(r, "sequence_writing");
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("warning");
+    expect(f[0].message).toMatch(/still being written/);
+    expect(f[0].message).toMatch(/3 frames below the highest written frame are not there yet.*out of order/);
+    // no gaps and fresh: only a note
+    restore?.();
+    const clean = seqWorld({ ageS: 3, skip: [] });
+    const r2 = await run(fakeAe(clean.h).ctx);
+    expect(find(r2, "sequence_writing")[0].severity).toBe("note");
+    expect(r2.counts.warning).toBe(0);
+  });
+
+  it("a footage file that is missing stays footage_missing and is not repeated as a sequence finding", async () => {
+    const { h } = seqWorld({ extra: { missing: true } });
+    const r = await run(fakeAe(h).ctx);
+    expect(codes(r)).toContain("footage_missing");
+    expect(codes(r).filter((c) => c.startsWith("sequence_"))).toEqual([]);
+  });
+
+  it("a sequence only comps outside the check use is left alone", async () => {
+    const { h } = seqWorld({ extra: { used_in: [99] } });
+    const r = await run(fakeAe(h).ctx);
+    expect(codes(r).filter((c) => c.startsWith("sequence_"))).toEqual([]);
+  });
+
+  it("sequence_check off reads no folder", async () => {
+    const { h, old } = seqWorld();
+    const r = await run(fakeAe(h).ctx, { sequence_check: "off" });
+    expect(codes(r)).not.toContain("sequence_gaps");
+    expect(old.log.readdir).toEqual([]);
+  });
+
+  it("reads the folders after the queue lease is released", async () => {
+    const { h } = seqWorld();
+    const f = fakeAe(h);
+    let held: boolean | null = null;
+    const before = seqscanDeps.io;
+    seqscanDeps.io = { ...before, readdir: async (d) => ((held = f.ctx.queue.inFlight !== null), nodeSeqIo.readdir(d)) };
+    try {
+      await run(f.ctx);
+    } finally {
+      seqscanDeps.io = before;
+    }
+    expect(held).toBe(false);
+  });
+
+  it("scope sequences lists only the footage: no project, no layer reads, rows with exact ranges", async () => {
+    const { h } = seqWorld();
+    const f = fakeAe(h);
+    const r = await run(f.ctx, { scope: "sequences" });
+    const fns = f.calls.map((c) => c.fn);
+    expect(fns).not.toContain("preflightLayers");
+    expect(fns).not.toContain("preflightProject");
+    expect(fns).toContain("preflightItems");
+    expect(r).toMatchObject({ ok: true, scope: "sequences", complete: true, sequence_footage: 1 });
+    expect(r.sequences).toMatchObject({ checked: 1, with_gaps: 1 });
+    expect(r.sequences.rows[0]).toMatchObject({ pattern: "A_beauty.[####].exr", first: 1, last: 20, on_disk: 17, missing: 3, missing_ranges: [[7, 8], [12, 12]], missing_text: "0007-0008, 0012", state: "gaps" });
+    expect(r.scope_note).toMatch(/comp_ids and comp_names are not applied/);
+  });
+
+  it("scope sequences applies max_ranges and settle_s", async () => {
+    const { h } = seqWorld({ skip: [3, 5, 7, 9], ageS: 40 });
+    const r = await run(fakeAe(h).ctx, { scope: "sequences", max_ranges: 2, settle_s: 60 });
+    const row = r.sequences.rows[0];
+    expect(row.missing).toBe(4);
+    expect(row.missing_ranges).toHaveLength(2);
+    expect(row.ranges_truncated).toBe(true);
+    expect(row.state).toBe("writing"); // 40 s old, settle_s 60
+  });
+
+  it("the gate carries the finding as a warning and still passes; sequence_check off skips it", async () => {
+    const { h } = seqWorld();
+    const gate = await runPreflightGate(fakeAe(h).ctx, { toolName: "ae_render_queue_add", opId: "op_s", comp_ids: [1] });
+    expect(gate.blocked).toBe(false);
+    expect(gate.summary.warnings.map((w) => w.code)).toContain("sequence_gaps");
+    restore?.();
+    const off = seqWorld();
+    const gate2 = await runPreflightGate(fakeAe(off.h).ctx, { toolName: "ae_aerender_start", opId: "op_t", comp_ids: [1], sequence_check: "off" });
+    expect(gate2.summary.warnings.map((w) => w.code)).not.toContain("sequence_gaps");
+    expect(off.old.log.readdir).toEqual([]);
+  });
+
+  it("an unreadable folder is a warning and does not throw", async () => {
+    const h = world({ comps: [{ info: comp(1, "Main"), layers: ["BG"] }], footage: [footage(2, "gone", { file: path.join(os.tmpdir(), "chroma-no-such-dir", "A.0001.exr"), used_in: [1], sequence: true })] });
+    const r = await run(fakeAe(h).ctx);
+    expect(find(r, "sequence_unreadable")[0]).toMatchObject({ severity: "warning" });
+    expect(find(r, "sequence_unreadable")[0].message).toMatch(/folder not found/);
+  });
+
+  it("attachSequences never throws", async () => {
+    const state = newScanState(normaliseOptions({}));
+    state.footage = [footage(2, "x", { file: "C:/x/A.0001.exr", used_in: [1], sequence: true })];
+    state.seen.add(1);
+    const before = seqscanDeps.io;
+    seqscanDeps.io = {
+      ...before,
+      readdir: async () => {
+        throw new Error("EIO");
+      },
+    };
+    try {
+      await expect(attachSequences(state)).resolves.toBeUndefined();
+    } finally {
+      seqscanDeps.io = before;
+    }
+    expect(buildFindings(state).some((f) => f.code === "sequence_unreadable")).toBe(true);
+  });
+});
+
+describe("preflight.jsx: image sequences", () => {
+  type Any = any;
+  it("preflightItems marks image sequences and gives AE's frame count; movies, stills and missing files stay out", () => {
+    const proj = new FakeProject() as Any;
+    proj.file = { fsName: "C:/Projects/Demo.aep" };
+    const mk = (name: string, file: string, extra: Record<string, unknown> = {}, source: Any = new FileSource()) => {
+      const f = proj.addFootage(name, 100, 100, source) as Any;
+      f.file = { fsName: file };
+      Object.assign(f, extra);
+      return f;
+    };
+    mk("beauty", "C:/r/A_beauty.0001.exr", { duration: 4, frameRate: 25 });
+    mk("plate", "C:/m/plate.mov", { duration: 4, frameRate: 25 });
+    mk("logo", "C:/m/logo_01.png", { duration: 0, frameRate: 0 }, Object.assign(new FileSource(), { isStill: true }));
+    mk("lost", "C:/r/B.0001.exr", { footageMissing: true, duration: 4, frameRate: 25 });
+    mk("tiff", "C:/r/C_0001.tif", { duration: 0, frameRate: 0 });
+    mk("numbered", "C:/r/D_0001.ext", { duration: 2, frameRate: 25 });
+    const { A } = loadHost(proj, ["preflight.jsx"]);
+    const byName = Object.fromEntries(A.preflightItems({ offset: 0, limit: 50 }).footage.map((f: Any) => [f.name, f]));
+    expect(byName.beauty).toMatchObject({ sequence: true, ae_frames: 100 });
+    expect(byName.plate.sequence).toBe(false);
+    expect(byName.plate.ae_frames).toBeUndefined();
+    expect(byName.logo.sequence).toBe(false);
+    expect(byName.lost.sequence).toBeUndefined();
+    expect(byName.tiff.sequence).toBe(true);
+    expect(byName.tiff.ae_frames).toBeUndefined(); // zero duration: no guess
+    expect(byName.numbered).toMatchObject({ sequence: true, ae_frames: 50 });
+  });
+});
+
+// ---------- repair round ----------
+
+describe("ae_preflight sequences: repair round", () => {
+  let restore2: (() => void) | null = null;
+  afterEach(() => {
+    restore2?.();
+    restore2 = null;
+  });
+  const oneSeq = (opts: { skip?: number[]; ageS?: number; extra?: Partial<FootageInfo> } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-pfseq2-"));
+    tmpDirs.push(dir);
+    const first = makeSequence(dir, { skip: opts.skip ?? [7] });
+    const old = useOldFiles(opts.ageS ?? 3600);
+    restore2 = old.restore;
+    const h = world({ comps: [{ info: comp(1, "Main"), layers: ["BG"] }], footage: [footage(2, "plate", { file: first, used_in: [1], sequence: true, ...opts.extra })] });
+    return { h, dir, first };
+  };
+  const go = (ctx: ToolContext, args: Record<string, unknown> = {}) => tool.handler(AePreflightSchema.parse({ comp_ids: [1], check_title_safe: false, ...args }), ctx) as Promise<any>;
+
+  it("a folder a running aerender job is filling is writing, not gaps (liveDirs)", async () => {
+    const { h, dir } = oneSeq();
+    const before = seqscanDeps.liveDirs;
+    seqscanDeps.liveDirs = () => [dir];
+    try {
+      const r = await go(fakeAe(h).ctx);
+      expect(codes(r)).not.toContain("sequence_gaps");
+      expect(find(r, "sequence_writing")[0].message).toMatch(/render started by this server/);
+    } finally {
+      seqscanDeps.liveDirs = before;
+    }
+    const plain = oneSeq();
+    expect(codes(await go(fakeAe(plain.h).ctx))).toContain("sequence_gaps");
+  });
+
+  it("scope sequences with sequence_check off is refused, not answered with clean counts", async () => {
+    const { h } = oneSeq();
+    const f = fakeAe(h);
+    const r = await go(f.ctx, { scope: "sequences", sequence_check: "off" });
+    expect(r).toMatchObject({ ok: false, error: "sequence_check_off" });
+    expect(f.calls).toEqual([]);
+  });
+
+  it("a stored sequences scan is dropped when another project is open", async () => {
+    // 200 footage items: two item pages, so a one-slice call leaves a cursor.
+    const items = Array.from({ length: 200 }, (_, i) => footage(100 + i, `f${i}.mov`, { file: `C:/media/f${i}.mov`, used_in: [1] }));
+    const h = world({ comps: [{ info: comp(1, "Main"), layers: ["BG"] }], footage: items });
+    let open = "C:/Projects/Demo.aep";
+    h.status = () => ({ project_path: open });
+    const f = fakeAe(h);
+    const first = await go(f.ctx, { scope: "sequences", max_slices: 1 });
+    expect(first.complete).toBe(false);
+    open = "C:/Projects/Other.aep";
+    const second = await tool.handler(AePreflightSchema.parse({ cursor: first.cursor }), f.ctx);
+    expect(second).toMatchObject({ ok: false, error: "cursor_stale" });
+    // the same project continues
+    open = "C:/Projects/Demo.aep";
+    const again = await go(f.ctx, { scope: "sequences", max_slices: 1 });
+    const done = (await tool.handler(AePreflightSchema.parse({ cursor: again.cursor }), f.ctx)) as any;
+    expect(done.ok).toBe(true);
+  });
+
+  it("new findings: sparse is a note, short and unknown are warnings, an unmatched name is a not-checked note", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-pfseq3-"));
+    tmpDirs.push(dir);
+    const every2 = makeSequence(path.join(dir, "a"), { prefix: "S.", from: 1, to: 40, skip: Array.from({ length: 20 }, (_, i) => i * 2 + 2) });
+    const shortFirst = makeSequence(path.join(dir, "b"), { prefix: "T.", from: 1, to: 30 });
+    const text = path.join(dir, "c", "shot_0001_beauty.exr");
+    fs.mkdirSync(path.dirname(text), { recursive: true });
+    fs.writeFileSync(text, "x");
+    const old = useOldFiles();
+    restore2 = old.restore;
+    const h = world({
+      comps: [{ info: comp(1, "Main"), layers: ["BG"] }],
+      footage: [
+        footage(2, "every2", { file: every2, used_in: [1], sequence: true, ae_frames: 20 }),
+        footage(3, "shortone", { file: shortFirst, used_in: [1], sequence: true, ae_frames: 90 }),
+        footage(4, "beauty", { file: text, used_in: [1], sequence: true }),
+      ],
+    });
+    const r = await go(fakeAe(h).ctx);
+    expect(find(r, "sequence_sparse")[0]).toMatchObject({ severity: "note" });
+    expect(find(r, "sequence_short")[0]).toMatchObject({ severity: "warning", confidence: "low" });
+    expect(find(r, "sequence_short")[0].message).toMatch(/counts about 90 frames but the folder holds 1-30/);
+    expect(codes(r)).not.toContain("sequence_gaps");
+    expect(find(r, "sequence_not_checked")[0]).toMatchObject({ severity: "note", count: 1 });
   });
 });

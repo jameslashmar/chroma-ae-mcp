@@ -77,7 +77,14 @@ export class FakeFile {
 
 export class ImportOptions {
   sequence = false;
+  /** True like a cautious default: a script that wants numbered order has to say so. */
+  forceAlphabetical = true;
   constructor(public file: FakeFile) {}
+  /** True unless a test lists the file name in `ImportOptions.refuse`. */
+  canImportAs(_type: unknown) {
+    return !ImportOptions.refuse.some((n) => this.file.fsName.includes(n));
+  }
+  static refuse: string[] = [];
 }
 
 export class CompItem {}
@@ -149,9 +156,11 @@ export class FakeProperty {
   keyValue(i: number) {
     return this.k(i).value;
   }
+  /** Set for a layer's own properties: .value follows the comp's current time, as AE's does. */
+  clock?: () => number;
   get value() {
     this.live();
-    return this.keys.length ? this.valueAtTime(0, false) : this.staticValue;
+    return this.keys.length ? this.valueAtTime(this.clock ? this.clock() : 0, false) : this.staticValue;
   }
   setValue(v: unknown) {
     this.live();
@@ -461,6 +470,13 @@ export class FakeLayer {
       );
     }
     this.group = new FakeGroup(name, "ADBE AV Layer", props);
+    const clockAll = (g: FakeGroup) => {
+      for (const c of g.props) {
+        if (c instanceof FakeGroup) clockAll(c);
+        else c.clock = () => comp.time;
+      }
+    };
+    clockAll(this.group);
     this.bindMattes();
   }
   private bindMattes() {
@@ -532,8 +548,23 @@ export class FakeLayer {
   transform(name: string) {
     return (this.group.property("ADBE Transform Group") as FakeGroup).property(name) as FakeProperty;
   }
-  sourceRectAtTime() {
-    return { ...this.rect };
+  /** A test can give the box a time: left / top / width / height at t (text that grows, a shape that animates). */
+  rectAt?: (t: number) => { left: number; top: number; width: number; height: number };
+  /** Honours its arguments: the time picks the box when a test set rectAt. */
+  sourceRectAtTime(t = 0, _extents = false) {
+    return this.rectAt ? { ...this.rectAt(t) } : { ...this.rect };
+  }
+  /** Splits Position into X and Y (ADBE Position_0 / _1); ADBE Position keeps reading as one value. */
+  separatePosition() {
+    const tr = this.group.property("ADBE Transform Group") as FakeGroup;
+    const pos = tr.property("ADBE Position") as FakeProperty & { dimensionsSeparated?: boolean };
+    pos.dimensionsSeparated = true;
+    const v = pos.staticValue as number[];
+    for (const [name, mn, val] of [["X Position", "ADBE Position_0", v[0]], ["Y Position", "ADBE Position_1", v[1]]] as Array<[string, string, number]>) {
+      const q = new FakeProperty(name, mn, PropertyValueType.OneD, val);
+      q.parentProperty = tr;
+      tr.props.push(q);
+    }
   }
   private move(to: number) {
     const s = this.comp.stack;
@@ -548,6 +579,36 @@ export class FakeLayer {
   }
   moveToEnd() {
     this.move(this.comp.stack.length - 1);
+  }
+  moveToBeginning() {
+    this.move(0);
+  }
+  /** Layer.copyToComp: a new layer on top of `dest` with this one's transform values and camera options. */
+  copyToComp(dest: FakeComp) {
+    const copy = new FakeLayer(dest, this.name, this.reflect.name);
+    copy.source = this.source;
+    copy.rect = { ...this.rect };
+    copy.enabled = this.enabled;
+    copy.threeDLayer = this.threeDLayer;
+    (copy as any).autoOrient = (this as any).autoOrient;
+    for (const n of ["Anchor Point", "Position", "Scale", "Rotation", "Opacity"]) {
+      const from = this.transform(n);
+      const to = copy.transform(n);
+      to.staticValue = local(from.staticValue);
+      to.keys = from.keys.map((k) => ({ ...k, value: local(k.value) }));
+    }
+    const cam = this.group.property("ADBE Camera Options Group") as FakeGroup | null;
+    if (cam) {
+      const made = new FakeGroup(cam.name, cam.matchName, cam.props.map((p) => {
+        const q = p as FakeProperty;
+        const made2 = new FakeProperty(q.name, q.matchName, q.propertyValueType, local(q.staticValue));
+        made2.keys = q.keys.map((k) => ({ ...k, value: local(k.value) }));
+        return made2;
+      }));
+      made.parentProperty = copy.group;
+      copy.group.props.push(made);
+    }
+    dest.stack.unshift(copy);
   }
   remove() {
     this.comp.stack = this.comp.stack.filter((l) => l !== this);
@@ -744,10 +805,15 @@ export class FakeProject {
   /** app.project.items: only addComp (name, w, h, pixel aspect, duration, frame rate). */
   items = {
     addComp: (name: string, w: number, h: number, _pa: number, dur: number, fps: number) => {
+      // AE's own ranges: 4..30000 px, 1..99 fps, a duration above 0 and at most 3 hours.
+      if (!(w >= 4 && w <= 30000 && h >= 4 && h <= 30000)) throw new Error(`Unable to call "addComp": width and height must be 4 to 30000 (got ${w} x ${h})`);
+      if (!(fps >= 1 && fps <= 99)) throw new Error(`Unable to call "addComp": frame rate must be 1 to 99 (got ${fps})`);
+      if (!(dur > 0 && dur <= 10800)) throw new Error(`Unable to call "addComp": duration must be above 0 and at most 10800 (got ${dur})`);
       const c = this.addComp(name, w, h, dur);
       c.frameRate = fps;
       return c;
     },
+    addFolder: (name: string) => this.addFolder(name),
   };
   constructor() {
     this.rootFolder = new FakeFolder(this, "Root");

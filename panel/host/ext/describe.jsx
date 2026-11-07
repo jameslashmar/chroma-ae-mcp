@@ -6,6 +6,9 @@
 //   presence and the layer names they mention, markers, and the keyframed
 //   segments (start, end, from, to, overshoot) the server clusters into beats.
 //   It also returns the comp's own markers and how precomps nest.
+//   With layout: true each layer also gets its comp-space box, masks, flags,
+//   source kind and camera data, and the comp gets a list of regions (mask
+//   boxes, guide layers, placeholders). Still read-only.
 //
 // Rules:
 // - ES3 only: no let, const, class, arrow functions, template strings, or chained ternaries.
@@ -42,6 +45,11 @@
   var MAX_NEST_DEPTH = 4;
   var TEXT_PREVIEW = 120;
   var COMMENT_MAX = 200;
+  var MAX_REGIONS = 100;
+  var DEFAULT_MASKS = 20;
+  var MAX_MASKS = 50;
+  // Masks listed in one page, over all its layers: keeps the reply under the output bound.
+  var MAX_PAGE_MASKS = 400;
 
   function fail(kind, message) {
     var e = new Error(message);
@@ -563,7 +571,312 @@
     return node;
   }
 
-  // args: { comp_id, from_layer?, max_layers? }. Layers from_layer ..
+  // ---------- layout (layout: true) ----------
+
+  // Layer space to comp space for an unparented 2D layer at time t:
+  // position * rotation * scale * (-anchor). Reads only.
+  function layerMatrix(l, t) {
+    var tr = l.property("ADBE Transform Group");
+    var an = tr.property("ADBE Anchor Point").valueAtTime(t, false);
+    var po = tr.property("ADBE Position").valueAtTime(t, false);
+    var sc = tr.property("ADBE Scale").valueAtTime(t, false);
+    var ro = tr.property("ADBE Rotate Z").valueAtTime(t, false);
+    var rad = (ro * Math.PI) / 180;
+    var cs = Math.cos(rad);
+    var sn = Math.sin(rad);
+    var a = (cs * sc[0]) / 100;
+    var b = (-sn * sc[1]) / 100;
+    var d = (sn * sc[0]) / 100;
+    var e = (cs * sc[1]) / 100;
+    return { a: a, b: b, c: po[0] - (a * an[0] + b * an[1]), d: d, e: e, f: po[1] - (d * an[0] + e * an[1]) };
+  }
+
+  // The box [x, y, width, height] of layer-space points once placed in the comp.
+  function boxOfPoints(m, pts) {
+    var x0 = 1e12;
+    var y0 = 1e12;
+    var x1 = -1e12;
+    var y1 = -1e12;
+    for (var i = 0; i < pts.length; i++) {
+      var x = m.a * pts[i][0] + m.b * pts[i][1] + m.c;
+      var y = m.d * pts[i][0] + m.e * pts[i][1] + m.f;
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+    return [r2(x0), r2(y0), r2(x1 - x0), r2(y1 - y0)];
+  }
+
+  function maskModeName(m) {
+    if (m === MaskMode.NONE) return "none";
+    if (m === MaskMode.ADD) return "add";
+    if (m === MaskMode.SUBTRACT) return "subtract";
+    if (m === MaskMode.INTERSECT) return "intersect";
+    if (m === MaskMode.LIGHTEN) return "lighten";
+    if (m === MaskMode.DARKEN) return "darken";
+    if (m === MaskMode.DIFFERENCE) return "difference";
+    return String(m);
+  }
+
+  function anyTangent(list) {
+    if (!list) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i]) continue;
+      if (Math.abs(list[i][0]) > 1e-6 || Math.abs(list[i][1]) > 1e-6) return true;
+    }
+    return false;
+  }
+
+  // One mask: every property is looked up again from the mask group by index.
+  function readMask(l, i, m, t, lay) {
+    var rec = { name: "", mode: "", inverted: false, locked: false, vertices: 0, rect: null };
+    var mk = null;
+    try { mk = l.property("ADBE Mask Parade").property(i); } catch (e0) { mk = null; }
+    if (!mk) {
+      rec.name = "Mask " + i;
+      return rec;
+    }
+    try { rec.name = clip(mk.name, 200); } catch (e1) {}
+    try { rec.mode = maskModeName(mk.maskMode); } catch (e2) {}
+    try { rec.inverted = mk.inverted === true; } catch (e3) {}
+    try { rec.locked = mk.locked === true; } catch (e4) {}
+    var shapeProp = null;
+    try { shapeProp = l.property("ADBE Mask Parade").property(i).property("ADBE Mask Shape"); } catch (e5) { shapeProp = null; }
+    if (shapeProp) {
+      var shape = null;
+      try {
+        if (shapeProp.numKeys > 0) rec.animated = true;
+      } catch (e6) {}
+      try { shape = shapeProp.valueAtTime(t, false); } catch (e7) { shape = null; }
+      if (shape && shape.vertices) {
+        rec.vertices = shape.vertices.length;
+        try { rec.closed = shape.closed === true; } catch (e8) {}
+        if (m && rec.vertices > 0) {
+          try {
+            rec.rect = boxOfPoints(m, shape.vertices);
+            if (anyTangent(shape.inTangents) || anyTangent(shape.outTangents)) rec.rect_approx = true;
+          } catch (e9) {
+            rec.rect = null;
+          }
+        } else if (rec.vertices > 0) {
+          rec.rect_reason = lay.rectReason;
+        }
+      }
+    }
+    try {
+      var fe = l.property("ADBE Mask Parade").property(i).property("ADBE Mask Feather").valueAtTime(t, false);
+      rec.feather = [r2(fe[0]), r2(fe[1])];
+    } catch (e10) {}
+    return rec;
+  }
+
+  var CAMERA_PROPS = [
+    ["ADBE Transform Group", "ADBE Position", "position"],
+    ["ADBE Transform Group", "ADBE Point of Interest", "point_of_interest"],
+    ["ADBE Transform Group", "ADBE Orientation", "orientation"],
+    ["ADBE Transform Group", "ADBE Rotate X", "x_rotation"],
+    ["ADBE Transform Group", "ADBE Rotate Y", "y_rotation"],
+    ["ADBE Transform Group", "ADBE Rotate Z", "z_rotation"],
+    ["ADBE Camera Options Group", "ADBE Camera Zoom", "zoom"],
+    ["ADBE Camera Options Group", "ADBE Camera Focus Distance", "focus_distance"],
+    ["ADBE Camera Options Group", "ADBE Camera Aperture", "aperture"]
+  ];
+
+  function roundList(v) {
+    var out = [];
+    for (var i = 0; i < v.length; i++) out.push(r3(v[i]));
+    return out;
+  }
+
+  // The point of interest's match name is documented nowhere (docs/HANDOVER.md):
+  // try "ADBE Point of Interest", then the camera's Anchor Point stream, as camera.jsx does.
+  function poiProp(l) {
+    var tr = null;
+    var p = null;
+    try { tr = l.property("ADBE Transform Group"); } catch (e0) { return null; }
+    try { p = tr.property("ADBE Point of Interest"); } catch (e1) { p = null; }
+    if (p) return p;
+    try { p = tr.property("ADBE Anchor Point"); } catch (e2) { p = null; }
+    return p;
+  }
+
+  // Two nodes is the layer's auto-orient, not whether a POI property was found.
+  function twoNodeOf(l, hasPoi) {
+    try {
+      if (typeof AutoOrientType !== "undefined") {
+        return l.autoOrient === AutoOrientType.CAMERA_OR_POINT_OF_INTEREST;
+      }
+    } catch (e) {}
+    return hasPoi === true;
+  }
+
+  function readCamera(l, t) {
+    var cam = { keyed_properties: [] };
+    var i;
+    var pr;
+    for (i = 0; i < CAMERA_PROPS.length; i++) {
+      pr = null;
+      if (CAMERA_PROPS[i][2] === "point_of_interest") pr = poiProp(l);
+      else {
+        try { pr = l.property(CAMERA_PROPS[i][0]).property(CAMERA_PROPS[i][1]); } catch (e0) { pr = null; }
+      }
+      if (!pr) continue;
+      var name = CAMERA_PROPS[i][2];
+      try {
+        var v = pr.valueAtTime(t, false);
+        if (name === "zoom") cam.zoom = r3(v);
+        else if (name === "position" || name === "point_of_interest") cam[name] = roundList(v);
+      } catch (e1) {}
+      try {
+        if (pr.numKeys > 0) cam.keyed_properties.push(name);
+      } catch (e2) {}
+    }
+    cam.two_node = twoNodeOf(l, cam.point_of_interest !== undefined);
+    return cam;
+  }
+
+  function sourceLayout(l) {
+    var src = null;
+    try { src = l.source; } catch (e0) { src = null; }
+    if (!src) return null;
+    var out = { kind: "footage" };
+    try { out.width = src.width; out.height = src.height; } catch (e1) {}
+    try {
+      if (src instanceof CompItem) {
+        out.kind = "comp";
+        return out;
+      }
+    } catch (e2) {}
+    var ms = null;
+    try { ms = src.mainSource; } catch (e3) { ms = null; }
+    try {
+      if (ms instanceof SolidSource) {
+        out.kind = "solid";
+        return out;
+      }
+    } catch (e4) {}
+    try {
+      if (ms instanceof PlaceholderSource) {
+        out.kind = "placeholder";
+        return out;
+      }
+    } catch (e5) {}
+    try {
+      if (src.footageMissing === true) out.kind = "missing";
+    } catch (e6) {}
+    return out;
+  }
+
+  // Everything layout: true adds to one layer's row. Reads only; every read is guarded.
+  function readLayerLayout(l, rec, lay) {
+    var out = { flags: {}, rect: null };
+    var t = lay.time;
+    out.flags.enabled = rec.enabled === true;
+    out.flags.shy = rec.shy === true;
+    out.flags.guide = rec.guide === true;
+    out.flags.locked = rec.locked === true;
+    out.flags.solo = rec.solo === true;
+    out.flags.three_d = rec.three_d === true;
+    out.flags.null_layer = false;
+    out.flags.adjustment = false;
+    try { out.flags.null_layer = l.nullLayer === true; } catch (e0) {}
+    try { out.flags.adjustment = l.adjustmentLayer === true; } catch (e1) {}
+    var sl = sourceLayout(l);
+    if (sl) out.source = sl;
+
+    var reason = null;
+    if (rec.role === "camera") reason = "camera";
+    else if (rec.role === "light") reason = "light";
+    else if (rec.three_d === true) reason = "3d";
+    else if (rec.parent !== null) reason = "parented";
+    var m = null;
+    if (reason === null) {
+      try {
+        m = layerMatrix(l, t);
+        var r = l.sourceRectAtTime(t, false);
+        out.rect = boxOfPoints(m, [[r.left, r.top], [r.left + r.width, r.top], [r.left, r.top + r.height], [r.left + r.width, r.top + r.height]]);
+      } catch (e2) {
+        out.rect = null;
+        reason = "no source rect";
+      }
+    }
+    if (out.rect === null) {
+      out.rect_reason = reason;
+      lay.rectsUnavailable++;
+    }
+    lay.rectReason = reason;
+
+    if (rec.role === "camera") out.camera = readCamera(l, t);
+
+    var mg = null;
+    try { mg = l.property("ADBE Mask Parade"); } catch (e3) { mg = null; }
+    var total = 0;
+    if (mg) {
+      try { total = mg.numProperties; } catch (e4) { total = 0; }
+    }
+    out.masks = [];
+    out.masks_total = total;
+    var i;
+    for (i = 1; i <= total && i <= lay.maxMasks; i++) {
+      if (lay.masksLeft <= 0) {
+        lay.masksTruncated = true;
+        break;
+      }
+      lay.masksLeft--;
+      out.masks.push(readMask(l, i, m, t, lay));
+    }
+    if (total > lay.maxMasks) lay.masksTruncated = true;
+    return out;
+  }
+
+  var DEFAULT_MASK_NAME = /^Mask \d+$/;
+
+  // Regions a template holds: boxes of masks (on layers that are not mattes),
+  // guide layers and placeholder-sourced layers. Built from the layer rows.
+  function buildRegions(rows) {
+    var regions = [];
+    var seen = {};
+    var truncated = false;
+    function add(reg) {
+      var key = reg.layer.id + ":" + reg.rect.join(",");
+      if (seen[key] === true) return;
+      seen[key] = true;
+      if (regions.length >= MAX_REGIONS) {
+        truncated = true;
+        return;
+      }
+      regions.push(reg);
+    }
+    var i;
+    var j;
+    var row;
+    var lay;
+    var mk;
+    for (i = 0; i < rows.length; i++) {
+      row = rows[i];
+      lay = row.layout;
+      if (!lay) continue;
+      var ref = { index: row.index, id: row.id, name: row.name };
+      for (j = 0; j < lay.masks.length; j++) {
+        mk = lay.masks[j];
+        if (!mk.rect) continue;
+        if (row.is_matte === true && DEFAULT_MASK_NAME.test(mk.name)) continue;
+        var nm = mk.name;
+        if (DEFAULT_MASK_NAME.test(mk.name)) nm = row.name + " / " + mk.name;
+        var reg = { name: nm, rect: mk.rect, from: "mask", layer: ref, mask: mk.name };
+        if (mk.rect_approx === true) reg.rect_approx = true;
+        add(reg);
+      }
+      if (lay.rect) {
+        if (lay.flags.guide === true) add({ name: row.name, rect: lay.rect, from: "guide_layer", layer: ref });
+        if (lay.source && lay.source.kind === "placeholder") add({ name: row.name, rect: lay.rect, from: "placeholder", layer: ref });
+      }
+    }
+    return { list: regions, truncated: truncated };
+  }
+
+  // args: { comp_id, from_layer?, max_layers?, layout?, layout_time?, max_masks_per_layer? }. Layers from_layer ..
   // from_layer + max_layers - 1 (default 200, at most 500 per call; from_layer
   // can be any layer of the comp) get the full read. The parent / matte
   // cross-references are a separate, cheaper pass over the first
@@ -631,6 +944,17 @@
       markers_truncated: false
     };
 
+    var lay = null;
+    if (args.layout === true) {
+      var lt = 0;
+      try { lt = c.time; } catch (eLt) { lt = 0; }
+      if (args.layout_time !== undefined && args.layout_time !== null) lt = args.layout_time;
+      var mm = DEFAULT_MASKS;
+      if (args.max_masks_per_layer !== undefined && args.max_masks_per_layer !== null && args.max_masks_per_layer > 0) mm = Math.floor(args.max_masks_per_layer);
+      if (mm > MAX_MASKS) mm = MAX_MASKS;
+      lay = { time: lt, maxMasks: mm, rectsUnavailable: 0, masksTruncated: false, rectReason: null, masksLeft: MAX_PAGE_MASKS };
+    }
+
     var layers = [];
     for (i = from; i <= to; i++) {
       var l = c.layer(i);
@@ -689,6 +1013,13 @@
       if (si) rec.source = si;
       readLayerMarkers(l, rec, ctx);
       readAnimation(l, rec, ctx);
+      if (lay) {
+        try {
+          rec.layout = readLayerLayout(l, rec, lay);
+        } catch (eLay) {
+          rec.layout_error = clip(eLay.message || eLay, 200);
+        }
+      }
       layers.push(rec);
     }
     for (i = 0; i < layers.length; i++) {
@@ -722,7 +1053,10 @@
     var next = null;
     if (to < total) next = to + 1;
 
-    return {
+    var regionsOut = null;
+    if (lay) regionsOut = buildRegions(layers);
+
+    var result = {
       comp: {
         id: c.id,
         name: clip(c.name, 200),
@@ -752,5 +1086,11 @@
       nesting_truncated: nest.truncated,
       properties_visited: ctx.visited
     };
+    if (lay) {
+      result.layout = { time: r3(lay.time), rects_unavailable: lay.rectsUnavailable, masks_truncated: lay.masksTruncated };
+      result.regions = regionsOut.list;
+      result.regions_truncated = regionsOut.truncated;
+    }
+    return result;
   };
 })($.global);

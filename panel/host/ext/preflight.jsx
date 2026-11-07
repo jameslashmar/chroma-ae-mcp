@@ -91,6 +91,34 @@
     return "footage";
   }
 
+  // A footage file that is an image sequence: not a still, not a known single-file
+  // container, a known image format or a name that ends in a frame number. Same
+  // rule as collect.jsx looksLikeSequence.
+  var SEQ_MOVIE_EXT = {
+    mov: 1, mp4: 1, m4v: 1, mxf: 1, avi: 1, mkv: 1, webm: 1, wmv: 1, flv: 1, f4v: 1, mpg: 1, mpeg: 1, mpe: 1, mpv: 1, m1v: 1, m2v: 1,
+    m2p: 1, m2t: 1, m2ts: 1, mts: 1, ts: 1, vob: 1, dv: 1, mod: 1, tod: 1, "3gp": 1, "3g2": 1, mj2: 1, r3d: 1, braw: 1, crm: 1,
+    amc: 1, c4d: 1, gif: 1, swf: 1, glb: 1, gltf: 1, obj: 1,
+    wav: 1, aif: 1, aiff: 1, mp3: 1, aac: 1, m4a: 1, flac: 1, ogg: 1, wma: 1, ac3: 1, bwf: 1, m2a: 1, mpa: 1, mp2: 1
+  };
+  var SEQ_IMAGE_EXT = {
+    png: 1, jpg: 1, jpeg: 1, tif: 1, tiff: 1, tga: 1, bmp: 1, exr: 1, dpx: 1, cin: 1, hdr: 1, sgi: 1, rgb: 1, bw: 1, iff: 1,
+    rla: 1, rpf: 1, pct: 1, pict: 1, pxr: 1, dng: 1, cr2: 1, nef: 1, arw: 1, jp2: 1, j2k: 1, ari: 1, psd: 1, webp: 1
+  };
+
+  function looksLikeSequence(source, filePath) {
+    var still = true;
+    try {
+      still = source.isStill === true;
+    } catch (e0) {}
+    if (still) return false;
+    var m = /\.([A-Za-z0-9]+)$/.exec(String(filePath));
+    if (m === null) return false;
+    var extName = m[1].toLowerCase();
+    if (SEQ_MOVIE_EXT[extName] === 1) return false;
+    if (SEQ_IMAGE_EXT[extName] === 1) return true;
+    return /[0-9]\.[A-Za-z0-9]+$/.test(String(filePath));
+  }
+
   function layerKind(l) {
     var reflectName = "";
     try {
@@ -279,6 +307,19 @@
           } catch (e3) {}
         }
         try { e.missing = it.footageMissing === true; } catch (e4) {}
+        // sequence: an image sequence on disk (the server reads its folder for gaps); ae_frames: duration * frame rate, a guess at the frames AE built.
+        if (kind === "footage" && e.file && !e.missing) {
+          var seqSource = null;
+          try { seqSource = it.mainSource; } catch (e9) {}
+          e.sequence = false;
+          try { e.sequence = looksLikeSequence(seqSource, e.file); } catch (e10) {}
+          if (e.sequence) {
+            try {
+              var nFrames = it.duration * it.frameRate;
+              if (isFinite(nFrames) && nFrames > 0) e.ae_frames = Math.round(nFrames);
+            } catch (e11) {}
+          }
+        }
         try {
           var ps = it.proxySource;
           if (ps) {

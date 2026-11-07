@@ -1022,6 +1022,59 @@ async function main() {
     check("ae_footage_proxy (clear)", okWrite(r), why(r));
   }
 
+  // ---------- busy handling, dialogs, render pre-checks, import and layout (unreleased; first live run) ----------
+  // Scratch project only: main() refuses to start on anything else. Nothing here opens a popup or starts a render.
+  {
+    // Many items in one undo step (two stills; pixel aspect is the one setting a still can take).
+    const impDir = path.join(MEDIA, "imp");
+    fs.mkdirSync(impDir, { recursive: true });
+    const impOne = path.join(impDir, "imp_one.png");
+    const impTwo = path.join(impDir, "imp_two.png");
+    fs.writeFileSync(impOne, Buffer.from(RED_PNG, "base64"));
+    fs.writeFileSync(impTwo, Buffer.from(BLUE_PNG, "base64"));
+    // The importer waits for a file to age (2 s) before it counts as written.
+    await sleep(2500);
+
+    r = await call("ae_import_footage", { paths: [path.join(MEDIA, "a.png"), path.join(MEDIA, "b.png")], expect });
+    const BATCH = r.item_ids ?? [];
+    check("ae_import_footage (for the batch interpretation steps)", r.applied && BATCH.length === 2, `items ${BATCH.join(", ")}`);
+    r = await call("ae_set_footage_interpretation", { item_ids: BATCH, pixel_aspect: 2, expect });
+    check("ae_set_footage_interpretation (item_ids: two items, one undo step)", okWrite(r) && r.batch === true && r.summary?.requested === 2, `${JSON.stringify(r.summary)}; ${why(r)}`);
+    r = await call("ae_set_footage_interpretation", { item_ids: BATCH, pixel_aspect: 1, overrides: [{ item_id: BATCH[1], pixel_aspect: 1 }], expect });
+    check("ae_set_footage_interpretation (item_ids, put back, with an override)", okWrite(r) && r.batch === true, `${JSON.stringify(r.summary)}; ${why(r)}`);
+    r = await call("ae_set_footage_interpretation", { item_ids: BATCH, loop: 2, expect });
+    check("ae_set_footage_interpretation (item_ids: loop on stills refuses all, writes nothing)", refused(r) && r.error === "interpretation_rejected" && !r.checkpoint, why(r).slice(0, 120));
+
+    // Import by paths with interpretation in the same undo step; dry run first, then write, then nothing left to import.
+    r = await call("ae_import_assets", { paths: [impOne, impTwo], interpret: { pixel_aspect: 2 }, dry_run: true, expect });
+    check("ae_import_assets (paths, dry run)", r.ok && r.to_import?.length === 2, `${r.to_import?.length} to import`);
+    r = await call("ae_import_assets", { paths: [impOne, impTwo], interpret: { pixel_aspect: 2 }, rules: [{ match: { name_glob: "imp_two*" }, interpret: { pixel_aspect: 1 } }], expect });
+    check("ae_import_assets (paths, interpret and a rule)", r.ok && r.imported?.length === 2 && r.receipt?.matches === true, `${r.imported?.length} imported into ${r.bin}; ${cpNote(r)}; ${why(r)}`);
+    r = await call("ae_import_assets", { paths: [impOne, impTwo], dry_run: true, expect });
+    check("ae_import_assets (paths: files already in the project are skipped)", r.ok && r.to_import?.length === 0, `${r.to_import?.length} left`);
+
+    // Pre-render sequence check on its own: reads the footage list and the folders, changes nothing.
+    r = await call("ae_preflight", { scope: "sequences" });
+    check("ae_preflight (scope sequences)", r.ok !== false && r.scope === "sequences" && r.sequences !== undefined, `${r.verdict ?? ""}`);
+
+    // Layout: a master comp, one typed rectangle region filled with a footage item. Dry run changes nothing.
+    const master = await call("ae_create_comp", { mode: "new", name: "smoke_layout", width: 640, height: 360, fps: 25, duration: 2, unique_name: true, expect });
+    const LAYOUT = master.comps?.[0]?.id;
+    check("ae_create_comp (target for ae_layout_apply)", master.applied === true && typeof LAYOUT === "number", why(master));
+    const regionsArg = [{ name: "Smoke Panel A", rect: [0, 0, 320, 180], content: { footage_id: BATCH[0] } }];
+    r = await call("ae_layout_apply", { comp_id: LAYOUT, regions: regionsArg, dry_run: true, expect });
+    const layersAfterDry = (await call("ae_describe_comp", { comp_id: LAYOUT })).comp?.num_layers;
+    check("ae_layout_apply (dry run: the plan, nothing written)", r.ok === true && r.dry_run === true && r.plan?.regions?.length === 1 && layersAfterDry === 0, `${JSON.stringify(r.plan?.regions?.[0]?.layer_rect)}; layers ${layersAfterDry}`);
+    r = await call("ae_layout_apply", { comp_id: LAYOUT, regions: regionsArg, expect });
+    check("ae_layout_apply (a typed rect region, written)", okWrite(r) && r.placed?.length === 1 && r.placed[0].name === "Smoke Panel A", `${cpNote(r)}; ${why(r)}`);
+    r = await call("ae_layout_apply", { comp_id: LAYOUT, regions: [{ name: "Smoke Panel A", rect: [0, 0, 100, 100], content: { footage_id: BATCH[1] } }, { name: "Smoke Panel A", rect: [100, 0, 100, 100], content: { footage_id: BATCH[1] } }], dry_run: true, expect });
+    check("ae_layout_apply (a duplicate region name is refused)", refused(r), why(r).slice(0, 120));
+
+    // The template read that ae_layout_apply works from.
+    r = await call("ae_describe_comp", { comp_id: LAYOUT, layout: true, include_layers: true });
+    check("ae_describe_comp (layout: true)", r.ok === true && r.layout !== undefined && Array.isArray(r.regions) && r.layers?.some((l) => l.layout !== undefined), `${r.regions?.length} region(s); ${r.layers?.length} layer(s)`);
+  }
+
   // ---------- wave 3: legibility (Wave Legibility: two overlapping texts) ----------
   {
     for (const n of ["Leg A", "Leg B"]) await call("ae_set_text", { comp_id: W.leg, layer: { name: n }, style: { fontSize: 60, fillColor: [1, 1, 1] }, expect });

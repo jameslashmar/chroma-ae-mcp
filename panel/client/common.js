@@ -45,6 +45,44 @@
     return path.normalize(p);
   }
 
+  function normaliseHostPath(raw) {
+    var p = fileUrlToNativePath(raw);
+    return p ? p : null;
+  }
+
+  // "Adobe After Effects 2026" / "(Beta)" in a path -> "2026" / "Beta"; null when the path says neither.
+  function aeLabelFromPath(p) {
+    var m = /Adobe After Effects\s*(\(Beta\)|Beta|\d{4})/i.exec(String(p || ""));
+    if (!m) return null;
+    return /beta/i.test(m[1]) ? "Beta" : m[1];
+  }
+
+  // AE 26.x -> "2026", 25.x -> "2025"; null for anything else.
+  function aeLabelFromVersion(v) {
+    var m = /^(\d{2})\./.exec(String(v || "").trim());
+    return m ? String(2000 + parseInt(m[1], 10)) : null;
+  }
+
+  // Who this service is, for /health, owner.json and ae_diagnostics. Pure. env: getHostEnvironment()'s
+  // result; hostPath: getHostPath() (may be null). The pid is the service's own process (the CEP engine
+  // that runs this extension), not AfterFX.exe: it is an instance id. No user or machine names.
+  function buildInstanceInfo(env, hostPath, port, paths, extra) {
+    var e = env && typeof env === "object" ? env : {};
+    var x = extra && typeof extra === "object" ? extra : {};
+    var label = aeLabelFromPath(hostPath) || aeLabelFromVersion(e.appVersion);
+    return {
+      pid: typeof x.pid === "number" ? x.pid : process.pid,
+      started_at: x.startedAt || new Date().toISOString(),
+      ae_version: e.appVersion ? String(e.appVersion) : null,
+      ae_label: label,
+      host_path: hostPath || null,
+      host_name: e.appName ? String(e.appName) : null,
+      panel_version: PANEL_VERSION,
+      port: port,
+      state_dir: paths && paths.stateDir ? paths.stateDir : null
+    };
+  }
+
   function createHostAdapter() {
     if (typeof window !== "undefined" && typeof window.CSInterface === "function") {
       var csInst = new window.CSInterface();
@@ -61,6 +99,17 @@
         getHostEnvironment: function () {
           try {
             return csInst.getHostEnvironment();
+          } catch (e) {
+            return null;
+          }
+        },
+        // Where the hosting After Effects is installed (SystemPath.HOST_APPLICATION); null on error.
+        getHostPath: function () {
+          try {
+            var which = (typeof window.SystemPath !== "undefined" && window.SystemPath.HOST_APPLICATION)
+              ? window.SystemPath.HOST_APPLICATION
+              : "hostApplication";
+            return normaliseHostPath(csInst.getSystemPath(which));
           } catch (e) {
             return null;
           }
@@ -81,6 +130,13 @@
           try {
             var raw = cep.getHostEnvironment();
             return typeof raw === "string" ? JSON.parse(raw) : raw;
+          } catch (e) {
+            return null;
+          }
+        },
+        getHostPath: function () {
+          try {
+            return normaliseHostPath(cep.getSystemPath("hostApplication"));
           } catch (e) {
             return null;
           }
@@ -130,6 +186,7 @@
       framesDir: path.join(sDir, "frames"),
       tokenPath: path.join(sDir, "token"),
       configPath: path.join(sDir, "config.json"),
+      ownerPath: path.join(sDir, "owner.json"),
       logPath: path.join(sDir, "service.log"),
       rotatedLogPath: path.join(sDir, "service.log.1")
     };
@@ -695,6 +752,9 @@
     parseLogLine: parseLogLine,
     rotateLogIfNeeded: rotateLogIfNeeded,
     appendServiceLog: appendServiceLog,
+    aeLabelFromPath: aeLabelFromPath,
+    aeLabelFromVersion: aeLabelFromVersion,
+    buildInstanceInfo: buildInstanceInfo,
     buildBootScript: buildBootScript,
     parseBootResult: parseBootResult
   };

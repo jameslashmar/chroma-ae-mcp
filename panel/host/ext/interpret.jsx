@@ -240,11 +240,13 @@
   // The interpretation of one item, every field read on its own so one that
   // throws (a still has no fields; some footage rejects pixelAspect) lands in
   // `unreadable` instead of failing the read.
-  function infoOf(it) {
+  function infoOf(it, compact) {
     var out = { id: it.id, name: clip(it.name, 500) };
     var unreadable = [];
     var src = null;
-    try { out.width = it.width; out.height = it.height; } catch (e0) {}
+    if (compact !== true) {
+      try { out.width = it.width; out.height = it.height; } catch (e0) {}
+    }
     if (isCompItem(it)) {
       out.kind = "comp";
     } else {
@@ -252,13 +254,13 @@
       try { src = it.mainSource; } catch (e1) { src = null; }
     }
     try { out.use_proxy = it.useProxy === true; } catch (e2) { unreadable.push("use_proxy"); }
-    out.proxy = proxyOf(it);
+    if (compact !== true) out.proxy = proxyOf(it);
     if (out.kind !== "file" || !src) {
       if (unreadable.length > 0) out.unreadable = unreadable;
       return out;
     }
     try {
-      if (src.file) out.file = clip(src.file.fsName, MAX_STR);
+      if (compact !== true && src.file) out.file = clip(src.file.fsName, MAX_STR);
     } catch (e3) {}
     try { out.missing = it.footageMissing === true; } catch (e4) {}
     try { out.has_video = it.hasVideo === true; } catch (e5) {}
@@ -285,7 +287,9 @@
       try { out.remove_pulldown = pulldownName(src.removePulldown); } catch (e14) { unreadable.push("remove_pulldown"); }
       try { out.conform_frame_rate = src.conformFrameRate; } catch (e15) { unreadable.push("conform_frame_rate"); }
       try { out.native_frame_rate = src.nativeFrameRate; } catch (e16) { unreadable.push("native_frame_rate"); }
-      try { out.display_frame_rate = src.displayFrameRate; } catch (e17) { unreadable.push("display_frame_rate"); }
+      if (compact !== true) {
+        try { out.display_frame_rate = src.displayFrameRate; } catch (e17) { unreadable.push("display_frame_rate"); }
+      }
       try { out.loop = src.loop; } catch (e18) { unreadable.push("loop"); }
     }
     if (unreadable.length > 0) out.unreadable = unreadable;
@@ -394,7 +398,7 @@
           items.push({ id: args.item_ids[i], error: "not_found" });
           continue;
         }
-        items.push(infoOf(it0));
+        items.push(infoOf(it0, args.compact === true));
         if (!firstFile && sourceKind(it0) === "file") firstFile = it0;
       }
       if (args.item_ids.length > MAX_ITEMS) out.truncated = true;
@@ -427,7 +431,7 @@
           out.truncated = true;
           continue;
         }
-        items.push(infoOf(it));
+        items.push(infoOf(it, args.compact === true));
         if (!firstFile && sourceKind(it) === "file") firstFile = it;
       }
       out.total_items = total;
@@ -556,10 +560,12 @@
     return true;
   }
 
-  A.interpretApply = function (args) {
-    assertGuard(args.expect);
-    var it = itemById(args.item_id);
-    if (!it || !isFootageItem(it)) fail("not_found", "No footage item with id " + args.item_id);
+  // Everything that can be checked without writing: finds the item, validates
+  // every field against the item's current state and builds the target.
+  // Throws fail("bad_args" | "not_found") exactly as interpretApply always did.
+  function planInterpret(itemId, args) {
+    var it = itemById(itemId);
+    if (!it || !isFootageItem(it)) fail("not_found", "No footage item with id " + itemId);
     if (sourceKind(it) !== "file") fail("bad_args", "\"" + it.name + "\" is a " + sourceKind(it) + " item; only footage from a file has an interpretation");
     var src = it.mainSource;
     var missing = false;
@@ -679,30 +685,267 @@
     if (!asked) fail("bad_args", "Nothing to set");
 
     var out = { item_id: it.id, name: it.name, changed: changed, no_change: changed.length === 0 };
-    // Everything asked for is already so: don't open an undo group for it.
-    if (changed.length === 0) return out;
+    return { it: it, src: src, cur: cur, tgt: tgt, changed: changed, out: out };
+  }
 
-    return A.withUndo(args.label || "Interpret footage", function () {
-      try {
-        applyTarget(it, src, cur, tgt, false);
-      } catch (e) {
-        // Put back what was there, in this same undo group, so a failed call
-        // leaves the footage as it was found.
-        var now = rawState(it, src);
-        applyTarget(it, src, now, cur, true);
-        // Read it again and only claim success when every field matches.
-        var left = stateDiff(cur, rawState(it, src));
-        if (left.names.length === 0) {
-          e.message = e.message + " (the footage's old interpretation was put back)";
-        } else {
-          e.message = e.message + " (the old interpretation could NOT be fully put back; still different: " + left.names.join(", ") + ". Inspect with ae_get_footage_interpretation before retrying)";
-          e.__expected = left.expected;
-          e.__actual = left.actual;
-        }
-        throw e;
+  // The writes of one planned item, restoring the old values if a step throws.
+  // The caller owns the undo group.
+  function commitInterpret(plan) {
+    var it = plan.it;
+    var src = plan.src;
+    var cur = plan.cur;
+    try {
+      applyTarget(it, src, cur, plan.tgt, false);
+    } catch (e) {
+      // Put back what was there, in this same undo group, so a failed call
+      // leaves the footage as it was found.
+      var now = rawState(it, src);
+      applyTarget(it, src, now, cur, true);
+      // Read it again and only claim success when every field matches.
+      var left = stateDiff(cur, rawState(it, src));
+      if (left.names.length === 0) {
+        e.message = e.message + " (the footage's old interpretation was put back)";
+      } else {
+        e.message = e.message + " (the old interpretation could NOT be fully put back; still different: " + left.names.join(", ") + ". Inspect with ae_get_footage_interpretation before retrying)";
+        e.__expected = left.expected;
+        e.__actual = left.actual;
       }
-      return out;
+      throw e;
+    }
+    return plan.out;
+  }
+
+  A.interpretApply = function (args) {
+    assertGuard(args.expect);
+    var plan = planInterpret(args.item_id, args);
+    // Everything asked for is already so: don't open an undo group for it.
+    if (plan.changed.length === 0) return plan.out;
+    return A.withUndo(args.label || "Interpret footage", function () {
+      return commitInterpret(plan);
     });
+  };
+
+  var SETTING_KEYS = {
+    alpha: 1,
+    field_separation: 1,
+    high_quality_field_separation: 1,
+    pulldown: 1,
+    conform_frame_rate: 1,
+    loop: 1,
+    pixel_aspect: 1
+  };
+
+  function inList(list, v) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] === v) return true;
+    }
+    return false;
+  }
+
+  function hasVal(v) {
+    return v !== undefined && v !== null;
+  }
+
+  // Pure checks of a settings object that need no item: names, types and
+  // ranges, so a typo fails before anything is imported or written.
+  // Throws fail("bad_args"). Order rules that depend on the item's current
+  // state (a pulldown needs fields on) are checked by planInterpret.
+  A.interpretCheckSettings = function (s) {
+    var k;
+    var n = 0;
+    var ci;
+    if (!s || typeof s !== "object") fail("bad_args", "interpret must be an object of settings");
+    for (k in s) {
+      if (!s.hasOwnProperty(k)) continue;
+      if (SETTING_KEYS[k] !== 1) fail("bad_args", "Unknown interpretation setting \"" + k + "\"");
+      if (hasVal(s[k])) n++;
+    }
+    if (n === 0) fail("bad_args", "interpret has no setting in it");
+    var a = s.alpha;
+    if (hasVal(a)) {
+      if (typeof a !== "object") fail("bad_args", "alpha must be an object");
+      if (hasVal(a.mode) && !inList(["ignore", "straight", "premultiplied", "guess"], a.mode)) {
+        fail("bad_args", "Unknown alpha mode \"" + a.mode + "\"");
+      }
+      if (a.mode === "guess" && (hasVal(a.premul_color) || hasVal(a.invert))) {
+        fail("bad_args", "alpha mode 'guess' can't be combined with premul_color or invert");
+      }
+      if (hasVal(a.premul_color)) {
+        var pcv = a.premul_color;
+        if (typeof pcv.length !== "number" || pcv.length !== 3) fail("bad_args", "premul_color must be [r, g, b]");
+        for (ci = 0; ci < 3; ci++) {
+          if (!isNum(pcv[ci]) || pcv[ci] < 0 || pcv[ci] > 1) fail("bad_args", "premul_color values must be numbers in 0..1");
+        }
+      }
+      if (hasVal(a.invert) && typeof a.invert !== "boolean") fail("bad_args", "alpha invert must be true or false");
+      if (!hasVal(a.mode) && !hasVal(a.premul_color) && !hasVal(a.invert)) {
+        fail("bad_args", "alpha needs at least one of mode, premul_color or invert");
+      }
+    }
+    if (hasVal(s.field_separation) && !inList(FIELD_NAMES, s.field_separation)) {
+      fail("bad_args", "Unknown field separation \"" + s.field_separation + "\"");
+    }
+    if (hasVal(s.high_quality_field_separation) && typeof s.high_quality_field_separation !== "boolean") {
+      fail("bad_args", "high_quality_field_separation must be true or false");
+    }
+    if (hasVal(s.pulldown)) {
+      var guess = s.pulldown === "guess_3_2" || s.pulldown === "guess_24p_advance";
+      if (!guess && !inList(PULLDOWN_NAMES, s.pulldown)) fail("bad_args", "Unknown pulldown phase \"" + s.pulldown + "\"");
+      if (guess && (hasVal(s.field_separation) || hasVal(s.high_quality_field_separation) || hasVal(s.conform_frame_rate))) {
+        fail("bad_args", "pulldown 'guess' sets the fields and the frame rate itself; run it alone");
+      }
+    }
+    if (hasVal(s.conform_frame_rate)) {
+      if (!isNum(s.conform_frame_rate) || s.conform_frame_rate < 0 || s.conform_frame_rate > 99) fail("bad_args", "conform_frame_rate must be a number in 0..99 (0 = the footage's own rate)");
+    }
+    if (hasVal(s.loop)) {
+      if (!isNum(s.loop) || Math.floor(s.loop) !== s.loop || s.loop < 1 || s.loop > 9999) fail("bad_args", "loop must be a whole number in 1..9999");
+    }
+    if (hasVal(s.pixel_aspect)) {
+      if (!isNum(s.pixel_aspect) || s.pixel_aspect < 0.01 || s.pixel_aspect > 100) fail("bad_args", "pixel_aspect must be a number in 0.01..100");
+    }
+    return { ok: true };
+  };
+
+  // For the import path: which of `settings` this item can take, and why the
+  // rest is left out. Never throws. Reads only.
+  A.interpretApplicable = function (item, settings) {
+    var use = {};
+    var skipped = [];
+    var all = [];
+    var k;
+    var i;
+    for (k in SETTING_KEYS) {
+      if (SETTING_KEYS.hasOwnProperty(k) && settings && hasVal(settings[k])) all.push(k);
+    }
+    var reason = null;
+    var src = null;
+    if (!item || !isFootageItem(item)) {
+      reason = "not a footage item";
+    } else if (sourceKind(item) !== "file") {
+      reason = "not footage from a file";
+    } else {
+      var missing = false;
+      try { missing = item.footageMissing === true; } catch (eM) {}
+      var hasVideo = true;
+      try { hasVideo = item.hasVideo === true; } catch (eV) {}
+      if (missing) reason = "missing file";
+      else if (!hasVideo) reason = "no video";
+      else src = item.mainSource;
+    }
+    if (reason !== null) {
+      for (i = 0; i < all.length; i++) skipped.push({ field: all[i], reason: reason });
+      return { use: use, skipped: skipped };
+    }
+    var isStill = false;
+    try { isStill = src.isStill === true; } catch (eS) {}
+    var hasAlpha = false;
+    try { hasAlpha = src.hasAlpha === true; } catch (eA) {}
+    var videoOnly = { field_separation: 1, high_quality_field_separation: 1, pulldown: 1, conform_frame_rate: 1, loop: 1 };
+    for (i = 0; i < all.length; i++) {
+      k = all[i];
+      if (k === "alpha" && !hasAlpha) skipped.push({ field: k, reason: "no alpha channel" });
+      else if (videoOnly[k] === 1 && isStill) skipped.push({ field: k, reason: "a still" });
+      else use[k] = settings[k];
+    }
+    return { use: use, skipped: skipped };
+  };
+
+  // Plans and writes `settings` on one item. The caller owns the undo group (a
+  // nested A.withUndo joins it). Throws after putting the old values back.
+  A.interpretApplyPlanned = function (item, settings, label) {
+    var args = {};
+    var k;
+    for (k in SETTING_KEYS) {
+      if (SETTING_KEYS.hasOwnProperty(k) && hasVal(settings[k])) args[k] = settings[k];
+    }
+    var plan = planInterpret(item.id, args);
+    if (plan.changed.length === 0) return plan.out;
+    return A.withUndo(label || "Interpret footage", function () {
+      return commitInterpret(plan);
+    });
+  };
+
+  var MAX_BATCH = 200;
+
+  // Many items in one undo group. Plans every item first; with strict (the
+  // default) one item that can't take its settings refuses the whole call
+  // before any group opens. Otherwise the items that can are written, each
+  // restoring itself if it throws, and the rest are listed.
+  A.interpretBatch = function (args) {
+    assertGuard(args.expect);
+    var items = args.items;
+    if (!items || typeof items.length !== "number" || items.length < 1) fail("bad_args", "Give at least one item");
+    if (items.length > MAX_BATCH) fail("bad_args", "At most " + MAX_BATCH + " items per call");
+    var strict = args.strict !== false;
+    var plans = [];
+    var rejected = [];
+    var failed = [];
+    var changedItems = [];
+    var noChange = [];
+    var todo = [];
+    var i;
+    var k;
+    var row;
+    var itemArgs;
+    var nm;
+    var seen = {};
+    for (i = 0; i < items.length; i++) {
+      row = items[i];
+      try {
+        if (seen[row.item_id] === true) fail("bad_args", "Item " + row.item_id + " is listed twice");
+        seen[row.item_id] = true;
+        itemArgs = {};
+        for (k in SETTING_KEYS) {
+          if (SETTING_KEYS.hasOwnProperty(k) && hasVal(row[k])) itemArgs[k] = row[k];
+        }
+        A.interpretCheckSettings(itemArgs);
+        plans.push(planInterpret(row.item_id, itemArgs));
+      } catch (ePlan) {
+        nm = undefined;
+        try { nm = itemById(row.item_id).name; } catch (eN) {}
+        rejected.push({ item_id: row.item_id, name: nm, reason: String(ePlan.message) });
+      }
+    }
+    var out = { refused: false, no_op: false, strict: strict, rejected: rejected, failed: failed, changed_items: changedItems, no_change_items: noChange };
+    if (rejected.length > 0 && strict) {
+      out.refused = true;
+      out.no_op = true;
+      return out;
+    }
+    for (i = 0; i < plans.length; i++) {
+      if (plans[i].changed.length > 0) todo.push(plans[i]);
+      else noChange.push({ item_id: plans[i].it.id, name: plans[i].out.name });
+    }
+    if (args.plan_only === true || todo.length === 0) {
+      out.no_op = true;
+      for (i = 0; i < todo.length; i++) changedItems.push({ item_id: todo[i].it.id, name: todo[i].out.name, changed: todo[i].changed });
+      return out;
+    }
+    A.withUndo(args.label || "Interpret footage (batch)", function () {
+      var t;
+      var r;
+      var f;
+      for (t = 0; t < todo.length; t++) {
+        try {
+          r = commitInterpret(todo[t]);
+          changedItems.push({ item_id: todo[t].it.id, name: r.name, changed: r.changed });
+        } catch (eCommit) {
+          f = { item_id: todo[t].it.id, name: todo[t].out.name, message: String(eCommit.message), restored: true };
+          if (eCommit.__expected !== undefined || eCommit.__actual !== undefined) f.restored = false;
+          if (eCommit.__expected !== undefined) f.expected = eCommit.__expected;
+          if (eCommit.__actual !== undefined) f.actual = eCommit.__actual;
+          failed.push(f);
+        }
+      }
+    });
+    // no_op only when nothing was written: every attempt failed AND was put back completely.
+    var residue = false;
+    for (i = 0; i < failed.length; i++) {
+      if (failed[i].restored !== true) residue = true;
+    }
+    if (changedItems.length === 0 && !residue) out.no_op = true;
+    return out;
   };
 
   // ---------- interpretProxy ----------

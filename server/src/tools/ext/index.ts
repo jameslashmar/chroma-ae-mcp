@@ -61,6 +61,7 @@ import { masksTools } from "./masks.js";
 import { multicompTools } from "./multicomp.js";
 import { motionTools } from "./motion.js";
 import { panelsTools } from "./panels.js";
+import { placementTools } from "./placement.js";
 import { preflightTools } from "./preflight.js";
 import { productionTools } from "./production.js";
 import { receiptsTools } from "./receipts.js";
@@ -100,6 +101,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...productionTools,
   ...masksTools,
   ...layoutTools,
+  ...placementTools,
   ...verifyTools,
   ...layeropsTools,
   ...multicompTools,

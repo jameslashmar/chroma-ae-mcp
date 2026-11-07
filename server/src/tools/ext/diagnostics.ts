@@ -9,14 +9,16 @@
  */
 
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { z } from "zod";
+import { BridgeError } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
 import { renderGate, renderGateMessage } from "../../render-gate.js";
 import { dataDirOf, type ToolContext, type ToolDefinition } from "../common.js";
 import { formatBackupTimestamp } from "../mutate.js";
-import { describeBlockingDialogs } from "./dialogs.js";
+import { describeBlockingDialogs, locateToolScript } from "./dialogs.js";
 
 export type ServiceInfo = Record<string, unknown> & {
   logPath?: string;
@@ -55,7 +57,74 @@ function readIfExists(p: string | undefined): string {
   }
 }
 
-type AeStatusAnswer = { answered: boolean; status?: unknown; environment?: unknown; environmentPending?: Promise<unknown>; error?: string };
+type AeStatusAnswer = {
+  answered: boolean;
+  status?: unknown;
+  environment?: unknown;
+  environmentPending?: Promise<unknown>;
+  error?: string;
+  /** The busy report when the bridge refused the status eval because AE cannot answer (see ae-activity.ts). */
+  busy?: unknown;
+};
+
+/** A refusal ("queued" with a busy report) means AE did not answer: not "answered with an error". */
+function failedAnswer(err: unknown): AeStatusAnswer {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof BridgeError && err.kind === "queued") {
+    const busy = (err.actual as { busy?: unknown } | undefined)?.busy;
+    return { answered: false, error: message, ...(busy !== undefined ? { busy } : {}) };
+  }
+  return { answered: true, error: message };
+}
+
+/** What the startup check (panel/tools/relay-diagnose.cjs) returns, as far as this file uses it. */
+export interface StartupCheckResult {
+  code: string;
+  ok: boolean;
+  message: string;
+  fix?: string[];
+  facts_summary?: string[];
+}
+export type StartupCheck = () => Promise<StartupCheckResult>;
+
+const STARTUP_CHECK_WAIT_MS = 8000;
+
+/** Loads relay-diagnose.cjs from the tools folder at run time (no import across the package root; it is a plain CommonJS file). */
+function defaultStartupCheck(serviceInfo: ServiceInfo | undefined): StartupCheck {
+  return async () => {
+    const script = locateToolScript("relay-diagnose.cjs");
+    if (!script) throw new Error("relay-diagnose.cjs was not found next to the panel tools");
+    const mod = createRequire(script)(script) as {
+      diagnose: (o: { port?: number; dataDir?: string; fresh?: boolean }) => Promise<StartupCheckResult>;
+    };
+    const port = typeof serviceInfo?.port === "number" ? serviceInfo.port : undefined;
+    const dataDir = serviceInfo?.tokenPath ? path.dirname(serviceInfo.tokenPath) : undefined;
+    return mod.diagnose({ port, dataDir, fresh: true });
+  };
+}
+
+async function readStartup(serviceInfo: ServiceInfo | undefined, check: StartupCheck | undefined): Promise<Record<string, unknown>> {
+  const section: Record<string, unknown> = {
+    instance: serviceInfo?.instance ?? null,
+  };
+  if (!check) return section;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const res = await Promise.race([
+      check(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`the startup check did not finish within ${STARTUP_CHECK_WAIT_MS / 1000} s`)), STARTUP_CHECK_WAIT_MS);
+      }),
+    ]);
+    const { code, ok, message, fix, facts_summary } = res;
+    section.check = { code, ok, message, fix: fix ?? [], facts_summary: facts_summary ?? [] };
+  } catch (err) {
+    section.check = { error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  return section;
+}
 
 /** One outstanding status eval per context: a stuck AE doesn't collect a queue of them. */
 const pendingStatus = new WeakMap<ToolContext, Promise<AeStatusAnswer>>();
@@ -98,7 +167,7 @@ async function aeStatusWithin(ctx: ToolContext, ms: number): Promise<AeStatusAns
         .catch((err: unknown): unknown => ({ error: err instanceof Error ? err.message : String(err) }));
       return { answered: true, status: r.result, environmentPending: environment };
     })
-    .catch((err: unknown) => ({ answered: true, error: err instanceof Error ? err.message : String(err) }));
+    .catch((err: unknown) => failedAnswer(err));
     const mine = call;
     pendingStatus.set(ctx, mine);
     void mine.then(() => {
@@ -143,7 +212,13 @@ export interface DiagnosticsResult {
 export async function writeDiagnostics(
   ctx: ToolContext,
   serviceInfo: ServiceInfo | undefined,
-  opts: { logLines?: number; includeDialogs?: boolean; aeWaitMs?: number } = {}
+  opts: {
+    logLines?: number;
+    includeDialogs?: boolean;
+    aeWaitMs?: number;
+    /** The startup check for the `Startup` section. Default: relay-diagnose.cjs, only when the service reports an `instance`. */
+    startupCheck?: StartupCheck | false;
+  } = {}
 ): Promise<DiagnosticsResult> {
   const now = new Date();
   const token = readIfExists(serviceInfo?.tokenPath).trim() || null;
@@ -153,6 +228,9 @@ export async function writeDiagnostics(
   const logText = readIfExists(serviceInfo?.rotatedLogPath) + readIfExists(serviceInfo?.logPath);
   const log = redact(tailLines(logText, opts.logLines ?? DEFAULT_LOG_LINES), token);
   const { tokenPath: _omit, ...service } = serviceInfo ?? {};
+  const check = opts.startupCheck === false ? undefined : opts.startupCheck ?? (serviceInfo?.instance ? defaultStartupCheck(serviceInfo) : undefined);
+  const startup = await readStartup(serviceInfo, check);
+  const startupCode = (startup.check as { code?: string } | undefined)?.code ?? null;
 
   const summary = {
     created_at: now.toISOString(),
@@ -162,10 +240,12 @@ export async function writeDiagnostics(
     quarantined: quarantine.length,
     open_dialogs: dialogs.length,
     render_gate: renderGate.active(),
+    startup_code: startupCode,
   };
   const sections: Array<[string, unknown]> = [
     ["Summary", summary],
     ["Service", service],
+    ["Startup", startup],
     ["After Effects", ae],
     ["Quarantine", quarantine],
     ["Settings", ctx.settings?.get() ?? null],

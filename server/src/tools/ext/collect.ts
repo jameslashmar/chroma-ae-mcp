@@ -31,6 +31,7 @@ import { BridgeError, SLOW_TIMEOUT_MS } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
 import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
+import { formatRanges, missingRanges } from "../../seqscan.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { checkpointDirFor, verifyTargetGuard } from "../mutate.js";
 import { readAfterWrite } from "../read-back.js";
@@ -38,6 +39,8 @@ import { getSessionTracker } from "./session.js";
 import { expectThat } from "./write-runner.js";
 
 const MAX_LIST = 500;
+/** Missing-frame ranges kept per sequence. */
+const MAX_GAP_RANGES = 20;
 const MAX_TEXT = 20_000;
 const WIN_OR_MAC = process.platform === "win32" || process.platform === "darwin";
 
@@ -142,6 +145,9 @@ export interface FrameName {
 /**
  * The frame number of a sequence file name: the last run of digits in the stem,
  * which may be followed by text before the extension (shot_0001_beauty.exr).
+ * This is looser on purpose than server/src/seqscan.ts and assets.ts, where the
+ * number must sit directly before the extension: collecting must not leave out
+ * a file AE points at. Unifying the two would change what gets collected.
  */
 export function splitFrameName(name: string): FrameName | null {
   const m = /^(.*?)(\d+)(\D*\.[^.]+)$/.exec(name);
@@ -182,7 +188,7 @@ export interface ResolvedSource {
   /** Something the user should know: a sequence that resolved to one file. */
   warning?: string;
   /** Sequences: the frames found, by number. */
-  frames?: { count: number; first: number; last: number; gaps: number };
+  frames?: { count: number; first: number; last: number; gaps: number; missing_ranges: Array<[number, number]>; ranges_truncated: boolean; digits: number };
 }
 
 const statFile = async (p: string): Promise<SourceFile> => {
@@ -215,7 +221,14 @@ export async function resolveSource(file: string, sequence: boolean): Promise<Re
       const first = frames[0].number;
       const last = frames[frames.length - 1].number;
       const distinct = new Set(frames.map((f) => f.number)).size;
-      const res: ResolvedSource = { files, frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct) } };
+      const numbers = [...new Set(frames.map((f) => f.number))];
+      const where = missingRanges(numbers, MAX_GAP_RANGES);
+      const own = splitFrameName(path.basename(file));
+      const digits = own && own.digits.length > 1 && own.digits.startsWith("0") ? own.digits.length : 0;
+      const res: ResolvedSource = {
+        files,
+        frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct), missing_ranges: where.ranges, ranges_truncated: where.truncated, digits },
+      };
       if (files.length === 1) res.warning = `${path.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
       return res;
     }
@@ -288,7 +301,7 @@ export interface Plan {
   /** Footage files more than one item uses: collected once. */
   shared: Array<{ file: string; item_ids: number[] }>;
   problems: Array<{ item_ids: number[]; file: string; role: Role; problem: string }>;
-  gaps: Array<{ file: string; missing_frames: number; first: number; last: number }>;
+  gaps: Array<{ file: string; missing_frames: number; first: number; last: number; missing_ranges: Array<[number, number]>; missing_text: string }>;
   skipped_unused: number;
   /** Sequences that resolved to a single file, and the like. */
   warnings: string[];
@@ -408,7 +421,14 @@ export function planCollect(
       plan.warnings.push(res.warning);
     }
     if (res.frames && res.frames.gaps > 0) {
-      plan.gaps.push({ file: g.ae_files[0], missing_frames: res.frames.gaps, first: res.frames.first, last: res.frames.last });
+      plan.gaps.push({
+        file: g.ae_files[0],
+        missing_frames: res.frames.gaps,
+        first: res.frames.first,
+        last: res.frames.last,
+        missing_ranges: res.frames.missing_ranges,
+        missing_text: formatRanges(res.frames.missing_ranges, res.frames.digits, 400) + (res.frames.ranges_truncated ? ", ..." : ""),
+      });
     }
     if (emitted.has(g.key)) continue;
     emitted.add(g.key);
@@ -1947,7 +1967,7 @@ async function relinkHandler(args: RelinkArgs, ctx: ToolContext) {
   const trimmed = removeUnused || !!reduceTo;
   const opId = ctx.bridge.newOpId();
   let seq = 0;
-  const host = <T>(fn: string, a: unknown, mutates: boolean) =>
+  const host = <T>(fn: string, a: unknown, mutates: boolean, mustSend = false) =>
     ctx.bridge.evalRaw<T>({
       id: `${opId}_${++seq}`,
       script: buildJsxCall(fn, a),
@@ -1955,6 +1975,7 @@ async function relinkHandler(args: RelinkArgs, ctx: ToolContext) {
       // A close and open of a big project is slow: wait, never abort an evalScript in flight.
       timeoutMs: SLOW_TIMEOUT_MS,
       mutates,
+      mustSend,
       toolName: tool,
     });
 
@@ -2016,6 +2037,7 @@ async function relinkHandler(args: RelinkArgs, ctx: ToolContext) {
           await host<SwitchResult>(
             "collectSwitch",
             { to_path: original, expect_open: [copyPath, "<unsaved>"], save_first: relinkOk, discard_changes: !relinkOk, label: "Reopen the original project" },
+            true,
             true
           )
         ).result;
@@ -2023,13 +2045,14 @@ async function relinkHandler(args: RelinkArgs, ctx: ToolContext) {
         restoreError = err instanceof Error ? err.message : String(err);
         if (relinkOk) {
           // Saving the copy can throw before anything closes (read-only or full disk): then the copy is still open. Discard it and bring the original back.
-          const st = await host<ProjectState>("collectState", {}, false).then((r) => r.result).catch(() => null);
+          const st = await host<ProjectState>("collectState", {}, false, true).then((r) => r.result).catch(() => null);
           if (st && pathKey(st.project_path) === pathKey(copyPath)) {
             try {
               reopened = (
                 await host<SwitchResult>(
                   "collectSwitch",
                   { to_path: original, expect_open: [copyPath, "<unsaved>"], save_first: false, discard_changes: true, label: "Reopen the original project (copy not saved)" },
+                  true,
                   true
                 )
               ).result;

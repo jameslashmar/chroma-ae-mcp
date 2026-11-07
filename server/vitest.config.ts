@@ -5,5 +5,7 @@ export default defineConfig({
     // The first test in a file that reaches the tool registry loads all of it:
     // over vitest's default 5 s when the whole suite runs in parallel.
     testTimeout: 20_000,
+    // Keeps the GPU probe (PowerShell) out of every test file.
+    setupFiles: ["./test/setup-resources.ts"],
   },
 });

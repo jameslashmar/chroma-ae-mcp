@@ -97,7 +97,7 @@ const KNOWN_METHODS = [
 
 const NOT_RUNNING =
   "After Effects is not reachable. Start After Effects and wait until " +
-  "Window > Extensions > Chroma AE MCP shows READY, then try again.";
+  "Window > Extensions > Chroma AE MCP shows Connected, then try again.";
 
 class PanelUnavailable extends Error {}
 
@@ -360,18 +360,60 @@ function replyOffline(message, reason) {
   }
 }
 
+// A tool call that cannot reach the panel gets the exact reason (relay-diagnose.cjs: AE closed, an
+// unsupported AE, no PlayerDebugMode, service down, another AE holds the port, token rejected...)
+// instead of one text for everything. Never for initialize, ping or the list calls: they are
+// answered offline at once and must stay instant. Any failure of the check, or CHROMA_AE_MCP_DIAGNOSE=off,
+// keeps the old text.
+// CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS lowers it (a test knob); the default is 6 s.
+const DIAGNOSE_BUDGET_MS = (() => {
+  const n = Number.parseInt(process.env.CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS || "", 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 6000) : 6000;
+})();
+
+function involvesToolCall(message) {
+  const list = Array.isArray(message) ? message : [message];
+  return list.some((m) => m && typeof m === "object" && hasId(m) && m.method === "tools/call");
+}
+
+async function reasonFor(message, fallback) {
+  if (!involvesToolCall(message)) return fallback;
+  if (String(process.env.CHROMA_AE_MCP_DIAGNOSE || "").trim().toLowerCase() === "off") return fallback;
+  let timer;
+  try {
+    const diag = require("./relay-diagnose.cjs");
+    const res = await Promise.race([
+      diag.diagnose({ port: PORT, dataDir: dataDir() }),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("diagnosis timed out")), DIAGNOSE_BUDGET_MS);
+      }),
+    ]);
+    // ok means the service answers after all (the failed call was a race): keep the old text then.
+    if (!res || res.ok || typeof res.message !== "string" || !res.message) return fallback;
+    log(res.code + ": " + res.message);
+    return res.message + (res.fix && res.fix[0] ? " " + res.fix[0] : "");
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function relay(message) {
   let res;
   try {
     res = await post(JSON.stringify(message));
   } catch (err) {
     if (!(err instanceof PanelUnavailable)) throw err;
-    replyOffline(message, err.message);
+    replyOffline(message, await reasonFor(message, err.message));
     return;
   }
   if (res.status === 202) return;
   if (res.status === 401) {
-    replyOffline(message, "The Chroma AE MCP panel rejected the token in " + TOKEN_PATH + ". Restart After Effects.");
+    replyOffline(
+      message,
+      await reasonFor(message, "The Chroma AE MCP panel rejected the token in " + TOKEN_PATH + ". Restart After Effects.")
+    );
     return;
   }
   let body;

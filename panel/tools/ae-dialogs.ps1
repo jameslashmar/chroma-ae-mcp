@@ -13,13 +13,26 @@ param(
 
     [string]$Button = "",
 
-    [string]$Check = ""
+    [string]$Check = "",
+
+    # respond: the key to post to an AE-painted dialog (enter or escape). TypeScript decides it from the
+    # button row and the default button; without -Key the old OCR-label decision is used.
+    [string]$Key = "",
+
+    # respond with -Key: refuse (dialog_changed) when the dialog's title is no longer this one.
+    [string]$ExpectTitle = "",
+    [switch]$ExpectEmptyTitle,
+
+    # respond with -Key: refuse (dialog_changed) when the window rect is no longer "left,top,right,bottom".
+    [string]$ExpectRect = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 function Write-JsonOut([hashtable]$Obj) {
     $json = $Obj | ConvertTo-Json -Compress -Depth 10
+    # Escape everything outside ASCII: stdout may be a legacy code page (ibm850), which would corrupt it.
+    $json = [regex]::Replace($json, '[^\x00-\x7F]', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) '\u{0:x4}' -f [int][char]$m.Value })
     [Console]::Out.WriteLine($json)
 }
 
@@ -46,6 +59,9 @@ public static class ChromaWin32 {
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowEnabled(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     public static extern bool IsIconic(IntPtr hWnd);
@@ -204,26 +220,6 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
     }
 }
-# Button candidates: short OCR lines (1-3 words, at most 24 characters) in the lower 45% of the dialog.
-function Get-OcrButtons($Ocr, [int]$Height) {
-    $out = @()
-    if ($null -eq $Ocr) { return ,$out }
-    foreach ($ln in $Ocr.lines) {
-        if ($ln.words.Count -lt 1 -or $ln.words.Count -gt 3) { continue }
-        $t = ([string]$ln.text).Trim()
-        if ($t.Length -lt 1 -or $t.Length -gt 24) { continue }
-        $x1 = ($ln.words | ForEach-Object { $_.x } | Measure-Object -Minimum).Minimum
-        $y1 = ($ln.words | ForEach-Object { $_.y } | Measure-Object -Minimum).Minimum
-        $x2 = ($ln.words | ForEach-Object { $_.x + $_.w } | Measure-Object -Maximum).Maximum
-        $y2 = ($ln.words | ForEach-Object { $_.y + $_.h } | Measure-Object -Maximum).Maximum
-        if ($y1 -lt ($Height * 0.55)) { continue }
-        $out += @{ name = $t; automationId = ""; enabled = $true; source = "ocr"; x = [int]$x1; y = [int]$y1; w = [int]($x2 - $x1); h = [int]($y2 - $y1) }
-    }
-    return ,$out
-}
-# OCR often reads "OK" as "0K"; compare labels loosely.
-function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant() -replace '0', 'o') -replace '[^a-z ]', '').Trim() }
-
     if ($Mode -eq "list") {
         $targetPids = @()
         if ($AePid -gt 0) {
@@ -314,6 +310,13 @@ function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant()
             if (-not (Test-Path -LiteralPath $ScreenshotDir)) {
                 New-Item -ItemType Directory -Path $ScreenshotDir -Force | Out-Null
             }
+            # Our own dialog screenshots older than 7 days (the old per-call names included).
+            try {
+                $cutoff = (Get-Date).AddDays(-7)
+                Get-ChildItem -LiteralPath $ScreenshotDir -Filter "dialog_*.png" -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LastWriteTime -lt $cutoff } |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            } catch {}
         }
 
         $dialogs = @()
@@ -459,7 +462,8 @@ function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant()
 
                 $screenshotPath = $null
                 if ($ScreenshotDir -ne "") {
-                    $fileName = "dialog_${hwndVal}_$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()).png"
+                    # One file per dialog handle, overwritten on every list (it used to be one file per call).
+                    $fileName = "dialog_${hwndVal}.png"
                     $candPath = Join-Path $ScreenshotDir $fileName
                     try {
                         $saved = [ChromaWin32]::CaptureWindowPng([IntPtr]$hwndVal, $bx, $by, $bw, $bh, $candPath)
@@ -472,7 +476,12 @@ function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant()
                 }
 
                 # UIA saw nothing (AE painted the dialog itself): fall back to OCR of a screenshot.
+                # The words and their boxes go to TypeScript (dialog-geometry.ts), which finds the button row
+                # and the default button; the screenshot stays available for that (screenshot, or analysis_png
+                # when no screenshot directory was given: TypeScript deletes that one after reading it).
                 $textSource = "uia"
+                $ocrLines = $null
+                $analysisPng = $null
                 if ([string]::IsNullOrWhiteSpace($joinedText) -or $buttons.Count -eq 0) {
                     $ocrPng = $screenshotPath
                     $ocrTemp = $false
@@ -488,13 +497,23 @@ function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant()
                                 if ($joinedText.Length -gt 4000) { $joinedText = $joinedText.Substring(0, 4000) }
                                 $textSource = "ocr"
                             }
-                            if ($buttons.Count -eq 0) { $buttons = Get-OcrButtons $ocr $bh }
+                            if ($buttons.Count -eq 0) {
+                                # Keep the LAST 60 lines: the button row is at the bottom.
+                                $ocrLines = @($ocr.lines | Select-Object -Last 60)
+                                if ($ocrTemp) { $analysisPng = $ocrPng; $ocrTemp = $false }
+                            }
                         }
                     }
                     if ($ocrTemp) { Remove-Item -LiteralPath $ocrPng -ErrorAction SilentlyContinue }
                 }
 
+                $winRect = ""
+                try {
+                    $wr = New-Object ChromaWin32+RECT
+                    if ([ChromaWin32]::GetWindowRect([IntPtr]$hwndVal, [ref]$wr)) { $winRect = "$($wr.Left),$($wr.Top),$($wr.Right),$($wr.Bottom)" }
+                } catch {}
                 $dialogs += @{
+                    win_rect     = $winRect
                     text_source  = $textSource
                     handle       = $hwndVal
                     title        = $title
@@ -510,6 +529,8 @@ function Get-NormalizedLabel([string]$s) { return (($s.Trim().ToLowerInvariant()
                         height = $bh
                     }
                     screenshot   = $screenshotPath
+                    ocr_lines    = $ocrLines
+                    analysis_png = $analysisPng
                 }
             } catch {
                 # Skip dialog if it disappeared while reading properties
@@ -553,6 +574,83 @@ public class ChromaPost {
             exit 0
         }
 
+        if (-not [string]::IsNullOrWhiteSpace($Key)) {
+            # -Key: TypeScript has read the dialog (screenshot, OCR, button row, default button) moments ago
+            # and decided which key answers it: Enter presses the default button, Escape answers Cancel/No.
+            # Posted to the dialog's own window, so AE is not brought to the front and no focus changes.
+            # This is the ONLY place a key is posted. Every guard runs before it and none touches the UI
+            # Automation tree of the window.
+            #
+            # NOT BUILT, on purpose: a focus-taking fallback (AppActivate + SendKeys Enter). Posted Enter was
+            # measured on AE 26.0 (2026-10-27) on the one-OK font dialog and on the Save dialog; whether it
+            # also closes the tall "is missing N frames" warning is not yet measured live. Build the fallback
+            # only if that live test shows posted Enter fails, and then guard it: dialog valid and AfterFX's,
+            # title unchanged, target is the default button, no user input for 1.5 s (GetLastInputInfo),
+            # foreground re-checked right before the key, one Enter and no other key, previous foreground
+            # window restored. Until then a dialog that does not close is reported closed:false.
+            $keyName = $Key.Trim().ToLowerInvariant()
+            if ($keyName -ne "enter" -and $keyName -ne "escape") {
+                Write-JsonOut @{ ok = $false; error = "bad_key" }
+                exit 0
+            }
+            if (-not [string]::IsNullOrWhiteSpace($Check)) {
+                Write-JsonOut @{ ok = $false; error = "checkbox_not_found"; detail = "a painted dialog has no checkbox that can be toggled" }
+                exit 0
+            }
+            # The window must still be an enabled AE window, with the rect and title TypeScript saw.
+            [uint32]$ownerPid = 0
+            $null = [ChromaWin32]::GetWindowThreadProcessId($hwndPtr, [ref]$ownerPid)
+            $ownerProc = Get-Process -Id ([int]$ownerPid) -ErrorAction SilentlyContinue
+            if ($null -eq $ownerProc -or $ownerProc.ProcessName -ne "AfterFX") {
+                Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "the window is not an After Effects window" }
+                exit 0
+            }
+            if (-not [ChromaWin32]::IsWindowEnabled($hwndPtr)) {
+                Write-JsonOut @{ ok = $false; error = "dialog_not_enabled"; detail = "another window is modal above this one" }
+                exit 0
+            }
+            if ($ExpectRect -ne "") {
+                $nr = New-Object ChromaWin32+RECT
+                $nowRect = ""
+                if ([ChromaWin32]::GetWindowRect($hwndPtr, [ref]$nr)) { $nowRect = "$($nr.Left),$($nr.Top),$($nr.Right),$($nr.Bottom)" }
+                if ($nowRect -ne $ExpectRect) {
+                    Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "the window moved or was resized" }
+                    exit 0
+                }
+            }
+            $nowTitle = ""
+            try { $nowTitle = [string][System.Windows.Automation.AutomationElement]::FromHandle($hwndPtr).Current.Name } catch { $nowTitle = "" }
+            if ($ExpectEmptyTitle) {
+                if ($nowTitle -ne "") {
+                    Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "the window has a title now" }
+                    exit 0
+                }
+            } elseif ($ExpectTitle -ne "") {
+                if ($nowTitle -ne $ExpectTitle) {
+                    Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "the window title is different now" }
+                    exit 0
+                }
+            } else {
+                Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "no expected title was given" }
+                exit 0
+            }
+            if ($keyName -eq "enter") {
+                $null = [ChromaPost]::Key($hwndPtr, 0x0D)
+                $method = "post_enter"
+            } else {
+                $null = [ChromaPost]::Key($hwndPtr, 0x1B)
+                $method = "post_escape"
+            }
+            $closed = $false
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($sw.ElapsedMilliseconds -lt 3000) {
+                if ((-not [ChromaWin32]::IsWindow($hwndPtr)) -or (-not [ChromaWin32]::IsWindowVisible($hwndPtr))) { $closed = $true; break }
+                Start-Sleep -Milliseconds 100
+            }
+            Write-JsonOut @{ ok = $true; handle = $Handle; pressed = $Button; method = $method; closed = $closed }
+            exit 0
+        }
+
         $dlgEl = $null
         try {
             $dlgEl = [System.Windows.Automation.AutomationElement]::FromHandle($hwndPtr)
@@ -561,6 +659,11 @@ public class ChromaPost {
         }
         if ($null -eq $dlgEl) {
             Write-JsonOut @{ ok = $false; error = "dialog_gone" }
+            exit 0
+        }
+        # Same guard as the -Key path: a window that another modal window sits above cannot take a click.
+        if (-not [ChromaWin32]::IsWindowEnabled($hwndPtr)) {
+            Write-JsonOut @{ ok = $false; error = "dialog_not_enabled"; detail = "another window is modal above this one" }
             exit 0
         }
 
@@ -622,41 +725,9 @@ public class ChromaPost {
         }
 
         if ($null -eq $targetBtn) {
-            # No UIA button (AE painted the dialog). Measured on AE 26.0 (2026-10-27): posted mouse clicks
-            # and letter access keys are ignored, but a posted Enter presses the default button and a posted
-            # Escape answers Cancel/No. Neither brings AE to the front nor moves the cursor. So:
-            #  - Cancel / No / Close  -> Escape, if OCR shows that label on the dialog;
-            #  - OK / Yes / Continue  -> Enter, only when it is the dialog's ONLY button (otherwise Enter could
-            #    press a different default, e.g. "Don't Save").
-            $rect = New-Object ChromaWin32+RECT
-            $null = [ChromaWin32]::GetWindowRect($hwndPtr, [ref]$rect)
-            $rw = $rect.Right - $rect.Left; $rh = $rect.Bottom - $rect.Top
-            $shot = Join-Path ([System.IO.Path]::GetTempPath()) ("chroma_resp_" + [Guid]::NewGuid().ToString("N") + ".png")
-            $ocrBtns = @()
-            if ([ChromaWin32]::CaptureWindowPng($hwndPtr, $rect.Left, $rect.Top, $rw, $rh, $shot)) {
-                $ocrBtns = Get-OcrButtons (Invoke-DialogOcr $shot) $rh
-            }
-            Remove-Item -LiteralPath $shot -ErrorAction SilentlyContinue
-            $want = Get-NormalizedLabel $Button
-            $labels = @($ocrBtns | ForEach-Object { Get-NormalizedLabel $_.name })
-            $method = $null; $pressedName = $null
-            if (($want -in @("cancel", "no", "close")) -and ($labels -contains $want)) {
-                $null = [ChromaPost]::Key($hwndPtr, 0x1B)
-                $method = "post_escape"; $pressedName = $Button
-            } elseif (($want -in @("ok", "yes", "continue")) -and $ocrBtns.Count -eq 1 -and $labels[0] -eq $want) {
-                $null = [ChromaPost]::Key($hwndPtr, 0x0D)
-                $method = "post_enter"; $pressedName = $Button
-            } else {
-                Write-JsonOut @{ ok = $false; error = "button_not_answerable"; ocr_buttons = @($ocrBtns | ForEach-Object { $_.name }); hint = "AE-painted dialog: only Escape (Cancel/No/Close) or Enter (a single OK/Yes/Continue button) can be sent without focusing AE. Ask Jay to answer it." }
-                exit 0
-            }
-            $closed = $false
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            while ($sw.ElapsedMilliseconds -lt 3000) {
-                if ((-not [ChromaWin32]::IsWindow($hwndPtr)) -or (-not [ChromaWin32]::IsWindowVisible($hwndPtr))) { $closed = $true; break }
-                Start-Sleep -Milliseconds 100
-            }
-            Write-JsonOut @{ ok = $true; handle = $Handle; pressed = $pressedName; method = $method; checked = $checkedName; closed = $closed }
+            # No UIA button: AE painted this dialog itself. Only a -Key call (every guard checked above) may post
+            # a key to it; without -Key nothing is sent. (The old OCR decision lived here and is gone.)
+            Write-JsonOut @{ ok = $false; error = "button_not_answerable"; hint = "No UI Automation button with that name. An AE-painted dialog is answered through ae_dialogs and ae_dialog_respond, which read it first and post Enter or Escape." }
             exit 0
         }
 

@@ -39,6 +39,8 @@ import {
 import { readTools } from "../src/tools/read.js";
 import { writeDiagnostics } from "../src/tools/ext/diagnostics.js";
 import { FakeFile, FakeProject, loadHost } from "./support/fake-ae.js";
+import { footagePage, makeSequence, useOldFiles } from "./support/seq-fixtures.js";
+import { resetResourceCache, resourceDeps } from "../src/system-resources.js";
 
 const tmpDirs: string[] = [];
 const tmp = () => {
@@ -87,6 +89,10 @@ interface RigOptions {
   snapshot?: () => unknown;
   /** No serviceInfo on the context: not inside the panel service. */
   noService?: boolean;
+  /** What preflightItems returns (the footage list the sequence check reads). */
+  items?: unknown;
+  /** preflightItems fails with an unreachable panel. */
+  itemsFail?: boolean;
 }
 
 function rig(opts: RigOptions = {}) {
@@ -113,6 +119,9 @@ function rig(opts: RigOptions = {}) {
         case "rqeditRead":
           await opts.onRead?.();
           return ok(opts.queue ?? defaultQueue);
+        case "preflightItems":
+          if (opts.itemsFail) return { ok: false as const, error: { kind: "unreachable", message: "panel gone" } };
+          return ok(opts.items ?? footagePage([]));
         case "sessionSnapshot":
           return ok(opts.snapshot ? opts.snapshot() : { project_path: "<unsaved>", fn });
         case "rqeditRender":
@@ -1150,5 +1159,157 @@ describe("the session baseline after a render", () => {
     const base = getSessionTracker()!.lastBaseline();
     expect(base?.render_queue).toMatchObject({ queued: 0 });
     expect(base?.tool).toBe("ae_render_queue_render");
+  });
+});
+
+// ---------- gaps in image sequences, and the GPU ----------
+
+describe("ae_render_queue_render: missing frames in image sequences", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+  const gappy = (ageS = 3600) => {
+    const first = makeSequence(path.join(tmp(), "exr"), { skip: [4, 5, 9] });
+    const old = useOldFiles(ageS);
+    restore = old.restore;
+    return { first, old };
+  };
+
+  it("warns by default and still starts: sequence_check and a warnings line in the result", async () => {
+    const { first } = gappy();
+    const r = rig({ items: footagePage([{ file: first, name: "A beauty" }]) });
+    const out = await startTool(r.ctx);
+    expect(out).toMatchObject({ ok: true, started: true });
+    expect(out.sequence_check).toMatchObject({ with_gaps: 1, checked: 1 });
+    expect(out.sequence_check.sequences[0]).toMatchObject({ state: "gaps", missing: 3, missing_text: "0004-0005, 0009" });
+    expect(out.warnings.join(" ")).toMatch(/1 image sequence has missing frames/);
+    await storeFor(r.ctx).done(out.job_id);
+    expect(r.calls.map((c) => c.fn)).toContain("rqeditRender");
+  });
+
+  it("block on a check that could not finish refuses with sequence_check_incomplete, not 'fix the missing frames'", async () => {
+    const r = rig({ items: footagePage([{ file: path.join(os.tmpdir(), "chroma-no-such-folder-xyz", "A.0001.exr") }]) });
+    const out = await startTool(r.ctx, { sequence_check: "block" });
+    expect(out).toMatchObject({ ok: false, started: false });
+    expect(out.refused[0].code).toBe("sequence_check_incomplete");
+    expect(out.message).toMatch(/could not finish/);
+    expect(out.message).not.toMatch(/Fix the missing frames/);
+    expect(out.refused[0].message).not.toMatch(/Fix the missing frames/);
+    expect(r.calls.map((c) => c.fn)).not.toContain("rqeditRender");
+  });
+
+  it("block refuses before anything is created: no job, no render eval, gate open, lease free", async () => {
+    const { first } = gappy();
+    const r = rig({ items: footagePage([{ file: first }]) });
+    const out = await startTool(r.ctx, { sequence_check: "block" });
+    expect(out).toMatchObject({ ok: false, started: false });
+    expect(out.refused[0].code).toBe("sequence_gaps");
+    expect(out.message).toMatch(/Nothing was started/);
+    expect(out.sequence_check.with_gaps).toBe(1);
+    expect(r.calls.map((c) => c.fn)).not.toContain("rqeditRender");
+    expect(storeFor(r.ctx).latest()).toBeUndefined();
+    expect(renderGate.active()).toBeNull();
+    expect(r.queue.inFlight).toBeNull();
+  });
+
+  it("off does not read the footage list or any folder", async () => {
+    const { first, old } = gappy();
+    const r = rig({ items: footagePage([{ file: first }]) });
+    const out = await startTool(r.ctx, { sequence_check: "off" });
+    expect(out.started).toBe(true);
+    expect(out.sequence_check).toBeUndefined();
+    expect(r.calls.map((c) => c.fn)).not.toContain("preflightItems");
+    expect(old.log.readdir).toEqual([]);
+    await storeFor(r.ctx).done(out.job_id);
+  });
+
+  it("block with a sequence still being written starts, and reports writing", async () => {
+    const { first } = gappy(2);
+    const r = rig({ items: footagePage([{ file: first }]) });
+    const out = await startTool(r.ctx, { sequence_check: "block" });
+    expect(out.started).toBe(true);
+    expect(out.sequence_check).toMatchObject({ with_gaps: 0, writing: 1 });
+    await storeFor(r.ctx).done(out.job_id);
+  });
+
+  it("a clean project adds no sequence warning", async () => {
+    const first = makeSequence(path.join(tmp(), "ok"));
+    const old = useOldFiles();
+    restore = old.restore;
+    const r = rig({ items: footagePage([{ file: first }]) });
+    const out = await startTool(r.ctx);
+    expect(out.started).toBe(true);
+    expect(out.warnings).toBeUndefined();
+    expect(out.sequence_check).toMatchObject({ checked: 1, with_gaps: 0, sequences: [] });
+    await storeFor(r.ctx).done(out.job_id);
+  });
+});
+
+describe("ae_render_queue_render: GPU and other renderers", () => {
+  const saved = { ...resourceDeps };
+  afterEach(() => {
+    Object.assign(resourceDeps, saved);
+    resetResourceCache();
+  });
+  const probe = (usedGb: number, processes: any[] = []) => {
+    resetResourceCache();
+    Object.assign(resourceDeps, {
+      platform: () => "win32" as const,
+      run: async () => ({ ok: true, adapters: [{ luid: "a", used_mb: usedGb * 1024 }], totals: [{ name: "RTX 4090", total_mb: 24 * 1024 }], processes }),
+    });
+  };
+
+  it("adds resource_warnings when the card is nearly full, and still starts", async () => {
+    probe(22.5, [{ pid: 41264, name: "Cinema 4D", gpu_mb: 9000 }]);
+    const r = rig();
+    const out = await startTool(r.ctx);
+    expect(out).toMatchObject({ ok: true, started: true });
+    expect(out.resource_warnings).toHaveLength(1);
+    expect(out.resource_warnings[0]).toMatch(/94 % full.*Cinema 4D \(pid 41264\)/);
+    expect(tool("ae_render_queue_render").description).toMatch(/If `resource_warnings` is present, tell the user before continuing/);
+    await storeFor(r.ctx).done(out.job_id);
+  });
+
+  it("has no resource_warnings key when the card has room", async () => {
+    probe(8);
+    const r = rig();
+    const out = await startTool(r.ctx);
+    expect(out.started).toBe(true);
+    expect("resource_warnings" in out).toBe(false);
+    await storeFor(r.ctx).done(out.job_id);
+  });
+
+  it("reads the GPU before it takes the queue lease", async () => {
+    let leaseHeldDuringProbe: boolean | null = null;
+    const r = rig();
+    resetResourceCache();
+    Object.assign(resourceDeps, {
+      platform: () => "win32" as const,
+      run: async () => {
+        leaseHeldDuringProbe = r.queue.inFlight !== null;
+        return { ok: true, adapters: [], totals: [], processes: [] };
+      },
+    });
+    const out = await startTool(r.ctx);
+    expect(leaseHeldDuringProbe).toBe(false);
+    await storeFor(r.ctx).done(out.job_id);
+  });
+});
+
+describe("ae_render_queue_render: a footage list that cannot be read", () => {
+  it("keeps the throw (its render eval would queue behind the abandoned one): nothing starts, the lease is free", async () => {
+    const r = rig({ itemsFail: true });
+    await expect(startTool(r.ctx)).rejects.toThrow(/panel gone/);
+    expect(r.calls.map((c) => c.fn)).not.toContain("rqeditRender");
+    expect(storeFor(r.ctx).latest()).toBeUndefined();
+    expect(renderGate.active()).toBeNull();
+    expect(r.queue.inFlight).toBeNull();
+    // sequence_check off does not need the list at all
+    const off = rig({ itemsFail: true });
+    const out = await startTool(off.ctx, { sequence_check: "off" });
+    expect(out.started).toBe(true);
+    await storeFor(off.ctx).done(out.job_id);
   });
 });

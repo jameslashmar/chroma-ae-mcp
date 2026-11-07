@@ -53,6 +53,45 @@ export interface DescribeLayer {
   markers: Array<{ time: number; comment: string; duration?: number }>;
   marker_count?: number;
   segments_truncated?: boolean;
+  /** Only with layout: true. */
+  layout?: DescribeLayerLayout;
+  layout_error?: string;
+}
+
+/** A layer's box [x, y, width, height] in comp pixels, or null with a reason. */
+export type LayoutRect = [number, number, number, number];
+
+export interface DescribeMask {
+  name: string;
+  mode: string;
+  inverted: boolean;
+  locked: boolean;
+  vertices: number;
+  closed?: boolean;
+  animated?: boolean;
+  rect: LayoutRect | null;
+  rect_approx?: boolean;
+  rect_reason?: string | null;
+  feather?: [number, number];
+}
+
+export interface DescribeLayerLayout {
+  flags: { enabled: boolean; shy: boolean; guide: boolean; locked: boolean; solo: boolean; three_d: boolean; null_layer: boolean; adjustment: boolean };
+  rect: LayoutRect | null;
+  rect_reason?: string | null;
+  source?: { kind: string; width?: number; height?: number };
+  camera?: { zoom?: number; two_node: boolean; position?: number[]; point_of_interest?: number[]; keyed_properties: string[] };
+  masks: DescribeMask[];
+  masks_total: number;
+}
+
+export interface DescribeRegion {
+  name: string;
+  rect: LayoutRect;
+  from: "mask" | "guide_layer" | "placeholder";
+  layer: { index: number; id: number; name: string };
+  mask?: string;
+  rect_approx?: boolean;
 }
 
 export interface DescribeSegment {
@@ -107,6 +146,10 @@ export interface DescribeRaw {
   nesting: NestNode;
   nesting_truncated: boolean;
   properties_visited: number;
+  /** Only with layout: true. */
+  layout?: { time: number; rects_unavailable: number; masks_truncated: boolean };
+  regions?: DescribeRegion[];
+  regions_truncated?: boolean;
 }
 
 // ---------- schema ----------
@@ -137,6 +180,14 @@ export const AeDescribeCompSchema = z.object({
     .boolean()
     .optional()
     .describe("Also return one compact row per layer (index, id, name, role, in/out, parent, matte, flags). Default false: the stack runs and the summary are usually enough and far smaller."),
+  layout: z
+    .boolean()
+    .optional()
+    .describe(
+      "Add each layer's comp-space box [x, y, w, h], masks (name, mode, vertices, comp-space box), flags (shy, guide, locked, enabled, solo, 3D, null, adjustment), source kind with its size (comp, footage, solid, placeholder, missing) and camera data, and a regions list from the masks, guide layers and placeholders. Implies the per-layer rows. Regions cover the layers of the page read. Default false: the output is unchanged."
+    ),
+  layout_time: z.number().optional().describe("With layout: the time in seconds to read boxes and masks at. Default: the comp's current time (never moved)."),
+  max_masks_per_layer: z.number().int().min(1).max(50).optional().describe("With layout: masks listed per layer (default 20; masks_total says how many there are)."),
   gantt: z
     .boolean()
     .optional()
@@ -765,6 +816,21 @@ export function drawGantt(raw: DescribeRaw): { png: PNG; info: GanttInfo } {
 
 // ---------- tool ----------
 
+/** The layout-only fields of one layer row: flags always present, source with kind and size, box, masks, camera. */
+function layoutFields(l: DescribeLayer): Record<string, unknown> {
+  const lay = l.layout;
+  if (!lay) return { layout_error: l.layout_error ?? "layout not read" };
+  return {
+    ...lay.flags,
+    rect: lay.rect,
+    ...(lay.rect === null ? { rect_reason: lay.rect_reason ?? null } : {}),
+    ...(lay.source ? { source: { ...(l.source ?? {}), ...lay.source } } : {}),
+    masks: lay.masks,
+    masks_total: lay.masks_total,
+    ...(lay.camera ? { camera: lay.camera } : {}),
+  };
+}
+
 export const describeTools: ToolDefinition<any>[] = [
   {
     name: "ae_describe_comp",
@@ -778,12 +844,13 @@ export const describeTools: ToolDefinition<any>[] = [
       "Expression-driven motion (wiggle, loopOut, rigs) is sampled at a few times and shows as 'moves (expression)'; quick changes between samples can be missed. " +
       "'Unused' is a definition made here (switched off with no audio, no matte, no parent, not picked by an effect's layer parameter, and no expression names it with layer(\"...\")); it is only judged when the whole comp was read and every expression was scanned. " +
       "Pages big comps (from_layer, max_layers up to 500). With gantt:true it also draws the timeline as a PNG and returns its path. " +
-      "Smaller than ae_get_comp + ae_comp_tree + ae_get_markers together; use those for exact values. Read-only: changes no time, selection or setting.",
+      "Smaller than ae_get_comp + ae_comp_tree + ae_get_markers together; use those for exact values. Read-only: changes no time, selection or setting. " +
+      "With layout: true it also reads what a template holds, for ae_layout_apply: every layer's comp-space box (2D, unparented layers; 3D, parented, camera and light layers say why not), its masks with their boxes (the control-polygon box, marked rect_approx for curved masks), flags, source kind and size (placeholder, missing), camera data, and a regions list from masks, guide layers and placeholders.",
     schema: AeDescribeCompSchema,
     handler: async (args: AeDescribeCompArgs, ctx) => {
       const res = await ctx.bridge.callHost<DescribeRaw>(
         "describeRead",
-        { comp_id: args.comp_id, from_layer: args.from_layer, max_layers: args.max_layers },
+        { comp_id: args.comp_id, from_layer: args.from_layer, max_layers: args.max_layers, layout: args.layout, layout_time: args.layout_time, max_masks_per_layer: args.max_masks_per_layer },
         { label: `ae_describe_comp(${args.comp_id})`, mutates: false, toolName: "ae_describe_comp" }
       );
       const raw = res.result;
@@ -806,7 +873,7 @@ export const describeTools: ToolDefinition<any>[] = [
           desc.throughout_truncated === true ||
           desc.summary_truncated === true,
       };
-      if (args.include_layers) {
+      if (args.include_layers || args.layout) {
         out.layers = raw.layers.map((l) => ({
           index: l.index,
           id: l.id,
@@ -825,7 +892,14 @@ export const describeTools: ToolDefinition<any>[] = [
           ...(l.three_d ? { three_d: true } : {}),
           ...(l.is_parent ? { is_parent: true } : {}),
           ...(l.is_matte ? { is_matte: true } : {}),
+          ...(args.layout ? layoutFields(l) : {}),
         }));
+      }
+      if (args.layout) {
+        out.layout = raw.layout;
+        out.regions = raw.regions ?? [];
+        out.regions_truncated = raw.regions_truncated === true;
+        if (raw.regions_truncated) out.truncated = true;
       }
       if (args.gantt) {
         try {

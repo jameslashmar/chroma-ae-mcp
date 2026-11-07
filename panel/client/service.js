@@ -24,6 +24,61 @@
   var extLoadFailures = [];
   var paths = common.getPaths();
   var sessionToken = "";
+  var serviceStartedAt = new Date().toISOString();
+  // What this service is (which After Effects owns it), for /health, owner.json and ae_diagnostics.
+  var hostEnvCache = null;
+  var hostPathCache = null;
+  // (The loser of a port conflict logs who owns the port, see probePortOwner; it has no MCP to report it through.)
+  var CONFLICT_PROBE_EVERY_MS = 5 * 60 * 1000;
+  var lastConflictProbeAt = 0;
+  var conflictProbeRunning = false;
+  var conflictProbeReq = null;
+  var ownerWrittenPid = null;
+
+  function currentInstance() {
+    return common.buildInstanceInfo(
+      hostEnvCache || { appVersion: aeVersion === "unknown" ? "" : aeVersion },
+      hostPathCache,
+      boundPort,
+      paths,
+      { startedAt: serviceStartedAt }
+    );
+  }
+
+  function clockOf(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var pad = function (n) { return n < 10 ? "0" + n : String(n); };
+    return pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  // owner.json: who holds the port, for relay-diagnose.cjs (read-only for everyone else). Atomic write.
+  function writeOwnerFile() {
+    try {
+      var instance = currentInstance();
+      var tmp = paths.ownerPath + "." + process.pid + ".tmp";
+      fs.writeFileSync(
+        tmp,
+        JSON.stringify({ instance: instance, written_at: new Date().toISOString() }),
+        { encoding: "utf8", mode: 384 }
+      );
+      fs.renameSync(tmp, paths.ownerPath);
+      ownerWrittenPid = instance.pid;
+    } catch (e) {
+      log("warn", "Could not write owner.json: " + (e && e.message ? e.message : String(e)));
+    }
+  }
+
+  // Best effort, and only the file this service wrote (another AE may own it by now).
+  function removeOwnerFile() {
+    if (ownerWrittenPid === null) return;
+    var mine = ownerWrittenPid;
+    ownerWrittenPid = null;
+    try {
+      var cur = JSON.parse(fs.readFileSync(paths.ownerPath, "utf8"));
+      if (cur && cur.instance && cur.instance.pid === mine) fs.unlinkSync(paths.ownerPath);
+    } catch (e) {}
+  }
 
   function log(level, msg) {
     if (msg === undefined) {
@@ -349,6 +404,8 @@
             panelVersion: PANEL_VERSION,
             aeVersion: aeVersion,
             extLoadFailures: extLoadFailures,
+            instance: currentInstance(),
+            hostPath: hostPathCache,
             port: boundPort,
             evalQueueDepth: queue.length,
             inFlight: inFlight
@@ -495,6 +552,7 @@
         aeVersion: aeVersion,
         extLoadFailures: extLoadFailures,
         panelVersion: PANEL_VERSION,
+        instance: currentInstance(),
         inFlight: inFlight
           ? { id: inFlight.id, label: inFlight.label, startedAt: inFlight.startedAt }
           : null,
@@ -708,6 +766,64 @@
     });
   }
 
+  // Who holds the port? Asked at most once per 5 minutes (the bind retry runs every 5 s for as long
+  // as the other After Effects lives). GET /health with the shared token: a Chroma service names its
+  // After Effects; anything else is "another program". No answer keeps the plain EADDRINUSE line.
+  function probePortOwner() {
+    if (conflictProbeRunning || isShuttingDown) return;
+    var now = Date.now();
+    if (lastConflictProbeAt && now - lastConflictProbeAt < CONFLICT_PROBE_EVERY_MS) return;
+    lastConflictProbeAt = now;
+    conflictProbeRunning = true;
+    var port = boundPort;
+    var finished = false;
+    var req = null;
+    function finish(status, body, failed) {
+      if (finished) return;
+      finished = true;
+      conflictProbeRunning = false;
+      if (isShuttingDown || isListening || failed) return;
+      var mineLabel = currentInstance().ae_label || "(version unknown)";
+      var inst = body && typeof body === "object" && body.instance && typeof body.instance === "object" ? body.instance : null;
+      var chroma = !!(body && typeof body === "object" && (body.startedBy === "service" || (body.error && body.error.kind === "auth")));
+      if (status === 200 && body && body.ok === true && chroma) {
+        var theirs = inst
+          ? "After Effects " + (inst.ae_label || "(version unknown)") + " (service pid " + inst.pid +
+            (inst.started_at && clockOf(inst.started_at) ? ", since " + clockOf(inst.started_at) : "") + ")"
+          : "another After Effects (" + (body.aeVersion ? "AE " + body.aeVersion : "an older Chroma AE MCP panel") + ")";
+        log("warn", "Port " + port + " is held by " + theirs + "; this After Effects " + mineLabel + " is not serving MCP");
+      } else if (status === 401 && chroma) {
+        log("warn", "Port " + port + " is held by another Chroma AE MCP service that rejected this token; this After Effects " + mineLabel + " is not serving MCP");
+      } else if (status) {
+        log("warn", "Port " + port + " is used by another program (HTTP " + status + "), not by Chroma AE MCP");
+      }
+    }
+    try {
+      req = http.request(
+        { hostname: "127.0.0.1", port: port, path: "/health", method: "GET", headers: { Host: "127.0.0.1:" + port, Authorization: "Bearer " + sessionToken } },
+        function (res) {
+          var chunks = [];
+          res.on("data", function (c) { chunks.push(c); });
+          res.on("end", function () {
+            var parsed = null;
+            try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch (e) { parsed = null; }
+            finish(res.statusCode || 0, parsed, false);
+          });
+          res.on("error", function () { finish(0, null, true); });
+        }
+      );
+      conflictProbeReq = req;
+      req.setTimeout(1500, function () {
+        finish(0, null, true);
+        try { req.destroy(); } catch (e) {}
+      });
+      req.on("error", function () { finish(0, null, true); });
+      req.end();
+    } catch (e) {
+      finish(0, null, true);
+    }
+  }
+
   function scheduleBindRetry() {
     if (isShuttingDown || isListening || isBinding) return;
     if (retryTimer !== null) return;
@@ -758,6 +874,8 @@
           );
         }
       }
+      // Asks who holds the port (at most once per 5 minutes, whatever the retry rate).
+      if (err && err.code === "EADDRINUSE") probePortOwner();
       // Binding retries only create a new listener. They never touch evalScript.
       scheduleBindRetry();
     });
@@ -772,11 +890,13 @@
       isBinding = false;
       isListening = true;
       lastBindErrorKey = "";
+      lastConflictProbeAt = 0;
       var addr = candidate.address();
       if (addr && typeof addr.port === "number") {
         boundPort = addr.port;
       }
       log("ok", "Listening on http://127.0.0.1:" + boundPort);
+      writeOwnerFile();
       // Load the MCP bundle only once this instance owns the port. Creating it starts the asset
       // watcher, which polls evalScript every 5 s while asset_watch is on in the shared
       // settings.json; an instance that never got the port must not poll or import.
@@ -853,6 +973,11 @@
         else if (panelMcp.assetWatcher && typeof panelMcp.assetWatcher.stop === "function") panelMcp.assetWatcher.stop();
       } catch (e) {}
     }
+    if (conflictProbeReq) {
+      try { conflictProbeReq.destroy(); } catch (e) {}
+      conflictProbeReq = null;
+    }
+    removeOwnerFile();
     isListening = false;
     isBinding = false;
   }
@@ -923,6 +1048,8 @@
     if (isShuttingDown) return;
     if (host) {
       var env = host.getHostEnvironment();
+      hostEnvCache = env && typeof env === "object" ? env : null;
+      if (typeof host.getHostPath === "function") hostPathCache = host.getHostPath();
       if (env && env.appVersion) {
         aeVersion = String(env.appVersion);
       }

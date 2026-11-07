@@ -83,15 +83,24 @@ async function runRelay(
   homeDir: string,
   port: number,
   messages: unknown[],
-  opts: { toolset?: string; stderr?: string[] } = {}
+  opts: { toolset?: string; stderr?: string[]; diagnose?: "off" | "quick" | "default"; relay?: string; env?: Record<string, string> } = {}
 ): Promise<any[]> {
   const baseEnv: Record<string, string | undefined> = { ...process.env };
   delete baseEnv.CHROMA_AE_MCP_TOOLSET;
-  const child = childProcess.spawn(process.execPath, [RELAY], {
+  delete baseEnv.CHROMA_AE_MCP_DIAGNOSE;
+  delete baseEnv.CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS;
+  const child = childProcess.spawn(process.execPath, [opts.relay ?? RELAY], {
     env: {
       ...baseEnv,
       ...(opts.toolset !== undefined ? { CHROMA_AE_MCP_TOOLSET: opts.toolset } : {}),
+      // The tests written before the relay diagnosed an unreachable panel pin its old one-line text.
+      // The diagnosis has its own tests below, in quick mode (no process is started, no real AE is looked at).
+      ...((opts.diagnose ?? "off") === "default" ? {} : { CHROMA_AE_MCP_DIAGNOSE: opts.diagnose ?? "off" }),
+      ...(opts.env ?? {}),
       LOCALAPPDATA: homeDir,
+      APPDATA: homeDir,
+      "CommonProgramFiles(x86)": homeDir,
+      CommonProgramFiles: homeDir,
       HOME: homeDir,
       USERPROFILE: homeDir,
       CHROMA_AE_MCP_PORT: String(port),
@@ -278,6 +287,176 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(replies[1].error.message).toMatch(/not reachable/);
   });
 
+  // ---------- why the panel cannot be reached ----------
+
+  /** Puts the panel where CEP looks for it in the temp home, so "not installed" does not win. */
+  function installPanel(dir: string) {
+    const ext =
+      process.platform === "win32"
+        ? path.join(dir, "Adobe", "CEP", "extensions", "london.chroma.aemcp")
+        : path.join(dir, "Library", "Application Support", "Adobe", "CEP", "extensions", "london.chroma.aemcp");
+    fs.mkdirSync(path.join(ext, "CSXS"), { recursive: true });
+    fs.writeFileSync(path.join(ext, "CSXS", "manifest.xml"), '<x ExtensionBundleVersion="0.6.0"/>');
+  }
+
+  it("a tool call with the panel not installed says so, and says Connected, not READY", async () => {
+    const { dir } = home();
+    const stderr: string[] = [];
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { diagnose: "quick", stderr });
+    const text = replies[0].result.content[0].text as string;
+    expect(replies[0].result.isError).toBe(true);
+    expect(text).toMatch(/panel is not installed/);
+    expect(text).toMatch(/install-dev.ps1/);
+    expect(text).not.toMatch(/READY/);
+    expect(stderr.some((l) => l.includes("panel_not_installed"))).toBe(true);
+    expect(stderr.join(" ")).not.toContain("secret-token");
+  });
+
+  it("a tool call with the panel installed but the service down says to open the panel", async () => {
+    const { dir } = home();
+    installPanel(dir);
+    const port = await closedPort();
+    const replies = await runRelay(dir, port, [callStatus(1)], { diagnose: "quick" });
+    const text = replies[0].result.content[0].text as string;
+    expect(text).toContain(`not listening on 127.0.0.1:${port}`);
+    expect(text).toMatch(/Open Window > Extensions > Chroma AE MCP once/);
+  });
+
+  it("a tool call before the service ever ran says it has never started", async () => {
+    const { dir, dataDir } = home();
+    fs.rmSync(path.join(dataDir, "token"));
+    installPanel(dir);
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { diagnose: "quick" });
+    expect(replies[0].result.content[0].text).toMatch(/never started on this machine/);
+  });
+
+  it("initialize, ping and the list calls are not diagnosed: they stay instant and keep the short text", async () => {
+    const { dir } = home();
+    const stderr: string[] = [];
+    const t0 = Date.now();
+    const replies = await runRelay(dir, await closedPort(), [initialize(1), { jsonrpc: "2.0", id: 2, method: "ping" }, listTools(3)], { diagnose: "quick", stderr });
+    expect(replies[0].result.serverInfo.name).toBe("chroma-ae-mcp");
+    expect(replies[1].result).toEqual({});
+    expect(replies[2].error.message).toMatch(/not reachable/);
+    expect(replies[2].error.message).toMatch(/shows Connected/);
+    // Nothing was diagnosed for them (no stderr line, no process spawn); generous bound for a loaded machine.
+    expect(stderr.filter((l) => /panel_not_installed|service_down|no_token/.test(l))).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(10000);
+  });
+
+  it("CHROMA_AE_MCP_DIAGNOSE=off keeps the old one-line text for a tool call", async () => {
+    const { dir } = home();
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { diagnose: "off" });
+    expect(replies[0].result.content[0].text).toMatch(/Start After Effects and wait until Window > Extensions > Chroma AE MCP shows Connected/);
+  });
+
+  it("a rejected token on a tool call is diagnosed as token_rejected, with the service's own /health asked", async () => {
+    const { dir } = home();
+    const paths: string[] = [];
+    const server = http.createServer((req, res) => {
+      paths.push(`${req.method} ${req.url}`);
+      req.resume();
+      req.on("end", () => {
+        res.statusCode = 401;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok: false, error: { kind: "auth" } }));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    const replies = await runRelay(dir, port, [callStatus(1)], { diagnose: "quick" });
+    expect(replies[0].result.isError).toBe(true);
+    expect(replies[0].result.content[0].text).toMatch(/rejected the token/);
+    expect(replies[0].result.content[0].text).toMatch(/Regenerate the token/);
+    expect(paths).toContain("POST /mcp");
+    expect(paths).toContain("GET /health");
+  });
+
+  // ---------- the default path, end to end ----------
+
+  it("the default path (no env switch) starts the real probes and still answers a tool call with a decided reason", async () => {
+    const { dir } = home();
+    const stderr: string[] = [];
+    const t0 = Date.now();
+    // The temp home has no panel and the port is closed. Whatever runs on this machine, the answer is a decided reason.
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { diagnose: "default", stderr });
+    const text = replies[0].result.content[0].text as string;
+    expect(replies[0].result.isError).toBe(true);
+    expect(text).toMatch(/^Chroma AE MCP: /);
+    expect(text).not.toMatch(/READY/);
+    expect(stderr.some((l) => /^\[chroma-ae relay\] [a-z_]+: Chroma AE MCP: /.test(l))).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(15000);
+  });
+
+  it("when the diagnosis finds the service answering after all (res.ok), the old text is kept", async () => {
+    const { dir } = home();
+    const seen: string[] = [];
+    const server = http.createServer((req, res) => {
+      seen.push(`${req.method} ${req.url}`);
+      req.resume();
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        if (req.url === "/health") {
+          res.end(JSON.stringify({ ok: true, startedBy: "service", aeVersion: "26.0", instance: { pid: 5, ae_label: "2026" } }));
+        } else {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ ok: false, error: { kind: "auth" } }));
+        }
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    const replies = await runRelay(dir, port, [callStatus(1)], { diagnose: "quick" });
+    expect(seen).toContain("GET /health");
+    expect(replies[0].result.content[0].text).toMatch(/rejected the token in .*Restart After Effects/);
+  });
+
+  /** A copy of the relay beside a stand-in relay-diagnose.cjs, so the hook runs against a diagnosis we control. */
+  function relayWithDiagnose(stub: string) {
+    const toolsDir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-relaycopy-"));
+    tmpDirs.push(toolsDir);
+    fs.copyFileSync(RELAY, path.join(toolsDir, "stdio-relay.cjs"));
+    fs.writeFileSync(path.join(toolsDir, "relay-diagnose.cjs"), stub);
+    return path.join(toolsDir, "stdio-relay.cjs");
+  }
+
+  it("a diagnosis that does not finish within the budget falls back to the old text, and the relay still exits", async () => {
+    const { dir } = home();
+    const relay = relayWithDiagnose("module.exports = { diagnose: () => new Promise(() => {}) };");
+    const t0 = Date.now();
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { relay, diagnose: "default", env: { CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS: "300" } });
+    expect(replies[0].result.content[0].text).toMatch(/Start After Effects and wait until Window > Extensions > Chroma AE MCP shows Connected/);
+    expect(Date.now() - t0).toBeLessThan(10000);
+  });
+
+  it("CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS can only lower the budget: a huge value still gives up at 6 s", async () => {
+    const { dir } = home();
+    const relay = relayWithDiagnose("module.exports = { diagnose: () => new Promise(() => {}) };");
+    const t0 = Date.now();
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { relay, diagnose: "default", env: { CHROMA_AE_MCP_DIAGNOSE_BUDGET_MS: "600000" } });
+    expect(replies[0].result.content[0].text).toMatch(/Start After Effects and wait until Window > Extensions > Chroma AE MCP shows Connected/);
+    expect(Date.now() - t0).toBeLessThan(9000);
+  }, 20_000);
+
+  it("a diagnosis that throws falls back to the old text", async () => {
+    const { dir } = home();
+    const relay = relayWithDiagnose("module.exports = { diagnose: () => { throw new Error('boom'); } };");
+    const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { relay });
+    expect(replies[0].result.content[0].text).toMatch(/Start After Effects and wait/);
+  });
+
+  it("a diagnosis that finds nothing wrong (ok) or says nothing keeps the old text too", async () => {
+    const { dir } = home();
+    const ok = relayWithDiagnose("module.exports = { diagnose: async () => ({ ok: true, code: 'ok', message: 'fine', fix: [] }) };");
+    const empty = relayWithDiagnose("module.exports = { diagnose: async () => ({ ok: false, code: 'x', message: '', fix: [] }) };");
+    for (const relay of [ok, empty]) {
+      const replies = await runRelay(dir, await closedPort(), [callStatus(1)], { relay });
+      expect(replies[0].result.content[0].text).toMatch(/Start After Effects and wait/);
+    }
+  });
+
   it("turns a rejected token into a readable tool error", async () => {
     const { dir } = home();
     const panel = await fakePanel(() => ({ status: 401, body: { ok: false, error: { kind: "auth" } } }));
@@ -385,6 +564,6 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const replies = await runRelay(dir, server.port, [listTools(1)], { toolset: "core" });
     expect(replies[0].result.tools.map((t: any) => t.name)).toEqual(list.map((t) => t.name));
     const cached = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-core-cache.json"), "utf8"));
-    expect(cached.tools).toHaveLength(35);
+    expect(cached.tools).toHaveLength(36);
   });
 });

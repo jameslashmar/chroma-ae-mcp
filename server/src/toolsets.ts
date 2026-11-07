@@ -55,7 +55,7 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
     tools: [
       "ae_set_property", "ae_batch_set", "ae_create_layer", "ae_create_comp", "ae_layer_ops", "ae_precompose",
       "ae_set_track_matte", "ae_align", "ae_multi_comp_apply", "ae_build_from_data", "ae_reframe",
-      "ae_add_markers", "ae_remove_markers", "ae_mask", "ae_shape",
+      "ae_add_markers", "ae_remove_markers", "ae_mask", "ae_shape", "ae_layout_apply",
     ],
   },
   project: {
@@ -162,6 +162,7 @@ export function groupOf(toolName: string): string | undefined {
 
 /** Extra search words for tools whose description does not use the words people reach for. */
 export const SEARCH_HINTS: Record<string, string> = {
+  ae_layout_apply: "layout screens regions wall floor atlas template fit comp into rectangle copy camera place feed",
   ae_cleanplate_setup: "remove object person wire rig logo from shot paint out hide",
   ae_cleanplate_pick: "remove object person wire rig logo from shot paint out hide",
   ae_inpaint_plate: "remove object person wire rig logo from shot paint out fill hole",
@@ -169,6 +170,7 @@ export const SEARCH_HINTS: Record<string, string> = {
   ae_garbage_matte: "remove unwanted garbage mask outside",
   ae_render_queue_render: "render inside after effects without aerender export video file",
   ae_aerender_start: "render background aerender export video file command line",
+  ae_preflight: "missing frames gaps sequence exr",
   ae_render_queue_add: "render export queue output",
   ae_screen_replace: "replace phone tv monitor screen content corner pin",
   ae_track_point: "track follow motion tracker point attach",
@@ -186,7 +188,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_skill_run", "ae_multi_comp_apply",
   "ae_render_queue_add", "ae_render_queue_edit", "ae_render_queue_status", "ae_render_queue_render",
   "ae_render_queue_render_status", "ae_render_templates", "ae_aerender_start", "ae_aerender_status",
-  "ae_set_footage_interpretation",
+  "ae_set_footage_interpretation", "ae_import_assets",
 ];
 
 export const META_TOOL_NAMES = ["ae_search_tools", "ae_get_tool_schema", "ae_invoke_tool"] as const;
@@ -202,9 +204,9 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_run_jsx:
     "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render:
-    "Start After Effects' OWN render of the queued items (like pressing Render) and return at once with a job id; follow it with ae_render_queue_render_status. AE stays busy for the whole render and other AE tools are refused meanwhile: tell the user first, ask them to save a dirty project, prefer ae_aerender_start when it works. Never ask the user to press Render.",
+    "Start After Effects' OWN render of the queued items (like pressing Render) and return at once with a job id; follow it with ae_render_queue_render_status. AE stays busy for the whole render and other AE tools are refused meanwhile: tell the user first, ask them to save a dirty project, prefer ae_aerender_start when it works. Never ask the user to press Render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
   ae_aerender_start:
-    "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow it with ae_aerender_status. `continue_on_missing_footage` renders anyway, with colour bars in place of the missing footage. If it cannot run, use ae_render_queue_render.",
+    "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow it with ae_aerender_status. `continue_on_missing_footage` renders anyway, with colour bars in place of the missing footage. If it cannot run, use ae_render_queue_render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
   ae_aerender_status:
     "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects.",
   ae_render_queue_render_status:
@@ -212,9 +214,9 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_render_templates:
     "List render-settings and output-module template names; action save stores a queue item's settings or module as a named template (NOT undoable, needs `expect`).",
   ae_dialogs:
-    "READ-ONLY. List modal dialogs open in After Effects (title, text, buttons, screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: read them here, answer only dialogs our own operation caused with ae_dialog_respond, ask the user otherwise.",
+    "READ-ONLY. List modal dialogs open in After Effects (title, text, kind, buttons (with the default marked), screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: read them here, answer only dialogs our own operation caused with ae_dialog_respond, ask the user otherwise.",
   ae_dialog_respond:
-    "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused; AE-painted dialogs can only be cancelled, or answered OK when it is the only button. Otherwise ask the user.",
+    "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused. An AE-painted dialog is answered only with Cancel (No and Close beside a Cancel are refused), or with its default (outlined) button when that is OK/Yes/Continue; OK on text about replacing, losing, removing or erasing needs both allow_destructive and a user_instruction; it must have been listed with ae_dialogs first and is re-read right before the key. The result says what the dialog said, so tell the user. Otherwise ask the user.",
   ae_save:
     "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` saves as the next free _vNNN. Both retarget the open project.",
   ae_create_comp:
@@ -242,17 +244,19 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_layer_ops:
     "Everyday layer edits in one call, by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
   ae_import_footage:
-    "Import footage files or an image sequence (PSD/AI as a comp, or a whole project, via import_as) into the project and an optional folder, guarded by `expect`; returns the new item_ids. Importing may raise dialogs: they are never suppressed, read them with ae_dialogs.",
+    "Import footage files or an image sequence (PSD/AI as a comp, or a whole project, via import_as) into the project and an optional folder, guarded by `expect`; returns the new item_ids. Many files go through ae_import_assets. Importing may raise dialogs: they are never suppressed, read them with ae_dialogs.",
+  ae_import_assets:
+    "The batch import path: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, with a dry run first. Without it a model imports one file at a time with ae_import_footage. Sequences count as one item; files already in the project are skipped; a long batch stops at `max_seconds` and lists the rest. Guarded by `expect`.",
   ae_snapshot_frame:
     "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame.",
   ae_render_queue_edit:
     "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add or remove output modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first to see what goes). Refused while the queue renders.",
   ae_set_footage_interpretation:
-    "Set a footage item's interpretation (alpha, fields, pulldown, conform frame rate, loop, pixel aspect) in one undo group guarded by `expect`; everything is checked before AE is touched and read back after.",
+    "Set footage interpretation without the dialog, one undo group guarded by expect: alpha, fields, pulldown, conform_frame_rate, loop, pixel_aspect. One item (item_id) or many (item_ids, up to 200, with overrides per item; strict, the default, refuses all if one item can't take its settings, strict:false writes the rest). Checked before AE is touched; read back in a separate call.",
   ae_add_effect:
     "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect whose value AE refuses is taken out again.",
   ae_status:
-    "Read panel health, AE version, project path ('<unsaved>' if none), dirty flag, active comp, selected layers and the quarantine list. `detail: true` adds the active item, selected properties, viewer, GPU and warnings. Call first; the selection can change, so act on explicit ids.",
+    "Read panel health, AE version, project path ('<unsaved>' if none), dirty flag, active comp, selected layers and the quarantine list. `detail: true` adds the active item, selected properties, viewer, GPU and warnings. Call first; the selection can change, so act on explicit ids. If AE is busy it answers at once with `ae_answered:false` and `busy` (why, popups, how long), within 10 s at most, instead of waiting.",
 };
 
 function cutAt(text: string, max: number): string {
@@ -387,7 +391,7 @@ export function coreInstructions(): string {
   return [
     `Chroma AE MCP drives Adobe After Effects. ${AGENT_SAFETY_GUIDANCE}`,
     "",
-    `This list shows ${CORE_TOOL_NAMES.length} everyday tools; ${ALL_TOOLS.length} exist in all. The rest are reached through three tools. ae_search_tools and ae_get_tool_schema never touch After Effects, so they work while it is busy or blocked; ae_invoke_tool runs a tool like any other, so it is refused while AE is rendering:`,
+    `This list shows ${CORE_TOOL_NAMES.length} everyday tools; ${ALL_TOOLS.length} exist in all. The rest are reached through three tools. ae_search_tools and ae_get_tool_schema never touch After Effects, so they work while it is busy or blocked; ae_invoke_tool runs a tool like any other, so it is refused while AE is rendering, and with a busy message while a popup or a long operation holds AE (ae_status says why):`,
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",

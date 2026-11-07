@@ -33,7 +33,7 @@ This is an internal Chroma tool, not a consumer product.
 
 **v0.6.0, released 2026-11-06** (signed ZXP on the [v0.6.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.6.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **177 tools in the released 0.6.0** (179 on `main` after it: `ae_render_queue_render` and `ae_render_queue_render_status` are unreleased), all through the build, 4,979 unit tests in 0.6.0 and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- **177 tools in the released 0.6.0** (180 on `main` after it: `ae_render_queue_render`, `ae_render_queue_render_status` and `ae_layout_apply` are unreleased), all through the build, 4,979 unit tests in 0.6.0 and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
 - Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions were checked live on AE 26.3. macOS should work but is untested.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
 
@@ -89,7 +89,7 @@ claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp
 
 - `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS.
 - The relay forwards to the same `/mcp` as Claude Code, so every client shares one write queue.
-- **Toolsets.** All 179 tool schemas are about 774,000 characters (roughly 200,000 tokens). Claude Code loads tool schemas on demand, but whether Claude Desktop does the same is **unconfirmed**, so the Desktop entry above asks for the `core` toolset: 32 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (about 72,000 characters, with shortened descriptions that keep every parameter), and the other tools are reached through those three. In the panel, pick **Desktop** under **Register with** and press **Add to Claude Desktop (core toolset)**: it writes the entry above into `claude_desktop_config.json` (the file is backed up as `claude_desktop_config.json.chroma-bak` first, other servers and other settings are kept), then quit Claude Desktop from the tray and reopen it. If Desktop already has a `chroma-ae` entry without `CHROMA_AE_MCP_TOOLSET`, it keeps listing all tools until you press **Use the core toolset in Claude Desktop**. To go back to all 179 tools, delete the `CHROMA_AE_MCP_TOOLSET` line from the entry's `env` (or set it to `full`) and restart Desktop; the panel never puts the line back by itself, and never overwrites a value you set. Claude Code, Cursor and Codex are registered without it. The details are in [docs/TOOLS.md](docs/TOOLS.md).
+- **Toolsets.** All 180 tool schemas are about 795,000 characters (roughly 200,000 tokens). Claude Code loads tool schemas on demand, but whether Claude Desktop does the same is **unconfirmed**, so the Desktop entry above asks for the `core` toolset: 33 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (about 81,000 characters, with shortened descriptions that keep every parameter), and the other tools are reached through those three. In the panel, pick **Desktop** under **Register with** and press **Add to Claude Desktop (core toolset)**: it writes the entry above into `claude_desktop_config.json` (the file is backed up as `claude_desktop_config.json.chroma-bak` first, other servers and other settings are kept), then quit Claude Desktop from the tray and reopen it. If Desktop already has a `chroma-ae` entry without `CHROMA_AE_MCP_TOOLSET`, it keeps listing all tools until you press **Use the core toolset in Claude Desktop**. To go back to all 180 tools, delete the `CHROMA_AE_MCP_TOOLSET` line from the entry's `env` (or set it to `full`) and restart Desktop; the panel never puts the line back by itself, and never overwrites a value you set. Claude Code, Cursor and Codex are registered without it. The details are in [docs/TOOLS.md](docs/TOOLS.md).
 - While AE is closed the relay answers `tools/list` from the last list the panel served (the core list has its own cache file, so it exists only after the panel has served it once with `CHROMA_AE_MCP_TOOLSET=core`; with no cache yet, `tools/list` returns an error), and calling a tool says to start AE.
 - The panel's buttons back up each config file as `<file>.chroma-bak` before changing it.
 
@@ -125,7 +125,7 @@ Full details, including what can't be undone: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Tools
 
-179 tools in 55 groups (the last two, `ae_render_queue_render` and its status, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
+180 tools in 55 groups (the last three, `ae_render_queue_render`, its status and `ae_layout_apply`, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Develop
 
@@ -138,7 +138,10 @@ Building, the dev install, releasing and QA are in [docs/DEVELOP.md](docs/DEVELO
 - **Tools fail with `unreachable`:** is AE running and the service up? The panel shows Connected, and `curl -H "Authorization: Bearer <token>" http://127.0.0.1:7790/health` answers. The service starts about 30 s after AE launches.
 - **401 errors:** the token was regenerated. Pick **Code** under Register with, click **Copy setup command** and paste it into a terminal again.
 - **Something is stuck:** click **Save diagnostics** in the panel (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
-- **A call times out:** the message names any popup blocking AE. Answer it in AE, or with `ae_dialog_respond` (see [docs/SAFETY.md](docs/SAFETY.md)), then check the state and `ae_acknowledge` the op.
+- **A call is refused with 'After Effects is busy':** a popup, a script or a render holds AE. Call `ae_status` (answers within 10 s, names the popup), answer the popup under the dialog rules, don't retry in a loop. Nothing was sent and nothing is quarantined.
+- **'Not reachable':** run `node panel/tools/relay-diagnose.cjs` (exit 0 fine, 2 wrong, `--json` available). Codes: `no_token`, `panel_not_installed`, `ae_not_running`, `only_unsupported_ae`, `debug_mode_off` (development install only), `service_down`, `port_other_program`, `token_rejected`, `other_ae_holds_port`, `service_busy`.
+- **Two After Effects versions running:** the first to start keeps port 7790. The other panel shows 'Other AE has the connection (2025)' and `service.log` names the owner.
+- **`CHROMA_AE_MCP_DIAGNOSE=off`** (old one-line relay text) or `quick` (no process probes).
 - **Port 7790 is busy:** the service retries every 5 s and never starts a second server. Check that an old AE instance isn't still running.
 - **Windows Firewall prompt when rendering:** `aerender` starts a background AE. Renders don't need network access, so cancelling the prompt is fine.
 - **The ZXP installer can't parse the package:** `ExtensionManifest Version` must be the manifest *schema* version (7.0), not the CEP version (12.0).

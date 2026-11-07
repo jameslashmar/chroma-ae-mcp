@@ -8,7 +8,7 @@ GitHub's hosted runners have no After Effects, so the live checks (`qa/smoke-mcp
 - PlayerDebugMode on, with the panel installed from the runner's checkout:
   1. let the workflow check out once (or clone to the runner's work folder);
   2. run `scripts/install-dev.ps1` from that checkout;
-  3. start AE and confirm Window > Extensions > Chroma AE MCP shows READY.
+  3. start AE and confirm Window > Extensions > Chroma AE MCP shows Connected.
 
   `qa/ci-live.mjs` refuses to run if the extension points anywhere else, because the test must load this checkout's code.
 

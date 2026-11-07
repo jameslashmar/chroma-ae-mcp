@@ -18,6 +18,7 @@ import {
 } from "../src/tools/ext/memory.js";
 import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
 import { FakeProject, GUARD, loadHost } from "./support/fake-ae.js";
+import { classifyResources, resetResourceCache, resourceDeps } from "../src/system-resources.js";
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -101,6 +102,41 @@ describe("pure logic", () => {
     expect(w.warnings[0]).toContain("9000 MB");
   });
 
+  it("adds the GPU warnings: ready only below level high, and unchanged when there is no report", () => {
+    const raw = (usedGb: number) => ({ ok: true, adapters: [{ luid: "a", used_mb: usedGb * 1024 }], totals: [{ name: "x", total_mb: 24 * 1024 }], processes: [] });
+    const high = classifyResources(raw(22.5));
+    const warn = classifyResources(raw(20.5));
+    const calm = classifyResources(raw(8));
+    const base = { aeBytes: 2000 * MB, freeBytes: 8000 * MB };
+    const h = preflightWarnings({ ...base, resources: high });
+    expect(h.ready).toBe(false);
+    expect(h.warnings).toHaveLength(1);
+    const w = preflightWarnings({ ...base, resources: warn });
+    expect(w.ready).toBe(true); // level warn adds the text only
+    expect(w.warnings).toHaveLength(1);
+    expect(preflightWarnings({ ...base, resources: calm })).toEqual({ ready: true, warnings: [] });
+    expect(preflightWarnings(base)).toEqual({ ready: true, warnings: [] });
+    // a RAM problem still counts, and comes first
+    const both = preflightWarnings({ aeBytes: 2000 * MB, freeBytes: 500 * MB, resources: warn });
+    expect(both.ready).toBe(false);
+    expect(both.warnings[0]).toContain("free RAM");
+  });
+
+  it("is still ready when After Effects itself holds the VRAM, and says so when the GPU could not be read", () => {
+    const base = { aeBytes: 2000 * MB, freeBytes: 8000 * MB };
+    const aeHolds = classifyResources({ ok: true, adapters: [{ luid: "a", used_mb: 22.5 * 1024 }], totals: [{ name: "x", total_mb: 24 * 1024 }], processes: [{ pid: 1, name: "AfterFX", gpu_mb: 20 * 1024 }] });
+    expect(aeHolds.level).toBe("high");
+    const w = preflightWarnings({ ...base, resources: aeHolds });
+    expect(w.ready).toBe(true);
+    expect(w.warnings[0]).toMatch(/After Effects itself holds most of it/);
+    // an unreadable GPU: a warning line, not a silent ready
+    const none = classifyResources({ ok: true, counters: false, error: "no such counter", adapters: [], totals: [], processes: [] });
+    const u = preflightWarnings({ ...base, resources: none });
+    expect(u.warnings.join(" ")).toMatch(/GPU memory could not be read \(no such counter\)/);
+    expect(u.ready).toBe(true);
+    expect(preflightWarnings({ ...base, resources: classifyResources(null) }).warnings.join(" ")).toMatch(/could not be read on this system/);
+  });
+
   it("says so when AE gave no reading to check the threshold against", () => {
     const w = preflightWarnings({ aeBytes: null, freeBytes: 8000 * MB, warnAboveMb: 8000 });
     expect(w.ready).toBe(false);
@@ -144,6 +180,44 @@ describe("tools with a fake bridge", () => {
     expect(out.ae.memory_in_use_bytes).toBe(6000 * MB);
     expect(out.server.panel_rss_bytes).toBeGreaterThan(0);
     expect(out.preflight.warnings.some((w: string) => w.includes("6000 MB"))).toBe(true);
+  });
+
+  it("ae_memory_status: the pre-flight carries the GPU warning and is not ready at level high", async () => {
+    const saved = { ...resourceDeps };
+    try {
+      resetResourceCache();
+      Object.assign(resourceDeps, {
+        platform: () => "win32" as const,
+        run: async () => ({ ok: true, adapters: [{ luid: "a", used_mb: 22.5 * 1024 }], totals: [{ name: "RTX 4090", total_mb: 24 * 1024 }], processes: [{ pid: 41264, name: "Cinema 4D", gpu_mb: 9000 }] }),
+      });
+      const { ctx } = fakeAe({ memoryRead: [read(2000 * MB)] });
+      const out = (await tool("ae_memory_status").handler(AeMemoryStatusSchema.parse({ min_free_mb: 100 }), ctx)) as any;
+      expect(out.preflight.ready).toBe(false);
+      expect(out.preflight.warnings[0]).toMatch(/94 % full.*Cinema 4D \(pid 41264\)/);
+      expect(tool("ae_memory_status").description).toMatch(/GPU memory/);
+    } finally {
+      Object.assign(resourceDeps, saved);
+      resetResourceCache();
+    }
+  });
+
+  it("ae_memory_status runs no GPU probe unless a pre-flight check was asked for", async () => {
+    const saved = { ...resourceDeps };
+    let probes = 0;
+    try {
+      resetResourceCache();
+      Object.assign(resourceDeps, { platform: () => "win32" as const, run: async () => (probes++, null) });
+      const plain = fakeAe({ memoryRead: [read(2000 * MB)] });
+      const out = (await tool("ae_memory_status").handler(AeMemoryStatusSchema.parse({}), plain.ctx)) as any;
+      expect(probes).toBe(0);
+      expect(out.preflight).toEqual({ ready: true, warnings: [] });
+      const asked = fakeAe({ memoryRead: [read(2000 * MB)] });
+      await tool("ae_memory_status").handler(AeMemoryStatusSchema.parse({ warn_above_mb: 8000 }), asked.ctx);
+      expect(probes).toBe(1);
+    } finally {
+      Object.assign(resourceDeps, saved);
+      resetResourceCache();
+    }
   });
 
   it("ae_memory_purge guards, reads, purges, and reads back in a separate call", async () => {

@@ -1,3 +1,4 @@
+import { powershellExe } from "../../win-exe.js";
 import * as childProcess from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -15,6 +16,9 @@ import {
 } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
 import { preflightRefusal, runPreflightGate, type GateSummary } from "./preflight.js";
+import { blockCode, finishSequenceCheck, liveDirsFromJobs, prepareSequenceCheck, sequenceStepFrom, SequenceCheckSchema, type PreparedSequenceCheck, type SequenceStepResult } from "./seqcheck.js";
+import { seqscanDeps } from "../../seqscan.js";
+import { resourceWarningsForRender } from "../../system-resources.js";
 import { renderGate } from "../../render-gate.js";
 
 export const WINDOWS_FALLBACK_AERENDER =
@@ -578,6 +582,10 @@ export function getDefaultAerenderRegistry(): AerenderJobRegistry {
   return defaultRegistry;
 }
 
+// ae_preflight (preflight.ts cannot import this file) asks which folders a running aerender job writes into.
+// It never creates the registry: no registry, no running job.
+seqscanDeps.liveDirs = () => (defaultRegistry ? liveDirsFromJobs(defaultRegistry.list()) : []);
+
 // ---------- Render Queue sources (-rqindex / whole queue) ----------
 
 /** One output module of a Render Queue item, as rqeditRead reports it. */
@@ -886,7 +894,7 @@ export async function listEnginesAsync(
     if (!/"AfterFX\.com"/i.test(quick)) return [];
     const script =
       "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='AfterFX.com'\" | ForEach-Object { $_.ProcessId.ToString() + [char]9 + $_.ParentProcessId.ToString() + [char]9 + ([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime).ToString() + [char]9 + $_.CommandLine }";
-    const out = await run("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], 15_000);
+    const out = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", script], 15_000);
     const list: AerenderEngineInfo[] = [];
     for (const line of out.split(String.fromCharCode(10))) {
       const parts = line.replace(/\r$/, "").split(String.fromCharCode(9));
@@ -1993,6 +2001,7 @@ export const AeAerenderStartSchema = z
       .describe(
         "Run the ae_preflight delivery check on this comp (by name; for rq_index / whole_queue the queue item's comp or comps, by id) and the comps it nests first, and refuse to start if it finds a blocker (missing footage or fonts, expressions in error, comp not found). Nothing is started when it refuses. Default false."
       ),
+    sequence_check: SequenceCheckSchema,
     continue_on_missing_footage: z
       .boolean()
       .optional()
@@ -2087,6 +2096,7 @@ export function createAerenderTools(
         "Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. " +
         "Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one's engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state \"running\" with phase \"queued\" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job's engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). " +
         "Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender's \"Launching After Effects...\") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level \"errors\" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. " +
+        "Before the spawn it checks the project's image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: \"block\"` refuses (also when the check could not finish), \"off\" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. " +
         "If aerender fails to start (\"never started rendering\") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects' own render of the queued Render Queue items; it keeps AE busy, so tell the user first). Never ask the user to press Render. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
@@ -2097,9 +2107,11 @@ export function createAerenderTools(
         const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
         const compName = args.comp_name ?? "";
         const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;
+        // Before the lease: the probe takes about a second and must not hold the queue.
+        const resourceWarnings = await resourceWarningsForRender();
 
         try {
-          return await ctx.queue.run(
+          const ran = await ctx.queue.run(
             `ae_aerender_start(${labelOf})`,
             async () => {
               ctx.quarantine.assertClear();
@@ -2223,12 +2235,19 @@ export function createAerenderTools(
                 const gate = await runPreflightGate(
                   ctx,
                   rq
-                    ? { toolName: "ae_aerender_start", opId, comp_ids: rq.comp_ids }
-                    : { toolName: "ae_aerender_start", opId, comp_names: [compName] }
+                    ? { toolName: "ae_aerender_start", opId, comp_ids: rq.comp_ids, sequence_check: "off" }
+                    : { toolName: "ae_aerender_start", opId, comp_names: [compName], sequence_check: "off" }
                 );
                 if (gate.blocked) return preflightRefusal("ae_aerender_start", gate.summary);
                 preflight = gate.summary;
               }
+
+              // Image sequences with missing frames. The footage is listed here (it needs AE, so the lease); the folders are read after
+              // the lease is released, then the job is started. The saved project was checked under the lease just above.
+              const prep: PreparedSequenceCheck | null =
+                args.sequence_check === "off"
+                  ? null
+                  : await prepareSequenceCheck(ctx, { opId, toolName: "ae_aerender_start", liveDirs: liveDirsFromJobs(registry.list()), tolerant: true });
 
               const aerenderBin = resolveAerenderPath({
                 platform: options.platform,
@@ -2240,6 +2259,8 @@ export function createAerenderTools(
                 existsSync: options.existsSync,
               });
 
+              const launch = (seq: SequenceStepResult) => {
+              const startWarnings = [...(rq ? rq.warnings : []), ...seq.warnings];
               const initialRecord = launchAerenderJob({
                 registry,
                 spawn: spawnFn,
@@ -2290,13 +2311,27 @@ export function createAerenderTools(
                       ...(args.rq_index !== undefined ? { rq_index: args.rq_index, item_comp_id: args.item_comp_id } : { queued_items: rq.item_indexes }),
                       output_paths: rq.outputs,
                       ...(rq.frame_range ? { frame_range: rq.frame_range } : {}),
-                      ...(rq.warnings.length > 0 ? { warnings: rq.warnings } : {}),
                     }
                   : {}),
+                ...(startWarnings.length > 0 ? { warnings: startWarnings } : {}),
+                ...(seq.check ? { sequence_check: seq.check } : {}),
+                ...(resourceWarnings.length > 0 ? { resource_warnings: resourceWarnings } : {}),
                 ...(preflight ? { preflight } : {}),
               };
+              };
+              return { pendingSequence: true as const, prep, launch };
             }
           );
+          if (typeof ran === "object" && ran !== null && "pendingSequence" in ran) {
+            const seq: SequenceStepResult = ran.prep
+              ? sequenceStepFrom(args.sequence_check, "ae_aerender_start", await finishSequenceCheck(ran.prep, { opId, toolName: "ae_aerender_start", liveDirs: liveDirsFromJobs(registry.list()) }))
+              : { warnings: [], block: false };
+            if (seq.block && seq.check) {
+              return { ok: false, error: blockCode(seq.check), kind: "sequence", applied: false as const, message: seq.blockMessage, sequence_check: seq.check };
+            }
+            return ran.launch(seq);
+          }
+          return ran;
         } catch (err) {
           if (err instanceof QueueWaitError) {
             throw new BridgeError({

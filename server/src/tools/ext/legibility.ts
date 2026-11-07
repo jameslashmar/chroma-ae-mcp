@@ -1625,6 +1625,7 @@ async function checkHandler(args: AeCheckLegibilityArgs, ctx: ToolContext) {
           script: buildJsxCall("legibilityEnd", { copy_id: copyId, expect }),
           label: `${label} (remove copy)`,
           mutates: true,
+          mustSend: true,
           toolName,
         });
         // already_gone is not a removal this call made, so it does not count as removed.

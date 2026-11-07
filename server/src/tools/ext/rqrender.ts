@@ -43,12 +43,14 @@ import { BridgeError } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
 import { QueueWaitError, type QueueLease } from "../../queue.js";
 import { renderGate, renderGateMessage } from "../../render-gate.js";
+import { resourceWarningsForRender } from "../../system-resources.js";
 import { AGENT_SAFETY_GUIDANCE, dataDirOf, ExpectSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
 import { getDefaultAerenderRegistry, type AerenderJobRegistry } from "./aerender.js";
 import { listBlockingDialogs } from "./dialogs.js";
 import { BatchStore, outputsOf } from "./renderbatch.js";
 import { pathKey, type ItemRead, type QueueRead } from "./rqedit.js";
+import { blockCode, dirsOfFiles, runSequenceCheck, sequenceBlockMessage, SequenceCheckSchema } from "./seqcheck.js";
 import { noteUiWrite } from "./session.js";
 
 // ---------- constants ----------
@@ -615,6 +617,7 @@ export const AeRenderQueueRenderSchema = z.object({
     .default(12)
     .describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
   overwrite: z.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool; whether After Effects then prompts or silently overwrites is not measured."),
+  sequence_check: SequenceCheckSchema,
   expect: ExpectSchema,
 });
 
@@ -902,6 +905,7 @@ export const rqrenderTools: ToolDefinition<any>[] = [
       "Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since \"Save in subfolder\" can make it at render time; nothing is created); or an output file already exists (unless `overwrite: true`; nothing is ever deleted, and whether After Effects then prompts is not measured). " +
       "A queued aerender job or batch item is held (not started) while the render runs. " +
       "When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run `ae_verify_render` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. " +
+      "Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning, the render still starts; `sequence_check: \"block\"` refuses (also when the check could not finish), \"off\" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. " +
       "`max_hours` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. " +
       `Stopping: ${STOP_TEXT} ` +
       "Jobs are kept on disk; if the service restarts during a render the job reads `lost` and you must look at After Effects. " +
@@ -929,6 +933,8 @@ export const rqrenderTools: ToolDefinition<any>[] = [
       }
       const maxHours = args.max_hours ?? 12;
       const opId = ctx.bridge.newOpId();
+      // Before the lease: the probe takes about a second and must not hold the queue.
+      const resourceWarnings = await resourceWarningsForRender();
       let lease: QueueLease;
       try {
         lease = await ctx.queue.acquire("ae_render_queue_render");
@@ -959,6 +965,17 @@ export const rqrenderTools: ToolDefinition<any>[] = [
             started: false,
             refused: plan.refusals,
             message: "Nothing was started. Fix the reasons above and call again.",
+          };
+        }
+        // Image sequences with missing frames: a warning by default, a refusal only with sequence_check "block".
+        const seq = await runSequenceCheck(ctx, args.sequence_check, { opId, toolName: "ae_render_queue_render", liveDirs: dirsOfFiles(live.map((l) => l.file)) });
+        if (seq.block && seq.check) {
+          return {
+            ok: false,
+            started: false,
+            refused: [{ code: blockCode(seq.check), message: sequenceBlockMessage("ae_render_queue_render", seq.check) }],
+            sequence_check: seq.check,
+            message: seq.check.with_gaps > 0 ? "Nothing was started. Fix the missing frames, or call again with sequence_check \"warn\" or \"off\"." : "Nothing was started. The sequence check could not finish; try again, or call again with sequence_check \"warn\" or \"off\".",
           };
         }
 
@@ -995,7 +1012,9 @@ export const rqrenderTools: ToolDefinition<any>[] = [
           project_path: projectPath,
           renders: "the open project exactly as it is now (unsaved or dirty changes included)",
           items: plan.items,
-          ...(plan.warnings.length > 0 ? { warnings: plan.warnings } : {}),
+          ...(plan.warnings.length > 0 || seq.warnings.length > 0 ? { warnings: [...plan.warnings, ...seq.warnings] } : {}),
+          ...(seq.check ? { sequence_check: seq.check } : {}),
+          ...(resourceWarnings.length > 0 ? { resource_warnings: resourceWarnings } : {}),
           note:
             "The render runs in After Effects in the background of this call. After Effects is busy until it ends and the user cannot work in it; every other AE tool is refused meanwhile. " +
             "Poll ae_render_queue_render_status (it never touches AE). " +

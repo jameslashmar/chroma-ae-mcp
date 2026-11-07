@@ -535,6 +535,7 @@ export async function withIsolatedPlate<T>(
         script: buildJsxCall("planarIsolateEnd", { copy_id: copyId, expect: a.expect }),
         label: `${toolName} remove plate copy`,
         mutates: true,
+        mustSend: true,
         toolName,
       });
       removed = end.result?.removed === true;

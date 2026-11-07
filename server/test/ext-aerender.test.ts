@@ -29,6 +29,9 @@ import {
   resolveAerenderPath,
 } from "../src/tools/ext/aerender.js";
 import { AGENT_SAFETY_GUIDANCE } from "../src/tools/common.js";
+import { resetResourceCache, resourceDeps } from "../src/system-resources.js";
+import { footagePage, makeSequence, useOldFiles } from "./support/seq-fixtures.js";
+import { seqscanDeps } from "../src/seqscan.js";
 
 const NO_GATE = { cool_down_ms: 0, list_engines: () => [] };
 
@@ -579,7 +582,7 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
     for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   });
 
-  function setup(opts: { items?: RqItemRead[] | ((dir: string) => RqItemRead[]); dirty?: boolean; project?: string } = {}) {
+  function setup(opts: { items?: RqItemRead[] | ((dir: string) => RqItemRead[]); dirty?: boolean; project?: string; footage?: (dir: string) => unknown; itemsFail?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-aerender-rq-"));
     dirs.push(dir);
     const registry = new AerenderJobRegistry(path.join(dir, "jobs.json"), NO_GATE);
@@ -605,6 +608,8 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
         const fn = script.slice("__chromaAe.".length, script.indexOf("("));
         calls.push({ fn, script });
         if (fn === "status") return { ok: true, result: { aeVersion: "26.0x68", project_path: opts.project ?? "C:\\Projects\\Demo.aep", dirty: opts.dirty === true }, durationMs: 1 };
+        if (fn === "preflightItems" && opts.itemsFail) return { ok: false as const, error: { kind: "unreachable", message: "panel gone" } };
+        if (fn === "preflightItems") return { ok: true, result: opts.footage ? opts.footage(dir) : footagePage([]), durationMs: 1 };
         if (fn === "rqeditRead") {
           const asked = /"item_indexes":\[(\d+)\]/.exec(script);
           const list = asked ? items.filter((i) => i.index === Number(asked[1])) : items;
@@ -625,7 +630,8 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
   it("renders one queue item by -rqindex, with all its outputs on the record", async () => {
     const t = setup();
     const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, rq_index: 1, item_comp_id: 5 }), t.ctx)) as Record<string, any>;
-    expect(t.calls.map((c) => c.fn)).toEqual(["status", "rqeditRead"]);
+    // preflightItems: the pre-render sequence check lists the footage once (sequence_check defaults to warn).
+    expect(t.calls.map((c) => c.fn)).toEqual(["status", "rqeditRead", "preflightItems"]);
     expect(t.calls[1].script).toContain('"item_indexes":[1]');
     expect(t.spawned()!.args).toEqual(["-project", "C:\\Projects\\Demo.aep", "-rqindex", "1"]);
     expect(out).toMatchObject({
@@ -684,6 +690,114 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
     expect(out).toMatchObject({ source: "whole_queue", comp_name: "<render queue>", queued_items: [1, 2] });
     expect(out.output_paths).toHaveLength(3);
     expect(t.registry.get(out.job_id)).toMatchObject({ whole_queue: true, comp_name: "<render queue>" });
+  });
+
+  describe("missing frames in image sequences and the GPU", () => {
+    let restore: (() => void) | null = null;
+    const savedDeps = { ...resourceDeps };
+    afterEach(() => {
+      restore?.();
+      restore = null;
+      Object.assign(resourceDeps, savedDeps);
+      resetResourceCache();
+    });
+    const gappy = (dir: string) => {
+      const first = makeSequence(path.join(dir, "seq"), { skip: [6, 7] });
+      const old = useOldFiles();
+      restore = old.restore;
+      return { first, old };
+    };
+    const outFile = (dir: string) => path.join(dir, "o.mov");
+
+    it("warns by default and still spawns: sequence_check and a warnings line", async () => {
+      let first = "";
+      const t = setup({ footage: (dir) => footagePage([{ file: (first = gappy(dir).first), name: "plate" }]) });
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir) }), t.ctx)) as Record<string, any>;
+      expect(first).not.toBe("");
+      expect(out.ok).toBe(true);
+      expect(t.spawned()).not.toBeNull();
+      expect(out.sequence_check).toMatchObject({ with_gaps: 1 });
+      expect(out.warnings.join(" ")).toMatch(/missing frames.*0006-0007/);
+    });
+
+    it("keeps the queue warnings and adds the sequence one", async () => {
+      const t = setup({ footage: (dir) => footagePage([{ file: gappy(dir).first }]) });
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, whole_queue: true }), t.ctx)) as Record<string, any>;
+      expect(out.warnings).toHaveLength(1);
+      const t2 = setup({ items: [qItem(1), qItem(2, { status: "done" })], footage: (dir) => footagePage([{ file: gappy(dir).first }]) });
+      const out2 = (await t2.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, whole_queue: true }), t2.ctx)) as Record<string, any>;
+      expect(out2.warnings).toHaveLength(2);
+      expect(out2.warnings[0]).toMatch(/not QUEUED/);
+      expect(out2.warnings[1]).toMatch(/missing frames/);
+    });
+
+    it("block refuses before the job exists: no spawn, no record", async () => {
+      const t = setup({ footage: (dir) => footagePage([{ file: gappy(dir).first }]) });
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir), sequence_check: "block" }), t.ctx)) as Record<string, any>;
+      expect(out).toMatchObject({ ok: false, error: "sequence_gaps", applied: false });
+      expect(t.spawned()).toBeNull();
+      expect(t.registry.list()).toHaveLength(0);
+    });
+
+    it("a footage list that cannot be read never refuses a warn: the job starts and the result says what failed", async () => {
+      const t = setup({ itemsFail: true });
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir) }), t.ctx)) as Record<string, any>;
+      expect(out.ok).toBe(true);
+      expect(t.spawned()).not.toBeNull();
+      expect(out.sequence_check.error).toMatch(/panel gone/);
+      expect(out.warnings.join(" ")).toMatch(/Sequence check incomplete.*panel gone/);
+      // block refuses, and says why and that warn proceeds
+      const b = setup({ itemsFail: true });
+      const refused = (await b.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(b.dir), sequence_check: "block" }), b.ctx)) as Record<string, any>;
+      expect(refused).toMatchObject({ ok: false, error: "sequence_check_incomplete", applied: false });
+      expect(refused.message).toMatch(/could not be checked.*"warn"/);
+      expect(b.spawned()).toBeNull();
+    });
+
+    it("reads the folders after the queue lease is released, then starts", async () => {
+      let held: boolean | null = null;
+      const seqDir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-seqlease-"));
+      dirs.push(seqDir);
+      const first = gappy(seqDir).first;
+      const t = setup({ footage: () => footagePage([{ file: first }]) });
+      const wrapped = seqscanDeps.io;
+      seqscanDeps.io = { ...wrapped, readdir: async (d, limit) => ((held = t.ctx.queue.inFlight !== null), wrapped.readdir(d, limit)) };
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir) }), t.ctx)) as Record<string, any>;
+      expect(held).toBe(false);
+      expect(out.ok).toBe(true);
+      expect(out.sequence_check.with_gaps).toBe(1);
+    });
+
+    it("off does not read the footage list", async () => {
+      const t = setup({ footage: (dir) => footagePage([{ file: gappy(dir).first }]) });
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir), sequence_check: "off" }), t.ctx)) as Record<string, any>;
+      expect(out.ok).toBe(true);
+      expect(out.sequence_check).toBeUndefined();
+      expect(t.calls.map((c) => c.fn)).not.toContain("preflightItems");
+    });
+
+    it("adds resource_warnings at a nearly full GPU and still spawns; none when the card has room", async () => {
+      const probe = (usedGb: number, withBlender = true) => {
+        resetResourceCache();
+        Object.assign(resourceDeps, {
+          platform: () => "win32" as const,
+          run: async () => ({ ok: true, adapters: [{ luid: "a", used_mb: usedGb * 1024 }], totals: [{ name: "RTX 4090", total_mb: 24 * 1024 }], processes: withBlender ? [{ pid: 9120, name: "blender", gpu_mb: 3200 }] : [] }),
+        });
+      };
+      probe(22.5);
+      const t = setup();
+      const out = (await t.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t.dir) }), t.ctx)) as Record<string, any>;
+      expect(out.ok).toBe(true);
+      expect(t.spawned()).not.toBeNull();
+      expect(out.resource_warnings[0]).toMatch(/94 % full/);
+      expect(out.resource_warnings.join(" ")).toMatch(/Blender \(pid 9120\) is running and holds the largest share/);
+      probe(8, false);
+      const t2 = setup();
+      const quiet = (await t2.start.handler(AeAerenderStartSchema.parse({ expect: expectArg, comp_name: "Main", output_path: outFile(t2.dir) }), t2.ctx)) as Record<string, any>;
+      expect(quiet.ok).toBe(true);
+      expect("resource_warnings" in quiet).toBe(false);
+      expect(t.start.description).toMatch(/If `resource_warnings` is present, tell the user before continuing/);
+    });
   });
 
   it("passes the flags on a plain comp job too, and no -v when log_level is left out", async () => {

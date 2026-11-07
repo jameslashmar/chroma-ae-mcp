@@ -8,6 +8,7 @@ import {
   type EvalSuccessResponse,
   type HostTransport,
 } from "./host.js";
+import { BUSY_REFUSE_AFTER_MS, busyError, describePopupBlock, describeBusy, isBusyNow, type BusySources } from "./ae-activity.js";
 import { buildJsxCall, type HostFunctionName } from "./jsx.js";
 import type { QuarantineStore } from "./quarantine.js";
 import { QueueWaitError, type SingleWriterQueue } from "./queue.js";
@@ -47,7 +48,27 @@ export interface PanelHostOptions {
   defaultTimeoutMs?: number;
   /** Reads popups blocking AE when a call times out (the panel passes describeBlockingDialogs). */
   describeDialogs?: () => Promise<object[]>;
+  /**
+   * The panel service's own bookkeeping (panel-entry passes ctx.serviceInfo): the eval it has in
+   * flight and for how long. With it, evalRaw refuses at once while AE has been busy for
+   * busyThresholdMs with something this server is not waiting on (see ae-activity.ts).
+   */
+  serviceInfo?: () => Record<string, unknown>;
+  /** Default BUSY_REFUSE_AFTER_MS (15 s). */
+  busyThresholdMs?: number;
+  /**
+   * Reads the open popups for a busy report. Default: UI Automation without screenshots.
+   * Not describeDialogs: that one saves a screenshot per call, which a burst of refused calls must not.
+   */
+  busyDialogs?: () => Promise<object[]>;
 }
+
+/**
+ * After a write's evalScript returned, the reads that follow it (read-back, session snapshot) are
+ * never refused by the door for this long: a refused read-back would put a false mismatch in the
+ * receipt of a write that was applied.
+ */
+const READ_BACK_GRACE_MS = 15_000;
 
 /** Upper bound on reading popups after a timeout, so a stuck UI Automation call can't delay the report. */
 const DESCRIBE_DIALOGS_BUDGET_MS = 4_000;
@@ -65,24 +86,81 @@ export class PanelHost implements HostTransport {
   private readonly quarantine?: QuarantineStore;
   private readonly defaultTimeoutMs: number;
   private readonly describeDialogs?: () => Promise<object[]>;
+  private readonly serviceInfo?: () => Record<string, unknown>;
+  private readonly busyThresholdMs?: number;
+  private readonly busyDialogs?: () => Promise<object[]>;
+  /** Evals sent to the service that have not settled and that evalRaw still waits for. */
+  private sentActive = 0;
+  /** Evals whose timeout fired (evalRaw threw "timeout") but whose promise is still pending: AE may still be running them. */
+  private abandoned = 0;
+  /** Until when reads are let through after a write returned (see READ_BACK_GRACE_MS). */
+  private readBackUntil = 0;
 
   constructor(
     optsOrFn: PanelHostOptions | PanelEvalScriptFn,
     extraOpts?: Omit<PanelHostOptions, "evalScript">
   ) {
-    if (typeof optsOrFn === "function") {
-      this.evalScript = optsOrFn;
-      this.queue = extraOpts?.queue;
-      this.quarantine = extraOpts?.quarantine;
-      this.defaultTimeoutMs = extraOpts?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
-      this.describeDialogs = extraOpts?.describeDialogs;
-    } else {
-      this.evalScript = optsOrFn.evalScript;
-      this.queue = optsOrFn.queue;
-      this.quarantine = optsOrFn.quarantine;
-      this.defaultTimeoutMs = optsOrFn.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
-      this.describeDialogs = optsOrFn.describeDialogs;
+    const o: PanelHostOptions =
+      typeof optsOrFn === "function" ? { ...extraOpts, evalScript: optsOrFn } : optsOrFn;
+    this.evalScript = o.evalScript;
+    this.queue = o.queue;
+    this.quarantine = o.quarantine;
+    this.defaultTimeoutMs = o.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.describeDialogs = o.describeDialogs;
+    this.serviceInfo = o.serviceInfo;
+    this.busyThresholdMs = o.busyThresholdMs;
+    this.busyDialogs = o.busyDialogs;
+    // A call that has to wait for the lease while a popup blocks AE is refused instead of waiting up to 600 s.
+    if (this.queue && this.serviceInfo) {
+      this.queue.setWaitGuard(async (op) => {
+        const report = await describePopupBlock(this.busySources());
+        return report ? busyError(report, op) : null;
+      });
     }
+  }
+
+  /** The popup reader this host was given, if any (ae_status reads popups through the same one, so they share its cache). */
+  busyDialogReader(): (() => Promise<object[]>) | undefined {
+    return this.busyDialogs;
+  }
+
+  /** The threshold this host refuses at (ae_status uses the same). */
+  busyThreshold(): number {
+    return this.busyThresholdMs ?? BUSY_REFUSE_AFTER_MS;
+  }
+
+  /** For the busy report (ae-activity.ts): how many of this host's evals are waited on, and how many were given up on but not finished. */
+  busyState(): { sentActive: number; abandoned: number } {
+    return { sentActive: this.sentActive, abandoned: this.abandoned };
+  }
+
+  private busySources(): BusySources {
+    return {
+      serviceInfo: this.serviceInfo,
+      queue: this.queue,
+      busyState: () => this.busyState(),
+      readDialogs: this.busyDialogs,
+      thresholdMs: this.busyThresholdMs,
+    };
+  }
+
+  /**
+   * The door for "AE cannot answer": refuses with kind "queued" before anything is sent, so the
+   * call neither waits for a timeout nor is quarantined. The render's own evals pass (the gate
+   * has its own door); everything else, reads and writes alike, is refused.
+   */
+  private async refuseIfBusy(id: string): Promise<void> {
+    const src = this.busySources();
+    if (!isBusyNow(src)) {
+      // An eval of ours sent without a lease (the asset watcher, a footage read, ae_diagnostics) is never "foreign", so a popup
+      // holding it does not make AE busy by the counters. A popup read tells: with one open, the next call would only wait for
+      // the whole eval timeout (and a write would be quarantined). A long operation with no popup keeps being waited for.
+      const popup = await describePopupBlock(src);
+      if (popup) throw busyError(popup, id);
+      return;
+    }
+    const report = await describeBusy(src);
+    if (report) throw busyError(report, id);
   }
 
   newOpId(): string {
@@ -101,10 +179,21 @@ export class PanelHost implements HostTransport {
     timeoutMs?: number;
     mutates?: boolean;
     toolName?: string;
+    /**
+     * Skip the busy door. For a cleanup that must reach AE even when an earlier eval of ours timed
+     * out: removing a temporary comp, reopening the original project. It is only sent; AE may
+     * answer late, and the timeout still applies.
+     */
+    mustSend?: boolean;
   }): Promise<EvalSuccessResponse<T>> {
     // While AE renders for ae_render_queue_render it cannot answer: refuse at once, send nothing.
     renderGate.check(params.id);
     const isRender = renderGate.isRenderOp(params.id);
+    // AE has been busy for a while with something this server is not waiting on (a popup, a script,
+    // a manual render), or an earlier eval of ours is still running in it: refuse at once, send nothing.
+    // Reads shortly after a write returned (its read-back) are not refused either.
+    const readBack = params.mutates !== true && Date.now() < this.readBackUntil;
+    if (!isRender && !params.mustSend && !readBack) await this.refuseIfBusy(params.id);
     const timeoutMs = params.timeoutMs ?? this.defaultTimeoutMs;
     const startedAt = Date.now();
 
@@ -125,10 +214,18 @@ export class PanelHost implements HostTransport {
 
     // Attach a no-op rejection handler so that if the timeout wins the race
     // and rawPromise later rejects, Node does not emit an unhandledRejection.
-    rawPromise.then(
-      () => noteOpFinished(params.id),
-      () => noteOpFinished(params.id)
-    );
+    // Where this eval is counted: "active" while evalRaw waits for it; "abandoned" once its timeout
+    // fired and AE may still run it; "none" after that for the render's own eval (the render gate owns that case).
+    const flight: { settled: boolean; counted: "active" | "abandoned" | "none" } = { settled: false, counted: "active" };
+    this.sentActive++;
+    const settle = (): void => {
+      flight.settled = true;
+      if (flight.counted === "abandoned") this.abandoned--;
+      else if (flight.counted === "active") this.sentActive--;
+      flight.counted = "none";
+      noteOpFinished(params.id);
+    };
+    rawPromise.then(settle, settle);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -142,6 +239,18 @@ export class PanelHost implements HostTransport {
       payload = await Promise.race([rawPromise, timeoutPromise]);
     } catch (err) {
       if (err instanceof PanelTimeoutSignal) {
+        // Still running in AE as far as we know: later calls are refused at the door until it settles.
+        // The render's own eval is not counted: its unknown outcome shuts the render gate, which lifts
+        // when the panel service reports nothing in flight.
+        if (!flight.settled) {
+          this.sentActive--;
+          if (isRender) {
+            flight.counted = "none";
+          } else {
+            flight.counted = "abandoned";
+            this.abandoned++;
+          }
+        }
         // The render's own eval has no quarantine: the render job and the gate handle its unknown outcome.
         if (params.mutates && this.quarantine && !isRender) {
           this.quarantine.add({
@@ -219,6 +328,9 @@ export class PanelHost implements HostTransport {
         message: "Panel evalScript returned an invalid response envelope",
       });
     }
+
+    // A write that returned: its read-back must not be refused (see READ_BACK_GRACE_MS).
+    if (params.mutates === true) this.readBackUntil = Date.now() + READ_BACK_GRACE_MS;
 
     if (!payload.ok) {
       const errObj = payload.error ?? {

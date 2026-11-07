@@ -2,9 +2,12 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
+import { PNG } from "pngjs";
 import { z } from "zod";
 import { defaultDataDir } from "../../quarantine.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolDefinition } from "../common.js";
+import { analysePaintedDialog, type OcrLine, type PngPixels } from "./dialog-geometry.js";
+import { powershellExe } from "../../win-exe.js";
 
 export const JAY_DIALOG_RULES =
   "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). " +
@@ -25,12 +28,16 @@ export interface DialogButton {
   source?: string;
   /** The label as OCR read it, only when it was corrected (0K -> OK). */
   raw_name?: string;
+  /** True on the default button of an AE-painted dialog (outlined in blue; Enter presses it). */
+  default?: boolean;
 }
 
 /** What can be answered without a person, for a dialog AE painted itself (OCR buttons). */
 export interface UnattendedAnswers {
   /** Buttons that can be pressed without focusing AE. */
   answerable: string[];
+  /** The default button (what Enter presses), when it was identified. */
+  default_button?: string | null;
   /** Plain statement of what is and is not possible. */
   note: string;
 }
@@ -77,7 +84,16 @@ export interface RawPs1Dialog {
     height?: number;
   };
   screenshot?: string | null;
+  /** AE-painted dialog: the OCR lines with word boxes (ae-dialogs.ps1); the buttons are derived here. */
+  ocr_lines?: OcrLine[] | null;
+  /** A screenshot kept only for the analysis (no screenshot directory); deleted after it is read. */
+  analysis_png?: string | null;
+  /** GetWindowRect as "left,top,right,bottom" (ae-dialogs.ps1); passed back as -ExpectRect. */
+  win_rect?: string;
 }
+
+/** "info": one OK-like button, nothing to decide. "destructive": a button that loses work. "question": anything else. Advisory; the policy does not read it. */
+export type DialogKind = "info" | "question" | "destructive";
 
 export interface EnrichedDialog {
   handle: number;
@@ -94,6 +110,14 @@ export interface EnrichedDialog {
   text_source?: string;
   /** Only for AE-painted dialogs (OCR buttons): which buttons ae_dialog_respond can press. */
   unattended?: UnattendedAnswers;
+  /** AE-painted dialog: the label of the default button (what Enter presses), or null when it is not known. */
+  default_button?: string | null;
+  /** How the default was found: "ring" (blue outline in the screenshot) or "only_button". */
+  default_source?: "ring" | "only_button" | null;
+  /** Painted dialog with one button read: the button row shows another pill that was not read (so there are more buttons than listed). */
+  other_pill_unread?: boolean;
+  kind: DialogKind;
+  window_rect?: string;
 }
 
 export type Ps1ListOutput =
@@ -126,6 +150,25 @@ interface SeenDialogMeta {
   caused_by_op: string | null;
   title: string;
   text: string;
+  /** True when AE painted the dialog itself: ae_dialog_respond re-reads it and posts a key. */
+  painted?: boolean;
+  default_button?: string | null;
+  /** The button labels as listed, joined with "|". */
+  buttons?: string;
+  /** What changes the identity of the dialog behind this handle (title, text without digits, buttons). */
+  signature?: string;
+  /** What the AGENT was last shown by ae_dialogs. Only that handler writes it: a background list must not reset it. */
+  shown?: ShownSnapshot;
+}
+
+interface ShownSnapshot {
+  title: string;
+  text: string;
+  buttons: string;
+  default_button: string | null;
+  rect: string;
+  /** The agent was shown an AE-painted dialog (OCR buttons). */
+  painted: boolean;
 }
 
 export type Ps1RunnerFn = (args: string[]) => Promise<string>;
@@ -367,39 +410,102 @@ function psLabel(name: string): string {
 }
 
 /**
- * What ae_dialog_respond can press in an AE-painted dialog without focusing AE, the way
- * ae-dialogs.ps1 decides it: Cancel/No/Close are sent as Escape, OK/Yes/Continue as Enter and only
- * when it is the dialog's one button. So a two-button dialog (OK and Cancel) can only be cancelled
- * unattended.
+ * What ae_dialog_respond can press in an AE-painted dialog without focusing AE: Cancel/No/Close are
+ * sent as Escape; the DEFAULT button (outlined, `default: true`) or a lone button is sent as Enter when
+ * it is OK/Yes/Continue. A dialog whose default could not be identified (no outline found, or no
+ * screenshot) can only be cancelled unattended.
  */
 export function unattendedAnswers(buttons: DialogButton[]): UnattendedAnswers {
   const labels = buttons.map((b) => psLabel(b.name));
   const answerable: string[] = [];
   const viaEscape: string[] = [];
   let viaEnter: string | null = null;
+  const hasCancel = labels.includes("cancel");
   for (let i = 0; i < labels.length; i++) {
-    if (CANCEL_LIKE.test(labels[i])) {
+    // Escape answers Cancel: with a Cancel on the row, No and Close would be reported pressed but Cancel would be.
+    if (CANCEL_LIKE.test(labels[i]) && (labels[i] === "cancel" || !hasCancel)) {
       answerable.push(normalizeOcrLabel(buttons[i].name));
       viaEscape.push(normalizeOcrLabel(buttons[i].name));
     }
   }
-  if (labels.length === 1 && OK_LIKE.test(labels[0])) {
-    answerable.push(normalizeOcrLabel(buttons[0].name));
-    viaEnter = normalizeOcrLabel(buttons[0].name);
+  let defaultIdx = buttons.findIndex((b) => b.default === true);
+  if (defaultIdx === -1 && buttons.length === 1 && buttons[0].default === undefined) defaultIdx = 0;
+  const defaultName = defaultIdx >= 0 ? normalizeOcrLabel(buttons[defaultIdx].name) : null;
+  if (defaultIdx >= 0 && OK_LIKE.test(labels[defaultIdx])) {
+    answerable.push(normalizeOcrLabel(buttons[defaultIdx].name));
+    viaEnter = normalizeOcrLabel(buttons[defaultIdx].name);
   }
+  const outlined = buttons.length > 1;
   let note: string;
   if (answerable.length === 0) {
     note = "AE painted this dialog itself and none of its buttons can be pressed without focusing AE: ask the user to answer it.";
   } else if (viaEnter !== null) {
-    note = "AE painted this dialog itself; its only button \"" + viaEnter + "\" is answered with Enter.";
+    const which = outlined ? 'its default button "' + viaEnter + '" (outlined)' : 'its only button "' + viaEnter + '"';
+    note = "AE painted this dialog itself; " + which + " is answered with Enter";
+    if (viaEscape.length > 0) note += ' and "' + viaEscape.join('", "') + '" with Escape';
+    note += outlined ? ". Any other button needs the user." : ".";
   } else if (labels.length === 1) {
-    note = "AE painted this dialog itself; its only button \"" + viaEscape[0] + "\" is answered with Escape.";
+    note = 'AE painted this dialog itself; its only button "' + viaEscape[0] + '" is answered with Escape.';
+  } else if (defaultName !== null) {
+    note =
+      'AE painted this dialog itself; its default button is "' + defaultName + '", which is not OK, Yes or Continue. ' +
+      "Only Cancel/No/Close can be pressed (sent as Escape), so it can only be cancelled unattended; ask the user for anything else.";
   } else {
     note =
-      "AE painted this dialog itself. Without focusing AE only Cancel/No/Close can be pressed (sent as Escape); " +
-      "OK or Yes on a dialog with more than one button needs the user to click it, so it can only be cancelled unattended.";
+      "AE painted this dialog itself and its default button could not be identified. Without focusing AE only Cancel/No/Close can be pressed (sent as Escape), " +
+      "so it can only be cancelled unattended; ask the user to click OK or Yes.";
   }
-  return { answerable, note };
+  return { answerable, default_button: defaultName, note };
+}
+
+/** What the buttons of a listed dialog say about it (advisory). */
+export function dialogKind(buttons: DialogButton[], checkboxes: DialogCheckbox[]): DialogKind {
+  if (buttons.some((b) => DESTRUCTIVE_BUTTON_PATTERN.test(b.name ?? ""))) return "destructive";
+  if (buttons.length === 1 && checkboxes.length === 0 && OK_LIKE.test(psLabel(buttons[0].name))) return "info";
+  return "question";
+}
+
+/** Letters and digits of any script only: two OCR reads of the same dialog compare equal even when spacing differs. `ignoreDigits` drops the numbers too (a progress percent moves). */
+function textKey(text: string, ignoreDigits = false): string {
+  const t = (text ?? "").toLowerCase();
+  return ignoreDigits ? t.replace(/[^\p{L}]/gu, "") : t.replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** A body that talks about replacing or losing something: answering OK on such a dialog is a destructive answer. */
+export const DESTRUCTIVE_BODY_PATTERN = /\b(replac|overwrit|delet|discard|revert|remov|eras|lose\b|losing\b|lost\b)/i;
+
+const MAX_PNG_BYTES = 4 * 1024 * 1024;
+
+/** Reads a dialog screenshot for the geometry analysis. Null when it is missing, too big or not a PNG. */
+function readPngPixels(file: string | null | undefined): PngPixels | null {
+  if (!file) return null;
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > MAX_PNG_BYTES) return null;
+    const png = PNG.sync.read(fs.readFileSync(file));
+    return { width: png.width, height: png.height, data: png.data };
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeOcrLines(value: unknown): OcrLine[] {
+  if (!Array.isArray(value)) return [];
+  const out: OcrLine[] = [];
+  for (const l of value.slice(-60)) {
+    const words = Array.isArray(l?.words) ? l.words : [];
+    out.push({
+      text: typeof l?.text === "string" ? l.text : "",
+      words: words.map((w: any) => ({
+        text: typeof w?.text === "string" ? w.text : "",
+        x: Number(w?.x),
+        y: Number(w?.y),
+        w: Number(w?.w),
+        h: Number(w?.h),
+      })),
+    });
+  }
+  return out;
 }
 
 function normalizeRawDialog(
@@ -407,32 +513,10 @@ function normalizeRawDialog(
   meta: SeenDialogMeta
 ): EnrichedDialog {
   const rawText = typeof raw.text === "string" ? raw.text : "";
-  const boundedText =
+  let boundedText =
     rawText.length > MAX_DIALOG_TEXT_CHARS
       ? rawText.slice(0, MAX_DIALOG_TEXT_CHARS)
       : rawText;
-
-  const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
-  const buttons: DialogButton[] = rawButtons.map((b) => {
-    const rawName = typeof b?.name === "string" ? b.name : "";
-    const fromOcr = b?.source === "ocr";
-    const name = fromOcr ? normalizeOcrLabel(rawName) : rawName;
-    const btn: DialogButton = {
-      name,
-      automationId: typeof b?.automationId === "string" ? b.automationId : "",
-      enabled: Boolean(b?.enabled ?? true),
-    };
-    if (fromOcr) btn.source = "ocr";
-    if (fromOcr && name !== rawName) btn.raw_name = rawName;
-    return btn;
-  });
-  const painted = buttons.length > 0 && buttons.every((b) => b.source === "ocr");
-
-  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
-  const checkboxes: DialogCheckbox[] = rawCheckboxes.map((c) => ({
-    name: typeof c?.name === "string" ? c.name : "",
-    checked: Boolean(c?.checked),
-  }));
 
   const r = raw.boundingRect ?? raw.rect ?? {};
   const boundingRect: DialogBoundingRect = {
@@ -441,6 +525,66 @@ function normalizeRawDialog(
     width: typeof r.width === "number" ? r.width : 0,
     height: typeof r.height === "number" ? r.height : 0,
   };
+
+  let buttons: DialogButton[];
+  let defaultButton: string | null = null;
+  let defaultSource: "ring" | "only_button" | null = null;
+  let otherPillUnread: boolean | undefined;
+  let painted = false;
+  if (Array.isArray(raw.ocr_lines)) {
+    // AE painted this dialog: find the button row and the default button from the OCR boxes and the screenshot.
+    painted = true;
+    const shot = typeof raw.screenshot === "string" ? raw.screenshot : typeof raw.analysis_png === "string" ? raw.analysis_png : null;
+    const pixels = readPngPixels(shot);
+    if (typeof raw.analysis_png === "string" && raw.analysis_png.length > 0) {
+      try {
+        fs.unlinkSync(raw.analysis_png);
+      } catch {
+        // already gone
+      }
+    }
+    const analysis = analysePaintedDialog(sanitizeOcrLines(raw.ocr_lines), pixels, {
+      width: boundingRect.width,
+      height: boundingRect.height,
+    });
+    buttons = analysis.buttons.map((b) => {
+      const name = normalizeOcrLabel(b.name);
+      const btn: DialogButton = { name, automationId: "", enabled: true, source: "ocr" };
+      if (name !== b.name) btn.raw_name = b.name;
+      if (b.default !== undefined) btn.default = b.default;
+      return btn;
+    });
+    defaultButton = analysis.default_index !== null ? buttons[analysis.default_index].name : null;
+    defaultSource = analysis.default_source;
+    otherPillUnread = analysis.other_pill_unread;
+    // The text above the buttons; when no button row was accepted the whole OCR text stays.
+    if (analysis.buttons.length > 0 && raw.text_source === "ocr") {
+      boundedText = analysis.body_text.slice(0, MAX_DIALOG_TEXT_CHARS);
+    }
+  } else {
+    const rawButtons = Array.isArray(raw.buttons) ? raw.buttons : [];
+    buttons = rawButtons.map((b) => {
+      const rawName = typeof b?.name === "string" ? b.name : "";
+      const fromOcr = b?.source === "ocr";
+      const name = fromOcr ? normalizeOcrLabel(rawName) : rawName;
+      const btn: DialogButton = {
+        name,
+        automationId: typeof b?.automationId === "string" ? b.automationId : "",
+        enabled: Boolean(b?.enabled ?? true),
+      };
+      if (fromOcr) btn.source = "ocr";
+      if (fromOcr && name !== rawName) btn.raw_name = rawName;
+      return btn;
+    });
+    // OCR buttons only come with ocr_lines (handled above); an older script's buttons without them are not treated as painted.
+    painted = buttons.length > 0 && buttons.every((b) => b.source === "ocr");
+  }
+
+  const rawCheckboxes = Array.isArray(raw.checkboxes) ? raw.checkboxes : [];
+  const checkboxes: DialogCheckbox[] = rawCheckboxes.map((c) => ({
+    name: typeof c?.name === "string" ? c.name : "",
+    checked: Boolean(c?.checked),
+  }));
 
   const out: EnrichedDialog = {
     handle: Number(raw.handle),
@@ -454,9 +598,16 @@ function normalizeRawDialog(
     screenshot: typeof raw.screenshot === "string" ? raw.screenshot : null,
     first_seen: meta.first_seen,
     caused_by_op: meta.caused_by_op,
+    kind: dialogKind(buttons, checkboxes),
   };
+  if (typeof raw.win_rect === "string" && raw.win_rect.length > 0) out.window_rect = raw.win_rect;
   if (typeof raw.text_source === "string") out.text_source = raw.text_source;
-  if (painted) out.unattended = unattendedAnswers(buttons);
+  if (painted) {
+    out.unattended = unattendedAnswers(buttons);
+    out.default_button = defaultButton;
+    out.default_source = defaultSource;
+    if (otherPillUnread !== undefined) out.other_pill_unread = otherPillUnread;
+  }
   return out;
 }
 
@@ -496,7 +647,21 @@ export function enrichDialogsList(rawDialogs: RawPs1Dialog[]): EnrichedDialog[] 
       if (text) meta.text = text;
     }
 
-    result.push(normalizeRawDialog(raw, meta));
+    let nd = normalizeRawDialog(raw, meta);
+    // Another dialog (or changed content) behind the same handle is a new dialog: first_seen and caused_by_op start over.
+    const signature = [nd.title, textKey(nd.text, true), nd.buttons.map((b) => b.name).join("|")].join("\u0001");
+    if (meta.signature !== undefined && meta.signature !== signature) {
+      meta.first_seen = now;
+      meta.caused_by_op = inFlight;
+      nd = normalizeRawDialog(raw, meta);
+    }
+    meta.signature = signature;
+    meta.title = nd.title;
+    meta.painted = nd.unattended !== undefined;
+    meta.default_button = nd.default_button ?? null;
+    meta.buttons = nd.buttons.map((b) => b.name).join("|");
+    if (nd.text) meta.text = nd.text;
+    result.push(nd);
   }
 
   for (const existingHandle of Array.from(seenDialogs.keys())) {
@@ -534,7 +699,7 @@ function runPowerShellScript(ps1Args: string[]): Promise<string> {
 
   return new Promise<string>((resolve) => {
     execFile(
-      "powershell.exe",
+      powershellExe(),
       fullArgs,
       {
         windowsHide: true,
@@ -757,7 +922,7 @@ export const AeDialogsSchema = z.object({
     .default(true)
     .optional()
     .describe(
-      "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true)."
+      "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true). One file per dialog handle, overwritten on each call."
     ),
 });
 
@@ -771,7 +936,7 @@ export const AeDialogRespondSchema = z.object({
     .string()
     .min(1)
     .describe(
-      "Exact button name (case-insensitive) to press via UIA InvokePattern."
+      "Exact button name (case-insensitive). A dialog with real buttons: pressed through UI Automation. An AE-painted dialog: its default button (default_button in ae_dialogs) or Cancel/No/Close."
     ),
   check: z
     .string()
@@ -801,11 +966,81 @@ export const AeDialogRespondSchema = z.object({
     ),
 });
 
+
+type PaintedDecision =
+  | { action: "escape" | "enter"; pressed: string }
+  | { action: "refuse"; error: "button_not_default" | "button_not_answerable"; message: string };
+
+/**
+ * Which key answers `want` in an AE-painted dialog, from the freshly read button row:
+ * Escape for Cancel/No/Close (when that label is on the dialog), Enter for the default button when it
+ * is OK/Yes/Continue (the default is the outlined one, or the lone button). Anything else is refused,
+ * and a refusal says whether the dialog's default is known.
+ */
+export function decidePaintedKey(buttons: DialogButton[], want: string): PaintedDecision {
+  const wantL = psLabel(want);
+  const idx = buttons.findIndex((b) => psLabel(b.name) === wantL);
+  if (idx === -1) {
+    const names = buttons.map((b) => b.name);
+    return {
+      action: "refuse",
+      error: "button_not_answerable",
+      message:
+        `"${want}" was NOT pressed: no button with that label was found on the dialog (read: ${names.length > 0 ? names.map((n) => `"${n}"`).join(", ") : "none"}). ` +
+        "AE painted this dialog itself: ask the user to answer it.",
+    };
+  }
+  const found = buttons[idx];
+  if (CANCEL_LIKE.test(wantL)) {
+    // Escape answers Cancel. "No" or "Close" next to a Cancel would report pressed:"No" while Cancel was answered.
+    if (wantL !== "cancel" && buttons.some((b) => psLabel(b.name) === "cancel")) {
+      return {
+        action: "refuse",
+        error: "button_not_answerable",
+        message:
+          `"${found.name}" was NOT pressed: this dialog also has a Cancel button, and the only key that can be sent for it (Escape) answers Cancel. ` +
+          "Ask the user to click it.",
+      };
+    }
+    return { action: "escape", pressed: found.name };
+  }
+
+  let defaultIdx = buttons.findIndex((b) => b.default === true);
+  if (defaultIdx === -1 && buttons.length === 1 && buttons[0].default === undefined) defaultIdx = 0;
+  if (defaultIdx === idx) {
+    if (OK_LIKE.test(wantL)) return { action: "enter", pressed: found.name };
+    return {
+      action: "refuse",
+      error: "button_not_answerable",
+      message:
+        `"${found.name}" is the default button but it is not OK, Yes or Continue, so it was NOT pressed. ` +
+        "Only OK/Yes/Continue (when default) and Cancel/No/Close can be answered without focusing AE: ask the user.",
+    };
+  }
+  if (defaultIdx >= 0) {
+    const d = buttons[defaultIdx].name;
+    return {
+      action: "refuse",
+      error: "button_not_default",
+      message:
+        `"${found.name}" was NOT pressed: it is not the default button of this AE-painted dialog (the default, outlined button is "${d}"), ` +
+        "and only the default button or Cancel can be answered without focusing AE. Ask the user to click it.",
+    };
+  }
+  return {
+    action: "refuse",
+    error: "button_not_answerable",
+    message: `"${found.name}" was NOT pressed. ` + unattendedAnswers(buttons).note,
+  };
+}
+
+const RESULT_TEXT_CHARS = 500;
+
 export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
     description:
-      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, and caused_by_op. AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: a two-button dialog (OK and Cancel) can only be cancelled unattended. Look at the screenshot when in doubt. " +
+      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, caused_by_op and kind (info: one OK button, nothing to decide; question; destructive: a button that loses work; advisory only). AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). The button row is the bottom row of the dialog only (a wrapped last line of the message is never a button) and the DEFAULT button is the one outlined in blue (buttons[].default, default_button, default_source \"ring\" or \"only_button\"; null when no outline was found). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: Cancel/No/Close, and the default button when it is OK/Yes/Continue. Look at the screenshot when in doubt. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -819,13 +1054,31 @@ export const dialogsTools: ToolDefinition<any>[] = [
       }
 
       const screenshots = args.screenshots ?? true;
-      return await listDialogsInternal({ screenshots });
+      const res = await listDialogsInternal({ screenshots });
+      if (res.ok) {
+        // What the agent is shown is the baseline ae_dialog_respond compares with. Only this handler sets it:
+        // a background list (timeout diagnostics, other tools) must not move it.
+        for (const d of res.dialogs) {
+          const m = seenDialogs.get(d.handle);
+          if (m) {
+            m.shown = {
+              title: d.title,
+              text: d.text,
+              buttons: d.buttons.map((b) => b.name).join("|"),
+              default_button: d.default_button ?? null,
+              rect: d.window_rect ?? "",
+              painted: d.unattended !== undefined,
+            };
+          }
+        }
+      }
+      return res;
     },
   },
   {
     name: "ae_dialog_respond",
     description:
-      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons), only two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and OK/Yes/Continue when it is the dialog's ONLY button (sent as Enter). Anything else returns button_not_answerable with a message and the answerable buttons: a two-button AE-painted dialog can only be cancelled unattended, so ask Jay to click OK. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
+      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask Jay to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell Jay what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask Jay. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -842,6 +1095,10 @@ export const dialogsTools: ToolDefinition<any>[] = [
       if (!meta) {
         await listDialogsInternal({ screenshots: false });
         meta = seenDialogs.get(args.handle);
+      }
+      // Windows: a handle that is not an open AE dialog is never answered (not even through UI Automation).
+      if (!meta && currentPlatform() !== "darwin") {
+        return { ok: false, error: "dialog_gone", message: `"${args.button}" was NOT pressed: no open After Effects dialog has this handle.`, handle: args.handle, button: args.button };
       }
 
       const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
@@ -863,29 +1120,116 @@ export const dialogsTools: ToolDefinition<any>[] = [
         };
       }
 
-      let rawStdout: string;
+      // A dialog with real buttons (UI Automation, or macOS): OK / Yes / Continue on text about replacing or losing something needs
+      // both destructive flags, as on a painted dialog (which has its own gate below, after the fresh read). A lone OK is harmless.
+      if (!(meta?.painted || meta?.shown?.painted)) {
+        const buttonCount = meta?.buttons ? meta.buttons.split("|").length : 0;
+        if (
+          buttonCount > 1 &&
+          OK_LIKE.test(psLabel(args.button)) &&
+          DESTRUCTIVE_BODY_PATTERN.test(meta?.text ?? "") &&
+          !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)
+        ) {
+          return {
+            ok: false,
+            error: "refused_destructive_dialog",
+            message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`,
+            handle: args.handle,
+            button: args.button,
+          };
+        }
+      }
+      let parsed: Ps1RespondOutput | Record<string, unknown>;
+      let shown: EnrichedDialog | null = null;
       if (currentPlatform() === "darwin") {
         // The title and the start of the text guard against another window having taken this index.
-        rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
+        const rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
+        parsed = parsePs1JsonOutput<Ps1RespondOutput>(rawStdout);
       } else {
-        const psArgs = [
-          "-Mode",
-          "respond",
-          "-Handle",
-          String(args.handle),
-          "-Button",
-          args.button,
-        ];
-        if (args.check) {
-          psArgs.push("-Check", args.check);
+        const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
+        let early: Record<string, unknown> | null = null;
+        const refuse = (error: string, message: string, extra: Record<string, unknown> = {}) => {
+          early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra };
+        };
+        if (meta?.painted || meta?.shown?.painted) {
+          // AE painted this dialog. Compare with what ae_dialogs showed the agent (title, text, buttons, default,
+          // rect), after a fresh read (screenshot, OCR, button row, default) right before the key.
+          const seen = meta.shown;
+          if (!seen) {
+            refuse("dialog_not_listed", "ae_dialogs has not shown this dialog yet. Call ae_dialogs, read it, then answer.");
+          } else {
+            const fresh = await listDialogsInternal({ screenshots: true });
+            if (!fresh.ok) {
+              early = { ok: false, error: fresh.error, handle: args.handle, button: args.button };
+            } else {
+              const d = fresh.dialogs.find((x) => x.handle === args.handle);
+              if (!d) {
+                early = { ok: false, error: "dialog_gone", handle: args.handle, button: args.button };
+              } else if (d.unattended === undefined) {
+                refuse("dialog_changed", "this window is no longer an AE-painted dialog the way ae_dialogs showed it. List the dialogs again.");
+              } else {
+                shown = d;
+                const cancelOnly = psLabel(args.button) === "cancel";
+                const sameText = textKey(d.text, cancelOnly) === textKey(seen.text, cancelOnly);
+                if (
+                  d.title !== seen.title ||
+                  !sameText ||
+                  d.buttons.map((b) => b.name).join("|") !== seen.buttons ||
+                  (d.default_button ?? null) !== seen.default_button ||
+                  (d.window_rect ?? "") !== seen.rect
+                ) {
+                  refuse("dialog_changed", "this dialog is not the one ae_dialogs showed (its title, text, buttons, default button or position differ now). List the dialogs again.");
+                } else if (fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle) {
+                  refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+                } else {
+                  const decision = decidePaintedKey(d.buttons, args.button);
+                  if (decision.action === "refuse") {
+                    early = {
+                      ok: false,
+                      error: decision.error,
+                      message: decision.message,
+                      handle: args.handle,
+                      button: args.button,
+                      ocr_buttons: d.buttons.map((b) => b.name),
+                      default_button: d.default_button ?? null,
+                      ...(d.unattended ? { unattended: d.unattended } : {}),
+                    };
+                  } else if (args.check) {
+                    refuse("checkbox_not_found", "an AE-painted dialog has no checkbox that can be toggled without focusing AE.");
+                  } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
+                    refuse(
+                      "refused_destructive_dialog",
+                      `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`
+                    );
+                  } else {
+                    // A key posted to the dialog's own window; AE keeps its focus state. A focus-taking
+                    // fallback (SendKeys) is NOT built: see ae-dialogs.ps1. If the dialog does not close,
+                    // the result says closed:false and the caller asks the user.
+                    psArgs.push("-Key", decision.action);
+                    if (d.title === "") psArgs.push("-ExpectEmptyTitle");
+                    else psArgs.push("-ExpectTitle", d.title);
+                    if (d.window_rect) psArgs.push("-ExpectRect", d.window_rect);
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          // A dialog with real (UI Automation) buttons: the same two guards as the painted path. Only the topmost
+          // dialog is answered (the list is topmost first); the script refuses a window that is not enabled.
+          const fresh = await listDialogsInternal({ screenshots: false });
+          if (fresh.ok && fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle && fresh.dialogs.some((x) => x.handle === args.handle)) {
+            refuse("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+          } else if (args.check) {
+            psArgs.push("-Check", args.check);
+          }
         }
-        rawStdout = await runPowerShellScript(psArgs);
+        parsed = early ?? parsePs1JsonOutput<Ps1RespondOutput>(await runPowerShellScript(psArgs));
       }
-      const parsed = parsePs1JsonOutput<Ps1RespondOutput>(rawStdout);
 
       const logTime = currentNowIso();
-      const title = meta?.title ?? "";
-      const textExcerpt = (meta?.text ?? "").slice(0, 500);
+      const title = shown?.title ?? meta?.title ?? "";
+      const textExcerpt = (shown?.text ?? meta?.text ?? "").slice(0, RESULT_TEXT_CHARS);
 
       appendResponseLog({
         time: logTime,
@@ -901,18 +1245,35 @@ export const dialogsTools: ToolDefinition<any>[] = [
         result: parsed,
       });
 
-      if (parsed.ok && parsed.closed) {
+      const res = parsed as { ok?: boolean; error?: string; closed?: boolean; message?: string; method?: string; pressed?: string; ocr_buttons?: unknown };
+      const ok = res.ok === true;
+      const closed = res.closed === true;
+      if (ok && closed) {
         seenDialogs.delete(args.handle);
       }
 
-      if (!parsed.ok && parsed.error === "button_not_answerable") {
+      if (!ok && res.error === "button_not_answerable" && !res.message) {
         // Say plainly what the AE-painted dialog allows, instead of leaving the caller to guess.
-        const ocr = (parsed as { ocr_buttons?: unknown }).ocr_buttons;
+        const ocr = res.ocr_buttons;
         const names = Array.isArray(ocr) ? ocr.filter((n): n is string => typeof n === "string").map(normalizeOcrLabel) : [];
         const fixed: DialogButton[] = names.map((n) => ({ name: n, automationId: "", enabled: true }));
         const un = fixed.length > 0 ? unattendedAnswers(fixed) : undefined;
         const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
         return { ...parsed, ocr_buttons: names, ...(un ? { unattended: un } : {}), message: `"${args.button}" was NOT pressed. ${why}` };
+      }
+
+      if (ok && shown && res.method) {
+        const said = shown.text.slice(0, RESULT_TEXT_CHARS);
+        const pressed = res.pressed ?? args.button;
+        const message = closed
+          ? `Pressed "${pressed}" (${res.method}) on the AE dialog "${shown.title}". It said: ${said} Tell the user what it said.`
+          : `Sent the key (${res.method}) for "${pressed}" but the dialog "${shown.title}" did not close within 3 s. Nothing else was tried: ask the user. It said: ${said}`;
+        return {
+          ...parsed,
+          dialog: { title: shown.title, text: said },
+          default_button: shown.default_button ?? null,
+          message,
+        };
       }
 
       return parsed;

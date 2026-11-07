@@ -394,6 +394,32 @@
   // ---------- Poll GET /health ----------
   var healthInFlight = false;
 
+  // Where this panel's own After Effects is installed, read once. null when the host cannot say.
+  var ownHostPath;
+  function ownHostPathOnce() {
+    if (ownHostPath === undefined) {
+      ownHostPath = null;
+      try {
+        if (host && typeof host.getHostPath === "function") ownHostPath = host.getHostPath() || null;
+      } catch (e) {}
+    }
+    return ownHostPath;
+  }
+
+  function samePath(a, b) {
+    var norm = function (x) { return String(x || "").split("\\").join("/").replace(/\/+$/, "").toLowerCase(); };
+    return norm(a) === norm(b);
+  }
+
+  // The service answering on the port belongs to another After Effects than this panel's:
+  // returns its instance block, else null. Both paths must be known; otherwise assume the same.
+  function otherAeInstance(body) {
+    var inst = body && body.instance && typeof body.instance === "object" ? body.instance : null;
+    var mine = ownHostPathOnce();
+    if (!inst || !inst.host_path || !mine) return null;
+    return samePath(inst.host_path, mine) ? null : inst;
+  }
+
   function pollHealth() {
     if (healthInFlight) return;
     healthInFlight = true;
@@ -405,6 +431,19 @@
         setBadge("Offline", "err");
         if ($inflight) $inflight.textContent = "";
         if ($queueDepth) $queueDepth.textContent = "0";
+        return;
+      }
+
+      // Another After Effects holds the port: say so instead of showing its version as this one's.
+      var otherAe = otherAeInstance(body);
+      if (otherAe) {
+        var otherLabel = otherAe.ae_label || shortVersion(otherAe.ae_version || body.aeVersion);
+        if ($ae) $ae.textContent = "AE " + otherLabel + " (not this AE)";
+        if ($inflight) $inflight.textContent = "";
+        if ($queueDepth) $queueDepth.textContent = "0";
+        if ($clearLockBtn) $clearLockBtn.hidden = true;
+        setBadge("Other AE has the connection (" + otherLabel + ")", "err");
+        if ($badge) $badge.title = "The MCP service on 127.0.0.1:" + boundPort + " belongs to After Effects " + otherLabel + ". This After Effects is not serving MCP; close one of them.";
         return;
       }
 
