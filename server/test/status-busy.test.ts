@@ -7,8 +7,9 @@ import type { ToolContext } from "../src/tools/common.js";
 // The popup read of the busy report goes through listBlockingDialogs: stand in for it, so the
 // test never starts PowerShell or looks at the real screen.
 const popups = vi.hoisted(() => ({ list: [] as object[] }));
-vi.mock("../src/tools/ext/dialogs.js", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("../src/tools/ext/dialogs.js")>();
+// importActual with a root-relative path, not importOriginal: see test/mock-ids.test.ts.
+vi.mock("../src/tools/ext/dialogs.js", async () => {
+  const orig = await vi.importActual<typeof import("../src/tools/ext/dialogs.js")>("/src/tools/ext/dialogs.ts");
   return { ...orig, listBlockingDialogs: async () => ({ ok: true, dialogs: popups.list }) };
 });
 

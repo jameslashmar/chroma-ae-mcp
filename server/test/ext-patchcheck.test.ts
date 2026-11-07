@@ -17,8 +17,9 @@ vi.setConfig({ testTimeout: 60000 });
 
 // A stale first render is hard to make with real files (the freshness poll waits 10 s), so a test can ask for the retry's outcome: the frame comes back at the nudged time.
 const staleHook = vi.hoisted(() => ({ nudgeFirst: false }));
-vi.mock("../src/tools/ext/frames.js", async (importOriginal) => {
-  const real = await importOriginal<typeof import("../src/tools/ext/frames.js")>();
+// The real module is fetched by importActual with a root-relative path, not importOriginal: that is the id every other import uses. importOriginal fetches it under a second id, and vitest 2.1.9 can then serve a half-written module (see test/mock-ids.test.ts).
+vi.mock("../src/tools/ext/frames.js", async () => {
+  const real = await vi.importActual<typeof import("../src/tools/ext/frames.js")>("/src/tools/ext/frames.ts");
   return {
     ...real,
     captureCompFrame: async (p: Parameters<typeof real.captureCompFrame>[0]) => {
