@@ -243,6 +243,50 @@ function stdioEntry(env) {
   return { command: node, args: [env.relayPath] };
 }
 
+// Claude Desktop is the one client that may load every tool schema into context, so its
+// entry asks the relay for the small "core" toolset. Claude Code, Cursor and Codex do not get
+// it. An entry the user already has keeps its env (and any other keys); a toolset the user
+// set themselves, even "full", is left as it is.
+const TOOLSET_ENV = "CHROMA_AE_MCP_TOOLSET";
+
+// opts.toolset === "core" is the user's explicit choice (the panel's button): it adds the variable to an
+// existing entry that has none. Without it, core is added only to a NEW entry. Whether an entry without
+// the variable was never set or had it removed on purpose cannot be told apart, so registering again never
+// puts it back by itself.
+function desktopEntry(env, old, opts) {
+  const entry = stdioEntry(env);
+  const isNew = !(old && typeof old === "object" && !Array.isArray(old));
+  const prev = isNew ? {} : old;
+  const prevEnv = prev.env && typeof prev.env === "object" && !Array.isArray(prev.env) ? prev.env : {};
+  const mergedEnv = Object.assign({}, prevEnv);
+  const explicit = Boolean(opts && opts.toolset === "core");
+  if (!(TOOLSET_ENV in mergedEnv) && (isNew || explicit)) mergedEnv[TOOLSET_ENV] = "core";
+  const out = Object.assign({}, prev, entry);
+  if (Object.keys(mergedEnv).length > 0) out.env = mergedEnv;
+  else delete out.env;
+  return out;
+}
+
+// What the Claude Desktop config says now: { registered, toolset } where toolset is "core", "full",
+// the user's other value, or "unset" (the entry has no CHROMA_AE_MCP_TOOLSET, so all tools are listed).
+function desktopState(env) {
+  const old = existingJsonServer(desktopConfigPath(env));
+  if (!old || typeof old !== "object") return { registered: false, toolset: "unset" };
+  const e = old.env && typeof old.env === "object" ? old.env : {};
+  if (!(TOOLSET_ENV in e)) return { registered: true, toolset: "unset" };
+  const v = String(e[TOOLSET_ENV]).trim().toLowerCase();
+  return { registered: true, toolset: v === "core" || v === "full" ? v : String(e[TOOLSET_ENV]) };
+}
+
+function existingJsonServer(file) {
+  try {
+    const cfg = readJson(file);
+    return cfg.mcpServers && typeof cfg.mcpServers === "object" ? cfg.mcpServers[NAME] : undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
+
 async function runClaude(env, args) {
   const claude = findClaude(env);
   if (!claude) throw new Error("The Claude Code CLI was not found. Install Claude Code, or copy the setup command instead.");
@@ -322,9 +366,18 @@ const CLIENTS = {
   "claude-desktop": {
     label: "Claude Desktop",
     registered: (env) => hasJsonServer(desktopConfigPath(env)),
-    register(env) {
-      setJsonServer(desktopConfigPath(env), stdioEntry(env));
-      return "Added to Claude Desktop. Quit and reopen Claude Desktop to load it.";
+    register(env, opts) {
+      const file = desktopConfigPath(env);
+      const old = existingJsonServer(file);
+      const entry = desktopEntry(env, old, opts);
+      setJsonServer(file, entry);
+      const toolset = entry.env && entry.env[TOOLSET_ENV] !== undefined ? String(entry.env[TOOLSET_ENV]).trim().toLowerCase() : "unset";
+      const verb = old ? "Updated" : "Added to";
+      const restart = " Quit Claude Desktop from the tray and reopen it to load it (the config was backed up as claude_desktop_config.json.chroma-bak).";
+      if (toolset === "core") {
+        return verb + " Claude Desktop with the core toolset (a short tool list plus search; remove CHROMA_AE_MCP_TOOLSET from the entry's env to list all tools)." + restart;
+      }
+      return verb + " Claude Desktop; it lists all tools (" + (toolset === "unset" ? "no CHROMA_AE_MCP_TOOLSET in its env" : "CHROMA_AE_MCP_TOOLSET=" + toolset + " kept") + ")." + restart;
     },
     unregister(env) {
       setJsonServer(desktopConfigPath(env), null);
@@ -394,7 +447,8 @@ function setupText(id, opts, env) {
       where: "Paste it into a terminal, then start a new Codex session.",
     };
   }
-  const json = JSON.stringify({ [NAME]: entry }, null, 2);
+  const shown = id === "claude-desktop" ? desktopEntry(e, null) : entry;
+  const json = JSON.stringify({ [NAME]: shown }, null, 2);
   // The entry alone, without the outer braces, so it pastes into an existing "mcpServers".
   const text = json.slice(1, -1).replace(/^\n/, "").replace(/\n$/, "").replace(/^ {2}/gm, "");
   if (id === "claude-desktop") {
@@ -423,7 +477,15 @@ function status(env) {
     } catch (err) {
       registered = false;
     }
-    return { id, label: CLIENTS[id].label, registered };
+    const row = { id, label: CLIENTS[id].label, registered };
+    if (id === "claude-desktop") {
+      try {
+        row.toolset = desktopState(e).toolset;
+      } catch (err) {
+        row.toolset = "unset";
+      }
+    }
+    return row;
   });
 }
 
@@ -440,6 +502,7 @@ module.exports = {
   status,
   setRegistered,
   setupText,
+  desktopState,
   upsertTomlTable,
   codexTable,
   tomlString,

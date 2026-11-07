@@ -82,13 +82,15 @@ claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp
 ```json
 "chroma-ae": {
   "command": "node",
-  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"]
+  "args": ["<CEP extensions>/london.chroma.aemcp/tools/stdio-relay.cjs"],
+  "env": { "CHROMA_AE_MCP_TOOLSET": "core" }
 }
 ```
 
 - `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS.
 - The relay forwards to the same `/mcp` as Claude Code, so every client shares one write queue.
-- While AE is closed the tools stay listed, and calling one says to start AE.
+- **Toolsets.** All 179 tool schemas are about 774,000 characters (roughly 200,000 tokens). Claude Code loads tool schemas on demand, but whether Claude Desktop does the same is **unconfirmed**, so the Desktop entry above asks for the `core` toolset: 32 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (about 72,000 characters, with shortened descriptions that keep every parameter), and the other tools are reached through those three. In the panel, pick **Desktop** under **Register with** and press **Add to Claude Desktop (core toolset)**: it writes the entry above into `claude_desktop_config.json` (the file is backed up as `claude_desktop_config.json.chroma-bak` first, other servers and other settings are kept), then quit Claude Desktop from the tray and reopen it. If Desktop already has a `chroma-ae` entry without `CHROMA_AE_MCP_TOOLSET`, it keeps listing all tools until you press **Use the core toolset in Claude Desktop**. To go back to all 179 tools, delete the `CHROMA_AE_MCP_TOOLSET` line from the entry's `env` (or set it to `full`) and restart Desktop; the panel never puts the line back by itself, and never overwrites a value you set. Claude Code, Cursor and Codex are registered without it. The details are in [docs/TOOLS.md](docs/TOOLS.md).
+- While AE is closed the relay answers `tools/list` from the last list the panel served (the core list has its own cache file, so it exists only after the panel has served it once with `CHROMA_AE_MCP_TOOLSET=core`; with no cache yet, `tools/list` returns an error), and calling a tool says to start AE.
 - The panel's buttons back up each config file as `<file>.chroma-bak` before changing it.
 
 ---

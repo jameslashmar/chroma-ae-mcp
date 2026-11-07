@@ -8,6 +8,11 @@ You are one of several builders working **at the same time** in this repo. To av
 
 Exception: an edit your task names explicitly.
 
+## A new tool needs a group (and does not join the core list)
+- **Group:** add the tool's name to exactly one group in `TOOL_GROUPS` in `server/src/toolsets.ts` (Claude edits that file, like `ext/index.ts`). `test/toolsets.test.ts` fails for a tool with no group, for one in two groups and for a group over 30 tools; split a group when it grows. A group's blurb is one line under 100 characters. If people would look for the tool in other words than its description uses ("remove something from a shot"), add words for it to `SEARCH_HINTS` there.
+- **Core list:** `CORE_TOOL_NAMES` in the same file is the list of 32 everyday tools that the `core` toolset shows (see `docs/TOOLS.md`). Do not add to it: the list and its `instructions` are held to 75,000 characters by a test, and every other tool is reached through `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`. A tool that is in the core list gets the first sentences of its description as its short text; add an entry to `CORE_DESCRIPTION_OVERRIDES` when that is not enough. Input schemas are trimmed automatically (descriptions cut to one clause; every property name, type, enum and `required` entry survives), so let the first clause of each `.describe()` carry the meaning.
+- **The meta-tools are not in `ALL_TOOLS`.** `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` live in `server/src/meta-tools.ts`, call tools through `callTool` in `server/src/tool-call.ts` (the one path `tools/call` also uses) and must never touch the bridge, the queue or the quarantine. A tool handler is not told its own name: use a constant for `toolName`, as the existing tools do, and it is right however the tool was called.
+
 ## How a tool group plugs in
 - **ExtendScript side:** `panel/host/ext/<group>.jsx`. The service loads it after `core.jsx`.
   - Attach functions to the existing object: `(function(G){ var A = G.__chromaAe; A.myFn = function(args){...}; })($.global);`

@@ -2,6 +2,48 @@
 
 Every tool the MCP serves, by group. Each tool's schema and description, as the agent sees them, live in `server/src/tools/`. The rules every write follows are in [SAFETY.md](SAFETY.md).
 
+## Toolsets: full and core
+
+`tools/list` has two shapes, chosen per request by the `X-Chroma-Toolset` header (the stdio relay sends it when `CHROMA_AE_MCP_TOOLSET=core` is in its environment). The counts in this file are for the tools themselves: the three meta-tools below are not in the 179.
+
+- **full** (the default; also an unset, empty or unknown value): all 179 tools, exactly as the tools define themselves, about 774,000 characters. No meta-tools are listed and `initialize` sends no `instructions`. Use it for a client that defers tool schemas itself (Claude Code does).
+- **core**: 32 everyday tools with shortened text, plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`. The list and the `instructions` that `initialize` returns (the safety text once, how to use the three tools, the group index) are held to 75,000 characters (about 20,000 tokens) by a test. We added it because it is **not confirmed** that Claude Desktop defers tool schemas the way Claude Code does, and 200,000 tokens of schemas per conversation is too much to risk.
+
+The shortened text keeps every property name, type, enum, `required` and nested structure; only descriptions shrink (the first clause; 27 of the 32 tools have a hand-written summary, and a few untyped values such as `ae_set_property.value`, `ae_batch_set` `ops[].value` and the effect `params[].value` keep up to 400-600 characters because their text is the only description of what they accept). Calls are always validated against the full schema.
+
+| Meta-tool | What it does |
+|---|---|
+| `ae_search_tools` | `query` (keywords over name, description and parameter names, ranked), `pattern` (a literal name fragment, case-insensitive; `^` anchors the start and `$` the end, e.g. `^ae_track`; it is not a regex), `group`, `limit` (default 8, max 20), `offset` (to page through a group or a long result; the reply gives `next_offset`), `detail` (`summary` or `schema`, the trimmed schema). An empty call lists the groups with counts. The whole reply is capped at 20,000 characters; when the cap cuts it the reply says so and gives `next_offset`. |
+| `ae_get_tool_schema` | `name` or up to 5 `names`: the full description (with the safety text), the full input schema and the group. The first tool is always returned whole; once the reply passes 40,000 characters the remaining names are listed in `omitted` to ask for again. A name is at most 80 characters. |
+| `ae_invoke_tool` | `name`, `arguments`: runs any tool through exactly the path `tools/call` uses (same validation, handler, receipt, content and `isError`; the service log and the tools' own receipts and checkpoints see the inner tool's name). It refuses a meta-tool as the target; an unknown name returns the closest names. |
+
+All three reject fields they do not know (put a tool's arguments under `arguments`). `ae_search_tools` and `ae_get_tool_schema` run in Node and never touch After Effects, so they answer while AE is busy, blocked by a popup or rendering. `ae_invoke_tool` hands the call to the real tool, which goes to AE like any call and is refused while AE renders.
+
+**Approvals and blocking.** A host sees `ae_invoke_tool` as one tool: if a host's per-tool approve or disable setting lets `ae_invoke_tool` through, every tool behind it passes. A host that wants to block or ask about one specific tool has to use the full toolset, where each tool is listed by name. `tools/call` accepts every tool in either toolset, listed or not; the meta-tools are callable in both and only listed in core.
+
+The core list: `ae_status`, `ae_get_project`, `ae_get_comp`, `ae_comp_tree`, `ae_get_layer_props`, `ae_find_layers`, `ae_get_keyframes`, `ae_set_property`, `ae_batch_set`, `ae_set_text`, `ae_create_layer`, `ae_create_comp`, `ae_layer_ops`, `ae_import_footage`, `ae_add_effect`, `ae_set_effect`, `ae_save`, `ae_snapshot_frame`, `ae_run_jsx`, `ae_dialogs`, `ae_dialog_respond`, `ae_skill_run`, `ae_multi_comp_apply`, `ae_render_queue_add`, `ae_render_queue_edit`, `ae_render_queue_status`, `ae_render_queue_render`, `ae_render_queue_render_status`, `ae_render_templates`, `ae_aerender_start`, `ae_aerender_status`, `ae_set_footage_interpretation`.
+
+### Search groups
+
+Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.ts`; a test fails for a tool without one). These are for `ae_search_tools`, not the sections below.
+
+| Group | Tools | What |
+|---|---|---|
+| `inspect` | 23 | Read-only views of the project, comps, layers, keyframes, effects and cuts |
+| `edit` | 15 | Set properties, create layers and comps, layer operations, masks, shapes, markers, batch edits |
+| `project` | 10 | Import and replace footage, interpretation, proxies, versions, save, comp and project settings |
+| `effects` | 5 | Add, change and remove effects, presets, green-screen keying |
+| `text` | 9 | Text content and styling, animators, fitting, measuring, backdrops, fonts, legibility |
+| `motion` | 9 | Keyframe easing and retiming, staggers, time remap, graphs, timing checks, camera rigs |
+| `rig_paths` | 15 | Rigs and controls, paths, expression recipes, Essential Graphics, .mogrt |
+| `tracking_patching` | 19 | Tracking, stabilizing, object removal, patches, screen replacement |
+| `render` | 18 | Render queue, rendering in After Effects or with aerender, batches, templates, verifying |
+| `delivery` | 10 | Delivery specs and recipes, preflight, house style, collect and relink |
+| `captions_audio` | 10 | Captions, transcription, audio analysis, loudness, cue keys |
+| `review` | 11 | Stills, contact sheets, annotated frames, motion review, brief and taste |
+| `safety` | 11 | Quarantine, checkpoints, variants, session changes, project sessions |
+| `app` | 14 | ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer |
+
 ## Motion guidance
 
 **Motion guidance comes with the tools.** Besides tools, the MCP serves Chroma's motion-director skill as MCP **prompts** (`motion_director`, with an optional `task`; `motion_review`, with an optional `comp`) and **resources** (`chroma-ae://guidance/motion-director/...`: the skill, its sources and seven reference files on timing and easing, choreography and transitions, type and layout, story and pacing, sound and captions, and review). Any client that supports prompts or resources gets them, including through the stdio relay while AE is closed. The text ships in `server/guidance/motion-director/`; `node scripts/sync-guidance.mjs` refreshes it from the skill, and a test fails if the compiled copy drifts.

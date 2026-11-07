@@ -75,7 +75,8 @@ describe("register.cjs config editing", () => {
     for (const id of ["claude-desktop", "cursor", "codex"]) await register.setRegistered(id, true, {}, env);
 
     const d = JSON.parse(fs.readFileSync(desktop, "utf8"));
-    expect(d.mcpServers["chroma-ae"]).toEqual({ command: node, args: [relayPath] });
+    // Only Claude Desktop's entry asks the relay for the core toolset.
+    expect(d.mcpServers["chroma-ae"]).toEqual({ command: node, args: [relayPath], env: { CHROMA_AE_MCP_TOOLSET: "core" } });
     expect(d.mcpServers.blender).toEqual({ command: "uvx" });
     expect(d.theme).toBe("dark");
     expect(fs.existsSync(desktop + ".chroma-bak")).toBe(true);
@@ -88,6 +89,107 @@ describe("register.cjs config editing", () => {
     for (const id of ["claude-desktop", "cursor", "codex"]) await register.setRegistered(id, false, {}, env);
     expect(register.status(env).every((c: any) => !c.registered)).toBe(true);
     expect(JSON.parse(fs.readFileSync(desktop, "utf8")).mcpServers.blender).toBeDefined();
+  });
+
+  it("writes CHROMA_AE_MCP_TOOLSET=core into the Claude Desktop entry only", async () => {
+    const { env, execs, node, relayPath } = fakeEnv();
+    fs.writeFileSync(path.join(env.pathEnv, process.platform === "win32" ? "claude.exe" : "claude"), "");
+    for (const id of ["claude-desktop", "cursor", "codex", "claude-code"]) await register.setRegistered(id, true, { port: 7790, token: "t" }, env);
+
+    const desktop = JSON.parse(fs.readFileSync(path.join(env.appData, "Claude", "claude_desktop_config.json"), "utf8"));
+    expect(desktop.mcpServers["chroma-ae"].env).toEqual({ CHROMA_AE_MCP_TOOLSET: "core" });
+    const cursor = JSON.parse(fs.readFileSync(path.join(env.home, ".cursor", "mcp.json"), "utf8"));
+    expect(cursor.mcpServers["chroma-ae"]).toEqual({ command: node, args: [relayPath] });
+    expect(fs.readFileSync(path.join(env.home, ".codex", "config.toml"), "utf8")).not.toContain("TOOLSET");
+    // Claude Code registration is the HTTP command, with no toolset.
+    expect(execs.map((e) => e.args.join(" ")).join(" | ")).not.toContain("TOOLSET");
+    expect(register.setupText("claude-code", { port: 7790, token: "t" }, env).text).not.toContain("TOOLSET");
+    expect(register.setupText("cursor", {}, env).text).not.toContain("TOOLSET");
+    expect(register.setupText("codex", {}, env).text).not.toContain("TOOLSET");
+    expect(register.setupText("claude-desktop", {}, env).text).toContain("CHROMA_AE_MCP_TOOLSET");
+  });
+
+  it("keeps the user's own env and toolset choice when Claude Desktop is registered again", async () => {
+    const { env, node, relayPath } = fakeEnv();
+    const file = path.join(env.appData, "Claude", "claude_desktop_config.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old", args: ["x"], env: { CHROMA_AE_MCP_PORT: "7791", CHROMA_AE_MCP_TOOLSET: "full" } } } }));
+    await register.setRegistered("claude-desktop", true, {}, env);
+    let entry = JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"];
+    expect(entry).toEqual({ command: node, args: [relayPath], env: { CHROMA_AE_MCP_PORT: "7791", CHROMA_AE_MCP_TOOLSET: "full" } });
+
+    // An entry with no toolset (never set, or removed on purpose: the two cannot be told apart) is NOT given core
+    // again by a plain re-registration. Its other env and keys are kept.
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old", disabled: false, env: { CHROMA_AE_MCP_PORT: "7791" } } } }));
+    const message = await register.setRegistered("claude-desktop", true, {}, env);
+    entry = JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"];
+    expect(entry).toEqual({ command: node, args: [relayPath], disabled: false, env: { CHROMA_AE_MCP_PORT: "7791" } });
+    // The message describes the env that was written, not what was intended.
+    expect(message).toContain("lists all tools");
+    expect(message).not.toContain("core toolset");
+
+    // No env at all: still no env key and no core.
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old" } } }));
+    await register.setRegistered("claude-desktop", true, {}, env);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"]).toEqual({ command: node, args: [relayPath] });
+  });
+
+  it("the panel's explicit Claude Desktop action adds core to an existing entry, keeping its other keys, with a backup", async () => {
+    const { env, node, relayPath } = fakeEnv();
+    const file = path.join(env.appData, "Claude", "claude_desktop_config.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const original = { theme: "dark", mcpServers: { blender: { command: "uvx" }, "chroma-ae": { command: "old", disabled: false, env: { CHROMA_AE_MCP_PORT: "7791" } } } };
+    fs.writeFileSync(file, JSON.stringify(original));
+
+    let st = register.status(env).find((c: any) => c.id === "claude-desktop");
+    expect(st).toMatchObject({ registered: true, toolset: "unset" });
+    expect(register.desktopState(env)).toEqual({ registered: true, toolset: "unset" });
+
+    const message = await register.setRegistered("claude-desktop", true, { toolset: "core" }, env);
+    const written = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(written.mcpServers["chroma-ae"]).toEqual({
+      command: node,
+      args: [relayPath],
+      disabled: false,
+      env: { CHROMA_AE_MCP_PORT: "7791", CHROMA_AE_MCP_TOOLSET: "core" },
+    });
+    expect(written.mcpServers.blender).toEqual({ command: "uvx" });
+    expect(written.theme).toBe("dark");
+    expect(JSON.parse(fs.readFileSync(file + ".chroma-bak", "utf8"))).toEqual(original);
+    expect(message).toContain("core toolset");
+    expect(message).toMatch(/Quit Claude Desktop .* reopen/);
+    st = register.status(env).find((c: any) => c.id === "claude-desktop");
+    expect(st).toMatchObject({ registered: true, toolset: "core" });
+
+    // A value the user set is never overwritten, even by the explicit action.
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old", env: { CHROMA_AE_MCP_TOOLSET: "full" } } } }));
+    const keep = await register.setRegistered("claude-desktop", true, { toolset: "core" }, env);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"].env).toEqual({ CHROMA_AE_MCP_TOOLSET: "full" });
+    expect(keep).toContain("CHROMA_AE_MCP_TOOLSET=full kept");
+    expect(register.desktopState(env)).toEqual({ registered: true, toolset: "full" });
+  });
+
+  it("adds a new Claude Desktop entry with core, and reports no registration before that", async () => {
+    const { env } = fakeEnv();
+    expect(register.desktopState(env)).toEqual({ registered: false, toolset: "unset" });
+    const message = await register.setRegistered("claude-desktop", true, { toolset: "core" }, env);
+    expect(message).toMatch(/^Added to Claude Desktop with the core toolset/);
+    expect(register.desktopState(env)).toEqual({ registered: true, toolset: "core" });
+    expect(register.status(env).filter((c: any) => c.id !== "claude-desktop").every((c: any) => c.toolset === undefined)).toBe(true);
+  });
+
+  it("is wired into the panel: a Claude Desktop button that calls the explicit action", () => {
+    const panelDir = path.resolve(__dirname, "../../panel/client");
+    const js = fs.readFileSync(path.join(panelDir, "panel.js"), "utf8");
+    const html = fs.readFileSync(path.join(panelDir, "index.html"), "utf8");
+    expect(html).toContain('id="write-desktop-btn"');
+    expect(js).toMatch(/setRegistered\("claude-desktop", true, \{ toolset: "core" \}\)/);
+    // An existing entry without the variable gets the offer, not only "already has chroma-ae".
+    expect(js).toContain('entry.toolset === "unset"');
+    expect(js).toContain("Use the core toolset in Claude Desktop");
+    expect(js).toMatch(/reopen it/);
+    // Node 17.7.2 in the panel: no optional chaining, let/const or arrows in the new code.
+    expect(js.slice(js.indexOf("function bindDesktopAction"), js.indexOf("function bindDesktopAction") + 900)).not.toMatch(/=>|\blet\b|\bconst\b|\?\./);
   });
 
   it("registers Claude Code through its CLI with the token, replacing an old entry", async () => {
@@ -225,7 +327,9 @@ describe("register.cjs setup text (the panel's Copy button)", () => {
     for (const id of ["claude-desktop", "cursor"]) {
       const s = register.setupText(id, { port: 7790, token: "abc123" }, env);
       expect(s.kind).toBe("config");
-      expect(JSON.parse("{" + s.text + "}")).toEqual({ "chroma-ae": { command: node, args: [relayPath] } });
+      const entry: Record<string, unknown> = { command: node, args: [relayPath] };
+      if (id === "claude-desktop") entry.env = { CHROMA_AE_MCP_TOOLSET: "core" };
+      expect(JSON.parse("{" + s.text + "}")).toEqual({ "chroma-ae": entry });
       expect(s.where).toContain("mcpServers");
     }
   });

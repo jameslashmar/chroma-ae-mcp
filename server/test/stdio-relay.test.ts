@@ -42,6 +42,7 @@ function home(token = "secret-token") {
 
 interface Seen {
   auth: string | undefined;
+  toolset: string | undefined;
   body: any;
 }
 
@@ -53,7 +54,7 @@ async function fakePanel(reply: (body: any) => { status: number; body?: unknown 
     req.on("data", (c) => (text += c));
     req.on("end", () => {
       const body = JSON.parse(text);
-      seen.push({ auth: req.headers.authorization, body });
+      seen.push({ auth: req.headers.authorization, toolset: req.headers["x-chroma-toolset"] as string | undefined, body });
       const out = reply(body);
       res.statusCode = out.status;
       if (out.body === undefined) {
@@ -78,10 +79,18 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
-async function runRelay(homeDir: string, port: number, messages: unknown[]): Promise<any[]> {
+async function runRelay(
+  homeDir: string,
+  port: number,
+  messages: unknown[],
+  opts: { toolset?: string; stderr?: string[] } = {}
+): Promise<any[]> {
+  const baseEnv: Record<string, string | undefined> = { ...process.env };
+  delete baseEnv.CHROMA_AE_MCP_TOOLSET;
   const child = childProcess.spawn(process.execPath, [RELAY], {
     env: {
-      ...process.env,
+      ...baseEnv,
+      ...(opts.toolset !== undefined ? { CHROMA_AE_MCP_TOOLSET: opts.toolset } : {}),
       LOCALAPPDATA: homeDir,
       HOME: homeDir,
       USERPROFILE: homeDir,
@@ -90,10 +99,13 @@ async function runRelay(homeDir: string, port: number, messages: unknown[]): Pro
     stdio: ["pipe", "pipe", "pipe"],
   });
   let out = "";
+  let err = "";
   child.stdout.on("data", (c) => (out += c));
+  child.stderr.on("data", (c) => (err += c));
   child.stdin.end(messages.map((m) => JSON.stringify(m)).join("\n") + "\n");
   const code = await new Promise((r) => child.on("close", r));
   expect(code).toBe(0);
+  if (opts.stderr) opts.stderr.push(...err.split("\n").filter((l) => l.trim()));
   return out
     .split("\n")
     .filter((l) => l.trim())
@@ -272,5 +284,107 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const replies = await runRelay(dir, panel.port, [callStatus(1)]);
     expect(replies[0].result.isError).toBe(true);
     expect(replies[0].result.content[0].text).toMatch(/rejected the token/);
+  });
+
+  // ---------- toolsets ----------
+
+  const CORE_TOOLS = [
+    { name: "ae_search_tools", description: "s", inputSchema: { type: "object" } },
+    { name: "ae_status", description: "status", inputSchema: { type: "object" } },
+  ];
+  const listReply = (body: any) => {
+    if (body.id === undefined) return { status: 202 };
+    if (body.method === "tools/list") return { status: 200, body: { jsonrpc: "2.0", id: body.id, result: { tools: CORE_TOOLS } } };
+    if (body.method === "initialize") {
+      return { status: 200, body: { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-06-18", instructions: "CORE INSTRUCTIONS", serverInfo: {} } } };
+    }
+    return { status: 200, body: { jsonrpc: "2.0", id: body.id, result: {} } };
+  };
+
+  it("sends X-Chroma-Toolset: core on every request when CHROMA_AE_MCP_TOOLSET=core", async () => {
+    const { dir } = home();
+    const panel = await fakePanel(listReply);
+    await runRelay(dir, panel.port, [initialize(1), { jsonrpc: "2.0", method: "notifications/initialized" }, listTools(2), callStatus(3)], { toolset: "core" });
+    expect(panel.seen).toHaveLength(4);
+    expect(panel.seen.every((s) => s.toolset === "core")).toBe(true);
+  });
+
+  it("sends no toolset header when the variable is unset, empty or full", async () => {
+    for (const toolset of [undefined, "", "full", "FULL"]) {
+      const { dir } = home();
+      const panel = await fakePanel(listReply);
+      await runRelay(dir, panel.port, [initialize(1), listTools(2)], { toolset });
+      expect(panel.seen.map((s) => s.toolset), String(toolset)).toEqual([undefined, undefined]);
+    }
+  });
+
+  it("treats a bad value as full and says so once on stderr", async () => {
+    const { dir } = home();
+    const panel = await fakePanel(listReply);
+    const stderr: string[] = [];
+    await runRelay(dir, panel.port, [initialize(1), listTools(2), listTools(3)], { toolset: "tiny", stderr });
+    expect(panel.seen.every((s) => s.toolset === undefined)).toBe(true);
+    const notes = stderr.filter((l) => l.includes("CHROMA_AE_MCP_TOOLSET"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("tiny");
+  });
+
+  it("keeps a separate tools cache for the core toolset, so switching never shows the wrong list", async () => {
+    const { dir, dataDir } = home();
+    const panel = await fakePanel(listReply);
+    await runRelay(dir, panel.port, [listTools(1)], { toolset: "core" });
+    const corePath = path.join(dataDir, "relay-tools-core-cache.json");
+    expect(JSON.parse(fs.readFileSync(corePath, "utf8"))).toEqual({ tools: CORE_TOOLS });
+    // The full-list cache keeps its name and was not touched.
+    expect(fs.existsSync(path.join(dataDir, "relay-tools-cache.json"))).toBe(false);
+
+    fs.writeFileSync(path.join(dataDir, "relay-tools-cache.json"), JSON.stringify({ tools: TOOLS }));
+    const closed = await closedPort();
+    const offlineCore = await runRelay(dir, closed, [listTools(1)], { toolset: "core" });
+    expect(offlineCore[0].result.tools).toEqual(CORE_TOOLS);
+    const offlineFull = await runRelay(dir, closed, [listTools(1)]);
+    expect(offlineFull[0].result.tools).toEqual(TOOLS);
+    // Core with no core cache yet does not fall back to the full list.
+    fs.rmSync(corePath);
+    const none = await runRelay(dir, closed, [listTools(1)], { toolset: "core" });
+    expect(none[0].error).toBeTruthy();
+  });
+
+  it("hands the cached core instructions to the client while AE is closed", async () => {
+    const { dir, dataDir } = home();
+    const panel = await fakePanel(listReply);
+    const online = await runRelay(dir, panel.port, [initialize(1)], { toolset: "core" });
+    expect(online[0].result.instructions).toBe("CORE INSTRUCTIONS");
+    const offline = await runRelay(dir, await closedPort(), [initialize(1)], { toolset: "core" });
+    expect(offline[0].result.instructions).toBe("CORE INSTRUCTIONS");
+    const offlineFull = await runRelay(dir, await closedPort(), [initialize(1)]);
+    expect(offlineFull[0].result).not.toHaveProperty("instructions");
+    expect(fs.existsSync(path.join(dataDir, "relay-instructions-core-cache.json"))).toBe(true);
+  });
+
+  it("survives an older panel that ignores the header: its full list passes through and is not cached as core", async () => {
+    const { dir, dataDir } = home();
+    const panel = await fakePanel((body) => {
+      if (body.method === "tools/list") return { status: 200, body: { jsonrpc: "2.0", id: body.id, result: { tools: TOOLS } } };
+      return { status: 200, body: { jsonrpc: "2.0", id: body.id, result: { echo: body.method } } };
+    });
+    const stderr: string[] = [];
+    const replies = await runRelay(dir, panel.port, [initialize(1), listTools(2), callStatus(3)], { toolset: "core", stderr });
+    expect(replies[0].result).toEqual({ echo: "initialize" });
+    expect(replies[1].result.tools).toEqual(TOOLS);
+    expect(replies[2].result).toEqual({ echo: "tools/call" });
+    expect(fs.existsSync(path.join(dataDir, "relay-tools-core-cache.json"))).toBe(false);
+    expect(stderr.some((l) => l.includes("does not know the core toolset"))).toBe(true);
+  });
+
+  it("passes the real core list from the MCP handler through and caches it as core", async () => {
+    const { dir, dataDir } = home();
+    const real = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {} as ToolContext, { toolset: "core" })) as any;
+    const list = real.result.tools as Array<{ name: string }>;
+    const server = await fakePanel((body) => ({ status: 200, body: { jsonrpc: "2.0", id: body.id, result: { tools: list } } }));
+    const replies = await runRelay(dir, server.port, [listTools(1)], { toolset: "core" });
+    expect(replies[0].result.tools.map((t: any) => t.name)).toEqual(list.map((t) => t.name));
+    const cached = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-core-cache.json"), "utf8"));
+    expect(cached.tools).toHaveLength(35);
   });
 });

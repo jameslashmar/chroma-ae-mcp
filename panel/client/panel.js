@@ -34,6 +34,7 @@
   var $queueDepth = typeof document !== "undefined" ? document.getElementById("queue-depth") : null;
   var $setupCommand = typeof document !== "undefined" ? document.getElementById("setup-command") : null;
   var $copySetupBtn = typeof document !== "undefined" ? document.getElementById("copy-setup-btn") : null;
+  var $writeDesktopBtn = typeof document !== "undefined" ? document.getElementById("write-desktop-btn") : null;
   var $regenTokenBtn = typeof document !== "undefined" ? document.getElementById("regen-token-btn") : null;
   var $log = typeof document !== "undefined" ? document.getElementById("log") : null;
 
@@ -558,19 +559,72 @@
     copiedTimer = setTimeout(function () { copiedTimer = null; renderSetupHint(); }, 1500);
   }
 
+  // What the last "Add to Claude Desktop" click said (cleared when another AI is chosen).
+  var desktopNote = "";
+
   function renderSetupHint() {
     var setup = chosenSetup(common.maskToken(sessionToken));
     var label = chosenLabel();
     var already = false;
+    var entry = null;
     for (var i = 0; i < clientList.length; i++) {
-      if (clientList[i].id === chosenClient) already = clientList[i].registered;
+      if (clientList[i].id === chosenClient) {
+        already = clientList[i].registered;
+        entry = clientList[i];
+      }
     }
     if ($copySetupBtn && !copiedTimer) {
       $copySetupBtn.textContent = setup && setup.kind === "config" ? "Copy config for " + label : "Copy setup command";
     }
+    // Claude Desktop: the panel can write the entry itself (with a backup), including the core toolset.
+    // An existing entry without CHROMA_AE_MCP_TOOLSET lists every tool, so offer the switch.
+    var desktopAction = "";
+    if (chosenClient === "claude-desktop" && entry) {
+      if (!entry.registered) desktopAction = "Add to Claude Desktop (core toolset)";
+      else if (entry.toolset === "unset") desktopAction = "Use the core toolset in Claude Desktop";
+    }
+    if ($writeDesktopBtn) {
+      $writeDesktopBtn.hidden = !desktopAction;
+      if (desktopAction) $writeDesktopBtn.textContent = desktopAction;
+    }
     if (!setup || !$setupWhere) return;
     $setupWhere.classList.remove("err");
-    $setupWhere.textContent = (already ? label + " already has chroma-ae. " : "") + setup.where;
+    var text = setup.where;
+    if (chosenClient === "claude-desktop" && already) {
+      if (entry && entry.toolset === "unset") {
+        text = "Claude Desktop has chroma-ae but lists all tools. The button switches it to the core toolset (short list plus search) and backs up the config; then quit Claude Desktop from the tray and reopen it.";
+      } else if (entry && entry.toolset === "core") {
+        text = "Claude Desktop has chroma-ae with the core toolset. To list all tools, remove CHROMA_AE_MCP_TOOLSET from the entry's env in claude_desktop_config.json and restart Claude Desktop.";
+      } else {
+        text = "Claude Desktop already has chroma-ae (CHROMA_AE_MCP_TOOLSET is set by you and is kept).";
+      }
+    } else if (already) {
+      text = label + " already has chroma-ae. " + text;
+    }
+    if (chosenClient === "claude-desktop" && desktopNote) text = desktopNote + " " + text;
+    $setupWhere.textContent = text;
+  }
+
+  function bindDesktopAction() {
+    if (!$writeDesktopBtn) return;
+    $writeDesktopBtn.addEventListener("click", function () {
+      if (!loadRegister()) return;
+      register.setRegistered("claude-desktop", true, { toolset: "core" }).then(
+        function (message) {
+          desktopNote = message;
+          logUi("ok", "Claude Desktop config written (core toolset). Restart Claude Desktop.");
+          renderRegister();
+        },
+        function (err) {
+          desktopNote = "";
+          logUi("err", "Claude Desktop was not changed: " + (err && err.message ? err.message : String(err)));
+          if ($setupWhere) {
+            $setupWhere.textContent = "Claude Desktop was not changed: " + (err && err.message ? err.message : String(err));
+            $setupWhere.classList.add("err");
+          }
+        }
+      );
+    });
   }
 
   // The section twirls closed once it has done its job. Until the user chooses,
@@ -639,6 +693,7 @@
   }
 
   function chooseClient(id, focus) {
+    if (id !== chosenClient) desktopNote = "";
     chosenClient = id;
     try { window.localStorage.setItem(CLIENT_KEY, id); } catch (e) {}
     renderRegister();
@@ -1339,6 +1394,7 @@
     refreshTokenFromDisk();
     updateSetupUi();
     bindSetupActions();
+    bindDesktopAction();
     bindAskActions();
     bindDiagnostics();
     bindClearRenderLock();

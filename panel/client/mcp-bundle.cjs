@@ -9500,9 +9500,9 @@ function saveAsPathProblem(p) {
 function nextIncrementPath(projectPath, listing) {
   const dir = path9.dirname(projectPath);
   const ext2 = path9.extname(projectPath) || ".aep";
-  const stem = path9.basename(projectPath, path9.extname(projectPath));
-  const m = /^(.*)_v(\d+)$/i.exec(stem);
-  const base = m ? m[1] : stem;
+  const stem2 = path9.basename(projectPath, path9.extname(projectPath));
+  const m = /^(.*)_v(\d+)$/i.exec(stem2);
+  const base = m ? m[1] : stem2;
   const width = m ? Math.max(3, m[2].length) : 3;
   let n = m ? parseInt(m[2], 10) : 1;
   const names = listing ?? fs8.readdirSync(dir);
@@ -9628,11 +9628,11 @@ async function autoCheckpoint(ctx, guard, toolName) {
   }
   const ext2 = path9.extname(projectPath) || ".aep";
   const dir = checkpointDirFor(projectPath);
-  const stem = `${path9.basename(projectPath, ext2)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
+  const stem2 = `${path9.basename(projectPath, ext2)}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}_auto-${toolName}`;
   try {
     await fs8.promises.mkdir(dir, { recursive: true });
-    let target = path9.join(dir, `${stem}${ext2}`);
-    for (let n = 2; fs8.existsSync(target); n++) target = path9.join(dir, `${stem}-${n}${ext2}`);
+    let target = path9.join(dir, `${stem2}${ext2}`);
+    for (let n = 2; fs8.existsSync(target); n++) target = path9.join(dir, `${stem2}-${n}${ext2}`);
     await fs8.promises.copyFile(projectPath, target, fs8.constants.COPYFILE_EXCL);
     rememberAutoCheckpoint(key, { size: stat.size, mtimeMs: stat.mtimeMs, path: target });
     ctx.log?.("ok", `Checkpoint saved before ${toolName}: ${path9.basename(target)}`);
@@ -11146,15 +11146,15 @@ async function writeDiagnostics(ctx, serviceInfo, opts = {}) {
   ].join("\n");
   const dir = path12.join(dataDirOf(ctx), "diagnostics");
   fs11.mkdirSync(dir, { recursive: true });
-  const stem = `chroma-ae-diagnostics_${formatBackupTimestamp(now)}`;
-  let file = path12.join(dir, `${stem}.md`);
+  const stem2 = `chroma-ae-diagnostics_${formatBackupTimestamp(now)}`;
+  let file = path12.join(dir, `${stem2}.md`);
   for (let n = 2; ; n++) {
     try {
       fs11.writeFileSync(file, md, { encoding: "utf8", flag: "wx" });
       break;
     } catch (err) {
       if (err.code !== "EEXIST" || n > 1e3) throw err;
-      file = path12.join(dir, `${stem}-${n}.md`);
+      file = path12.join(dir, `${stem2}-${n}.md`);
     }
   }
   return { path: file, summary: summary3 };
@@ -14929,9 +14929,9 @@ function stamp() {
 function findRenderedAudio(outputPath) {
   if (fs14.existsSync(outputPath)) return outputPath;
   const dir = path16.dirname(outputPath);
-  const stem = path16.basename(outputPath, path16.extname(outputPath));
+  const stem2 = path16.basename(outputPath, path16.extname(outputPath));
   try {
-    const hit = fs14.readdirSync(dir).find((n) => n.startsWith(stem) && /\.(aif|aiff|aifc|wav)$/i.test(n));
+    const hit = fs14.readdirSync(dir).find((n) => n.startsWith(stem2) && /\.(aif|aiff|aifc|wav)$/i.test(n));
     return hit ? path16.join(dir, hit) : null;
   } catch {
     return null;
@@ -15897,10 +15897,10 @@ function withPosition(cues, override) {
     return { ...rest, ...Object.keys(merged).length ? { position: merged } : {} };
   });
 }
-function writeNew(dir, stem, ext2, data) {
+function writeNew(dir, stem2, ext2, data) {
   fs16.mkdirSync(dir, { recursive: true });
   for (let n = 1; n < 1e3; n++) {
-    const target = path18.join(dir, n === 1 ? `${stem}${ext2}` : `${stem} ${n}${ext2}`);
+    const target = path18.join(dir, n === 1 ? `${stem2}${ext2}` : `${stem2} ${n}${ext2}`);
     try {
       fs16.writeFileSync(target, data, { encoding: "utf8", flag: "wx" });
       return target;
@@ -15908,7 +15908,7 @@ function writeNew(dir, stem, ext2, data) {
       if (err.code !== "EEXIST") throw err;
     }
   }
-  throw new Error(`Could not find a free name for ${stem}${ext2} in ${dir}`);
+  throw new Error(`Could not find a free name for ${stem2}${ext2} in ${dir}`);
 }
 async function statusOf(ctx, toolName) {
   const res = await ctx.bridge.callHost("status", {}, { label: `${toolName} (project path)`, mutates: false, toolName });
@@ -28712,9 +28712,9 @@ function outputNameFor(job, compName, spec, n, now) {
     if (token === "date") return dateStamp(now);
     return String(n).padStart(2, "0");
   });
-  const stem = sanitizeFileToken(base);
+  const stem2 = sanitizeFileToken(base);
   const ext2 = spec.extension ?? job.extension;
-  return spec.sequence ? `${stem}.[#####].${ext2}` : `${stem}.${ext2}`;
+  return spec.sequence ? `${stem2}.[#####].${ext2}` : `${stem2}.${ext2}`;
 }
 function normaliseJob(args) {
   return {
@@ -30877,10 +30877,10 @@ function safeSegment(name, max = 120) {
   let s = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
   if (!s || s === "." || s === "..") s = "_";
   const ext2 = path30.extname(s);
-  const stem = ext2 ? s.slice(0, -ext2.length) : s;
+  const stem2 = ext2 ? s.slice(0, -ext2.length) : s;
   const room = Math.max(1, max - ext2.length);
-  let out = (stem.length > room ? stem.slice(0, room) : stem) + ext2;
-  if (RESERVED.test(stem)) out = `_${out}`;
+  let out = (stem2.length > room ? stem2.slice(0, room) : stem2) + ext2;
+  if (RESERVED.test(stem2)) out = `_${out}`;
   return out;
 }
 function splitFrameName(name) {
@@ -30972,8 +30972,8 @@ function planCollect(entries, resolved, opts = {}) {
   const unique = (taken, rel, split) => {
     let candidate = rel;
     for (let n = 2; taken.has(pathKey2(candidate)); n++) {
-      const [stem, ext2] = split(rel);
-      candidate = `${stem}_${n}${ext2}`;
+      const [stem2, ext2] = split(rel);
+      candidate = `${stem2}_${n}${ext2}`;
     }
     taken.add(pathKey2(candidate));
     return candidate;
@@ -40137,9 +40137,9 @@ function backupProjectFile(projectPath) {
     const base = path37.basename(projectPath, ext2);
     const dir = path37.join(path37.dirname(projectPath), "_mcp_backups");
     fs38.mkdirSync(dir, { recursive: true });
-    const stem = `${base}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
-    let target = path37.join(dir, `${stem}${ext2}`);
-    for (let n = 2; fs38.existsSync(target); n++) target = path37.join(dir, `${stem}-${n}${ext2}`);
+    const stem2 = `${base}_${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
+    let target = path37.join(dir, `${stem2}${ext2}`);
+    for (let n = 2; fs38.existsSync(target); n++) target = path37.join(dir, `${stem2}-${n}${ext2}`);
     fs38.copyFileSync(projectPath, target);
     return target;
   } catch (err) {
@@ -49008,9 +49008,9 @@ function safeName(name) {
   const s = name.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
   return (s || "plate").slice(0, 60);
 }
-function uniquePath(dir, stem, ext2) {
-  let target = path43.join(dir, `${stem}${ext2}`);
-  for (let n = 2; fs44.existsSync(target); n++) target = path43.join(dir, `${stem}_${n}${ext2}`);
+function uniquePath(dir, stem2, ext2) {
+  let target = path43.join(dir, `${stem2}${ext2}`);
+  for (let n = 2; fs44.existsSync(target); n++) target = path43.join(dir, `${stem2}_${n}${ext2}`);
   return target;
 }
 function planSamples3(o) {
@@ -49294,13 +49294,13 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   const finish2 = async () => {
     const fill = await fillFromGathered(fillInput, gathered);
     fs44.mkdirSync(folder, { recursive: true });
-    const stem = `${safeName(plate.name)}_f${frame}_inpaint`;
-    const pngPath = uniquePath(folder, stem, ".png");
+    const stem2 = `${safeName(plate.name)}_f${frame}_inpaint`;
+    const pngPath = uniquePath(folder, stem2, ".png");
     fs44.writeFileSync(pngPath, encodePng(toPng(fill.image)), { flag: "wx" });
     let previewPath = null;
     if (args.preview) {
       try {
-        previewPath = uniquePath(folder, `${stem}_preview`, ".png");
+        previewPath = uniquePath(folder, `${stem2}_preview`, ".png");
         fs44.writeFileSync(previewPath, encodePng(previewSheet(fill)), { flag: "wx" });
       } catch (err) {
         previewPath = null;
@@ -64404,6 +64404,9 @@ init_diagnostics();
 init_dialogs();
 var path55 = __toESM(require("node:path"), 1);
 
+// src/meta-tools.ts
+init_zod();
+
 // src/schema.ts
 init_zod();
 function zodToJsonSchema(schema) {
@@ -64480,8 +64483,906 @@ function convertFieldSchema(schema) {
   return { propSchema, isOptional };
 }
 
-// src/mcp-rpc.ts
+// src/toolsets.ts
 init_common();
+init_registry();
+var TOOLSET_HEADER = "x-chroma-toolset";
+function parseToolset(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === void 0 || raw === null) return { toolset: "full", invalid: false };
+  const v = String(raw).trim().toLowerCase();
+  if (v === "" || v === "full") return { toolset: "full", invalid: false };
+  if (v === "core") return { toolset: "core", invalid: false };
+  return { toolset: "full", invalid: true };
+}
+var TOOL_GROUPS = {
+  inspect: {
+    blurb: "Read-only views of the project, comps, layers, keyframes, effects and cuts.",
+    tools: [
+      "ae_status",
+      "ae_get_project",
+      "ae_get_comp",
+      "ae_comp_tree",
+      "ae_get_layer_props",
+      "ae_get_layer_full",
+      "ae_find_layers",
+      "ae_get_keyframes",
+      "ae_get_markers",
+      "ae_get_comp_settings",
+      "ae_get_time_remap",
+      "ae_list_effects",
+      "ae_list_presets",
+      "ae_project_items",
+      "ae_describe_comp",
+      "ae_explain_layer",
+      "ae_explain_layer_proof",
+      "ae_comp_fingerprint",
+      "ae_comp_diff",
+      "ae_scene_3d_report",
+      "ae_get_footage_interpretation",
+      "ae_validate_expressions",
+      "ae_detect_cuts"
+    ]
+  },
+  edit: {
+    blurb: "Set properties, create layers and comps, layer operations, masks, shapes, markers, batch edits.",
+    tools: [
+      "ae_set_property",
+      "ae_batch_set",
+      "ae_create_layer",
+      "ae_create_comp",
+      "ae_layer_ops",
+      "ae_precompose",
+      "ae_set_track_matte",
+      "ae_align",
+      "ae_multi_comp_apply",
+      "ae_build_from_data",
+      "ae_reframe",
+      "ae_add_markers",
+      "ae_remove_markers",
+      "ae_mask",
+      "ae_shape"
+    ]
+  },
+  project: {
+    blurb: "Import and replace footage, interpretation, proxies, versions, save, comp and project settings.",
+    tools: [
+      "ae_import_footage",
+      "ae_import_assets",
+      "ae_replace_footage",
+      "ae_set_footage_interpretation",
+      "ae_footage_proxy",
+      "ae_version_footage",
+      "ae_save",
+      "ae_comp_settings",
+      "ae_project_settings",
+      "ae_purge_unused"
+    ]
+  },
+  effects: {
+    blurb: "Add, change and remove effects, apply presets, key a green screen.",
+    tools: ["ae_add_effect", "ae_set_effect", "ae_remove_effect", "ae_apply_preset", "ae_key_greenscreen"]
+  },
+  text: {
+    blurb: "Text layers: content and styling, animators, fitting, measuring, backdrops, fonts, legibility.",
+    tools: [
+      "ae_set_text",
+      "ae_text_animator",
+      "ae_fit_text",
+      "ae_measure_text",
+      "ae_text_backdrop",
+      "ae_fonts",
+      "ae_check_text_overlap",
+      "ae_estimate_legibility",
+      "ae_check_legibility"
+    ]
+  },
+  motion: {
+    blurb: "Keyframe easing and retiming, staggers, time remap, graphs, timing checks, 3D camera rigs.",
+    tools: [
+      "ae_set_keyframe_ease",
+      "ae_keyframes_transform",
+      "ae_remove_keyframes",
+      "ae_time_remap",
+      "ae_stagger",
+      "ae_stagger_layout",
+      "ae_motion_graph",
+      "ae_timing_check",
+      "ae_camera_rig"
+    ]
+  },
+  rig_paths: {
+    blurb: "Rigs and controls, shape and mask paths, expression recipes, Essential Graphics, .mogrt.",
+    tools: [
+      "ae_rig_add_controls",
+      "ae_rig_link",
+      "ae_rig_unlink",
+      "ae_rig_rename",
+      "ae_rig_list",
+      "ae_path_read",
+      "ae_path_write",
+      "ae_path_operator",
+      "ae_path_link",
+      "ae_path_connector",
+      "ae_get_essential_graphics",
+      "ae_set_essential_graphics",
+      "ae_export_mogrt",
+      "ae_expr_recipes",
+      "ae_expr_recipe"
+    ]
+  },
+  tracking_patching: {
+    blurb: "Tracking, stabilizing, object removal (clean plates, inpaint), patches, screen replacement.",
+    tools: [
+      "ae_track_point",
+      "ae_track_multi",
+      "ae_track_read",
+      "ae_track_apply",
+      "ae_patch_check",
+      "ae_patch_color_match",
+      "ae_patch_grain",
+      "ae_patch_finish",
+      "ae_region_stats",
+      "ae_stabilize",
+      "ae_stabilize_roundtrip",
+      "ae_cleanplate_pick",
+      "ae_cleanplate_setup",
+      "ae_inpaint_plate",
+      "ae_mask_follow",
+      "ae_garbage_matte",
+      "ae_caf_prep",
+      "ae_screen_corners",
+      "ae_screen_replace"
+    ]
+  },
+  render: {
+    blurb: "Render queue, rendering in After Effects or with aerender, batches, templates, verify.",
+    tools: [
+      "ae_render_queue_add",
+      "ae_render_queue_status",
+      "ae_render_queue_inspect",
+      "ae_render_queue_edit",
+      "ae_render_queue_duplicate",
+      "ae_render_queue_apply_spec",
+      "ae_render_queue_render",
+      "ae_render_queue_render_status",
+      "ae_render_templates",
+      "ae_aerender_start",
+      "ae_aerender_status",
+      "ae_aerender_cancel",
+      "ae_render_batch_plan",
+      "ae_render_batch",
+      "ae_render_batch_status",
+      "ae_render_batch_resume",
+      "ae_render_batch_cancel",
+      "ae_verify_render"
+    ]
+  },
+  delivery: {
+    blurb: "Delivery specs and recipes, preflight, house style, collecting and relinking files.",
+    tools: [
+      "ae_delivery_specs",
+      "ae_check_delivery_file",
+      "ae_deliver_recipe",
+      "ae_deliver_step",
+      "ae_deliver_status",
+      "ae_preflight",
+      "ae_house_style_check",
+      "ae_collect_files",
+      "ae_collect_relink",
+      "ae_collect_report"
+    ]
+  },
+  captions_audio: {
+    blurb: "Captions (plan, build, read, export, QA), transcription, audio analysis, loudness, cue keys.",
+    tools: [
+      "ae_captions_plan",
+      "ae_captions",
+      "ae_captions_read",
+      "ae_transcribe",
+      "ae_captions_export",
+      "ae_captions_qa",
+      "ae_audio_analyze",
+      "ae_cue_keys",
+      "ae_loudness_check",
+      "ae_loudness_apply"
+    ]
+  },
+  review: {
+    blurb: "Look at the work: stills, contact sheets, annotated frames, motion review, brief and taste.",
+    tools: [
+      "ae_snapshot_frame",
+      "ae_contact_sheet",
+      "ae_annotate_frame",
+      "ae_compare_frames",
+      "ae_scrub_check",
+      "ae_motion_review",
+      "ae_brief",
+      "ae_taste",
+      "ae_taste_baseline",
+      "ae_taste_rules",
+      "ae_learn_taste"
+    ]
+  },
+  safety: {
+    blurb: "Quarantine, checkpoints, variants, session changes and project sessions (open, new, close).",
+    tools: [
+      "ae_quarantine_status",
+      "ae_acknowledge",
+      "ae_checkpoint_create",
+      "ae_checkpoint_list",
+      "ae_auto_checkpoint",
+      "ae_checkpoint_revert",
+      "ae_variants",
+      "ae_variants_pick",
+      "ae_variants_discard",
+      "ae_session_changes",
+      "ae_project_session"
+    ]
+  },
+  app: {
+    blurb: "ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer.",
+    tools: [
+      "ae_run_jsx",
+      "ae_dialogs",
+      "ae_dialog_respond",
+      "ae_ask_user",
+      "ae_diagnostics",
+      "ae_memory_status",
+      "ae_memory_purge",
+      "ae_list_panels",
+      "ae_open_panel",
+      "ae_ui_screenshot",
+      "ae_view",
+      "ae_skill_list",
+      "ae_skill_save",
+      "ae_skill_run"
+    ]
+  }
+};
+var GROUP_BY_TOOL = /* @__PURE__ */ new Map();
+for (const [group, def] of Object.entries(TOOL_GROUPS)) {
+  for (const name of def.tools) GROUP_BY_TOOL.set(name, group);
+}
+function groupOf(toolName) {
+  return GROUP_BY_TOOL.get(toolName);
+}
+var SEARCH_HINTS = {
+  ae_cleanplate_setup: "remove object person wire rig logo from shot paint out hide",
+  ae_cleanplate_pick: "remove object person wire rig logo from shot paint out hide",
+  ae_inpaint_plate: "remove object person wire rig logo from shot paint out fill hole",
+  ae_caf_prep: "remove object from shot content aware fill paint out",
+  ae_garbage_matte: "remove unwanted garbage mask outside",
+  ae_render_queue_render: "render inside after effects without aerender export video file",
+  ae_aerender_start: "render background aerender export video file command line",
+  ae_render_queue_add: "render export queue output",
+  ae_screen_replace: "replace phone tv monitor screen content corner pin",
+  ae_track_point: "track follow motion tracker point attach",
+  ae_stabilize: "stabilize shaky camera smooth",
+  ae_transcribe: "speech to text subtitles whisper",
+  ae_captions: "subtitles lower thirds speech words"
+};
+var CORE_TOOL_NAMES = [
+  "ae_status",
+  "ae_get_project",
+  "ae_get_comp",
+  "ae_comp_tree",
+  "ae_get_layer_props",
+  "ae_find_layers",
+  "ae_get_keyframes",
+  "ae_set_property",
+  "ae_batch_set",
+  "ae_set_text",
+  "ae_create_layer",
+  "ae_create_comp",
+  "ae_layer_ops",
+  "ae_import_footage",
+  "ae_add_effect",
+  "ae_set_effect",
+  "ae_save",
+  "ae_snapshot_frame",
+  "ae_run_jsx",
+  "ae_dialogs",
+  "ae_dialog_respond",
+  "ae_skill_run",
+  "ae_multi_comp_apply",
+  "ae_render_queue_add",
+  "ae_render_queue_edit",
+  "ae_render_queue_status",
+  "ae_render_queue_render",
+  "ae_render_queue_render_status",
+  "ae_render_templates",
+  "ae_aerender_start",
+  "ae_aerender_status",
+  "ae_set_footage_interpretation"
+];
+var META_TOOL_NAMES = ["ae_search_tools", "ae_get_tool_schema", "ae_invoke_tool"];
+var SCHEMA_POINTER = "More: ae_get_tool_schema.";
+var CORE_DESCRIPTION_OVERRIDES = {
+  ae_run_jsx: "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
+  ae_render_queue_render: "Start After Effects' OWN render of the queued items (like pressing Render) and return at once with a job id; follow it with ae_render_queue_render_status. AE stays busy for the whole render and other AE tools are refused meanwhile: tell the user first, ask them to save a dirty project, prefer ae_aerender_start when it works. Never ask the user to press Render.",
+  ae_aerender_start: "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow it with ae_aerender_status. `continue_on_missing_footage` renders anyway, with colour bars in place of the missing footage. If it cannot run, use ae_render_queue_render.",
+  ae_aerender_status: "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects.",
+  ae_render_queue_render_status: "Where a render started by ae_render_queue_render is: state, elapsed time, output files (exists, bytes, mtime). Never touches After Effects, so it answers during the render.",
+  ae_render_templates: "List render-settings and output-module template names; action save stores a queue item's settings or module as a named template (NOT undoable, needs `expect`).",
+  ae_dialogs: "READ-ONLY. List modal dialogs open in After Effects (title, text, buttons, screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: read them here, answer only dialogs our own operation caused with ae_dialog_respond, ask the user otherwise.",
+  ae_dialog_respond: "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused; AE-painted dialogs can only be cancelled, or answered OK when it is the only button. Otherwise ask the user.",
+  ae_save: "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` saves as the next free _vNNN. Both retarget the open project.",
+  ae_create_comp: "Create a comp: mode 'new' (width, height, fps, duration...), 'from_footage' or 'duplicate' (deep duplicate is a DRY RUN unless dry_run: false). Guarded by `expect`.",
+  ae_multi_comp_apply: "Run one existing guarded write tool (op {tool, args}, without comp_id and expect) on many comps picked by comp_ids, folder_id, nested_in or name_pattern. Each comp goes through that tool's own guard and is its own undo step (the way back is the automatic checkpoint); the result is a per-comp table. dry_run resolves the comps first.",
+  ae_skill_run: "Run a saved AE skill: its numbered steps run in one evalScript (one undo step). Writing skills need `expect`; pass what varies in `args`. List skills with ae_skill_list.",
+  ae_comp_tree: "Read how comps nest: with no comp_id every comp with its use counts, depth and render-queue state, plus the top-level and unused comps; with comp_id what that comp contains and where it is used. Read-only.",
+  ae_get_project: "Read the project item tree (id, name, type, folder; comps with size, fps, duration; footage with path and missing flag). Filter by kind, name or missing, sort, and page with offset/limit.",
+  ae_get_layer_props: "Read a layer's property tree: matchName, name, value, numKeys, expression. `meta: true` adds what each property accepts (type, min/max, units); `shape_values: true` gives path and marker values.",
+  ae_get_keyframes: "Read a property's keyframes: time, value, interpolation, temporal ease per side, spatial tangents, continuity flags and roving. Read-only; at most 500 keys per call (`truncated` says more exist).",
+  ae_set_property: "Set a layer property's value, keyframes or expression in one undo group, guarded by `expect`, with a read-back receipt. Everything is validated before the group opens (dimensions, min/max, paths, fonts). Paths are { vertices, inTangents?, outTangents?, closed? }; markers go through keyframes.",
+  ae_batch_set: "Set many properties on layers of one comp in one call (values, keyframes, expressions, paths, markers). Everything is validated first, then written in chunks of up to 500 ops, each one undo group guarded by `expect`, with read-back; a font that is not installed refuses the batch unless allow_substitute.",
+  ae_set_text: "Update a text layer's string and styling (font, size, tracking, leading, colours, justification; `ranges` and `paragraphs` style parts; `style` has caps, baseline, kerning, scale...) in one undo group guarded by `expect`, with read-back. A font that is not installed is refused.",
+  ae_create_layer: "Create a layer in a comp: solid, null, adjustment, text, shape, camera, light, footage, precomp or mesh, with name, length, start, 3D, parent and stack position, in one undo group guarded by `expect`. Text takes `font`; lights `light_type`; meshes `mesh_type`.",
+  ae_layer_ops: "Everyday layer edits in one call, by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
+  ae_import_footage: "Import footage files or an image sequence (PSD/AI as a comp, or a whole project, via import_as) into the project and an optional folder, guarded by `expect`; returns the new item_ids. Importing may raise dialogs: they are never suppressed, read them with ae_dialogs.",
+  ae_snapshot_frame: "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame.",
+  ae_render_queue_edit: "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add or remove output modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first to see what goes). Refused while the queue renders.",
+  ae_set_footage_interpretation: "Set a footage item's interpretation (alpha, fields, pulldown, conform frame rate, loop, pixel aspect) in one undo group guarded by `expect`; everything is checked before AE is touched and read back after.",
+  ae_add_effect: "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect whose value AE refuses is taken out again.",
+  ae_status: "Read panel health, AE version, project path ('<unsaved>' if none), dirty flag, active comp, selected layers and the quarantine list. `detail: true` adds the active item, selected properties, viewer, GPU and warnings. Call first; the selection can change, so act on explicit ids."
+};
+function cutAt(text, max) {
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max);
+  const space = slice.lastIndexOf(" ");
+  return (space > max * 0.6 ? slice.slice(0, space) : slice).replace(/[\s,;:(\-]+$/, "") + "...";
+}
+function firstSentences(text, max, fill = false) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (fill) return cutAt(flat, max);
+  const sentences = [];
+  let start = 0;
+  const re = /([.!?])\s+(?=[A-Z`'(])/g;
+  let m;
+  while (m = re.exec(flat)) {
+    const piece = flat.slice(start, m.index + 1);
+    if (/(?:e\.g|i\.e|etc|vs)\.$/.test(piece) || /\b[A-Z]\.$/.test(piece)) continue;
+    sentences.push(piece);
+    start = m.index + m[0].length;
+  }
+  if (start < flat.length) sentences.push(flat.slice(start));
+  let out = "";
+  for (const s of sentences) {
+    if (out && out.length + 1 + s.length > max) break;
+    out = out ? out + " " + s : s;
+    if (out.length >= max * 0.6) break;
+  }
+  return cutAt(out || flat, max);
+}
+function stripSafety(description) {
+  return description.split(AGENT_SAFETY_GUIDANCE).join("").replace(/\s+$/, "");
+}
+var TOOL_DESC_MAX = 260;
+var PROP_DESC_MAX = 64;
+var PROP_DESC_MAX_UNTYPED = 250;
+var CORE_PROPERTY_CAPS = {
+  "ae_create_layer.mesh_options": 600,
+  "ae_layer_ops.scope": 300,
+  "ae_set_property.value": 400,
+  "ae_batch_set.ops[].value": 400,
+  "ae_add_effect.params[].value": 400,
+  "ae_set_effect.params[].value": 400
+};
+function trimToolDescription(tool) {
+  const override = CORE_DESCRIPTION_OVERRIDES[tool.name];
+  const body = override ?? firstSentences(stripSafety(tool.description), TOOL_DESC_MAX);
+  return `${body} ${SCHEMA_POINTER}`;
+}
+function trimSchema(node, path56 = "") {
+  if (Array.isArray(node)) return node.map((n) => trimSchema(n, path56));
+  if (node === null || typeof node !== "object") return node;
+  const src = node;
+  const out = {};
+  const itemsUntyped = src.type === "array" && src.items !== null && typeof src.items === "object" && Object.keys(src.items).filter((k) => k !== "description").length === 0;
+  const untyped = src.type === void 0 && src.enum === void 0 && src.properties === void 0 || itemsUntyped;
+  for (const [key, value] of Object.entries(src)) {
+    if (key === "description" && typeof value === "string") {
+      const cap2 = CORE_PROPERTY_CAPS[path56];
+      const text = cap2 !== void 0 ? firstSentences(value, cap2, true) : untyped ? firstSentences(value, PROP_DESC_MAX_UNTYPED, true) : firstSentences(value, PROP_DESC_MAX);
+      if (text) out.description = text;
+    } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const props = {};
+      for (const [name, sub] of Object.entries(value)) props[name] = trimSchema(sub, path56 ? `${path56}.${name}` : name);
+      out.properties = props;
+    } else if (key === "items") {
+      out.items = trimSchema(value, `${path56}[]`);
+    } else {
+      out[key] = trimSchema(value, path56);
+    }
+  }
+  return out;
+}
+function fullListEntry(t) {
+  return { name: t.name, description: t.description, inputSchema: zodToJsonSchema(t.schema) };
+}
+function trimmedListEntry(t) {
+  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name) };
+}
+function coreTools() {
+  const byName = new Map(ALL_TOOLS.map((t) => [t.name, t]));
+  const out = [];
+  for (const name of CORE_TOOL_NAMES) {
+    const t = byName.get(name);
+    if (t) out.push(t);
+  }
+  return out;
+}
+function groupCounts() {
+  return Object.entries(TOOL_GROUPS).map(([group, def]) => ({ group, blurb: def.blurb, tools: def.tools.length }));
+}
+function coreInstructions() {
+  const lines = groupCounts().map((g) => `- ${g.group} (${g.tools}): ${g.blurb}`);
+  return [
+    `Chroma AE MCP drives Adobe After Effects. ${AGENT_SAFETY_GUIDANCE}`,
+    "",
+    `This list shows ${CORE_TOOL_NAMES.length} everyday tools; ${ALL_TOOLS.length} exist in all. The rest are reached through three tools. ae_search_tools and ae_get_tool_schema never touch After Effects, so they work while it is busy or blocked; ae_invoke_tool runs a tool like any other, so it is refused while AE is rendering:`,
+    "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
+    "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
+    "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
+    "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status.",
+    "",
+    "Tool groups:",
+    ...lines
+  ].join("\n");
+}
+var STOP_WORDS = /* @__PURE__ */ new Set([
+  "a",
+  "an",
+  "the",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "from",
+  "with",
+  "and",
+  "or",
+  "my",
+  "me",
+  "i",
+  "it",
+  "is",
+  "this",
+  "that",
+  "how",
+  "do",
+  "can",
+  "some",
+  "something",
+  "into",
+  "by",
+  "at",
+  "as",
+  "be",
+  "tool",
+  "tools",
+  "ae"
+]);
+function stem(word) {
+  if (word.length > 4 && word.endsWith("ing")) return word.slice(0, -3);
+  if (word.length > 3 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  if (word.length > 3 && word.endsWith("ed")) return word.slice(0, -2);
+  return word;
+}
+function tokenize(text) {
+  return text.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP_WORDS.has(w)).map(stem);
+}
+function propertyNames(node, out, depth = 0) {
+  if (depth > 6 || node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const n of node) propertyNames(n, out, depth + 1);
+    return;
+  }
+  const src = node;
+  const props = src.properties;
+  if (props && typeof props === "object" && !Array.isArray(props)) {
+    for (const [name, sub] of Object.entries(props)) {
+      out.add(name);
+      propertyNames(sub, out, depth + 1);
+    }
+  }
+  if (src.items) propertyNames(src.items, out, depth + 1);
+}
+var FIELD_WEIGHT = { name: 5, hints: 3, group: 2, props: 2, desc: 1 };
+var searchIndex = null;
+function buildIndex2() {
+  if (searchIndex && searchIndex.built === ALL_TOOLS.length) return searchIndex;
+  const docs = [];
+  const df = /* @__PURE__ */ new Map();
+  for (const tool of ALL_TOOLS) {
+    const group = groupOf(tool.name) ?? "other";
+    const props = /* @__PURE__ */ new Set();
+    propertyNames(zodToJsonSchema(tool.schema), props);
+    const tf = /* @__PURE__ */ new Map();
+    const add = (text, weight) => {
+      for (const tok of tokenize(text)) tf.set(tok, (tf.get(tok) ?? 0) + weight);
+    };
+    add(tool.name.replace(/^ae_/, ""), FIELD_WEIGHT.name);
+    add(SEARCH_HINTS[tool.name] ?? "", FIELD_WEIGHT.hints);
+    add(group, FIELD_WEIGHT.group);
+    add([...props].join(" "), FIELD_WEIGHT.props);
+    add(stripSafety(tool.description), FIELD_WEIGHT.desc);
+    let length = 0;
+    for (const v of tf.values()) length += v;
+    for (const tok of tf.keys()) df.set(tok, (df.get(tok) ?? 0) + 1);
+    docs.push({ tool, group, tf, length });
+  }
+  const avg = docs.reduce((a, d) => a + d.length, 0) / Math.max(1, docs.length);
+  searchIndex = { built: ALL_TOOLS.length, docs, df, avg };
+  return searchIndex;
+}
+function rankTools(query, candidates) {
+  const idx = buildIndex2();
+  const terms = [...new Set(tokenize(query))];
+  const N = idx.docs.length;
+  const k1 = 1.4;
+  const b = 0.6;
+  const scored = [];
+  for (const doc of idx.docs) {
+    if (candidates && !candidates.has(doc.tool.name)) continue;
+    let score = 0;
+    for (const term of terms) {
+      const f = doc.tf.get(term) ?? 0;
+      if (!f) continue;
+      const n = idx.df.get(term) ?? 0;
+      const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
+      score += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * doc.length / idx.avg));
+    }
+    const bare = doc.tool.name.replace(/^ae_/, "");
+    const rawTerms = query.toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+    for (const w of rawTerms) if (bare.includes(w)) score += 1.5;
+    if (score > 0) scored.push({ tool: doc.tool, group: doc.group, score });
+  }
+  scored.sort((a, b2) => b2.score - a.score || a.tool.name.localeCompare(b2.tool.name));
+  return scored;
+}
+function editDistance(a, b) {
+  const prev = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+function closestToolNames(name, count = 5) {
+  const wanted = name.slice(0, 80).toLowerCase().replace(/^ae_/, "");
+  const scored = ALL_TOOLS.map((t) => {
+    const bare = t.name.replace(/^ae_/, "");
+    let score = editDistance(wanted, bare);
+    if (bare.includes(wanted) || wanted.includes(bare)) score = Math.min(score, 1 + Math.abs(bare.length - wanted.length) / 10);
+    return { name: t.name, score };
+  });
+  scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
+  return scored.slice(0, count).map((s) => s.name);
+}
+
+// src/tool-call.ts
+init_common();
+init_registry();
+function oneLine2(text) {
+  return text.replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 80);
+}
+var toolMap = /* @__PURE__ */ new Map();
+var mappedCount = -1;
+function findTool(name) {
+  if (mappedCount !== ALL_TOOLS.length) {
+    toolMap = new Map(ALL_TOOLS.map((t) => [t.name, t]));
+    mappedCount = ALL_TOOLS.length;
+  }
+  return toolMap.get(name);
+}
+async function callTool(toolName, rawArgs, ctx) {
+  const tool = findTool(toolName);
+  if (!tool) {
+    return formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`));
+  }
+  const parsed = tool.schema.safeParse(rawArgs ?? {});
+  if (!parsed.success) {
+    return formatToolError(
+      new Error(
+        `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`
+      )
+    );
+  }
+  const started = Date.now();
+  try {
+    const output = await tool.handler(parsed.data, ctx);
+    ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
+    return formatToolResponse(output);
+  } catch (err) {
+    const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
+    ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
+    return formatToolError(err);
+  }
+}
+
+// src/meta-tools.ts
+init_common();
+init_registry();
+var SEARCH_OUTPUT_MAX = 2e4;
+var SCHEMA_OUTPUT_SOFT_MAX = 4e4;
+var NAME_MAX = 80;
+var CORE_SET = new Set(CORE_TOOL_NAMES);
+var ToolName = external_exports.string().min(1).max(NAME_MAX);
+var SearchArgs = external_exports.object({
+  query: external_exports.string().max(500).optional(),
+  pattern: external_exports.string().max(200).optional(),
+  group: external_exports.string().max(60).optional(),
+  limit: external_exports.number().int().min(1).max(20).optional(),
+  offset: external_exports.number().int().min(0).max(1e3).optional(),
+  detail: external_exports.enum(["summary", "schema"]).optional()
+}).strict();
+var SchemaArgs = external_exports.object({
+  name: ToolName.optional(),
+  names: external_exports.array(ToolName).min(1).max(5).optional()
+}).strict();
+var InvokeArgs = external_exports.object({
+  name: ToolName,
+  arguments: external_exports.record(external_exports.unknown()).optional()
+}).strict();
+function sizeOf(value) {
+  return JSON.stringify(value, null, 2).length;
+}
+function oneLine3(text, max) {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ").trim().slice(0, max);
+}
+function nameMatcher(pattern) {
+  let p = pattern.toLowerCase();
+  const start = p.startsWith("^");
+  if (start) p = p.slice(1);
+  const end = p.endsWith("$");
+  if (end) p = p.slice(0, -1);
+  return (name) => {
+    const n = name.toLowerCase();
+    if (start && end) return n === p;
+    if (start) return n.startsWith(p);
+    if (end) return n.endsWith(p);
+    return n.includes(p);
+  };
+}
+async function runSearch(args) {
+  const detail = args.detail ?? "summary";
+  const limit = args.limit ?? 8;
+  const offset = args.offset ?? 0;
+  const query = (args.query ?? "").trim();
+  const pattern = (args.pattern ?? "").trim();
+  const group = (args.group ?? "").trim();
+  if (!query && !pattern && !group) {
+    return formatToolResponse({
+      total_tools: ALL_TOOLS.length,
+      listed_directly: CORE_TOOL_NAMES.length,
+      groups: groupCounts(),
+      next: "Call again with `query` (keywords), `pattern` (a name fragment, ^ and $ anchor it) and/or `group`. Then ae_get_tool_schema { name }, then ae_invoke_tool { name, arguments }."
+    });
+  }
+  if (group && !Object.prototype.hasOwnProperty.call(TOOL_GROUPS, group)) {
+    return formatToolError(new Error(`Unknown group "${oneLine3(group, 60)}". Groups: ${Object.keys(TOOL_GROUPS).join(", ")}.`));
+  }
+  const matches = pattern ? nameMatcher(pattern) : null;
+  const candidates = ALL_TOOLS.filter((t) => (!group || groupOf(t.name) === group) && (!matches || matches(t.name)));
+  let ordered;
+  if (query) {
+    const allowed = new Set(candidates.map((t) => t.name));
+    ordered = rankTools(query, allowed).map((r) => ({ name: r.tool.name, tool: r.tool, score: Math.round(r.score * 100) / 100 }));
+  } else {
+    ordered = candidates.map((t) => ({ name: t.name, tool: t }));
+  }
+  const total2 = ordered.length;
+  const page = [];
+  for (const o of ordered.slice(offset, offset + limit)) {
+    const entry = {
+      name: o.name,
+      group: groupOf(o.name) ?? null,
+      call: CORE_SET.has(o.name) ? "direct" : "ae_invoke_tool",
+      summary: firstSentences(stripSafety(o.tool.description), 220)
+    };
+    if (o.score !== void 0) entry.score = o.score;
+    if (detail === "schema") entry.inputSchema = trimSchema(zodToJsonSchema(o.tool.schema), o.tool.name);
+    page.push(entry);
+  }
+  const build = (n2, withSchema = true) => {
+    const rows = page.slice(0, n2).map((e) => {
+      if (withSchema || !("inputSchema" in e)) return e;
+      const { inputSchema: _dropped, ...rest } = e;
+      return rest;
+    });
+    const result2 = { total_matches: total2, offset, returned: n2, matches: rows };
+    if (!withSchema) {
+      result2.schema_omitted = "A single schema does not fit in this reply; get it with ae_get_tool_schema { name }.";
+    }
+    const cutBySize = n2 < page.length;
+    if (cutBySize) result2.truncated = true;
+    if (offset + n2 < total2) {
+      result2.next_offset = offset + n2;
+      result2.more = cutBySize ? `The reply was cut at ${SEARCH_OUTPUT_MAX} characters (detail "schema" is large); call again with offset ${offset + n2}, or use detail "summary".` : `${total2 - offset - n2} more match(es): call again with offset ${offset + n2}, or narrow the search (group, pattern).`;
+    }
+    if (n2 === 0) {
+      result2.hint = total2 === 0 ? "No match. Try other words, a `pattern` such as ^ae_track, or an empty call to list the groups." : `Nothing at offset ${offset}; there are ${total2} matches.`;
+    } else {
+      result2.next = "Read ae_get_tool_schema { name } before the first use. Call tools marked direct by name; call the others with ae_invoke_tool { name, arguments }.";
+    }
+    return result2;
+  };
+  let n = page.length;
+  let result = build(n);
+  while (n > 1 && sizeOf(result) > SEARCH_OUTPUT_MAX) {
+    n--;
+    result = build(n);
+  }
+  if (sizeOf(result) > SEARCH_OUTPUT_MAX) result = build(n, false);
+  return formatToolResponse(result);
+}
+async function runGetSchema(args) {
+  const wanted = [];
+  if (args.name) wanted.push(args.name);
+  if (args.names) {
+    for (const n of args.names) if (!wanted.includes(n)) wanted.push(n);
+  }
+  if (wanted.length === 0) return formatToolError(new Error("Give `name` or `names` (up to 5)."));
+  if (wanted.length > 5) return formatToolError(new Error("At most 5 names per call."));
+  const tools = [];
+  const notFound = [];
+  const omitted = [];
+  let total2 = 0;
+  for (const name of wanted) {
+    const t = findTool(name);
+    if (!t) {
+      notFound.push({ name: oneLine3(name, NAME_MAX), closest: closestToolNames(name) });
+      continue;
+    }
+    if (total2 > SCHEMA_OUTPUT_SOFT_MAX) {
+      omitted.push(t.name);
+      continue;
+    }
+    const entry = {
+      name: t.name,
+      group: groupOf(t.name) ?? null,
+      call: CORE_SET.has(t.name) ? "direct" : "ae_invoke_tool",
+      // Verbatim, including the safety text for tools that carry it.
+      description: t.description,
+      inputSchema: zodToJsonSchema(t.schema)
+    };
+    total2 += JSON.stringify(entry).length;
+    tools.push(entry);
+  }
+  if (tools.length === 0) {
+    return formatToolError(
+      new Error(
+        `Unknown tool: ${notFound.map((n) => n.name).join(", ")}. Closest: ${notFound.map((n) => n.closest.join(", ")).join(" | ")}. Use ae_search_tools to find a tool.`
+      )
+    );
+  }
+  const result = { tools };
+  if (notFound.length) result.not_found = notFound;
+  if (omitted.length) {
+    result.omitted = omitted;
+    result.omitted_note = `The reply passed ${SCHEMA_OUTPUT_SOFT_MAX} characters, so these were left out. Ask for them again, a few at a time.`;
+  }
+  return formatToolResponse(result);
+}
+async function runInvoke(args, ctx) {
+  const name = oneLine3(args.name, NAME_MAX);
+  if (META_TOOL_NAMES.includes(args.name)) {
+    const why = `ae_invoke_tool cannot call ${name}: it is a meta-tool. Call ${name} directly.`;
+    ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    return formatToolError(new Error(why));
+  }
+  if (!findTool(args.name)) {
+    const why = `Unknown tool: ${name}. Closest names: ${closestToolNames(args.name).join(", ")}. Use ae_search_tools to find a tool.`;
+    ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    return formatToolError(new Error(why));
+  }
+  return callTool(args.name, args.arguments, ctx);
+}
+var SEARCH_DESCRIPTION = `Find tools: ${ALL_TOOLS.length} After Effects tools exist but only ${CORE_TOOL_NAMES.length} are listed, so search the rest here. Give \`query\` (keywords, e.g. 'remove object from shot', 'captions', 'track'), \`pattern\` (a name fragment, not a regex: ^ anchors the start and $ the end, e.g. ^ae_track) and/or \`group\`; an empty call lists the groups; \`offset\` pages. Then ae_get_tool_schema { name } for the full schema and ae_invoke_tool { name, arguments } to call it. Never touches After Effects.`;
+var GET_SCHEMA_DESCRIPTION = "Full description and full input schema of up to 5 tools, by `name` or `names`, including the safety text that guarded write tools carry. Read it before the first call of a tool you have not used. Never touches After Effects.";
+var INVOKE_DESCRIPTION = "Call any After Effects tool by name with its arguments: same validation, guard, receipt and errors as calling it directly (it goes to After Effects like any call, and is refused while AE renders). Put the tool's arguments under `arguments`. Use it for tools that are not in the list (find them with ae_search_tools). It cannot call the meta-tools. Safety: " + AGENT_SAFETY_GUIDANCE;
+var nameProp = { type: "string", minLength: 1, maxLength: NAME_MAX };
+var META_TOOLS = [
+  {
+    name: "ae_search_tools",
+    description: SEARCH_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Keywords over tool name, description and parameter names." },
+        pattern: { type: "string", description: "Name fragment; ^ anchors the start, $ the end (e.g. ^ae_track). Not a regex." },
+        group: { type: "string", description: "Only this group (an empty call lists them)." },
+        limit: { type: "integer", minimum: 1, maximum: 20, description: "Matches to return (default 8)." },
+        offset: { type: "integer", minimum: 0, maximum: 1e3, description: "Matches to skip, to page (default 0)." },
+        detail: { type: "string", enum: ["summary", "schema"], description: "schema adds each tool's (trimmed) input schema." }
+      },
+      additionalProperties: false
+    },
+    schema: SearchArgs,
+    unknownFieldHint: "Allowed fields: query, pattern, group, limit, offset, detail.",
+    logsItself: true,
+    run: (a) => runSearch(a)
+  },
+  {
+    name: "ae_get_tool_schema",
+    description: GET_SCHEMA_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { ...nameProp, description: "A tool name." },
+        names: { type: "array", items: nameProp, minItems: 1, maxItems: 5, description: "Up to 5 tool names." }
+      },
+      additionalProperties: false
+    },
+    schema: SchemaArgs,
+    unknownFieldHint: "Allowed fields: name, names.",
+    logsItself: true,
+    run: (a) => runGetSchema(a)
+  },
+  {
+    name: "ae_invoke_tool",
+    description: INVOKE_DESCRIPTION,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { ...nameProp, description: "The tool to call." },
+        arguments: { type: "object", description: "The tool's arguments, as its schema says." }
+      },
+      required: ["name"],
+      additionalProperties: false
+    },
+    schema: InvokeArgs,
+    unknownFieldHint: "Put the tool's arguments under `arguments`: { name, arguments: { ... } }. Fields beside `name` are not passed on.",
+    logsItself: false,
+    run: (a, ctx) => runInvoke(a, ctx)
+  }
+];
+var META_BY_NAME = new Map(META_TOOLS.map((m) => [m.name, m]));
+function isMetaTool(name) {
+  return META_BY_NAME.has(name);
+}
+function metaToolList() {
+  return META_TOOLS.map((m) => ({ name: m.name, description: m.description, inputSchema: m.inputSchema }));
+}
+async function callMetaTool(name, rawArgs, ctx) {
+  const meta = META_BY_NAME.get(name);
+  if (!meta) return formatToolError(new Error(`Unknown tool: ${oneLine3(name, NAME_MAX)}`));
+  const started = Date.now();
+  const parsed = meta.schema.safeParse(rawArgs ?? {});
+  if (!parsed.success) {
+    const unknown = parsed.error.issues.some((i) => i.code === "unrecognized_keys");
+    const why = (`Invalid arguments for ${meta.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}` + (unknown ? ` ${meta.unknownFieldHint}` : "")).slice(0, 600);
+    ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(why, 200)}`);
+    return formatToolError(new Error(why));
+  }
+  try {
+    const result = await meta.run(parsed.data, ctx);
+    if (meta.logsItself) {
+      const failed = "isError" in result && result.isError === true;
+      ctx.log?.(
+        failed ? "err" : "ok",
+        failed ? `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(result.content[0]?.text ?? "", 120)}` : `tool ${meta.name} ok (${Date.now() - started}ms)`
+      );
+    }
+    return result;
+  } catch (err) {
+    const why = oneLine3(err instanceof Error ? err.message : String(err), 200);
+    ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${why}`);
+    return formatToolError(err);
+  }
+}
+
+// src/mcp-rpc.ts
 init_registry();
 
 // src/guidance/content.generated.ts
@@ -64731,9 +65632,12 @@ Task: ${task.trim()}
 ` : "")
   }
 ];
-var TOOL_MAP = new Map(
-  ALL_TOOLS.map((t) => [t.name, t])
-);
+function listTools(toolset) {
+  if (toolset === "core") {
+    return [...metaToolList(), ...coreTools().map(trimmedListEntry)];
+  }
+  return ALL_TOOLS.map(fullListEntry);
+}
 var SUPPORTED_PROTOCOL_VERSIONS = [
   "2025-06-18",
   "2025-03-26",
@@ -64756,7 +65660,7 @@ function makeErrorResponse(id, code, message, data) {
 function isPlainObject2(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
-async function handleSingleRpc(message, ctx) {
+async function handleSingleRpc(message, ctx, toolset) {
   if (!isPlainObject2(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
@@ -64805,7 +65709,10 @@ async function handleSingleRpc(message, ctx) {
           serverInfo: {
             name: SERVER_NAME,
             version: SERVER_VERSION
-          }
+          },
+          // Full mode sends no instructions (as before); core mode carries the safety text once,
+          // how to use the meta-tools and the group index.
+          ...toolset === "core" ? { instructions: coreInstructions() } : {}
         }
       };
     }
@@ -64821,11 +65728,7 @@ async function handleSingleRpc(message, ctx) {
         jsonrpc: "2.0",
         id,
         result: {
-          tools: ALL_TOOLS.map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: zodToJsonSchema(t.schema)
-          }))
+          tools: listTools(toolset)
         }
       };
     }
@@ -64846,46 +65749,8 @@ async function handleSingleRpc(message, ctx) {
           "Invalid params: `arguments` must be an object"
         );
       }
-      const tool = TOOL_MAP.get(toolName);
-      if (!tool) {
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(new Error(`Unknown tool: ${toolName}`))
-        };
-      }
-      const parsed = tool.schema.safeParse(rawArgs ?? {});
-      if (!parsed.success) {
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(
-            new Error(
-              `Invalid arguments for ${toolName}: ${parsed.error.issues.map(
-                (i) => `${i.path.join(".") || "<root>"}: ${i.message}`
-              ).join("; ")}`
-            )
-          )
-        };
-      }
-      const started = Date.now();
-      try {
-        const output = await tool.handler(parsed.data, ctx);
-        ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolResponse(output)
-        };
-      } catch (err) {
-        const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
-        ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(err)
-        };
-      }
+      const result = isMetaTool(toolName) ? await callMetaTool(toolName, rawArgs, ctx) : await callTool(toolName, rawArgs, ctx);
+      return { jsonrpc: "2.0", id, result };
     }
     case "prompts/list": {
       return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) } };
@@ -64947,7 +65812,8 @@ async function handleSingleRpc(message, ctx) {
     }
   }
 }
-async function handleRpc(message, ctx) {
+async function handleRpc(message, ctx, opts = {}) {
+  const toolset = parseToolset(opts.toolset).toolset;
   let parsed = message;
   if (typeof message === "string") {
     try {
@@ -64962,14 +65828,14 @@ async function handleRpc(message, ctx) {
     }
     const results = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx);
+      const res = await handleSingleRpc(item, ctx, toolset);
       if (res !== null) {
         results.push(res);
       }
     }
     return results.length > 0 ? results : null;
   }
-  return await handleSingleRpc(parsed, ctx);
+  return await handleSingleRpc(parsed, ctx, toolset);
 }
 
 // src/panel-host.ts
@@ -65245,6 +66111,7 @@ function createPanelMcp(opts) {
   const log = opts.log;
   const assetWatcher = new AssetWatcher(ctx, { log });
   if (opts.watchAssets !== false) assetWatcher.start();
+  const warnedToolsets = /* @__PURE__ */ new Set();
   async function handleHttp(req, res, bodyText) {
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "POST") {
@@ -65311,7 +66178,16 @@ function createPanelMcp(opts) {
       );
       return;
     }
-    const rpcResponse = await handleRpc(parsed, ctx);
+    const headerValue = req.headers?.[TOOLSET_HEADER];
+    const choice = parseToolset(headerValue);
+    if (choice.invalid) {
+      const shown = String(Array.isArray(headerValue) ? headerValue[0] : headerValue).slice(0, 40);
+      if (!warnedToolsets.has(shown)) {
+        warnedToolsets.add(shown);
+        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
+      }
+    }
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset });
     if (rpcResponse === null || Array.isArray(rpcResponse) && rpcResponse.length === 0) {
       if (!res.writableEnded) {
         res.statusCode = 202;

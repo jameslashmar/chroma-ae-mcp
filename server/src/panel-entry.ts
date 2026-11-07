@@ -5,6 +5,7 @@ import { writeDiagnostics } from "./tools/ext/diagnostics.js";
 import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
+import { parseToolset, TOOLSET_HEADER } from "./toolsets.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
@@ -147,6 +148,8 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   const assetWatcher = new AssetWatcher(ctx, { log });
   if (opts.watchAssets !== false) assetWatcher.start();
 
+  const warnedToolsets = new Set<string>();
+
   async function handleHttp(
     req: IncomingMessage | HttpRequestLike,
     res: ServerResponse | HttpResponseLike,
@@ -221,7 +224,18 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       return;
     }
 
-    const rpcResponse = await handleRpc(parsed, ctx);
+    // The stdio relay sends X-Chroma-Toolset on every request (the service is stateless).
+    // A missing header, or any value but "core", is the full list.
+    const headerValue = req.headers?.[TOOLSET_HEADER];
+    const choice = parseToolset(headerValue);
+    if (choice.invalid) {
+      const shown = String(Array.isArray(headerValue) ? headerValue[0] : headerValue).slice(0, 40);
+      if (!warnedToolsets.has(shown)) {
+        warnedToolsets.add(shown);
+        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
+      }
+    }
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset });
 
     if (
       rpcResponse === null ||

@@ -1,11 +1,15 @@
-import { z } from "zod";
-import { zodToJsonSchema } from "./schema.js";
+import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
+import { callTool } from "./tool-call.js";
 import {
-  formatToolError,
-  formatToolResponse,
-  type ToolContext,
-  type ToolDefinition,
-} from "./tools/common.js";
+  coreInstructions,
+  coreTools,
+  fullListEntry,
+  parseToolset,
+  trimmedListEntry,
+  type ListedTool,
+  type Toolset,
+} from "./toolsets.js";
+import type { ToolContext } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 import { captionsSkillBody, listGuidanceResources, readGuidance, reviewBody, skillBody } from "./guidance/index.js";
 
@@ -41,9 +45,18 @@ const PROMPTS: PromptDef[] = [
   },
 ];
 
-const TOOL_MAP = new Map<string, ToolDefinition<any>>(
-  ALL_TOOLS.map((t) => [t.name, t])
-);
+/** Per-request options. `toolset` comes from the X-Chroma-Toolset header (see toolsets.ts). */
+export interface RpcOptions {
+  toolset?: Toolset | string | null;
+}
+
+/** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
+export function listTools(toolset: Toolset): ListedTool[] {
+  if (toolset === "core") {
+    return [...metaToolList(), ...coreTools().map(trimmedListEntry)];
+  }
+  return ALL_TOOLS.map(fullListEntry);
+}
 
 export const SUPPORTED_PROTOCOL_VERSIONS = [
   "2025-06-18",
@@ -101,7 +114,8 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
 
 async function handleSingleRpc(
   message: unknown,
-  ctx: ToolContext
+  ctx: ToolContext,
+  toolset: Toolset
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -169,6 +183,9 @@ async function handleSingleRpc(
             name: SERVER_NAME,
             version: SERVER_VERSION,
           },
+          // Full mode sends no instructions (as before); core mode carries the safety text once,
+          // how to use the meta-tools and the group index.
+          ...(toolset === "core" ? { instructions: coreInstructions() } : {}),
         },
       };
     }
@@ -186,11 +203,7 @@ async function handleSingleRpc(
         jsonrpc: "2.0",
         id,
         result: {
-          tools: ALL_TOOLS.map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: zodToJsonSchema(t.schema),
-          })),
+          tools: listTools(toolset),
         },
       };
     }
@@ -214,53 +227,12 @@ async function handleSingleRpc(
         );
       }
 
-      const tool = TOOL_MAP.get(toolName);
-      if (!tool) {
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(new Error(`Unknown tool: ${toolName}`)),
-        };
-      }
-
-      const parsed = tool.schema.safeParse(rawArgs ?? {});
-      if (!parsed.success) {
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(
-            new Error(
-              `Invalid arguments for ${toolName}: ${parsed.error.issues
-                .map(
-                  (i: z.ZodIssue) =>
-                    `${i.path.join(".") || "<root>"}: ${i.message}`
-                )
-                .join("; ")}`
-            )
-          ),
-        };
-      }
-
-      // One line per tool call in the service log. The panel's tiles, reply-time
-      // chart and Log are built from these lines (panel/client/common.js, parseToolLine).
-      const started = Date.now();
-      try {
-        const output = await tool.handler(parsed.data, ctx);
-        ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolResponse(output),
-        };
-      } catch (err) {
-        const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
-        ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
-        return {
-          jsonrpc: "2.0",
-          id,
-          result: formatToolError(err),
-        };
-      }
+      // Meta-tools answer in either toolset (they are only listed in core). Everything else,
+      // listed or not, goes through the one shared path in tool-call.ts.
+      const result = isMetaTool(toolName)
+        ? await callMetaTool(toolName, rawArgs, ctx)
+        : await callTool(toolName, rawArgs, ctx);
+      return { jsonrpc: "2.0", id, result };
     }
 
     case "prompts/list": {
@@ -335,8 +307,11 @@ async function handleSingleRpc(
  */
 export async function handleRpc(
   message: unknown,
-  ctx: ToolContext
+  ctx: ToolContext,
+  opts: RpcOptions = {}
 ): Promise<JsonRpcResponse | JsonRpcResponse[] | null> {
+  // Any value but "core" (including a bad one) behaves as full.
+  const toolset = parseToolset(opts.toolset).toolset;
   let parsed: unknown = message;
   if (typeof message === "string") {
     try {
@@ -352,7 +327,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx);
+      const res = await handleSingleRpc(item, ctx, toolset);
       if (res !== null) {
         results.push(res);
       }
@@ -360,5 +335,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx);
+  return await handleSingleRpc(parsed, ctx, toolset);
 }

@@ -13,6 +13,11 @@
 //   resources/list come from the last lists the panel served, and prompts/get
 //   and resources/read from the guidance text it served, so everything stays
 //   registered and readable; a tool call tells the user to start AE.
+// - CHROMA_AE_MCP_TOOLSET=core in the relay's environment asks the panel for the small tool
+//   list (a few everyday tools plus ae_search_tools / ae_get_tool_schema / ae_invoke_tool).
+//   The relay sends the choice on every request in an X-Chroma-Toolset header; an unset or
+//   "full" value sends nothing and keeps today's behaviour. Any other value is logged once
+//   and treated as full. The tool list cache is kept per toolset.
 "use strict";
 
 const fs = require("fs");
@@ -43,7 +48,21 @@ function resolvePort() {
   return Number.isFinite(n) && n > 0 && n <= 65535 ? n : 7790;
 }
 
+// "core" or "full". Anything else behaves as full, with one line on stderr.
+function resolveToolset() {
+  const raw = process.env.CHROMA_AE_MCP_TOOLSET;
+  if (raw === undefined) return { toolset: "full", note: "" };
+  const v = String(raw).trim().toLowerCase();
+  if (v === "" || v === "full") return { toolset: "full", note: "" };
+  if (v === "core") return { toolset: "core", note: "" };
+  return {
+    toolset: "full",
+    note: "CHROMA_AE_MCP_TOOLSET=" + JSON.stringify(String(raw).slice(0, 40)) + " is not 'core' or 'full'; using the full tool list.",
+  };
+}
+
 const PORT = resolvePort();
+const TOOLSET = resolveToolset();
 const TOKEN_PATH = path.join(dataDir(), "token");
 
 // Keep in step with server/src/mcp-rpc.ts.
@@ -86,6 +105,8 @@ function log(msg) {
   process.stderr.write("[chroma-ae relay] " + msg + "\n");
 }
 
+if (TOOLSET.note) log(TOOLSET.note);
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -107,12 +128,17 @@ function post(bodyText) {
         port: PORT,
         path: "/mcp",
         method: "POST",
-        headers: {
-          Authorization: "Bearer " + token,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "Content-Length": Buffer.byteLength(bodyText),
-        },
+        headers: Object.assign(
+          {
+            Authorization: "Bearer " + token,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "Content-Length": Buffer.byteLength(bodyText),
+          },
+          // The panel is stateless, so the choice goes with every request. A panel that does
+          // not know the header ignores it and serves the full list.
+          TOOLSET.toolset === "core" ? { "X-Chroma-Toolset": "core" } : {}
+        ),
       },
       (res) => {
         const chunks = [];
@@ -140,9 +166,16 @@ function cachePath(key) {
   return path.join(dataDir(), "relay-" + key + "-cache.json");
 }
 
+// The file a list is cached in. The core toolset's tool list has its own file
+// (relay-tools-core-cache.json), so switching toolsets never shows the other one's list;
+// the full list keeps the original name, relay-tools-cache.json.
+function listFileKey(key) {
+  return key === "tools" && TOOLSET.toolset === "core" ? "tools-core" : key;
+}
+
 function readListCache(key) {
   try {
-    const cached = JSON.parse(fs.readFileSync(cachePath(key), "utf8"));
+    const cached = JSON.parse(fs.readFileSync(cachePath(listFileKey(key)), "utf8"));
     return cached && Array.isArray(cached[key]) ? cached[key] : null;
   } catch {
     return null;
@@ -151,12 +184,35 @@ function readListCache(key) {
 
 function writeListCache(key, list) {
   try {
-    const file = cachePath(key);
+    const file = cachePath(listFileKey(key));
     const tmp = file + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify({ [key]: list }));
     fs.renameSync(tmp, file);
   } catch (err) {
     log("could not cache the " + key + " list: " + err.message);
+  }
+}
+
+// The core toolset's initialize carries `instructions`; keep the last ones so the offline
+// initialize (AE closed) can still hand them to the client.
+function readInstructionsCache() {
+  if (TOOLSET.toolset !== "core") return null;
+  try {
+    const c = JSON.parse(fs.readFileSync(cachePath("instructions-core"), "utf8"));
+    return c && typeof c.instructions === "string" ? c.instructions : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeInstructionsCache(text) {
+  try {
+    const file = cachePath("instructions-core");
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ instructions: text }));
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    log("could not cache the instructions: " + err.message);
   }
 }
 
@@ -190,6 +246,7 @@ function writeContentCache(c) {
 }
 
 let prefetched = false;
+let warnedOldPanel = false;
 let prefetchId = 0;
 
 async function ask(method, params) {
@@ -240,20 +297,24 @@ function offlineReply(msg, reason) {
     case "initialize": {
       const asked = params.protocolVersion;
       const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.indexOf(asked) >= 0 ? asked : SUPPORTED_PROTOCOL_VERSIONS[0];
+      const instructions = readInstructionsCache();
       return {
         jsonrpc: "2.0",
         id,
         // The same capabilities as the panel, so a client that starts before AE still
         // asks for prompts and resources (their lists come from the cache below).
-        result: {
-          protocolVersion,
-          capabilities: {
-            tools: { listChanged: false },
-            prompts: { listChanged: false },
-            resources: { subscribe: false, listChanged: false },
+        result: Object.assign(
+          {
+            protocolVersion,
+            capabilities: {
+              tools: { listChanged: false },
+              prompts: { listChanged: false },
+              resources: { subscribe: false, listChanged: false },
+            },
+            serverInfo: SERVER_INFO,
           },
-          serverInfo: SERVER_INFO,
-        },
+          instructions ? { instructions } : {}
+        ),
       };
     }
     case "ping":
@@ -322,7 +383,29 @@ async function relay(message) {
   }
   const listKey = !Array.isArray(message) ? LIST_RESULT_KEY[message.method] : undefined;
   if (listKey && body.result && Array.isArray(body.result[listKey])) {
-    writeListCache(listKey, body.result[listKey]);
+    const olderPanel =
+      listKey === "tools" &&
+      TOOLSET.toolset === "core" &&
+      !body.result.tools.some((t) => t && t.name === "ae_search_tools");
+    if (olderPanel) {
+      // An older panel ignores the header and serves the full list. Pass it on, but do not
+      // file it under the core toolset.
+      if (!warnedOldPanel) {
+        warnedOldPanel = true;
+        log("the panel does not know the core toolset (no ae_search_tools in its list); showing its full list.");
+      }
+    } else {
+      writeListCache(listKey, body.result[listKey]);
+    }
+  }
+  if (
+    !Array.isArray(message) &&
+    message.method === "initialize" &&
+    TOOLSET.toolset === "core" &&
+    body.result &&
+    typeof body.result.instructions === "string"
+  ) {
+    writeInstructionsCache(body.result.instructions);
   }
   send(body);
   // After the reply, so the client never waits on it; the process stays up until it is written.
