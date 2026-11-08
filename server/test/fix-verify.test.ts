@@ -90,10 +90,8 @@ describe("imported item is cleaned up (C90)", () => {
     return (fn: string) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") {
-        if (removed) return new Error("No imported item 9");
-        return read;
-      }
+      if (fn === "verifyExists") return { exists: !removed };
+      if (fn === "verifyRead") return read;
       if (opts.removeFails) return new Error("cannot remove");
       removed = true;
       return { removed: 9 };
@@ -127,7 +125,7 @@ describe("imported item is cleaned up (C90)", () => {
         const fn = script.slice("__chromaAe.".length, script.indexOf("("));
         calls.push(fn);
         if (fn === "checkGuard") return { ok: true, result: { ok: true, project_path: "<unsaved>", comp_id: null, comp_is_valid: true }, durationMs: 1 };
-        if (fn === "verifyRead") return { ok: false, error: { kind: "timeout", message: "timed out" }, durationMs: 1 } as any;
+        if (fn === "verifyRead" || fn === "verifyExists") return { ok: false, error: { kind: "timeout", message: "timed out" }, durationMs: 1 } as any;
         return { ok: true, result: answers(null)(fn), durationMs: 1 };
       },
       queue,
@@ -153,7 +151,8 @@ describe("imported item is cleaned up (C90)", () => {
     const { ctx } = fakeAe((fn) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") return removed ? new Error("bridge hiccup") : render({ fps: 25, duration: 4, frames: 100 });
+      if (fn === "verifyExists") return new Error("bridge hiccup");
+      if (fn === "verifyRead") return render({ fps: 25, duration: 4, frames: 100 });
       removed = true;
       return { removed: 9 };
     });

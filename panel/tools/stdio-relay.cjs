@@ -13,11 +13,18 @@
 //   resources/list come from the last lists the panel served, and prompts/get
 //   and resources/read from the guidance text it served, so everything stays
 //   registered and readable; a tool call tells the user to start AE.
-// - CHROMA_AE_MCP_TOOLSET=core in the relay's environment asks the panel for the small tool
-//   list (a few everyday tools plus ae_search_tools / ae_get_tool_schema / ae_invoke_tool).
-//   The relay sends the choice on every request in an X-Chroma-Toolset header; an unset or
-//   "full" value sends nothing and keeps today's behaviour. Any other value is logged once
-//   and treated as full. The tool list cache is kept per toolset.
+// - The toolset. "core" is a small tool list (a few everyday tools plus ae_search_tools /
+//   ae_get_tool_schema / ae_invoke_tool); "full" is every tool. The relay sends core on every
+//   request in an X-Chroma-Toolset header; full sends nothing.
+//   * CHROMA_AE_MCP_TOOLSET set: it wins ("core", "full"; anything else is logged once and
+//     treated as full).
+//   * Unset: decided at the client's initialize from params.clientInfo.name. Claude Desktop
+//     (believed to be "claude-ai", matched exactly, case-insensitively) gets core; every other
+//     client (Cursor, Codex, ...) gets full. Before an initialize it is full.
+//   The choice is logged once on stderr (the host's MCP log) with the client name and the
+//   reason. The tool list cache is kept per toolset.
+// - X-Chroma-Client carries the client's name (sanitised, at most 40 characters) on every
+//   request once known; the panel's usage log records it.
 "use strict";
 
 const fs = require("fs");
@@ -48,21 +55,37 @@ function resolvePort() {
   return Number.isFinite(n) && n > 0 && n <= 65535 ? n : 7790;
 }
 
-// "core" or "full". Anything else behaves as full, with one line on stderr.
+// The environment's choice: { set, toolset, note }. Unset leaves the choice to the client's name.
+// A set value that is not "core" or "full" behaves as full, with one line on stderr.
 function resolveToolset() {
   const raw = process.env.CHROMA_AE_MCP_TOOLSET;
-  if (raw === undefined) return { toolset: "full", note: "" };
+  if (raw === undefined) return { set: false, toolset: "full", note: "" };
   const v = String(raw).trim().toLowerCase();
-  if (v === "" || v === "full") return { toolset: "full", note: "" };
-  if (v === "core") return { toolset: "core", note: "" };
+  if (v === "" || v === "full") return { set: true, toolset: "full", note: "" };
+  if (v === "core") return { set: true, toolset: "core", note: "" };
   return {
+    set: true,
     toolset: "full",
     note: "CHROMA_AE_MCP_TOOLSET=" + JSON.stringify(String(raw).slice(0, 40)) + " is not 'core' or 'full'; using the full tool list.",
   };
 }
 
+// Client names that get core when the environment does not choose. Exact, lower case.
+const CORE_CLIENTS = ["claude-ai"];
+
+// A client name that is safe in a header and a log line: printable ASCII only, one line, 40 characters.
+function sanitizeClientName(raw) {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/[^ -~]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
 const PORT = resolvePort();
-const TOOLSET = resolveToolset();
+const ENV_TOOLSET = resolveToolset();
+// The live choice. With the variable set it is fixed from the start; otherwise it stays full until
+// the client's initialize names itself (see observeInitialize).
+const TOOLSET = { toolset: ENV_TOOLSET.toolset };
+let clientName = "";
+let toolsetDecided = false;
 const TOKEN_PATH = path.join(dataDir(), "token");
 
 // Keep in step with server/src/mcp-rpc.ts.
@@ -105,7 +128,30 @@ function log(msg) {
   process.stderr.write("[chroma-ae relay] " + msg + "\n");
 }
 
-if (TOOLSET.note) log(TOOLSET.note);
+if (ENV_TOOLSET.note) log(ENV_TOOLSET.note);
+
+// Called with each incoming message before it is handled. The first initialize fixes the toolset
+// (once) and the client name, and logs the choice once.
+function observeInitialize(message) {
+  const list = Array.isArray(message) ? message : [message];
+  for (const m of list) {
+    if (toolsetDecided) return;
+    if (!m || typeof m !== "object" || m.method !== "initialize") continue;
+    const info = m.params && typeof m.params === "object" && m.params.clientInfo && typeof m.params.clientInfo === "object" ? m.params.clientInfo : {};
+    clientName = sanitizeClientName(info.name);
+    toolsetDecided = true;
+    let why;
+    if (ENV_TOOLSET.set) {
+      why = "env";
+    } else if (clientName && CORE_CLIENTS.indexOf(clientName.toLowerCase()) >= 0) {
+      TOOLSET.toolset = "core";
+      why = "client " + clientName;
+    } else {
+      why = "default full";
+    }
+    log("toolset " + TOOLSET.toolset + " (" + why + "); client " + JSON.stringify(clientName || "unknown"));
+  }
+}
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
@@ -137,7 +183,8 @@ function post(bodyText) {
           },
           // The panel is stateless, so the choice goes with every request. A panel that does
           // not know the header ignores it and serves the full list.
-          TOOLSET.toolset === "core" ? { "X-Chroma-Toolset": "core" } : {}
+          TOOLSET.toolset === "core" ? { "X-Chroma-Toolset": "core" } : {},
+          clientName ? { "X-Chroma-Client": clientName } : {}
         ),
       },
       (res) => {
@@ -477,6 +524,7 @@ rl.on("line", (line) => {
     send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });
     return;
   }
+  observeInitialize(message);
   pending++;
   relay(message)
     .catch((err) => {

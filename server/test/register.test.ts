@@ -125,8 +125,11 @@ describe("register.cjs config editing", () => {
     entry = JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"];
     expect(entry).toEqual({ command: node, args: [relayPath], disabled: false, env: { CHROMA_AE_MCP_PORT: "7791" } });
     // The message describes the env that was written, not what was intended.
-    expect(message).toContain("lists all tools");
-    expect(message).not.toContain("core toolset");
+    // No variable: Claude Desktop gets core by default through the relay, and the message says so.
+    expect(message).toContain("core toolset by default");
+    expect(message).toContain("CHROMA_AE_MCP_TOOLSET=full");
+    expect(message).not.toContain("lists all tools");
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).mcpServers["chroma-ae"].env).not.toHaveProperty("CHROMA_AE_MCP_TOOLSET");
 
     // No env at all: still no env key and no core.
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old" } } }));
@@ -184,10 +187,13 @@ describe("register.cjs config editing", () => {
     const html = fs.readFileSync(path.join(panelDir, "index.html"), "utf8");
     expect(html).toContain('id="write-desktop-btn"');
     expect(js).toMatch(/setRegistered\("claude-desktop", true, \{ toolset: "core" \}\)/);
-    // An existing entry without the variable gets the offer, not only "already has chroma-ae".
+    // An existing entry without the variable still gets the pin button (the client name the relay relies on is unconfirmed).
     expect(js).toContain('entry.toolset === "unset"');
     expect(js).toContain("Use the core toolset in Claude Desktop");
-    expect(js).toMatch(/reopen it/);
+    expect(js).toContain("should get the core toolset");
+    expect(js).toContain("pins core in the config");
+    expect(js).toContain("CHROMA_AE_MCP_TOOLSET=full");
+    expect(js).toMatch(/restart Claude Desktop/i);
     // Node 17.7.2 in the panel: no optional chaining, let/const or arrows in the new code.
     expect(js.slice(js.indexOf("function bindDesktopAction"), js.indexOf("function bindDesktopAction") + 900)).not.toMatch(/=>|\blet\b|\bconst\b|\?\./);
   });

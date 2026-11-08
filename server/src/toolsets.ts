@@ -16,6 +16,8 @@ import { ALL_TOOLS } from "./tools/registry.js";
 
 export type Toolset = "full" | "core";
 export const TOOLSET_HEADER = "x-chroma-toolset";
+/** The relay sends the MCP client's name here (sanitised, at most 40 characters); the usage log records it. */
+export const CLIENT_HEADER = "x-chroma-client";
 export const TOOLSET_ENV = "CHROMA_AE_MCP_TOOLSET";
 
 /** "core" -> core, undefined / "" / "full" -> full, anything else -> full with `invalid` set. */
@@ -204,25 +206,25 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_run_jsx:
     "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render:
-    "Start After Effects' OWN render of the queued items (like pressing Render) and return at once with a job id; follow it with ae_render_queue_render_status. AE stays busy for the whole render and other AE tools are refused meanwhile: tell the user first, ask them to save a dirty project, prefer ae_aerender_start when it works. Never ask the user to press Render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
+    "Start After Effects' OWN render of the queued items (like pressing Render), returning a job id at once; poll ae_render_queue_render_status. AE stays busy until it ends and other AE tools are refused: tell the user first, save a dirty project, prefer ae_aerender_start. Never ask the user to press Render. `engine: \"media_encoder\"` queues the SAVED project in Media Encoder (AE stays free; the user checks the preset and presses Start): ask the user first, then `user_confirmed: true`; offer only if aerender did not start or a long render would lock AE. `item_indexes` renders only those items, else ALL queued. Tell the user any `resource_warnings` / `sequence_check`.",
   ae_aerender_start:
-    "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow it with ae_aerender_status. `continue_on_missing_footage` renders anyway, with colour bars in place of the missing footage. If it cannot run, use ae_render_queue_render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
+    "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow with ae_aerender_status. `continue_on_missing_footage` renders anyway (colour bars for missing footage). If it cannot run, use ae_render_queue_render. Tell the user any `resource_warnings` / `sequence_check`.",
   ae_aerender_status:
     "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects.",
   ae_render_queue_render_status:
-    "Where a render started by ae_render_queue_render is: state, elapsed time, output files (exists, bytes, mtime). Never touches After Effects, so it answers during the render.",
+    "State, elapsed time and output files (exists, bytes, mtime) of a render from ae_render_queue_render. Never touches AE. A Media Encoder job shows grew_since_last_check per file, never finished: confirm with ae_verify_render.",
   ae_render_templates:
     "List render-settings and output-module template names; action save stores a queue item's settings or module as a named template (NOT undoable, needs `expect`).",
   ae_dialogs:
-    "READ-ONLY. List modal dialogs open in After Effects (title, text, kind, buttons (with the default marked), screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: read them here, answer only dialogs our own operation caused with ae_dialog_respond, ask the user otherwise.",
+    "READ-ONLY. List modal dialogs open in After Effects (title, text, kind, buttons (default marked), screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: answer only dialogs our own operation caused, with ae_dialog_respond; else ask the user.",
   ae_dialog_respond:
-    "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused. An AE-painted dialog is answered only with Cancel (No and Close beside a Cancel are refused), or with its default (outlined) button when that is OK/Yes/Continue; OK on text about replacing, losing, removing or erasing needs both allow_destructive and a user_instruction; it must have been listed with ae_dialogs first and is re-read right before the key. The result says what the dialog said, so tell the user. Otherwise ask the user.",
+    "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused. An AE-painted dialog is answered only with Cancel (No and Close beside a Cancel are refused), or with its default (outlined) button when that is OK/Yes/Continue; OK on text about replacing, losing, removing or erasing needs both allow_destructive and a user_instruction; it must have been listed with ae_dialogs first and is re-read right before the key. Tell the user what the dialog said; otherwise ask them.",
   ae_save:
-    "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` saves as the next free _vNNN. Both retarget the open project.",
+    "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` the next free _vNNN. Both retarget the open project.",
   ae_create_comp:
     "Create a comp: mode 'new' (width, height, fps, duration...), 'from_footage' or 'duplicate' (deep duplicate is a DRY RUN unless dry_run: false). Guarded by `expect`.",
   ae_multi_comp_apply:
-    "Run one existing guarded write tool (op {tool, args}, without comp_id and expect) on many comps picked by comp_ids, folder_id, nested_in or name_pattern. Each comp goes through that tool's own guard and is its own undo step (the way back is the automatic checkpoint); the result is a per-comp table. dry_run resolves the comps first.",
+    "Run one guarded write tool (op {tool, args}, without comp_id and expect) on many comps picked by comp_ids, folder_id, nested_in or name_pattern. Each comp goes through that tool's own guard and is its own undo step (the way back is the automatic checkpoint); per-comp result table. dry_run resolves the comps first.",
   ae_skill_run:
     "Run a saved AE skill: its numbered steps run in one evalScript (one undo step). Writing skills need `expect`; pass what varies in `args`. List skills with ae_skill_list.",
   ae_comp_tree:
@@ -234,27 +236,27 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_get_keyframes:
     "Read a property's keyframes: time, value, interpolation, temporal ease per side, spatial tangents, continuity flags and roving. Read-only; at most 500 keys per call (`truncated` says more exist).",
   ae_set_property:
-    "Set a layer property's value, keyframes or expression in one undo group, guarded by `expect`, with a read-back receipt. Everything is validated before the group opens (dimensions, min/max, paths, fonts). Paths are { vertices, inTangents?, outTangents?, closed? }; markers go through keyframes.",
+    "Set a layer property's value, keyframes or expression in one undo group, guarded by `expect`, with a read-back receipt. Everything is validated before the group opens. Paths are { vertices, inTangents?, outTangents?, closed? }; markers go through keyframes.",
   ae_batch_set:
     "Set many properties on layers of one comp in one call (values, keyframes, expressions, paths, markers). Everything is validated first, then written in chunks of up to 500 ops, each one undo group guarded by `expect`, with read-back; a font that is not installed refuses the batch unless allow_substitute.",
   ae_set_text:
-    "Update a text layer's string and styling (font, size, tracking, leading, colours, justification; `ranges` and `paragraphs` style parts; `style` has caps, baseline, kerning, scale...) in one undo group guarded by `expect`, with read-back. A font that is not installed is refused.",
+    "Update a text layer's string and styling (font, size, tracking, leading, colours, justification; `ranges` / `paragraphs` style parts; `style`: caps, baseline, kerning, scale...) in one undo group guarded by `expect`. A font that is not installed is refused.",
   ae_create_layer:
     "Create a layer in a comp: solid, null, adjustment, text, shape, camera, light, footage, precomp or mesh, with name, length, start, 3D, parent and stack position, in one undo group guarded by `expect`. Text takes `font`; lights `light_type`; meshes `mesh_type`.",
   ae_layer_ops:
-    "Everyday layer edits in one call, by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
+    "Layer edits by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
   ae_import_footage:
     "Import footage files or an image sequence (PSD/AI as a comp, or a whole project, via import_as) into the project and an optional folder, guarded by `expect`; returns the new item_ids. Many files go through ae_import_assets. Importing may raise dialogs: they are never suppressed, read them with ae_dialogs.",
   ae_import_assets:
-    "The batch import path: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, with a dry run first. Without it a model imports one file at a time with ae_import_footage. Sequences count as one item; files already in the project are skipped; a long batch stops at `max_seconds` and lists the rest. Guarded by `expect`.",
+    "Batch import: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, dry run first. Sequences count as one item; files already in the project are skipped; `max_seconds` stops a long batch and lists the rest. Guarded by `expect`. Without this tool a model imports one file at a time with ae_import_footage.",
   ae_snapshot_frame:
     "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame.",
   ae_render_queue_edit:
-    "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add or remove output modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first to see what goes). Refused while the queue renders.",
+    "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add/remove modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first). Refused while the queue renders.",
   ae_set_footage_interpretation:
     "Set footage interpretation without the dialog, one undo group guarded by expect: alpha, fields, pulldown, conform_frame_rate, loop, pixel_aspect. One item (item_id) or many (item_ids, up to 200, with overrides per item; strict, the default, refuses all if one item can't take its settings, strict:false writes the rest). Checked before AE is touched; read back in a separate call.",
   ae_add_effect:
-    "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect whose value AE refuses is taken out again.",
+    "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect AE refuses a value for is taken out again.",
   ae_status:
     "Read panel health, AE version, project path ('<unsaved>' if none), dirty flag, active comp, selected layers and the quarantine list. `detail: true` adds the active item, selected properties, viewer, GPU and warnings. Call first; the selection can change, so act on explicit ids. If AE is busy it answers at once with `ae_answered:false` and `busy` (why, popups, how long), within 10 s at most, instead of waiting.",
 };

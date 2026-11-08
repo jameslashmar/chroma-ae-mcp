@@ -6,6 +6,17 @@ import {
   type ToolDefinition,
 } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
+import { errorKindOf, errorTextOf, recordUsage, runJsxFields, type UsageEntry } from "./usage-log.js";
+
+/** Where a call came from, for the usage log only. */
+export interface CallOptions {
+  /** The X-Chroma-Toolset value of the request, when known. */
+  toolset?: string;
+  /** The X-Chroma-Client value of the request (the MCP client's name), when known. */
+  client?: string;
+  /** ae_invoke_tool sets "ae_invoke_tool"; a direct tools/call is "direct". */
+  via?: "direct" | "ae_invoke_tool";
+}
 
 /** One line, at most 80 characters: a tool name is echoed in errors, so it must not carry line breaks. */
 function oneLine(text: string): string {
@@ -35,22 +46,26 @@ export function findTool(name: string): ToolDefinition<any> | undefined {
 export async function callTool(
   toolName: string,
   rawArgs: Record<string, unknown> | undefined,
-  ctx: ToolContext
+  ctx: ToolContext,
+  opts: CallOptions = {}
 ): Promise<ToolCallResult> {
+  const via = opts.via ?? "direct";
+  const usage = (e: Pick<UsageEntry, "ms" | "ok" | "errorKind" | "error">, extra?: Partial<UsageEntry>) =>
+    recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra, ...e });
   const tool = findTool(toolName);
   if (!tool) {
+    usage({ ms: 0, ok: false, errorKind: "unknown_tool", error: `Unknown tool: ${oneLine(toolName)}` });
     return formatToolError(new Error(`Unknown tool: ${oneLine(toolName)}`));
   }
 
   const parsed = tool.schema.safeParse(rawArgs ?? {});
+  const extra = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : undefined;
   if (!parsed.success) {
-    return formatToolError(
-      new Error(
-        `Invalid arguments for ${toolName}: ${parsed.error.issues
-          .map((i: z.ZodIssue) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-          .join("; ")}`
-      )
-    );
+    const why = `Invalid arguments for ${toolName}: ${parsed.error.issues
+      .map((i: z.ZodIssue) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+      .join("; ")}`;
+    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra);
+    return formatToolError(new Error(why));
   }
 
   // One line per tool call in the service log. The panel's tiles, reply-time
@@ -59,10 +74,12 @@ export async function callTool(
   try {
     const output = await tool.handler(parsed.data, ctx);
     ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
+    usage({ ms: Date.now() - started, ok: true }, extra);
     return formatToolResponse(output);
   } catch (err) {
     const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
     ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
+    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra);
     return formatToolError(err);
   }
 }

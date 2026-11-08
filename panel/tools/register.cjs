@@ -243,16 +243,20 @@ function stdioEntry(env) {
   return { command: node, args: [env.relayPath] };
 }
 
-// Claude Desktop is the one client that may load every tool schema into context, so its
-// entry asks the relay for the small "core" toolset. Claude Code, Cursor and Codex do not get
-// it. An entry the user already has keeps its env (and any other keys); a toolset the user
-// set themselves, even "full", is left as it is.
+// Claude Desktop is the one client that may load every tool schema into context, so it gets the
+// small "core" toolset. A NEW Desktop entry gets CHROMA_AE_MCP_TOOLSET=core written into its env
+// (explicit, and harmless). An entry without the variable gets core anyway: with the variable
+// unset, the relay picks core when the client that connects calls itself Claude Desktop
+// (clientInfo.name "claude-ai"), full for any other client. Cursor and Codex launch the same relay
+// but are not named Claude Desktop, so they still get the full list; Claude Code connects over
+// HTTP and gets the full list. An entry the user already has keeps its env (and any other keys);
+// a toolset the user set themselves, even "full", is left as it is.
 const TOOLSET_ENV = "CHROMA_AE_MCP_TOOLSET";
 
 // opts.toolset === "core" is the user's explicit choice (the panel's button): it adds the variable to an
-// existing entry that has none. Without it, core is added only to a NEW entry. Whether an entry without
-// the variable was never set or had it removed on purpose cannot be told apart, so registering again never
-// puts it back by itself.
+// existing entry that has none. Without it, core is added only to a NEW entry. An existing entry without
+// the variable is left alone: the relay gives Claude Desktop core by default, and "full" in the env
+// opts out, so registering again never needs to write it.
 function desktopEntry(env, old, opts) {
   const entry = stdioEntry(env);
   const isNew = !(old && typeof old === "object" && !Array.isArray(old));
@@ -268,7 +272,8 @@ function desktopEntry(env, old, opts) {
 }
 
 // What the Claude Desktop config says now: { registered, toolset } where toolset is "core", "full",
-// the user's other value, or "unset" (the entry has no CHROMA_AE_MCP_TOOLSET, so all tools are listed).
+// the user's other value, or "unset" (the entry has no CHROMA_AE_MCP_TOOLSET: Claude Desktop gets core by
+// default through the relay; CHROMA_AE_MCP_TOOLSET=full gets all tools).
 function desktopState(env) {
   const old = existingJsonServer(desktopConfigPath(env));
   if (!old || typeof old !== "object") return { registered: false, toolset: "unset" };
@@ -375,9 +380,12 @@ const CLIENTS = {
       const verb = old ? "Updated" : "Added to";
       const restart = " Quit Claude Desktop from the tray and reopen it to load it (the config was backed up as claude_desktop_config.json.chroma-bak).";
       if (toolset === "core") {
-        return verb + " Claude Desktop with the core toolset (a short tool list plus search; remove CHROMA_AE_MCP_TOOLSET from the entry's env to list all tools)." + restart;
+        return verb + " Claude Desktop with the core toolset (a short tool list plus search; set CHROMA_AE_MCP_TOOLSET=full in the entry's env to list all tools)." + restart;
       }
-      return verb + " Claude Desktop; it lists all tools (" + (toolset === "unset" ? "no CHROMA_AE_MCP_TOOLSET in its env" : "CHROMA_AE_MCP_TOOLSET=" + toolset + " kept") + ")." + restart;
+      if (toolset === "unset") {
+        return verb + " Claude Desktop; with no CHROMA_AE_MCP_TOOLSET in its env it gets the core toolset by default (set CHROMA_AE_MCP_TOOLSET=full to list all tools)." + restart;
+      }
+      return verb + " Claude Desktop; CHROMA_AE_MCP_TOOLSET=" + toolset + " kept." + restart;
     },
     unregister(env) {
       setJsonServer(desktopConfigPath(env), null);

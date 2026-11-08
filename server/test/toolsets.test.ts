@@ -28,7 +28,7 @@ import {
 import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../src/tools/common.js";
 
 /** The size budget for the core tools/list JSON plus the core `instructions` (about 20k tokens). */
-const CORE_BUDGET_CHARS = 82_000;
+const CORE_BUDGET_CHARS = 84_000;
 
 /** A bridge that fails the test if anything reaches After Effects. */
 function noAeCtx(log?: (level: string, msg: string) => void): ToolContext {

@@ -436,6 +436,9 @@
   //   [hh:mm:ss] [OK] Checkpoint saved before <tool>: <file>
   // A session starts at the service's "Listening on" line.
   var TOOL_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(OK|ERR)\]\s+tool\s+(\S+)\s+(ok|failed)\s+\((\d+)ms\)(?::\s*(.*))?$/;
+  // A render job that ended failed (or unknown): one ERR line, counted as an error but not as a call.
+  //   [hh:mm:ss] [ERR] job <tool> <job id> (failed|ended unknown): <why>
+  var JOB_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[ERR\]\s+job\s+(\S+)\s+(\S+)\s+(failed|ended unknown):\s*(.*)$/;
   var CHECKPOINT_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[OK\]\s+Checkpoint saved before\s+(\S+):\s*(.*)$/;
   var SESSION_START_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[OK\]\s+Listening on \S*?:(\d+)/;
   var EVENT_LINE = /^\[(\d{2}:\d{2}:\d{2})\]\s+\[(OK|WARN|ERR)\]\s+(.*)$/;
@@ -460,6 +463,10 @@
     var m = TOOL_LINE.exec(line);
     if (m) {
       return { kind: "tool", time: m[1], tool: m[3], ok: m[4] === "ok", ms: parseInt(m[5], 10), error: m[6] || "" };
+    }
+    m = JOB_LINE.exec(line);
+    if (m) {
+      return { kind: "event", time: m[1], level: "err", title: "Render job " + (m[4] === "failed" ? "failed" : "ended unknown") + ": " + m[2], detail: m[3] + (m[5] ? " - " + m[5] : ""), job: true };
     }
     m = CHECKPOINT_LINE.exec(line);
     if (m) {
@@ -528,6 +535,7 @@
         return p;
       }
       if (p.kind === "event") {
+        if (p.job) s.errors += 1;
         s.entries.push(p);
         if (s.entries.length > limit) s.entries.shift();
         return p;

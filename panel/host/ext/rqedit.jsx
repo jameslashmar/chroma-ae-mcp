@@ -20,6 +20,9 @@
 //   group: not undoable). It returns only when the render ends, so the server sends it in
 //   one long evalScript (ae_render_queue_render) and reads the result separately:
 // - rqeditRenderResult (read): item status, elapsed time and output files after a render
+// - rqeditAmeState (read) / rqeditQueueInAme: opt-in hand-over of the queue to Adobe Media Encoder (queueInAME(false) or (true))
+// - rqeditHold / rqeditRelease (guarded writes, one undo group each): uncheck the Render box of the other
+//   QUEUED items so that only chosen ones render, and check it again afterwards on the items that still match
 //
 // What AE allows: the output module Format (and so the codec) is readable but
 // not settable; it changes only through OutputModule.applyTemplate with a
@@ -1669,6 +1672,181 @@
     return n;
   }
 
+  // ---------- render only chosen items: hold the others back, release them after ----------
+
+  function filesOf(it) {
+    var out = [];
+    var o;
+    for (o = 1; o <= it.numOutputModules && o <= MAX_MODULES; o++) {
+      var f = null;
+      try {
+        f = fsNameOf(it.outputModule(o));
+      } catch (e1) {}
+      if (f === null || f === undefined) f = "";
+      out.push(String(f));
+    }
+    return out;
+  }
+
+  function sameFiles(a, b) {
+    var i;
+    if (!isArr(a) || !isArr(b) || a.length !== b.length) return false;
+    for (i = 0; i < a.length; i++) {
+      if (String(a[i]) !== String(b[i])) return false;
+    }
+    return true;
+  }
+
+  function isStatus(it, name) {
+    var v = statusEnumValue(name);
+    return v !== undefined && it.status === v;
+  }
+
+  // Unchecks the Render box of the QUEUED items the caller listed in `hold` so that RenderQueue.render()
+  // renders only the `keep` items. Everything is checked first (no write on a mismatch): not rendering, each kept
+  // item QUEUED and holding its comp, each held item QUEUED at its index with its comp and output files, and no
+  // QUEUED item outside both lists. One undo group. args: keep ([{ index, comp_id }]), hold ([{ index, comp_id, files }]).
+  A.rqeditHold = function (args) {
+    args = args || {};
+    var rq = app.project.renderQueue;
+    requireIdle(rq);
+    var keep = args.keep || [];
+    var hold = args.hold || [];
+    var kept = {};
+    var held = {};
+    var i;
+    var it;
+    for (i = 0; i < keep.length; i++) {
+      it = itemAt(rq, keep[i].index, keep[i].comp_id);
+      if (!isStatus(it, "QUEUED")) {
+        fail("bad_args", "Render queue item " + keep[i].index + " is not QUEUED, so it cannot be the one to render.");
+      }
+      kept[keep[i].index] = true;
+    }
+    for (i = 0; i < hold.length; i++) {
+      var h = hold[i];
+      if (kept[h.index] === true) {
+        fail("bad_args", "Render queue item " + h.index + " is both to be rendered and to be held back.");
+      }
+      it = itemAt(rq, h.index, h.comp_id);
+      if (!isStatus(it, "QUEUED")) {
+        fail("guard", "Render queue item " + h.index + " is no longer QUEUED. The queue changed; read it again.");
+      }
+      if (!sameFiles(filesOf(it), h.files)) {
+        fail("guard", "Render queue item " + h.index + " has other output files than when it was read. The queue changed; read it again.");
+      }
+      held[h.index] = true;
+    }
+    var n;
+    for (n = 1; n <= rq.numItems; n++) {
+      if (kept[n] !== true && held[n] !== true && isStatus(rq.item(n), "QUEUED")) {
+        fail("guard", "Render queue item " + n + " became QUEUED after the queue was read. The queue changed; read it again.");
+      }
+    }
+    if (hold.length === 0) {
+      return { held: [], errors: [], no_op: true };
+    }
+    var done = [];
+    var errors = [];
+    A.withUndo("Chroma AE MCP: render only chosen queue items", function () {
+      var k;
+      for (k = 0; k < hold.length; k++) {
+        try {
+          rq.item(hold[k].index).render = false;
+          done.push({ index: hold[k].index, comp_id: hold[k].comp_id, files: hold[k].files });
+        } catch (e1) {
+          errors.push("item " + hold[k].index + ": " + msgOf(e1));
+        }
+      }
+    });
+    return { held: done, errors: errors };
+  };
+
+  // Checks the Render box again on the items rqeditHold unchecked, but only those that still sit at their
+  // index with the same comp and output files and are UNQUEUED. Anything else is left alone and reported.
+  // Checks first, one undo group, no throw once it has written. args: items ([{ index, comp_id, files }]).
+  A.rqeditRelease = function (args) {
+    args = args || {};
+    var rq = app.project.renderQueue;
+    requireIdle(rq);
+    var items = args.items || [];
+    var restore = [];
+    var skipped = [];
+    var i;
+    var n;
+    for (i = 0; i < items.length; i++) {
+      var h = items[i];
+      var row = { index: h.index, comp_id: h.comp_id, files: h.files };
+      var it = null;
+      if (typeof h.index === "number" && h.index >= 1 && h.index <= rq.numItems) {
+        it = rq.item(h.index);
+      }
+      var sameComp = false;
+      if (it !== null) {
+        try {
+          sameComp = it.comp.id === h.comp_id;
+        } catch (e1) {}
+      }
+      if (it !== null && sameComp) {
+        if (!sameFiles(filesOf(it), h.files)) {
+          row.code = "changed";
+          row.reason = "its output file(s) changed";
+          skipped.push(row);
+        } else if (isStatus(it, "UNQUEUED")) {
+          restore.push(row);
+        } else if (isStatus(it, "QUEUED")) {
+          row.code = "already_queued";
+          row.reason = "it is already queued";
+          skipped.push(row);
+        } else {
+          row.code = "changed";
+          row.reason = "its status is now " + statusName(it.status);
+          skipped.push(row);
+        }
+        continue;
+      }
+      // Not at its index with its comp: say whether the same item sits elsewhere.
+      var now = 0;
+      for (n = 1; n <= rq.numItems && now === 0; n++) {
+        var other = rq.item(n);
+        var match = false;
+        try {
+          match = other.comp.id === h.comp_id && sameFiles(filesOf(other), h.files) && isStatus(other, "UNQUEUED");
+        } catch (e2) {}
+        if (match) now = n;
+      }
+      if (now > 0) {
+        row.code = "moved";
+        row.reason = "it is now at index " + now;
+        row.now_at = now;
+      } else {
+        row.code = "gone";
+        row.reason = "no item with that comp and output file is left";
+      }
+      skipped.push(row);
+    }
+    var restored = [];
+    var errors = [];
+    if (restore.length === 0) {
+      return { restored: restored, not_restored: skipped, errors: errors, no_op: true };
+    }
+    A.withUndo("Chroma AE MCP: queue the items held back from a render", function () {
+      var k;
+      for (k = 0; k < restore.length; k++) {
+        try {
+          rq.item(restore[k].index).render = true;
+          restored.push(restore[k]);
+        } catch (e3) {
+          restore[k].code = "error";
+          restore[k].reason = msgOf(e3);
+          skipped.push(restore[k]);
+          errors.push("item " + restore[k].index + ": " + msgOf(e3));
+        }
+      }
+    });
+    return { restored: restored, not_restored: skipped, errors: errors };
+  };
+
   // Starts AE's own render of the queued items, the same as pressing Render.
   // RenderQueue.render() returns only when the render has ended (done, stopped
   // by the user, or an error), so the server calls this in one long evalScript
@@ -1676,6 +1854,7 @@
   // a render is not undoable. Nothing here changes the project; the server has
   // already checked the queue and the output files.
   A.rqeditRender = function (args) {
+    args = args || {};
     var rq = app.project.renderQueue;
     if (rq.rendering === true) {
       fail("busy", "The Render Queue is already rendering.");
@@ -1684,9 +1863,59 @@
     if (queued === 0) {
       fail("nothing_queued", "No Render Queue item is QUEUED.");
     }
+    if (typeof args.expected_queued === "number" && queued !== args.expected_queued) {
+      fail("guard", "Expected " + args.expected_queued + " QUEUED Render Queue item(s) but " + queued + " are QUEUED, so nothing was rendered. The queue changed after the others were held back.");
+    }
     var started = new Date().getTime();
     rq.render();
     return { returned: true, queued_items: queued, elapsed_ms: new Date().getTime() - started };
+  };
+
+  // Read: can this AE hand the queue to Adobe Media Encoder? canQueueInAME is true only when queued items exist
+  // and the AME command is available (AE Scripting Guide, RenderQueue.canQueueInAME, AE 14.0+). null = property missing.
+  A.rqeditAmeState = function (args) {
+    var rq = app.project.renderQueue;
+    var can = null;
+    var hasFn = false;
+    try {
+      if (typeof rq.canQueueInAME !== "undefined") {
+        can = rq.canQueueInAME === true;
+      }
+    } catch (e1) {}
+    try {
+      hasFn = typeof rq.queueInAME === "function" || typeof rq.queueInAME === "object";
+    } catch (e2) {}
+    return {
+      can_queue_in_ame: can,
+      has_queue_in_ame: hasFn,
+      rendering: rq.rendering === true,
+      queued: countStatus(rq, "QUEUED")
+    };
+  };
+
+  // Hands the QUEUED items to Adobe Media Encoder (RenderQueue.queueInAME(args.start_now === true): false only queues them, true also starts AME's queue). It returns at
+  // once: AME renders on its own and After Effects stays free. No undo group (the project is not changed by this call);
+  // everything is checked before the call and nothing is thrown after it. args: start_now (boolean, default false), expected_queued (number, optional).
+  A.rqeditQueueInAme = function (args) {
+    args = args || {};
+    var rq = app.project.renderQueue;
+    if (rq.rendering === true) {
+      fail("busy", "The Render Queue is already rendering.");
+    }
+    var can = false;
+    try {
+      can = rq.canQueueInAME === true;
+    } catch (e1) {}
+    if (can !== true) {
+      fail("ame_unavailable", "canQueueInAME is not true (no QUEUED item, or Adobe Media Encoder is not available to this After Effects), so nothing was handed over.");
+    }
+    var queued = countStatus(rq, "QUEUED");
+    if (typeof args.expected_queued === "number" && queued !== args.expected_queued) {
+      fail("guard", "Expected " + args.expected_queued + " QUEUED Render Queue item(s) but " + queued + " are QUEUED, so nothing was handed over. The queue changed after the others were held back.");
+    }
+    var started = new Date().getTime();
+    rq.queueInAME(args.start_now === true);
+    return { called: true, start_now: args.start_now === true, queued_items: queued, elapsed_ms: new Date().getTime() - started };
   };
 
   // Item status, elapsed time and output files after a render. args: indexes (1-based queue indexes), comp_ids (the comp each index held when the render started).

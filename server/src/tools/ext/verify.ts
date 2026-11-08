@@ -281,15 +281,16 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
               } else {
                 // Read back in a separate evalScript: the item must be gone.
                 try {
-                  await call("gone", "verifyRead", { item_id: imported.item_id }, false);
-                  itemState = "left";
-                  problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
-                } catch (errG) {
-                  if (errG instanceof BridgeError && /not_found|No imported item/i.test(errG.message)) itemState = "removed";
+                  // verifyExists answers { exists: false } for a missing item, so the good case writes no error line to the service log.
+                  const still = (await call<{ exists: boolean }>("gone", "verifyExists", { item_id: imported.item_id }, false)).result;
+                  if (still && still.exists === false) itemState = "removed";
                   else {
-                    itemState = "unknown";
-                    problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
+                    itemState = "left";
+                    problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
                   }
+                } catch (errG) {
+                  itemState = "unknown";
+                  problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
                 }
               }
             }

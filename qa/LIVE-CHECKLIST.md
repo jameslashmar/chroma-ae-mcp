@@ -19,6 +19,24 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 - [ ] The panel bundle is built (`npm run bundle`) and the dev panel loads it.
 - [ ] A throwaway saved project and a render of a few seconds.
 - [ ] `ae_render_queue_render` end to end: job id at once, status, output files, `ae_verify_render`.
+- [ ] Media Encoder (`engine: "media_encoder"`, opt-in): a throwaway SAVED project with one queued item (ProRes 422 HQ output module, a few seconds), Media Encoder installed. Call without `user_confirmed` (refused with what to tell the user), then with it. Check each of these and write down what you see:
+  - [ ] `start_now` false (default): the items wait in AME's queue, and with which preset (AME's last-used one or the output module's format)? Nothing renders until Start is pressed; the status reads `queued_in_media_encoder`.
+  - [ ] After pressing Start: file growth shows in the status; a file with another extension, if any, is listed under `other_extension_files`.
+  - [ ] `start_now` true: does `queueInAME(true)` start the render in Media Encoder at once (AME opens and the item starts without a click)?
+  - [ ] Media Encoder not installed (or renamed folder): `ame_not_installed`, and what `canQueueInAME` reads then.
+  - [ ] Does Media Encoder keep the AE output module's format (ProRes 422 HQ), or apply its own most recent preset (the AE Scripting Guide says it applies the most recently used preset)?
+  - [ ] What status do the Render Queue items show afterwards (`item_statuses_after_hand_over` in the result, and in AE's panel: still QUEUED, DONE, or something else)?
+  - [ ] Does the output path in Media Encoder match the output module's file (the status tool's `outputs[].exists` turns true, `grew_since_last_check` is true while it writes and false once it is done)?
+  - [ ] Is AE usable during the render (other tools answer, nothing is refused, no render gate)?
+  - [ ] Refusals: an unsaved project and a project with unsaved changes (`project_unsaved`); `canQueueInAME` false when Media Encoder is not installed, or no item queued (`ame_unavailable`).
+  - [ ] With `item_indexes` set to one of two queued items: only that item reaches Media Encoder, and the other is QUEUED again right after (`restore.state: restored`), also if Media Encoder was not installed.
+  - [ ] A long H.264 render of the comp that ran AE out of memory: Media Encoder finishes it while AE stays small.
+- [ ] Render only some items: two or three queued comps, `ae_render_queue_render` with `item_indexes` set to one. The result lists `held_back`; the others read UNQUEUED (Render box unchecked) while it renders, only the chosen one writes a file, and afterwards the others are QUEUED again (box checked) with `restore.state: restored`. One Ctrl+Z step each for the hold and the restore.
+- [ ] Same, with a render that fails (e.g. an unwritable output folder on the chosen item) or that the user stops: the other items are still queued again afterwards.
+- [ ] Same, but edit the queue while it renders if AE allows it (change an output file, or remove or reorder an item): the changed items stay UNQUEUED and `not_restored` names them (`changed`, `moved`, `gone`).
+- [ ] A hold that cannot be confirmed (for instance a locked item): the call is refused with `hold_failed` and every item is QUEUED again.
+- [ ] Quit After Effects mid-render of an `item_indexes` job, start it again: the status shows `restore_pending` and `restore_how`; following it queues the items again.
+- [ ] `render = false` on a QUEUED item reads back UNQUEUED, and `render()` skips it (what the whole feature relies on).
 - [ ] The Stop button during a render: what the job reads afterwards, whether the gate lifts.
 - [ ] An hours-long eval (a render that runs long): the gate stays shut, nothing is resent, nothing times out wrongly.
 - [ ] The overwrite prompt when the output file exists.
@@ -28,6 +46,9 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 
 ## B. Core toolset
 
+- [ ] A Claude Desktop entry WITHOUT `CHROMA_AE_MCP_TOOLSET` in its env, then Desktop quit from the tray and reopened: the relay's line in Desktop's MCP log (`mcp-server-chroma-ae.log`) reads `toolset core (client claude-ai); client "claude-ai"`, and `tools/list` is the short list (36 tools). If the client name is something else, the line says `default full`: change `CORE_CLIENTS` in `panel/tools/stdio-relay.cjs`.
+- [ ] The same entry with `"CHROMA_AE_MCP_TOOLSET": "full"` lists all tools (the line says `(env)`); Cursor or Codex with no variable list all tools (`default full`).
+- [ ] `node panel/tools/usage-report.cjs` shows the client name under **Calls per client**.
 - [ ] The panel's Claude Desktop button (never clicked in a real panel), then Desktop restarted.
 - [ ] How many tools Desktop shows (expect 36: 33 core tools and the 3 meta-tools).
 - [ ] Whether Desktop lets a model call a tool name that is not listed.
@@ -138,3 +159,9 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 - [ ] A parent's children move when the parent is filled.
 - [ ] `comp.layer(i).parent.id` works.
 - [ ] A 4K master with 20 or more feeds: write time.
+
+## J. Real-use fixes (verify log, failed render, hand render)
+
+- [ ] Render by hand in AE's Render Queue (press Render yourself): does `ae_render_queue_status` answer during it, and does `follow` list the item with `grew_since_last_check` true on the second call while the file grows? If AE does not answer, does the answer come from the earlier read with the note?
+- [ ] A good `ae_verify_render`: no `[ERR]` line in the panel Log and the error tile stays at 0.
+- [ ] A failed aerender job (for example one that never starts rendering) and a failed `ae_render_queue_render`: exactly one `[ERR] job ...` line each, and the error tile goes up by one. A cancelled aerender job adds none.

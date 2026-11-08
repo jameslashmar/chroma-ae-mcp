@@ -13,9 +13,10 @@ import {
   trimSchema,
   type ListedTool,
 } from "./toolsets.js";
-import { callTool, findTool, type ToolCallResult } from "./tool-call.js";
+import { callTool, findTool, type CallOptions, type ToolCallResult } from "./tool-call.js";
 import { AGENT_SAFETY_GUIDANCE, formatToolError, formatToolResponse, type ToolContext } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
+import { recordUsage } from "./usage-log.js";
 
 /**
  * The three meta-tools of the core toolset. ae_search_tools and ae_get_tool_schema run in Node
@@ -67,7 +68,7 @@ interface MetaTool {
   unknownFieldHint: string;
   /** Whether the call writes its own `tool ... ok` log line (ae_invoke_tool does not: the inner call logs). */
   logsItself: boolean;
-  run: (args: any, ctx: ToolContext) => Promise<ToolCallResult>;
+  run: (args: any, ctx: ToolContext, opts: CallOptions, usage: { query?: string; hits?: number }) => Promise<ToolCallResult>;
 }
 
 function sizeOf(value: unknown): number {
@@ -97,7 +98,7 @@ export function nameMatcher(pattern: string): (name: string) => boolean {
 
 // ---------- ae_search_tools ----------
 
-async function runSearch(args: z.infer<typeof SearchArgs>): Promise<ToolCallResult> {
+async function runSearch(args: z.infer<typeof SearchArgs>, usage: { query?: string; hits?: number }): Promise<ToolCallResult> {
   const detail = args.detail ?? "summary";
   const limit = args.limit ?? 8;
   const offset = args.offset ?? 0;
@@ -128,6 +129,8 @@ async function runSearch(args: z.infer<typeof SearchArgs>): Promise<ToolCallResu
     ordered = candidates.map((t) => ({ name: t.name, tool: t }));
   }
   const total = ordered.length;
+  usage.query = query || pattern || group;
+  usage.hits = total;
 
   const page: Array<Record<string, unknown>> = [];
   for (const o of ordered.slice(offset, offset + limit)) {
@@ -233,20 +236,23 @@ async function runGetSchema(args: z.infer<typeof SchemaArgs>): Promise<ToolCallR
 
 // ---------- ae_invoke_tool ----------
 
-async function runInvoke(args: z.infer<typeof InvokeArgs>, ctx: ToolContext): Promise<ToolCallResult> {
+async function runInvoke(args: z.infer<typeof InvokeArgs>, ctx: ToolContext, opts: CallOptions): Promise<ToolCallResult> {
   const name = oneLine(args.name, NAME_MAX);
+  const base = { toolset: opts.toolset, client: opts.client, via: "ae_invoke_tool" as const };
   if ((META_TOOL_NAMES as readonly string[]).includes(args.name)) {
     const why = `ae_invoke_tool cannot call ${name}: it is a meta-tool. Call ${name} directly.`;
     ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    recordUsage(ctx, { tool: "ae_invoke_tool", ms: 0, ok: false, errorKind: "error", error: why, ...base });
     return formatToolError(new Error(why));
   }
   if (!findTool(args.name)) {
     const why = `Unknown tool: ${name}. Closest names: ${closestToolNames(args.name).join(", ")}. Use ae_search_tools to find a tool.`;
     ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    recordUsage(ctx, { tool: name, ms: 0, ok: false, errorKind: "unknown_tool", error: why, ...base });
     return formatToolError(new Error(why));
   }
-  // Exactly the tools/call path, under the inner tool's own name.
-  return callTool(args.name, args.arguments, ctx);
+  // Exactly the tools/call path, under the inner tool's own name; the usage log records the real tool once (via ae_invoke_tool).
+  return callTool(args.name, args.arguments, ctx, { toolset: opts.toolset, client: opts.client, via: "ae_invoke_tool" });
 }
 
 // ---------- definitions ----------
@@ -286,7 +292,7 @@ export const META_TOOLS: MetaTool[] = [
     schema: SearchArgs,
     unknownFieldHint: "Allowed fields: query, pattern, group, limit, offset, detail.",
     logsItself: true,
-    run: (a) => runSearch(a),
+    run: (a, _ctx, _o, u) => runSearch(a, u),
   },
   {
     name: "ae_get_tool_schema",
@@ -319,7 +325,7 @@ export const META_TOOLS: MetaTool[] = [
     schema: InvokeArgs,
     unknownFieldHint: "Put the tool's arguments under `arguments`: { name, arguments: { ... } }. Fields beside `name` are not passed on.",
     logsItself: false,
-    run: (a, ctx) => runInvoke(a, ctx),
+    run: (a, ctx, o) => runInvoke(a, ctx, o),
   },
 ];
 
@@ -336,7 +342,8 @@ export function metaToolList(): ListedTool[] {
 export async function callMetaTool(
   name: string,
   rawArgs: Record<string, unknown> | undefined,
-  ctx: ToolContext
+  ctx: ToolContext,
+  opts: CallOptions = {}
 ): Promise<ToolCallResult> {
   const meta = META_BY_NAME.get(name);
   if (!meta) return formatToolError(new Error(`Unknown tool: ${oneLine(name, NAME_MAX)}`));
@@ -350,10 +357,12 @@ export async function callMetaTool(
         .join("; ")}` + (unknown ? ` ${meta.unknownFieldHint}` : "")
     ).slice(0, 600);
     ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine(why, 200)}`);
+    recordUsage(ctx, { tool: meta.name, ms: 0, ok: false, errorKind: "invalid_args", error: why, toolset: opts.toolset, client: opts.client, via: meta.name === "ae_invoke_tool" ? "ae_invoke_tool" : "direct" });
     return formatToolError(new Error(why));
   }
+  const usage: { query?: string; hits?: number } = {};
   try {
-    const result = await meta.run(parsed.data, ctx);
+    const result = await meta.run(parsed.data, ctx, opts, usage);
     if (meta.logsItself) {
       const failed = "isError" in result && result.isError === true;
       ctx.log?.(
@@ -362,11 +371,25 @@ export async function callMetaTool(
           ? `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine((result.content[0] as { text?: string })?.text ?? "", 120)}`
           : `tool ${meta.name} ok (${Date.now() - started}ms)`
       );
+      // ae_invoke_tool is recorded by callTool under the real tool's name, never here.
+      recordUsage(ctx, {
+        tool: meta.name,
+        ms: Date.now() - started,
+        ok: !failed,
+        ...(failed ? { errorKind: "error", error: oneLine((result.content[0] as { text?: string })?.text ?? "", 160) } : {}),
+        toolset: opts.toolset,
+        client: opts.client,
+        via: "direct",
+        ...usage,
+      });
     }
     return result;
   } catch (err) {
     const why = oneLine(err instanceof Error ? err.message : String(err), 200);
     ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${why}`);
+    if (meta.logsItself) {
+      recordUsage(ctx, { tool: meta.name, ms: Date.now() - started, ok: false, errorKind: "error", error: why, toolset: opts.toolset, client: opts.client, via: "direct", ...usage });
+    }
     return formatToolError(err);
   }
 }

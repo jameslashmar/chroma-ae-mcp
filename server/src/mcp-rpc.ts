@@ -48,6 +48,8 @@ const PROMPTS: PromptDef[] = [
 /** Per-request options. `toolset` comes from the X-Chroma-Toolset header (see toolsets.ts). */
 export interface RpcOptions {
   toolset?: Toolset | string | null;
+  /** The X-Chroma-Client value (the MCP client's name, sanitised by the relay). Usage log only. */
+  client?: string | null;
 }
 
 /** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
@@ -115,7 +117,8 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
 async function handleSingleRpc(
   message: unknown,
   ctx: ToolContext,
-  toolset: Toolset
+  toolset: Toolset,
+  client?: string
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -230,8 +233,8 @@ async function handleSingleRpc(
       // Meta-tools answer in either toolset (they are only listed in core). Everything else,
       // listed or not, goes through the one shared path in tool-call.ts.
       const result = isMetaTool(toolName)
-        ? await callMetaTool(toolName, rawArgs, ctx)
-        : await callTool(toolName, rawArgs, ctx);
+        ? await callMetaTool(toolName, rawArgs, ctx, { toolset, client })
+        : await callTool(toolName, rawArgs, ctx, { toolset, client });
       return { jsonrpc: "2.0", id, result };
     }
 
@@ -312,6 +315,7 @@ export async function handleRpc(
 ): Promise<JsonRpcResponse | JsonRpcResponse[] | null> {
   // Any value but "core" (including a bad one) behaves as full.
   const toolset = parseToolset(opts.toolset).toolset;
+  const client = typeof opts.client === "string" && opts.client.trim() ? opts.client : undefined;
   let parsed: unknown = message;
   if (typeof message === "string") {
     try {
@@ -327,7 +331,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset);
+      const res = await handleSingleRpc(item, ctx, toolset, client);
       if (res !== null) {
         results.push(res);
       }
@@ -335,5 +339,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx, toolset);
+  return await handleSingleRpc(parsed, ctx, toolset, client);
 }

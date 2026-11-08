@@ -43,6 +43,7 @@ function home(token = "secret-token") {
 interface Seen {
   auth: string | undefined;
   toolset: string | undefined;
+  client: string | undefined;
   body: any;
 }
 
@@ -54,7 +55,7 @@ async function fakePanel(reply: (body: any) => { status: number; body?: unknown 
     req.on("data", (c) => (text += c));
     req.on("end", () => {
       const body = JSON.parse(text);
-      seen.push({ auth: req.headers.authorization, toolset: req.headers["x-chroma-toolset"] as string | undefined, body });
+      seen.push({ auth: req.headers.authorization, toolset: req.headers["x-chroma-toolset"] as string | undefined, client: req.headers["x-chroma-client"] as string | undefined, body });
       const out = reply(body);
       res.statusCode = out.status;
       if (out.body === undefined) {
@@ -126,11 +127,11 @@ async function runRelay(
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
 
-const initialize = (id: number, protocolVersion = "2025-06-18") => ({
+const initialize = (id: number, protocolVersion = "2025-06-18", clientName: unknown = "test") => ({
   jsonrpc: "2.0",
   id,
   method: "initialize",
-  params: { protocolVersion, capabilities: {}, clientInfo: { name: "test", version: "1" } },
+  params: { protocolVersion, capabilities: {}, clientInfo: { name: clientName, version: "1" } },
 });
 const listTools = (id: number) => ({ jsonrpc: "2.0", id, method: "tools/list" });
 const callStatus = (id: number) => ({
@@ -543,6 +544,82 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const offlineFull = await runRelay(dir, await closedPort(), [initialize(1)]);
     expect(offlineFull[0].result).not.toHaveProperty("instructions");
     expect(fs.existsSync(path.join(dataDir, "relay-instructions-core-cache.json"))).toBe(true);
+  });
+
+  describe("toolset by client name (CHROMA_AE_MCP_TOOLSET unset)", () => {
+    const run = async (clientName: unknown, toolset?: string, stderr?: string[]) => {
+      const { dir } = home();
+      const panel = await fakePanel(listReply);
+      await runRelay(dir, panel.port, [initialize(1, "2025-06-18", clientName), listTools(2), callStatus(3)], { toolset, stderr });
+      return panel.seen;
+    };
+
+    it("gives claude-ai (Claude Desktop) the core toolset, matched case-insensitively", async () => {
+      for (const name of ["claude-ai", "Claude-AI"]) {
+        const seen = await run(name);
+        expect(seen.map((s) => s.toolset), name).toEqual(["core", "core", "core"]);
+      }
+    });
+
+    it("gives cursor, claude-code and other or missing names the full list", async () => {
+      for (const name of ["cursor", "claude-code", "codex-mcp-client", "claude-ai-extra", "my claude-ai", "", undefined, 42]) {
+        const seen = await run(name);
+        expect(seen.map((s) => s.toolset), String(name)).toEqual([undefined, undefined, undefined]);
+      }
+    });
+
+    it("lets the environment win either way", async () => {
+      expect((await run("claude-ai", "full")).map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
+      expect((await run("cursor", "core")).map((s) => s.toolset)).toEqual(["core", "core", "core"]);
+      expect((await run("claude-ai", "")).map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("logs the choice once, with the client name and the reason", async () => {
+      const cases: Array<[unknown, string | undefined, string]> = [
+        ["claude-ai", undefined, 'toolset core (client claude-ai); client "claude-ai"'],
+        ["cursor", undefined, 'toolset full (default full); client "cursor"'],
+        ["cursor", "core", 'toolset core (env); client "cursor"'],
+        ["claude-ai", "full", 'toolset full (env); client "claude-ai"'],
+      ];
+      for (const [name, toolset, line] of cases) {
+        const stderr: string[] = [];
+        await run(name, toolset, stderr);
+        const lines = stderr.filter((l) => l.includes("toolset ") && l.includes("client "));
+        expect(lines, String(name)).toHaveLength(1);
+        expect(lines[0]).toContain(line);
+      }
+    });
+
+    it("uses the full list before any initialize", async () => {
+      const { dir } = home();
+      const panel = await fakePanel(listReply);
+      await runRelay(dir, panel.port, [listTools(1)]);
+      expect(panel.seen.map((s) => s.toolset)).toEqual([undefined]);
+      expect(panel.seen[0].client).toBeUndefined();
+    });
+
+    it("answers the offline initialize by the same rule", async () => {
+      const { dir } = home();
+      const panel = await fakePanel(listReply);
+      await runRelay(dir, panel.port, [initialize(1, "2025-06-18", "claude-ai"), listTools(2)]);
+      const closed = await closedPort();
+      const desktop = await runRelay(dir, closed, [initialize(1, "2025-06-18", "claude-ai"), listTools(2)]);
+      expect(desktop[0].result.instructions).toBe("CORE INSTRUCTIONS");
+      expect(desktop[1].result.tools).toEqual(CORE_TOOLS);
+      const cursor = await runRelay(dir, closed, [initialize(1, "2025-06-18", "cursor")]);
+      expect(cursor[0].result).not.toHaveProperty("instructions");
+    });
+
+    it("sends X-Chroma-Client on every request after the initialize, sanitised and at most 40 characters", async () => {
+      const seen = await run("cursor");
+      expect(seen.map((s) => s.client)).toEqual(["cursor", "cursor", "cursor"]);
+      const messy = await run("Evil\r\nX-Injected: 1 " + "x".repeat(80) + "\u00e9");
+      const sent = messy[0].client as string;
+      expect(sent.length).toBeLessThanOrEqual(40);
+      expect(sent).toMatch(/^[ -~]+$/);
+      expect(sent.startsWith("Evil X-Injected: 1 xxx")).toBe(true);
+      expect(messy.every((s) => s.client === sent)).toBe(true);
+    });
   });
 
   it("survives an older panel that ignores the header: its full list passes through and is not cached as core", async () => {

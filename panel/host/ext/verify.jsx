@@ -6,6 +6,7 @@
 //   starts, into the project
 // - verifyRead (read): what AE reads from the imported item (length, frame
 //   rate, size, audio), in its own evalScript after the import
+// - verifyExists (read): whether the imported item is still there ({ exists }); never raises for a missing item
 // - verifyRemove (guarded write): take the imported item out again
 // - verifyCompInfo (read): the comp the render came from
 //
@@ -122,6 +123,14 @@
     if (!out.still && it.frameRate > 0) out.frames = Math.round(it.duration * it.frameRate);
     try { if (it.file) out.file = it.file.fsName; } catch (eF) {}
     return out;
+  };
+
+  // Whether the imported item is still in the project. A read that never fails for a missing
+  // item, so the bridge logs no error when the cleanup worked (verifyRead raises not_found).
+  A.verifyExists = function (args) {
+    var it = null;
+    try { it = app.project.itemByID(args.item_id); } catch (e) { it = null; }
+    return { item_id: args.item_id, exists: !!(it && it instanceof FootageItem) };
   };
 
   A.verifyRemove = function (args) {
