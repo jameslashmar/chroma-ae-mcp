@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The server and panel bundle. Majors (zod 4, vitest, esbuild) are planned by hand
+  # (docs/ROADMAP.md), so only minor and patch updates open PRs here.
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]

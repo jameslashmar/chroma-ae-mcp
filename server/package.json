@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "bundle": "esbuild src/panel-entry.ts --bundle --platform=node --target=node17 --format=cjs --outfile=../panel/client/mcp-bundle.cjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/pngjs": "^6.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "^0.24.0",
     "typescript": "^5.0.0",
     "vitest": "^2.0.0"
