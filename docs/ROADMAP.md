@@ -9,6 +9,31 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 - CI runs the build, the unit tests, the ExtendScript lint, and the in-panel MCP end to end on AE's own Node (17.7.2).
 - macOS should work but is untested. Popup reading on macOS is written and unit-tested, but has not been run on a Mac.
 
+## Next
+
+Planned on 2026-11-08 after reading premiere-pro-mcp's commits up to v1.30.0 (MIT: port with its copyright notice). Sizes are rough: S small, M medium.
+
+**0.8.0: reliability**
+- [ ] **Write outcomes** (S/M; premiere-pro-mcp `src/workflows/mutation-receipt.ts`, 0716cc8d, 3cffd793). Today a throw part-way through a write leaves the partial changes (`A.withUndo` in `panel/host/core.jsx` closes the group in `finally`) and the server returns a bare `evalscript_error`. Add `A.refuse(code, msg)` for checks before anything is touched (`outcome: "not_applied"`), map any other write error to `outcome: "unknown"` with next steps (one Ctrl+Z, `ae_comp_diff`, the checkpoint), and put `outcome` on success too. Check whether a failure in a later chunk of `ae_batch_set`, `ae_render_batch` or `ae_multi_comp_apply` still reports the chunks that committed.
+- [ ] **Idempotency keys and recent operations** (S/M; `src/workflows/idempotency.ts`, 08f6ddda, 77e45529). Quarantine covers our own timeouts, but a client that gives up and resends runs the write twice. An optional `idempotency_key` handled once in `tools/ext/write-runner.ts` (SHA-256 of key and arguments, 200 entries, 1 h, module-level so every request shares it), and an `ae_recent_ops` read tool.
+- [ ] **Tool groups** (S; `src/workflows/tool-packs.ts`, b4699c66, c15fb464). `CHROMA_AE_MCP_TOOLSET` takes `full`, `core` or group names from `TOOL_GROUPS` (`core,render,captions`); `CHROMA_AE_MCP_TOOL_LIST` names tools; unknown names stop startup with a clear error.
+- [ ] The three items left open by the 0.7.0 live check (below): stopping a render in AE, long H.264 renders, the rest of the checklist.
+- [ ] **zod 4.** `npm audit` reports a high-severity advisory in zod 3 (memory exhaustion on oversized constrained collections, fixed only in 4.6.6+). The server listens on localhost behind a token, so the exposure is small, but every tool schema has to move.
+- [ ] Dev tooling: vitest 2 and esbuild 0.24 carry advisories (dev only, not shipped in the panel); move to current majors.
+
+**0.9.0: delivery checks**
+- [ ] **Sampled-frame render check** (M; `verify_temporal_render_artifact`). `ae_verify_render sample_frames: N` renders N frames of the imported output and of the comp and diffs them with the `ae_compare_frames` code.
+- [ ] **Broadcast-safe check** (M; `inspect_rendered_video_scopes`). `ae_broadcast_safe_check` on PNG samples: luma outside 16–235, chroma and saturation over EBU R103, share and position of the pixels, Broadcast Colors as the fix. 8-bit samples can't support HDR claims; say so.
+- [ ] **Codec and colour tags without ffprobe** (M). A pure-JS MP4/MOV atom reader: `stsd` fourcc (apch, ap4h, avc1), `colr` nclc, size, `mdhd` rate, bitrate, alpha. Closes `ae_check_delivery_file`'s codec gap.
+- [ ] **MOGRT contents** (S/M; theirs only checks the ZIP header). Unzip with Node zlib, read the definition JSON, list exposed controls and compare with `ae_get_essential_graphics`.
+
+**Later**
+- [ ] A folder watcher for Cinema 4D and render outputs (`manage_media_watch`, 8463ea30) that reports new sequences and versions and offers `ae_version_footage`; it never imports by itself.
+- [ ] `ae_can_execute {tool, args}` (`can_execute`): schema, quarantine, render gate, AE busy and guard, without running.
+- [ ] Compact schemas with a session guard (96438c2d): only if measuring shows `expect` costs a lot across the tool list.
+
+Not taken: timeline prediction and post-condition checks (`ae_comp_diff` covers AE), interlacing and letterbox detection (comp renders are progressive; both need ffmpeg), their in-memory export jobs (ours persist and resume), EDL/AAF/OMF/OTIO, telemetry.
+
 ## Open
 
 - [ ] **Live AE run of 0.4:** run the smoke test (`qa/ci-live.mjs`) for the 25 new tools.

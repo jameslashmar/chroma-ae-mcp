@@ -1,5 +1,18 @@
 # chroma-ae-mcp
 
+[![CI](https://img.shields.io/github/actions/workflow/status/jameslashmar/chroma-ae-mcp/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/jameslashmar/chroma-ae-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jameslashmar/chroma-ae-mcp?label=release&color=e34e9c)](https://github.com/jameslashmar/chroma-ae-mcp/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-3f4fa1.svg)](LICENSE)
+[![After Effects](https://img.shields.io/badge/After%20Effects-2026%20(26.x)-674fa1.svg?logo=adobeaftereffects&logoColor=white)](https://www.adobe.com/products/aftereffects.html)
+[![MCP](https://img.shields.io/badge/MCP-2025--11--25-43c0bc.svg)](https://modelcontextprotocol.io/specification/2025-11-25)
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B%20%C2%B7%20CEP%2017.7-f37d5b.svg?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS-f06465.svg)](#)
+
+[![GitHub stars](https://img.shields.io/github/stars/jameslashmar/chroma-ae-mcp?style=flat&logo=github)](https://github.com/jameslashmar/chroma-ae-mcp/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/jameslashmar/chroma-ae-mcp?style=flat&logo=github)](https://github.com/jameslashmar/chroma-ae-mcp/network/members)
+[![Open issues](https://img.shields.io/github/issues/jameslashmar/chroma-ae-mcp.svg)](https://github.com/jameslashmar/chroma-ae-mcp/issues)
+[![Last commit](https://img.shields.io/github/last-commit/jameslashmar/chroma-ae-mcp.svg)](https://github.com/jameslashmar/chroma-ae-mcp/commits/main)
+
 ## What is this?
 
 An MCP server that lets Claude Code, Claude Desktop, Cursor and Codex drive **Adobe After Effects 2026** (AE 26.x, CEP 12) safely, alongside a person who is editing live. It runs **inside After Effects** and starts with it, so there is no separate server to install or run.
@@ -38,6 +51,28 @@ This is an internal Chroma tool, not a consumer product.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
 
 Test details, what is open and what each release added: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Roadmap
+
+Several items come from [premiere-pro-mcp](https://github.com/leancoderkavy/premiere-pro-mcp) (MIT), which solved the same problems for Premiere; details and reasons are in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+**0.8.0: reliability**
+- [ ] Every write reports an outcome: `not_applied` when it was refused before touching the project, `unknown` when it failed part-way, with the safe next step (one Ctrl+Z, `ae_comp_diff`, the checkpoint).
+- [ ] Idempotency keys, so a client that times out and resends doesn't make a second layer or precomp; `ae_recent_ops` lists recent writes and how each ended.
+- [ ] Tool groups: `CHROMA_AE_MCP_TOOLSET=core,render,captions` and an explicit tool list, refusing unknown names at startup.
+- [ ] A render started inside AE that can be stopped, and a guard against long H.264 renders in AE (both seen in the 0.7.0 live check).
+- [ ] zod 4 (a high-severity zod 3 advisory), and the rest of the 0.7.0 live checklist.
+
+**0.9.0: delivery checks**
+- [ ] `ae_verify_render` compares sampled frames of the render with the comp (black or stale frames, lost alpha, gamma shifts, wrong output module).
+- [ ] A broadcast-safe check: luma outside 16–235, chroma over EBU R103, and where in the frame.
+- [ ] Codec and colour tags read from MP4/MOV files without ffprobe (ProRes 4444 vs 422, `colr` primaries and transfer).
+- [ ] Exported MOGRTs opened and their controls checked against Essential Graphics.
+
+**Later**
+- [ ] A watcher for Cinema 4D and render output folders that offers `ae_version_footage` when a new version lands.
+- [ ] `ae_can_execute`: check one call (schema, busy, render gate, guard) without running it.
+- [ ] macOS: popup reading and a live run on a Mac (CI now builds and tests on macOS).
 
 ---
 
