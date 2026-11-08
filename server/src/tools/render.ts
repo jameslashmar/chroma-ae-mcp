@@ -10,20 +10,31 @@ import { QueueWaitError } from "../queue.js";
 import {
   AGENT_SAFETY_GUIDANCE,
   ExpectSchema,
+  type ToolContext,
   type ToolDefinition,
 } from "./common.js";
 import { readAfterWrite } from "./read-back.js";
 import { writeScaledCopy } from "./ext/png-utils.js";
 import { autoCheckpoint, verifyTargetGuard } from "./mutate.js";
 import { preflightRefusal, runPreflightGate } from "./ext/preflight.js";
-import { followDeps, followQueue } from "./ext/rqfollow.js";
+import { followQueue } from "./ext/rqfollow.js";
+import { captureCompFrame } from "./ext/frames.js";
+import {
+  MAX_SAVE_FRAMES,
+  checkSaveFolder,
+  moveRenderedFrame,
+  planFrames,
+  savedFrameName,
+  type SavedFrame,
+} from "./ext/frame-save.js";
 
 export const AeSnapshotFrameSchema = z.object({
   comp_id: z.number().int().describe("The CompItem ID to snapshot."),
   time: z
     .number()
     .min(0)
-    .describe("Composition time in seconds at which to capture the frame."),
+    .optional()
+    .describe("Composition time in seconds at which to capture the frame. Required, except with `save_to` (which takes `frames` or `times`)."),
   scale: z
     .number()
     .gt(0)
@@ -42,6 +53,25 @@ export const AeSnapshotFrameSchema = z.object({
     .describe(
       "Long edge in pixels of the returned PNG. Overrides `scale`. 512 to 1024 is enough for most visual checks and costs far fewer image tokens."
     ),
+  save_to: z
+    .object({
+      folder: z.string().min(1).describe("Absolute path of an existing folder. It is never created."),
+      overwrite: z.boolean().optional().describe("Replace files that already exist. Default false: an existing file refuses the whole call before anything is rendered."),
+    })
+    .optional()
+    .describe("Save full-resolution PNGs of the frames in `frames` or `times` (up to 50) into this folder as `<comp name>_<frame>.png`, instead of one snapshot. Gives each file's path, bytes, frame and time."),
+  frames: z
+    .array(z.number().int().min(0))
+    .min(1)
+    .max(MAX_SAVE_FRAMES)
+    .optional()
+    .describe("With `save_to`: frame numbers (0 is the comp's first frame)."),
+  times: z
+    .array(z.number().min(0))
+    .min(1)
+    .max(MAX_SAVE_FRAMES)
+    .optional()
+    .describe("With `save_to`: times in seconds, each taken to the nearest frame. Use `frames` or `times`, not both."),
 });
 
 export const AeRenderQueueAddSchema = z.object({
@@ -91,6 +121,9 @@ export function isFreshPngFile(
   }
 }
 
+/** The poll of waitForFreshPng. Production keeps 100 ms / 10 s; test/setup-resources.ts sets a short interval so render tests do not sleep. */
+export const pngWaitDeps = { intervalMs: 100, timeoutMs: 10_000 };
+
 /**
  * saveFrameToPng returns before the PNG is written (measured on AE 26.0: the file
  * exists at 0 bytes when evalScript returns and fills in shortly after). Poll
@@ -99,8 +132,8 @@ export function isFreshPngFile(
 export async function waitForFreshPng(
   filePath: string,
   requestStartMs: number,
-  timeoutMs: number = 10_000,
-  intervalMs: number = 100
+  timeoutMs: number = pngWaitDeps.timeoutMs,
+  intervalMs: number = pngWaitDeps.intervalMs
 ): Promise<{ fresh: boolean; size: number; mtimeMs: number }> {
   const deadline = Date.now() + timeoutMs;
   let last = isFreshPngFile(filePath, requestStartMs);
@@ -144,6 +177,82 @@ function snapshotOutput(
   };
 }
 
+type SnapshotArgs = z.infer<typeof AeSnapshotFrameSchema>;
+
+/** `save_to`: renders the chosen frames at full resolution (captureCompFrame, with its stale-frame retry) and copies each into the caller's folder. */
+async function saveChosenFrames(args: SnapshotArgs, ctx: ToolContext, framesDir: string, opId: string): Promise<Record<string, unknown>> {
+  const refuse = (error: string, message: string) => ({ ok: false, error, message });
+  if (!args.save_to) return refuse("save_to_required", "`frames` and `times` are for `save_to: { folder }`. Nothing was rendered.");
+  if ((args.frames === undefined) === (args.times === undefined)) return refuse("frames_or_times", "Pass either `frames` or `times` with `save_to`, not both and not neither. Nothing was rendered.");
+  if (args.time !== undefined) return refuse("time_with_save_to", "`time` is for one snapshot; with `save_to` pass `frames` or `times`. Nothing was rendered.");
+  const { folder } = args.save_to;
+  const overwrite = args.save_to.overwrite === true;
+  const folderProblem = checkSaveFolder(folder);
+  if (folderProblem) return refuse(folderProblem.code, folderProblem.message);
+  fs.mkdirSync(framesDir, { recursive: true });
+
+  try {
+    return await ctx.queue.run(`ae_snapshot_frame(${args.comp_id} save_to)`, async () => {
+      // The comp's name and frame rate, before anything is rendered.
+      const info = await ctx.bridge.evalRaw<Record<string, unknown>>({
+        id: `${opId}_comp`,
+        script: buildJsxCall("getComp", { comp_id: args.comp_id, limit: 1 }),
+        label: `ae_snapshot_frame(${args.comp_id} read comp)`,
+        mutates: false,
+        toolName: "ae_snapshot_frame",
+      });
+      const comp = (info.result ?? {}) as { name?: unknown; fps?: unknown; duration?: unknown };
+      const fps = typeof comp.fps === "number" && comp.fps > 0 ? comp.fps : 0;
+      const duration = typeof comp.duration === "number" ? comp.duration : 0;
+      if (fps === 0 || duration <= 0) return refuse("comp_unreadable", `Could not read the frame rate and duration of comp ${args.comp_id}. Nothing was rendered.`);
+      const compName = typeof comp.name === "string" ? comp.name : `comp${args.comp_id}`;
+
+      const plan = planFrames({ frames: args.frames, times: args.times }, fps, duration);
+      if (plan.problem) return refuse(plan.problem.code, plan.problem.message);
+      const lastFrame = Math.max(0, Math.round(duration * fps) - 1);
+      const targets = plan.picks.map((p) => ({ ...p, dest: path.join(folder, savedFrameName(compName, p.frame, lastFrame)) }));
+      if (!overwrite) {
+        const taken = targets.filter((t) => fs.existsSync(t.dest)).map((t) => t.dest);
+        if (taken.length > 0) {
+          return {
+            ...refuse("file_exists", `${taken.length} file(s) already exist and overwrite is not set; nothing was rendered or written: ${taken.slice(0, 10).join(", ")}${taken.length > 10 ? ", ..." : ""}.`),
+            existing: taken.slice(0, 50),
+          };
+        }
+      }
+
+      const saved: SavedFrame[] = [];
+      const failed: Array<{ frame: number; path: string; error: string }> = [];
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        try {
+          const shot = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: t.time, frameIndex: i, framesDir, toolName: "ae_snapshot_frame" });
+          const bytes = moveRenderedFrame(shot.path, t.dest, overwrite);
+          saved.push({ path: t.dest, bytes, frame: t.frame, time: shot.time });
+        } catch (err) {
+          if (err instanceof BridgeError) throw err;
+          failed.push({ frame: t.frame, path: t.dest, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      return {
+        ok: failed.length === 0,
+        ...(failed.length > 0 ? { error: "some_frames_not_saved" } : {}),
+        comp_id: args.comp_id,
+        comp_name: compName,
+        folder,
+        fps,
+        saved,
+        ...(failed.length > 0 ? { failed } : {}),
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+
 export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_snapshot_frame",
@@ -151,18 +260,26 @@ export const renderTools: ToolDefinition<any>[] = [
       "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. " +
       "saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
       "`path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. " +
+      "To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeSnapshotFrameSchema,
     handler: async (args, ctx) => {
       const scale = args.scale ?? 0.5;
       const framesDir = defaultFramesDir();
-      fs.mkdirSync(framesDir, { recursive: true });
-
       const opId = ctx.bridge.newOpId();
+
+      if (args.save_to !== undefined || args.frames !== undefined || args.times !== undefined) {
+        return saveChosenFrames(args, ctx, framesDir, opId);
+      }
+      if (args.time === undefined) {
+        return { ok: false, error: "time_required", message: "Pass `time` for one snapshot, or `save_to` with `frames` or `times` to save chosen frames. Nothing was rendered." };
+      }
+      const time = args.time;
+      fs.mkdirSync(framesDir, { recursive: true });
 
       try {
         return await ctx.queue.run(
-          `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
+          `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
           async () => {
             const uniqueSuffix1 = `${Date.now()}_${crypto
               .randomBytes(4)
@@ -177,11 +294,11 @@ export const renderTools: ToolDefinition<any>[] = [
               id: `${opId}_try1`,
               script: buildJsxCall("snapshotFrame", {
                 comp_id: args.comp_id,
-                time: args.time,
+                time: time,
                 scale,
                 output_path: pngPath1,
               }),
-              label: `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
+              label: `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
               timeoutMs: SLOW_TIMEOUT_MS,
               mutates: false,
               toolName: "ae_snapshot_frame",
@@ -195,7 +312,7 @@ export const renderTools: ToolDefinition<any>[] = [
                 comp_id: args.comp_id,
                 // snapshotFrame clamps time to the comp's duration; report what was
                 // actually rendered when the host tells us, not the raw request.
-                time: (resp1.result?.time as number | undefined) ?? args.time,
+                time: (resp1.result?.time as number | undefined) ?? time,
                 scale,
                 ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
                 retried: false,
@@ -205,7 +322,7 @@ export const renderTools: ToolDefinition<any>[] = [
             }
 
             // Retry once with a small time nudge
-            const nudgedTime = Math.max(0, args.time + 0.001);
+            const nudgedTime = Math.max(0, time + 0.001);
             const uniqueSuffix2 = `${Date.now()}_${crypto
               .randomBytes(4)
               .toString("hex")}`;
@@ -251,7 +368,7 @@ export const renderTools: ToolDefinition<any>[] = [
               message:
                 "saveFrameToPng did not produce a fresh non-empty PNG after retrying with a time nudge.",
               comp_id: args.comp_id,
-              time: args.time,
+              time: time,
               scale,
               retried: true,
               attempts: [
@@ -397,7 +514,7 @@ export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_status",
     description:
-      "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check. " +
+      "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check (a second read, made only when something renders or an item's Render box is checked). If After Effects does not answer, the earlier read is used and `follow.note` says why (the refusal or timeout, naming the render job when one is running). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueStatusSchema,
     handler: async (_args, ctx) => {
@@ -405,12 +522,13 @@ export const renderTools: ToolDefinition<any>[] = [
       let status: Record<string, unknown> | null = null;
       let readError: unknown;
       try {
-        const res = await ctx.bridge.callHost("rqStatus", {}, { label: toolName, mutates: false, toolName, timeoutMs: followDeps.answerTimeoutMs });
+        // The same wait as before the follow was added: a shorter one would leave this eval running in AE after the tool gave up on it.
+        const res = await ctx.bridge.callHost("rqStatus", {}, { label: toolName, mutates: false, toolName });
         status = (res.result ?? {}) as Record<string, unknown>;
       } catch (err) {
         readError = err;
       }
-      const followed = await followQueue(ctx, status, toolName);
+      const followed = await followQueue(ctx, status, toolName, readError);
       if (status === null) {
         // After Effects did not answer (busy, or the render gate is shut): answer from the last successful read, or fail as before.
         if (!followed) throw readError;

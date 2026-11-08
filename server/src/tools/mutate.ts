@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { BridgeError, SLOW_TIMEOUT_MS } from "../host.js";
 import { buildJsxCall, normalizeGuardPath, pathsMatchForGuard } from "../jsx.js";
+import { lintEs3 } from "../es3-lint.js";
 import { lintJsxSafety, safetyRefusalMessage } from "../jsx-safety-lint.js";
 import { buildReceipt, type ReceiptMismatch } from "../receipts.js";
 import { QueueWaitError } from "../queue.js";
@@ -446,6 +447,18 @@ export async function autoCheckpoint(
   }
 }
 
+/** The refusal for code that is not ES3: each finding with its line, then how to fix it. */
+export function es3RefusalMessage(findings: Array<{ line: number; message: string }>): string {
+  const shown = findings.slice(0, 10).map((f) => `line ${f.line}: ${f.message}`);
+  const more = findings.length > shown.length ? `\n... and ${findings.length - shown.length} more` : "";
+  return (
+    "ae_run_jsx code refused: it is not ES3. Nothing ran.\n" +
+    shown.join("\n") +
+    more +
+    "\nExtendScript is ES3: use var and function declarations; no let/const, arrow functions, template strings, class or for...of."
+  );
+}
+
 export const mutateTools: ToolDefinition<any>[] = [
   {
     name: "ae_run_jsx",
@@ -455,6 +468,7 @@ export const mutateTools: ToolDefinition<any>[] = [
       "and a separate read-back evalScript produces a before/after receipt of `expect.comp_id` (or project summary). " +
       "Note: `app.executeCommand` silently does nothing through CEP; use DOM methods instead (e.g. `layer.duplicate()`). " +
       "Never use chained ternaries (`a ? b : c ? d : e`) in ExtendScript as it parses them left-associatively; use `if/else`. " +
+      "The code must be ES3 (var and function; no let/const, arrow functions, template strings, class or for...of): an ES3 pre-check refuses anything else, with the line, before AE is called. " +
       "A static safety lint runs first and refuses code that calls members which break the hard limits, naming the dedicated tool each time: " +
       "system.callSystem, File/Folder .execute, file writes and deletes (File/Folder remove, rename, copy, create, write, open for writing), " +
       "dialogs (alert, confirm, prompt, File.openDialog, ScriptUI; use ae_ask_user, never app.beginSuppressDialogs, see ae_dialogs), sockets, $.evalFile, #include, $.sleep, " +
@@ -474,6 +488,16 @@ export const mutateTools: ToolDefinition<any>[] = [
           message: safetyRefusalMessage(unsafe, "ae_run_jsx code"),
           line: unsafe[0].line,
           actual: unsafe,
+        });
+      }
+      // ExtendScript is ES3: AE would only answer "Illegal use of reserved word" after a full round trip.
+      const es3 = lintEs3(args.code);
+      if (es3.length > 0) {
+        throw new BridgeError({
+          kind: "evalscript_error",
+          message: es3RefusalMessage(es3),
+          line: es3[0].line,
+          actual: es3,
         });
       }
       if (!args.mutates) {

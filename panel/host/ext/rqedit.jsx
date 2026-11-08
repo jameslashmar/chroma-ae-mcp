@@ -1788,16 +1788,17 @@
         } catch (e1) {}
       }
       if (it !== null && sameComp) {
-        if (!sameFiles(filesOf(it), h.files)) {
+        if (isStatus(it, "QUEUED")) {
+          // Queued again already (by the user, whatever its files are now): nothing to put back.
+          row.code = "already_queued";
+          row.reason = "it is already queued";
+          skipped.push(row);
+        } else if (!sameFiles(filesOf(it), h.files)) {
           row.code = "changed";
           row.reason = "its output file(s) changed";
           skipped.push(row);
         } else if (isStatus(it, "UNQUEUED")) {
           restore.push(row);
-        } else if (isStatus(it, "QUEUED")) {
-          row.code = "already_queued";
-          row.reason = "it is already queued";
-          skipped.push(row);
         } else {
           row.code = "changed";
           row.reason = "its status is now " + statusName(it.status);
@@ -1873,10 +1874,18 @@
 
   // Read: can this AE hand the queue to Adobe Media Encoder? canQueueInAME is true only when queued items exist
   // and the AME command is available (AE Scripting Guide, RenderQueue.canQueueInAME, AE 14.0+). null = property missing.
+  // app_path: Folder.appPackage.fsName (JavaScript Tools Guide: the folder holding the running application's executable), so the
+  // server can look for an "Adobe Media Encoder*" folder beside After Effects' own install folder; null when it cannot be read.
   A.rqeditAmeState = function (args) {
     var rq = app.project.renderQueue;
     var can = null;
     var hasFn = false;
+    var appPath = null;
+    try {
+      appPath = String(Folder.appPackage.fsName);
+    } catch (e0) {
+      appPath = null;
+    }
     try {
       if (typeof rq.canQueueInAME !== "undefined") {
         can = rq.canQueueInAME === true;
@@ -1888,6 +1897,7 @@
     return {
       can_queue_in_ame: can,
       has_queue_in_ame: hasFn,
+      app_path: appPath,
       rendering: rq.rendering === true,
       queued: countStatus(rq, "QUEUED")
     };

@@ -20,23 +20,29 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 - [ ] A throwaway saved project and a render of a few seconds.
 - [ ] `ae_render_queue_render` end to end: job id at once, status, output files, `ae_verify_render`.
 - [ ] Media Encoder (`engine: "media_encoder"`, opt-in): a throwaway SAVED project with one queued item (ProRes 422 HQ output module, a few seconds), Media Encoder installed. Call without `user_confirmed` (refused with what to tell the user), then with it. Check each of these and write down what you see:
-  - [ ] `start_now` false (default): the items wait in AME's queue, and with which preset (AME's last-used one or the output module's format)? Nothing renders until Start is pressed; the status reads `queued_in_media_encoder`.
+  - [x] `start_now` false (default): the items wait in AME's queue, and with which preset (AME's last-used one or the output module's format)? Nothing renders until Start is pressed; the status reads `queued_in_media_encoder`. Measured 2026-11-08 (AE 26.2.1): AME opened and queued the item but with ITS last-used preset (QuickTime, Apple ProRes 4444, so the file became `LIVE_B.mov`) instead of the output module's H.264 (`LIVE_B.mp4`). AME's queue also held an item the user had left there earlier ("Ready"). Not checked: that nothing renders until Start (an unpressed Start was not observed further).
   - [ ] After pressing Start: file growth shows in the status; a file with another extension, if any, is listed under `other_extension_files`.
-  - [ ] `start_now` true: does `queueInAME(true)` start the render in Media Encoder at once (AME opens and the item starts without a click)?
+  - [ ] `start_now` true: does `queueInAME(true)` start the render in Media Encoder at once (AME opens and the item starts without a click)? Not run on purpose 2026-11-08: it would have started the user's earlier AME item too. Now needs `whole_ame_queue_ok: true`.
   - [ ] Media Encoder not installed (or renamed folder): `ame_not_installed`, and what `canQueueInAME` reads then.
-  - [ ] Does Media Encoder keep the AE output module's format (ProRes 422 HQ), or apply its own most recent preset (the AE Scripting Guide says it applies the most recently used preset)?
-  - [ ] What status do the Render Queue items show afterwards (`item_statuses_after_hand_over` in the result, and in AE's panel: still QUEUED, DONE, or something else)?
-  - [ ] Does the output path in Media Encoder match the output module's file (the status tool's `outputs[].exists` turns true, `grew_since_last_check` is true while it writes and false once it is done)?
-  - [ ] Is AE usable during the render (other tools answer, nothing is refused, no render gate)?
+  - [x] Does Media Encoder keep the AE output module's format (ProRes 422 HQ), or apply its own most recent preset (the AE Scripting Guide says it applies the most recently used preset)? Measured 2026-11-08: it applied its own last-used preset (ProRes 4444 .mov), not the module's H.264 .mp4.
+  - [x] What status do the Render Queue items show afterwards (`item_statuses_after_hand_over` in the result, and in AE's panel: still QUEUED, DONE, or something else)? Measured 2026-11-08: AE showed the handed item UNQUEUED (box unchecked) a moment after the hand-over, while our read right after it still said QUEUED.
+  - [ ] Does the output path in Media Encoder match the output module's file (the status tool's `outputs[].exists` turns true, `grew_since_last_check` is true while it writes and false once it is done)? Output file was `LIVE_B.mov` (AME's preset), not the module's `.mp4`; growth once started is still open.
+  - [x] Is AE usable during the render (other tools answer, nothing is refused, no render gate)? Measured 2026-11-08 (hand-over only): AE was not locked.
   - [ ] Refusals: an unsaved project and a project with unsaved changes (`project_unsaved`); `canQueueInAME` false when Media Encoder is not installed, or no item queued (`ame_unavailable`).
-  - [ ] With `item_indexes` set to one of two queued items: only that item reaches Media Encoder, and the other is QUEUED again right after (`restore.state: restored`), also if Media Encoder was not installed.
+  - [ ] `item_indexes` with `engine: "media_encoder"` is refused for now (`item_indexes_with_media_encoder`). Revisit once Queue in AME is measured: does `queueInAME` take only the checked items, does the project stay clean, and could the hold and restore come back (they dirty the saved project)?
+  - [ ] Install check: with Media Encoder in a custom folder beside After Effects' install folder, `ame_not_installed` is not raised; with it nowhere, it is, and the message shows `C:\Program Files\Adobe`.
+  - [ ] `overwrite: true` with an existing output: the old file reads `stale: true` in the status until Media Encoder writes; does it overwrite it, or write `<name>_1.<ext>` (listed under `other_extension_files`)?
+  - [ ] A hand-over that times out (AE busy with a dialog): the answer says `started: "unknown"` (`ame_handover_unknown`) and nothing was resent.
   - [ ] A long H.264 render of the comp that ran AE out of memory: Media Encoder finishes it while AE stays small.
-- [ ] Render only some items: two or three queued comps, `ae_render_queue_render` with `item_indexes` set to one. The result lists `held_back`; the others read UNQUEUED (Render box unchecked) while it renders, only the chosen one writes a file, and afterwards the others are QUEUED again (box checked) with `restore.state: restored`. One Ctrl+Z step each for the hold and the restore.
+- [x] Render only some items: two or three queued comps, `ae_render_queue_render` with `item_indexes` set to one. The result lists `held_back`; the others read UNQUEUED (Render box unchecked) while it renders, only the chosen one writes a file, and afterwards the others are QUEUED again (box checked) with `restore.state: restored`. One Ctrl+Z step each for the hold and the restore. Measured 2026-11-08: `item_indexes` works. Only item 1 rendered (DONE); item 2 was unchecked during the render and restored afterwards (QUEUED again, `restore.state: restored`). Ctrl+Z step counts not checked.
 - [ ] Same, with a render that fails (e.g. an unwritable output folder on the chosen item) or that the user stops: the other items are still queued again afterwards.
 - [ ] Same, but edit the queue while it renders if AE allows it (change an output file, or remove or reorder an item): the changed items stay UNQUEUED and `not_restored` names them (`changed`, `moved`, `gone`).
 - [ ] A hold that cannot be confirmed (for instance a locked item): the call is refused with `hold_failed` and every item is QUEUED again.
 - [ ] Quit After Effects mid-render of an `item_indexes` job, start it again: the status shows `restore_pending` and `restore_how`; following it queues the items again.
-- [ ] `render = false` on a QUEUED item reads back UNQUEUED, and `render()` skips it (what the whole feature relies on).
+- [ ] Same, then start another render with `item_indexes` before queuing the items again: refused with `restore_pending` and `pending_restores`; after queuing them (`ae_render_queue_edit`) the same call goes through. `ae_render_queue_render_status` without a job id lists `pending_restores` behind a newer job.
+- [ ] A render that is stopped or fails writes one line to the panel's error list (`failed`), a lost job after a restart writes one (`ended unknown`).
+- [ ] `ae_render_queue_status` while the user renders by hand: it still answers (no shortened wait on the first read); with an idle queue it makes no second read.
+- [x] `render = false` on a QUEUED item reads back UNQUEUED, and `render()` skips it (what the whole feature relies on). Measured 2026-11-08: confirmed; `render()` skipped item 2.
 - [ ] The Stop button during a render: what the job reads afterwards, whether the gate lifts.
 - [ ] An hours-long eval (a render that runs long): the gate stays shut, nothing is resent, nothing times out wrongly.
 - [ ] The overwrite prompt when the output file exists.
@@ -46,8 +52,8 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 
 ## B. Core toolset
 
-- [ ] A Claude Desktop entry WITHOUT `CHROMA_AE_MCP_TOOLSET` in its env, then Desktop quit from the tray and reopened: the relay's line in Desktop's MCP log (`mcp-server-chroma-ae.log`) reads `toolset core (client claude-ai); client "claude-ai"`, and `tools/list` is the short list (36 tools). If the client name is something else, the line says `default full`: change `CORE_CLIENTS` in `panel/tools/stdio-relay.cjs`.
-- [ ] The same entry with `"CHROMA_AE_MCP_TOOLSET": "full"` lists all tools (the line says `(env)`); Cursor or Codex with no variable list all tools (`default full`).
+- [ ] A Claude Desktop entry WITHOUT `CHROMA_AE_MCP_TOOLSET` in its env, then Desktop quit from the tray and reopened: the relay's line in Desktop's MCP log (`mcp-server-chroma-ae.log`) reads `toolset core (client claude-ai); client "claude-ai"`, and `tools/list` is the short list (36 tools). If the client name is something else, the line says `default full`: change `CORE_CLIENTS` in `panel/tools/stdio-relay.cjs`. Simulated 2026-11-08 (relay with clientInfo, Node 22 and 17.7.2): `claude-ai` got core (36 tools, 79,801 characters, 2,829 characters of instructions). The REAL Claude Desktop client name is still unconfirmed, so this stays open.
+- [ ] The same entry with `"CHROMA_AE_MCP_TOOLSET": "full"` lists all tools (the line says `(env)`); Cursor or Codex with no variable list all tools (`default full`). Simulated 2026-11-08: env `full` plus `claude-ai` got full; `cursor` got full (180 tools, 803,235 characters). Still to see in a real Desktop.
 - [ ] `node panel/tools/usage-report.cjs` shows the client name under **Calls per client**.
 - [ ] The panel's Claude Desktop button (never clicked in a real panel), then Desktop restarted.
 - [ ] How many tools Desktop shows (expect 36: 33 core tools and the 3 meta-tools).
@@ -163,5 +169,14 @@ Run on a throwaway project in `_work/live-check-pr10/`, partly over Remote Deskt
 ## J. Real-use fixes (verify log, failed render, hand render)
 
 - [ ] Render by hand in AE's Render Queue (press Render yourself): does `ae_render_queue_status` answer during it, and does `follow` list the item with `grew_since_last_check` true on the second call while the file grows? If AE does not answer, does the answer come from the earlier read with the note?
-- [ ] A good `ae_verify_render`: no `[ERR]` line in the panel Log and the error tile stays at 0.
-- [ ] A failed aerender job (for example one that never starts rendering) and a failed `ae_render_queue_render`: exactly one `[ERR] job ...` line each, and the error tile goes up by one. A cancelled aerender job adds none.
+- [x] A good `ae_verify_render`: no `[ERR]` line in the panel Log and the error tile stays at 0. Measured 2026-11-08: the "gone" check now logs OK, no ERR line.
+- [ ] A failed aerender job (for example one that never starts rendering) and a failed `ae_render_queue_render`: exactly one `[ERR] job ...` line each, and the error tile goes up by one. A cancelled aerender job adds none. Measured 2026-11-08: the failed aerender job wrote exactly one `[ERR] job ae_aerender_start ... failed:` line. The failed `ae_render_queue_render` case is still open.
+- [ ] aerender with the usual extensions fails in about 15 s with the CEP reason, not 3.5 minutes. The job shows `engine_exit_after_ms`, `cep_children_max` and `cep_autostart`, and one `[ERR]` line.
+
+## K. Fewer tokens per call
+
+- [ ] Compact JSON (no indentation) is read fine by Claude Desktop and by Claude Code: call `ae_search_tools`, `ae_get_project` and `ae_render_queue_render_status` in each and check the model quotes values correctly.
+- [ ] One `ae_render_queue_render_status` (and one `ae_aerender_status`) with `wait_seconds: 30` while a short render runs returns early when the render ends (`waited_ms` well under 30000, state `finished` / `succeeded`). Measured 2026-11-08: `ae_aerender_status` waited 16-30 s per call and woke on the watchdog's phase changes. `ae_render_queue_render_status` returned after 3 s while the render still ran, because the output file appeared; fixed (an AE job now wakes only on a state or restore change; a file wakes only a Media Encoder job). The early return at the end of a real render is still to check.
+- [x] `ae_run_jsx` with `let x = 1;` is refused with the line before AE is called (nothing in the panel Log), and a valid ES3 script still runs. Measured 2026-11-08: let, const, an arrow function and a template string were refused in 33 ms without touching AE; a string or comment containing those words still ran.
+- [ ] After a day of use `node panel/tools/usage-report.cjs` shows **Largest results by tool**.
+

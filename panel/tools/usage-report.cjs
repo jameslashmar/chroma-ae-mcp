@@ -28,6 +28,13 @@ function defaultUsageDir() {
   return path.join(defaultDataDir(), "usage");
 }
 
+// ae_search_tools scores come from BM25 in rankTools (server/src/toolsets.ts). A term found only in a
+// tool description scores about 1 to 3.5; a hit in a tool name or hint words adds the field weight
+// (5 and 3) and, for the name, 1.5 more, so real matches measured 4.9 to 12 and description-only
+// matches measured 2.5 to 3.6. A search whose best hit scores below 4 found, at best, a tool that
+// mentions one query word in passing, so the report lists it beside the searches with 0 hits.
+const LOW_SEARCH_SCORE = 4;
+
 function pad(n) {
   return n < 10 ? "0" + n : String(n);
 }
@@ -105,11 +112,13 @@ function summarize(entries, opts) {
   const tools = {};
   const labels = {};
   const emptySearches = {};
+  const weakSearches = {};
   const busy = {};
   const clients = {};
   const jsx = { count: 0, reads: 0, writes: 0, failed: 0, codeChars: 0 };
   let total = 0;
   let failed = 0;
+  let resultFailed = 0;
   let busyTotal = 0;
   let unreadable = o.skipped || 0;
 
@@ -126,11 +135,25 @@ function summarize(entries, opts) {
     bump(clients, typeof e.client === "string" && e.client ? e.client : "(unknown)");
     let t = tools[e.tool];
     if (!t) {
-      t = { calls: 0, fails: 0, kinds: {}, ms: [] };
+      t = { calls: 0, fails: 0, resultFails: 0, kinds: {}, ms: [], chars: [] };
       tools[e.tool] = t;
     }
     t.calls++;
-    if (typeof e.ms === "number" && isFinite(e.ms)) t.ms.push(e.ms);
+    if (typeof e.ms === "number" && isFinite(e.ms)) {
+      // A call that waited on purpose (wait_seconds) is not slow: count only the time past the wait.
+      const waited = typeof e.waited_ms === "number" && isFinite(e.waited_ms) && e.waited_ms > 0 ? e.waited_ms : 0;
+      t.ms.push(Math.max(0, e.ms - waited));
+    }
+    if (typeof e.result_chars === "number" && isFinite(e.result_chars) && e.result_chars >= 0) t.chars.push(e.result_chars);
+    if (e.ok === true && e.result_ok === false) {
+      // The tool returned { ok: false } without an MCP error: still a failure for this report.
+      failed++;
+      resultFailed++;
+      t.fails++;
+      t.resultFails++;
+      const rk = typeof e.result_kind === "string" && e.result_kind ? e.result_kind : "unspecified";
+      bump(t.kinds, "result:" + rk);
+    }
     if (e.ok === false) {
       failed++;
       t.fails++;
@@ -145,13 +168,23 @@ function summarize(entries, opts) {
       jsx.count++;
       if (e.mutates === true) jsx.writes++;
       else jsx.reads++;
-      if (e.ok === false) jsx.failed++;
+      if (e.ok === false || e.result_ok === false) jsx.failed++;
       if (typeof e.code_chars === "number") jsx.codeChars += e.code_chars;
       const key = normalizeLabel(e.label) || "(no label)";
       bump(labels, key);
     }
-    if (e.tool === "ae_search_tools" && e.ok !== false && e.hits === 0 && typeof e.query === "string") {
-      bump(emptySearches, e.query.toLowerCase().trim() || "(empty)");
+    if (e.tool === "ae_search_tools" && e.ok !== false) {
+      const what =
+        typeof e.query === "string" && e.query.trim()
+          ? e.query.toLowerCase().trim()
+          : typeof e.group === "string" && e.group
+            ? "group:" + e.group
+            : "(empty)";
+      if (e.hits === 0) {
+        bump(emptySearches, what);
+      } else if (typeof e.top_score === "number" && e.top_score < LOW_SEARCH_SCORE) {
+        bump(weakSearches, what + " (best: " + (typeof e.top === "string" ? e.top : "?") + ", score " + e.top_score + ")");
+      }
     }
   }
 
@@ -161,10 +194,17 @@ function summarize(entries, opts) {
     const sorted = t.ms.slice().sort(function (a, b) {
       return a - b;
     });
+    const sortedChars = t.chars.slice().sort(function (a, b) {
+      return a - b;
+    });
     toolRows.push({
       tool: name,
+      medianChars: percentile(sortedChars, 50),
+      maxChars: sortedChars.length ? sortedChars[sortedChars.length - 1] : 0,
+      sized: sortedChars.length,
       calls: t.calls,
       fails: t.fails,
+      resultFails: t.resultFails,
       failRate: t.calls ? t.fails / t.calls : 0,
       kinds: topN(t.kinds, 5),
       medianMs: percentile(sorted, 50),
@@ -186,6 +226,7 @@ function summarize(entries, opts) {
     days: days,
     total: total,
     failed: failed,
+    resultFailed: resultFailed,
     unreadable: unreadable,
     perDay: dayRows,
     topTools: toolRows.slice(0, 15),
@@ -205,6 +246,14 @@ function summarize(entries, opts) {
         return b.p95Ms - a.p95Ms;
       })
       .slice(0, 10),
+    largest: toolRows
+      .filter(function (r) {
+        return r.sized >= 3;
+      })
+      .sort(function (a, b) {
+        return b.medianChars - a.medianChars || b.maxChars - a.maxChars || (a.tool < b.tool ? -1 : 1);
+      })
+      .slice(0, 10),
     runJsx: {
       count: jsx.count,
       reads: jsx.reads,
@@ -214,6 +263,8 @@ function summarize(entries, opts) {
       labels: topN(labels, 20),
     },
     emptySearches: topN(emptySearches, 20),
+    weakSearches: topN(weakSearches, 20),
+    lowSearchScore: LOW_SEARCH_SCORE,
     perClient: topN(clients, 20),
     busy: { total: busyTotal, byTool: topN(busy, 10) },
   };
@@ -225,10 +276,13 @@ function pct(x) {
 
 function render(s) {
   const out = [];
+  out.push("Private: this report contains the user's own project wording (ae_run_jsx labels and search queries). It is not for pasting publicly.");
+  out.push("");
   out.push("# Usage report");
   out.push("");
   out.push("Period: " + s.from + " to " + s.to + " (" + s.days + " days)");
   out.push("Calls: " + s.total + ", failed: " + s.failed + (s.total ? " (" + pct(s.failed / s.total) + ")" : ""));
+  if (s.resultFailed) out.push("Failed includes " + s.resultFailed + " call(s) that returned ok: false without an MCP error.");
   if (s.unreadable) out.push("Unreadable lines skipped: " + s.unreadable);
   if (s.total === 0) {
     out.push("");
@@ -256,6 +310,7 @@ function render(s) {
 
   out.push("");
   out.push("## Tools that fail");
+  out.push("A failure is an MCP error, or a result with ok: false (kinds shown as result:<code>).");
   if (s.failing.length === 0) out.push("- none");
   s.failing.forEach(function (r) {
     const kinds = r.kinds
@@ -268,9 +323,18 @@ function render(s) {
 
   out.push("");
   out.push("## Slowest tools (5 or more calls)");
+  out.push("Time spent waiting on purpose (wait_seconds, logged as waited_ms) is subtracted: ms - waited_ms.");
   if (s.slowest.length === 0) out.push("- none");
   s.slowest.forEach(function (r) {
     out.push("- " + r.tool + ": median " + r.medianMs + " ms, p95 " + r.p95Ms + " ms (" + r.calls + " calls)");
+  });
+
+  out.push("");
+  out.push("## Largest results by tool (3 or more calls with a recorded size)");
+  out.push("Characters of text returned to the client; the biggest outputs are the ones to slim next.");
+  if (s.largest.length === 0) out.push("- none");
+  s.largest.forEach(function (r) {
+    out.push("- " + r.tool + ": median " + r.medianChars + " chars, max " + r.maxChars + " chars (" + r.sized + " calls)");
   });
 
   out.push("");
@@ -287,6 +351,13 @@ function render(s) {
   out.push("## ae_search_tools queries that found nothing");
   if (s.emptySearches.length === 0) out.push("- none");
   s.emptySearches.forEach(function (r) {
+    out.push("- " + r[1] + " x " + r[0]);
+  });
+
+  out.push("");
+  out.push("## ae_search_tools queries with only a weak match (best score below " + s.lowSearchScore + ")");
+  if (s.weakSearches.length === 0) out.push("- none");
+  s.weakSearches.forEach(function (r) {
     out.push("- " + r[1] + " x " + r[0]);
   });
 

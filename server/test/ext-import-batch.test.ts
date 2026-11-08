@@ -26,7 +26,7 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import { SettingsStore } from "../src/settings.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AeImportAssetsSchema, AssetWatcher, assetsTools } from "../src/tools/ext/assets.js";
+import { AeImportAssetsSchema, AssetWatcher, assetDeps, assetsTools } from "../src/tools/ext/assets.js";
 import { AeSetFootageInterpretationSchema, InterpretSettingsSchema, interpretTools, mergeInterpret } from "../src/tools/ext/interpret.js";
 import { FakeFootage, FakeProject, FileSource, GUARD, ImportOptions, loadHost } from "./support/fake-ae.js";
 
@@ -36,6 +36,9 @@ function tempDir(prefix: string): string {
   tmpDirs.push(dir);
   return dir;
 }
+// Files must age past the settle time before they count; a short one keeps the real waits short (production keeps 2 s).
+assetDeps.settleMs = 300;
+
 afterEach(() => {
   ImportOptions.refuse = [];
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
@@ -844,7 +847,7 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     touch(path.join(root, "_assets", "b.png"));
     const project = path.join(root, "Show.aep");
     const { ctx, calls } = importBridge(project, { footage: [] });
-    await new Promise((r) => setTimeout(r, 2100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     const args = AeImportAssetsSchema.parse({
       dry_run: true,
       interpret: { loop: 3 },
@@ -920,7 +923,7 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     const first = path.join(assets, "shot_00001.exr");
     const state = { footage: [first] };
     const { ctx, calls } = importBridge(project, state);
-    await new Promise((r) => setTimeout(r, 2100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     const out: any = await importTool.handler(AeImportAssetsSchema.parse({ expect: { project_path: project } }), ctx);
     expect(out.ok).toBe(true);
     expect(out.scan_truncated).toBeUndefined();
@@ -931,7 +934,7 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     // The watcher does the same with the next new file.
     fs.writeFileSync(path.join(assets, "second.png"), "");
     ctx.settings!.updateAssetWatch({ enabled: true, since: new Date(Date.now() - 3_600_000).toISOString() });
-    await new Promise((r) => setTimeout(r, 2100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     const logs: string[] = [];
     const watcher = new AssetWatcher(ctx, { log: (_l, m) => logs.push(m) });
     expect(await watcher.tick()).toEqual({ imported: 1, failed: 0 });
@@ -945,7 +948,7 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
     for (let i = 0; i < 201; i++) fs.writeFileSync(path.join(assets, `n${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}.png`), "");
     const project = path.join(root, "Show.aep");
     const { ctx, calls } = importBridge(project, { footage: [] });
-    await new Promise((r) => setTimeout(r, 2100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     const out: any = await importTool.handler(AeImportAssetsSchema.parse({ expect: { project_path: project } }), ctx);
     expect(out).toMatchObject({ ok: false, error: "too_many" });
     expect(out.message).toMatch(/subfolder as .folder., or paths/);
@@ -995,7 +998,7 @@ describe("ae_import_assets: interpretation, paths and refusals", () => {
       },
       project
     );
-    await new Promise((r) => setTimeout(r, 2100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     ctx.settings!.updateAssetWatch({ enabled: true, since: new Date(Date.now() - 3_600_000).toISOString() });
     const logs: string[] = [];
     const watcher = new AssetWatcher(ctx, { log: (_l, m) => logs.push(m) });

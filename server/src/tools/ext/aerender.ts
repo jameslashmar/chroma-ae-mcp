@@ -20,6 +20,7 @@ import { blockCode, finishSequenceCheck, liveDirsFromJobs, prepareSequenceCheck,
 import { seqscanDeps } from "../../seqscan.js";
 import { resourceWarningsForRender } from "../../system-resources.js";
 import { renderGate } from "../../render-gate.js";
+import { clampWaitSeconds, waitForChange } from "../../wait-for-change.js";
 
 export const WINDOWS_FALLBACK_AERENDER =
   "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/aerender.exe";
@@ -61,6 +62,8 @@ export interface AerenderJobRecord {
   output_paths?: string[];
   /** CompItem id of the rendered comp, when known. */
   comp_id?: number;
+  /** The tool that launched the job ("ae_render_batch"); absent means ae_aerender_start. Only the failure log line reads it. */
+  launched_by?: string;
   /**
    * Where the start is. "queued": the job has not been spawned yet (state stays
    * "running" so existing readers keep waiting): it waits for an earlier aerender job,
@@ -75,6 +78,18 @@ export interface AerenderJobRecord {
   start_attempts?: number;
   /** When the job was queued instead of started at once. */
   queued_at?: string;
+  /** Windows: how long after the last attempt was spawned its AfterFX.com engine was seen gone (ms), while aerender was alive and showed no render PROGRESS line. */
+  engine_exit_after_ms?: number;
+  /** Windows: the most CEPHtmlEngine.exe children seen under that engine (CEP extensions starting in it). */
+  cep_children_max?: number;
+  /** Windows, set when an engine exit failed an attempt: CEP extensions that start by themselves in After Effects (read from their manifests). */
+  cep_autostart?: CepAutostartEntry[];
+}
+
+/** One CEP extension that starts by itself when After Effects starts or is activated. */
+export interface CepAutostartEntry {
+  id: string;
+  folder: string;
 }
 
 export interface AerenderProgressInfo {
@@ -439,6 +454,8 @@ export class AerenderJobRegistry {
   private readonly filePath: string;
   private readonly jobs: Map<string, AerenderJobRecord> = new Map();
   private readonly procs: Map<string, childProcess.ChildProcess> = new Map();
+  /** Wake-ups for waiting status calls (wait_seconds); called after every update. */
+  private readonly listeners = new Set<() => void>();
   /** The start gate and startup watchdog of this registry's jobs (see AerenderStartGate). */
   readonly gate: AerenderStartGate;
   /**
@@ -447,6 +464,8 @@ export class AerenderJobRegistry {
    * background, such as the watchdog's "never started rendering", shows as an [ERR] line.
    */
   failureSink: ((rec: AerenderJobRecord) => void) | null = null;
+  /** The log function bindFailureLog last bound (so binding it again is a no-op). */
+  failureLogBoundTo: ((level: string, msg: string) => void) | null = null;
 
   constructor(filePath: string = defaultAerenderJobsFilePath(), gate?: Partial<AerenderGateOptions>) {
     this.filePath = filePath;
@@ -472,6 +491,14 @@ export class AerenderJobRegistry {
 
   get(jobId: string): AerenderJobRecord | undefined {
     return this.jobs.get(jobId);
+  }
+
+  /** Calls `wake` after every job update; returns the function that stops it. */
+  onUpdate(wake: () => void): () => void {
+    this.listeners.add(wake);
+    return () => {
+      this.listeners.delete(wake);
+    };
   }
 
   getProcess(jobId: string): childProcess.ChildProcess | undefined {
@@ -514,6 +541,13 @@ export class AerenderJobRegistry {
       this.procs.delete(jobId);
     }
     this.saveToDisk();
+    for (const wake of Array.from(this.listeners)) {
+      try {
+        wake();
+      } catch {
+        // a waiting status call must never break the job
+      }
+    }
     // Whatever ended the job (exit, error, cancel, an interrupted mark), the gate learns of it here.
     if (existing.state === "running" && updated.state !== "running") this.gate.noteEnded(jobId);
     if (existing.state === "running" && updated.state === "failed" && !updated.cancelled && this.failureSink) {
@@ -589,15 +623,28 @@ export class AerenderJobRegistry {
 let defaultRegistry: AerenderJobRegistry | null = null;
 
 /** The service-log line for a failed render job: panel/client/common.js (JOB_LINE) counts it as an error. */
-export function formatJobFailureLine(tool: string, jobId: string, reason: string | undefined): string {
-  const why = (reason ?? "no reason recorded").replace(/\s+/g, " ").trim().slice(0, 200);
+export function formatJobFailureLine(
+  tool: string,
+  jobId: string,
+  reason: string | undefined,
+  exit?: { exit_code?: number | null; signal?: string | null }
+): string {
+  // A plain non-zero exit records no error text: say how the process ended instead.
+  let fallback = "no reason recorded";
+  if (exit && typeof exit.signal === "string" && exit.signal) fallback = `signal ${exit.signal}`;
+  else if (exit && typeof exit.exit_code === "number") fallback = `exit code ${exit.exit_code}`;
+  const why = (reason && reason.trim() ? reason : fallback).replace(/\s+/g, " ").trim().slice(0, 200);
   return `job ${tool} ${jobId} failed: ${why}`;
 }
 
 /** Sends one [ERR] line to the service log when a job of this registry fails. A call without a log leaves the earlier sink alone. */
 export function bindFailureLog(registry: AerenderJobRegistry, log: ((level: string, msg: string) => void) | undefined): void {
   if (!log) return;
-  registry.failureSink = (rec) => log("err", formatJobFailureLine("ae_aerender_start", rec.job_id, rec.error));
+  // Idempotent: binding the same log again changes nothing (every launching tool calls this on each call).
+  if (registry.failureLogBoundTo === log && registry.failureSink) return;
+  registry.failureLogBoundTo = log;
+  // The tool name comes from the job record, so a batch item is not reported as ae_aerender_start.
+  registry.failureSink = (rec) => log("err", formatJobFailureLine(rec.launched_by ?? "ae_aerender_start", rec.job_id, rec.error, rec));
 }
 
 export function getDefaultAerenderRegistry(): AerenderJobRegistry {
@@ -786,6 +833,8 @@ export function selectWholeQueue(read: { numItems?: number; items?: RqItemRead[]
 
 export interface LaunchAerenderParams extends AerenderExtraFlags {
   registry: AerenderJobRegistry;
+  /** The launching tool's name, kept on the record for the failure log line (default ae_aerender_start). */
+  launched_by?: string;
   spawn: SpawnLike;
   aerender_path: string;
   project_path: string;
@@ -821,6 +870,8 @@ export interface AerenderEngineInfo {
   command: string;
   /** CPU time the process has used so far (kernel + user), in ms; absent or null where the list cannot tell. */
   cpu_ms?: number | null;
+  /** CEPHtmlEngine.exe processes whose parent is this engine (CEP extensions started in it); absent means none seen. */
+  cep_children?: number;
 }
 
 /** What a process-list query answers: the engines, or null when the query failed or timed out ("could not tell"). */
@@ -851,6 +902,13 @@ export interface AerenderGateOptions {
   max_start_retries: number;
   /** How long a queued job waits for an earlier job's AfterFX.com engine to end before it fails. */
   engine_wait_ms: number;
+  /**
+   * Windows: how often a job in its start phase (no render PROGRESS line yet) looks at its
+   * own AfterFX.com engine. An engine that was seen and is now gone, with aerender alive and
+   * no PROGRESS line, ends the attempt at once (aerender never notices its engine died).
+   * 0 turns this off.
+   */
+  engine_poll_ms: number;
   /** How often a queued job re-checks the gate. */
   poll_ms: number;
   /** How long the gate reuses a process-list answer; the poll never queries more often than this. */
@@ -918,11 +976,17 @@ export async function listEnginesAsync(
     const quick = await run("tasklist", ["/FI", "IMAGENAME eq AfterFX.com", "/FO", "CSV", "/NH"], 5000);
     if (!/"AfterFX\.com"/i.test(quick)) return [];
     const script =
-      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='AfterFX.com'\" | ForEach-Object { $_.ProcessId.ToString() + [char]9 + $_.ParentProcessId.ToString() + [char]9 + ([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime).ToString() + [char]9 + $_.CommandLine }";
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='AfterFX.com'\" | ForEach-Object { $_.ProcessId.ToString() + [char]9 + $_.ParentProcessId.ToString() + [char]9 + ([uint64]$_.KernelModeTime + [uint64]$_.UserModeTime).ToString() + [char]9 + $_.CommandLine }; Get-CimInstance Win32_Process -Filter \"Name='CEPHtmlEngine.exe'\" | ForEach-Object { 'CEP' + [char]9 + $_.ParentProcessId.ToString() }";
     const out = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", script], 15_000);
     const list: AerenderEngineInfo[] = [];
+    const cepByParent = new Map<number, number>();
     for (const line of out.split(String.fromCharCode(10))) {
       const parts = line.replace(/\r$/, "").split(String.fromCharCode(9));
+      if (parts[0] === "CEP") {
+        const parent = parseInt(parts[1] ?? "", 10);
+        if (Number.isInteger(parent)) cepByParent.set(parent, (cepByParent.get(parent) ?? 0) + 1);
+        continue;
+      }
       const pid = parseInt(parts[0] ?? "", 10);
       const ppid = parseInt(parts[1] ?? "", 10);
       if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
@@ -930,10 +994,125 @@ export async function listEnginesAsync(
       // Win32_Process counts CPU time in 100 ns units.
       list.push({ pid, ppid, cpu_ms: Number.isFinite(ticks) && (parts[2] ?? "") !== "" ? ticks / 10_000 : null, command: parts.slice(3).join(String.fromCharCode(9)) });
     }
+    for (const e of list) {
+      const n = cepByParent.get(e.pid);
+      if (n !== undefined && n > 0) e.cep_children = n;
+    }
     return list;
   } catch {
     return null;
   }
+}
+
+// ---------- Auto-starting CEP extensions ----------
+
+/** Our own extension bundle id; its extensions are listed but left out of the advice text. */
+export const OWN_CEP_ID_PREFIX = "london.chroma.aemcp";
+const CEP_LIST_MAX = 30;
+
+/**
+ * Ids of the extensions in one CEP manifest that run in After Effects (host AEFT) and start
+ * by themselves (a StartOn event of ApplicationActivate or ApplicationInitialized, whatever
+ * the spelling or event namespace).
+ */
+export function autostartExtensionIdsFromManifest(xml: string): string[] {
+  const text = xml.replace(/<!--[\s\S]*?-->/g, "");
+  const hostsOf = (block: string): string[] => {
+    const out: string[] = [];
+    const re = /<Host\b[^>]*?\bName\s*=\s*"([^"]*)"/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(block)) !== null) out.push(m[1].trim().toLowerCase());
+    return out;
+  };
+  const dispatch = /<DispatchInfoList\b[\s\S]*?<\/DispatchInfoList>/i.exec(text);
+  if (!dispatch) return [];
+  const bundleHosts = hostsOf(text.replace(dispatch[0], ""));
+  const ids: string[] = [];
+  const re = /<Extension\b[^>]*?\bId\s*=\s*"([^"]+)"[^>]*>([\s\S]*?)<\/Extension>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(dispatch[0])) !== null) {
+    const block = m[2];
+    const own = hostsOf(block);
+    const hosts = own.length > 0 ? own : bundleHosts;
+    if (!hosts.includes("aeft")) continue;
+    const startOn = /<StartOn\b[^>]*>([\s\S]*?)<\/StartOn>/i.exec(block);
+    if (!startOn) continue;
+    if (/Application(?:Activate|Initiali[sz]ed)/i.test(startOn[1])) ids.push(m[1].trim());
+  }
+  return ids;
+}
+
+/** The CEP extension folders of this machine (Windows). */
+export function defaultCepExtensionDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const dirs: string[] = [];
+  if (env.APPDATA) dirs.push(path.join(env.APPDATA, "Adobe", "CEP", "extensions"));
+  const x86 = env["ProgramFiles(x86)"];
+  if (x86) dirs.push(path.join(x86, "Common Files", "Adobe", "CEP", "extensions"));
+  if (env.ProgramFiles) dirs.push(path.join(env.ProgramFiles, "Common Files", "Adobe", "CEP", "extensions"));
+  return dirs;
+}
+
+/** Reads the manifests of the extension folders under `dirs`. Read-only; never throws; at most 30 entries. */
+export function scanCepAutostart(dirs: string[] = defaultCepExtensionDirs()): CepAutostartEntry[] {
+  const found: CepAutostartEntry[] = [];
+  const seen = new Set<string>();
+  try {
+    for (const dir of dirs) {
+      let names: string[] = [];
+      try {
+        names = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const folder of names) {
+        if (found.length >= CEP_LIST_MAX) return found;
+        try {
+          const manifest = path.join(dir, folder, "CSXS", "manifest.xml");
+          if (fs.statSync(manifest).size > 1_000_000) continue;
+          for (const id of autostartExtensionIdsFromManifest(fs.readFileSync(manifest, "utf8"))) {
+            const key = `${folder}\u0000${id}`;
+            if (seen.has(key) || found.length >= CEP_LIST_MAX) continue;
+            seen.add(key);
+            found.push({ id, folder });
+          }
+        } catch {
+          // no manifest or unreadable: skip this folder
+        }
+      }
+    }
+  } catch {
+    // keep what was found
+  }
+  return found;
+}
+
+let cepAutostartCache: CepAutostartEntry[] | null = null;
+
+/** The scan of this machine's CEP folders, done once per process (Windows only; [] elsewhere). */
+export function cepAutostartCached(): CepAutostartEntry[] {
+  if (cepAutostartCache === null) cepAutostartCache = process.platform === "win32" ? scanCepAutostart() : [];
+  return cepAutostartCache;
+}
+
+/** For tests: forget the cached scan (or put one in). */
+export function resetCepAutostartCache(value: CepAutostartEntry[] | null = null): void {
+  cepAutostartCache = value;
+}
+
+/** The job error when every attempt ended because the AfterFX.com engine exited while CEP extensions were starting in it. */
+export function cepEngineExitMessage(afterS: number, cepChildren: number, attempts: number, list: CepAutostartEntry[]): string {
+  const others = list.filter((e) => !e.id.toLowerCase().startsWith(OWN_CEP_ID_PREFIX));
+  let named = "";
+  if (others.length > 0) {
+    const shown = others.slice(0, 10).map((e) => e.id).join(", ");
+    named = ` Auto-starting CEP extensions on this machine: ${shown}${others.length > 10 ? ` and ${others.length - 10} more` : ""} (all are in cep_autostart).`;
+  }
+  return (
+    `aerender's render engine (AfterFX.com) exited about ${afterS} s after starting, while CEP extensions were starting in it (${cepChildren} CEPHtmlEngine.exe processes), on each of ${attempts} attempts; aerender then waited for it for ever, so each attempt was stopped. ` +
+    `On the machine where this was measured (After Effects 26.2.1), aerender rendered when 5 or fewer auto-starting CEP extensions started in its engine and failed with 6 or more; no single extension and no pair caused it, so it is the number of them together. ` +
+    `Meanwhile, do not ask the user to press Render: render in After Effects with ae_render_queue_render (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true (After Effects stays free; Media Encoder renders the SAVED project). ` +
+    `To use aerender, turn off the auto-starting CEP extensions you do not need until it renders.${named}`
+  );
 }
 
 function defaultGateOptions(): AerenderGateOptions {
@@ -947,6 +1126,7 @@ function defaultGateOptions(): AerenderGateOptions {
     dead_engine_ms: DEFAULT_GATE_DEAD_ENGINE_MS,
     max_start_retries: 2,
     engine_wait_ms: 120_000,
+    engine_poll_ms: 3000,
     poll_ms: 1000,
     engine_cache_ms: 5000,
     now: () => Date.now(),
@@ -1012,6 +1192,13 @@ interface StartCtl {
   /** What holds this job back as the head of the queue (an engine pid, or "unknown"), and since when. */
   blockKey: string | null;
   blockSinceMs: number;
+  /** The fast engine look of the start phase (engine_poll_ms). */
+  pollTimer: unknown;
+  /** Whether the current attempt's own engine was seen, and the most CEP children seen under it. */
+  engineSeen: boolean;
+  attemptCepMax: number;
+  /** One entry per attempt the watchdog stopped: an engine exit (with its numbers) or another cause. */
+  stops: Array<{ engineExit: boolean; afterMs: number; cep: number }>;
 }
 
 interface GateBlocker {
@@ -1353,6 +1540,9 @@ export class AerenderStartGate {
     // log_level "errors" prints no PROGRESS lines, so the log says nothing about a start: only the slow, engine-based check applies.
     ctl.startPhase = ctl.p.log_level !== "errors";
     if (this.opts.engines_known) this.armWatch(ctl, att, ctl.startPhase ? this.opts.startup_limit_ms : this.opts.slow_check_ms);
+    ctl.engineSeen = false;
+    ctl.attemptCepMax = 0;
+    if (this.opts.engines_known && ctl.startPhase && this.opts.engine_poll_ms > 0) this.armPoll(ctl, att);
 
     if (typeof child.unref === "function") {
       child.unref();
@@ -1364,6 +1554,56 @@ export class AerenderStartGate {
       this.opts.clear_timer(ctl.watchTimer);
       ctl.watchTimer = null;
     }
+    if (ctl.pollTimer !== null) {
+      this.opts.clear_timer(ctl.pollTimer);
+      ctl.pollTimer = null;
+    }
+  }
+
+  private armPoll(ctl: StartCtl, att: StartAttempt): void {
+    if (ctl.pollTimer !== null) this.opts.clear_timer(ctl.pollTimer);
+    ctl.pollTimer = this.opts.set_timer(() => this.onPoll(ctl, att), this.opts.engine_poll_ms);
+  }
+
+  /** A fast look at the job's own engine during the start phase. */
+  private onPoll(ctl: StartCtl, att: StartAttempt): void {
+    ctl.pollTimer = null;
+    if (!this.watchValid(ctl, att) || !ctl.startPhase) return;
+    this.queryEngines((s) => this.judgePoll(ctl, att, s));
+  }
+
+  /**
+   * An engine that was seen under this attempt's aerender and is now gone, while aerender is
+   * alive and has written no render PROGRESS line, ends the attempt at once: aerender never
+   * notices that its engine died. Anything unclear keeps waiting for the normal check.
+   */
+  private judgePoll(ctl: StartCtl, att: StartAttempt, s: EngineSample): void {
+    if (!this.watchValid(ctl, att) || !ctl.startPhase) return;
+    const child = ctl.child;
+    const pid = child !== null && typeof child.pid === "number" ? child.pid : null;
+    if (child === null || pid === null) return;
+    if (s.list === null) {
+      this.armPoll(ctl, att);
+      return;
+    }
+    const own = s.list.filter((e) => e.ppid === pid);
+    if (own.length > 0) {
+      ctl.engineSeen = true;
+      let cep = 0;
+      for (const e of own) cep += typeof e.cep_children === "number" ? e.cep_children : 0;
+      if (cep > ctl.attemptCepMax) ctl.attemptCepMax = cep;
+      this.armPoll(ctl, att);
+      return;
+    }
+    if (!ctl.engineSeen) {
+      this.armPoll(ctl, att);
+      return;
+    }
+    if (this.progressState(ctl) === "rendering") return; // the normal check moves on to the slow phase
+    const afterMs = Math.max(0, s.atMs - ctl.attemptStartMs);
+    const afterS = Math.round(afterMs / 1000);
+    ctl.first = null;
+    this.stopAttempt(ctl, att, child, pid, own, `its AfterFX.com engine exited ${afterS} s after the attempt was spawned (${ctl.attemptCepMax} CEPHtmlEngine.exe children seen under it)`, { afterMs, cep: ctl.attemptCepMax });
   }
 
   private armWatch(ctl: StartCtl, att: StartAttempt, ms: number): void {
@@ -1511,10 +1751,18 @@ export class AerenderStartGate {
    * another engine, never AfterFX.exe), and the job is queued for another attempt, or failed
    * after the last.
    */
-  private stopAttempt(ctl: StartCtl, att: StartAttempt, child: childProcess.ChildProcess, pid: number, own: AerenderEngineInfo[], why: string): void {
+  private stopAttempt(ctl: StartCtl, att: StartAttempt, child: childProcess.ChildProcess, pid: number, own: AerenderEngineInfo[], why: string, engineExit?: { afterMs: number; cep: number }): void {
     att.stopped = true;
+    this.clearWatch(ctl);
     ctl.child = null;
     ctl.pastPids.push(pid);
+    ctl.stops.push({ engineExit: engineExit !== undefined, afterMs: engineExit?.afterMs ?? 0, cep: engineExit?.cep ?? 0 });
+    let engineFields: Partial<AerenderJobRecord> = {};
+    if (engineExit !== undefined) {
+      let cepMax = 0;
+      for (const st of ctl.stops) if (st.cep > cepMax) cepMax = st.cep;
+      engineFields = { engine_exit_after_ms: Math.round(engineExit.afterMs), cep_children_max: cepMax, cep_autostart: cepAutostartCached() };
+    }
     const killedEngines: number[] = [];
     for (const e of own) {
       try {
@@ -1541,10 +1789,27 @@ export class AerenderStartGate {
         phase: "queued",
         queued_reason: `attempt ${attempts} showed no render PROGRESS line after ${waitedS} s and ${why}; it was stopped; waiting to start again`,
         start_attempts: attempts,
+        ...engineFields,
       });
       ctl.blockKey = null;
       this.queue.unshift(ctl);
       this.schedulePump(0);
+      return;
+    }
+    const allEngineExits = ctl.stops.length > 0 && ctl.stops.every((st) => st.engineExit && st.cep > 0);
+    let cepMaxAll = 0;
+    for (const st of ctl.stops) if (st.cep > cepMaxAll) cepMaxAll = st.cep;
+    const lastStop = ctl.stops[ctl.stops.length - 1];
+    if (allEngineExits && lastStop) {
+      const cepMessage = cepEngineExitMessage(Math.round(lastStop.afterMs / 1000), cepMaxAll, attempts, cepAutostartCached());
+      this.note(ctl, `AERENDER WATCHDOG: ${cepMessage}`);
+      this.registry.update(ctl.jobId, {
+        state: "failed",
+        error: cepMessage,
+        start_attempts: attempts,
+        ...engineFields,
+        finished_at: new Date().toISOString(),
+      });
       return;
     }
     const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: render in After Effects with ae_render_queue_render (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true (After Effects stays free; Media Encoder renders the SAVED project).`;
@@ -1708,6 +1973,10 @@ export class AerenderStartGate {
       slowLogSize: -1,
       blockKey: null,
       blockSinceMs: 0,
+      pollTimer: null,
+      engineSeen: false,
+      attemptCepMax: 0,
+      stops: [],
     };
     const blocker: GateBlocker | null = this.queue.length === 0 ? this.blocker() : { text: "waiting for earlier queued aerender jobs" };
     if (blocker === null) {
@@ -1812,6 +2081,7 @@ export function launchAerenderJob(p: LaunchAerenderParams): AerenderJobRecord {
     ...(p.whole_queue === true ? { whole_queue: true } : {}),
     ...(p.output_paths && p.output_paths.length > 0 ? { output_paths: p.output_paths } : {}),
     ...(p.comp_id !== undefined ? { comp_id: p.comp_id } : {}),
+    ...(p.launched_by ? { launched_by: p.launched_by } : {}),
     aerender_path: p.aerender_path,
     args: cliArgs,
     log_path: logPath,
@@ -2078,6 +2348,13 @@ export type AeAerenderStartArgs = z.infer<typeof AeAerenderStartSchema>;
 
 export const AeAerenderStatusSchema = z.object({
   job_id: z.string().min(1).describe("Background aerender job ID."),
+  wait_seconds: z
+    .number()
+    .min(0)
+    .max(30)
+    .default(0)
+    .optional()
+    .describe("Wait up to this many seconds (0-30, default 0) for the job's state or phase to change (an output file appearing does not end the wait: it exists long before the render is over), then answer; the reply says waited_ms. Never touches After Effects."),
 });
 
 export type AeAerenderStatusArgs = z.infer<typeof AeAerenderStatusSchema>;
@@ -2374,14 +2651,19 @@ export function createAerenderTools(
       name: "ae_aerender_status",
       description:
         "Check the status of a background `aerender` job (`running`, `succeeded`, `failed`; a running job with phase \"queued\" has not been spawned yet and says why in queued_reason, start_attempts counts the spawns the startup watchdog made), parsing `PROGRESS` lines from `<job>.log` for frame progress, exit code, and the log tail. A job started with rq_index / whole_queue also reports rq_index, item_comp_id and output_paths; with several queue items rendering in a row the percent can be null while frames still count. " +
+        "`wait_seconds` (0-30, default 0) waits for the job's state or phase to change before answering (an output file appearing does not end the wait: aerender creates it long before the render is over) (the reply has `waited_ms`): one call with wait_seconds replaces several polls. It never touches After Effects and holds neither the AE queue nor a lease. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStatusSchema,
       handler: async (args: AeAerenderStatusArgs) => {
         const registry = getRegistry();
-        const job = registry.get(args.job_id);
+        let job = registry.get(args.job_id);
         if (!job) {
           throw new Error(`No aerender job found with job_id "${args.job_id}".`);
         }
+
+        // Waits for a change from what the job was when this call came in; no AE queue, no lease.
+        const waited = await waitForAerenderJob(registry, job.job_id, args.wait_seconds);
+        job = registry.get(args.job_id) ?? job;
 
         const { fullText, tail } = readLogTail(job.log_path);
         const progress = parseAerenderProgress(fullText, {
@@ -2408,6 +2690,9 @@ export function createAerenderTools(
           ...(job.phase ? { phase: job.phase } : {}),
           ...(job.queued_reason ? { queued_reason: job.queued_reason } : {}),
           ...(job.start_attempts !== undefined ? { start_attempts: job.start_attempts } : {}),
+          ...(job.engine_exit_after_ms !== undefined ? { engine_exit_after_ms: job.engine_exit_after_ms } : {}),
+          ...(job.cep_children_max !== undefined ? { cep_children_max: job.cep_children_max } : {}),
+          ...(job.cep_autostart ? { cep_autostart: job.cep_autostart } : {}),
           ...(job.error ? { error: job.error } : {}),
           ...(job.rq_index !== undefined ? { rq_index: job.rq_index } : {}),
           ...(job.item_comp_id !== undefined ? { item_comp_id: job.item_comp_id } : {}),
@@ -2420,6 +2705,7 @@ export function createAerenderTools(
           total_frames: progress.total_frames,
           percent: progress.percent,
           log_tail: tail,
+          ...(waited ? { waited_ms: waited.waited_ms } : {}),
         };
       },
     },
@@ -2474,6 +2760,35 @@ export function createAerenderTools(
       },
     },
   ];
+}
+
+/** The files a job is expected to write (a sequence pattern like [#####] is not a file and never counts as one). */
+function aerenderOutputFiles(job: AerenderJobRecord): string[] {
+  const all = [job.output_path, ...(job.output_paths ?? [])].filter((p): p is string => typeof p === "string" && p.length > 0);
+  return Array.from(new Set(all)).filter((p) => !/\[#+\]/.test(p));
+}
+
+/** What a waiting status call watches in a job: its state and its phase. An output file appearing does not count: aerender creates it long before the render is over. */
+function aerenderSignature(job: AerenderJobRecord): string {
+  return `${job.state}|${job.phase ?? ""}`;
+}
+
+/** wait_seconds for ae_aerender_status. A job that is no longer running is not waited for. Null when no wait was asked. */
+async function waitForAerenderJob(registry: AerenderJobRegistry, jobId: string, seconds: number | undefined): Promise<{ waited_ms: number } | null> {
+  const wait = clampWaitSeconds(seconds);
+  if (wait === 0) return null;
+  const start = registry.get(jobId);
+  if (!start || start.state !== "running") return { waited_ms: 0 };
+  const baseline = aerenderSignature(start);
+  const res = await waitForChange({
+    seconds: wait,
+    subscribe: (wake) => registry.onUpdate(wake),
+    changed: () => {
+      const cur = registry.get(jobId);
+      return !cur || aerenderSignature(cur) !== baseline;
+    },
+  });
+  return { waited_ms: res.waited_ms };
 }
 
 export const aerenderTools: ToolDefinition<any>[] = createAerenderTools();

@@ -528,8 +528,15 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(offlineCore[0].result.tools).toEqual(CORE_TOOLS);
     const offlineFull = await runRelay(dir, closed, [listTools(1)]);
     expect(offlineFull[0].result.tools).toEqual(TOOLS);
-    // Core with no core cache yet does not fall back to the full list.
+    // Core with no core cache yet (an upgrader from 0.7.0): the full cache answers, with one log line.
     fs.rmSync(corePath);
+    const stderr: string[] = [];
+    const upgraded = await runRelay(dir, closed, [listTools(1), listTools(2)], { toolset: "core", stderr });
+    expect(upgraded[0].result.tools).toEqual(TOOLS);
+    expect(upgraded[1].result.tools).toEqual(TOOLS);
+    expect(stderr.filter((l) => l.includes("no core tools cache yet"))).toHaveLength(1);
+    // With neither cache there is still an error.
+    fs.rmSync(path.join(dataDir, "relay-tools-cache.json"));
     const none = await runRelay(dir, closed, [listTools(1)], { toolset: "core" });
     expect(none[0].error).toBeTruthy();
   });

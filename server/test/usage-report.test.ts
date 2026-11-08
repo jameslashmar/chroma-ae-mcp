@@ -59,6 +59,32 @@ describe("usage report summarize", () => {
     expect(s.slowest[0]).toMatchObject({ tool: "slow_tool", medianMs: 100, p95Ms: 190 });
   });
 
+  it("subtracts waited_ms from the time of a call, so waiting is not slowness", () => {
+    const rows: any[] = [];
+    for (let i = 0; i < 5; i++) rows.push(entry("2026-11-07", "waiter", { ms: 20_000 + i, waited_ms: 19_900 }));
+    for (let i = 0; i < 5; i++) rows.push(entry("2026-11-07", "plain", { ms: 500 }));
+    const s = report.summarize(rows, { now: NOW });
+    expect(s.slowest[0]).toMatchObject({ tool: "plain", medianMs: 500 });
+    expect(s.slowest[1]).toMatchObject({ tool: "waiter", medianMs: 102 });
+    expect(report.render(s)).toMatch(/ms - waited_ms/);
+  });
+
+  it("lists the largest results by tool: median and max, only tools with 3 or more sized calls", () => {
+    const rows: any[] = [];
+    for (const n of [1000, 3000, 2000]) rows.push(entry("2026-11-07", "big_tool", { result_chars: n }));
+    for (const n of [10, 20, 30, 40]) rows.push(entry("2026-11-07", "small_tool", { result_chars: n }));
+    for (const n of [99999, 99999]) rows.push(entry("2026-11-07", "rare_tool", { result_chars: n }));
+    rows.push(entry("2026-11-07", "old_tool"), entry("2026-11-07", "old_tool"), entry("2026-11-07", "old_tool"));
+    const s = report.summarize(rows, { now: NOW });
+    expect(s.largest.map((r: any) => r.tool)).toEqual(["big_tool", "small_tool"]);
+    expect(s.largest[0]).toMatchObject({ medianChars: 2000, maxChars: 3000, sized: 3 });
+    expect(s.largest[1]).toMatchObject({ medianChars: 20, maxChars: 40, sized: 4 });
+    const text = report.render(s);
+    expect(text).toContain("## Largest results by tool");
+    expect(text).toContain("- big_tool: median 2000 chars, max 3000 chars (3 calls)");
+    expect(text).not.toContain("rare_tool: median");
+  });
+
   it("groups ae_run_jsx labels after lower-casing and stripping digits and quotes", () => {
     const s = report.summarize(
       [
@@ -84,6 +110,49 @@ describe("usage report summarize", () => {
       { now: NOW }
     );
     expect(s.emptySearches).toEqual([["wobble thing", 2]]);
+  });
+
+  it("lists searches with a weak best hit as well as searches with no hits", () => {
+    const s = report.summarize(
+      [
+        entry("2026-11-07", "ae_search_tools", { query: "make coffee", hits: 11, top: "ae_layout_apply", top_score: 3.21 }),
+        entry("2026-11-07", "ae_search_tools", { query: "Make Coffee", hits: 11, top: "ae_layout_apply", top_score: 3.21 }),
+        entry("2026-11-07", "ae_search_tools", { query: "track a point", hits: 66, top: "ae_track_point", top_score: 9.42 }),
+        entry("2026-11-07", "ae_search_tools", { group: "tracking", hits: 6 }),
+        entry("2026-11-07", "ae_search_tools", { query: "zzzz", hits: 0 }),
+      ],
+      { now: NOW }
+    );
+    expect(s.emptySearches).toEqual([["zzzz", 1]]);
+    expect(s.weakSearches).toEqual([["make coffee (best: ae_layout_apply, score 3.21)", 2]]);
+    const text = report.render(s);
+    expect(text).toContain("only a weak match");
+    expect(text).toContain("- 2 x make coffee (best: ae_layout_apply, score 3.21)");
+  });
+
+  it("counts a result with ok: false as a failure and says so", () => {
+    const s = report.summarize(
+      [
+        entry("2026-11-07", "tool_a"),
+        entry("2026-11-07", "tool_a", { result_ok: false, result_kind: "refused", result_error: "no" }),
+        entry("2026-11-07", "tool_a", { result_ok: false }),
+        entry("2026-11-07", "tool_b", { ok: false, error_kind: "error", error: "x" }),
+      ],
+      { now: NOW }
+    );
+    expect(s.total).toBe(4);
+    expect(s.failed).toBe(3);
+    expect(s.resultFailed).toBe(2);
+    expect(s.failing[0]).toMatchObject({ tool: "tool_a", fails: 2, calls: 3, resultFails: 2 });
+    expect(s.failing[0].kinds).toEqual([["result:refused", 1], ["result:unspecified", 1]]);
+    const text = report.render(s);
+    expect(text).toContain("Failed includes 2 call(s) that returned ok: false without an MCP error.");
+    expect(text).toContain("result:refused 1");
+  });
+
+  it("starts with a line saying the report holds the user's own wording", () => {
+    const text = report.render(report.summarize([entry("2026-11-07", "tool_a")], { now: NOW }));
+    expect(text.split("\n")[0]).toMatch(/not for pasting publicly/);
   });
 
   it("counts calls per client, with entries that have no client under (unknown)", () => {
