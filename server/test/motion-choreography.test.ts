@@ -485,3 +485,30 @@ describe("ae_motion_review with choreography checks", () => {
     }
   });
 });
+
+describe("choreography: a move split by a roving key", () => {
+  // The review's fix for a linear A-B-C move: ease the end keys, rove the middle one. AE then
+  // holds it as two segments, "speeds up" into the middle key and "slows down" out of it.
+  const split = (layer = L(1)) => prop({ layer, match: "ADBE Position", keys: [[0, 100], [1, 320], [2, 540]], shapes: ["easein", "easeout"] });
+
+  it("reads the two halves as one ease in-out, not an entrance that only eases in", () => {
+    const f = run([split()], [info(1, { out_point: 10 })], spec(), ["direction"]);
+    expect(f).toEqual([]);
+  });
+  it("runs the whole review (the after-the-fix state) with no medium finding", () => {
+    const p = split();
+    const speeds = sampleSpeeds(p.samples);
+    const own = reviewProperty(p.samples, p.analysis, speeds, p.path as never, { comp_id: 7, project_path: "C:/jobs/Shot.aep" });
+    const all = [...own, ...run([p], [info(1, { out_point: 2 })])];
+    expect(all.filter((x) => x.severity === "medium")).toEqual([]);
+  });
+  it("still flags a real exit that only eases out, however many keys it has", () => {
+    const p = prop({ layer: L(1), match: "ADBE Position", keys: [[8, 100], [9, 320], [10, 540]], shapes: ["linear", "easeout"] });
+    // linear then ease-out: the join is not a pass-through (speeds differ), so the last tween is a plain ease out.
+    expect(kinds(run([p], [info(1, { out_point: 10 })], spec(), ["direction"]))).toEqual(["wrong_direction"]);
+  });
+  it("keeps a key where the move stops as a boundary", () => {
+    const p = prop({ layer: L(1), match: "ADBE Position", keys: [[0, 100], [1, 320], [2, 540]], shapes: ["inout", "inout"] });
+    expect(kinds(run([p], [info(1)], spec(), ["direction"]))).toEqual([]);
+  });
+});

@@ -247,6 +247,20 @@ describe("ae_describe_comp layout argument", () => {
     expect(out.layout.rects_unavailable).toBe(3);
   });
 
+  it("puts the layout fields flat on each layer row: no nested `layout` key there, only at the top", async () => {
+    const { project, comp } = template();
+    const { A } = load(project);
+    const raw = JSON.parse(JSON.stringify(A.describeRead({ comp_id: comp.id, layout: true })));
+    const { ctx } = bridge(raw);
+    // include_layers together with layout must keep every layout field.
+    const out: any = await tool.handler(AeDescribeCompSchema.parse({ comp_id: comp.id, layout: true, include_layers: true }), ctx);
+    expect(out.ok).toBe(true);
+    expect(out.layout).toBeDefined();
+    expect(Array.isArray(out.regions)).toBe(true);
+    expect(out.layers.some((l: any) => l.layout !== undefined)).toBe(false);
+    expect(out.layers.every((l: any) => "rect" in l && "masks_total" in l && "enabled" in l)).toBe(true);
+  });
+
   it("is unchanged without layout: no layout fields, layer rows only on request", async () => {
     const { project, comp } = template();
     const { A } = load(project);
