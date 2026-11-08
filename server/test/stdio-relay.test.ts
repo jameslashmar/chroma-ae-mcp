@@ -157,7 +157,7 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
       { jsonrpc: "2.0", method: "notifications/initialized" },
       listTools(2),
       callStatus(3),
-    ]);
+    ], { toolset: "full" });
 
     expect(panel.seen.map((s) => s.body.method)).toEqual([
       "initialize",
@@ -493,8 +493,8 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(panel.seen.every((s) => s.toolset === "core")).toBe(true);
   });
 
-  it("sends no toolset header when the variable is unset, empty or full", async () => {
-    for (const toolset of [undefined, "", "full", "FULL"]) {
+  it("sends no toolset header when the variable is empty or full", async () => {
+    for (const toolset of ["", "full", "FULL"]) {
       const { dir } = home();
       const panel = await fakePanel(listReply);
       await runRelay(dir, panel.port, [initialize(1), listTools(2)], { toolset });
@@ -526,7 +526,7 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const closed = await closedPort();
     const offlineCore = await runRelay(dir, closed, [listTools(1)], { toolset: "core" });
     expect(offlineCore[0].result.tools).toEqual(CORE_TOOLS);
-    const offlineFull = await runRelay(dir, closed, [listTools(1)]);
+    const offlineFull = await runRelay(dir, closed, [listTools(1)], { toolset: "full" });
     expect(offlineFull[0].result.tools).toEqual(TOOLS);
     // Core with no core cache yet (an upgrader from 0.7.0): the full cache answers, with one log line.
     fs.rmSync(corePath);
@@ -548,7 +548,7 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(online[0].result.instructions).toBe("CORE INSTRUCTIONS");
     const offline = await runRelay(dir, await closedPort(), [initialize(1)], { toolset: "core" });
     expect(offline[0].result.instructions).toBe("CORE INSTRUCTIONS");
-    const offlineFull = await runRelay(dir, await closedPort(), [initialize(1)]);
+    const offlineFull = await runRelay(dir, await closedPort(), [initialize(1)], { toolset: "full" });
     expect(offlineFull[0].result).not.toHaveProperty("instructions");
     expect(fs.existsSync(path.join(dataDir, "relay-instructions-core-cache.json"))).toBe(true);
   });
@@ -561,30 +561,41 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
       return panel.seen;
     };
 
-    it("gives claude-ai (Claude Desktop) the core toolset, matched case-insensitively", async () => {
-      for (const name of ["claude-ai", "Claude-AI"]) {
+    it("gives claude-ai, the Store build's local-agent-mode name, cursor, unknown and missing names the core toolset", async () => {
+      for (const name of ["claude-ai", "Claude-AI", "local-agent-mode-chroma-ae", "cursor", "codex-mcp-client", "something-new", "claude-code-extra", "", undefined, 42]) {
         const seen = await run(name);
-        expect(seen.map((s) => s.toolset), name).toEqual(["core", "core", "core"]);
+        expect(seen.map((s) => s.toolset), String(name)).toEqual(["core", "core", "core"]);
       }
     });
 
-    it("gives cursor, claude-code and other or missing names the full list", async () => {
-      for (const name of ["cursor", "claude-code", "codex-mcp-client", "claude-ai-extra", "my claude-ai", "", undefined, 42]) {
+    it("gives claude-code (any case) the full list", async () => {
+      for (const name of ["claude-code", "Claude-Code", "CLAUDE-CODE"]) {
         const seen = await run(name);
-        expect(seen.map((s) => s.toolset), String(name)).toEqual([undefined, undefined, undefined]);
+        expect(seen.map((s) => s.toolset), name).toEqual([undefined, undefined, undefined]);
       }
     });
 
     it("lets the environment win either way", async () => {
       expect((await run("claude-ai", "full")).map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
+      expect((await run("cursor", "full")).map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
+      expect((await run("claude-code", "core")).map((s) => s.toolset)).toEqual(["core", "core", "core"]);
       expect((await run("cursor", "core")).map((s) => s.toolset)).toEqual(["core", "core", "core"]);
       expect((await run("claude-ai", "")).map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
     });
 
+    it("treats an invalid environment value as full and logs it once", async () => {
+      const stderr: string[] = [];
+      const seen = await run("claude-ai", "bogus", stderr);
+      expect(seen.map((s) => s.toolset)).toEqual([undefined, undefined, undefined]);
+      expect(stderr.filter((l) => l.includes("is not 'core' or 'full'"))).toHaveLength(1);
+    });
+
     it("logs the choice once, with the client name and the reason", async () => {
       const cases: Array<[unknown, string | undefined, string]> = [
-        ["claude-ai", undefined, 'toolset core (client claude-ai); client "claude-ai"'],
-        ["cursor", undefined, 'toolset full (default full); client "cursor"'],
+        ["claude-ai", undefined, 'toolset core (default core); client "claude-ai"'],
+        ["local-agent-mode-chroma-ae", undefined, 'toolset core (default core); client "local-agent-mode-chroma-ae"'],
+        ["cursor", undefined, 'toolset core (default core); client "cursor"'],
+        ["claude-code", undefined, 'toolset full (client claude-code); client "claude-code"'],
         ["cursor", "core", 'toolset core (env); client "cursor"'],
         ["claude-ai", "full", 'toolset full (env); client "claude-ai"'],
       ];
@@ -597,11 +608,11 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
       }
     });
 
-    it("uses the full list before any initialize", async () => {
+    it("uses the core list before any initialize", async () => {
       const { dir } = home();
       const panel = await fakePanel(listReply);
       await runRelay(dir, panel.port, [listTools(1)]);
-      expect(panel.seen.map((s) => s.toolset)).toEqual([undefined]);
+      expect(panel.seen.map((s) => s.toolset)).toEqual(["core"]);
       expect(panel.seen[0].client).toBeUndefined();
     });
 
@@ -614,7 +625,9 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
       expect(desktop[0].result.instructions).toBe("CORE INSTRUCTIONS");
       expect(desktop[1].result.tools).toEqual(CORE_TOOLS);
       const cursor = await runRelay(dir, closed, [initialize(1, "2025-06-18", "cursor")]);
-      expect(cursor[0].result).not.toHaveProperty("instructions");
+      expect(cursor[0].result.instructions).toBe("CORE INSTRUCTIONS");
+      const code = await runRelay(dir, closed, [initialize(1, "2025-06-18", "claude-code")]);
+      expect(code[0].result).not.toHaveProperty("instructions");
     });
 
     it("sends X-Chroma-Client on every request after the initialize, sanitised and at most 40 characters", async () => {

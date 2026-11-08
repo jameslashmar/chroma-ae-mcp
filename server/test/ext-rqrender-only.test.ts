@@ -15,6 +15,7 @@ import {
   RenderJobStore,
   ameNearApp,
   ameRootCandidates,
+  readAmePreset,
   bindJobFailureLog,
   jobsFileFor,
   planStart,
@@ -37,13 +38,16 @@ const tmp = () => {
 };
 const realAmeInstalled = rqrenderDeps.ameInstalled;
 const realAmeNear = rqrenderDeps.ameNearApp;
+const realReadAmePreset = rqrenderDeps.readAmePreset;
 beforeEach(() => {
+  rqrenderDeps.readAmePreset = () => null; // never read this machine's real Media Encoder prefs
   rqrenderDeps.ameInstalled = () => true;
   rqrenderDeps.ameNearApp = realAmeNear;
   renderGate.reset();
   resetRenderJobStores();
 });
 afterEach(() => {
+  rqrenderDeps.readAmePreset = realReadAmePreset;
   rqrenderDeps.ameInstalled = realAmeInstalled;
   rqrenderDeps.ameNearApp = realAmeNear;
   renderGate.reset();
@@ -673,6 +677,73 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
     expect(out.refused[0].message).toMatch(/check the preset and format/);
     expect(out.refused[0].message).toMatch(/other items already in Media Encoder.s queue start too/);
     expect(out.refused[0].message).toMatch(/ProRes 4444/);
+  });
+
+  it("the consent refusal carries a structured warning about AME's own preset", async () => {
+    const f = fakeAe({ saved: true });
+    const out = await start(f.ctx, { engine: "media_encoder", expect: { project_path: SAVED_PATH } });
+    expect(out.warnings[0]).toMatch(/its own last-used preset/);
+  });
+
+  it("result warns that AME uses its own preset and names what the output module asked for; unreadable prefs say so and do not fail", async () => {
+    const f = fakeAe({ saved: true });
+    const out = await ame(f.ctx);
+    expect(out.ok).toBe(true);
+    expect(out.warnings.join(" ")).toMatch(/its own last-used preset/);
+    expect(out.warnings.join(" ")).toMatch(/could not be read/);
+    expect(out.warnings.join(" ")).toMatch(/before pressing Start/);
+    expect(out.ame_preset).toMatchObject({ read: false });
+    expect(out.output_module_asked_for.length).toBeGreaterThan(0);
+    expect(out.output_module_asked_for[0]).toMatchObject({ item_index: 1, module: 1 });
+    expect(typeof out.output_module_asked_for[0].extension).toBe("string");
+  });
+
+  it("a readable preset is named in ame_preset and a differing format is warned about", async () => {
+    rqrenderDeps.readAmePreset = () => ({ name: "Apple ProRes 4444", format_code: "MooV", extensions: ["mov"], source_file: "AMEPrefs.xml" });
+    const f = fakeAe({ saved: true });
+    const ext = path.extname(f.list[0].mods[0].file.fsName).slice(1).toLowerCase();
+    const out = await ame(f.ctx);
+    expect(out.ame_preset).toMatchObject({ name: "Apple ProRes 4444", source_file: "AMEPrefs.xml" });
+    const text = out.warnings.join(" ");
+    if (ext === "mov") expect(text).not.toMatch(/will not be what the output module asked for/);
+    else expect(text).toMatch(/"Apple ProRes 4444".*will not be what the output module asked for/);
+  });
+
+  it("a preset reader that throws never fails the hand-over", async () => {
+    rqrenderDeps.readAmePreset = () => {
+      throw new Error("boom");
+    };
+    const f = fakeAe({ saved: true });
+    const out = await ame(f.ctx);
+    expect(out).toMatchObject({ ok: true, started: true });
+    expect(out.ame_preset).toMatchObject({ read: false });
+    expect(f.rq.ameCalls).toEqual([false]);
+  });
+
+  it("readAmePreset reads AMEPrefs.xml and PresetCache.xml of the newest version folder; missing or odd files give null", () => {
+    const home = tmp();
+    expect(readAmePreset(home)).toBeNull(); // no folder at all
+    const base = path.join(home, "Documents", "Adobe", "Adobe Media Encoder");
+    const old = path.join(base, "25.0");
+    const cur = path.join(base, "26.0");
+    fs.mkdirSync(old, { recursive: true });
+    fs.mkdirSync(cur, { recursive: true });
+    expect(readAmePreset(home)).toBeNull(); // folders without prefs
+    const id = "a7782c70-0394-4055-8ba2-17c06d1d376b";
+    fs.writeFileSync(path.join(cur, "AMEPrefs.xml"), `<prop.pair>\n<key>Preset Preference</key>\n<ustring>${id}</ustring>\n</prop.pair>`);
+    expect(readAmePreset(home)).toBeNull(); // prefs but no cache to resolve the id
+    fs.writeFileSync(
+      path.join(cur, "PresetCache.xml"),
+      `<PremiereData><Key Version="1" Index="0"><Key Version="3" Index="24"><PresetFileType>1299148630</PresetFileType><PresetClassID>1061109567</PresetClassID>` +
+        `<PresetName>($$$/AME/EncoderHost/Presets/${id}/PresetName=Apple ProRes 4444)</PresetName><PresetID>${id}</PresetID>` +
+        `<FolderDisplayPath>System Presets/Broadcast/Apple ProRes</FolderDisplayPath></Key></Key></PremiereData>`
+    );
+    const r = readAmePreset(home);
+    expect(r).toMatchObject({ name: "Apple ProRes 4444", folder: "System Presets/Broadcast/Apple ProRes", format_code: "MooV", extensions: ["mov"] });
+    expect(r?.source_file).toBe(path.join(cur, "AMEPrefs.xml"));
+    // garbage never throws
+    fs.writeFileSync(path.join(cur, "AMEPrefs.xml"), "\u0000\u0001 not xml");
+    expect(readAmePreset(home)).toBeNull();
   });
 
   it("start_now true without whole_ame_queue_ok is refused before anything is sent to AE or AME", async () => {

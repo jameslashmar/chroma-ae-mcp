@@ -6,7 +6,7 @@ import { ALL_TOOLS } from "./tools/registry.js";
  * Toolsets.
  *
  * - "full" (the default): tools/list returns ALL_TOOLS exactly as the tools define themselves.
- * - "core": a small list for hosts that load every tool schema into context (Claude Desktop):
+ * - "core": a small list for hosts that load every tool schema into context (stdio clients such as Claude Desktop; the relay picks it for all but Claude Code):
  *   the CORE_TOOL_NAMES with trimmed text, plus three meta-tools (ae_search_tools,
  *   ae_get_tool_schema, ae_invoke_tool) that reach the rest. The Zod schemas and the full
  *   definitions are never touched; validation is always against the full schema.

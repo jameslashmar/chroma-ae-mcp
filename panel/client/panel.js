@@ -632,7 +632,7 @@
     var text = setup.where;
     if (chosenClient === "claude-desktop" && already) {
       if (entry && entry.toolset === "unset") {
-        text = "Claude Desktop has chroma-ae with no CHROMA_AE_MCP_TOOLSET. It should get the core toolset (short list plus search) by default when it reports itself as Claude Desktop; the button pins core in the config to be sure and backs up the config first, then quit Claude Desktop from the tray and reopen it. CHROMA_AE_MCP_TOOLSET=full in the entry's env lists all tools.";
+        text = "Claude Desktop has chroma-ae with no CHROMA_AE_MCP_TOOLSET. It should get the core toolset (short list plus search) by default; the button pins core in the config to be sure and backs up the config first, then quit Claude Desktop from the tray and reopen it. CHROMA_AE_MCP_TOOLSET=full in the entry's env lists all tools.";
       } else if (entry && entry.toolset === "core") {
         text = "Claude Desktop has chroma-ae with the core toolset. To list all tools, set CHROMA_AE_MCP_TOOLSET=full in the entry's env in claude_desktop_config.json and restart Claude Desktop.";
       } else {

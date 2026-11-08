@@ -18,9 +18,12 @@
 //   request in an X-Chroma-Toolset header; full sends nothing.
 //   * CHROMA_AE_MCP_TOOLSET set: it wins ("core", "full"; anything else is logged once and
 //     treated as full).
-//   * Unset: decided at the client's initialize from params.clientInfo.name. Claude Desktop
-//     (believed to be "claude-ai", matched exactly, case-insensitively) gets core; every other
-//     client (Cursor, Codex, ...) gets full. Before an initialize it is full.
+//   * Unset: every client gets core, except clients known to load MCP tool schemas on demand
+//     themselves (FULL_CLIENTS, today only Claude Code, clientInfo.name "claude-code", matched
+//     case-insensitively), which get full. The name is read at the client's initialize; an
+//     unknown name or a missing clientInfo gets core. Before an initialize it is core too: a
+//     client that skips the handshake gets the cheap list, and a missing core cache falls back
+//     to the full cached list, so nothing is lost.
 //   The choice is logged once on stderr (the host's MCP log) with the client name and the
 //   reason. The tool list cache is kept per toolset.
 // - X-Chroma-Client carries the client's name (sanitised, at most 40 characters) on every
@@ -59,7 +62,7 @@ function resolvePort() {
 // A set value that is not "core" or "full" behaves as full, with one line on stderr.
 function resolveToolset() {
   const raw = process.env.CHROMA_AE_MCP_TOOLSET;
-  if (raw === undefined) return { set: false, toolset: "full", note: "" };
+  if (raw === undefined) return { set: false, toolset: "core", note: "" };
   const v = String(raw).trim().toLowerCase();
   if (v === "" || v === "full") return { set: true, toolset: "full", note: "" };
   if (v === "core") return { set: true, toolset: "core", note: "" };
@@ -70,8 +73,10 @@ function resolveToolset() {
   };
 }
 
-// Client names that get core when the environment does not choose. Exact, lower case.
-const CORE_CLIENTS = ["claude-ai"];
+// Client names that get the full list when the environment does not choose; every other client
+// gets core. Exact, lower case. Claude Code defers MCP tool schemas natively, so the full list
+// costs it little and direct calls to the real tool names work better there.
+const FULL_CLIENTS = ["claude-code"];
 
 // A client name that is safe in a header and a log line: printable ASCII only, one line, 40 characters.
 function sanitizeClientName(raw) {
@@ -81,8 +86,8 @@ function sanitizeClientName(raw) {
 
 const PORT = resolvePort();
 const ENV_TOOLSET = resolveToolset();
-// The live choice. With the variable set it is fixed from the start; otherwise it stays full until
-// the client's initialize names itself (see observeInitialize).
+// The live choice. With the variable set it is fixed from the start; otherwise it starts as core
+// and the client's initialize can switch it to full (see observeInitialize).
 const TOOLSET = { toolset: ENV_TOOLSET.toolset };
 let clientName = "";
 let toolsetDecided = false;
@@ -143,11 +148,11 @@ function observeInitialize(message) {
     let why;
     if (ENV_TOOLSET.set) {
       why = "env";
-    } else if (clientName && CORE_CLIENTS.indexOf(clientName.toLowerCase()) >= 0) {
-      TOOLSET.toolset = "core";
+    } else if (clientName && FULL_CLIENTS.indexOf(clientName.toLowerCase()) >= 0) {
+      TOOLSET.toolset = "full";
       why = "client " + clientName;
     } else {
-      why = "default full";
+      why = "default core";
     }
     log("toolset " + TOOLSET.toolset + " (" + why + "); client " + JSON.stringify(clientName || "unknown"));
   }

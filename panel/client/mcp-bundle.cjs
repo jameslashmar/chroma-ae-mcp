@@ -26739,6 +26739,106 @@ function stillWaitingRestores(store, queue2) {
   }
   return out;
 }
+function fourCC(n) {
+  if (!Number.isInteger(n) || n <= 0 || n > 4294967295) return void 0;
+  const s = String.fromCharCode(n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255);
+  return /^[\x20-\x7e]{4}$/.test(s) ? s : void 0;
+}
+function amePrefDirs(home) {
+  const base = path25.join(home, "Documents", "Adobe", "Adobe Media Encoder");
+  try {
+    return fs23.readdirSync(base).filter((n) => /^\d+(\.\d+)*$/.test(n)).sort((a, b) => b.localeCompare(a, void 0, { numeric: true })).map((n) => path25.join(base, n));
+  } catch {
+    return [];
+  }
+}
+function readAmePreset(home = process.env["USERPROFILE"] ?? process.env["HOME"] ?? "") {
+  try {
+    if (!home) return null;
+    for (const dir of amePrefDirs(home)) {
+      const prefs = path25.join(dir, "AMEPrefs.xml");
+      let xml;
+      let mtime;
+      try {
+        const st = fs23.statSync(prefs);
+        if (!st.isFile() || st.size > 2e6) continue;
+        xml = fs23.readFileSync(prefs, "utf8");
+        mtime = st.mtime.toISOString();
+      } catch {
+        continue;
+      }
+      const id = /<key>Preset Preference<\/key>\s*<ustring>([0-9a-fA-F-]{36})<\/ustring>/.exec(xml)?.[1];
+      if (!id) continue;
+      for (const cacheName of ["PresetUserCache.xml", "PresetCache.xml"]) {
+        let cache;
+        try {
+          const cp = path25.join(dir, cacheName);
+          if (fs23.statSync(cp).size > 2e7) continue;
+          cache = fs23.readFileSync(cp, "utf8");
+        } catch {
+          continue;
+        }
+        const at = cache.toLowerCase().indexOf(`<presetid>${id.toLowerCase()}</presetid>`);
+        if (at < 0) continue;
+        const start = cache.lastIndexOf("<Key ", at);
+        const end = cache.indexOf("</Key>", at);
+        const block = start >= 0 && end > start ? cache.slice(start, end) : "";
+        let name = /<PresetName>([\s\S]*?)<\/PresetName>/.exec(block)?.[1]?.trim();
+        const loc = name ? /^\(\$\$\$\/[^=]*=([\s\S]*)\)$/.exec(name) : null;
+        if (loc?.[1]) name = loc[1];
+        if (!name) continue;
+        name = name.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+        const folder = /<FolderDisplayPath>([\s\S]*?)<\/FolderDisplayPath>/.exec(block)?.[1]?.trim().replace(/&amp;/g, "&");
+        const code = fourCC(Number(/<PresetFileType>(\d+)<\/PresetFileType>/.exec(block)?.[1]));
+        const exts = code ? FORMAT_EXTENSIONS[code] : void 0;
+        return {
+          name: name.slice(0, 200),
+          ...folder ? { folder: folder.slice(0, 200) } : {},
+          ...code ? { format_code: code } : {},
+          ...exts ? { extensions: exts } : {},
+          source_file: prefs,
+          ...mtime ? { source_mtime: mtime } : {}
+        };
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+function ameHandOverNotes(plan2) {
+  const warnings = [AME_PRESET_WARNING];
+  const asked = [];
+  for (const it of plan2.items) {
+    for (const o of it.outputs) {
+      const ext2 = path25.extname(o.file).replace(/^\./, "").toLowerCase();
+      asked.push({ item_index: o.item_index, module: o.module, extension: ext2 || (o.sequence ? "(image sequence)" : "") });
+    }
+  }
+  let preset = null;
+  try {
+    preset = rqrenderDeps.readAmePreset();
+  } catch {
+    preset = null;
+  }
+  if (!preset) {
+    warnings.push("The preset Media Encoder will use could not be read from its preferences, so it is not known. Check the format in Media Encoder's queue before pressing Start.");
+    return { warnings, asked_for: asked, ame_preset: { read: false, reason: "AME's preferences (Documents/Adobe/Adobe Media Encoder/<version>/AMEPrefs.xml) were missing, unreadable or had no last preset" } };
+  }
+  const wanted = Array.from(new Set(asked.map((a) => a.extension).filter((e) => e !== "")));
+  if (preset.extensions) {
+    const bad4 = wanted.filter((e) => !preset.extensions.includes(e));
+    if (bad4.length > 0) {
+      warnings.push(
+        `Media Encoder's last-used preset is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad4.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.`
+      );
+    }
+  } else {
+    warnings.push(
+      `Media Encoder's last-used preset reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.`
+    );
+  }
+  return { warnings, asked_for: asked, ame_preset: preset };
+}
 async function handOffToMediaEncoder(p) {
   const { ctx, store, jobId, opId, plan: plan2 } = p;
   bindJobFailureLog(store, ctx.log);
@@ -26831,6 +26931,12 @@ async function handOffToMediaEncoder(p) {
     });
   } catch {
   }
+  let notes = null;
+  try {
+    notes = ameHandOverNotes(plan2);
+  } catch {
+    notes = null;
+  }
   return {
     ok: true,
     started: true,
@@ -26838,6 +26944,8 @@ async function handOffToMediaEncoder(p) {
     job_id: jobId,
     state: finalState,
     start_now: p.startNow,
+    warnings: notes ? [...plan2.warnings, ...notes.warnings] : [...plan2.warnings, AME_PRESET_WARNING, "Check the format in Media Encoder's queue before pressing Start."],
+    ...notes ? { output_module_asked_for: notes.asked_for, ame_preset: notes.ame_preset } : {},
     started_at: store.get(jobId)?.started_at,
     project_path: store.get(jobId)?.project_path,
     renders: "the SAVED project file in Adobe Media Encoder; changes made after the last save are not in it",
@@ -26981,7 +27089,7 @@ async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
   }
   return out;
 }
-var crypto5, fs23, path25, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, WAITABLE_STATES, rqrenderTools;
+var crypto5, fs23, path25, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, FORMAT_EXTENSIONS, AME_PRESET_WARNING, WAITABLE_STATES, rqrenderTools;
 var init_rqrender = __esm({
   "src/tools/ext/rqrender.ts"() {
     "use strict";
@@ -27170,6 +27278,8 @@ var init_rqrender = __esm({
       ameInstalled: () => ameInstalledOnDisk(),
       /** Is there an "Adobe Media Encoder*" folder next to After Effects' own install folder (appPath = Folder.appPackage)? */
       ameNearApp: (appPath) => ameNearApp(appPath),
+      /** AME's last-used preset from its prefs on disk (null when not readable). */
+      readAmePreset: () => readAmePreset(),
       readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
       stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
       stillRenderingPollMs: STILL_RENDERING_POLL_MS
@@ -27202,6 +27312,8 @@ var init_rqrender = __esm({
     } : {};
     AME_CALL_TIMEOUT_MS = 12e4;
     AME_REFUSAL_ASK = "Ask the user first, then call again with user_confirmed: true. Say to them: After Effects stays free while it renders; Media Encoder renders the SAVED project, so changes made after the last save are not in it; Media Encoder may take a moment to open; it uses its own last-used preset, so the format may differ from After Effects' output module (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4), so check the preset and format in Media Encoder's queue before pressing Start; other items already in Media Encoder's queue start too when you press Start.";
+    FORMAT_EXTENSIONS = { MooV: ["mov"], H264: ["mp4", "m4v"] };
+    AME_PRESET_WARNING = "Media Encoder applies its own last-used preset to the handed-over items, not the output module's format (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4).";
     WAITABLE_STATES = /* @__PURE__ */ new Set(["running", "queued_in_media_encoder", "handed_to_media_encoder"]);
     rqrenderTools = [
       {
@@ -27216,7 +27328,8 @@ var init_rqrender = __esm({
               ok: false,
               started: false,
               engine: "media_encoder",
-              refused: [{ code: "user_confirmation_needed", message: `Rendering in Adobe Media Encoder needs the user's OK for this render. Nothing was started. ${AME_REFUSAL_ASK}` }]
+              refused: [{ code: "user_confirmation_needed", message: `Rendering in Adobe Media Encoder needs the user's OK for this render. Nothing was started. ${AME_REFUSAL_ASK}` }],
+              warnings: [AME_PRESET_WARNING + " The result will name the preset Media Encoder holds when it can be read, and the format each output module asked for."]
             };
           }
           if (viaAme && args.start_now === true && args.whole_ame_queue_ok !== true) {
@@ -27473,9 +27586,21 @@ var init_rqrender = __esm({
 // src/tools/ext/rqfollow.ts
 function followSources(read3) {
   const sources = [];
+  const finished = [];
   let truncated = false;
   for (const it of read3?.items ?? []) {
     const status = (it.status ?? "").toLowerCase();
+    if (FINISHED_STATUSES.has(status)) {
+      const key = itemKey(it.index, it.comp_name);
+      if (followState.followed.has(key) && finished.length < MAX_FOLLOW_ITEMS) {
+        const files2 = [];
+        for (const m of it.output_modules ?? []) {
+          if (typeof m.file === "string" && m.file !== "" && files2.length < MAX_FOLLOW_MODULES) files2.push({ module: m.index, file: m.file });
+        }
+        finished.push({ index: it.index, ...it.comp_name ? { comp_name: it.comp_name } : {}, status, finished: true, files: files2 });
+      }
+      continue;
+    }
     if (status !== "rendering" && status !== "queued") continue;
     if (sources.length >= MAX_FOLLOW_ITEMS) {
       truncated = true;
@@ -27487,13 +27612,14 @@ function followSources(read3) {
     }
     sources.push({ index: it.index, ...it.comp_name ? { comp_name: it.comp_name } : {}, status, files });
   }
-  return { sources, truncated };
+  return { sources, truncated, finished };
 }
 function statFollow(sources, nowMs) {
   return sources.map((s) => ({
     index: s.index,
     ...s.comp_name ? { comp_name: s.comp_name } : {},
     status: s.status,
+    ...s.finished ? { finished: true } : {},
     outputs: s.files.map((f) => {
       const st = statOutput({ item_index: s.index, module: f.module, file: f.file });
       const before = followState.lastSeen.get(f.file);
@@ -27523,10 +27649,10 @@ async function followQueue(ctx, status, toolName, firstError) {
     problemKind = d.kind;
   }
   if (status !== null) {
-    if (!somethingToFollow(status)) return null;
+    if (!somethingToFollow(status) && followState.followed.size === 0) return null;
     const num5 = typeof status.numItems === "number" ? status.numItems : 0;
     if (num5 === 0) {
-      fresh = { sources: [], truncated: false };
+      fresh = { sources: [], truncated: false, finished: [] };
     } else {
       try {
         const res = await ctx.bridge.callHost(
@@ -27544,12 +27670,13 @@ async function followQueue(ctx, status, toolName, firstError) {
   }
   if (fresh) {
     followState.lastRead = { at: nowMs, sources: fresh.sources, truncated: fresh.truncated };
+    followState.followed = new Set(fresh.sources.map((x) => itemKey(x.index, x.comp_name)));
     return {
       read_now: true,
       follow: {
-        items: statFollow(fresh.sources, nowMs),
+        items: statFollow([...fresh.sources, ...fresh.finished], nowMs),
         ...fresh.truncated ? { truncated: true, truncated_note: `Only the first ${MAX_FOLLOW_ITEMS} RENDERING or QUEUED items are followed.` } : {},
-        note: "Output files of the RENDERING and QUEUED items, checked on disk now. After Effects gives no percentage; a growing file (grew_since_last_check true) is a sign of life, null means this is the first check. A movie may only be written at the end."
+        note: "Output files of the RENDERING and QUEUED items, checked on disk now. After Effects gives no percentage; a growing file (grew_since_last_check true) is a sign of life, null means this is the first check. A movie may only be written at the end. finished:true = ended since the last check (final size and status, shown once)."
       }
     };
   }
@@ -27567,7 +27694,7 @@ async function followQueue(ctx, status, toolName, firstError) {
     }
   };
 }
-var MAX_FOLLOW_ITEMS, MAX_FOLLOW_MODULES, followDeps, followState;
+var MAX_FOLLOW_ITEMS, MAX_FOLLOW_MODULES, followDeps, FINISHED_STATUSES, itemKey, followState;
 var init_rqfollow = __esm({
   "src/tools/ext/rqfollow.ts"() {
     "use strict";
@@ -27575,7 +27702,9 @@ var init_rqfollow = __esm({
     MAX_FOLLOW_ITEMS = 20;
     MAX_FOLLOW_MODULES = 8;
     followDeps = { answerTimeoutMs: 6e3, now: () => Date.now() };
-    followState = { lastSeen: /* @__PURE__ */ new Map(), lastRead: null };
+    FINISHED_STATUSES = /* @__PURE__ */ new Set(["done", "user_stopped", "err_stopped"]);
+    itemKey = (index, compName) => `${index}|${compName ?? ""}`;
+    followState = { lastSeen: /* @__PURE__ */ new Map(), lastRead: null, followed: /* @__PURE__ */ new Set() };
   }
 });
 

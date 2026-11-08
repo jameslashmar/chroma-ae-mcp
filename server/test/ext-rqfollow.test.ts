@@ -166,3 +166,90 @@ describe("ae_render_queue_status: when AE does not answer, the note says why", (
     expect((res!.follow.note as string)).toMatch(/did not answer in time/);
   });
 });
+
+describe("ae_render_queue_status: a finished item stays in follow for one more check", () => {
+  type It = { index: number; comp_name: string; status: string; file: string };
+  const readOf = (items: It[]) => ({
+    numItems: items.length,
+    items: items.map((i) => ({ index: i.index, comp_id: i.index, comp_name: i.comp_name, status: i.status, output_modules: [{ index: 1, file: i.file }] })),
+  });
+  /** A queue whose items the test changes between calls. */
+  function liveQueue(items: It[]) {
+    const stub = stubCtx({
+      rqStatus: () => ({ numItems: items.length, rendering: items.some((i) => i.status === "rendering"), items: items.map((i) => ({ index: i.index, status: i.status, render: i.status === "rendering" })) }),
+      rqeditRead: () => readOf(items),
+    });
+    return { ...stub, call: async (): Promise<any> => statusTool.handler({}, stub.ctx) };
+  }
+
+  it("a DONE item shows once more with its final size, final status and finished: true, then is gone", async () => {
+    const f = path.join(tmp(), "a.mov");
+    fs.writeFileSync(f, "x".repeat(10));
+    const items: It[] = [{ index: 1, comp_name: "Main", status: "rendering", file: f }];
+    const q = liveQueue(items);
+    const r1 = await q.call();
+    expect(r1.follow.items[0].finished).toBeUndefined();
+    fs.writeFileSync(f, "x".repeat(50));
+    items[0].status = "done";
+    const r2 = await q.call();
+    expect(r2.follow.items).toHaveLength(1);
+    expect(r2.follow.items[0]).toMatchObject({ index: 1, status: "done", finished: true });
+    expect(r2.follow.items[0].outputs[0]).toMatchObject({ bytes: 50, grew_since_last_check: true });
+    const r3 = await q.call();
+    expect(r3.follow).toBeUndefined();
+  });
+
+  it("a failed or user-stopped item likewise", async () => {
+    const dir = tmp();
+    const items: It[] = [
+      { index: 1, comp_name: "A", status: "rendering", file: path.join(dir, "a.mov") },
+      { index: 2, comp_name: "B", status: "queued", file: path.join(dir, "b.mov") },
+    ];
+    const q = liveQueue(items);
+    await q.call();
+    items[0].status = "err_stopped";
+    items[1].status = "user_stopped";
+    const r2 = await q.call();
+    expect(r2.follow.items.map((i: any) => [i.index, i.status, i.finished])).toEqual([
+      [1, "err_stopped", true],
+      [2, "user_stopped", true],
+    ]);
+    expect((await q.call()).follow).toBeUndefined();
+  });
+
+  it("an item that was never followed and is already done is not added", async () => {
+    const dir = tmp();
+    const items: It[] = [
+      { index: 1, comp_name: "Old", status: "done", file: path.join(dir, "old.mov") },
+      { index: 2, comp_name: "Now", status: "rendering", file: path.join(dir, "now.mov") },
+    ];
+    const q = liveQueue(items);
+    const r1 = await q.call();
+    expect(r1.follow.items.map((i: any) => i.index)).toEqual([2]);
+    items[1].status = "done";
+    const r2 = await q.call();
+    expect(r2.follow.items.map((i: any) => [i.index, i.finished])).toEqual([[2, true]]);
+  });
+
+  it("several items at once: finished ones are marked, those still rendering are not, and only the finished ones drop out next time", async () => {
+    const dir = tmp();
+    const items: It[] = [1, 2, 3].map((n) => ({ index: n, comp_name: `C${n}`, status: "rendering", file: path.join(dir, `${n}.mov`) }));
+    const q = liveQueue(items);
+    await q.call();
+    items[0].status = "done";
+    items[2].status = "err_stopped";
+    const r2 = await q.call();
+    expect(r2.follow.items.map((i: any) => [i.index, i.finished ?? false])).toEqual([
+      [2, false],
+      [1, true],
+      [3, true],
+    ]);
+    const r3 = await q.call();
+    expect(r3.follow.items.map((i: any) => i.index)).toEqual([2]);
+    items[1].status = "done";
+    const r4 = await q.call();
+    expect(r4.follow.items.map((i: any) => [i.index, i.finished])).toEqual([[2, true]]);
+    expect((await q.call()).follow).toBeUndefined();
+  });
+
+});

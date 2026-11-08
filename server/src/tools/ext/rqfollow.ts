@@ -25,6 +25,8 @@ export interface FollowItem {
   index: number;
   comp_name?: string;
   status: string;
+  /** True once, for an item followed last time that has finished since (final size and status). */
+  finished?: boolean;
   outputs: FollowOutput[];
 }
 
@@ -32,27 +34,46 @@ interface FollowSource {
   index: number;
   comp_name?: string;
   status: string;
+  finished?: boolean;
   files: Array<{ module: number; file: string }>;
 }
+
+const FINISHED_STATUSES = new Set(["done", "user_stopped", "err_stopped"]);
+const itemKey = (index: number, compName?: string): string => `${index}|${compName ?? ""}`;
 
 /** Sizes seen by the last status call and the item/output list of the last successful AE read. Memory only. */
 export const followState: {
   lastSeen: Map<string, { bytes: number; at: number }>;
   lastRead: { at: number; sources: FollowSource[]; truncated: boolean } | null;
-} = { lastSeen: new Map(), lastRead: null };
+  /** Keys (index|comp) of the items the last fresh check followed (RENDERING or QUEUED; at most MAX_FOLLOW_ITEMS). */
+  followed: Set<string>;
+} = { lastSeen: new Map(), lastRead: null, followed: new Set() };
 
 /** For tests: forget everything, as a service restart does. */
 export function resetFollowState(): void {
   followState.lastSeen.clear();
   followState.lastRead = null;
+  followState.followed.clear();
 }
 
 /** The RENDERING and QUEUED items of a queue read, with their output files, bounded. */
-export function followSources(read: QueueRead | null | undefined): { sources: FollowSource[]; truncated: boolean } {
+export function followSources(read: QueueRead | null | undefined): { sources: FollowSource[]; truncated: boolean; finished: FollowSource[] } {
   const sources: FollowSource[] = [];
+  const finished: FollowSource[] = [];
   let truncated = false;
   for (const it of read?.items ?? []) {
     const status = (it.status ?? "").toLowerCase();
+    if (FINISHED_STATUSES.has(status)) {
+      const key = itemKey(it.index, it.comp_name);
+      if (followState.followed.has(key) && finished.length < MAX_FOLLOW_ITEMS) {
+        const files: Array<{ module: number; file: string }> = [];
+        for (const m of it.output_modules ?? []) {
+          if (typeof m.file === "string" && m.file !== "" && files.length < MAX_FOLLOW_MODULES) files.push({ module: m.index, file: m.file });
+        }
+        finished.push({ index: it.index, ...(it.comp_name ? { comp_name: it.comp_name } : {}), status, finished: true, files });
+      }
+      continue;
+    }
     if (status !== "rendering" && status !== "queued") continue;
     if (sources.length >= MAX_FOLLOW_ITEMS) {
       truncated = true;
@@ -64,7 +85,7 @@ export function followSources(read: QueueRead | null | undefined): { sources: Fo
     }
     sources.push({ index: it.index, ...(it.comp_name ? { comp_name: it.comp_name } : {}), status, files });
   }
-  return { sources, truncated };
+  return { sources, truncated, finished };
 }
 
 /** Stats the files of the sources now and compares with the sizes seen last time. */
@@ -73,6 +94,7 @@ export function statFollow(sources: FollowSource[], nowMs: number): FollowItem[]
     index: s.index,
     ...(s.comp_name ? { comp_name: s.comp_name } : {}),
     status: s.status,
+    ...(s.finished ? { finished: true } : {}),
     outputs: s.files.map((f) => {
       const st = statOutput({ item_index: s.index, module: f.module, file: f.file });
       const before = followState.lastSeen.get(f.file);
@@ -112,7 +134,7 @@ export async function followQueue(
   firstError?: unknown
 ): Promise<{ follow: Record<string, unknown>; read_now: boolean } | null> {
   const nowMs = followDeps.now();
-  let fresh: { sources: FollowSource[]; truncated: boolean } | null = null;
+  let fresh: { sources: FollowSource[]; truncated: boolean; finished: FollowSource[] } | null = null;
   let problem = "";
   let problemKind = "";
   if (status === null && firstError !== undefined) {
@@ -121,10 +143,11 @@ export async function followQueue(
     problemKind = d.kind;
   }
   if (status !== null) {
-    if (!somethingToFollow(status)) return null;
+    // An item followed last time may have just finished: then nothing renders any more, but it is owed one more check.
+    if (!somethingToFollow(status) && followState.followed.size === 0) return null;
     const num = typeof status.numItems === "number" ? status.numItems : 0;
     if (num === 0) {
-      fresh = { sources: [], truncated: false };
+      fresh = { sources: [], truncated: false, finished: [] };
     } else {
       try {
         const res = await ctx.bridge.callHost<QueueRead>(
@@ -142,12 +165,14 @@ export async function followQueue(
   }
   if (fresh) {
     followState.lastRead = { at: nowMs, sources: fresh.sources, truncated: fresh.truncated };
+    // Finished items stay for this one check only: the followed set is rebuilt from the items still in progress.
+    followState.followed = new Set(fresh.sources.map((x) => itemKey(x.index, x.comp_name)));
     return {
       read_now: true,
       follow: {
-        items: statFollow(fresh.sources, nowMs),
+        items: statFollow([...fresh.sources, ...fresh.finished], nowMs),
         ...(fresh.truncated ? { truncated: true, truncated_note: `Only the first ${MAX_FOLLOW_ITEMS} RENDERING or QUEUED items are followed.` } : {}),
-        note: "Output files of the RENDERING and QUEUED items, checked on disk now. After Effects gives no percentage; a growing file (grew_since_last_check true) is a sign of life, null means this is the first check. A movie may only be written at the end.",
+        note: "Output files of the RENDERING and QUEUED items, checked on disk now. After Effects gives no percentage; a growing file (grew_since_last_check true) is a sign of life, null means this is the first check. A movie may only be written at the end. finished:true = ended since the last check (final size and status, shown once).",
       },
     };
   }

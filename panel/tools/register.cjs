@@ -243,13 +243,12 @@ function stdioEntry(env) {
   return { command: node, args: [env.relayPath] };
 }
 
-// Claude Desktop is the one client that may load every tool schema into context, so it gets the
-// small "core" toolset. A NEW Desktop entry gets CHROMA_AE_MCP_TOOLSET=core written into its env
+// Stdio clients may load every tool schema into context, so they get the small "core" toolset.
+// A NEW Desktop entry gets CHROMA_AE_MCP_TOOLSET=core written into its env
 // (explicit, and harmless). An entry without the variable gets core anyway: with the variable
-// unset, the relay picks core when the client that connects calls itself Claude Desktop
-// (clientInfo.name "claude-ai"), full for any other client. Cursor and Codex launch the same relay
-// but are not named Claude Desktop, so they still get the full list; Claude Code connects over
-// HTTP and gets the full list. An entry the user already has keeps its env (and any other keys);
+// unset, the relay picks core for every client except Claude Code (clientInfo.name "claude-code"),
+// which defers tool schemas itself and gets full. Cursor and Codex launch the same relay and get
+// core too; Claude Code connects over HTTP and gets the full list. An entry the user already has keeps its env (and any other keys);
 // a toolset the user set themselves, even "full", is left as it is.
 const TOOLSET_ENV = "CHROMA_AE_MCP_TOOLSET";
 

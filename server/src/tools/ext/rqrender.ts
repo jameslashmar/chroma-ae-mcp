@@ -422,6 +422,8 @@ export const rqrenderDeps = {
   ameInstalled: (): boolean => ameInstalledOnDisk(),
   /** Is there an "Adobe Media Encoder*" folder next to After Effects' own install folder (appPath = Folder.appPackage)? */
   ameNearApp: (appPath: string | null | undefined): boolean => ameNearApp(appPath),
+  /** AME's last-used preset from its prefs on disk (null when not readable). */
+  readAmePreset: (): AmePresetRead | null => readAmePreset(),
   readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
   stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
   stillRenderingPollMs: STILL_RENDERING_POLL_MS,
@@ -1439,6 +1441,144 @@ const AME_REFUSAL_ASK =
   "Ask the user first, then call again with user_confirmed: true. Say to them: After Effects stays free while it renders; " +
   "Media Encoder renders the SAVED project, so changes made after the last save are not in it; Media Encoder may take a moment to open; it uses its own last-used preset, so the format may differ from After Effects' output module (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4), so check the preset and format in Media Encoder's queue before pressing Start; other items already in Media Encoder's queue start too when you press Start.";
 
+/** What AME's preferences say it last used for After Effects items (best effort, read only). */
+export interface AmePresetRead {
+  /** The preset's display name, e.g. "Apple ProRes 4444". */
+  name: string;
+  /** Preset folder as AME shows it, e.g. "System Presets/Broadcast/Apple ProRes" (may be empty). */
+  folder?: string;
+  /** AME's format code of the preset as four letters, e.g. "MooV" (QuickTime) or "H264". */
+  format_code?: string;
+  /** File extensions that format writes, when the code is one we know. */
+  extensions?: string[];
+  /** The AMEPrefs.xml it came from. */
+  source_file: string;
+  /** When AME last wrote that file. AME writes prefs when a setting changes or on exit, so while it runs this can lag. */
+  source_mtime?: string;
+}
+
+const FORMAT_EXTENSIONS: Record<string, string[]> = { MooV: ["mov"], H264: ["mp4", "m4v"] };
+
+function fourCC(n: number): string | undefined {
+  if (!Number.isInteger(n) || n <= 0 || n > 0xffffffff) return undefined;
+  const s = String.fromCharCode((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+  return /^[\x20-\x7e]{4}$/.test(s) ? s : undefined;
+}
+
+/** The AME preference folders to try, newest version first: Documents/Adobe/Adobe Media Encoder/<version>. */
+function amePrefDirs(home: string): string[] {
+  const base = path.join(home, "Documents", "Adobe", "Adobe Media Encoder");
+  try {
+    return fs
+      .readdirSync(base)
+      .filter((n) => /^\d+(\.\d+)*$/.test(n))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .map((n) => path.join(base, n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Reads AME's "Preset Preference" (the id of the preset it last used) from AMEPrefs.xml and looks the id up in
+ * PresetCache.xml / PresetUserCache.xml for its name. Read only; returns null when anything is missing or unreadable
+ * (never throws, never guesses). Uses the newest version folder that has AMEPrefs.xml.
+ */
+export function readAmePreset(home: string = process.env["USERPROFILE"] ?? process.env["HOME"] ?? ""): AmePresetRead | null {
+  try {
+    if (!home) return null;
+    for (const dir of amePrefDirs(home)) {
+      const prefs = path.join(dir, "AMEPrefs.xml");
+      let xml: string;
+      let mtime: string | undefined;
+      try {
+        const st = fs.statSync(prefs);
+        if (!st.isFile() || st.size > 2_000_000) continue;
+        xml = fs.readFileSync(prefs, "utf8");
+        mtime = st.mtime.toISOString();
+      } catch {
+        continue;
+      }
+      const id = /<key>Preset Preference<\/key>\s*<ustring>([0-9a-fA-F-]{36})<\/ustring>/.exec(xml)?.[1];
+      if (!id) continue;
+      for (const cacheName of ["PresetUserCache.xml", "PresetCache.xml"]) {
+        let cache: string;
+        try {
+          const cp = path.join(dir, cacheName);
+          if (fs.statSync(cp).size > 20_000_000) continue;
+          cache = fs.readFileSync(cp, "utf8");
+        } catch {
+          continue;
+        }
+        const at = cache.toLowerCase().indexOf(`<presetid>${id.toLowerCase()}</presetid>`);
+        if (at < 0) continue;
+        // The entry is one <Key>...</Key> block; its fields sit on both sides of PresetID.
+        const start = cache.lastIndexOf("<Key ", at);
+        const end = cache.indexOf("</Key>", at);
+        const block = start >= 0 && end > start ? cache.slice(start, end) : "";
+        let name = /<PresetName>([\s\S]*?)<\/PresetName>/.exec(block)?.[1]?.trim();
+        const loc = name ? /^\(\$\$\$\/[^=]*=([\s\S]*)\)$/.exec(name) : null;
+        if (loc?.[1]) name = loc[1];
+        if (!name) continue;
+        name = name.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+        const folder = /<FolderDisplayPath>([\s\S]*?)<\/FolderDisplayPath>/.exec(block)?.[1]?.trim().replace(/&amp;/g, "&");
+        const code = fourCC(Number(/<PresetFileType>(\d+)<\/PresetFileType>/.exec(block)?.[1]));
+        const exts = code ? FORMAT_EXTENSIONS[code] : undefined;
+        return {
+          name: name.slice(0, 200),
+          ...(folder ? { folder: folder.slice(0, 200) } : {}),
+          ...(code ? { format_code: code } : {}),
+          ...(exts ? { extensions: exts } : {}),
+          source_file: prefs,
+          ...(mtime ? { source_mtime: mtime } : {}),
+        };
+      }
+    }
+  } catch {
+    // unreadable prefs are no information
+  }
+  return null;
+}
+
+const AME_PRESET_WARNING =
+  "Media Encoder applies its own last-used preset to the handed-over items, not the output module's format (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4).";
+
+/** The warnings and the format facts for a hand-over. Never throws. */
+export function ameHandOverNotes(plan: StartPlan): { warnings: string[]; asked_for: Array<{ item_index: number; module: number; extension: string }>; ame_preset: AmePresetRead | { read: false; reason: string } } {
+  const warnings: string[] = [AME_PRESET_WARNING];
+  const asked: Array<{ item_index: number; module: number; extension: string }> = [];
+  for (const it of plan.items) {
+    for (const o of it.outputs) {
+      const ext = path.extname(o.file).replace(/^\./, "").toLowerCase();
+      asked.push({ item_index: o.item_index, module: o.module, extension: ext || (o.sequence ? "(image sequence)" : "") });
+    }
+  }
+  let preset: AmePresetRead | null = null;
+  try {
+    preset = rqrenderDeps.readAmePreset();
+  } catch {
+    preset = null;
+  }
+  if (!preset) {
+    warnings.push("The preset Media Encoder will use could not be read from its preferences, so it is not known. Check the format in Media Encoder's queue before pressing Start.");
+    return { warnings, asked_for: asked, ame_preset: { read: false, reason: "AME's preferences (Documents/Adobe/Adobe Media Encoder/<version>/AMEPrefs.xml) were missing, unreadable or had no last preset" } };
+  }
+  const wanted = Array.from(new Set(asked.map((a) => a.extension).filter((e) => e !== "")));
+  if (preset.extensions) {
+    const bad = wanted.filter((e) => !preset!.extensions!.includes(e));
+    if (bad.length > 0) {
+      warnings.push(
+        `Media Encoder's last-used preset is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.`
+      );
+    }
+  } else {
+    warnings.push(
+      `Media Encoder's last-used preset reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.`
+    );
+  }
+  return { warnings, asked_for: asked, ame_preset: preset };
+}
+
 export interface AmeParams {
   ctx: ToolContext;
   store: RenderJobStore;
@@ -1559,6 +1699,12 @@ export async function handOffToMediaEncoder(p: AmeParams): Promise<Record<string
   } catch {
     // bookkeeping only
   }
+  let notes: ReturnType<typeof ameHandOverNotes> | null = null;
+  try {
+    notes = ameHandOverNotes(plan);
+  } catch {
+    notes = null;
+  }
   return {
     ok: true,
     started: true,
@@ -1566,6 +1712,8 @@ export async function handOffToMediaEncoder(p: AmeParams): Promise<Record<string
     job_id: jobId,
     state: finalState,
     start_now: p.startNow,
+    warnings: notes ? [...plan.warnings, ...notes.warnings] : [...plan.warnings, AME_PRESET_WARNING, "Check the format in Media Encoder's queue before pressing Start."],
+    ...(notes ? { output_module_asked_for: notes.asked_for, ame_preset: notes.ame_preset } : {}),
     started_at: store.get(jobId)?.started_at,
     project_path: store.get(jobId)?.project_path,
     renders: "the SAVED project file in Adobe Media Encoder; changes made after the last save are not in it",
@@ -1780,6 +1928,7 @@ export const rqrenderTools: ToolDefinition<any>[] = [
           started: false,
           engine: "media_encoder",
           refused: [{ code: "user_confirmation_needed", message: `Rendering in Adobe Media Encoder needs the user's OK for this render. Nothing was started. ${AME_REFUSAL_ASK}` }],
+          warnings: [AME_PRESET_WARNING + " The result will name the preset Media Encoder holds when it can be read, and the format each output module asked for."],
         };
       }
       if (viaAme && args.start_now === true && args.whole_ame_queue_ok !== true) {
