@@ -89,14 +89,45 @@ describe("ae_verify_render flow", () => {
     const { ctx, calls } = fakeAe((fn) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      if (fn === "verifyExists") return { exists: !gone };
+      if (fn === "verifyRead") return render({ frames: 50 });
       gone = true;
       return { removed: 9 };
     });
     const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_1", expect: GUARD }), ctx);
-    expect(calls).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyRead"]);
+    expect(calls).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyExists"]);
     expect(res).toMatchObject({ ok: true, matches: true, imported_item: null, project_changed: true });
     expect(res.checks.find((c: { what: string }) => c.what === "frames")).toMatchObject({ expected: 50, ok: true });
+  });
+
+  it("a good verify makes no eval fail, so the service log gets no ERR line", async () => {
+    const dir = tempDir("chroma-verify-");
+    const out = path.join(dir, "edit.mov");
+    fs.writeFileSync(out, "movie");
+    const tool = createVerifyTools({ getJob: () => ({ state: "succeeded", output_path: out, comp_name: "Edit", start_frame: 0, end_frame: 49 } as any) })[0];
+    let gone = false;
+    let failedEvals = 0;
+    const { ctx } = fakeAe((fn) => {
+      if (fn === "verifyCompInfo") return comp;
+      if (fn === "verifyImport") return { item_id: 9 };
+      if (fn === "verifyExists") return { exists: !gone };
+      if (fn === "verifyRead") return render({ frames: 50 });
+      gone = true;
+      return { removed: 9 };
+    });
+    // The panel writes an [ERR] line for every eval that answers with an error: count them at the transport.
+    const real = ctx.bridge.evalRaw.bind(ctx.bridge);
+    (ctx.bridge as any).evalRaw = async (params: any) => {
+      try {
+        return await real(params);
+      } catch (err) {
+        failedEvals++;
+        throw err;
+      }
+    };
+    const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_1", expect: GUARD }), ctx);
+    expect(res).toMatchObject({ ok: true, imported_item: null, imported_item_state: "removed" });
+    expect(failedEvals).toBe(0);
   });
 
   it("after the read of the imported render times out, the removal is still sent, as a must-send cleanup", async () => {
@@ -108,7 +139,8 @@ describe("ae_verify_render flow", () => {
     const { ctx, calls } = fakeAe((fn) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      if (fn === "verifyExists") return { exists: !gone };
+      if (fn === "verifyRead") return render({ frames: 50 });
       gone = true;
       return { removed: 9 };
     });
@@ -165,8 +197,11 @@ describe("verify.jsx in the simulated AE", () => {
     const imp = A.verifyImport({ path: file, sequence: true, expect: GUARD });
     expect((project.itemByID(imp.item_id) as any).imported_as_sequence).toBe(true);
     expect(A.verifyRead({ item_id: imp.item_id })).toMatchObject({ width: 1920, height: 1080, fps: 25, frames: 100, has_audio: true });
+    expect(A.verifyExists({ item_id: imp.item_id })).toEqual({ item_id: imp.item_id, exists: true });
     A.verifyRemove({ item_id: imp.item_id, expect: GUARD });
     expect(project.itemByID(imp.item_id)).toBeNull();
+    // The check that the item is gone is a read that answers, not one that throws not_found (the bridge logs a throw as [ERR]).
+    expect(A.verifyExists({ item_id: imp.item_id })).toEqual({ item_id: imp.item_id, exists: false });
     expect(() => A.verifyImport({ path: file + ".gone", expect: GUARD })).toThrow(/No render/);
   });
 });
@@ -198,7 +233,8 @@ describe("w5render: ae_verify_render for Render Queue jobs", () => {
     return (fn: string) => {
       if (fn === "verifyCompInfo") return comp;
       if (fn === "verifyImport") return { item_id: 9 };
-      if (fn === "verifyRead") return gone ? new Error("No imported item 9") : render({ frames: 50 });
+      if (fn === "verifyExists") return { exists: !gone };
+      if (fn === "verifyRead") return render({ frames: 50 });
       gone = true;
       return { removed: 9 };
     };
@@ -239,7 +275,7 @@ describe("w5render: ae_verify_render for Render Queue jobs", () => {
     const tool = createVerifyTools({ getJob: () => j.rec })[0];
     const { ctx, calls } = fakeAe(answers());
     const res = await tool.handler(AeVerifyRenderSchema.parse({ job_id: "job_rq", expect: GUARD }), ctx);
-    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyRead"]);
+    expect(calls.map((c) => c.fn)).toEqual(["checkGuard", "verifyCompInfo", "verifyImport", "verifyRead", "verifyRemove", "verifyExists"]);
     expect(calls[1].script).toContain('"comp_id":1');
     expect(calls[2].script).toContain(j.files[0].replace(/\\/g, "/"));
     expect(res).toMatchObject({ ok: true, matches: true, render_queue: { rq_index: 2, item_comp_id: 1 } });

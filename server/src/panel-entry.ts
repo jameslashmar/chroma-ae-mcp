@@ -5,7 +5,7 @@ import { writeDiagnostics } from "./tools/ext/diagnostics.js";
 import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
-import { parseToolset, TOOLSET_HEADER } from "./toolsets.js";
+import { CLIENT_HEADER, parseToolset, TOOLSET_HEADER } from "./toolsets.js";
 import { PanelHost, type PanelEvalScriptFn } from "./panel-host.js";
 import { defaultDataDir, QuarantineStore } from "./quarantine.js";
 import { SingleWriterQueue } from "./queue.js";
@@ -236,7 +236,12 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
         log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
       }
     }
-    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset });
+    const clientHeader = req.headers?.[CLIENT_HEADER];
+    const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "")
+      .replace(/[^ -~]+/g, " ")
+      .trim()
+      .slice(0, 40);
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined });
 
     if (
       rpcResponse === null ||

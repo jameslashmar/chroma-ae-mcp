@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderGate } from "../src/render-gate.js";
 import {
   AerenderJobRegistry,
+  bindFailureLog,
   cancelAerenderJob,
   ENGINE_EXIT_GRACE_MS,
   launchAerenderJob,
@@ -449,6 +450,8 @@ describe("aerender startup watchdog", () => {
 
   it("stops a start with no PROGRESS line and an idle engine (its own engine only), then starts it again, and fails it after the third attempt", () => {
     const r = make();
+    const logged: string[] = [];
+    bindFailureLog(r.registry, (level, msg) => logged.push(`${level}: ${msg}`));
     const a = r.launch();
     for (let attempt = 1; attempt <= 3; attempt++) {
       const child = r.children[attempt - 1];
@@ -486,6 +489,9 @@ describe("aerender startup watchdog", () => {
     // The late exit events of the stopped attempts do not rewrite the failed job.
     r.exit(r.children[0], 1);
     expect(r.registry.get(a.job_id)!.error).toContain("never started rendering");
+    // One [ERR] line for the failed job, not one per attempt and not one more for the late exit.
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatch(new RegExp(`^err: job ae_aerender_start ${a.job_id} failed: aerender never started rendering`));
   });
 
   it("a retry that then shows progress is left alone and succeeds", () => {

@@ -21,6 +21,11 @@
  * nothing is resent and the gate stays shut until the panel service has
  * nothing in flight again.
  *
+ * item_indexes: render() renders every QUEUED item, so the other QUEUED items are unchecked first (host rqeditHold, one undo
+ * group, confirmed by a separate read; the list is saved in the job record before the write) and checked again after the
+ * render, also a failed one (rqeditRelease, a separate evalScript, only items still UNQUEUED with the same index, comp and
+ * files). When the outcome is unknown the record keeps restore.state "pending" and the status says how to finish it.
+ *
  * Jobs are kept in <data dir>/renders/rq-render-jobs.json. A job still
  * "running" in that file when a service starts was cut off by a restart: it is
  * reported as "lost" (After Effects may still be rendering: look at it).
@@ -70,11 +75,14 @@ export const RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
 const STOP_TEXT =
   "Measured live (AE 26.3, 2026-11-07, over Remote Desktop): a render started by script LOCKS After Effects' UI for its whole length, so the user could NOT reach the Stop button; ending After Effects was the only way out. " +
   "A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. " +
-  "So keep these renders short, save a dirty project first, and prefer ae_aerender_start (or Media Encoder) for long renders. A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.";
+  "So keep these renders short, save a dirty project first, and prefer ae_aerender_start for long renders (or, if the user agrees, engine \"media_encoder\"). A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.";
 
 // ---------- job record ----------
 
-export type RenderJobState = "running" | "finished" | "failed" | "unknown" | "lost";
+/** queued_in_media_encoder: the items wait in AME's queue (start_now false) until the user presses Start there. handed_to_media_encoder: AME was told to start (start_now true). After Effects gets no progress from either. */
+export type RenderJobState = "running" | "finished" | "failed" | "unknown" | "lost" | "queued_in_media_encoder" | "handed_to_media_encoder";
+
+export type RenderEngine = "after_effects" | "media_encoder";
 
 export interface JobOutput {
   item_index: number;
@@ -121,6 +129,32 @@ export interface RenderJobResult {
   read_back_error?: string;
 }
 
+/** A Render Queue item that was unchecked to render only the chosen ones: index, comp id and output files identify it again. */
+export interface HeldItem {
+  index: number;
+  comp_id: number;
+  comp_name?: string;
+  files: string[];
+}
+
+export interface NotRestored extends HeldItem {
+  /** already_queued (nothing to do), moved, gone, changed, error, read_back_mismatch */
+  code: string;
+  reason: string;
+  now_at?: number;
+}
+
+/** pending: not yet queued again (also after a failed or unknown attempt); restored: all done; partial: some could not be. */
+export type RestoreState = "pending" | "restored" | "partial" | "failed" | "unknown";
+
+export interface RestoreRecord {
+  state: RestoreState;
+  held: HeldItem[];
+  restored: HeldItem[];
+  not_restored: NotRestored[];
+  error?: string;
+}
+
 export interface RenderJobRecord {
   job_id: string;
   op_id: string;
@@ -131,6 +165,16 @@ export interface RenderJobRecord {
   project_path: string;
   overwrite: boolean;
   items: JobItem[];
+  /** item_indexes of the call: only these items were rendered, the other QUEUED items were unchecked meanwhile. */
+  only_item_indexes?: number[];
+  /** The items unchecked for this job and what became of them. Kept on disk so a restart or a crash does not lose it. */
+  restore?: RestoreRecord;
+  /** Absent = "after_effects". With "media_encoder" the render runs in Adobe Media Encoder from the SAVED project. */
+  engine?: RenderEngine;
+  /** media_encoder: when queueInAME returned. */
+  handed_at?: string;
+  /** media_encoder: the item statuses right after queueInAME (a separate read; for the live check). */
+  ame_item_statuses?: JobItemResult[];
   /** True when every queued item is DONE and every output exists with bytes (set with state "finished"). */
   ok?: boolean;
   summary?: string;
@@ -150,6 +194,9 @@ export class RenderJobStore {
   private readonly settled = new Map<string, Promise<void>>();
   /** Sizes seen by the last status call, to say whether files grew since. Memory only. */
   readonly lastSeen = new Map<string, { bytes: number; at: number }>();
+  /** Called once per job when it reaches "failed" or "unknown"; the tool points it at the service log (bindJobFailureLog). */
+  failureSink: ((rec: RenderJobRecord) => void) | null = null;
+  private readonly reported = new Set<string>();
 
   constructor(readonly filePath: string) {
     this.load();
@@ -165,7 +212,15 @@ export class RenderJobStore {
         if (!raw || typeof raw !== "object" || typeof (raw as RenderJobRecord).job_id !== "string") continue;
         const rec = { ...(raw as RenderJobRecord) };
         // This process did not start it: the render it began is not tracked by anyone now.
-        if (rec.state === "running") {
+        if (rec.state === "running" && rec.engine === "media_encoder") {
+          // The hand-over was cut off before it finished: nothing says AME got the items.
+          rec.state = "unknown";
+          rec.finished_at = new Date().toISOString();
+          rec.note =
+            "The panel service restarted while this job was being handed to Media Encoder, so it is not known whether Media Encoder got it. " +
+            "Look at Media Encoder's queue and at After Effects' Render Queue (items unchecked for this job may still need queuing again: see restore). Nothing was resent.";
+          changed = true;
+        } else if (rec.state === "running") {
           rec.state = "lost";
           rec.finished_at = new Date().toISOString();
           rec.note =
@@ -219,8 +274,22 @@ export class RenderJobStore {
   update(jobId: string, patch: Partial<RenderJobRecord>): void {
     const cur = this.jobs.get(jobId);
     if (!cur) return;
-    this.jobs.set(jobId, { ...cur, ...patch, job_id: cur.job_id });
+    const next = { ...cur, ...patch, job_id: cur.job_id };
+    this.jobs.set(jobId, next);
     this.save();
+    if ((next.state === "failed" || next.state === "unknown") && !this.reported.has(jobId) && this.failureSink) {
+      this.reported.add(jobId);
+      try {
+        this.failureSink(next);
+      } catch {
+        // a log line must never break a render job
+      }
+    }
+  }
+
+  /** Forgets a job that was refused before its render began and left nothing to restore. */
+  discard(jobId: string): void {
+    if (this.jobs.delete(jobId)) this.save();
   }
 
   /** The running job, else the newest one. */
@@ -274,10 +343,61 @@ export const rqrenderDeps = {
   defer: (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0)),
   sleep: (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)),
   now: (): number => Date.now(),
+  /** Is Adobe Media Encoder installed? (folder "Adobe Media Encoder*" under Program Files\Adobe, or /Applications). */
+  ameInstalled: (): boolean => ameInstalledOnDisk(),
   readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
   stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
   stillRenderingPollMs: STILL_RENDERING_POLL_MS,
 };
+
+// ---------- Media Encoder install check ----------
+
+/** True when a folder named "Adobe Media Encoder*" exists where Adobe installs it. Never throws. */
+export function ameInstalledOnDisk(): boolean {
+  const roots: string[] = [];
+  if (process.platform === "win32") {
+    for (const v of [process.env["ProgramFiles"], process.env["ProgramW6432"], "C:\Program Files"]) {
+      if (v) roots.push(path.join(v, "Adobe"));
+    }
+  } else if (process.platform === "darwin") {
+    roots.push("/Applications");
+  }
+  for (const r of roots) {
+    try {
+      if (fs.readdirSync(r).some((n) => /^adobe media encoder/i.test(n))) return true;
+    } catch {
+      // not there
+    }
+  }
+  return false;
+}
+
+/** Files in the output's folder with the same base name and another extension that appeared or changed since `sinceMs`. At most 10. Never throws. */
+export function otherExtensionFiles(file: string, sinceMs: number): Array<{ file: string; bytes: number; mtime: string }> {
+  const out: Array<{ file: string; bytes: number; mtime: string }> = [];
+  try {
+    if (isSequencePath(file)) return out;
+    const dir = path.dirname(file);
+    const base = path.basename(file);
+    const stem = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
+    let scanned = 0;
+    for (const name of fs.readdirSync(dir)) {
+      if (++scanned > 20_000 || out.length >= 10) break;
+      if (name.toLowerCase() === base.toLowerCase()) continue;
+      const dot = name.lastIndexOf(".");
+      if (dot <= 0 || name.slice(0, dot).toLowerCase() !== stem.toLowerCase()) continue;
+      try {
+        const st = fs.statSync(path.join(dir, name));
+        if (st.isFile() && st.mtimeMs >= sinceMs) out.push({ file: path.join(dir, name), bytes: st.size, mtime: st.mtime.toISOString() });
+      } catch {
+        // vanished
+      }
+    }
+  } catch {
+    // folder unreadable
+  }
+  return out;
+}
 
 // ---------- output files on disk ----------
 
@@ -375,6 +495,15 @@ export interface StartRefusal {
     | "queue_truncated"
     | "duplicate_output"
     | "output_in_use"
+    | "item_not_found"
+    | "item_not_queued"
+    | "item_comp_mismatch"
+    | "bad_item_indexes"
+    | "hold_failed"
+    | "user_confirmation_needed"
+    | "project_unsaved"
+    | "ame_unavailable"
+    | "ame_not_installed"
     | "not_in_panel";
   message: string;
   item_index?: number;
@@ -386,6 +515,14 @@ export interface StartPlan {
   refusals: StartRefusal[];
   /** Things that do not stop the render but the caller should know. */
   warnings: string[];
+  /** With item_indexes: the other QUEUED items, to be unchecked for the render and checked again after it. */
+  hold: HeldItem[];
+}
+
+/** The items a call names (item_indexes, with comp_ids in the same order when given). */
+export interface OnlyItems {
+  indexes: number[];
+  comp_ids?: number[];
 }
 
 /** An output file that a running aerender job or an unfinished batch item is going to write ("" file: outputs unknown). */
@@ -426,15 +563,17 @@ export function liveOutputsFrom(registry: AerenderJobRegistry): LiveOutput[] {
 }
 
 /** Judges the Render Queue read (rqeditRead) against what ae_render_queue_render needs. Pure apart from fs. */
-export function planStart(queue: QueueRead | null, overwrite: boolean, live: LiveOutput[] = []): StartPlan {
+export function planStart(queue: QueueRead | null, overwrite: boolean, live: LiveOutput[] = [], only?: OnlyItems): StartPlan {
   const refusals: StartRefusal[] = [];
   const warnings: string[] = [];
   const items: JobItem[] = [];
+  const hold: HeldItem[] = [];
   if (!queue) {
     return {
       items,
       refusals: [{ code: "nothing_queued", message: "The Render Queue could not be read." }],
       warnings,
+      hold,
     };
   }
   if (queue.rendering === true) {
@@ -446,7 +585,49 @@ export function planStart(queue: QueueRead | null, overwrite: boolean, live: Liv
       message: `The Render Queue read stopped at ${queue.items.length} of ${queue.numItems} items, so the rest were not checked and render() would still render them. Nothing was started. Remove or unqueue items first.`,
     });
   }
-  const queued = queue.items.filter((i: ItemRead) => i.status === "queued");
+  let queued = queue.items.filter((i: ItemRead) => i.status === "queued");
+  if (only) {
+    // Only the named items render; each must be QUEUED, then every other QUEUED item is held back.
+    const chosen: ItemRead[] = [];
+    const seenIdx = new Set<number>();
+    only.indexes.forEach((n, k) => {
+      if (seenIdx.has(n)) return;
+      seenIdx.add(n);
+      const it = queue.items.find((i: ItemRead) => i.index === n);
+      if (!it) {
+        refusals.push({ code: "item_not_found", item_index: n, message: `Render Queue item ${n} does not exist (the queue has ${queue.numItems}). Nothing was started.` });
+        return;
+      }
+      const want = only.comp_ids?.[k];
+      if (want !== undefined && it.comp_id !== want) {
+        refusals.push({
+          code: "item_comp_mismatch",
+          item_index: n,
+          message: `Render Queue item ${n} is comp ${it.comp_id} (${it.comp_name ?? "?"}), not ${want}. The queue changed; read it again with ae_render_queue_inspect. Nothing was started.`,
+        });
+        return;
+      }
+      if (it.status !== "queued") {
+        refusals.push({
+          code: "item_not_queued",
+          item_index: n,
+          message: `Render Queue item ${n} (${it.comp_name ?? "comp " + it.comp_id}) is ${it.status ?? "not known"}, not QUEUED, so it cannot be rendered. Queue it with ae_render_queue_edit (queued: true). A finished (DONE) item cannot be queued again: duplicate it with ae_render_queue_duplicate. Nothing was started.`,
+        });
+        return;
+      }
+      chosen.push(it);
+    });
+    queued = chosen;
+    for (const it of queue.items) {
+      if (it.status !== "queued" || chosen.includes(it)) continue;
+      hold.push({
+        index: it.index,
+        comp_id: it.comp_id,
+        ...(it.comp_name !== undefined ? { comp_name: it.comp_name } : {}),
+        files: (it.output_modules ?? []).map((m) => (typeof m.file === "string" ? m.file : "")),
+      });
+    }
+  }
   for (const it of queue.items) {
     if (it.status === "needs_output" && it.render === true) {
       refusals.push({
@@ -456,7 +637,7 @@ export function planStart(queue: QueueRead | null, overwrite: boolean, live: Liv
       });
     }
   }
-  if (queued.length === 0) {
+  if (queued.length === 0 && !only) {
     refusals.push({
       code: "nothing_queued",
       message:
@@ -541,7 +722,7 @@ export function planStart(queue: QueueRead | null, overwrite: boolean, live: Liv
     }
     items.push(job);
   }
-  return { items, refusals, warnings };
+  return { items, refusals, warnings, hold };
 }
 
 // ---------- reading the result ----------
@@ -617,6 +798,26 @@ export const AeRenderQueueRenderSchema = z.object({
     .default(12)
     .describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
   overwrite: z.boolean().optional().describe("Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool. After Effects then asks \"<file> already exists. Overwrite?\" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was."),
+  item_indexes: z
+    .array(z.number().int().min(1).max(500))
+    .min(1)
+    .max(MAX_ITEMS)
+    .optional()
+    .describe(
+      "Render only these QUEUED items (1-based, as ae_render_queue_inspect shows). Without it After Effects renders EVERY QUEUED item. The other QUEUED items have their Render box unchecked before the render and checked again after it, even when it failed or was stopped."
+    ),
+  comp_ids: z
+    .array(z.number().int())
+    .min(1)
+    .max(MAX_ITEMS)
+    .optional()
+    .describe("With item_indexes: the comp id each index must hold, same order; refused on a mismatch."),
+  start_now: z.boolean().optional().describe("media_encoder: true starts AME at once with its LAST preset. Default false: items wait for the user to press Start."),
+  engine: z
+    .enum(["after_effects", "media_encoder"])
+    .optional()
+    .describe("media_encoder: Adobe Media Encoder renders the SAVED project, AE stays free; needs user_confirmed. Default after_effects."),
+  user_confirmed: z.boolean().optional().describe("True after the user agreed to Media Encoder."),
   sequence_check: SequenceCheckSchema,
   expect: ExpectSchema,
 });
@@ -628,6 +829,177 @@ export const AeRenderQueueRenderStatusSchema = z.object({
 
 type RenderArgs = z.infer<typeof AeRenderQueueRenderSchema>;
 type StatusArgs = z.infer<typeof AeRenderQueueRenderStatusSchema>;
+
+// ---------- holding the other items back, and putting them back ----------
+
+interface HoldResult {
+  held?: Array<{ index: number }>;
+  errors?: string[];
+}
+
+interface ReleaseResult {
+  restored?: Array<{ index: number; comp_id: number; files: string[] }>;
+  not_restored?: Array<{ index: number; comp_id: number; files: string[]; code: string; reason: string; now_at?: number }>;
+  errors?: string[];
+}
+
+export interface RestoreOutcome {
+  state: RestoreState;
+  restored: HeldItem[];
+  not_restored: NotRestored[];
+  error?: string;
+  timedOut?: boolean;
+}
+
+const stripHeld = (h: HeldItem) => ({ index: h.index, comp_id: h.comp_id, files: h.files });
+
+/** What a restore leaves: "restored" when every held item is queued again or was queued already. */
+function restoreStateOf(held: HeldItem[], restored: HeldItem[], notRestored: NotRestored[], error?: string): RestoreState {
+  const benign = notRestored.filter((n) => n.code === "already_queued").length;
+  if (!error && restored.length + benign === held.length && notRestored.length === benign) return "restored";
+  return "partial";
+}
+
+/**
+ * Checks the Render box again on the held items that are still UNQUEUED and still match (index, comp id,
+ * output files), in one evalScript, then reads them back in another. Never throws. A failed eval leaves the
+ * state "failed" (or "unknown" after a timeout) and the items as they were.
+ */
+export async function restoreHeld(ctx: ToolContext, idBase: string, held: HeldItem[]): Promise<RestoreOutcome> {
+  if (held.length === 0) return { state: "restored", restored: [], not_restored: [] };
+  const names = new Map(held.map((h) => [h.index, h.comp_name] as const));
+  const named = <T extends { index: number }>(x: T): T & { comp_name?: string } => {
+    const n = names.get(x.index);
+    return n !== undefined ? { ...x, comp_name: n } : x;
+  };
+  let rel: ReleaseResult | null = null;
+  try {
+    const res = await ctx.bridge.evalRaw<ReleaseResult>({
+      id: idBase,
+      script: buildJsxCall("rqeditRelease", { items: held.map(stripHeld) }),
+      label: "ae_render_queue_render (queue the held-back items again)",
+      mutates: true,
+      mustSend: true,
+      toolName: "ae_render_queue_render",
+      timeoutMs: rqrenderDeps.readBackTimeoutMs,
+    });
+    rel = (res.result ?? null) as ReleaseResult | null;
+  } catch (err) {
+    const timedOut = err instanceof BridgeError && err.kind === "timeout";
+    return { state: timedOut ? "unknown" : "failed", restored: [], not_restored: [], error: clip(errMessage(err)), ...(timedOut ? { timedOut: true } : {}) };
+  }
+  let restored: HeldItem[] = (rel?.restored ?? []).map((r) => named({ index: r.index, comp_id: r.comp_id, files: r.files }));
+  const notRestored: NotRestored[] = (rel?.not_restored ?? []).map((r) => named({ ...r }));
+  let error = rel?.errors && rel.errors.length > 0 ? clip(rel.errors.join("; ")) : undefined;
+  if (restored.length > 0) {
+    // A separate read: a read in the write's own script would give stale values.
+    try {
+      const back = await ctx.bridge.evalRaw<QueueRead>({
+        id: `${idBase}read`,
+        script: buildJsxCall("rqeditRead", { item_indexes: restored.map((r) => r.index), settings: false }),
+        label: "ae_render_queue_render (read-back of the restore)",
+        mutates: false,
+        toolName: "ae_render_queue_render",
+        timeoutMs: rqrenderDeps.readBackTimeoutMs,
+      });
+      const rows = back.result?.items ?? [];
+      const bad = restored.filter((r) => rows.find((x) => x.index === r.index)?.status !== "queued");
+      if (bad.length > 0) {
+        for (const b of bad) notRestored.push({ ...b, code: "read_back_mismatch", reason: "the read-back after checking its Render box does not say QUEUED" });
+        restored = restored.filter((r) => !bad.includes(r));
+      }
+    } catch (err) {
+      error = clip(`${error ? error + "; " : ""}the read-back of the restore failed (${errMessage(err)}): look at the Render Queue`);
+    }
+  }
+  return { state: restoreStateOf(held, restored, notRestored, error), restored, not_restored: notRestored, ...(error ? { error } : {}) };
+}
+
+/** After the hold: the chosen items QUEUED, every other item not QUEUED. Returns the problem, or null. */
+function holdProblem(read: QueueRead | null, plan: StartPlan, numItems: number | undefined): string | null {
+  if (!read) return "the queue could not be read back";
+  const chosen = new Set(plan.items.map((i) => i.index));
+  if (numItems !== undefined && read.numItems !== numItems) return `the queue now has ${read.numItems} items, not ${numItems}`;
+  for (const it of read.items) {
+    if (chosen.has(it.index) && it.status !== "queued") return `item ${it.index} (to render) reads ${it.status ?? "unknown"}, not QUEUED`;
+    if (!chosen.has(it.index) && it.status === "queued") return `item ${it.index} is still QUEUED`;
+  }
+  for (const c of chosen) if (!read.items.some((i) => i.index === c)) return `item ${c} was not in the read-back`;
+  return null;
+}
+
+/**
+ * Unchecks the other QUEUED items in one undo group, then reads the queue in a separate evalScript to confirm only
+ * the chosen items are QUEUED. On any problem it puts back what it changed. Never throws.
+ */
+async function holdOthers(ctx: ToolContext, opId: string, plan: StartPlan, numItems: number | undefined): Promise<{ ok: true } | { ok: false; problem: string; outcome: RestoreOutcome }> {
+  let problem: string | null = null;
+  try {
+    const res = await ctx.bridge.evalRaw<HoldResult>({
+      id: `${opId}_hold`,
+      script: buildJsxCall("rqeditHold", {
+        keep: plan.items.map((i) => ({ index: i.index, comp_id: i.comp_id })),
+        hold: plan.hold.map(stripHeld),
+      }),
+      label: "ae_render_queue_render (uncheck the other queued items)",
+      mutates: true,
+      toolName: "ae_render_queue_render",
+    });
+    const errs = res.result?.errors ?? [];
+    if (errs.length > 0) problem = `After Effects refused to uncheck: ${errs.join("; ")}`;
+  } catch (err) {
+    problem = errMessage(err);
+  }
+  if (problem === null) {
+    try {
+      const back = await ctx.bridge.evalRaw<QueueRead>({
+        id: `${opId}_holdread`,
+        script: buildJsxCall("rqeditRead", { settings: false }),
+        label: "ae_render_queue_render (read-back of the hold)",
+        mutates: false,
+        toolName: "ae_render_queue_render",
+      });
+      const bad = holdProblem((back.result ?? null) as QueueRead | null, plan, numItems);
+      if (bad) problem = `the read-back does not show only the chosen items QUEUED: ${bad}`;
+    } catch (err) {
+      problem = `the read-back failed: ${errMessage(err)}`;
+    }
+  }
+  if (problem === null) return { ok: true };
+  const outcome = await restoreHeld(ctx, `${opId}_unhold`, plan.hold);
+  return { ok: false, problem: clip(problem), outcome };
+}
+
+/** Holds the other QUEUED items back; returns the refusal to send when that failed (the job record is discarded or marked failed), else null. */
+async function holdOrRefuse(ctx: ToolContext, store: RenderJobStore, jobId: string, opId: string, plan: StartPlan, numItems: number | undefined): Promise<Record<string, unknown> | null> {
+  bindJobFailureLog(store, ctx.log);
+  const h = await holdOthers(ctx, opId, plan, numItems);
+  if (h.ok) return null;
+  const clean = h.outcome.state === "restored";
+  if (clean) {
+    store.discard(jobId);
+  } else {
+    store.update(jobId, {
+      state: "failed",
+      finished_at: new Date().toISOString(),
+      ok: false,
+      error: h.problem,
+      restore: { state: h.outcome.state, held: plan.hold, restored: h.outcome.restored, not_restored: h.outcome.not_restored, ...(h.outcome.error ? { error: h.outcome.error } : {}) },
+      summary: `Nothing was rendered. The other queued items could not be unchecked cleanly (${h.problem}) and putting them back failed in part. ${restoreSummary({ state: h.outcome.state, held: plan.hold, restored: h.outcome.restored, not_restored: h.outcome.not_restored, ...(h.outcome.error ? { error: h.outcome.error } : {}) })}`,
+    });
+  }
+  return {
+    ok: false,
+    started: false,
+    refused: [
+      {
+        code: "hold_failed",
+        message: `The other queued items could not be unchecked, so nothing was rendered: ${h.problem}. ${clean ? "Everything that was unchecked is QUEUED again." : "Some items could not be put back; see restore and call ae_render_queue_inspect."}`,
+      },
+    ],
+    ...(clean ? {} : { job_id: jobId, restore: h.outcome, restore_how: RESTORE_HOW }),
+  };
+}
 
 // ---------- the background run ----------
 
@@ -658,6 +1030,16 @@ export function beginRenderGate(store: RenderJobStore, info: { job_id: string; o
   );
 }
 
+/** Sends one [ERR] line to the service log when a job of this store ends failed or unknown (panel/client/common.js, JOB_LINE, counts it). */
+export function bindJobFailureLog(store: RenderJobStore, log: ((level: string, msg: string) => void) | undefined): void {
+  if (!log) return;
+  store.failureSink = (rec) => {
+    const reason = rec.error || rec.summary || rec.note || "no reason recorded";
+    const word = rec.state === "unknown" ? "ended unknown" : "failed";
+    log("err", `job ae_render_queue_render ${rec.job_id} ${word}: ${reason.replace(/\s+/g, " ").trim().slice(0, 200)}`);
+  };
+}
+
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -670,6 +1052,8 @@ interface RunParams {
   lease: QueueLease;
   timeoutMs: number;
   items: JobItem[];
+  /** With item_indexes: the number of QUEUED items the render must find (the chosen ones), checked inside the render's own eval. */
+  expectedQueued?: number;
 }
 
 /**
@@ -679,6 +1063,7 @@ interface RunParams {
  */
 export async function runRenderJob(p: RunParams): Promise<void> {
   const { ctx, store, jobId, opId, items } = p;
+  bindJobFailureLog(store, ctx.log);
   let keepGate = false;
   try {
     // The tool's reply goes out first; the call that keeps After Effects busy starts one macrotask later.
@@ -687,7 +1072,7 @@ export async function runRenderJob(p: RunParams): Promise<void> {
     try {
       await ctx.bridge.evalRaw({
         id: opId,
-        script: buildJsxCall("rqeditRender", {}),
+        script: buildJsxCall("rqeditRender", p.expectedQueued !== undefined ? { expected_queued: p.expectedQueued } : {}),
         label: "ae_render_queue_render (render)",
         mutates: true,
         toolName: "ae_render_queue_render",
@@ -755,7 +1140,20 @@ export async function runRenderJob(p: RunParams): Promise<void> {
       await rqrenderDeps.sleep(rqrenderDeps.stillRenderingPollMs);
     }
 
+    // The other QUEUED items that were unchecked go back to QUEUED now, whatever the render did (a SEPARATE evalScript).
+    // Not while the outcome is unknown: AE may still be rendering, and the record keeps the list as pending.
+    let restorePatch: Partial<RenderJobRecord> = {};
+    const held = store.get(jobId)?.restore;
+    if (held && held.held.length > 0 && !keepGate && !stillGoing) {
+      const out = await restoreHeld(ctx, `${opId}_restore`, held.held);
+      if (out.timedOut) {
+        keepGate = true;
+        renderGate.markUnknown("read_back_timeout");
+      }
+      restorePatch = { restore: { state: out.state, held: held.held, restored: out.restored, not_restored: out.not_restored, ...(out.error ? { error: out.error } : {}) } };
+    }
     const judged = judgeResult(items, read, readBackError);
+    if (restorePatch.restore) judged.summary += " " + restoreSummary(restorePatch.restore);
     if (stillGoing) {
       keepGate = true;
       renderGate.markUnknown("still_rendering");
@@ -779,9 +1177,10 @@ export async function runRenderJob(p: RunParams): Promise<void> {
         error: clip(evalProblem.message),
         summary: `After Effects raised an error from the render call: ${clip(evalProblem.message)}. ${judged.summary}`,
         result: judged.result,
+        ...restorePatch,
       });
     } else {
-      store.update(jobId, { state: "finished", finished_at: new Date().toISOString(), ok: judged.ok, summary: judged.summary, result: judged.result });
+      store.update(jobId, { state: "finished", finished_at: new Date().toISOString(), ok: judged.ok, summary: judged.summary, result: judged.result, ...restorePatch });
     }
 
     // The render changed the Render Queue (statuses, DONE items): take the new state as the session baseline, still behind the gate,
@@ -809,6 +1208,166 @@ export async function runRenderJob(p: RunParams): Promise<void> {
     if (!keepGate) renderGate.end(jobId);
     p.lease.release();
   }
+}
+
+/** One sentence on what became of the items held back for the render. */
+export function restoreSummary(r: RestoreRecord): string {
+  const where = (xs: HeldItem[]) => xs.map((x) => `${x.index} (${x.comp_name ?? "comp " + x.comp_id})`).join(", ");
+  if (r.state === "restored") {
+    return r.restored.length > 0 ? `The ${r.restored.length} other item(s) that were unchecked for this render are QUEUED again: ${where(r.restored)}.` : "The other items that were unchecked for this render were already QUEUED again.";
+  }
+  const parts: string[] = [];
+  if (r.restored.length > 0) parts.push(`queued again: ${where(r.restored)}`);
+  const left = r.not_restored.filter((n) => n.code !== "already_queued");
+  if (left.length > 0) parts.push(`NOT queued again: ${left.map((n) => `${n.index} (${n.comp_name ?? "comp " + n.comp_id}): ${n.reason}`).join("; ")}`);
+  if (r.error) parts.push(`error: ${r.error}`);
+  if (r.restored.length === 0 && left.length === 0) parts.push("no item was queued again");
+  return `Restore of the items unchecked for this render: ${parts.join(" | ")}.`;
+}
+
+const RESTORE_HOW =
+  "Items in restore.held that are not in restore.restored were unchecked by this tool and may still be UNQUEUED. Once After Effects is idle and answers, call ae_render_queue_inspect, and for each such item whose index, comp_id and output file still match and that reads UNQUEUED, call ae_render_queue_edit with item_index, comp_id and queued: true. Leave any item that no longer matches: someone changed it.";
+
+// ---------- the Media Encoder hand-over (opt-in engine) ----------
+
+const AME_CALL_TIMEOUT_MS = 120_000;
+
+const AME_REFUSAL_ASK =
+  "Ask the user first, then call again with user_confirmed: true. Say to them: After Effects stays free while it renders; " +
+  "Media Encoder renders the SAVED project, so changes made after the last save are not in it; Media Encoder may take a moment to open; it uses its own last-used preset, so the format may differ from After Effects' output module (you will check it in Media Encoder's queue before it starts).";
+
+interface AmeParams {
+  ctx: ToolContext;
+  store: RenderJobStore;
+  jobId: string;
+  opId: string;
+  plan: StartPlan;
+  maxHours: number;
+  startNow: boolean;
+}
+
+/**
+ * queueInAME(true) returns at once (Media Encoder renders on its own), so this runs inside the tool call while it holds the
+ * lease and sets NO render gate. Then the item statuses are read in a separate evalScript, and the held-back items are
+ * checked again in another. Never throws; every failure goes into the job record.
+ */
+async function handOffToMediaEncoder(p: AmeParams): Promise<Record<string, unknown>> {
+  const { ctx, store, jobId, opId, plan } = p;
+  bindJobFailureLog(store, ctx.log);
+  let problem: { kind: string; message: string } | null = null;
+  try {
+    await ctx.bridge.evalRaw({
+      id: `${opId}_ame`,
+      script: buildJsxCall("rqeditQueueInAme", { expected_queued: plan.items.length, start_now: p.startNow }),
+      label: "ae_render_queue_render (Queue in Media Encoder)",
+      mutates: true,
+      toolName: "ae_render_queue_render",
+      timeoutMs: AME_CALL_TIMEOUT_MS,
+    });
+  } catch (err) {
+    problem = { kind: err instanceof BridgeError ? err.kind : "other", message: errMessage(err) };
+  }
+  const timedOut = problem !== null && problem.kind === "timeout";
+
+  // What the items read right after the hand-over: a separate evalScript, for the record (the live check has no answer yet).
+  let statuses: JobItemResult[] | undefined;
+  if (!timedOut) {
+    try {
+      const res = await ctx.bridge.evalRaw<ResultRead>({
+        id: `${opId}_after`,
+        script: buildJsxCall("rqeditRenderResult", { indexes: plan.items.map((i) => i.index), comp_ids: plan.items.map((i) => i.comp_id) }),
+        label: "ae_render_queue_render (read-back after Queue in Media Encoder)",
+        mutates: false,
+        toolName: "ae_render_queue_render",
+        timeoutMs: rqrenderDeps.readBackTimeoutMs,
+      });
+      const read = (res.result ?? null) as ResultRead | null;
+      statuses = plan.items.map((it) => {
+        const row = read?.items?.find((r) => r.index === it.index);
+        return {
+          index: it.index,
+          comp_id: row?.comp_id ?? null,
+          comp_name: row?.comp_name ?? it.comp_name,
+          status: row?.status ?? null,
+          ...(row?.error ? { error: clip(row.error) } : {}),
+        };
+      });
+    } catch {
+      statuses = undefined;
+    }
+  }
+
+  // The items held back for item_indexes go back to QUEUED now. Not after a timeout: AE is busy and the list stays pending.
+  let restorePatch: Partial<RenderJobRecord> = {};
+  if (plan.hold.length > 0 && !timedOut) {
+    const out = await restoreHeld(ctx, `${opId}_restore`, plan.hold);
+    restorePatch = { restore: { state: out.state, held: plan.hold, restored: out.restored, not_restored: out.not_restored, ...(out.error ? { error: out.error } : {}) } };
+  }
+  const restoreText = restorePatch.restore ? " " + restoreSummary(restorePatch.restore) : "";
+  const now = new Date().toISOString();
+
+  if (problem) {
+    store.update(jobId, {
+      state: timedOut ? "unknown" : "failed",
+      finished_at: now,
+      ok: false,
+      error: clip(problem.message),
+      summary: timedOut
+        ? "The call that hands the queue to Media Encoder did not answer in time, so it is not known whether Media Encoder got it. Look at Media Encoder and After Effects. Nothing was resent."
+        : `Nothing was handed to Media Encoder: ${clip(problem.message)}.${restoreText}`,
+      ...(statuses ? { ame_item_statuses: statuses } : {}),
+      ...restorePatch,
+    });
+    return {
+      ok: false,
+      started: false,
+      job_id: jobId,
+      engine: "media_encoder",
+      refused: [{ code: "ame_unavailable", message: `Media Encoder was not started: ${clip(problem.message)}.${restoreText}` }],
+      ...(restorePatch.restore && restorePatch.restore.state !== "restored" ? { restore: restorePatch.restore, restore_how: RESTORE_HOW } : {}),
+    };
+  }
+
+  const finalState = p.startNow ? ("handed_to_media_encoder" as const) : ("queued_in_media_encoder" as const);
+  store.update(jobId, {
+    state: finalState,
+    handed_at: now,
+    summary: p.startNow
+      ? `Handed to Adobe Media Encoder, which started rendering the saved project on its own with its last-used preset.${restoreText} After Effects gets no progress from it: confirm with ae_verify_render once the output file stops growing.`
+      : `Queued in Adobe Media Encoder; nothing renders until the user presses Start there.${restoreText} Ask the user to check the preset and format in Media Encoder's queue first.`,
+    ...(statuses ? { ame_item_statuses: statuses } : {}),
+    ...restorePatch,
+  });
+  try {
+    const rec = store.get(jobId);
+    await noteUiWrite(ctx, {
+      opId: `${opId}_rebase`,
+      toolName: "ae_render_queue_render",
+      label: "ae_render_queue_render (session baseline)",
+      expect: { project_path: rec?.project_path ?? "<unsaved>" },
+    });
+  } catch {
+    // bookkeeping only
+  }
+  return {
+    ok: true,
+    started: true,
+    engine: "media_encoder",
+    job_id: jobId,
+    state: finalState,
+    start_now: p.startNow,
+    started_at: store.get(jobId)?.started_at,
+    project_path: store.get(jobId)?.project_path,
+    renders: "the SAVED project file in Adobe Media Encoder; changes made after the last save are not in it",
+    items: plan.items,
+    ...(statuses ? { item_statuses_after_hand_over: statuses } : {}),
+    ...(plan.hold.length > 0 ? { held_back: plan.hold, ...(restorePatch.restore ? { restore: restorePatch.restore } : {}) } : {}),
+    note: p.startNow
+      ? "start_now was true: Media Encoder started its queue with its last-used preset. After Effects is NOT locked and other tools work. It may take a moment to open; the format may differ from the output module's (not measured). " +
+        "After Effects gets no progress or end signal: poll ae_render_queue_render_status (output files, bytes, whether they grew, files with another extension). Never say it finished from this call: confirm with ae_verify_render once the file stops growing."
+      : "The items were put in Media Encoder's queue and WAIT there; nothing renders yet. Ask the user to open Media Encoder, check the preset and format of each item (it uses its last-used preset, not necessarily the output module's) and press Start. " +
+        "After Effects is NOT locked. Once the user has pressed Start, poll ae_render_queue_render_status (output files, bytes, growth, files with another extension); confirm with ae_verify_render once the file stops growing.",
+  };
 }
 
 // ---------- status ----------
@@ -841,6 +1400,19 @@ export async function describeJob(ctx: ToolContext, store: RenderJobStore, rec: 
     items: rec.items.map((i) => ({ index: i.index, comp_id: i.comp_id, comp_name: i.comp_name })),
     outputs,
   };
+  if (rec.only_item_indexes) out.only_item_indexes = rec.only_item_indexes;
+  if (rec.restore && rec.restore.held.length > 0) {
+    out.restore = rec.restore;
+    if (rec.state === "running") {
+      out.restore_note = `${rec.restore.held.length} other QUEUED item(s) are unchecked while this renders and are checked again when it ends.`;
+    } else if (rec.restore.state === "restored") {
+      out.restore_summary = restoreSummary(rec.restore);
+    } else {
+      out.restore_pending = rec.restore.state !== "partial";
+      out.restore_summary = restoreSummary(rec.restore);
+      if (rec.restore.state !== "partial") out.restore_how = RESTORE_HOW;
+    }
+  }
   const gate = renderGate.active();
   if (gate) {
     out.gate = { job_id: gate.job_id, state: gate.state, ...(gate.cause ? { cause: gate.cause } : {}) };
@@ -849,7 +1421,39 @@ export async function describeJob(ctx: ToolContext, store: RenderJobStore, rec: 
       "the user can also press Clear render lock in the Chroma AE MCP panel (shown only while the gate is shut).";
   }
 
-  if (rec.state === "running") {
+  if (rec.engine === "media_encoder") out.engine = "media_encoder";
+  if (rec.state === "handed_to_media_encoder" || rec.state === "queued_in_media_encoder") {
+    // Per output file: did it grow since the last status call? (memory only; null on the first call)
+    out.outputs = outputs.map((o) => {
+      const key = `${rec.job_id}|${o.item_index}|${o.module}`;
+      const before = store.lastSeen.get(key);
+      store.lastSeen.set(key, { bytes: o.bytes, at: nowMs });
+      return { ...o, grew_since_last_check: before ? o.bytes > before.bytes : null };
+    });
+    // Another extension of the same name that appeared or changed after the hand-over: AME's preset may write another format.
+    const since = rec.handed_at ? Date.parse(rec.handed_at) : Date.parse(rec.started_at);
+    const others: Array<{ file: string; bytes: number; mtime: string }> = [];
+    for (const it of rec.items) {
+      for (const o of it.outputs) {
+        for (const f of otherExtensionFiles(o.file, Number.isFinite(since) ? since : 0)) {
+          if (others.length < 10) others.push(f);
+        }
+      }
+    }
+    if (others.length > 0) {
+      out.other_extension_files = others;
+      out.other_extension_note = "Files with the same name and another extension appeared after the hand-over: Media Encoder may have used its own preset and written another format than the output module's. Check them with ae_verify_render.";
+    }
+    out.files_written_since_start = writtenSince;
+    if (rec.handed_at) out.handed_at = rec.handed_at;
+    if (rec.summary) out.summary = rec.summary;
+    if (rec.ame_item_statuses) out.item_statuses_after_hand_over = rec.ame_item_statuses;
+    out.message = rec.state === "queued_in_media_encoder"
+      ? "Queued in Adobe Media Encoder; it waits there until the user checks the preset and format and presses Start. Nothing may be rendering yet (the files below stay absent until then). After Effects is free and gets no progress, so this tool NEVER says the render finished. Once the user pressed Start, watch exists, bytes and grew_since_last_check, then confirm with ae_verify_render when a file stops growing."
+      : "Handed to Adobe Media Encoder. After Effects is free and gets no progress from it, so this tool NEVER says the render finished. " +
+      "Watch the output files: exists, bytes and grew_since_last_check (null on the first call; call again a little later). " +
+      "Once a file exists and has stopped growing on two checks apart, confirm it with ae_verify_render (one real file or frame). Media Encoder's own window shows its queue.";
+  } else if (rec.state === "running") {
     out.sign_of_life = {
       files_written_since_start: writtenSince,
       total_bytes: totalBytes,
@@ -909,11 +1513,30 @@ export const rqrenderTools: ToolDefinition<any>[] = [
       "`max_hours` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. " +
       `Stopping: ${STOP_TEXT} ` +
       "Jobs are kept on disk; if the service restarts during a render the job reads `lost` and you must look at After Effects. " +
+      "`item_indexes` (with `comp_ids`) renders only those QUEUED items: without it After Effects renders EVERY QUEUED item. The other QUEUED items are unchecked just before and checked again after the render (also when it failed); the status lists what was restored and what could not be (moved, deleted, changed), and after a crash what still needs queuing. " +
+      "`engine: \"media_encoder\"` (opt-in, per render): puts the queue in Adobe Media Encoder (RenderQueue.queueInAME) so After Effects stays FREE: no render gate, the call returns in seconds, other tools keep working. Offer it ONLY when `ae_aerender_start` did not start, a long render would lock After Effects, or a long H.264 render (one ran After Effects out of memory); ASK THE USER first and pass `user_confirmed: true` only after they agree (say: AE stays free; Media Encoder renders the SAVED project so later changes are not in it; it may take a moment to open). By default (`start_now` false) the items only WAIT in Media Encoder's queue (state `queued_in_media_encoder`): tell the user to check the preset and format there and press Start, because Media Encoder applies its LAST-used preset, not the output module's (AE Scripting Guide). `start_now: true` starts it at once: use it only when the user said the format does not matter, or after a live run showed Media Encoder keeps the output module's format. Refused without `user_confirmed`, when Media Encoder is not installed (`ame_not_installed`, checked on disk), with unsaved changes (ae_save first), or when `canQueueInAME` is false/missing; the same output, folder, sequence and `item_indexes` checks apply. Progress is unknown to After Effects: `ae_render_queue_render_status` reports `handed_to_media_encoder` and each file's exists/bytes/grew_since_last_check, never \"finished\"; confirm with `ae_verify_render` once the file stops growing. The status also lists files with the same name and another extension that appeared after the hand-over. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueRenderSchema,
     handler: async (args: RenderArgs, ctx: ToolContext) => {
       ctx.quarantine.assertClear();
-      if (!ctx.serviceInfo) {
+      const viaAme = args.engine === "media_encoder";
+      if (viaAme && args.user_confirmed !== true) {
+        return {
+          ok: false,
+          started: false,
+          engine: "media_encoder",
+          refused: [{ code: "user_confirmation_needed", message: `Rendering in Adobe Media Encoder needs the user's OK for this render. Nothing was started. ${AME_REFUSAL_ASK}` }],
+        };
+      }
+      if (viaAme && !rqrenderDeps.ameInstalled()) {
+        return {
+          ok: false,
+          started: false,
+          engine: "media_encoder",
+          refused: [{ code: "ame_not_installed", message: "Adobe Media Encoder does not seem to be installed (no \"Adobe Media Encoder*\" folder under Program Files\Adobe or /Applications). Nothing was started. Render inside After Effects instead (engine after_effects)." }],
+        };
+      }
+      if (!viaAme && !ctx.serviceInfo) {
         return {
           ok: false,
           started: false,
@@ -945,6 +1568,22 @@ export const rqrenderTools: ToolDefinition<any>[] = [
       let handedOff = false;
       try {
         const guard = await verifyTargetGuard(ctx, args.expect, opId);
+        if (viaAme && (guard.project_path === undefined || guard.project_path === "<unsaved>" || guard.dirty !== false)) {
+          return {
+            ok: false,
+            started: false,
+            engine: "media_encoder",
+            refused: [
+              {
+                code: "project_unsaved",
+                message:
+                  guard.project_path === "<unsaved>" || guard.project_path === undefined
+                    ? "The project has never been saved, and Media Encoder reads the saved file. Save it with ae_save first. Nothing was started."
+                    : "The project has unsaved changes (or After Effects would not say), and Media Encoder reads the saved file, so they would not be in the render. Save first with ae_save, then call again. Nothing was started.",
+              },
+            ],
+          };
+        }
         const readRes = await ctx.bridge.evalRaw<QueueRead>({
           id: `${opId}_read`,
           script: buildJsxCall("rqeditRead", { settings: false }),
@@ -958,7 +1597,18 @@ export const rqrenderTools: ToolDefinition<any>[] = [
         } catch {
           live = [];
         }
-        const plan = planStart(readRes.result ?? null, args.overwrite === true, live);
+        const only: OnlyItems | undefined = args.item_indexes ? { indexes: args.item_indexes, ...(args.comp_ids ? { comp_ids: args.comp_ids } : {}) } : undefined;
+        if (!only && args.comp_ids) {
+          return { ok: false, started: false, refused: [{ code: "bad_item_indexes", message: "comp_ids needs item_indexes. Nothing was started." }] };
+        }
+        if (only?.comp_ids && only.comp_ids.length !== only.indexes.length) {
+          return {
+            ok: false,
+            started: false,
+            refused: [{ code: "bad_item_indexes", message: `comp_ids has ${only.comp_ids.length} entries but item_indexes has ${only.indexes.length}: give one comp id per index, in the same order. Nothing was started.` }],
+          };
+        }
+        const plan = planStart(readRes.result ?? null, args.overwrite === true, live, only);
         if (plan.refusals.length > 0) {
           return {
             ok: false,
@@ -979,6 +1629,34 @@ export const rqrenderTools: ToolDefinition<any>[] = [
           };
         }
 
+        if (viaAme) {
+          // canQueueInAME is true only with QUEUED items and an available AME command; a missing property means an old or odd AE.
+          const ameRes = await ctx.bridge.evalRaw<{ can_queue_in_ame: boolean | null; has_queue_in_ame?: boolean }>({
+            id: `${opId}_ame_state`,
+            script: buildJsxCall("rqeditAmeState", {}),
+            label: "ae_render_queue_render (can the queue go to Media Encoder)",
+            mutates: false,
+            toolName: "ae_render_queue_render",
+          });
+          const can = ameRes.result?.can_queue_in_ame;
+          if (can !== true) {
+            return {
+              ok: false,
+              started: false,
+              engine: "media_encoder",
+              refused: [
+                {
+                  code: "ame_unavailable",
+                  message:
+                    can === false
+                      ? "After Effects says renderQueue.canQueueInAME is false: Adobe Media Encoder cannot take the queue (it is not installed or not available to this After Effects, or no item is QUEUED). Nothing was started. Render inside After Effects instead (engine after_effects) or install Media Encoder."
+                      : "This After Effects has no renderQueue.canQueueInAME (it needs After Effects 14.0 / CC 2017 or later), so the queue cannot go to Media Encoder. Nothing was started. Render inside After Effects instead.",
+                },
+              ],
+            };
+          }
+        }
+
         const jobId = `rqjob_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
         const startedAt = new Date().toISOString();
         const projectPath = guard.project_path ?? args.expect.project_path;
@@ -990,15 +1668,27 @@ export const rqrenderTools: ToolDefinition<any>[] = [
           max_hours: maxHours,
           project_path: projectPath,
           overwrite: args.overwrite === true,
+          ...(viaAme ? { engine: "media_encoder" as const } : {}),
           items: plan.items,
+          ...(only ? { only_item_indexes: plan.items.map((i) => i.index) } : {}),
+          // Written BEFORE anything is unchecked, so a crash between the write and the render still leaves the list.
+          ...(plan.hold.length > 0 ? { restore: { state: "pending" as const, held: plan.hold, restored: [], not_restored: [] } } : {}),
         });
+        if (plan.hold.length > 0) {
+          const refusal = await holdOrRefuse(ctx, store, jobId, opId, plan, readRes.result?.numItems);
+          if (refusal) return refusal;
+        }
+        if (viaAme) {
+          // No gate: the call returns at once and After Effects stays free.
+          return await handOffToMediaEncoder({ ctx, store, jobId, opId, plan, maxHours, startNow: args.start_now === true });
+        }
         // From here the gate is shut: waiting tools are dropped now, later ones are refused at the door.
         const info = { job_id: jobId, op_id: opId, started_at: startedAt };
         beginRenderGate(store, info, lease);
         ctx.queue.rejectWaiting(() => new BridgeError({ kind: "queued", message: renderGateMessage({ ...info, state: "rendering" }) }));
         const timeoutMs = renderTimeoutMs(maxHours);
         handedOff = true;
-        const run = runRenderJob({ ctx, store, jobId, opId, lease, timeoutMs, items: plan.items });
+        const run = runRenderJob({ ctx, store, jobId, opId, lease, timeoutMs, items: plan.items, ...(only ? { expectedQueued: plan.items.length } : {}) });
         store.trackSettled(jobId, run);
         void run.catch(() => undefined);
 
@@ -1012,6 +1702,12 @@ export const rqrenderTools: ToolDefinition<any>[] = [
           project_path: projectPath,
           renders: "the open project exactly as it is now (unsaved or dirty changes included)",
           items: plan.items,
+          ...(plan.hold.length > 0
+            ? {
+                held_back: plan.hold,
+                held_back_note: `Only the item(s) above render. ${plan.hold.length} other QUEUED item(s) are unchecked now and checked again when the render ends, also if it fails; ae_render_queue_render_status reports what was restored.`,
+              }
+            : {}),
           ...(plan.warnings.length > 0 || seq.warnings.length > 0 ? { warnings: [...plan.warnings, ...seq.warnings] } : {}),
           ...(seq.check ? { sequence_check: seq.check } : {}),
           ...(resourceWarnings.length > 0 ? { resource_warnings: resourceWarnings } : {}),
@@ -1030,7 +1726,7 @@ export const rqrenderTools: ToolDefinition<any>[] = [
     description:
       "Where a render started by ae_render_queue_render is: state (running, finished, failed, unknown, lost), elapsed time, and for every output file whether it exists, its bytes and mtime and, for an image sequence, the frame count; plus any popup blocking After Effects (screenshots are not taken). " +
       "It NEVER touches After Effects (no evalScript), so it answers during the render. While it renders, After Effects gives no percentage: a new or growing file is a sign of life, not progress. " +
-      "After the end it gives each item's status (DONE, ERR_STOPPED, USER_STOPPED), its elapsed time and a verdict, and suggests ae_verify_render. A job `lost` was cut off by a service restart: look at After Effects. `unknown` means the render call hit its time limit, its read-back timed out, or After Effects kept reporting that it renders. While the gate is shut the answer says that restarting After Effects clears it if AE no longer renders. Changes nothing.",
+      "For a job in Media Encoder (`queued_in_media_encoder` or `handed_to_media_encoder`) it lists each output's exists, bytes and `grew_since_last_check` and never claims it finished: confirm with ae_verify_render once the file stops growing. After the end of an AE render it gives each item's status (DONE, ERR_STOPPED, USER_STOPPED), its elapsed time and a verdict, and suggests ae_verify_render. A job `lost` was cut off by a service restart: look at After Effects. `unknown` means the render call hit its time limit, its read-back timed out, or After Effects kept reporting that it renders. While the gate is shut the answer says that restarting After Effects clears it if AE no longer renders. Changes nothing.",
     schema: AeRenderQueueRenderStatusSchema,
     handler: async (args: StatusArgs, ctx: ToolContext) => {
       const store = storeFor(ctx);

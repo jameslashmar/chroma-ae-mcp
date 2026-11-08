@@ -445,8 +445,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path60, errorMaps, issueData } = params;
-      const fullPath = [...path60, ...issueData.path || []];
+      const { data, path: path61, errorMaps, issueData } = params;
+      const fullPath = [...path61, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -754,11 +754,11 @@ var init_types = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path60, key) {
+      constructor(parent, value, path61, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path60;
+        this._path = path61;
         this._key = key;
       }
       get path() {
@@ -4160,11 +4160,11 @@ function missingRanges(sorted, maxRanges) {
   return { missing, ranges, truncated };
 }
 function formatRanges(ranges, digits, maxChars) {
-  const pad = (n) => digits > 0 ? String(n).padStart(digits, "0") : String(n);
+  const pad2 = (n) => digits > 0 ? String(n).padStart(digits, "0") : String(n);
   let out = "";
   for (let i = 0; i < ranges.length; i++) {
     const [a, b] = ranges[i];
-    const part2 = a === b ? pad(a) : `${pad(a)}-${pad(b)}`;
+    const part2 = a === b ? pad2(a) : `${pad2(a)}-${pad2(b)}`;
     const next = out === "" ? part2 : `${out}, ${part2}`;
     if (next.length > maxChars) return out === "" ? `${part2.slice(0, Math.max(0, maxChars - 3))}...` : `${out}, ...`;
     out = next;
@@ -8206,11 +8206,13 @@ __export(aerender_exports, {
   MACOS_FALLBACK_AERENDER: () => MACOS_FALLBACK_AERENDER,
   WINDOWS_FALLBACK_AERENDER: () => WINDOWS_FALLBACK_AERENDER,
   aerenderTools: () => aerenderTools,
+  bindFailureLog: () => bindFailureLog,
   buildAerenderArgs: () => buildAerenderArgs,
   cancelAerenderJob: () => cancelAerenderJob,
   createAerenderTools: () => createAerenderTools,
   defaultAerenderJobsFilePath: () => defaultAerenderJobsFilePath,
   defaultRendersDir: () => defaultRendersDir,
+  formatJobFailureLine: () => formatJobFailureLine,
   getDefaultAerenderRegistry: () => getDefaultAerenderRegistry,
   isAerenderProcess: () => isAerenderProcess,
   itemFrameRange: () => itemFrameRange,
@@ -8432,6 +8434,14 @@ function readLogTail(logPath, maxLines = 60, maxChars = 16e3) {
   } catch {
     return { fullText: "", tail: "" };
   }
+}
+function formatJobFailureLine(tool, jobId, reason) {
+  const why = (reason ?? "no reason recorded").replace(/\s+/g, " ").trim().slice(0, 200);
+  return `job ${tool} ${jobId} failed: ${why}`;
+}
+function bindFailureLog(registry, log) {
+  if (!log) return;
+  registry.failureSink = (rec) => log("err", formatJobFailureLine("ae_aerender_start", rec.job_id, rec.error));
 }
 function getDefaultAerenderRegistry() {
   if (!defaultRegistry) {
@@ -8766,12 +8776,13 @@ function createAerenderTools(options = {}) {
   return [
     {
       name: "ae_aerender_start",
-      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. Before the spawn it checks the project\'s image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: "block"` refuses (also when the check could not finish), "off" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. If aerender fails to start ("never started rendering") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects\' own render of the queued Render Queue items; it keeps AE busy, so tell the user first). Never ask the user to press Render. ' + AGENT_SAFETY_GUIDANCE,
+      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. Before the spawn it checks the project\'s image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: "block"` refuses (also when the check could not finish), "off" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. If aerender fails to start ("never started rendering") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects\' own render of the queued Render Queue items; it keeps AE busy, so tell the user first), or offer Media Encoder after asking the user (`engine: "media_encoder"`, `user_confirmed: true`; AE stays free, the SAVED project is rendered). Never ask the user to press Render. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
         const opId = ctx.bridge.newOpId();
         const registry = getRegistry();
+        bindFailureLog(registry, ctx.log);
         const fromQueue = args.rq_index !== void 0 || args.whole_queue === true;
         const compName = args.comp_name ?? "";
         const labelOf2 = args.whole_queue === true ? "whole queue" : args.rq_index !== void 0 ? `rq ${args.rq_index}` : compName;
@@ -9080,6 +9091,12 @@ var init_aerender = __esm({
       procs = /* @__PURE__ */ new Map();
       /** The start gate and startup watchdog of this registry's jobs (see AerenderStartGate). */
       gate;
+      /**
+       * Called once when a running job reaches "failed" (never for a cancelled job). The tools
+       * point it at the service log (bindFailureLog), so a failure that happens in the
+       * background, such as the watchdog's "never started rendering", shows as an [ERR] line.
+       */
+      failureSink = null;
       constructor(filePath = defaultAerenderJobsFilePath(), gate) {
         this.filePath = filePath;
         this.gate = new AerenderStartGate(this, gate);
@@ -9132,6 +9149,12 @@ var init_aerender = __esm({
         }
         this.saveToDisk();
         if (existing.state === "running" && updated.state !== "running") this.gate.noteEnded(jobId);
+        if (existing.state === "running" && updated.state === "failed" && !updated.cancelled && this.failureSink) {
+          try {
+            this.failureSink(updated);
+          } catch {
+          }
+        }
         return updated;
       }
       loadFromDisk() {
@@ -9635,7 +9658,7 @@ AERENDER SPAWN ERROR: ${err.message}
           this.schedulePump(0);
           return;
         }
-        const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: call ae_render_queue_render, which starts After Effects' own render of the queued items (tell the user first that After Effects will be busy until it ends).`;
+        const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: render in After Effects with ae_render_queue_render (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true (After Effects stays free; Media Encoder renders the SAVED project).`;
         this.note(ctl, `AERENDER WATCHDOG: ${message}`);
         this.registry.update(ctl.jobId, {
           state: "failed",
@@ -11673,8 +11696,8 @@ async function runGuardedWrite(ctx, spec) {
     throw err;
   }
 }
-function expectThat(mismatches, ok, path60, expected, actual, message) {
-  if (!ok) mismatches.push({ path: path60, expected, actual, message });
+function expectThat(mismatches, ok, path61, expected, actual, message) {
+  if (!ok) mismatches.push({ path: path61, expected, actual, message });
 }
 var init_write_runner = __esm({
   "src/tools/ext/write-runner.ts"() {
@@ -17544,9 +17567,9 @@ var init_caption_plan_options = __esm({
 
 // src/caption-fit.ts
 function availableWidth(a) {
-  const pad = (a.box_padding ?? 0) * 2;
-  if (a.justification === "center") return a.comp_width - 2 * Math.max(a.left, a.right) - pad;
-  return a.width - pad;
+  const pad2 = (a.box_padding ?? 0) * 2;
+  if (a.justification === "center") return a.comp_width - 2 * Math.max(a.left, a.right) - pad2;
+  return a.width - pad2;
 }
 function outsideReason(c, area) {
   return c.width > availableWidth(area) + 0.5 ? "too_wide" : "position";
@@ -21639,12 +21662,12 @@ function backdropMismatches(args, afterRaw) {
     expectThat(m, after.text.name_set, "text.name_set", true, after.text.name_set, "The text layer's name is not pinned, so editing the text renames it and breaks the box");
   }
   if (b.expression_error) m.push({ path: "backdrop.expression_error", expected: null, actual: b.expression_error, message: "The size expression has an error" });
-  const pad = args.padding ?? [24, 12];
+  const pad2 = args.padding ?? [24, 12];
   const t = after.text;
   const plain = (t.rotation === void 0 || Math.abs(t.rotation) < 1e-4) && t.parented !== true && t.three_d !== true;
   const sx = Math.abs(t.scale?.[0] ?? 100) / 100;
   const sy = Math.abs(t.scale?.[1] ?? 100) / 100;
-  const want = [t.bounds.width * sx + 2 * pad[0], t.bounds.height * sy + 2 * pad[1]];
+  const want = [t.bounds.width * sx + 2 * pad2[0], t.bounds.height * sy + 2 * pad2[1]];
   if (b.size && !b.expression_error && plain) {
     expectThat(m, near2(b.size[0], want[0], 1) && near2(b.size[1], want[1], 1), "backdrop.size", want, b.size, "The box is not the text's size (at its Scale) plus padding");
   }
@@ -23351,11 +23374,11 @@ function drawCross(dst, x, y, arm, thickness, rgba) {
   drawLine(dst, cx - arm, cy, cx + arm, cy, thickness, rgba);
   drawLine(dst, cx, cy - arm, cx, cy + arm, thickness, rgba);
 }
-function drawLabel(dst, text, x, y, scale, fg, bg, pad = 2) {
-  const w = textWidth(text, scale) + pad * 2;
-  const h = GLYPH_HEIGHT * scale + pad * 2;
+function drawLabel(dst, text, x, y, scale, fg, bg, pad2 = 2) {
+  const w = textWidth(text, scale) + pad2 * 2;
+  const h = GLYPH_HEIGHT * scale + pad2 * 2;
   fillRect(dst, x, y, w, h, bg);
-  drawText(dst, text, x + pad, y + pad, scale, fg);
+  drawText(dst, text, x + pad2, y + pad2, scale, fg);
   return { x, y, w, h };
 }
 var fs20, import_pngjs2, GLYPHS, GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_ADVANCE;
@@ -23418,16 +23441,3605 @@ var init_png_utils = __esm({
   }
 });
 
+// src/tools/ext/renderbatch.ts
+function refineJob(val, ctx) {
+  const comps = val.comps ?? [];
+  const queueItems = val.queue_items ?? [];
+  if (comps.length === 0 && queueItems.length === 0) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["comps"], message: "Give comps, queue_items or both." });
+  }
+  if (new Set(comps).size !== comps.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["comps"], message: "Comp names must be unique in the list." });
+  }
+  if (new Set(queueItems.map((q) => q.rq_index)).size !== queueItems.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["queue_items"], message: "A Render Queue index is listed twice." });
+  }
+  const queueNames = queueItems.map((q) => (q.name ?? `rq${q.rq_index}`).toLowerCase());
+  if (new Set(queueNames).size !== queueNames.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["queue_items"], message: "Queue item names must be unique." });
+  }
+  const specNames = (val.specs ?? []).map((s) => s.name.toLowerCase());
+  if (new Set(specNames).size !== specNames.length) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["specs"], message: "Spec names must be unique." });
+  }
+  if (!WIN_OR_POSIX_ABSOLUTE.test(val.output_dir)) {
+    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["output_dir"], message: "`output_dir` must be an absolute path." });
+  }
+  for (const m of (val.name_template ?? "").matchAll(/\{([^{}]*)\}/g)) {
+    if (!TOKENS.includes(m[1])) {
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["name_template"], message: `Unknown token {${m[1]}}. Use ${TOKENS.map((t) => `{${t}}`).join(", ")}.` });
+    }
+  }
+}
+function sanitizeFileToken(s) {
+  const cleaned = s.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
+  return cleaned.length > 0 ? cleaned : "_";
+}
+function isSequencePath(p) {
+  return /\[#+\]/.test(path23.basename(p.replace(/\\/g, "/")));
+}
+function joinOutput(dir, name) {
+  const sep6 = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return dir.replace(/[\\/]+$/, "") + sep6 + name;
+}
+function dateStamp(now) {
+  const d = new Date(now);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+function outputNameFor(job, compName, spec, n, now) {
+  const base = job.name_template.replace(/\{(comp|spec|date|n)\}/g, (_m, token) => {
+    if (token === "comp") return sanitizeFileToken(compName);
+    if (token === "spec") return sanitizeFileToken(spec.name);
+    if (token === "date") return dateStamp(now);
+    return String(n).padStart(2, "0");
+  });
+  const stem2 = sanitizeFileToken(base);
+  const ext2 = spec.extension ?? job.extension;
+  return spec.sequence ? `${stem2}.[#####].${ext2}` : `${stem2}.${ext2}`;
+}
+function normaliseJob(args) {
+  return {
+    comps: args.comps ?? [],
+    queue_items: args.queue_items ?? [],
+    specs: args.specs && args.specs.length > 0 ? args.specs : [{ name: "default" }],
+    output_dir: args.output_dir,
+    name_template: args.name_template ?? "{comp}_{spec}",
+    extension: args.extension ?? "mov",
+    extension_given: args.extension !== void 0,
+    time_span: args.time_span ?? "comp"
+  };
+}
+function framesFor(info, span) {
+  const fps = info?.frame_rate;
+  const dur = info?.duration;
+  if (!info || !fps || !dur || !(fps > 0) || !(dur > 0)) return { frames: null };
+  const whole = Math.max(1, Math.round(dur * fps));
+  if (span === "template") return { frames: whole };
+  if (span === "work_area") {
+    const ws = info.work_area_start;
+    const wd = info.work_area_duration;
+    if (typeof ws === "number" && typeof wd === "number" && wd > 0) {
+      const start = Math.max(0, Math.round(ws * fps));
+      const frames = Math.max(1, Math.round(wd * fps));
+      return { start, end: start + frames - 1, frames };
+    }
+  }
+  return { start: 0, end: whole - 1, frames: whole };
+}
+function outputsOf(item) {
+  if (item.output_paths && item.output_paths.length > 0) return item.output_paths;
+  return item.output_path ? [item.output_path] : [];
+}
+function folderOf(p) {
+  const m = /^(.*)([\\/])[^\\/]*$/.exec(p);
+  if (!m) return "";
+  if (m[1] === "") return m[2];
+  if (/^[A-Za-z]:$/.test(m[1])) return m[1] + m[2];
+  return m[1];
+}
+function volumeKeyOf(dir) {
+  return driveLetterOf(dir + "/") ?? dir;
+}
+function mayShareVolume(a, b) {
+  const la = driveLetterOf(a + "/");
+  const lb = driveLetterOf(b + "/");
+  return la === null || lb === null || la === lb;
+}
+function spaceDirsOf(item, outputDir) {
+  if (item.rq_index === void 0) return [outputDir];
+  const seen = {};
+  const dirs = [];
+  for (const out of outputsOf(item)) {
+    const d = folderOf(out) || outputDir;
+    const k = volumeKeyOf(d);
+    if (seen[k]) continue;
+    seen[k] = true;
+    dirs.push(d);
+  }
+  return dirs.length > 0 ? dirs : [outputDir];
+}
+function batchSpaceDirs(items, outputDir) {
+  const seen = {};
+  const dirs = [];
+  const add = (d) => {
+    const k = volumeKeyOf(d);
+    if (seen[k]) return;
+    seen[k] = true;
+    dirs.push(d);
+  };
+  if (items.length === 0 || items.some((it) => it.rq_index === void 0)) add(outputDir);
+  for (const it of items) if (it.rq_index !== void 0) for (const d of spaceDirsOf(it, outputDir)) add(d);
+  return dirs;
+}
+function queueItemFrames(q) {
+  if (!q || typeof q.comp_frame_rate !== "number" || !(q.comp_frame_rate > 0)) return null;
+  const dur = q.time_span_duration ?? q.comp_duration;
+  if (typeof dur !== "number" || !(dur > 0)) return null;
+  const skip = typeof q.skip_frames === "number" && q.skip_frames > 0 ? q.skip_frames + 1 : 1;
+  return Math.max(1, Math.round(dur * q.comp_frame_rate / skip));
+}
+function expandItems(job, reads, now, queueReads = []) {
+  const byName = new Map(reads.map((c) => [c.name, c]));
+  const items = [];
+  for (const comp of job.comps) {
+    const info = byName.get(comp);
+    const f = framesFor(info && info.count === 1 ? info : void 0, job.time_span);
+    for (const spec of job.specs) {
+      const index = items.length + 1;
+      items.push({
+        index,
+        comp_name: comp,
+        spec_name: spec.name,
+        ...spec.render_settings_template ? { render_settings_template: spec.render_settings_template } : {},
+        ...spec.output_module_template ? { output_module_template: spec.output_module_template } : {},
+        output_path: joinOutput(job.output_dir, outputNameFor(job, comp, spec, index, now)),
+        ...f.start !== void 0 ? { start_frame: f.start } : {},
+        ...f.end !== void 0 ? { end_frame: f.end } : {},
+        frames: f.frames
+      });
+    }
+  }
+  for (const q of job.queue_items) {
+    const rd = queueReads.find((r) => r.index === q.rq_index && r.found !== false);
+    const outs = rd ? itemOutputs(rd).paths : [];
+    items.push({
+      index: items.length + 1,
+      comp_name: rd?.comp_name ?? "",
+      spec_name: q.name ?? `rq${q.rq_index}`,
+      rq_index: q.rq_index,
+      item_comp_id: q.item_comp_id,
+      output_path: outs[0] ?? "",
+      output_paths: outs,
+      frames: queueItemFrames(rd)
+    });
+  }
+  return items;
+}
+function protectedReason(outputPath, projectPaths = []) {
+  const norm3 = outputPath.replace(/\\/g, "/").toLowerCase();
+  for (const seg of norm3.split("/")) {
+    if (seg === "_mcp_backups" || seg === "_mcp_checkpoints") return `it is inside ${seg}, which holds the MCP's own backups`;
+  }
+  for (const p of projectPaths) {
+    if (p && p !== "<unsaved>" && p.replace(/\\/g, "/").toLowerCase() === norm3) return "it is the project file itself";
+  }
+  return null;
+}
+function validatePlan(job, read3, items, projectPaths = []) {
+  const errors = [];
+  const warnings = [];
+  if (read3) {
+    if (job.queue_items.length > 0) {
+      if (read3.dirty) {
+        errors.push({
+          code: "queue_items_need_saved_project",
+          message: "The open project has unsaved changes. aerender reads the saved file, so Render Queue items added or queued since the last save are not in it: run ae_save, then plan again."
+        });
+      }
+      if (read3.queue_error) warnings.push(`The Render Queue items could not all be read: ${read3.queue_error}`);
+      for (const q of job.queue_items) {
+        const rd = read3.queue_items?.find((r) => r.index === q.rq_index && r.found !== false);
+        const picked = selectRqItem({ numItems: read3.queue_total ?? 0, items: rd ? [rd] : [] }, { rq_index: q.rq_index, item_comp_id: q.item_comp_id });
+        if (!picked.ok) {
+          errors.push({ code: picked.code, comp: rd?.comp_name, message: `Queue item ${q.rq_index}: ${picked.message}` });
+          continue;
+        }
+        for (const w of picked.selection.warnings) warnings.push(`Queue item ${q.rq_index}: ${w}`);
+        for (const f of picked.selection.outputs) {
+          const why = protectedReason(f, projectPaths);
+          if (why) errors.push({ code: "output_protected", comp: rd?.comp_name, message: `Queue item ${q.rq_index} would write ${f}, but ${why}.` });
+        }
+      }
+    }
+    for (const name of job.comps) {
+      const c = read3.comps.find((x) => x.name === name);
+      if (!c || c.count === 0) errors.push({ code: "comp_not_found", comp: name, message: `No comp named "${name}" in the project.` });
+      else if (c.count > 1) {
+        errors.push({ code: "comp_name_ambiguous", comp: name, message: `${c.count} comps are named "${name}"; aerender selects by name. Rename them so the name is unique.` });
+      } else if (!c.frame_rate || !c.duration) {
+        warnings.push(`Comp "${name}": frame rate or duration unreadable; its ETA and frame range are unknown.`);
+      }
+      if (c && c.count === 1 && c.queued_item) {
+        const q = c.queued_item;
+        const files = q.output_files.filter((f) => typeof f === "string");
+        if (q.num_output_modules > 1) {
+          errors.push({
+            code: "queued_item_extra_output_modules",
+            comp: name,
+            message: `Comp "${name}" already has a queued item in the render queue with ${q.num_output_modules} output modules (${files.slice(0, 5).join(", ")}). aerender renders that item, so every module writes to the path stored in the project, outside output_dir, where nothing here checks for overwrites. Take the item out of the render queue (or remove its extra output modules), save, and plan again.`
+          });
+          for (const f of files.slice(1)) {
+            const why = protectedReason(f, projectPaths);
+            if (why) errors.push({ code: "output_protected", comp: name, message: `A queued output module of "${name}" would write ${f}, but ${why}.` });
+          }
+        }
+        const missing = job.specs.filter((sp) => !sp.render_settings_template || !sp.output_module_template).map((sp) => sp.name);
+        if (missing.length > 0) {
+          warnings.push(`Comp "${name}" has a queued render-queue item. aerender renders that item, so spec(s) ${missing.join(", ")} (which leave out a template) use its render settings and output module, which may differ from the defaults (resolution, frame rate, codec).`);
+        }
+      }
+      if (c && c.count === 1 && typeof c.display_start_time === "number" && c.display_start_time !== 0 && (job.time_span === "comp" || job.time_span === "work_area")) {
+        warnings.push(`Comp "${name}" has a non-zero display start time (${c.display_start_time}s): whether aerender's -s/-e frames count from 0 or from that start is unconfirmed, so the rendered range may be shifted. Consider time_span 'template' for this comp.`);
+      }
+    }
+    const rsKnown = read3.templates.source !== "none" && read3.templates.render_settings.length > 0;
+    const omKnown = read3.templates.source !== "none" && read3.templates.output_modules.length > 0;
+    if (read3.templates.source === "none") {
+      warnings.push("Template names were not checked: the render queue is empty, and reading them would need a temporary item (which marks the project changed). An unknown template fails that item with 'aerender ERROR' in its log.");
+    } else {
+      if (!rsKnown && job.specs.some((sp) => sp.render_settings_template)) warnings.push("Render-settings template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
+      if (!omKnown && job.specs.some((sp) => sp.output_module_template)) warnings.push("Output-module template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
+      for (const spec of job.specs) {
+        if (rsKnown && spec.render_settings_template && !read3.templates.render_settings.includes(spec.render_settings_template)) {
+          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no render-settings template "${spec.render_settings_template}". Known: ${read3.templates.render_settings.slice(0, 20).join(", ")}.` });
+        }
+        if (omKnown && spec.output_module_template && !read3.templates.output_modules.includes(spec.output_module_template)) {
+          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no output-module template "${spec.output_module_template}". Known: ${read3.templates.output_modules.slice(0, 20).join(", ")}.` });
+        }
+      }
+    }
+    if (read3.truncated) warnings.push("The comp list was capped; some names were not checked.");
+  }
+  for (const spec of job.comps.length === 0 ? [] : job.specs) {
+    if (spec.extension !== void 0 || job.extension_given) continue;
+    if (!spec.output_module_template) {
+      errors.push({
+        code: "extension_required",
+        message: `Spec "${spec.name}" has no output_module_template and no extension (nor does the job), so the file name would be a guess ('.${job.extension}'; recent After Effects versions default to H.264, .mp4). Give the spec or the job an extension that matches what is rendered.`
+      });
+    } else {
+      warnings.push(`Spec "${spec.name}" has no extension, so the file name ends in '.${job.extension}' (a default, not read from the template). Give it the extension the output-module template writes, or the batch fails verifying a file that rendered under another name.`);
+    }
+  }
+  const seen = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    for (const out of outputsOf(it)) {
+      const key = out.replace(/\\/g, "/").toLowerCase();
+      const prev = seen.get(key);
+      if (prev !== void 0) {
+        const who = prev === it.index ? `Item ${it.index} writes the same file from two output modules` : `Items ${prev} and ${it.index} write the same file`;
+        errors.push({ code: "output_collision", item: it.index, message: `${who} (${out}). Add {comp}, {spec} or {n} to name_template, or give the queue items different output files.` });
+      } else seen.set(key, it.index);
+      if (it.rq_index === void 0) {
+        const why = protectedReason(out, projectPaths);
+        if (why) errors.push({ code: "output_protected", item: it.index, message: `Item ${it.index} would write ${out}, but ${why}.` });
+      }
+    }
+  }
+  if (job.time_span === "template") warnings.push("time_span 'template': no -s/-e is passed, so progress and ETA are estimated from the comp length.");
+  return { errors, warnings };
+}
+function sequenceRegex(base) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${base.split(/\[#+\]/).map(esc).join("\\d+")}$`, "i");
+}
+function outputFiles(outputPath) {
+  try {
+    if (isSequencePath(outputPath)) {
+      const norm3 = path23.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
+      const dir = path23.dirname(norm3);
+      const re = sequenceRegex(path23.basename(norm3));
+      return fs21.readdirSync(dir).filter((n) => re.test(n)).map((n) => path23.join(dir, n));
+    }
+    return fs21.existsSync(outputPath) ? [outputPath] : [];
+  } catch {
+    return [];
+  }
+}
+function inspectOutput(outputPath) {
+  let bytes = 0;
+  let newest = null;
+  let count = 0;
+  const files = [];
+  for (const f of outputFiles(outputPath)) {
+    try {
+      const st = fs21.statSync(f);
+      if (!st.isFile()) continue;
+      count++;
+      files.push({ mtime_ms: st.mtimeMs, size: st.size });
+      bytes += st.size;
+      if (newest === null || st.mtimeMs > newest) newest = st.mtimeMs;
+    } catch {
+    }
+  }
+  return { exists: count > 0, bytes, newest_mtime_ms: newest, files };
+}
+function inspectOutputs(paths) {
+  if (paths.length === 1) return inspectOutput(paths[0]);
+  let bytes = 0;
+  let newest = null;
+  let any = false;
+  const files = [];
+  for (const p of paths) {
+    const o = inspectOutput(p);
+    if (!o.exists) continue;
+    any = true;
+    bytes += o.bytes;
+    files.push(...o.files);
+    if (o.newest_mtime_ms !== null && (newest === null || o.newest_mtime_ms > newest)) newest = o.newest_mtime_ms;
+  }
+  return { exists: any, bytes, newest_mtime_ms: newest, files };
+}
+function verifyOutput(outputPath, sinceMs, expectFrames = null) {
+  const o = inspectOutput(outputPath);
+  if (!o.exists) return { ok: false, bytes: 0, reason: "the output file does not exist" };
+  if (o.bytes <= 0) return { ok: false, bytes: 0, reason: "the output file is empty" };
+  const floor = sinceMs === null ? null : sinceMs - MTIME_SLOP_MS;
+  if (isSequencePath(outputPath)) {
+    const fresh = floor === null ? o.files : o.files.filter((f) => f.mtime_ms >= floor);
+    const bytes = fresh.reduce((sum, f) => sum + f.size, 0);
+    if (fresh.length === 0) return { ok: false, bytes: o.bytes, files: 0, reason: "no frame of the sequence is newer than the item's start (aerender did not write it)" };
+    if (expectFrames !== null && expectFrames > 0 && fresh.length !== expectFrames) {
+      return { ok: false, bytes, files: fresh.length, reason: `${fresh.length} of ${expectFrames} frames of the sequence were written` };
+    }
+    if (bytes <= 0) return { ok: false, bytes: 0, files: fresh.length, reason: "the written frames are empty" };
+    return { ok: true, bytes, files: fresh.length };
+  }
+  if (floor !== null && (o.newest_mtime_ms ?? 0) < floor) {
+    return { ok: false, bytes: o.bytes, reason: "the output file is older than the item's start (aerender did not write it)" };
+  }
+  return { ok: true, bytes: o.bytes };
+}
+function verifyOutputs(item, sinceMs, expectFrames = null) {
+  const paths = outputsOf(item);
+  if (paths.length <= 1) return verifyOutput(paths[0] ?? item.output_path, sinceMs, expectFrames);
+  let bytes = 0;
+  let files = 0;
+  let sawFiles = false;
+  for (const p of paths) {
+    const v = verifyOutput(p, sinceMs, null);
+    if (!v.ok) return { ok: false, bytes, reason: `${p}: ${v.reason}` };
+    bytes += v.bytes;
+    if (v.files !== void 0) {
+      files += v.files;
+      sawFiles = true;
+    }
+  }
+  return { ok: true, bytes, ...sawFiles ? { files } : {} };
+}
+function spaceStatus(freeBytes, neededBytes, minFreeGb) {
+  if (freeBytes === null) return "unknown";
+  return freeBytes - (neededBytes ?? 0) >= minFreeGb * GIB ? "ok" : "low";
+}
+function estimateBytes(items, item) {
+  if (!item.frames) return null;
+  let bytes = 0;
+  let frames = 0;
+  for (const i of items) {
+    if (i.state === "succeeded" && i.spec_name === item.spec_name && i.frames && i.output_bytes) {
+      bytes += i.output_bytes;
+      frames += i.frames;
+    }
+  }
+  if (frames === 0) return null;
+  return Math.round(bytes / frames * item.frames * 1.1);
+}
+function parseDfAvailableBytes(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /\s(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(lines[i]);
+    if (m) return parseInt(m[3], 10) * 1024;
+  }
+  return null;
+}
+function driveLetterOf(p) {
+  const m = /^([A-Za-z]):[\\/]/.exec(p);
+  return m ? m[1].toUpperCase() : null;
+}
+async function getFreeBytes(dir, platform = process.platform, run = defaultRunFile) {
+  try {
+    if (platform === "win32") {
+      const letter = driveLetterOf(dir);
+      if (!letter) return null;
+      const out = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", `(Get-PSDrive -Name ${letter}).Free`]);
+      const text = out.trim();
+      if (!/^\d+$/.test(text)) return null;
+      const n = Number(text);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+    let probe = dir;
+    while (probe && !fs21.existsSync(probe) && path23.dirname(probe) !== probe) probe = path23.dirname(probe);
+    return parseDfAvailableBytes(await run("df", ["-Pk", probe]));
+  } catch {
+    return null;
+  }
+}
+function effectiveConcurrency(requested, registry) {
+  return Math.max(1, Math.min(requested, registry.gate.opts.max_running));
+}
+function computeEta(b, nowMs, gate = {}) {
+  let secs3 = 0;
+  let frames = 0;
+  for (const i of b.items) {
+    if (i.state === "succeeded" && i.frames && i.started_at && i.finished_at) {
+      const d = (Date.parse(i.finished_at) - Date.parse(i.started_at)) / 1e3;
+      if (d > 0) {
+        secs3 += d;
+        frames += i.frames;
+      }
+    }
+  }
+  const spf = frames > 0 ? secs3 / frames : null;
+  const running = b.items.filter((i) => i.state === "running");
+  const pending = b.items.filter((i) => i.state === "pending");
+  if (running.length === 0 && pending.length === 0) return { eta_seconds: 0, eta_at: null, basis: "nothing left to render" };
+  let unknown = false;
+  let longestRunning = 0;
+  for (const i of running) {
+    const started = i.started_at ? Date.parse(i.started_at) : NaN;
+    if (typeof i.percent === "number" && i.percent > 0 && !Number.isNaN(started)) {
+      longestRunning = Math.max(longestRunning, (nowMs - started) / 1e3 * ((100 - i.percent) / i.percent));
+    } else if (spf !== null && i.frames) {
+      longestRunning = Math.max(longestRunning, spf * i.frames);
+    } else unknown = true;
+  }
+  let pendingSecs = 0;
+  for (const i of pending) {
+    if (spf !== null && i.frames) pendingSecs += spf * i.frames;
+    else unknown = true;
+  }
+  if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
+  const conc = Math.max(1, Math.min(b.options.concurrency, gate.concurrency ?? b.options.concurrency));
+  const total2 = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
+  return { eta_seconds: total2, eta_at: new Date(nowMs + total2 * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
+}
+function countStates(items) {
+  const c = { pending: 0, running: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
+  for (const i of items) c[i.state]++;
+  return c;
+}
+function logFinished(logPath) {
+  const { fullText } = readLogTail(logPath);
+  return /Finished composition/i.test(fullText) && !/^aerender ERROR/im.test(fullText);
+}
+function refreshRunning(item, job, now, stallMs) {
+  const { fullText } = readLogTail(job.log_path);
+  const p = parseAerenderProgress(fullText, { start_frame: job.start_frame, end_frame: job.end_frame, state: job.state });
+  let percent = p.percent;
+  if (percent === null && item.frames && p.frames_completed > 0) percent = Math.min(100, Math.round(p.frames_completed / item.frames * 1e4) / 100);
+  item.percent = percent;
+  item.frames_completed = p.frames_completed;
+  let outBytes = 0;
+  for (const out of outputsOf(item)) {
+    try {
+      outBytes += fs21.existsSync(out) && !isSequencePath(out) ? fs21.statSync(out).size : 0;
+    } catch {
+    }
+  }
+  const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
+  if (!item.activity || item.activity.sig !== sig || job.phase === "queued") item.activity = { sig, changed_ms: now };
+  item.stalled = job.state === "running" && job.phase !== "queued" && now - item.activity.changed_ms >= stallMs;
+  if (!item.stalled) item.stall_noted = false;
+}
+function expectedFrames(item) {
+  return item.start_frame !== void 0 && isSequencePath(item.output_path) ? item.frames : null;
+}
+function itemView(i) {
+  return {
+    index: i.index,
+    comp: i.comp_name,
+    spec: i.spec_name,
+    state: i.state,
+    output_path: i.output_path,
+    ...i.rq_index !== void 0 ? { rq_index: i.rq_index, output_paths: outputsOf(i) } : {},
+    frames: i.frames,
+    ...i.percent !== void 0 ? { percent: i.percent } : {},
+    ...i.job_id ? { job_id: i.job_id } : {},
+    ...i.error ? { error: i.error } : {},
+    ...i.note ? { note: i.note } : {},
+    ...i.output_bytes !== void 0 ? { output_bytes: i.output_bytes } : {},
+    ...i.output_files !== void 0 ? { output_files: i.output_files } : {},
+    ...i.stalled ? { stalled: true } : {},
+    ...i.overwrote ? { overwrote_existing: true } : {}
+  };
+}
+function batchSummary(b) {
+  return {
+    batch_id: b.batch_id,
+    state: b.state,
+    created_at: b.created_at,
+    finished_at: b.finished_at,
+    output_dir: b.output_dir,
+    counts: countStates(b.items),
+    total: b.items.length
+  };
+}
+function resolveOptions(a, aerenderPath, base) {
+  const pick4 = (v, fallback) => v === void 0 ? fallback : v;
+  return {
+    concurrency: pick4(a.concurrency, base?.concurrency ?? 1),
+    max_cpu_percent: pick4(a.max_cpu_percent, base?.max_cpu_percent ?? 50),
+    on_error: pick4(a.on_error, base?.on_error ?? "stop"),
+    stall_minutes: pick4(a.stall_minutes, base?.stall_minutes ?? 15),
+    if_output_exists: pick4(a.if_output_exists, base?.if_output_exists ?? "protect_recent"),
+    protect_recent_minutes: pick4(a.protect_recent_minutes, base?.protect_recent_minutes ?? 60),
+    min_free_gb: pick4(a.min_free_gb, base?.min_free_gb ?? 2),
+    on_unknown_space: pick4(a.on_unknown_space, base?.on_unknown_space ?? "continue"),
+    aerender_path: aerenderPath
+  };
+}
+function readArgs(job) {
+  return { comp_names: job.comps, ...job.queue_items.length > 0 ? { rq_items: job.queue_items.map((q) => ({ rq_index: q.rq_index })) } : {} };
+}
+function fileSig(p) {
+  try {
+    const st = fs21.statSync(p);
+    return `${st.mtimeMs}|${st.size}`;
+  } catch {
+    return "";
+  }
+}
+function createRenderbatch(options = {}) {
+  const getRegistry = () => options.registry ?? getDefaultAerenderRegistry();
+  const now = options.now ?? (() => Date.now());
+  const freeBytes = options.getFreeBytes ?? ((dir) => getFreeBytes(dir, options.platform));
+  let storeInstance = options.store ?? null;
+  let runnerInstance = null;
+  const getStore = () => {
+    if (!storeInstance) storeInstance = new BatchStore(path23.join(getRegistry().rendersDir, "batches"));
+    return storeInstance;
+  };
+  const pidAlive2 = options.isPidAlive ?? ((pid, jobId) => defaultIsPidAlive(pid, getRegistry(), jobId));
+  const getRunner = () => {
+    if (!runnerInstance) {
+      runnerInstance = new BatchRunner(
+        getStore(),
+        {
+          registry: getRegistry(),
+          spawn: options.spawn ?? childProcess3.spawn,
+          now,
+          getFreeBytes: freeBytes,
+          isPidAlive: pidAlive2,
+          killProcess: options.killProcess,
+          cancelHooks: options.cancelHooks
+        },
+        { tickMs: options.tickMs ?? 5e3, autoTick: options.autoTick ?? true }
+      );
+    }
+    return runnerInstance;
+  };
+  const queued10 = (err, opId) => {
+    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    throw err;
+  };
+  const planSpace = async (dir, minFreeGb) => {
+    const free = await freeBytes(dir);
+    return { dir, status: spaceStatus(free, null, minFreeGb), free_bytes: free, needed_bytes: null, checked_at: new Date(now()).toISOString() };
+  };
+  const measureBatchSpace = async (items, outputDir, minFreeGb) => {
+    const rows = [];
+    for (const d of batchSpaceDirs(items, outputDir)) rows.push(await planSpace(d, minFreeGb));
+    let space = rows[0];
+    for (const r of rows) if (space.status !== "low" && (r.status === "low" || r.status === "unknown" && space.status === "ok")) space = r;
+    return { space, rows };
+  };
+  const describeExisting = (items, policy) => items.map((it) => {
+    const ex = inspectOutputs(outputsOf(it));
+    const age = ex.newest_mtime_ms === null ? null : Math.max(0, Math.round((now() - ex.newest_mtime_ms) / 6e4));
+    const blocks = ex.exists && policy.if_output_exists === "protect_recent" && age !== null && age < policy.protect_recent_minutes;
+    return { index: it.index, exists: ex.exists, bytes: ex.bytes, age_minutes: age, ...blocks ? { would_block: true } : {} };
+  });
+  const tools = [
+    {
+      name: "ae_render_batch_plan",
+      description: "Dry run for a render batch. Expands comps x specs into items (comps outer, specs inner), names each output from name_template, and checks (queue_items are existing Render Queue items rendered through aerender -rqindex with all their output modules: each is checked for its comp id, QUEUED status and an output file on every module, the project must be saved and not dirty, and every output file is counted in the collision and overwrite checks, and free space is measured on each queue item's own output volumes): every comp name exists exactly once (aerender selects by name), the template names exist (when the render queue has an item to read them from), no two items write the same file, no output sits in _mcp_backups / _mcp_checkpoints, which outputs already exist and would be protected, and the output volume's free space ('unknown' for a UNC path, never 'ok'). Changes nothing in After Effects or on disk. Run it before ae_render_batch; valid:false lists what to fix.",
+      schema: AeRenderBatchPlanSchema,
+      handler: async (args, ctx) => {
+        const job = normaliseJob(args);
+        const read3 = (await ctx.bridge.callHost("renderbatchRead", readArgs(job), { label: "ae_render_batch_plan", mutates: false, toolName: "ae_render_batch_plan" })).result;
+        const items = expandItems(job, read3.comps, now(), read3.queue_items);
+        const { errors, warnings } = validatePlan(job, read3, items, [read3.project_path]);
+        const policy = resolveOptions(args, "");
+        const { space, rows: spaceRows } = await measureBatchSpace(items, job.output_dir, policy.min_free_gb);
+        if (space.status === "unknown") warnings.push("Free space on the output volume could not be measured; it is reported as unknown, not ok.");
+        if (read3.dirty) warnings.push("The open project has unsaved changes. ae_render_batch renders the saved file and asks for ae_save first.");
+        if (read3.project_path === "<unsaved>") errors.push({ code: "project_unsaved", message: "The project has never been saved; save it so there is a file to render." });
+        const existing = describeExisting(items, policy);
+        return {
+          ok: true,
+          valid: errors.length === 0,
+          project_path: read3.project_path,
+          dirty: read3.dirty,
+          item_count: items.length,
+          items: items.slice(0, MAX_ITEMS).map((it) => ({ ...it, existing: existing.find((e) => e.index === it.index) })),
+          errors,
+          warnings,
+          free_space: space,
+          ...spaceRows.length > 1 ? { free_space_volumes: spaceRows } : {},
+          templates_checked: read3.templates.source !== "none"
+        };
+      }
+    },
+    {
+      name: "ae_render_batch",
+      description: "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the processes that can run at once) and one process at a time (the limit counts every aerender job this server runs; the start gate allows only one aerender at a time, so concurrency above 1 is capped to 1, and each item starts 20 s after the one before it ended and not while that one's After Effects engine is still alive; that gap is in the ETA). Also checks the project's image sequences for missing frames (a line in `warnings` and `sequence_check`; the batch still starts; `sequence_check: \"block\"` refuses, also when the check could not finish; \"off\" skips) and reads the GPU (`resource_warnings`: GPU nearly full, or another app such as Cinema 4D running; if present, tell the user before continuing). Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. Not measured yet: whether footage paths resolve from the frozen copy, how far the -mfr cap limits the CPU, and whether aerender overwrites an existing file silently. A comp with a queued render-queue item renders with that item's settings when a spec leaves out its templates, and extra output modules on it are refused. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchStartSchema,
+      handler: async (args, ctx) => {
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const job = normaliseJob(args);
+        let ready;
+        const resourceWarnings2 = await resourceWarningsForRender();
+        try {
+          ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps${job.queue_items.length > 0 ? `, ${job.queue_items.length} queue items` : ""})`, async () => {
+            ctx.quarantine.assertClear();
+            const statusResp = await ctx.bridge.evalRaw({
+              id: `${opId}_status`,
+              script: buildJsxCall("status", {}),
+              label: "ae_render_batch (status)",
+              mutates: false,
+              toolName: "ae_render_batch"
+            });
+            const st = statusResp.result ?? {};
+            const projectPath = st.project_path ?? "<unsaved>";
+            if (projectPath === "<unsaved>" || args.expect.project_path === "<unsaved>") {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: "Cannot start a render batch on an unsaved project (<unsaved>). Save the project to disk first.",
+                expected: { project_path: args.expect.project_path, dirty: false },
+                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
+              });
+            }
+            if (!pathsMatchForGuard(args.expect.project_path, projectPath)) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: `Target guard refused ae_render_batch: expected project_path "${args.expect.project_path}", but After Effects has "${projectPath}" open.`,
+                expected: args.expect,
+                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
+              });
+            }
+            if (st.dirty === true && !args.allow_dirty) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: "Cannot start a render batch because the open project has unsaved changes (dirty: true). Call ae_save first so the batch renders what you see, or pass allow_dirty to render the last saved file.",
+                expected: { project_path: args.expect.project_path, dirty: false },
+                actual: { project_path: projectPath, dirty: true }
+              });
+            }
+            if (args.expect.comp_id !== void 0) await verifyTargetGuard(ctx, args.expect, opId);
+            const projectSig = job.queue_items.length > 0 ? fileSig(projectPath) : null;
+            const read3 = (await ctx.bridge.evalRaw({
+              id: `${opId}_read`,
+              script: buildJsxCall("renderbatchRead", readArgs(job)),
+              label: "ae_render_batch (comps)",
+              mutates: false,
+              toolName: "ae_render_batch"
+            })).result;
+            const items = expandItems(job, read3.comps, now(), read3.queue_items);
+            const { errors, warnings } = validatePlan(job, read3, items, [projectPath]);
+            if (errors.length > 0) {
+              return {
+                ok: false,
+                error: "plan_invalid",
+                applied: false,
+                message: `The plan has ${errors.length} problem${errors.length === 1 ? "" : "s"}; nothing was started. Fix them (ae_render_batch_plan shows the full plan).`,
+                errors,
+                warnings
+              };
+            }
+            let preflight;
+            if (args.preflight !== false) {
+              const queueCompIds = job.queue_items.map((q) => q.item_comp_id);
+              const gate = await runPreflightGate(ctx, {
+                toolName: "ae_render_batch",
+                opId,
+                comp_names: job.comps.length > 0 ? job.comps : void 0,
+                ...queueCompIds.length > 0 ? { comp_ids: queueCompIds } : {},
+                sequence_check: "off"
+              });
+              if (gate.blocked) return preflightRefusal("ae_render_batch", gate.summary);
+              preflight = gate.summary;
+            }
+            const sequencePrep = args.sequence_check === "off" ? null : await prepareSequenceCheck(ctx, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()), tolerant: true });
+            const aerenderBin = resolveAerenderPath({
+              platform: options.platform,
+              afterFxPath: options.afterFxPath ?? st.afterfx_path ?? st.app_path,
+              aeVersion: st.aeVersion,
+              existsSync: options.existsSync
+            });
+            if (st.dirty === true) warnings.push("The project had unsaved changes; the batch renders the last saved file on disk.");
+            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig, sequence_prep: sequencePrep };
+          });
+        } catch (err) {
+          return queued10(err, opId);
+        }
+        if (!ready.ok) return ready;
+        let sequenceCheck;
+        if (ready.sequence_prep) {
+          const seq = sequenceStepFrom(args.sequence_check, "ae_render_batch", await finishSequenceCheck(ready.sequence_prep, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()) }));
+          if (seq.block && seq.check) return { ok: false, error: blockCode(seq.check), applied: false, message: seq.blockMessage, sequence_check: seq.check };
+          ready.warnings.push(...seq.warnings);
+          sequenceCheck = seq.check;
+        }
+        const store = getStore();
+        const batchId = store.newId();
+        const batchDir = store.batchDir(batchId);
+        const ext2 = path23.extname(ready.project_path) || ".aep";
+        const beside = args.freeze_location === "project_folder";
+        const frozenDir = beside ? path23.dirname(ready.project_path) : batchDir;
+        const frozen = path23.join(frozenDir, beside ? `${path23.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path23.basename(ready.project_path, ext2)}${ext2}`);
+        try {
+          fs21.mkdirSync(frozenDir, { recursive: true });
+          fs21.copyFileSync(ready.project_path, frozen);
+        } catch (err) {
+          return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
+        }
+        if (ready.project_sig !== null && fileSig(ready.project_path) !== ready.project_sig) {
+          try {
+            if (beside) fs21.rmSync(frozen, { force: true });
+          } catch {
+          }
+          store.forget(batchId);
+          return { ok: false, error: "project_changed", applied: false, message: "The project file was saved while the batch was starting, so the Render Queue indexes just checked may not match the frozen copy. Nothing was started; plan and start again." };
+        }
+        const batch = {
+          batch_id: batchId,
+          state: "running",
+          created_at: new Date(now()).toISOString(),
+          finished_at: null,
+          cancel_requested: false,
+          project_path: ready.project_path,
+          frozen_project: frozen,
+          ...beside ? { frozen_temporary: true } : {},
+          batch_dir: batchDir,
+          output_dir: job.output_dir,
+          options: resolveOptions(args, ready.aerenderBin),
+          items: ready.items.map((it) => ({ ...it, state: "pending", attempts: 0 })),
+          warnings: ready.warnings,
+          notices: [],
+          ...ready.preflight ? { preflight: ready.preflight } : {}
+        };
+        try {
+          store.save(batch);
+        } catch (err) {
+          try {
+            if (beside) fs21.rmSync(frozen, { force: true });
+          } catch {
+          }
+          store.forget(batchId);
+          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); the frozen copy was removed and nothing was started.` };
+        }
+        let after = batch;
+        let saveNotice;
+        try {
+          after = await getRunner().begin(batchId) ?? batch;
+        } catch (err) {
+          saveNotice = `The batch started, but its state could not be saved: ${errText(err)}`;
+        }
+        return {
+          ok: true,
+          applied: true,
+          op_id: opId,
+          batch_id: batchId,
+          state: after.state,
+          batch_json: store.jsonPath(batchId),
+          frozen_project: frozen,
+          ...beside ? { frozen_temporary: true } : {},
+          options: after.options,
+          counts: countStates(after.items),
+          items: after.items.slice(0, MAX_ITEMS).map(itemView),
+          warnings: after.warnings,
+          notices: saveNotice ? [...after.notices, saveNotice] : after.notices,
+          ...ready.preflight ? { preflight: ready.preflight } : {},
+          ...sequenceCheck ? { sequence_check: sequenceCheck } : {},
+          ...resourceWarnings2.length > 0 ? { resource_warnings: resourceWarnings2 } : {},
+          next: "Poll ae_render_batch_status with this batch_id. The renders run in the background; the After Effects project is untouched."
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_status",
+      description: "State of a render batch: per-item state, percent, output size and error, counts, an ETA (running items' progress plus seconds-per-frame of the finished ones), stall warnings, notices, and whether this server is still driving the batch (runner_active; false after a panel restart: call ae_render_batch_resume). Without batch_id it lists recent batches. Read-only: nothing is started, cancelled or changed.",
+      schema: AeRenderBatchStatusSchema,
+      handler: async (args) => {
+        const store = getStore();
+        if (!args.batch_id) {
+          return { ok: true, batches: store.list(20).map(batchSummary) };
+        }
+        const stored = store.get(args.batch_id);
+        if (!stored) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
+        const t = now();
+        const b = JSON.parse(JSON.stringify(stored));
+        const registry = getRegistry();
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? registry.get(item.job_id) : void 0;
+          if (job) refreshRunning(item, job, t, b.options.stall_minutes * 6e4);
+        }
+        const runnerActive = getRunner().isActive(b.batch_id);
+        const measured = args.include_free_space ? await measureBatchSpace(b.items, b.output_dir, b.options.min_free_gb) : null;
+        const space = measured ? measured.space : b.free_space;
+        const orphaned = b.items.filter((i) => {
+          if (i.state !== "running" || !i.job_id) return false;
+          const job = registry.get(i.job_id);
+          return job !== void 0 && job.state === "running" && job.phase !== "queued" && registry.getProcess(job.job_id) === void 0 && !(typeof job.pid === "number" && pidAlive2(job.pid, job.job_id));
+        });
+        const orphanIdx = new Set(orphaned.map((i) => i.index));
+        const stalled = b.items.filter((i) => i.state === "running" && i.stalled && !orphanIdx.has(i.index)).map((i) => ({ index: i.index, job_id: i.job_id, advice: "No progress for a while: check ae_aerender_status, then ae_aerender_cancel if it is stuck." }));
+        return {
+          ok: true,
+          batch_id: b.batch_id,
+          state: b.state,
+          runner_active: runnerActive,
+          ...b.state === "running" && !runnerActive ? { advice: "This server is not driving the batch (it restarted since). Call ae_render_batch_resume to continue; finished renders are kept." } : {},
+          created_at: b.created_at,
+          finished_at: b.finished_at,
+          project_path: b.project_path,
+          frozen_project: b.frozen_project,
+          output_dir: b.output_dir,
+          options: b.options,
+          counts: countStates(b.items),
+          eta: computeEta(b, t, { concurrency: effectiveConcurrency(b.options.concurrency, registry), gap_s: registry.gate.opts.cool_down_ms / 1e3 }),
+          items: b.items.slice(0, MAX_ITEMS).map(itemView),
+          stalled,
+          ...orphaned.length > 0 ? { orphaned: orphaned.map((i) => ({ index: i.index, job_id: i.job_id, advice: "Its aerender process is gone (the server or the machine restarted). Call ae_render_batch_resume; do not cancel it by pid." })) } : {},
+          warnings: b.warnings,
+          notices: b.notices.slice(-50),
+          ...space ? { free_space: space } : {},
+          ...measured && measured.rows.length > 1 ? { free_space_volumes: measured.rows } : {},
+          batch_json: store.jsonPath(b.batch_id)
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_resume",
+      description: "Continue a stopped, failed or interrupted render batch from its frozen project copy. Items that finished and whose output still verifies (exists, not empty, written after the item started; an image sequence must have all its frames) are kept, and so are items skipped on purpose (if_output_exists 'skip': their files are never overwritten by a resume, whatever policy it passes); an item whose runner died is adopted when its aerender ended cleanly or its log says it finished; failed, cancelled and unstarted items run again, a failed item's partial file included. Takes expect so the right project is open, refuses while an aerender of the batch is still alive, and can change concurrency, max_cpu_percent, on_error, stall_minutes and if_output_exists for the rest of the run. Does not re-check image sequences (start did). If `resource_warnings` is present (GPU nearly full, or another app such as Cinema 4D running), tell the user before continuing. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchResumeSchema,
+      handler: async (args, ctx) => {
+        ctx.quarantine.assertClear();
+        const opId = ctx.bridge.newOpId();
+        const store = getStore();
+        const batch = store.get(args.batch_id);
+        if (!batch) return { ok: false, error: "not_found", applied: false, message: `No render batch "${args.batch_id}".` };
+        try {
+          await ctx.queue.run("ae_render_batch_resume", async () => {
+            ctx.quarantine.assertClear();
+            await verifyTargetGuard(ctx, args.expect, opId);
+            if (!pathsMatchForGuard(args.expect.project_path, batch.project_path)) {
+              throw new BridgeError({
+                kind: "guard",
+                op_id: opId,
+                message: `Target guard refused ae_render_batch_resume: batch ${batch.batch_id} belongs to "${batch.project_path}", but expect.project_path is "${args.expect.project_path}".`,
+                expected: args.expect,
+                actual: { project_path: batch.project_path }
+              });
+            }
+          });
+        } catch (err) {
+          return queued10(err, opId);
+        }
+        if (!fs21.existsSync(batch.frozen_project)) {
+          return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
+        }
+        const runner = getRunner();
+        if (batch.state === "running" && runner.isActive(batch.batch_id)) {
+          return { ok: false, error: "already_running", applied: false, message: "This batch is already running under this server." };
+        }
+        const rec = runner.reconcile(batch);
+        if (!rec.ok) return { ok: false, error: "still_running", applied: false, message: rec.message };
+        const resumeResourceWarnings = await resourceWarningsForRender();
+        batch.options = resolveOptions(args, batch.options.aerender_path, batch.options);
+        batch.notices.push(`Resumed at ${new Date(now()).toISOString()}: ${rec.kept} kept (${rec.skipped_kept} of them skipped on purpose), ${rec.recovered} adopted, ${rec.reset} to render again.`);
+        try {
+          store.save(batch);
+        } catch (err) {
+          batch.state = "stopped";
+          batch.notices.push(`The resume could not be saved to disk (${errText(err)}); nothing was started.`);
+          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); nothing was started. Resume again once the disk problem is fixed.` };
+        }
+        let after = batch;
+        let saveNotice;
+        try {
+          after = await runner.begin(batch.batch_id) ?? batch;
+        } catch (err) {
+          saveNotice = `The batch resumed, but its state could not be saved: ${errText(err)}`;
+        }
+        return {
+          ok: true,
+          applied: true,
+          op_id: opId,
+          batch_id: after.batch_id,
+          state: after.state,
+          kept: rec.kept,
+          skipped_kept: rec.skipped_kept,
+          recovered: rec.recovered,
+          reset: rec.reset,
+          counts: countStates(after.items),
+          items: after.items.slice(0, MAX_ITEMS).map(itemView),
+          notices: (saveNotice ? [...after.notices, saveNotice] : after.notices).slice(-50),
+          ...resumeResourceWarnings.length > 0 ? { resource_warnings: resumeResourceWarnings } : {}
+        };
+      }
+    },
+    {
+      name: "ae_render_batch_cancel",
+      description: "Cancel a render batch: terminates its running aerender processes (those items become cancelled) and ends the batch; an item whose process cannot be identified is not killed and stays running (see notices; resume refuses until it is gone); renders already finished are kept and ae_render_batch_resume can pick the rest up later. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
+      schema: AeRenderBatchCancelSchema,
+      handler: async (args) => {
+        const store = getStore();
+        const b = store.get(args.batch_id);
+        if (!b) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
+        if (b.state !== "running") return { ok: true, batch_id: b.batch_id, state: b.state, already_finished: true, counts: countStates(b.items) };
+        getRunner().cancel(b);
+        const unconfirmed = b.items.filter((i) => i.state === "running").map((i) => ({ index: i.index, job_id: i.job_id }));
+        return { ok: true, batch_id: b.batch_id, state: b.state, cancelled: true, ...unconfirmed.length > 0 ? { kill_unconfirmed: unconfirmed, notices: b.notices.slice(-10) } : {}, counts: countStates(b.items), items: b.items.slice(0, MAX_ITEMS).map(itemView) };
+      }
+    }
+  ];
+  return { tools, getRunner, getStore };
+}
+function createRenderbatchTools(options = {}) {
+  return createRenderbatch(options).tools;
+}
+var childProcess3, crypto4, fs21, path23, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
+var init_renderbatch = __esm({
+  "src/tools/ext/renderbatch.ts"() {
+    "use strict";
+    init_win_exe();
+    childProcess3 = __toESM(require("node:child_process"), 1);
+    crypto4 = __toESM(require("node:crypto"), 1);
+    fs21 = __toESM(require("node:fs"), 1);
+    path23 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_common();
+    init_mutate();
+    init_aerender();
+    init_preflight();
+    init_seqcheck();
+    init_system_resources();
+    MAX_ITEMS = 500;
+    MAX_STRING = 2e4;
+    GIB = 1024 * 1024 * 1024;
+    MTIME_SLOP_MS = 2e3;
+    TOKENS = ["comp", "spec", "date", "n"];
+    WIN_OR_POSIX_ABSOLUTE = /^([A-Za-z]:[\\/]|\\\\|\/)/;
+    BatchSpecSchema = external_exports.object({
+      name: external_exports.string().min(1).max(60).regex(/^[A-Za-z0-9._-]+$/, "Spec names use letters, digits, '.', '_' and '-' only (they go into file names).").describe(
+        "Short name of this render spec, e.g. 'h264' or 'prores'. It fills the {spec} token in the file name. This is a free-form label, not an ae_delivery_specs id: a name like 'youtube_1080p' here does not apply that spec's resize, channels or audio."
+      ),
+      render_settings_template: external_exports.string().min(1).optional().describe("Render Settings template name (aerender -RStemplate). Omit to use the settings of the comp's queued render-queue item when it has one (the plan reports it), otherwise After Effects' defaults."),
+      output_module_template: external_exports.string().min(1).optional().describe(
+        "Output Module template name (aerender -OMtemplate), e.g. the installed template an ae_delivery_specs entry names. Omit to use the output module of the comp's queued render-queue item when it has one, otherwise After Effects' default (H.264 in recent versions). A size change needs a reframed comp or a template that resizes."
+      ),
+      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mp4'.").optional().describe("File extension for this spec, without the dot. It must match what the Output Module template writes. Falls back to the job's extension. A spec with no output_module_template and no extension (here or on the job) is refused: the plan would have to guess the file name."),
+      sequence: external_exports.boolean().optional().describe("The spec writes an image sequence: the file name gets a [#####] frame token (name.[#####].png) and the result is verified as a set of numbered files.")
+    });
+    BatchQueueItemSchema = external_exports.object({
+      rq_index: external_exports.number().int().min(1).max(500).describe("1-based Render Queue index of the item to render (aerender -rqindex). It renders with all its output modules and its own settings."),
+      item_comp_id: external_exports.number().int().describe("The CompItem id the item at rq_index must have (ae_render_queue_inspect shows it). The plan and the start refuse when the item there is another comp: indexes shift when the queue changes."),
+      name: external_exports.string().min(1).max(60).regex(/^[A-Za-z0-9._-]+$/, "Names use letters, digits, '.', '_' and '-' only.").optional().describe("Label for this item in the plan and status (default 'rq<index>').")
+    });
+    jobFields = {
+      comps: external_exports.array(external_exports.string().min(1).max(255)).min(1).max(50).optional().describe(
+        "Names of the comps to render. aerender selects a comp by name, so each name must belong to exactly one comp in the project. For other sizes, make the copies first with ae_reframe and list their names here: a size is just another comp. Give comps, queue_items or both."
+      ),
+      queue_items: external_exports.array(BatchQueueItemSchema).min(1).max(50).optional().describe(
+        "Existing Render Queue items to render through aerender -rqindex, each with ALL its output modules (H.264 + ProRes + PNG built with ae_render_queue_edit / _duplicate / _apply_spec) and its own render settings; specs, name_template, extension and time_span do not apply to them (the item holds its output files and time span). Every output file is counted in the overwrite check, and free space is measured on the volume of each item's output modules (output_dir is not used for them). Needs a saved, not dirty project and each item QUEUED with its comp id matching item_comp_id. Item outputs may not sit in _mcp_backups / _mcp_checkpoints."
+      ),
+      specs: external_exports.array(BatchSpecSchema).min(1).max(10).optional().describe(
+        "Render specs: free-form {name, render_settings_template, output_module_template, extension, sequence} objects, not ae_delivery_specs ids (those carry a resize, channels and audio that aerender cannot apply here; pass the installed template an entry names as output_module_template). Every comp is rendered once per spec. Omit for one render per comp with After Effects' default templates (or the comp's queued item); an extension is then required."
+      ),
+      output_dir: external_exports.string().min(1).describe("Absolute folder the renders go into (created when missing). Never a folder named _mcp_backups or _mcp_checkpoints."),
+      name_template: external_exports.string().min(1).max(200).optional().describe("File name without extension, with tokens {comp}, {spec}, {date} (YYYYMMDD) and {n} (item number, two digits). Default '{comp}_{spec}'. Characters Windows forbids in file names become '_'."),
+      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mov'.").optional().describe("Default file extension, without the dot, for specs that give none ('mov' is the name guessed when this is left out, and the plan refuses that for a spec without an output_module_template). A spec's own extension wins."),
+      time_span: external_exports.enum(["comp", "work_area", "template"]).optional().describe(
+        "Which frames each item renders. 'comp' (default) passes -s/-e for the whole comp; 'work_area' for the comp's work area; 'template' passes neither and lets the render-settings template decide (the ETA then uses the comp length as a guess)."
+      )
+    };
+    policyFields = {
+      if_output_exists: external_exports.enum(["protect_recent", "skip", "overwrite"]).optional().describe(
+        "What to do when an output file already exists. 'protect_recent' (default) refuses an item whose file was written in the last protect_recent_minutes and overwrites older ones; 'skip' leaves any existing non-empty file alone and marks the item skipped (a partial file left by this batch's own earlier attempt is not left alone: that item renders again); 'overwrite' always renders. A file in _mcp_backups / _mcp_checkpoints is never written."
+      ),
+      protect_recent_minutes: external_exports.number().int().min(1).max(1e5).optional().describe("How recent counts as 'recent' for protect_recent. Default 60."),
+      min_free_gb: external_exports.number().min(0).max(1e5).optional().describe("Free space (GB) that must remain on the output volume after an item's estimated size. Default 2."),
+      on_unknown_space: external_exports.enum(["continue", "stop"]).optional().describe("When free space can't be measured (a UNC path or a failed lookup): 'continue' (default) renders and flags it, 'stop' blocks the item. Unknown is never reported as ok.")
+    };
+    runFields = {
+      concurrency: external_exports.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The start gate lets only ONE aerender of this server run at a time (the last one's After Effects engine must be gone and 20 s must have passed), so a value above 1 is capped to 1: items still go one after another, with a 20 s gap between them. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
+      max_cpu_percent: external_exports.number().int().min(1).max(100).optional().describe(
+        "Share of the CPU for the whole batch, split evenly over the aerender processes that can really run at once (each gets floor(max_cpu_percent / that number), at least 1, as aerender -mfr ON <percent>, After Effects 22+). The start gate runs one aerender at a time, so with the default gate the one running render gets the whole share. Default 50. How far -mfr limits the CPU is not measured."
+      ),
+      on_error: external_exports.enum(["stop", "continue"]).optional().describe("A failed item stops the batch ('stop', default; resume retries it) or the batch goes on with the next item ('continue')."),
+      stall_minutes: external_exports.number().int().min(1).max(1e4).optional().describe("Minutes without log or output growth before a running item is flagged as stalled (advice only, nothing is cancelled). Default 15.")
+    };
+    AeRenderBatchPlanSchema = external_exports.object({ ...jobFields, ...policyFields }).superRefine(refineJob);
+    AeRenderBatchStartSchema = external_exports.object({
+      expect: ExpectSchema,
+      ...jobFields,
+      ...policyFields,
+      ...runFields,
+      preflight: external_exports.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
+      sequence_check: SequenceCheckSchema,
+      allow_dirty: external_exports.boolean().optional().describe("Render the last saved state although the open project has unsaved changes. Default false: the tool refuses and asks for ae_save first, so the frozen copy holds what you see."),
+      freeze_location: external_exports.enum(["batch_folder", "project_folder"]).optional().describe(
+        "Where the frozen copy of the .aep goes. 'batch_folder' (default) keeps it with batch.json; 'project_folder' puts it beside the original .aep as <name>.mcp_<batch id>.aep (so a relative footage path resolves from the same folder; whether it does is not measured) and deletes it when the batch ends succeeded. In a synced folder it is synced while it exists."
+      )
+    }).superRefine(refineJob);
+    BATCH_ID_RE = /^batch_\d+_[0-9a-f]{6}$/;
+    BatchIdSchema = external_exports.string().regex(BATCH_ID_RE, "batch_id must look like batch_<digits>_<6 hex>, as returned by ae_render_batch.");
+    AeRenderBatchStatusSchema = external_exports.object({
+      batch_id: BatchIdSchema.optional().describe("Batch to report. Omit to list the most recent batches."),
+      include_free_space: external_exports.boolean().optional().describe("Also measure free space now on every volume the batch writes to (each Render Queue item's own output volumes, and output_dir only when the batch has comp items; runs a PowerShell or df lookup). Reports the worst as free_space, and free_space_volumes when there is more than one. Default false.")
+    });
+    AeRenderBatchResumeSchema = external_exports.object({
+      expect: ExpectSchema,
+      batch_id: BatchIdSchema.describe("Batch to continue."),
+      concurrency: runFields.concurrency,
+      max_cpu_percent: runFields.max_cpu_percent,
+      on_error: runFields.on_error,
+      stall_minutes: runFields.stall_minutes,
+      if_output_exists: policyFields.if_output_exists
+    });
+    AeRenderBatchCancelSchema = external_exports.object({
+      batch_id: BatchIdSchema.describe("Batch to cancel. Running aerender processes are terminated; finished renders are kept.")
+    });
+    clip = (s) => s.length > MAX_STRING ? s.slice(0, MAX_STRING) : s;
+    errText = (e) => clip(e instanceof Error ? e.message : String(e));
+    defaultRunFile = (file, args) => new Promise((resolve7, reject) => {
+      childProcess3.execFile(file, args, { windowsHide: true, timeout: 15e3 }, (err, stdout) => err ? reject(err) : resolve7(String(stdout)));
+    });
+    BatchStore = class {
+      constructor(dir) {
+        this.dir = dir;
+      }
+      cache = /* @__PURE__ */ new Map();
+      newId() {
+        return `batch_${Date.now()}_${crypto4.randomBytes(3).toString("hex")}`;
+      }
+      batchDir(id) {
+        return path23.join(this.dir, id);
+      }
+      jsonPath(id) {
+        return path23.join(this.batchDir(id), "batch.json");
+      }
+      save(b) {
+        this.cache.set(b.batch_id, b);
+        const file = this.jsonPath(b.batch_id);
+        fs21.mkdirSync(path23.dirname(file), { recursive: true });
+        const tmp = `${file}.tmp-${process.pid}-${crypto4.randomBytes(3).toString("hex")}`;
+        const payload = JSON.stringify(b, null, 2);
+        try {
+          fs21.writeFileSync(tmp, payload, "utf8");
+          fs21.renameSync(tmp, file);
+        } catch {
+          fs21.writeFileSync(file, payload, "utf8");
+          try {
+            fs21.unlinkSync(tmp);
+          } catch {
+          }
+        }
+      }
+      /** Drops a batch that never started: the cached record and its folder. */
+      forget(id) {
+        this.cache.delete(id);
+        if (!BATCH_ID_RE.test(id)) return;
+        try {
+          fs21.rmSync(this.batchDir(id), { recursive: true, force: true });
+        } catch {
+        }
+      }
+      get(id) {
+        if (!BATCH_ID_RE.test(id)) return void 0;
+        const cached2 = this.cache.get(id);
+        if (cached2) return cached2;
+        try {
+          const b = JSON.parse(fs21.readFileSync(this.jsonPath(id), "utf8"));
+          if (b && typeof b.batch_id === "string") {
+            this.cache.set(id, b);
+            return b;
+          }
+        } catch {
+        }
+        return void 0;
+      }
+      /** Newest first. */
+      list(limit = 20) {
+        let ids = [];
+        try {
+          ids = fs21.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
+        } catch {
+          ids = [];
+        }
+        ids.sort().reverse();
+        const out = [];
+        for (const id of ids) {
+          const b = this.get(id);
+          if (b) out.push(b);
+          if (out.length >= limit) break;
+        }
+        return out;
+      }
+    };
+    BatchRunner = class {
+      constructor(store, deps, opts = { tickMs: 5e3, autoTick: true }) {
+        this.store = store;
+        this.deps = deps;
+        this.opts = opts;
+      }
+      timers = /* @__PURE__ */ new Map();
+      busy = /* @__PURE__ */ new Set();
+      isActive(id) {
+        return this.timers.has(id) || this.busy.has(id);
+      }
+      /** Marks the batch as driven by this process, ticks once now, and keeps ticking. */
+      async begin(id) {
+        if (this.opts.autoTick && !this.timers.has(id)) {
+          const t = setInterval(() => {
+            this.tick(id).catch(() => {
+            });
+          }, this.opts.tickMs);
+          if (typeof t.unref === "function") t.unref();
+          this.timers.set(id, t);
+        }
+        return this.tick(id);
+      }
+      stopTimer(id) {
+        const t = this.timers.get(id);
+        if (t) clearInterval(t);
+        this.timers.delete(id);
+      }
+      async tick(id) {
+        const b = this.store.get(id);
+        if (!b) {
+          this.stopTimer(id);
+          return void 0;
+        }
+        if (b.state !== "running") {
+          this.stopTimer(id);
+          return b;
+        }
+        if (this.busy.has(id)) return b;
+        this.busy.add(id);
+        try {
+          await this.step(b);
+        } catch (err) {
+          b.notices.push(`The runner stopped on an error: ${errText(err)}`);
+          b.state = "stopped";
+          b.finished_at = new Date(this.deps.now()).toISOString();
+        } finally {
+          this.busy.delete(id);
+          if (b.state === "succeeded" && b.frozen_temporary) {
+            b.frozen_temporary = false;
+            try {
+              fs21.rmSync(b.frozen_project, { force: true });
+              b.notices.push(`Every item finished; the frozen project copy ${b.frozen_project} was deleted.`);
+            } catch (err) {
+              b.notices.push(`Every item finished, but the frozen project copy ${b.frozen_project} could not be deleted (${errText(err)}).`);
+            }
+          }
+          try {
+            this.store.save(b);
+          } catch (err) {
+            const note = `The batch state could not be saved to disk (${errText(err)}); it is kept in memory only.`;
+            if (!b.notices.includes(note)) b.notices.push(note);
+          }
+          if (b.state !== "running") this.stopTimer(id);
+        }
+        return b;
+      }
+      stopping(b) {
+        return b.cancel_requested || b.options.on_error === "stop" && b.items.some((i) => i.state === "failed" || i.state === "cancelled");
+      }
+      async step(b) {
+        const now = this.deps.now();
+        const stallMs = b.options.stall_minutes * 6e4;
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+          if (!job) {
+            this.fail(item, "the aerender job record is gone", now);
+            continue;
+          }
+          refreshRunning(item, job, now, stallMs);
+          if (item.stalled && !item.stall_noted) {
+            item.stall_noted = true;
+            b.notices.push(
+              `Item ${item.index} (${item.comp_name}, ${item.spec_name}) shows no log or output growth for ${b.options.stall_minutes} minutes (job ${job.job_id}). It may be stuck on a slow frame; check ae_aerender_status and call ae_aerender_cancel if it is. The batch does not cancel it for you.`
+            );
+          }
+          if (job.state === "running") continue;
+          item.finished_at = job.finished_at ?? new Date(now).toISOString();
+          if (job.cancelled) {
+            item.state = "cancelled";
+            item.error = "cancelled";
+          } else if (job.state === "succeeded") {
+            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (v.ok) {
+              item.state = "succeeded";
+              item.output_bytes = v.bytes;
+              if (v.files !== void 0) item.output_files = v.files;
+              item.percent = 100;
+              item.stalled = false;
+            } else this.fail(item, `aerender exited cleanly but ${v.reason}`, now);
+          } else {
+            this.fail(item, job.error ? clip(job.error) : `aerender exited with code ${job.exit_code ?? "unknown"}${job.signal ? ` (${job.signal})` : ""}; see ${job.log_path}`, now);
+          }
+        }
+        let waitingForOthers = false;
+        while (!this.stopping(b)) {
+          const own = b.items.filter((i) => i.state === "running").length;
+          const others = this.othersRunning(b);
+          if (own + others >= effectiveConcurrency(b.options.concurrency, this.deps.registry)) {
+            waitingForOthers = own === 0 && others > 0 && b.items.some((i) => i.state === "pending");
+            break;
+          }
+          const next = b.items.find((i) => i.state === "pending");
+          if (!next) break;
+          await this.startItem(b, next, now);
+        }
+        if (b.items.some((i) => i.state === "running")) return;
+        if (waitingForOthers && b.state === "running" && !b.cancel_requested) {
+          const note = "Waiting: the concurrency limit is used up by aerender jobs that are not part of this batch (another batch or ae_aerender_start). The next item starts when one of them ends.";
+          if (!b.notices.includes(note)) b.notices.push(note);
+          return;
+        }
+        const counts = countStates(b.items);
+        if (b.cancel_requested) b.state = "cancelled";
+        else if (counts.pending > 0) b.state = "stopped";
+        else b.state = counts.failed > 0 || counts.cancelled > 0 ? "failed" : "succeeded";
+        b.finished_at = new Date(now).toISOString();
+      }
+      /** Running aerender jobs of this process that no item of this batch owns (other batches, ae_aerender_start). */
+      othersRunning(b) {
+        const own = new Set(b.items.map((i) => i.job_id).filter((j) => typeof j === "string"));
+        return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && (this.deps.registry.getProcess(j.job_id) !== void 0 || j.phase === "queued")).length;
+      }
+      fail(item, why, now) {
+        item.state = "failed";
+        item.error = why;
+        item.finished_at = new Date(now).toISOString();
+      }
+      /** The governor, then the launch. Any refusal fails the item with the reason; nothing is thrown. */
+      async startItem(b, item, now) {
+        const o = b.options;
+        for (const out of outputsOf(item)) {
+          const why = protectedReason(out, [b.project_path, b.frozen_project]);
+          if (why) return this.fail(item, `blocked: ${why}`, now);
+        }
+        const existing = inspectOutputs(outputsOf(item));
+        if (existing.exists) {
+          const ours = item.attempts > 0;
+          if (o.if_output_exists === "skip" && existing.bytes > 0 && !ours) {
+            item.state = "skipped";
+            item.note = "the output already exists; left alone (if_output_exists: skip)";
+            item.output_bytes = existing.bytes;
+            item.finished_at = new Date(now).toISOString();
+            return;
+          }
+          const ageMin = existing.newest_mtime_ms === null ? Infinity : (now - existing.newest_mtime_ms) / 6e4;
+          if (o.if_output_exists === "protect_recent" && !ours && ageMin < o.protect_recent_minutes) {
+            return this.fail(item, `blocked: ${item.output_path} was written ${Math.max(0, Math.round(ageMin))} minutes ago (protect_recent_minutes ${o.protect_recent_minutes}). Use another name, wait, or set if_output_exists to 'overwrite' or 'skip'.`, now);
+          }
+          item.overwrote = true;
+        }
+        const spaceDirs = spaceDirsOf(item, b.output_dir);
+        const frees = [];
+        for (const d of spaceDirs) frees.push(await this.deps.getFreeBytes(d));
+        if (b.cancel_requested || b.state !== "running") return;
+        const needed = estimateBytes(b.items, item);
+        let status = "ok";
+        let free = null;
+        let reserved = 0;
+        let shownDir = spaceDirs[0];
+        let worst = -1;
+        for (let di = 0; di < spaceDirs.length; di++) {
+          let res = 0;
+          for (const r of b.items) {
+            if (r.state !== "running" || r === item) continue;
+            if (spaceDirsOf(r, b.output_dir).some((rd) => mayShareVolume(rd, spaceDirs[di]))) res += estimateBytes(b.items, r) ?? 0;
+          }
+          const f = frees[di];
+          const st = spaceStatus(f === null ? null : Math.max(0, f - res), needed, o.min_free_gb);
+          const rank = st === "low" ? 2 : st === "unknown" ? 1 : 0;
+          if (rank > worst) {
+            worst = rank;
+            status = st;
+            free = f;
+            reserved = res;
+            shownDir = spaceDirs[di];
+          }
+        }
+        b.free_space = { dir: shownDir, status, free_bytes: free, needed_bytes: needed, checked_at: new Date(now).toISOString() };
+        if (status === "low") {
+          return this.fail(item, `blocked: only ${((free ?? 0) / GIB).toFixed(1)} GB free on the output volume of ${shownDir}${reserved > 0 ? ` (${(Math.max(0, (free ?? 0) - reserved) / GIB).toFixed(1)} GB after ${(reserved / GIB).toFixed(1)} GB reserved for running items)` : ""}; this item needs about ${((needed ?? 0) / GIB).toFixed(1)} GB plus ${o.min_free_gb} GB spare.`, now);
+        }
+        if (status === "unknown") {
+          if (o.on_unknown_space === "stop") return this.fail(item, "blocked: free space on the output volume could not be measured (on_unknown_space: stop)", now);
+          const note = `Free space on ${shownDir} could not be measured (a network path or a failed lookup); rendering anyway. It is not known to be ok.`;
+          if (!b.notices.includes(note)) b.notices.push(note);
+        }
+        try {
+          const cpu = Math.max(1, Math.floor(o.max_cpu_percent / effectiveConcurrency(o.concurrency, this.deps.registry)));
+          const rec = item.rq_index !== void 0 ? launchAerenderJob({
+            registry: this.deps.registry,
+            spawn: this.deps.spawn,
+            aerender_path: o.aerender_path,
+            project_path: b.frozen_project,
+            comp_name: item.comp_name,
+            rq_index: item.rq_index,
+            item_comp_id: item.item_comp_id,
+            comp_id: item.item_comp_id,
+            output_paths: outputsOf(item),
+            max_cpu_percent: cpu
+          }) : launchAerenderJob({
+            registry: this.deps.registry,
+            spawn: this.deps.spawn,
+            aerender_path: o.aerender_path,
+            project_path: b.frozen_project,
+            comp_name: item.comp_name,
+            output_path: item.output_path,
+            output_module_template: item.output_module_template,
+            render_settings_template: item.render_settings_template,
+            start_frame: item.start_frame,
+            end_frame: item.end_frame,
+            max_cpu_percent: cpu
+          });
+          item.state = "running";
+          item.attempts++;
+          item.job_id = rec.job_id;
+          item.started_at = rec.started_at;
+          item.finished_at = void 0;
+          item.error = void 0;
+          item.percent = 0;
+          item.stalled = false;
+          item.stall_noted = false;
+          item.activity = { sig: "", changed_ms: now };
+        } catch (err) {
+          this.fail(item, `could not start aerender: ${errText(err)}`, now);
+        }
+      }
+      /** Cancels a batch: kills what runs, ends the batch. Finished renders stay. */
+      cancel(b) {
+        b.cancel_requested = true;
+        const now = new Date(this.deps.now()).toISOString();
+        for (const item of b.items.filter((i) => i.state === "running")) {
+          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+          if (job && job.state === "running") {
+            const res = cancelAerenderJob(this.deps.registry, job, this.deps.killProcess, "ae_render_batch_cancel", this.deps.cancelHooks);
+            if (res.kill_unconfirmed) {
+              item.note = "cancel not confirmed: the aerender process could not be identified, so it was not killed";
+              b.notices.push(`Item ${item.index} (job ${job.job_id}, pid ${job.pid}): the cancel could not confirm the process is an aerender, so nothing was killed and the job stays running. Check the process, then call ae_aerender_cancel for the job; ae_render_batch_resume refuses until it is gone.`);
+              continue;
+            }
+          }
+          item.state = "cancelled";
+          item.error = "cancelled";
+          item.stalled = false;
+          item.finished_at = now;
+        }
+        b.state = "cancelled";
+        b.finished_at = now;
+        this.stopTimer(b.batch_id);
+        try {
+          this.store.save(b);
+        } catch (err) {
+          b.notices.push(`The cancelled state could not be saved to disk (${errText(err)}).`);
+        }
+      }
+      /**
+       * Gets a stopped or interrupted batch ready to run again: finished renders
+       * that still verify stay, and so do items skipped on purpose (their files
+       * were left alone deliberately and a resume must not overwrite them); an item
+       * whose runner died is adopted when its job ended cleanly or its log says it
+       * finished; everything else goes back to pending. Returns a refusal when an
+       * aerender of the batch is still alive (the pid must still be an aerender).
+       */
+      reconcile(b) {
+        let recovered = 0;
+        let reset = 0;
+        let kept = 0;
+        let skippedKept = 0;
+        for (const item of b.items) {
+          if (item.state === "running") {
+            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+            if (job && job.state === "running" && typeof job.pid === "number" && this.deps.isPidAlive(job.pid, job.job_id)) {
+              return { ok: false, message: `Item ${item.index} still has a live aerender (job ${job.job_id}, pid ${job.pid}). ${b.state === "cancelled" ? "The batch is already cancelled: stop it with ae_aerender_cancel on that job, or end the process by hand, then resume." : "Wait for it, or stop it with ae_render_batch_cancel / ae_aerender_cancel, then resume."}` };
+            }
+          }
+        }
+        for (const item of b.items) {
+          if (item.state === "succeeded") {
+            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (v.ok) {
+              kept++;
+              continue;
+            }
+            item.note = `rendered again: ${v.reason}`;
+          } else if (item.state === "skipped") {
+            if (verifyOutputs(item, null).ok) {
+              kept++;
+              skippedKept++;
+              continue;
+            }
+            item.note = "rendered: the file it had left alone is gone";
+          } else if (item.state === "running") {
+            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
+            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
+            if (job && v.ok && (job.state === "succeeded" || job.state === "running" && logFinished(job.log_path))) {
+              item.state = "succeeded";
+              item.output_bytes = v.bytes;
+              if (v.files !== void 0) item.output_files = v.files;
+              item.percent = 100;
+              item.finished_at = job.finished_at ?? new Date(this.deps.now()).toISOString();
+              item.note = "finished while the runner was away; adopted on resume";
+              recovered++;
+              continue;
+            }
+            if (job && job.state === "running") {
+              this.deps.registry.update(job.job_id, { state: "failed", error: "interrupted: its aerender process is gone", finished_at: new Date(this.deps.now()).toISOString() });
+            }
+            item.note = "interrupted; rendered again";
+          }
+          item.state = "pending";
+          item.error = void 0;
+          item.job_id = void 0;
+          item.finished_at = void 0;
+          item.percent = void 0;
+          item.output_files = void 0;
+          item.stalled = false;
+          item.stall_noted = false;
+          item.activity = void 0;
+          reset++;
+        }
+        b.state = "running";
+        b.cancel_requested = false;
+        b.finished_at = null;
+        return { ok: true, recovered, reset, kept, skipped_kept: skippedKept };
+      }
+    };
+    defaultIsPidAlive = (pid, registry, jobId, identify = (p) => isAerenderProcess(p)) => {
+      try {
+        process.kill(pid, 0);
+      } catch (err) {
+        if (err.code !== "EPERM") return false;
+      }
+      if (registry && pidHeldByLiveJob(registry, pid, jobId)) return false;
+      return identify(pid) !== false;
+    };
+    renderbatchTools = createRenderbatchTools();
+  }
+});
+
+// src/tools/ext/rqedit.ts
+function unknownNameTokens(tpl) {
+  const bad4 = [];
+  for (const m of tpl.matchAll(/\[([^\]]*)\]/g)) {
+    const t = m[1];
+    if (/^#+$/.test(t)) continue;
+    if (NAME_TOKENS.includes(t)) continue;
+    bad4.push(t);
+  }
+  return bad4;
+}
+function sizeNumbers(got) {
+  if (typeof got === "string") return numbersIn(got);
+  if (got && typeof got === "object" && !Array.isArray(got)) {
+    const o = got;
+    if ("x" in o && "y" in o) return [toNum(o.x), toNum(o.y)];
+    if ("width" in o && "height" in o) return [toNum(o.width), toNum(o.height)];
+    return Object.values(o).map(toNum);
+  }
+  return [];
+}
+function sameSetting(want, got) {
+  if (got === void 0 || got === null) return false;
+  if (typeof want === "boolean") return toBool(got) === want;
+  if (typeof want === "number") {
+    const n = toNum(got);
+    return n !== void 0 && Math.abs(n - want) <= 1e-4 * Math.max(1, Math.abs(want));
+  }
+  if (Array.isArray(want)) {
+    if (Array.isArray(got)) return got.length === want.length && want.every((w, i) => sameSetting(w, got[i]));
+    return sizeNumbers(got).length >= want.length && want.every((w, i) => typeof w === "number" && sizeNumbers(got)[i] !== void 0 && Math.abs(sizeNumbers(got)[i] - w) <= 1e-4);
+  }
+  if (want && typeof want === "object") {
+    if (!got || typeof got !== "object") return false;
+    return Object.entries(want).every(([k, v]) => sameSetting(v, got[k]));
+  }
+  if (typeof want === "string") {
+    if (typeof got === "string") return got.trim().toLowerCase() === want.trim().toLowerCase();
+    if (typeof got === "number") return String(got) === want.trim();
+    if (typeof got === "boolean") return toBool(want) === got;
+  }
+  return false;
+}
+function settingsMismatches(where, want, got, skip) {
+  const m = [];
+  if (!want) return m;
+  for (const [key, value] of Object.entries(want)) {
+    if (skip.has(key)) continue;
+    if (!got) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: "The settings could not be read back" });
+      continue;
+    }
+    if (!(key in got)) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: `AE does not list "${key}" in the read-back` });
+    } else if (!sameSetting(value, got[key])) {
+      m.push({ path: `${where}.${key}`, expected: value, actual: got[key], message: `"${key}" reads back differently (a format can adjust a size or rate it can't take)` });
+    }
+  }
+  return m;
+}
+function stepMismatches(where, errors, skipped) {
+  const m = [];
+  (errors ?? []).forEach(
+    (e, i) => m.push({ path: `${where}.errors[${i}]`, expected: "the step to succeed", actual: e.message, message: `${e.step} failed: ${e.message}` })
+  );
+  (skipped ?? []).forEach((s, i) => {
+    if (s.optional === true) return;
+    m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: void 0, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` });
+  });
+  return m;
+}
+function itemMismatches(where, echo, item, skipped) {
+  const m = [];
+  if (!echo) return m;
+  if (!item) {
+    m.push({ path: where, expected: "the item in the read-back", actual: void 0, message: "The render queue item could not be read back" });
+    return m;
+  }
+  const skipAt = (suffix) => new Set((skipped ?? []).filter((s) => !s.where || s.where.endsWith(suffix)).map((s) => s.key));
+  const ne = (ok, p, expected, actual, message) => {
+    if (!ok) m.push({ path: `${where}.${p}`, expected, actual, message });
+  };
+  if (echo.time_span) {
+    ne(item.time_span_start !== void 0 && Math.abs(item.time_span_start - echo.time_span.start) <= TIME_TOL2, "time_span.start", echo.time_span.start, item.time_span_start, "Time span start differs");
+    ne(
+      item.time_span_duration !== void 0 && Math.abs(item.time_span_duration - echo.time_span.duration) <= TIME_TOL2,
+      "time_span.duration",
+      echo.time_span.duration,
+      item.time_span_duration,
+      "Time span length differs"
+    );
+  }
+  if (echo.skip_frames !== void 0) ne(item.skip_frames === echo.skip_frames, "skip_frames", echo.skip_frames, item.skip_frames, "Skip frames differs");
+  if (echo.log_type !== void 0) ne(item.log_type === echo.log_type, "log_type", echo.log_type, item.log_type, "Log type differs");
+  if (echo.queued !== void 0) {
+    if (echo.queued && item.status === "needs_output") {
+      m.push({
+        path: `${where}.queued`,
+        expected: "status queued",
+        actual: item.status,
+        message: "The Render checkbox was set but the item reads NEEDS_OUTPUT: it has no valid output file. Give it one (output_modules[].file) and queue it again"
+      });
+    } else {
+      ne(item.render === echo.queued, "queued", echo.queued, item.render, `The item's Render checkbox reads ${String(item.render)} (status ${item.status ?? "unknown"})`);
+    }
+  }
+  m.push(...settingsMismatches(`${where}.render_settings`, echo.render_settings, item.render_settings, skipAt(" render settings")));
+  ne(item.num_output_modules === echo.num_output_modules, "num_output_modules", echo.num_output_modules, item.num_output_modules, "Output module count differs");
+  for (const e of echo.modules) {
+    const mod = item.output_modules?.find((o) => o.index === e.index);
+    const p = `${where}.output_modules[${e.index}]`;
+    if (!mod) {
+      m.push({ path: p, expected: "the output module in the read-back", actual: void 0, message: `Output module ${e.index} could not be read back` });
+      continue;
+    }
+    if (e.file !== void 0) ne(!!mod.file && pathKey(mod.file) === pathKey(e.file), `output_modules[${e.index}].file`, e.file, mod.file, "Output file differs");
+    if (e.post_render_action !== void 0) {
+      ne(mod.post_render_action === e.post_render_action, `output_modules[${e.index}].post_render_action`, e.post_render_action, mod.post_render_action, "Post-render action differs");
+    }
+    if (e.include_source_xmp !== void 0) {
+      ne(mod.include_source_xmp === e.include_source_xmp, `output_modules[${e.index}].include_source_xmp`, e.include_source_xmp, mod.include_source_xmp, "Include source XMP differs");
+    }
+    m.push(...settingsMismatches(p, e.settings, mod.settings, skipAt(` output module ${e.plan_index ?? e.index}`)));
+  }
+  return m;
+}
+function editMismatches(args, _before, afterRaw, written) {
+  const after = queueOf(afterRaw);
+  const where = `item[${args.item_index}]`;
+  if (args.item_index === void 0) return [];
+  const m = stepMismatches(where, asArray(written.errors), asArray(written.skipped));
+  if (!after) return m;
+  m.push(...itemMismatches(where, written.expect, itemOf2(after, args.item_index), asArray(written.skipped)));
+  if (args.comp_id !== void 0) {
+    const it = itemOf2(after, args.item_index);
+    if (it && it.comp_id !== args.comp_id) m.push({ path: `${where}.comp_id`, expected: args.comp_id, actual: it.comp_id, message: "The item at this index is another comp now" });
+  }
+  return m;
+}
+function copiesMismatches(kind, beforeRaw, afterRaw, entries, compId) {
+  const m = [];
+  const before = queueOf(beforeRaw);
+  const after = queueOf(afterRaw);
+  const made = entries.filter((e) => typeof e.item_index === "number" && e.in_place !== true).length;
+  entries.forEach((e, i) => {
+    const where = `${kind}[${i + 1}]`;
+    m.push(...stepMismatches(where, asArray(e.errors), asArray(e.skipped)));
+    if (typeof e.item_index !== "number") {
+      m.push({ path: where, expected: "a duplicate", actual: void 0, message: "The item could not be duplicated, or its place in the queue could not be found" });
+    }
+  });
+  if (!after) return m;
+  if (before) {
+    const grown = after.numItems - before.numItems;
+    if (grown !== made) m.push({ path: "numItems", expected: before.numItems + made, actual: after.numItems, message: "The queue did not grow by the number of copies" });
+  }
+  entries.forEach((e, i) => {
+    if (typeof e.item_index !== "number") return;
+    const where = `${kind}[${i + 1}]`;
+    const it = itemOf2(after, e.item_index);
+    m.push(...itemMismatches(where, e.expect, it, asArray(e.skipped)));
+    if (it && typeof compId === "number" && it.comp_id !== compId) {
+      m.push({ path: `${where}.comp_id`, expected: compId, actual: it.comp_id, message: "The copy is another comp than the source" });
+    }
+  });
+  const touched = new Set(entries.map((e) => e.item_index).filter((n) => typeof n === "number"));
+  const seen = /* @__PURE__ */ new Map();
+  for (const it of after.items) {
+    if (it.status === "done") continue;
+    for (const o of it.output_modules ?? []) {
+      if (!o.file || /\[#+\]/.test(o.file)) continue;
+      const key = pathKey(o.file);
+      const other = seen.get(key);
+      const here = `item ${it.index} output ${o.index}`;
+      if (other && (touched.has(it.index) || touched.has(other.index))) {
+        m.push({ path: `items[${it.index}]`, expected: "distinct output files", actual: o.file, message: `${here} and ${other.label} write the same file` });
+      }
+      if (!other) seen.set(key, { label: here, index: it.index });
+    }
+  }
+  return m;
+}
+function checkDeliveryFile(spec, filePath) {
+  const issues = [];
+  let size = 0;
+  let exists = false;
+  try {
+    const st = fs22.statSync(filePath);
+    exists = st.isFile();
+    size = st.size;
+  } catch {
+    exists = false;
+  }
+  if (!exists) {
+    issues.push("The file does not exist.");
+  } else {
+    if (size === 0) issues.push("The file is empty.");
+    const ext2 = path24.extname(filePath).replace(/^\./, "").toLowerCase();
+    if (ext2 !== spec.ext) issues.push(`The extension is .${ext2}, the spec's is .${spec.ext}.`);
+    if (spec.max_size_mb !== void 0 && size > spec.max_size_mb * 1024 * 1024) {
+      issues.push(`The file is ${(size / 1048576).toFixed(1)} MB, over the spec's approximate ${spec.max_size_mb} MB limit.`);
+    }
+  }
+  return { ok: issues.length === 0, exists, size_bytes: size, size_mb: Math.round(size / 1048576 * 100) / 100, issues };
+}
+function removeMismatches(beforeRaw, afterRaw, written) {
+  const m = stepMismatches("remove", asArray(written.errors), []);
+  const after = queueOf(afterRaw);
+  if (!after) return m;
+  const removed = asArray(written.removed);
+  const echo = written.expect ?? {};
+  const before = queueOf(beforeRaw);
+  if (before && removed.length > 0 && after.numItems !== before.numItems - removed.length) {
+    m.push({ path: "numItems", expected: before.numItems - removed.length, actual: after.numItems, message: "The queue did not shrink by the number of removed items" });
+  } else if (typeof echo.num_items === "number" && after.numItems !== echo.num_items) {
+    m.push({ path: "numItems", expected: echo.num_items, actual: after.numItems, message: "The queue holds a different number of items than expected" });
+  }
+  const want = echo.survivor_comp_ids;
+  if (Array.isArray(want) && !after.truncated && after.items.length === want.length) {
+    after.items.forEach((it, i) => {
+      if (it.comp_id !== want[i]) {
+        m.push({ path: `items[${i + 1}].comp_id`, expected: want[i], actual: it.comp_id, message: "A surviving item is another comp than expected" });
+      }
+    });
+  }
+  return m;
+}
+var fs22, path24, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
+var init_rqedit = __esm({
+  "src/tools/ext/rqedit.ts"() {
+    "use strict";
+    fs22 = __toESM(require("node:fs"), 1);
+    path24 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_common();
+    init_write_runner();
+    queueOf = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
+    itemOf2 = (q, index) => q?.items.find((i) => i.index === index);
+    H264 = (mbps) => [
+      { pattern: `^H\\.264.*Match Render Settings.*\\b${mbps} ?Mbps`, flags: "i" },
+      { pattern: "^H\\.264.*Match Render Settings", flags: "i" },
+      { pattern: "^H\\.264", flags: "i" }
+    ];
+    SOCIAL_NOTE = "The bitrate comes from the template (AE ships H.264 15 and 40 Mbps ones); scripts can't set it. The size limit is approximate.";
+    SPEC_LIBRARY = [
+      {
+        id: "youtube_1080p",
+        label: "YouTube 1080p",
+        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        note: "YouTube re-encodes; this is the upload master. " + SOCIAL_NOTE
+      },
+      {
+        id: "youtube_4k",
+        label: "YouTube 4K",
+        description: "H.264 MP4, 3840x2160, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(40),
+        resize: { width: 3840, height: 2160 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "instagram_feed",
+        label: "Instagram feed (4:5)",
+        description: "H.264 MP4, 1080x1350, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1350 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 4096,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "instagram_reels_story",
+        label: "Instagram Reels / Story (9:16)",
+        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1920 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 4096,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "tiktok",
+        label: "TikTok (9:16)",
+        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1080, height: 1920 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 500,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "linkedin_1080p",
+        label: "LinkedIn 1080p",
+        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
+        container: "mp4",
+        ext: "mp4",
+        template_candidates: H264(15),
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        audio_sample_rate: 48e3,
+        name_template: "[compName]_[spec].mp4",
+        max_size_mb: 5120,
+        note: SOCIAL_NOTE
+      },
+      {
+        id: "broadcast_hd",
+        label: "Broadcast HD (ProRes 422 HQ)",
+        description: "Apple ProRes 422 HQ MOV, 1920x1080.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        resize: { width: 1920, height: 1080 },
+        channels: "RGB",
+        name_template: "[compName]_[spec].mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine (made in the Output Module dialog); refused without one. Frame rate follows the comp."
+      },
+      {
+        id: "broadcast_uhd",
+        label: "Broadcast UHD (ProRes 422 HQ)",
+        description: "Apple ProRes 422 HQ MOV, 3840x2160.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        resize: { width: 3840, height: 2160 },
+        channels: "RGB",
+        name_template: "[compName]_[spec].mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
+      },
+      {
+        id: "prores_422_hq_master",
+        label: "ProRes 422 HQ master",
+        description: "Apple ProRes 422 HQ MOV at the comp's size.",
+        container: "mov",
+        ext: "mov",
+        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
+        name_template: "[compName]_master.mov",
+        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
+      },
+      {
+        id: "png_sequence",
+        label: "PNG sequence",
+        description: "Numbered PNG frames at the comp's size, with alpha.",
+        container: "png_sequence",
+        ext: "png",
+        sequence: true,
+        template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG.*alpha", flags: "i" }, { pattern: "PNG", flags: "i" }],
+        channels: "RGB + Alpha",
+        video_output: true,
+        name_template: "[compName]_[spec]_[#####].png",
+        note: 'Needs a PNG output module template on this machine, preferably one with alpha in its name ("PNG + ALPHA"): AE lists no Channels setting for PNG templates, so alpha comes from the template; with a plain "PNG" template the alpha cannot be set and the receipt reports it. The folder should be empty: every frame is a file.'
+      },
+      {
+        id: "wav_audio",
+        label: "WAV audio only",
+        description: "48 kHz WAV, no picture.",
+        container: "wav",
+        ext: "wav",
+        template_candidates: [{ pattern: "\\bWAV\\b", flags: "i" }],
+        video_output: false,
+        audio_sample_rate: 48e3,
+        output_audio: "On",
+        name_template: "[compName]_[spec].wav",
+        note: "Needs a WAV output module template on this machine; refused without one."
+      },
+      {
+        id: "gif",
+        label: "Animated GIF",
+        description: "Not available: After Effects has no animated GIF output module.",
+        container: "gif",
+        ext: "gif",
+        template_candidates: [],
+        name_template: "[compName].gif",
+        refuse: "After Effects has no animated GIF output module (Adobe moved GIF to Media Encoder and Photoshop). Use the png_sequence spec and convert the frames outside AE."
+      }
+    ];
+    SPEC_IDS = SPEC_LIBRARY.map((s) => s.id);
+    specById = (id) => SPEC_LIBRARY.find((s) => s.id === id);
+    NAME_TOKENS = ["compName", "spec", "width", "height", "date", "copy"];
+    isAbsolutePath = (p) => /^([A-Za-z]:[\\/]|\/|\\\\)/.test(p);
+    pathKey = (p) => p.replace(/\\/g, "/").toLowerCase();
+    toBool = (v) => {
+      if (typeof v === "boolean") return v;
+      if (typeof v === "number") return v !== 0;
+      if (typeof v === "string") {
+        if (/^(on|true|yes|1)$/i.test(v.trim())) return true;
+        if (/^(off|false|no|0)$/i.test(v.trim())) return false;
+      }
+      return void 0;
+    };
+    numbersIn = (s) => (s.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    toNum = (v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = numbersIn(v)[0];
+        if (n === void 0) return void 0;
+        return /khz/i.test(v) ? n * 1e3 : n;
+      }
+      return void 0;
+    };
+    TIME_TOL2 = 0.05;
+    ItemIndexSchema = external_exports.number().int().min(1).max(500).describe("1-based position in the Render Queue (see ae_render_queue_inspect). The queue shifts when items are added or removed, so re-read it first.");
+    ItemCompSchema = external_exports.number().int().optional().describe("Expected CompItem id of the queue item at item_index. The tool refuses when it is another comp (the queue changed under you).");
+    SettingValueSchema = external_exports.union([
+      external_exports.string().max(2e3),
+      external_exports.number().finite(),
+      external_exports.boolean(),
+      external_exports.array(external_exports.union([external_exports.string().max(200), external_exports.number().finite()])).max(8),
+      external_exports.record(external_exports.string(), external_exports.union([external_exports.string().max(2e3), external_exports.number().finite(), external_exports.boolean()]))
+    ]);
+    SettingsMapSchema = external_exports.record(external_exports.string().min(1).max(100), SettingValueSchema).refine((r) => Object.keys(r).length <= 40, { message: "At most 40 settings at once." }).refine((r) => !Object.keys(r).some((k) => k.trim().toLowerCase() === "format"), {
+      message: '"Format" is read-only in After Effects. Change the format with an output module template.'
+    });
+    FileSchema = external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Absolute output file path. AE's [#####] frame token is kept for image sequences. The tool refuses a path another queued item uses, or one already on disk unless allow_overwrite is true.");
+    POST_ACTIONS = ["none", "import", "import_and_replace_usage", "set_proxy"];
+    LOG_TYPES = ["errors_only", "errors_and_settings", "errors_and_per_frame_info"];
+    PostActionSchema = external_exports.enum(POST_ACTIONS).describe("What AE does with the rendered file: nothing, import it, import it and replace the comp's usage, or set it as the comp's proxy.");
+    TimeSpanSchema = external_exports.union([
+      external_exports.enum(["comp", "work_area"]),
+      external_exports.object({
+        start: external_exports.number().min(0).describe("Seconds from the comp's start."),
+        duration: external_exports.number().positive().describe("Seconds.")
+      })
+    ]).describe("The time span to render: 'comp' (whole comp), 'work_area', or { start, duration } in seconds. Must end inside the comp.");
+    ModuleBase = {
+      template: external_exports.string().min(1).max(200).optional().describe("Output module template to apply first (this is the only way to change the format, codec or bitrate). Must be installed on this machine; the tool lists the installed ones when it isn't."),
+      settings: SettingsMapSchema.optional().describe(
+        "Output module settings by their STRING_SETTABLE key, e.g. 'Channels', 'Resize', 'Resize to' ([width, height]), 'Audio Sample Rate', 'Output File Info' ({ 'File Name': ... }). Keys are checked against ae_render_queue_inspect's dump before anything changes; values take the dump's type. Applied after the template."
+      ),
+      file: FileSchema.optional(),
+      post_render_action: PostActionSchema.optional(),
+      include_source_xmp: external_exports.boolean().optional().describe("Include the source XMP metadata in the output file.")
+    };
+    hasModuleChange = (m) => [m.template, m.settings, m.file, m.post_render_action, m.include_source_xmp].some((v) => v !== void 0);
+    ModuleEditSchema = external_exports.object({ index: external_exports.number().int().min(1).max(20).describe("1-based output module index."), ...ModuleBase }).refine(hasModuleChange, { message: "Each output module edit changes something." });
+    ModuleAddSchema = external_exports.object(ModuleBase).describe("A new output module (AE starts it from the default template).");
+    REMOVE_STATUSES = ["done", "user_stopped", "err_stopped", "unqueued", "queued", "needs_output"];
+    RemoveRowSchema = external_exports.object({
+      index: ItemIndexSchema,
+      comp_id: external_exports.number().int().describe("The CompItem id the item at index must have. The tool refuses the whole removal when any index holds another comp (the queue shifted).")
+    });
+    RemoveFilterSchema = external_exports.object({
+      status: external_exports.enum(REMOVE_STATUSES).describe("Remove every item with this status ('done' clears finished renders, 'unqueued' the ones switched off). An item that is rendering is never removed."),
+      comp_id: external_exports.number().int().optional().describe("Only items of this comp.")
+    });
+    AeRenderQueueInspectSchema = external_exports.object({
+      item_index: ItemIndexSchema.optional().describe("One item, with its render settings and output module settings. Without it: every item, briefly."),
+      settings: external_exports.boolean().optional().describe("Dump the render settings and each output module's settings (the keys ae_render_queue_edit accepts). Default true with item_index, false without."),
+      include_templates: external_exports.boolean().optional().describe("List the installed render settings and output module templates for the item(s).")
+    });
+    AeRenderQueueEditSchema = external_exports.object({
+      item_index: ItemIndexSchema.optional().describe(
+        "1-based position in the Render Queue (see ae_render_queue_inspect). Required for every edit; not used with remove / remove_filter. The queue shifts when items are added or removed, so re-read it first."
+      ),
+      comp_id: ItemCompSchema,
+      queued: external_exports.boolean().optional().describe(
+        "Set the item's Render checkbox (RenderQueueItem.render): true queues it (needed before ae_aerender_start rq_index can render it, and ae_save so the file holds it), false unqueues it. A DONE or RENDERING item is refused. Queueing an item without a valid output file leaves it NEEDS_OUTPUT: the read-back reports that as a mismatch. Applied after the other changes of the same call."
+      ),
+      remove: external_exports.array(RemoveRowSchema).min(1).max(500).optional().describe("Take these items out of the Render Queue: [{ index, comp_id }], each guarded by its comp. Exclusive: no other change in the same call. Done highest index first in one undo group; refused while the queue is rendering or when an item is rendering."),
+      remove_filter: RemoveFilterSchema.optional().describe("Take out every item with this status (and comp_id), scanning the whole queue; more than 500 matches is refused. Exclusive like remove. Use dry_run first to see what goes."),
+      dry_run: external_exports.boolean().optional().describe("With remove / remove_filter: list the items that would be removed and change nothing."),
+      render_settings_template: external_exports.string().min(1).max(200).optional().describe("Render settings template to apply first."),
+      time_span: TimeSpanSchema.optional(),
+      skip_frames: external_exports.number().int().min(0).max(99).optional().describe("Frames to skip between rendered frames (0 renders every frame)."),
+      log_type: external_exports.enum(LOG_TYPES).optional(),
+      render_settings: SettingsMapSchema.optional().describe(
+        "Render settings by STRING_SETTABLE key (e.g. 'Quality', 'Resolution', 'Frame Rate'). Keys are checked before anything changes. Applied after render_settings_template."
+      ),
+      output_modules: external_exports.array(ModuleEditSchema).max(20).optional().describe("Edits to existing output modules, by index."),
+      add_output_modules: external_exports.array(ModuleAddSchema).max(10).optional().describe("Output modules to add (one more deliverable from the same render)."),
+      remove_output_modules: external_exports.array(external_exports.number().int().min(1).max(20)).max(20).optional().describe("Output modules to remove, by their index before this call. At least one must remain."),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow an output file that already exists on disk."),
+      expect: ExpectSchema
+    }).refine(
+      (v) => [v.render_settings_template, v.time_span, v.skip_frames, v.log_type, v.render_settings, v.output_modules, v.add_output_modules, v.remove_output_modules, v.queued, v.remove, v.remove_filter].some(
+        (x) => x !== void 0
+      ),
+      { message: "Nothing to change: give at least one of the settings." }
+    ).superRefine((v, ctx) => {
+      const removing = v.remove !== void 0 || v.remove_filter !== void 0;
+      if (v.remove !== void 0 && v.remove_filter !== void 0) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["remove_filter"], message: "Give remove or remove_filter, not both." });
+      }
+      if (removing) {
+        const others = ["item_index", "render_settings_template", "time_span", "skip_frames", "log_type", "render_settings", "output_modules", "add_output_modules", "remove_output_modules", "queued", "allow_overwrite", "comp_id"].filter((k) => v[k] !== void 0);
+        if (others.length > 0) {
+          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: [others[0]], message: `Removing items is a call of its own (indexes shift): drop ${others.join(", ")}.${others.includes("comp_id") ? " To limit a removal to one comp use remove[].comp_id or remove_filter.comp_id." : ""}` });
+        }
+        if (v.remove !== void 0 && new Set(v.remove.map((r) => r.index)).size !== v.remove.length) {
+          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["remove"], message: "An index is listed twice." });
+        }
+      } else {
+        if (v.item_index === void 0) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["item_index"], message: "item_index is required to edit an item." });
+        if (v.dry_run !== void 0) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["dry_run"], message: "dry_run goes with remove / remove_filter." });
+      }
+    });
+    CopySchema = external_exports.object({
+      output_module_template: external_exports.string().min(1).max(200).optional().describe("Output module template for this copy's first output module."),
+      render_settings_template: external_exports.string().min(1).max(200).optional(),
+      file: FileSchema.optional().describe("Output file of this copy's first output module. Required with output_module_template (the format decides the extension, and a PNG sequence needs [#####]). Default: the source's path with the next free _copyN before the extension (a duplicate may keep the source's path, which would render over it)."),
+      settings: SettingsMapSchema.optional().describe("Settings for this copy's first output module (see ae_render_queue_edit)."),
+      render_settings: SettingsMapSchema.optional(),
+      time_span: TimeSpanSchema.optional(),
+      skip_frames: external_exports.number().int().min(0).max(99).optional(),
+      log_type: external_exports.enum(LOG_TYPES).optional(),
+      post_render_action: PostActionSchema.optional()
+    }).refine((c) => c.output_module_template === void 0 || c.file !== void 0, {
+      message: "Give file together with output_module_template: the template can change the container, so the source's path (and its extension) cannot be reused."
+    }).describe("What differs in this copy.");
+    AeRenderQueueDuplicateSchema = external_exports.object({
+      item_index: ItemIndexSchema,
+      comp_id: ItemCompSchema,
+      count: external_exports.number().int().min(1).max(20).optional().describe("Plain copies (each with the next free _copyN path, so a later call continues the numbering). Use copies for per-copy changes."),
+      copies: external_exports.array(CopySchema).min(1).max(20).optional(),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
+      expect: ExpectSchema
+    }).refine((v) => v.count === void 0 !== (v.copies === void 0), { message: "Give either count or copies." });
+    AeDeliverySpecsSchema = external_exports.object({
+      ids: external_exports.array(external_exports.enum(SPEC_IDS)).max(20).optional().describe("Only these specs. Default: all."),
+      item_index: ItemIndexSchema.optional().describe("Judge the specs against this queue item (its installed templates and its comp's size). Default: queue item 1, templates and comp."),
+      comp_id: external_exports.number().int().optional().describe("Judge the aspect ratio against this comp.")
+    });
+    AeApplySpecSchema = external_exports.object({
+      item_index: ItemIndexSchema,
+      comp_id: ItemCompSchema,
+      specs: external_exports.array(external_exports.enum(SPEC_IDS)).min(1).max(12).describe("Spec ids from ae_delivery_specs. One output per spec."),
+      output_folder: external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Folder the files go in. It should exist; the tool warns when it doesn't."),
+      file_name: external_exports.string().min(1).max(300).refine((t) => unknownNameTokens(t).length === 0, { message: `Unknown token. Use ${NAME_TOKENS.map((t) => `[${t}]`).join(", ")} (and AE's [#####] for sequences).` }).optional().describe("File name template; default each spec's own, like '[compName]_[spec].mp4'. A name without an extension gets the spec's; another media extension (like .mp4 on a ProRes spec) is replaced by the spec's."),
+      in_place: external_exports.boolean().optional().describe("Default true: the first spec is applied to the item itself and the rest to duplicates of it. False: every spec gets a duplicate and the item is left as it is. A DONE item is locked by AE, so it defaults to false and in_place: true is refused."),
+      allow_stretch: external_exports.boolean().optional().describe("Apply a spec whose aspect ratio differs from the comp's (the picture stretches). Default false: refused."),
+      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
+      settings: SettingsMapSchema.optional().describe("Extra output module settings for every spec."),
+      post_render_action: PostActionSchema.optional(),
+      expect: ExpectSchema
+    }).refine((v) => new Set(v.specs).size === v.specs.length, { message: "A spec is listed twice." }).refine((v) => v.specs.length < 2 || v.file_name === void 0 || /\[(spec|copy|width|height)\]/.test(v.file_name), {
+      message: "With several specs the file name template needs [spec], [copy], [width] or [height] so the files differ."
+    });
+    AeCheckDeliveryFileSchema = external_exports.object({
+      spec_id: external_exports.enum(SPEC_IDS),
+      file_path: external_exports.string().min(1).max(1e3).describe("The finished file (for a PNG sequence, any one frame).")
+    });
+    readCall2 = (indexes, settings) => ({
+      host: "rqeditRead",
+      args: { item_indexes: indexes, settings }
+    });
+    asArray = (v) => Array.isArray(v) ? v : [];
+    afterCopiesRead = (entries) => {
+      const idx = asArray(entries).map((e) => e.item_index).filter((n) => typeof n === "number");
+      if (!idx.length) return readCall2(void 0, false);
+      return { host: "rqeditRead", args: { item_indexes: void 0, settings: false, settings_indexes: [...new Set(idx)] } };
+    };
+    editHostArgs = (a) => ({
+      item_index: a.item_index,
+      item_comp_id: a.comp_id,
+      queued: a.queued,
+      item_template: a.render_settings_template,
+      time_span: a.time_span,
+      skip_frames: a.skip_frames,
+      log_type: a.log_type,
+      render_settings: a.render_settings,
+      modules: a.output_modules,
+      add_modules: a.add_output_modules,
+      remove_modules: a.remove_output_modules,
+      allow_overwrite: a.allow_overwrite,
+      label: `Edit render queue item ${a.item_index}`
+    });
+    rqeditTools = [
+      {
+        name: "ae_render_queue_inspect",
+        description: "Read Render Queue items: comp, status, the render (queued) flag, time span, skip frames, log type, output modules (file, post-render action) and, with settings, the render settings and each output module's settings by their STRING_SETTABLE key (the keys ae_render_queue_edit takes), with include_templates the installed templates. Changes nothing. The output module Format is shown but cannot be set by script; only a template changes it.",
+        schema: AeRenderQueueInspectSchema,
+        handler: async (args, ctx) => {
+          const res = await ctx.bridge.callHost(
+            "rqeditRead",
+            {
+              item_indexes: args.item_index !== void 0 ? [args.item_index] : void 0,
+              settings: args.settings ?? args.item_index !== void 0,
+              include_templates: args.include_templates === true
+            },
+            { label: "ae_render_queue_inspect", mutates: false, toolName: "ae_render_queue_inspect" }
+          );
+          return res.result;
+        }
+      },
+      {
+        name: "ae_render_queue_edit",
+        description: "Edit an item already in the Render Queue, in one undo group guarded by `expect`: render settings template, time span (comp, work area or start/duration), skip frames, log type, render settings, the queued flag (queued: true/false, the item's Render checkbox: an item must be queued, then saved, before ae_aerender_start rq_index can render it), and per output module the template, settings, output file, post-render action and XMP; add or remove output modules. Or take items out of the queue: remove ([{ index, comp_id }], each guarded by its comp) or remove_filter ({ status: done | user_stopped | err_stopped | unqueued | queued | needs_output, comp_id? }) in a call of their own, highest index first in one undo group, refused while the queue is rendering; dry_run lists what would go. The read-back checks the queue shrank by the count and the survivors are the expected comps. A DONE item is refused (AE locks its settings; duplicate it instead). Everything is checked before AE changes: templates must be installed, setting keys must be ones the item offers (ae_render_queue_inspect lists them), \"Format\" is read-only (use a template), the time span must fit the comp, and an output file must not be another queued item's or already on disk (allow_overwrite). A step that fails inside AE is reported in `errors`, not thrown. The read-back (a separate evalScript) compares every change; a format can adjust a size or rate it can't take, and that shows as a mismatch. A template itself can't be read back. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueEditSchema,
+        handler: async (args, ctx) => {
+          if (args.remove !== void 0 || args.remove_filter !== void 0) {
+            const removeArgs = { remove: args.remove, remove_filter: args.remove_filter };
+            if (args.dry_run === true) {
+              ctx.quarantine.assertClear();
+              const res = await ctx.bridge.callHost(
+                "rqeditRemove",
+                { ...removeArgs, dry_run: true, expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id } },
+                { label: "ae_render_queue_edit (dry run)", mutates: false, toolName: "ae_render_queue_edit" }
+              );
+              return { applied: false, ...res.result ?? {} };
+            }
+            return runGuardedWrite(ctx, {
+              toolName: "ae_render_queue_edit",
+              label: `ae_render_queue_edit(remove ${args.remove !== void 0 ? args.remove.length + " items" : "by status " + args.remove_filter?.status})`,
+              expect: args.expect,
+              read: () => readCall2(void 0, false),
+              write: { host: "rqeditRemove", args: { ...removeArgs, label: "Remove render queue items" } },
+              check: (before, after, w) => removeMismatches(before, after, w),
+              present: (_b, after, w) => ({
+                removed: w.removed,
+                errors: w.errors,
+                warnings: w.warnings,
+                num_items_before: w.num_items_before,
+                num_items: queueOf(after)?.numItems,
+                ...w.no_op === true ? { no_op: true } : {}
+              })
+            });
+          }
+          const itemIndex = args.item_index;
+          return runGuardedWrite(ctx, {
+            toolName: "ae_render_queue_edit",
+            label: `ae_render_queue_edit(item ${itemIndex})`,
+            expect: args.expect,
+            read: () => readCall2([itemIndex], true),
+            write: { host: "rqeditEdit", args: editHostArgs(args) },
+            check: (before, after, w) => editMismatches(args, before, after, w),
+            present: (_b, after, w) => ({
+              item_index: itemIndex,
+              item: itemOf2(queueOf(after), itemIndex),
+              steps_done: w.steps_done,
+              skipped: w.skipped,
+              errors: w.errors,
+              warnings: w.warnings,
+              added_modules: w.added_modules,
+              removed_modules: w.removed_modules,
+              ...w.no_op === true ? { no_op: true } : {}
+            })
+          });
+        }
+      },
+      {
+        name: "ae_render_queue_duplicate",
+        description: "Duplicate a Render Queue item N times (RenderQueueItem.duplicate), each copy with its own output module template, output file and settings, in one undo group guarded by `expect`: H.264 plus ProRes plus a PNG sequence from one comp. A duplicate may keep the source's output path and render over it, so every copy gets its own file (yours, or the source's with the next free _copyN) and the tool refuses a path already queued or on disk. A copy with an output_module_template needs its own file. A finished item's copy is queued again. The read-back (a separate evalScript) checks the queue grew by the copies, each copy's settings and that no copy writes the same file as another unfinished item in the queue. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueDuplicateSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_duplicate",
+          label: `ae_render_queue_duplicate(item ${args.item_index} x${args.count ?? args.copies?.length ?? 0})`,
+          expect: args.expect,
+          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.copies),
+          write: {
+            host: "rqeditDuplicate",
+            args: {
+              item_index: args.item_index,
+              item_comp_id: args.comp_id,
+              copies: args.copies ?? Array.from({ length: args.count ?? 0 }, () => ({})),
+              allow_overwrite: args.allow_overwrite,
+              label: `Duplicate render queue item ${args.item_index}`
+            }
+          },
+          check: (before, after, w) => copiesMismatches("copy", before, after, asArray(w.copies), w.comp_id).concat(stepMismatches("duplicate", asArray(w.errors), [])),
+          present: (_b, after, w) => {
+            const q = queueOf(after);
+            const copies = asArray(w.copies);
+            return {
+              source_index: w.source_index,
+              copies: copies.map((c) => ({ ...c, expect: void 0, item: itemOf2(q, c.item_index) })),
+              errors: w.errors
+            };
+          }
+        })
+      },
+      {
+        name: "ae_delivery_specs",
+        description: "The delivery spec library (YouTube 1080p/4K, Instagram feed and Reels/Story, TikTok, LinkedIn, broadcast HD/UHD and ProRes 422 HQ master, PNG sequence, WAV, GIF) and which of them this After Effects can meet for a queue item: the installed output module template each would use, and why a spec is refused (no matching template, the comp's aspect ratio, GIF). Changes nothing. Specs pick an installed template (AE can't set format, codec or bitrate by script) and set size, channels and audio around it; the bitrate is whatever the template carries. Apply with ae_render_queue_apply_spec.",
+        schema: AeDeliverySpecsSchema,
+        handler: async (args, ctx) => {
+          const specs = args.ids ? SPEC_LIBRARY.filter((s) => args.ids.includes(s.id)) : SPEC_LIBRARY;
+          const res = await ctx.bridge.callHost(
+            "rqeditSpecs",
+            { specs, item_index: args.item_index, comp_id: args.comp_id },
+            { label: "ae_delivery_specs", mutates: false, toolName: "ae_delivery_specs" }
+          );
+          const host = res.result ?? {};
+          const verdicts = asArray(host.specs);
+          return {
+            templates_known: host.templates_known,
+            templates_from: host.templates_from,
+            comp: host.comp,
+            output_module_templates: host.output_module_templates,
+            specs: specs.map((s) => ({ ...s, template_candidates: void 0, ...verdicts.find((v) => v.id === s.id) ?? {}, id: s.id }))
+          };
+        }
+      },
+      {
+        name: "ae_render_queue_apply_spec",
+        description: `Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by \`expect\`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. Only these default keys may be left unset when AE does not offer them for the template's format, and they are listed in the result's skipped[] with optional: true without failing the call: Channels "RGB" (an H.264 template has no Channels key and is RGB anyway) and Resize off. Everything else defines the delivery and fails the read-back when it is missing: Channels "RGB + Alpha" (unless the template's name says alpha, e.g. "PNG + ALPHA": AE lists no Channels setting for PNG templates, so the template carries it), Output Audio, Audio Sample Rate, Video Output, Resize on and Resize to, and any key you pass in \`settings\`. The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. ` + AGENT_SAFETY_GUIDANCE,
+        schema: AeApplySpecSchema,
+        handler: (args, ctx) => runGuardedWrite(ctx, {
+          toolName: "ae_render_queue_apply_spec",
+          label: `ae_render_queue_apply_spec(item ${args.item_index}: ${args.specs.join(", ")})`,
+          expect: args.expect,
+          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.results),
+          write: {
+            host: "rqeditApplySpec",
+            args: {
+              item_index: args.item_index,
+              item_comp_id: args.comp_id,
+              specs: args.specs.map((id) => specById(id)),
+              output_folder: args.output_folder,
+              file_name: args.file_name,
+              in_place: args.in_place,
+              allow_stretch: args.allow_stretch,
+              allow_overwrite: args.allow_overwrite,
+              settings: args.settings,
+              post_render_action: args.post_render_action,
+              label: `Apply delivery specs to render queue item ${args.item_index}`
+            }
+          },
+          check: (before, after, w) => {
+            const results = asArray(w.results);
+            return copiesMismatches("spec", before, after, results, w.comp_id);
+          },
+          present: (_b, after, w) => {
+            const q = queueOf(after);
+            return {
+              source_index: w.source_index,
+              in_place: w.in_place,
+              results: asArray(w.results).map((r) => ({ ...r, expect: void 0, item: itemOf2(q, r.item_index) }))
+            };
+          }
+        })
+      },
+      {
+        name: "ae_check_delivery_file",
+        description: "Check a finished render against its delivery spec: the file exists and isn't empty, has the spec's extension and is under the spec's approximate size limit (Node fs.stat). Codec, bitrate and dimensions aren't checked here; ae_verify_render imports the file and checks size, frame rate and audio. Changes nothing.",
+        schema: AeCheckDeliveryFileSchema,
+        handler: async (args) => {
+          const spec = specById(args.spec_id);
+          return { spec_id: spec.id, file_path: args.file_path, ...checkDeliveryFile(spec, args.file_path), max_size_mb: spec.max_size_mb ?? null };
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/rqrender.ts
+function clip2(s) {
+  return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + "..." : s;
+}
+function renderTimeoutMs(maxHours) {
+  return Math.min(Math.round(maxHours * 36e5), MAX_TIMEOUT_MS);
+}
+function jobsFileFor(ctx) {
+  return path25.join(dataDirOf(ctx), "renders", RQ_RENDER_JOBS_FILE);
+}
+function storeFor(ctx) {
+  const file = jobsFileFor(ctx);
+  let s = stores.get(file);
+  if (!s) {
+    s = new RenderJobStore(file);
+    stores.set(file, s);
+  }
+  return s;
+}
+function ameInstalledOnDisk() {
+  const roots2 = [];
+  if (process.platform === "win32") {
+    for (const v of [process.env["ProgramFiles"], process.env["ProgramW6432"], "C:Program Files"]) {
+      if (v) roots2.push(path25.join(v, "Adobe"));
+    }
+  } else if (process.platform === "darwin") {
+    roots2.push("/Applications");
+  }
+  for (const r of roots2) {
+    try {
+      if (fs23.readdirSync(r).some((n) => /^adobe media encoder/i.test(n))) return true;
+    } catch {
+    }
+  }
+  return false;
+}
+function otherExtensionFiles(file, sinceMs) {
+  const out = [];
+  try {
+    if (isSequencePath2(file)) return out;
+    const dir = path25.dirname(file);
+    const base = path25.basename(file);
+    const stem2 = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
+    let scanned = 0;
+    for (const name of fs23.readdirSync(dir)) {
+      if (++scanned > 2e4 || out.length >= 10) break;
+      if (name.toLowerCase() === base.toLowerCase()) continue;
+      const dot = name.lastIndexOf(".");
+      if (dot <= 0 || name.slice(0, dot).toLowerCase() !== stem2.toLowerCase()) continue;
+      try {
+        const st = fs23.statSync(path25.join(dir, name));
+        if (st.isFile() && st.mtimeMs >= sinceMs) out.push({ file: path25.join(dir, name), bytes: st.size, mtime: st.mtime.toISOString() });
+      } catch {
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+function isSequencePath2(p) {
+  return SEQ_TOKEN.test(path25.basename(p));
+}
+function escapeRe2(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function sequenceRegex2(fileName) {
+  const m = SEQ_TOKEN.exec(fileName);
+  if (!m) return new RegExp(`^${escapeRe2(fileName)}$`, "i");
+  const before = fileName.slice(0, m.index);
+  const after = fileName.slice(m.index + m[0].length);
+  return new RegExp(`^${escapeRe2(before)}\\d{${m[1].length},}${escapeRe2(after)}$`, "i");
+}
+function statOutput(o) {
+  const dir = path25.dirname(o.file);
+  const sequence = o.sequence ?? isSequencePath2(o.file);
+  const out = {
+    item_index: o.item_index,
+    module: o.module,
+    file: o.file,
+    sequence,
+    folder_exists: false,
+    exists: false,
+    bytes: 0,
+    mtime: null
+  };
+  try {
+    out.folder_exists = fs23.statSync(dir).isDirectory();
+  } catch {
+    return out;
+  }
+  try {
+    if (!sequence) {
+      const st = fs23.statSync(o.file);
+      if (st.isFile()) {
+        out.exists = true;
+        out.bytes = st.size;
+        out.mtime = st.mtime.toISOString();
+      }
+      return out;
+    }
+    const re = sequenceRegex2(path25.basename(o.file));
+    let frames = 0;
+    let bytes = 0;
+    let newest = 0;
+    let statted = 0;
+    for (const name of fs23.readdirSync(dir)) {
+      if (!re.test(name)) continue;
+      frames++;
+      if (statted >= MAX_OUTPUT_FILES_STAT) {
+        out.truncated = true;
+        continue;
+      }
+      statted++;
+      try {
+        const st = fs23.statSync(path25.join(dir, name));
+        if (!st.isFile()) continue;
+        bytes += st.size;
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch {
+      }
+    }
+    out.frame_count = frames;
+    out.exists = frames > 0;
+    out.bytes = bytes;
+    out.mtime = newest > 0 ? new Date(newest).toISOString() : null;
+  } catch {
+  }
+  return out;
+}
+function liveOutputsFrom(registry) {
+  const out = [];
+  try {
+    for (const j of registry.list()) {
+      if (j.state !== "running") continue;
+      const files = j.output_paths && j.output_paths.length > 0 ? j.output_paths : j.output_path ? [j.output_path] : [];
+      const real = files.filter((f) => typeof f === "string" && f.length > 0 && !f.startsWith("<"));
+      if (j.whole_queue === true && real.length === 0) {
+        out.push({ file: "", owner: `aerender job ${j.job_id} (it renders the whole Render Queue)` });
+      }
+      for (const f of real) out.push({ file: f, owner: `aerender job ${j.job_id}` });
+    }
+  } catch {
+  }
+  try {
+    const store = new BatchStore(path25.join(registry.rendersDir, "batches"));
+    for (const b of store.list(20)) {
+      if (b.state !== "running") continue;
+      for (const it of b.items) {
+        if (it.state !== "pending" && it.state !== "running") continue;
+        for (const f of outputsOf(it)) out.push({ file: f, owner: `render batch ${b.batch_id}` });
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+function planStart(queue, overwrite, live = [], only) {
+  const refusals = [];
+  const warnings = [];
+  const items = [];
+  const hold = [];
+  if (!queue) {
+    return {
+      items,
+      refusals: [{ code: "nothing_queued", message: "The Render Queue could not be read." }],
+      warnings,
+      hold
+    };
+  }
+  if (queue.rendering === true) {
+    refusals.push({ code: "already_rendering", message: "After Effects' Render Queue is already rendering (started by a person or another tool). Nothing was started." });
+  }
+  if (queue.truncated === true) {
+    refusals.push({
+      code: "queue_truncated",
+      message: `The Render Queue read stopped at ${queue.items.length} of ${queue.numItems} items, so the rest were not checked and render() would still render them. Nothing was started. Remove or unqueue items first.`
+    });
+  }
+  let queued10 = queue.items.filter((i) => i.status === "queued");
+  if (only) {
+    const chosen = [];
+    const seenIdx = /* @__PURE__ */ new Set();
+    only.indexes.forEach((n, k) => {
+      if (seenIdx.has(n)) return;
+      seenIdx.add(n);
+      const it = queue.items.find((i) => i.index === n);
+      if (!it) {
+        refusals.push({ code: "item_not_found", item_index: n, message: `Render Queue item ${n} does not exist (the queue has ${queue.numItems}). Nothing was started.` });
+        return;
+      }
+      const want = only.comp_ids?.[k];
+      if (want !== void 0 && it.comp_id !== want) {
+        refusals.push({
+          code: "item_comp_mismatch",
+          item_index: n,
+          message: `Render Queue item ${n} is comp ${it.comp_id} (${it.comp_name ?? "?"}), not ${want}. The queue changed; read it again with ae_render_queue_inspect. Nothing was started.`
+        });
+        return;
+      }
+      if (it.status !== "queued") {
+        refusals.push({
+          code: "item_not_queued",
+          item_index: n,
+          message: `Render Queue item ${n} (${it.comp_name ?? "comp " + it.comp_id}) is ${it.status ?? "not known"}, not QUEUED, so it cannot be rendered. Queue it with ae_render_queue_edit (queued: true). A finished (DONE) item cannot be queued again: duplicate it with ae_render_queue_duplicate. Nothing was started.`
+        });
+        return;
+      }
+      chosen.push(it);
+    });
+    queued10 = chosen;
+    for (const it of queue.items) {
+      if (it.status !== "queued" || chosen.includes(it)) continue;
+      hold.push({
+        index: it.index,
+        comp_id: it.comp_id,
+        ...it.comp_name !== void 0 ? { comp_name: it.comp_name } : {},
+        files: (it.output_modules ?? []).map((m) => typeof m.file === "string" ? m.file : "")
+      });
+    }
+  }
+  for (const it of queue.items) {
+    if (it.status === "needs_output" && it.render === true) {
+      refusals.push({
+        code: "needs_output",
+        item_index: it.index,
+        message: `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) is checked to render but has no output (NEEDS_OUTPUT), so Render would stop at it. Give it an output file with ae_render_queue_edit (output_modules[].file) or uncheck it. Nothing was started.`
+      });
+    }
+  }
+  if (queued10.length === 0 && !only) {
+    refusals.push({
+      code: "nothing_queued",
+      message: "No Render Queue item is QUEUED, so Render would do nothing. Queue one with ae_render_queue_edit (queued: true) or add one with ae_render_queue_add. A finished (DONE) item cannot be queued again (After Effects locks it): make a fresh copy of it with ae_render_queue_duplicate."
+    });
+  }
+  if (queued10.length > MAX_ITEMS2) {
+    refusals.push({
+      code: "too_many_items",
+      message: `${queued10.length} items are QUEUED; this tool checks and reports at most ${MAX_ITEMS2}, and render() renders all of them. Nothing was started. Unqueue some items.`
+    });
+  }
+  const seen = /* @__PURE__ */ new Map();
+  const liveByKey = /* @__PURE__ */ new Map();
+  let liveUnknown = null;
+  for (const l of live) {
+    if (l.file === "") liveUnknown = l.owner;
+    else liveByKey.set(pathKey(l.file), l.owner);
+  }
+  if (liveUnknown) {
+    refusals.push({ code: "output_in_use", message: `${liveUnknown} is running, so its outputs are not known and could be the same files. Wait for it or cancel it. Nothing was started.` });
+  }
+  for (const it of queued10.slice(0, MAX_ITEMS2)) {
+    const job = { index: it.index, comp_id: it.comp_id, comp_name: it.comp_name, outputs: [] };
+    if (it.output_modules_truncated === true) {
+      refusals.push({
+        code: "queue_truncated",
+        item_index: it.index,
+        message: `Render Queue item ${it.index} has more output modules than were read, so the unread ones were not checked. Nothing was started. Remove extra output modules.`
+      });
+    }
+    for (const m of it.output_modules ?? []) {
+      const where = `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) output module ${m.index}`;
+      if (typeof m.file !== "string" || m.file.length === 0) {
+        refusals.push({ code: "no_output_file", item_index: it.index, message: `${where} has no output file. Give it one with ae_render_queue_edit (output_modules[].file).` });
+        continue;
+      }
+      const key = pathKey(m.file);
+      const earlier = seen.get(key);
+      if (earlier) {
+        refusals.push({
+          code: "duplicate_output",
+          item_index: it.index,
+          file: m.file,
+          message: `${where} writes the same file as ${earlier} (${m.file}); they would overwrite each other. Give each its own file with ae_render_queue_edit.`
+        });
+      } else {
+        seen.set(key, where);
+      }
+      const owner = liveByKey.get(key);
+      if (owner) {
+        refusals.push({ code: "output_in_use", item_index: it.index, file: m.file, message: `${where}: ${owner} is going to write ${m.file}. Wait for it, cancel it, or change the file. Nothing was started.` });
+      }
+      const sequence = isSequencePath2(m.file);
+      const stat = statOutput({ item_index: it.index, module: m.index, file: m.file, sequence });
+      if (!stat.folder_exists) {
+        const dir = path25.dirname(m.file);
+        let parentExists = false;
+        try {
+          parentExists = fs23.statSync(path25.dirname(dir)).isDirectory();
+        } catch {
+          parentExists = false;
+        }
+        if (!parentExists) {
+          refusals.push({ code: "folder_missing", item_index: it.index, file: m.file, message: `${where}: the folder ${dir} and its parent do not exist. Nothing is created for you; make the folder or change the file.` });
+          continue;
+        }
+        warnings.push(
+          `${where}: the folder ${dir} does not exist yet, but its parent does. After Effects can make a subfolder at render time ("Save in subfolder"), so this is not refused; if it does not, the render stops at this item. Nothing is created for you.`
+        );
+      } else if (stat.exists && !overwrite) {
+        refusals.push({
+          code: "output_exists",
+          item_index: it.index,
+          file: m.file,
+          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (After Effects then asks "Overwrite?" and the render waits until it is answered).`
+        });
+      }
+      job.outputs.push({ item_index: it.index, comp_id: it.comp_id, module: m.index, file: m.file, sequence });
+    }
+    items.push(job);
+  }
+  return { items, refusals, warnings, hold };
+}
+function stillRendering(read3) {
+  if (!read3) return false;
+  if (read3.rendering === true) return true;
+  return (read3.items ?? []).some((r) => r.status === "rendering" || r.status === "will_continue");
+}
+function judgeResult(items, read3, readBackError) {
+  const statuses = [];
+  for (const it of items) {
+    const row = read3?.items?.find((r) => r.index === it.index);
+    statuses.push({
+      index: it.index,
+      comp_id: row?.comp_id ?? null,
+      comp_name: row?.comp_name ?? it.comp_name,
+      status: row?.status ?? null,
+      ...typeof row?.elapsed_seconds === "number" ? { elapsed_seconds: row.elapsed_seconds } : {},
+      ...row && row.comp_matches === false ? { comp_matches: false } : {},
+      ...row?.error ? { error: clip2(row.error) } : {}
+    });
+  }
+  const outputs = [];
+  for (const it of items) for (const o of it.outputs) outputs.push(statOutput(o));
+  const result = { item_statuses: statuses, outputs, ...readBackError ? { read_back_error: clip2(readBackError) } : {} };
+  if (!read3) {
+    return { result, ok: false, summary: `The render call returned, but the item statuses could not be read back (${clip2(readBackError ?? "no answer")}). Look at After Effects' Render Queue panel; the output files on disk are listed.` };
+  }
+  if (stillRendering(read3)) {
+    return { result, ok: false, summary: "After Effects still reports that it is rendering (the Render Queue, or an item is RENDERING or WILL_CONTINUE), so the render is not over. Look at After Effects." };
+  }
+  const bad4 = statuses.filter((s) => s.status !== "done");
+  const stopped = statuses.filter((s) => s.status === "user_stopped");
+  const errored = statuses.filter((s) => s.status === "err_stopped");
+  const emptyOutputs = outputs.filter((o) => !o.exists || o.bytes <= 0);
+  const moved = statuses.filter((s) => s.comp_matches === false);
+  if (moved.length > 0) {
+    return { result, ok: false, summary: "The Render Queue changed during the render (an item now holds a different comp), so the statuses may not be the ones started. Look at After Effects." };
+  }
+  if (errored.length > 0) {
+    return { result, ok: false, summary: `Stopped by an error on item(s) ${errored.map((s) => s.index).join(", ")} (ERR_STOPPED). See the render log in After Effects; ae_verify_render can check what was written.` };
+  }
+  if (stopped.length > 0) {
+    return { result, ok: false, summary: `Stopped by the user on item(s) ${stopped.map((s) => s.index).join(", ")} (USER_STOPPED). Files already written are on disk (see outputs).` };
+  }
+  if (bad4.length > 0) {
+    return { result, ok: false, summary: `Item(s) ${bad4.map((s) => `${s.index} (${s.status ?? "unknown"})`).join(", ")} did not reach DONE.` };
+  }
+  if (emptyOutputs.length > 0) {
+    return { result, ok: false, summary: `Every item reads DONE, but ${emptyOutputs.length} output(s) are missing or empty on disk (see outputs). Look at After Effects and check the output path.` };
+  }
+  return { result, ok: true, summary: `All ${statuses.length} item(s) reached DONE and every output exists on disk.` };
+}
+function restoreStateOf(held, restored, notRestored, error) {
+  const benign = notRestored.filter((n) => n.code === "already_queued").length;
+  if (!error && restored.length + benign === held.length && notRestored.length === benign) return "restored";
+  return "partial";
+}
+async function restoreHeld(ctx, idBase, held) {
+  if (held.length === 0) return { state: "restored", restored: [], not_restored: [] };
+  const names = new Map(held.map((h) => [h.index, h.comp_name]));
+  const named = (x) => {
+    const n = names.get(x.index);
+    return n !== void 0 ? { ...x, comp_name: n } : x;
+  };
+  let rel = null;
+  try {
+    const res = await ctx.bridge.evalRaw({
+      id: idBase,
+      script: buildJsxCall("rqeditRelease", { items: held.map(stripHeld) }),
+      label: "ae_render_queue_render (queue the held-back items again)",
+      mutates: true,
+      mustSend: true,
+      toolName: "ae_render_queue_render",
+      timeoutMs: rqrenderDeps.readBackTimeoutMs
+    });
+    rel = res.result ?? null;
+  } catch (err) {
+    const timedOut = err instanceof BridgeError && err.kind === "timeout";
+    return { state: timedOut ? "unknown" : "failed", restored: [], not_restored: [], error: clip2(errMessage(err)), ...timedOut ? { timedOut: true } : {} };
+  }
+  let restored = (rel?.restored ?? []).map((r) => named({ index: r.index, comp_id: r.comp_id, files: r.files }));
+  const notRestored = (rel?.not_restored ?? []).map((r) => named({ ...r }));
+  let error = rel?.errors && rel.errors.length > 0 ? clip2(rel.errors.join("; ")) : void 0;
+  if (restored.length > 0) {
+    try {
+      const back = await ctx.bridge.evalRaw({
+        id: `${idBase}read`,
+        script: buildJsxCall("rqeditRead", { item_indexes: restored.map((r) => r.index), settings: false }),
+        label: "ae_render_queue_render (read-back of the restore)",
+        mutates: false,
+        toolName: "ae_render_queue_render",
+        timeoutMs: rqrenderDeps.readBackTimeoutMs
+      });
+      const rows = back.result?.items ?? [];
+      const bad4 = restored.filter((r) => rows.find((x) => x.index === r.index)?.status !== "queued");
+      if (bad4.length > 0) {
+        for (const b of bad4) notRestored.push({ ...b, code: "read_back_mismatch", reason: "the read-back after checking its Render box does not say QUEUED" });
+        restored = restored.filter((r) => !bad4.includes(r));
+      }
+    } catch (err) {
+      error = clip2(`${error ? error + "; " : ""}the read-back of the restore failed (${errMessage(err)}): look at the Render Queue`);
+    }
+  }
+  return { state: restoreStateOf(held, restored, notRestored, error), restored, not_restored: notRestored, ...error ? { error } : {} };
+}
+function holdProblem(read3, plan2, numItems) {
+  if (!read3) return "the queue could not be read back";
+  const chosen = new Set(plan2.items.map((i) => i.index));
+  if (numItems !== void 0 && read3.numItems !== numItems) return `the queue now has ${read3.numItems} items, not ${numItems}`;
+  for (const it of read3.items) {
+    if (chosen.has(it.index) && it.status !== "queued") return `item ${it.index} (to render) reads ${it.status ?? "unknown"}, not QUEUED`;
+    if (!chosen.has(it.index) && it.status === "queued") return `item ${it.index} is still QUEUED`;
+  }
+  for (const c of chosen) if (!read3.items.some((i) => i.index === c)) return `item ${c} was not in the read-back`;
+  return null;
+}
+async function holdOthers(ctx, opId, plan2, numItems) {
+  let problem = null;
+  try {
+    const res = await ctx.bridge.evalRaw({
+      id: `${opId}_hold`,
+      script: buildJsxCall("rqeditHold", {
+        keep: plan2.items.map((i) => ({ index: i.index, comp_id: i.comp_id })),
+        hold: plan2.hold.map(stripHeld)
+      }),
+      label: "ae_render_queue_render (uncheck the other queued items)",
+      mutates: true,
+      toolName: "ae_render_queue_render"
+    });
+    const errs = res.result?.errors ?? [];
+    if (errs.length > 0) problem = `After Effects refused to uncheck: ${errs.join("; ")}`;
+  } catch (err) {
+    problem = errMessage(err);
+  }
+  if (problem === null) {
+    try {
+      const back = await ctx.bridge.evalRaw({
+        id: `${opId}_holdread`,
+        script: buildJsxCall("rqeditRead", { settings: false }),
+        label: "ae_render_queue_render (read-back of the hold)",
+        mutates: false,
+        toolName: "ae_render_queue_render"
+      });
+      const bad4 = holdProblem(back.result ?? null, plan2, numItems);
+      if (bad4) problem = `the read-back does not show only the chosen items QUEUED: ${bad4}`;
+    } catch (err) {
+      problem = `the read-back failed: ${errMessage(err)}`;
+    }
+  }
+  if (problem === null) return { ok: true };
+  const outcome = await restoreHeld(ctx, `${opId}_unhold`, plan2.hold);
+  return { ok: false, problem: clip2(problem), outcome };
+}
+async function holdOrRefuse(ctx, store, jobId, opId, plan2, numItems) {
+  bindJobFailureLog(store, ctx.log);
+  const h = await holdOthers(ctx, opId, plan2, numItems);
+  if (h.ok) return null;
+  const clean = h.outcome.state === "restored";
+  if (clean) {
+    store.discard(jobId);
+  } else {
+    store.update(jobId, {
+      state: "failed",
+      finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+      ok: false,
+      error: h.problem,
+      restore: { state: h.outcome.state, held: plan2.hold, restored: h.outcome.restored, not_restored: h.outcome.not_restored, ...h.outcome.error ? { error: h.outcome.error } : {} },
+      summary: `Nothing was rendered. The other queued items could not be unchecked cleanly (${h.problem}) and putting them back failed in part. ${restoreSummary({ state: h.outcome.state, held: plan2.hold, restored: h.outcome.restored, not_restored: h.outcome.not_restored, ...h.outcome.error ? { error: h.outcome.error } : {} })}`
+    });
+  }
+  return {
+    ok: false,
+    started: false,
+    refused: [
+      {
+        code: "hold_failed",
+        message: `The other queued items could not be unchecked, so nothing was rendered: ${h.problem}. ${clean ? "Everything that was unchecked is QUEUED again." : "Some items could not be put back; see restore and call ae_render_queue_inspect."}`
+      }
+    ],
+    ...clean ? {} : { job_id: jobId, restore: h.outcome, restore_how: RESTORE_HOW }
+  };
+}
+function beginRenderGate(store, info, lease) {
+  renderGate.begin(
+    info,
+    () => store.update(info.job_id, {
+      note: "The panel has nothing in flight again, so After Effects answers; the item statuses may never have been read. Look at After Effects' Render Queue panel and the output files, and call ae_render_queue_inspect."
+    }),
+    () => {
+      const cur = store.get(info.job_id);
+      store.update(info.job_id, {
+        ...cur && cur.state === "running" ? { state: "unknown", finished_at: (/* @__PURE__ */ new Date()).toISOString() } : {},
+        note: "The user cleared the render lock in the panel. Nothing was resent or stopped; After Effects may still be rendering. Look at After Effects' Render Queue panel and the output files."
+      });
+      lease?.release();
+    }
+  );
+}
+function bindJobFailureLog(store, log) {
+  if (!log) return;
+  store.failureSink = (rec) => {
+    const reason = rec.error || rec.summary || rec.note || "no reason recorded";
+    const word = rec.state === "unknown" ? "ended unknown" : "failed";
+    log("err", `job ae_render_queue_render ${rec.job_id} ${word}: ${reason.replace(/\s+/g, " ").trim().slice(0, 200)}`);
+  };
+}
+function errMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+async function runRenderJob(p) {
+  const { ctx, store, jobId, opId, items } = p;
+  bindJobFailureLog(store, ctx.log);
+  let keepGate = false;
+  try {
+    await rqrenderDeps.defer();
+    let evalProblem = null;
+    try {
+      await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall("rqeditRender", p.expectedQueued !== void 0 ? { expected_queued: p.expectedQueued } : {}),
+        label: "ae_render_queue_render (render)",
+        mutates: true,
+        toolName: "ae_render_queue_render",
+        timeoutMs: p.timeoutMs
+      });
+    } catch (err) {
+      evalProblem = { kind: err instanceof BridgeError ? err.kind : "other", message: errMessage(err) };
+    }
+    if (evalProblem && evalProblem.kind === "timeout") {
+      keepGate = true;
+      renderGate.markUnknown("render_timeout");
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        error: clip2(evalProblem.message),
+        note: "The render call reached its time limit, so its outcome is unknown. After Effects may still be rendering. Nothing was resent and nothing was stopped. Look at After Effects' Render Queue panel; other tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders, restarting it clears this."
+      });
+      return;
+    }
+    if (evalProblem && evalProblem.kind === "unreachable") {
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        error: clip2(evalProblem.message),
+        note: "The panel could not be reached while the render ran, so its outcome is unknown. Look at After Effects. Nothing was resent."
+      });
+      return;
+    }
+    let read3 = null;
+    let readBackError;
+    let stillGoing = false;
+    const deadline = rqrenderDeps.now() + rqrenderDeps.stillRenderingMaxMs;
+    for (let n = 1; ; n++) {
+      try {
+        const res = await ctx.bridge.evalRaw({
+          id: n === 1 ? `${opId}_after` : `${opId}_after${n}`,
+          script: buildJsxCall("rqeditRenderResult", { indexes: items.map((i) => i.index), comp_ids: items.map((i) => i.comp_id) }),
+          label: "ae_render_queue_render (read-back)",
+          mutates: false,
+          toolName: "ae_render_queue_render",
+          timeoutMs: rqrenderDeps.readBackTimeoutMs
+        });
+        read3 = res.result ?? null;
+      } catch (err) {
+        read3 = null;
+        readBackError = errMessage(err);
+        if (err instanceof BridgeError && err.kind === "timeout") {
+          keepGate = true;
+          renderGate.markUnknown("read_back_timeout");
+        }
+        break;
+      }
+      if (!stillRendering(read3)) break;
+      if (rqrenderDeps.now() >= deadline) {
+        stillGoing = true;
+        break;
+      }
+      await rqrenderDeps.sleep(rqrenderDeps.stillRenderingPollMs);
+    }
+    let restorePatch = {};
+    const held = store.get(jobId)?.restore;
+    if (held && held.held.length > 0 && !keepGate && !stillGoing) {
+      const out = await restoreHeld(ctx, `${opId}_restore`, held.held);
+      if (out.timedOut) {
+        keepGate = true;
+        renderGate.markUnknown("read_back_timeout");
+      }
+      restorePatch = { restore: { state: out.state, held: held.held, restored: out.restored, not_restored: out.not_restored, ...out.error ? { error: out.error } : {} } };
+    }
+    const judged = judgeResult(items, read3, readBackError);
+    if (restorePatch.restore) judged.summary += " " + restoreSummary(restorePatch.restore);
+    if (stillGoing) {
+      keepGate = true;
+      renderGate.markUnknown("still_rendering");
+      store.update(jobId, {
+        state: "unknown",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        ok: false,
+        summary: judged.summary,
+        result: judged.result,
+        note: "The render call returned, but After Effects kept reporting that it is rendering, so the outcome is unknown and other tools stay refused. Look at After Effects' Render Queue panel. If it no longer renders, restarting After Effects (or the user's Clear render lock button in the panel) clears this."
+      });
+      return;
+    }
+    if (evalProblem) {
+      store.update(jobId, {
+        state: "failed",
+        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
+        ok: false,
+        error: clip2(evalProblem.message),
+        summary: `After Effects raised an error from the render call: ${clip2(evalProblem.message)}. ${judged.summary}`,
+        result: judged.result,
+        ...restorePatch
+      });
+    } else {
+      store.update(jobId, { state: "finished", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: judged.ok, summary: judged.summary, result: judged.result, ...restorePatch });
+    }
+    if (read3 && !keepGate) {
+      try {
+        const rec = store.get(jobId);
+        await noteUiWrite(ctx, {
+          opId: `${opId}_rebase`,
+          toolName: "ae_render_queue_render",
+          label: "ae_render_queue_render (session baseline)",
+          expect: { project_path: rec?.project_path ?? "<unsaved>" }
+        });
+      } catch {
+      }
+    }
+  } catch (err) {
+    try {
+      store.update(jobId, { state: "failed", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: false, error: clip2(errMessage(err)), summary: "The render job's bookkeeping failed; look at After Effects and the output files." });
+    } catch {
+    }
+  } finally {
+    if (!keepGate) renderGate.end(jobId);
+    p.lease.release();
+  }
+}
+function restoreSummary(r) {
+  const where = (xs) => xs.map((x) => `${x.index} (${x.comp_name ?? "comp " + x.comp_id})`).join(", ");
+  if (r.state === "restored") {
+    return r.restored.length > 0 ? `The ${r.restored.length} other item(s) that were unchecked for this render are QUEUED again: ${where(r.restored)}.` : "The other items that were unchecked for this render were already QUEUED again.";
+  }
+  const parts = [];
+  if (r.restored.length > 0) parts.push(`queued again: ${where(r.restored)}`);
+  const left = r.not_restored.filter((n) => n.code !== "already_queued");
+  if (left.length > 0) parts.push(`NOT queued again: ${left.map((n) => `${n.index} (${n.comp_name ?? "comp " + n.comp_id}): ${n.reason}`).join("; ")}`);
+  if (r.error) parts.push(`error: ${r.error}`);
+  if (r.restored.length === 0 && left.length === 0) parts.push("no item was queued again");
+  return `Restore of the items unchecked for this render: ${parts.join(" | ")}.`;
+}
+async function handOffToMediaEncoder(p) {
+  const { ctx, store, jobId, opId, plan: plan2 } = p;
+  bindJobFailureLog(store, ctx.log);
+  let problem = null;
+  try {
+    await ctx.bridge.evalRaw({
+      id: `${opId}_ame`,
+      script: buildJsxCall("rqeditQueueInAme", { expected_queued: plan2.items.length, start_now: p.startNow }),
+      label: "ae_render_queue_render (Queue in Media Encoder)",
+      mutates: true,
+      toolName: "ae_render_queue_render",
+      timeoutMs: AME_CALL_TIMEOUT_MS
+    });
+  } catch (err) {
+    problem = { kind: err instanceof BridgeError ? err.kind : "other", message: errMessage(err) };
+  }
+  const timedOut = problem !== null && problem.kind === "timeout";
+  let statuses;
+  if (!timedOut) {
+    try {
+      const res = await ctx.bridge.evalRaw({
+        id: `${opId}_after`,
+        script: buildJsxCall("rqeditRenderResult", { indexes: plan2.items.map((i) => i.index), comp_ids: plan2.items.map((i) => i.comp_id) }),
+        label: "ae_render_queue_render (read-back after Queue in Media Encoder)",
+        mutates: false,
+        toolName: "ae_render_queue_render",
+        timeoutMs: rqrenderDeps.readBackTimeoutMs
+      });
+      const read3 = res.result ?? null;
+      statuses = plan2.items.map((it) => {
+        const row = read3?.items?.find((r) => r.index === it.index);
+        return {
+          index: it.index,
+          comp_id: row?.comp_id ?? null,
+          comp_name: row?.comp_name ?? it.comp_name,
+          status: row?.status ?? null,
+          ...row?.error ? { error: clip2(row.error) } : {}
+        };
+      });
+    } catch {
+      statuses = void 0;
+    }
+  }
+  let restorePatch = {};
+  if (plan2.hold.length > 0 && !timedOut) {
+    const out = await restoreHeld(ctx, `${opId}_restore`, plan2.hold);
+    restorePatch = { restore: { state: out.state, held: plan2.hold, restored: out.restored, not_restored: out.not_restored, ...out.error ? { error: out.error } : {} } };
+  }
+  const restoreText = restorePatch.restore ? " " + restoreSummary(restorePatch.restore) : "";
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (problem) {
+    store.update(jobId, {
+      state: timedOut ? "unknown" : "failed",
+      finished_at: now,
+      ok: false,
+      error: clip2(problem.message),
+      summary: timedOut ? "The call that hands the queue to Media Encoder did not answer in time, so it is not known whether Media Encoder got it. Look at Media Encoder and After Effects. Nothing was resent." : `Nothing was handed to Media Encoder: ${clip2(problem.message)}.${restoreText}`,
+      ...statuses ? { ame_item_statuses: statuses } : {},
+      ...restorePatch
+    });
+    return {
+      ok: false,
+      started: false,
+      job_id: jobId,
+      engine: "media_encoder",
+      refused: [{ code: "ame_unavailable", message: `Media Encoder was not started: ${clip2(problem.message)}.${restoreText}` }],
+      ...restorePatch.restore && restorePatch.restore.state !== "restored" ? { restore: restorePatch.restore, restore_how: RESTORE_HOW } : {}
+    };
+  }
+  const finalState = p.startNow ? "handed_to_media_encoder" : "queued_in_media_encoder";
+  store.update(jobId, {
+    state: finalState,
+    handed_at: now,
+    summary: p.startNow ? `Handed to Adobe Media Encoder, which started rendering the saved project on its own with its last-used preset.${restoreText} After Effects gets no progress from it: confirm with ae_verify_render once the output file stops growing.` : `Queued in Adobe Media Encoder; nothing renders until the user presses Start there.${restoreText} Ask the user to check the preset and format in Media Encoder's queue first.`,
+    ...statuses ? { ame_item_statuses: statuses } : {},
+    ...restorePatch
+  });
+  try {
+    const rec = store.get(jobId);
+    await noteUiWrite(ctx, {
+      opId: `${opId}_rebase`,
+      toolName: "ae_render_queue_render",
+      label: "ae_render_queue_render (session baseline)",
+      expect: { project_path: rec?.project_path ?? "<unsaved>" }
+    });
+  } catch {
+  }
+  return {
+    ok: true,
+    started: true,
+    engine: "media_encoder",
+    job_id: jobId,
+    state: finalState,
+    start_now: p.startNow,
+    started_at: store.get(jobId)?.started_at,
+    project_path: store.get(jobId)?.project_path,
+    renders: "the SAVED project file in Adobe Media Encoder; changes made after the last save are not in it",
+    items: plan2.items,
+    ...statuses ? { item_statuses_after_hand_over: statuses } : {},
+    ...plan2.hold.length > 0 ? { held_back: plan2.hold, ...restorePatch.restore ? { restore: restorePatch.restore } : {} } : {},
+    note: p.startNow ? "start_now was true: Media Encoder started its queue with its last-used preset. After Effects is NOT locked and other tools work. It may take a moment to open; the format may differ from the output module's (not measured). After Effects gets no progress or end signal: poll ae_render_queue_render_status (output files, bytes, whether they grew, files with another extension). Never say it finished from this call: confirm with ae_verify_render once the file stops growing." : "The items were put in Media Encoder's queue and WAIT there; nothing renders yet. Ask the user to open Media Encoder, check the preset and format of each item (it uses its last-used preset, not necessarily the output module's) and press Start. After Effects is NOT locked. Once the user has pressed Start, poll ae_render_queue_render_status (output files, bytes, growth, files with another extension); confirm with ae_verify_render once the file stops growing."
+  };
+}
+function elapsedSeconds(rec, nowMs) {
+  const start = Date.parse(rec.started_at);
+  const end = rec.state === "running" || !rec.finished_at ? nowMs : Date.parse(rec.finished_at);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round((end - start) / 1e3)) : 0;
+}
+async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
+  const nowMs = now();
+  const outputs = [];
+  for (const it of rec.items) for (const o of it.outputs) outputs.push(statOutput(o));
+  const totalBytes = outputs.reduce((n, o) => n + o.bytes, 0);
+  const startMs = Date.parse(rec.started_at);
+  const writtenSince = outputs.filter((o) => o.mtime !== null && Date.parse(o.mtime) >= startMs).length;
+  const prev = store.lastSeen.get(rec.job_id);
+  store.lastSeen.set(rec.job_id, { bytes: totalBytes, at: nowMs });
+  const out = {
+    ok: true,
+    job_id: rec.job_id,
+    state: rec.state,
+    started_at: rec.started_at,
+    ...rec.finished_at ? { finished_at: rec.finished_at } : {},
+    elapsed_seconds: elapsedSeconds(rec, nowMs),
+    max_hours: rec.max_hours,
+    project_path: rec.project_path,
+    items: rec.items.map((i) => ({ index: i.index, comp_id: i.comp_id, comp_name: i.comp_name })),
+    outputs
+  };
+  if (rec.only_item_indexes) out.only_item_indexes = rec.only_item_indexes;
+  if (rec.restore && rec.restore.held.length > 0) {
+    out.restore = rec.restore;
+    if (rec.state === "running") {
+      out.restore_note = `${rec.restore.held.length} other QUEUED item(s) are unchecked while this renders and are checked again when it ends.`;
+    } else if (rec.restore.state === "restored") {
+      out.restore_summary = restoreSummary(rec.restore);
+    } else {
+      out.restore_pending = rec.restore.state !== "partial";
+      out.restore_summary = restoreSummary(rec.restore);
+      if (rec.restore.state !== "partial") out.restore_how = RESTORE_HOW;
+    }
+  }
+  const gate = renderGate.active();
+  if (gate) {
+    out.gate = { job_id: gate.job_id, state: gate.state, ...gate.cause ? { cause: gate.cause } : {} };
+    out.gate_note = "Other tools are refused while this gate is shut. If After Effects no longer renders and it does not clear, restarting After Effects clears it; the user can also press Clear render lock in the Chroma AE MCP panel (shown only while the gate is shut).";
+  }
+  if (rec.engine === "media_encoder") out.engine = "media_encoder";
+  if (rec.state === "handed_to_media_encoder" || rec.state === "queued_in_media_encoder") {
+    out.outputs = outputs.map((o) => {
+      const key = `${rec.job_id}|${o.item_index}|${o.module}`;
+      const before = store.lastSeen.get(key);
+      store.lastSeen.set(key, { bytes: o.bytes, at: nowMs });
+      return { ...o, grew_since_last_check: before ? o.bytes > before.bytes : null };
+    });
+    const since = rec.handed_at ? Date.parse(rec.handed_at) : Date.parse(rec.started_at);
+    const others = [];
+    for (const it of rec.items) {
+      for (const o of it.outputs) {
+        for (const f of otherExtensionFiles(o.file, Number.isFinite(since) ? since : 0)) {
+          if (others.length < 10) others.push(f);
+        }
+      }
+    }
+    if (others.length > 0) {
+      out.other_extension_files = others;
+      out.other_extension_note = "Files with the same name and another extension appeared after the hand-over: Media Encoder may have used its own preset and written another format than the output module's. Check them with ae_verify_render.";
+    }
+    out.files_written_since_start = writtenSince;
+    if (rec.handed_at) out.handed_at = rec.handed_at;
+    if (rec.summary) out.summary = rec.summary;
+    if (rec.ame_item_statuses) out.item_statuses_after_hand_over = rec.ame_item_statuses;
+    out.message = rec.state === "queued_in_media_encoder" ? "Queued in Adobe Media Encoder; it waits there until the user checks the preset and format and presses Start. Nothing may be rendering yet (the files below stay absent until then). After Effects is free and gets no progress, so this tool NEVER says the render finished. Once the user pressed Start, watch exists, bytes and grew_since_last_check, then confirm with ae_verify_render when a file stops growing." : "Handed to Adobe Media Encoder. After Effects is free and gets no progress from it, so this tool NEVER says the render finished. Watch the output files: exists, bytes and grew_since_last_check (null on the first call; call again a little later). Once a file exists and has stopped growing on two checks apart, confirm it with ae_verify_render (one real file or frame). Media Encoder's own window shows its queue.";
+  } else if (rec.state === "running") {
+    out.sign_of_life = {
+      files_written_since_start: writtenSince,
+      total_bytes: totalBytes,
+      ...prev ? { grew_since_last_check: totalBytes > prev.bytes, seconds_since_last_check: Math.round((nowMs - prev.at) / 1e3) } : {},
+      note: "After Effects gives no percentage while it renders for a script. A new or growing output file is a sign of life, not progress; a movie may only be written at the end."
+    };
+    out.message = "Rendering. Other tools can't reach After Effects until it ends; this tool does not touch it.";
+    out.stop = STOP_TEXT;
+  } else {
+    if (rec.ok !== void 0) out.render_ok = rec.ok;
+    if (rec.summary) out.summary = rec.summary;
+    if (rec.error) out.error = rec.error;
+    if (rec.note) out.note = rec.note;
+    if (rec.result) {
+      out.item_statuses = rec.result.item_statuses;
+      if (rec.result.read_back_error) out.read_back_error = rec.result.read_back_error;
+    }
+    if (rec.state === "finished" || rec.state === "failed") {
+      out.next = "Check one real output frame or file with ae_verify_render (path: a single existing file, with expect) once the gate is open; an image sequence path with [#####] is not a file, so give one real frame such as the first.";
+    }
+  }
+  if (includeDialogs) {
+    try {
+      const d = await rqrenderDeps.listDialogs({ screenshots: false });
+      if (d.ok) out.dialogs = (d.dialogs ?? []).slice(0, 20);
+      else out.dialogs_error = clip2(d.error ?? "could not be read");
+      if (d.ok && (d.dialogs?.length ?? 0) > 0) {
+        out.dialogs_note = "A popup is open in After Effects. Read it with ae_dialogs; answer with ae_dialog_respond only under the user's rules. Never suppressed.";
+      }
+    } catch (err) {
+      out.dialogs_error = clip2(errMessage(err));
+    }
+  }
+  return out;
+}
+var crypto5, fs23, path25, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, rqrenderTools;
+var init_rqrender = __esm({
+  "src/tools/ext/rqrender.ts"() {
+    "use strict";
+    crypto5 = __toESM(require("node:crypto"), 1);
+    fs23 = __toESM(require("node:fs"), 1);
+    path25 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_render_gate();
+    init_system_resources();
+    init_common();
+    init_mutate();
+    init_aerender();
+    init_dialogs();
+    init_renderbatch();
+    init_rqedit();
+    init_seqcheck();
+    init_session();
+    MAX_JOBS_KEPT = 30;
+    MAX_OUTPUT_FILES_STAT = 2e4;
+    MAX_ITEMS2 = 100;
+    STILL_RENDERING_MAX_MS = 30 * 6e4;
+    STILL_RENDERING_POLL_MS = 5e3;
+    MAX_TIMEOUT_MS = 2147e6;
+    READ_BACK_TIMEOUT_MS = 12e4;
+    MAX_TEXT = 2e3;
+    RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
+    STOP_TEXT = `Measured live (AE 26.3, 2026-11-07, over Remote Desktop): a render started by script LOCKS After Effects' UI for its whole length, so the user could NOT reach the Stop button; ending After Effects was the only way out. A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. So keep these renders short, save a dirty project first, and prefer ae_aerender_start for long renders (or, if the user agrees, engine "media_encoder"). A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.`;
+    RenderJobStore = class {
+      constructor(filePath) {
+        this.filePath = filePath;
+        this.load();
+      }
+      jobs = /* @__PURE__ */ new Map();
+      settled = /* @__PURE__ */ new Map();
+      /** Sizes seen by the last status call, to say whether files grew since. Memory only. */
+      lastSeen = /* @__PURE__ */ new Map();
+      /** Called once per job when it reaches "failed" or "unknown"; the tool points it at the service log (bindJobFailureLog). */
+      failureSink = null;
+      reported = /* @__PURE__ */ new Set();
+      load() {
+        try {
+          if (!fs23.existsSync(this.filePath)) return;
+          const parsed = JSON.parse(fs23.readFileSync(this.filePath, "utf8"));
+          const list2 = Array.isArray(parsed.jobs) ? parsed.jobs : [];
+          let changed = false;
+          for (const raw of list2) {
+            if (!raw || typeof raw !== "object" || typeof raw.job_id !== "string") continue;
+            const rec = { ...raw };
+            if (rec.state === "running" && rec.engine === "media_encoder") {
+              rec.state = "unknown";
+              rec.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+              rec.note = "The panel service restarted while this job was being handed to Media Encoder, so it is not known whether Media Encoder got it. Look at Media Encoder's queue and at After Effects' Render Queue (items unchecked for this job may still need queuing again: see restore). Nothing was resent.";
+              changed = true;
+            } else if (rec.state === "running") {
+              rec.state = "lost";
+              rec.finished_at = (/* @__PURE__ */ new Date()).toISOString();
+              rec.note = "The panel service restarted while this render was running, so nobody is tracking it any more. After Effects may still be rendering, or may have finished or stopped: look at After Effects' Render Queue panel and at the output files. Nothing was resent.";
+              changed = true;
+            }
+            this.jobs.set(rec.job_id, rec);
+          }
+          if (changed) this.save();
+        } catch {
+        }
+      }
+      save() {
+        try {
+          fs23.mkdirSync(path25.dirname(this.filePath), { recursive: true });
+          const keep = this.list().slice(-MAX_JOBS_KEPT);
+          const payload = JSON.stringify({ jobs: keep }, null, 2);
+          const tmp = `${this.filePath}.tmp-${process.pid}-${crypto5.randomBytes(3).toString("hex")}`;
+          try {
+            fs23.writeFileSync(tmp, payload, "utf8");
+            fs23.renameSync(tmp, this.filePath);
+          } catch {
+            fs23.writeFileSync(this.filePath, payload, "utf8");
+            try {
+              fs23.rmSync(tmp, { force: true });
+            } catch {
+            }
+          }
+        } catch {
+        }
+      }
+      list() {
+        return Array.from(this.jobs.values()).sort((a, b) => a.started_at.localeCompare(b.started_at));
+      }
+      get(jobId) {
+        return this.jobs.get(jobId);
+      }
+      create(rec) {
+        this.jobs.set(rec.job_id, { ...rec });
+        this.save();
+      }
+      update(jobId, patch) {
+        const cur = this.jobs.get(jobId);
+        if (!cur) return;
+        const next = { ...cur, ...patch, job_id: cur.job_id };
+        this.jobs.set(jobId, next);
+        this.save();
+        if ((next.state === "failed" || next.state === "unknown") && !this.reported.has(jobId) && this.failureSink) {
+          this.reported.add(jobId);
+          try {
+            this.failureSink(next);
+          } catch {
+          }
+        }
+      }
+      /** Forgets a job that was refused before its render began and left nothing to restore. */
+      discard(jobId) {
+        if (this.jobs.delete(jobId)) this.save();
+      }
+      /** The running job, else the newest one. */
+      latest() {
+        const all = this.list();
+        return all.find((j) => j.state === "running") ?? all[all.length - 1];
+      }
+      trackSettled(jobId, p) {
+        this.settled.set(jobId, p);
+      }
+      /** Resolves when the background run of a job has finished (for tests). */
+      done(jobId) {
+        return this.settled.get(jobId) ?? Promise.resolve();
+      }
+    };
+    stores = /* @__PURE__ */ new Map();
+    rqrenderDeps = {
+      listDialogs: listBlockingDialogs,
+      /** Outputs that running aerender jobs and batches are going to write. */
+      liveOutputs: () => liveOutputsFrom(getDefaultAerenderRegistry()),
+      /** One macrotask, so the tool's reply is sent before the render eval is. */
+      defer: () => new Promise((resolve7) => setTimeout(resolve7, 0)),
+      sleep: (ms) => new Promise((resolve7) => setTimeout(resolve7, ms)),
+      now: () => Date.now(),
+      /** Is Adobe Media Encoder installed? (folder "Adobe Media Encoder*" under Program Files\Adobe, or /Applications). */
+      ameInstalled: () => ameInstalledOnDisk(),
+      readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
+      stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
+      stillRenderingPollMs: STILL_RENDERING_POLL_MS
+    };
+    SEQ_TOKEN = /\[(#+)\]/;
+    AeRenderQueueRenderSchema = external_exports.object({
+      max_hours: external_exports.number().min(1).max(48).default(12).describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
+      overwrite: external_exports.boolean().optional().describe(`Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool. After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was.`),
+      item_indexes: external_exports.array(external_exports.number().int().min(1).max(500)).min(1).max(MAX_ITEMS2).optional().describe(
+        "Render only these QUEUED items (1-based, as ae_render_queue_inspect shows). Without it After Effects renders EVERY QUEUED item. The other QUEUED items have their Render box unchecked before the render and checked again after it, even when it failed or was stopped."
+      ),
+      comp_ids: external_exports.array(external_exports.number().int()).min(1).max(MAX_ITEMS2).optional().describe("With item_indexes: the comp id each index must hold, same order; refused on a mismatch."),
+      start_now: external_exports.boolean().optional().describe("media_encoder: true starts AME at once with its LAST preset. Default false: items wait for the user to press Start."),
+      engine: external_exports.enum(["after_effects", "media_encoder"]).optional().describe("media_encoder: Adobe Media Encoder renders the SAVED project, AE stays free; needs user_confirmed. Default after_effects."),
+      user_confirmed: external_exports.boolean().optional().describe("True after the user agreed to Media Encoder."),
+      sequence_check: SequenceCheckSchema,
+      expect: ExpectSchema
+    });
+    AeRenderQueueRenderStatusSchema = external_exports.object({
+      job_id: external_exports.string().min(1).max(100).optional().describe("A job id from ae_render_queue_render. Default: the running job, else the newest."),
+      include_dialogs: external_exports.boolean().default(true).optional().describe("Also list popups blocking After Effects (read from outside AE; screenshots are not taken). Default true.")
+    });
+    stripHeld = (h) => ({ index: h.index, comp_id: h.comp_id, files: h.files });
+    RESTORE_HOW = "Items in restore.held that are not in restore.restored were unchecked by this tool and may still be UNQUEUED. Once After Effects is idle and answers, call ae_render_queue_inspect, and for each such item whose index, comp_id and output file still match and that reads UNQUEUED, call ae_render_queue_edit with item_index, comp_id and queued: true. Leave any item that no longer matches: someone changed it.";
+    AME_CALL_TIMEOUT_MS = 12e4;
+    AME_REFUSAL_ASK = "Ask the user first, then call again with user_confirmed: true. Say to them: After Effects stays free while it renders; Media Encoder renders the SAVED project, so changes made after the last save are not in it; Media Encoder may take a moment to open; it uses its own last-used preset, so the format may differ from After Effects' output module (you will check it in Media Encoder's queue before it starts).";
+    rqrenderTools = [
+      {
+        name: "ae_render_queue_render",
+        description: `Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. Use it when \`ae_aerender_start\` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. Prefer \`ae_aerender_start\` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST: After Effects' UI is locked for the whole render and the Stop button cannot be reached (measured), so a render cannot be stopped short of ending After Effects. Keep these renders short. NEVER ask the user to press Render in the Render Queue panel: call this instead. While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. These keep working: \`ae_render_queue_render_status\` (state, elapsed, output files, any blocking popup; it never touches AE), \`ae_dialogs\`, \`ae_dialog_respond\`, \`ae_diagnostics\`; \`ae_status\` answers with the render state; \`ae_ask_user\` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads \`lost\`. Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since "Save in subfolder" can make it at render time; nothing is created); or an output file already exists (unless \`overwrite: true\`; nothing is ever deleted, and After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was). A queued aerender job or batch item is held (not started) while the render runs. When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run \`ae_verify_render\` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold \`sequence_check\` (a warning, the render still starts; \`sequence_check: "block"\` refuses (also when the check could not finish), "off" skips) and \`resource_warnings\` (GPU nearly full, or another app such as Cinema 4D running). If \`resource_warnings\` is present, tell the user before continuing. \`max_hours\` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. Stopping: ${STOP_TEXT} Jobs are kept on disk; if the service restarts during a render the job reads \`lost\` and you must look at After Effects. \`item_indexes\` (with \`comp_ids\`) renders only those QUEUED items: without it After Effects renders EVERY QUEUED item. The other QUEUED items are unchecked just before and checked again after the render (also when it failed); the status lists what was restored and what could not be (moved, deleted, changed), and after a crash what still needs queuing. \`engine: "media_encoder"\` (opt-in, per render): puts the queue in Adobe Media Encoder (RenderQueue.queueInAME) so After Effects stays FREE: no render gate, the call returns in seconds, other tools keep working. Offer it ONLY when \`ae_aerender_start\` did not start, a long render would lock After Effects, or a long H.264 render (one ran After Effects out of memory); ASK THE USER first and pass \`user_confirmed: true\` only after they agree (say: AE stays free; Media Encoder renders the SAVED project so later changes are not in it; it may take a moment to open). By default (\`start_now\` false) the items only WAIT in Media Encoder's queue (state \`queued_in_media_encoder\`): tell the user to check the preset and format there and press Start, because Media Encoder applies its LAST-used preset, not the output module's (AE Scripting Guide). \`start_now: true\` starts it at once: use it only when the user said the format does not matter, or after a live run showed Media Encoder keeps the output module's format. Refused without \`user_confirmed\`, when Media Encoder is not installed (\`ame_not_installed\`, checked on disk), with unsaved changes (ae_save first), or when \`canQueueInAME\` is false/missing; the same output, folder, sequence and \`item_indexes\` checks apply. Progress is unknown to After Effects: \`ae_render_queue_render_status\` reports \`handed_to_media_encoder\` and each file's exists/bytes/grew_since_last_check, never "finished"; confirm with \`ae_verify_render\` once the file stops growing. The status also lists files with the same name and another extension that appeared after the hand-over. ` + AGENT_SAFETY_GUIDANCE,
+        schema: AeRenderQueueRenderSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const viaAme = args.engine === "media_encoder";
+          if (viaAme && args.user_confirmed !== true) {
+            return {
+              ok: false,
+              started: false,
+              engine: "media_encoder",
+              refused: [{ code: "user_confirmation_needed", message: `Rendering in Adobe Media Encoder needs the user's OK for this render. Nothing was started. ${AME_REFUSAL_ASK}` }]
+            };
+          }
+          if (viaAme && !rqrenderDeps.ameInstalled()) {
+            return {
+              ok: false,
+              started: false,
+              engine: "media_encoder",
+              refused: [{ code: "ame_not_installed", message: 'Adobe Media Encoder does not seem to be installed (no "Adobe Media Encoder*" folder under Program FilesAdobe or /Applications). Nothing was started. Render inside After Effects instead (engine after_effects).' }]
+            };
+          }
+          if (!viaAme && !ctx.serviceInfo) {
+            return {
+              ok: false,
+              started: false,
+              refused: [
+                {
+                  code: "not_in_panel",
+                  message: "This tool runs only inside the After Effects panel service. The dev stdio server reaches the panel with fetch, whose 300 s timeout would read a long render as unreachable and lift the render gate mid-render. Nothing was started."
+                }
+              ]
+            };
+          }
+          const store = storeFor(ctx);
+          const gate = renderGate.active();
+          if (gate) {
+            return { ok: false, started: false, refused: [{ code: "already_rendering", message: renderGateMessage(gate) }], job_id: gate.job_id };
+          }
+          const maxHours = args.max_hours ?? 12;
+          const opId = ctx.bridge.newOpId();
+          const resourceWarnings2 = await resourceWarningsForRender();
+          let lease;
+          try {
+            lease = await ctx.queue.acquire("ae_render_queue_render");
+          } catch (err) {
+            if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+            throw err;
+          }
+          let handedOff = false;
+          try {
+            const guard = await verifyTargetGuard(ctx, args.expect, opId);
+            if (viaAme && (guard.project_path === void 0 || guard.project_path === "<unsaved>" || guard.dirty !== false)) {
+              return {
+                ok: false,
+                started: false,
+                engine: "media_encoder",
+                refused: [
+                  {
+                    code: "project_unsaved",
+                    message: guard.project_path === "<unsaved>" || guard.project_path === void 0 ? "The project has never been saved, and Media Encoder reads the saved file. Save it with ae_save first. Nothing was started." : "The project has unsaved changes (or After Effects would not say), and Media Encoder reads the saved file, so they would not be in the render. Save first with ae_save, then call again. Nothing was started."
+                  }
+                ]
+              };
+            }
+            const readRes = await ctx.bridge.evalRaw({
+              id: `${opId}_read`,
+              script: buildJsxCall("rqeditRead", { settings: false }),
+              label: "ae_render_queue_render (read)",
+              mutates: false,
+              toolName: "ae_render_queue_render"
+            });
+            let live = [];
+            try {
+              live = rqrenderDeps.liveOutputs();
+            } catch {
+              live = [];
+            }
+            const only = args.item_indexes ? { indexes: args.item_indexes, ...args.comp_ids ? { comp_ids: args.comp_ids } : {} } : void 0;
+            if (!only && args.comp_ids) {
+              return { ok: false, started: false, refused: [{ code: "bad_item_indexes", message: "comp_ids needs item_indexes. Nothing was started." }] };
+            }
+            if (only?.comp_ids && only.comp_ids.length !== only.indexes.length) {
+              return {
+                ok: false,
+                started: false,
+                refused: [{ code: "bad_item_indexes", message: `comp_ids has ${only.comp_ids.length} entries but item_indexes has ${only.indexes.length}: give one comp id per index, in the same order. Nothing was started.` }]
+              };
+            }
+            const plan2 = planStart(readRes.result ?? null, args.overwrite === true, live, only);
+            if (plan2.refusals.length > 0) {
+              return {
+                ok: false,
+                started: false,
+                refused: plan2.refusals,
+                message: "Nothing was started. Fix the reasons above and call again."
+              };
+            }
+            const seq = await runSequenceCheck(ctx, args.sequence_check, { opId, toolName: "ae_render_queue_render", liveDirs: dirsOfFiles(live.map((l) => l.file)) });
+            if (seq.block && seq.check) {
+              return {
+                ok: false,
+                started: false,
+                refused: [{ code: blockCode(seq.check), message: sequenceBlockMessage("ae_render_queue_render", seq.check) }],
+                sequence_check: seq.check,
+                message: seq.check.with_gaps > 0 ? 'Nothing was started. Fix the missing frames, or call again with sequence_check "warn" or "off".' : 'Nothing was started. The sequence check could not finish; try again, or call again with sequence_check "warn" or "off".'
+              };
+            }
+            if (viaAme) {
+              const ameRes = await ctx.bridge.evalRaw({
+                id: `${opId}_ame_state`,
+                script: buildJsxCall("rqeditAmeState", {}),
+                label: "ae_render_queue_render (can the queue go to Media Encoder)",
+                mutates: false,
+                toolName: "ae_render_queue_render"
+              });
+              const can = ameRes.result?.can_queue_in_ame;
+              if (can !== true) {
+                return {
+                  ok: false,
+                  started: false,
+                  engine: "media_encoder",
+                  refused: [
+                    {
+                      code: "ame_unavailable",
+                      message: can === false ? "After Effects says renderQueue.canQueueInAME is false: Adobe Media Encoder cannot take the queue (it is not installed or not available to this After Effects, or no item is QUEUED). Nothing was started. Render inside After Effects instead (engine after_effects) or install Media Encoder." : "This After Effects has no renderQueue.canQueueInAME (it needs After Effects 14.0 / CC 2017 or later), so the queue cannot go to Media Encoder. Nothing was started. Render inside After Effects instead."
+                    }
+                  ]
+                };
+              }
+            }
+            const jobId = `rqjob_${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
+            const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+            const projectPath = guard.project_path ?? args.expect.project_path;
+            store.create({
+              job_id: jobId,
+              op_id: opId,
+              state: "running",
+              started_at: startedAt,
+              max_hours: maxHours,
+              project_path: projectPath,
+              overwrite: args.overwrite === true,
+              ...viaAme ? { engine: "media_encoder" } : {},
+              items: plan2.items,
+              ...only ? { only_item_indexes: plan2.items.map((i) => i.index) } : {},
+              // Written BEFORE anything is unchecked, so a crash between the write and the render still leaves the list.
+              ...plan2.hold.length > 0 ? { restore: { state: "pending", held: plan2.hold, restored: [], not_restored: [] } } : {}
+            });
+            if (plan2.hold.length > 0) {
+              const refusal = await holdOrRefuse(ctx, store, jobId, opId, plan2, readRes.result?.numItems);
+              if (refusal) return refusal;
+            }
+            if (viaAme) {
+              return await handOffToMediaEncoder({ ctx, store, jobId, opId, plan: plan2, maxHours, startNow: args.start_now === true });
+            }
+            const info = { job_id: jobId, op_id: opId, started_at: startedAt };
+            beginRenderGate(store, info, lease);
+            ctx.queue.rejectWaiting(() => new BridgeError({ kind: "queued", message: renderGateMessage({ ...info, state: "rendering" }) }));
+            const timeoutMs = renderTimeoutMs(maxHours);
+            handedOff = true;
+            const run = runRenderJob({ ctx, store, jobId, opId, lease, timeoutMs, items: plan2.items, ...only ? { expectedQueued: plan2.items.length } : {} });
+            store.trackSettled(jobId, run);
+            void run.catch(() => void 0);
+            return {
+              ok: true,
+              started: true,
+              job_id: jobId,
+              state: "running",
+              started_at: startedAt,
+              max_hours: maxHours,
+              project_path: projectPath,
+              renders: "the open project exactly as it is now (unsaved or dirty changes included)",
+              items: plan2.items,
+              ...plan2.hold.length > 0 ? {
+                held_back: plan2.hold,
+                held_back_note: `Only the item(s) above render. ${plan2.hold.length} other QUEUED item(s) are unchecked now and checked again when the render ends, also if it fails; ae_render_queue_render_status reports what was restored.`
+              } : {},
+              ...plan2.warnings.length > 0 || seq.warnings.length > 0 ? { warnings: [...plan2.warnings, ...seq.warnings] } : {},
+              ...seq.check ? { sequence_check: seq.check } : {},
+              ...resourceWarnings2.length > 0 ? { resource_warnings: resourceWarnings2 } : {},
+              note: "The render runs in After Effects in the background of this call. After Effects is busy until it ends and the user cannot work in it; every other AE tool is refused meanwhile. Poll ae_render_queue_render_status (it never touches AE). " + STOP_TEXT
+            };
+          } finally {
+            if (!handedOff) lease.release();
+          }
+        }
+      },
+      {
+        name: "ae_render_queue_render_status",
+        description: "Where a render started by ae_render_queue_render is: state (running, finished, failed, unknown, lost), elapsed time, and for every output file whether it exists, its bytes and mtime and, for an image sequence, the frame count; plus any popup blocking After Effects (screenshots are not taken). It NEVER touches After Effects (no evalScript), so it answers during the render. While it renders, After Effects gives no percentage: a new or growing file is a sign of life, not progress. For a job in Media Encoder (`queued_in_media_encoder` or `handed_to_media_encoder`) it lists each output's exists, bytes and `grew_since_last_check` and never claims it finished: confirm with ae_verify_render once the file stops growing. After the end of an AE render it gives each item's status (DONE, ERR_STOPPED, USER_STOPPED), its elapsed time and a verdict, and suggests ae_verify_render. A job `lost` was cut off by a service restart: look at After Effects. `unknown` means the render call hit its time limit, its read-back timed out, or After Effects kept reporting that it renders. While the gate is shut the answer says that restarting After Effects clears it if AE no longer renders. Changes nothing.",
+        schema: AeRenderQueueRenderStatusSchema,
+        handler: async (args, ctx) => {
+          const store = storeFor(ctx);
+          const rec = args.job_id ? store.get(args.job_id) : store.latest();
+          if (!rec) {
+            return {
+              ok: false,
+              error: args.job_id ? "unknown_job" : "no_jobs",
+              message: args.job_id ? `No render job ${args.job_id}.` : "No render has been started with ae_render_queue_render yet.",
+              ...renderGate.active() ? { gate: renderGate.active() } : {}
+            };
+          }
+          return describeJob(ctx, store, rec, args.include_dialogs !== false);
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/rqfollow.ts
+function followSources(read3) {
+  const sources = [];
+  let truncated = false;
+  for (const it of read3?.items ?? []) {
+    const status = (it.status ?? "").toLowerCase();
+    if (status !== "rendering" && status !== "queued") continue;
+    if (sources.length >= MAX_FOLLOW_ITEMS) {
+      truncated = true;
+      break;
+    }
+    const files = [];
+    for (const m of it.output_modules ?? []) {
+      if (typeof m.file === "string" && m.file !== "" && files.length < MAX_FOLLOW_MODULES) files.push({ module: m.index, file: m.file });
+    }
+    sources.push({ index: it.index, ...it.comp_name ? { comp_name: it.comp_name } : {}, status, files });
+  }
+  return { sources, truncated };
+}
+function statFollow(sources, nowMs) {
+  return sources.map((s) => ({
+    index: s.index,
+    ...s.comp_name ? { comp_name: s.comp_name } : {},
+    status: s.status,
+    outputs: s.files.map((f) => {
+      const st = statOutput({ item_index: s.index, module: f.module, file: f.file });
+      const before = followState.lastSeen.get(f.file);
+      followState.lastSeen.set(f.file, { bytes: st.bytes, at: nowMs });
+      return { ...st, grew_since_last_check: before ? st.bytes > before.bytes : null };
+    })
+  }));
+}
+async function followQueue(ctx, status, toolName) {
+  const nowMs = followDeps.now();
+  let fresh = null;
+  let problem = "";
+  if (status !== null) {
+    const num5 = typeof status.numItems === "number" ? status.numItems : 0;
+    if (num5 === 0) {
+      fresh = { sources: [], truncated: false };
+    } else {
+      try {
+        const res = await ctx.bridge.callHost(
+          "rqeditRead",
+          {},
+          { label: `${toolName} (follow)`, mutates: false, toolName, timeoutMs: followDeps.answerTimeoutMs }
+        );
+        fresh = followSources(res.result);
+      } catch (err) {
+        problem = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  if (fresh) {
+    followState.lastRead = { at: nowMs, sources: fresh.sources, truncated: fresh.truncated };
+    return {
+      read_now: true,
+      follow: {
+        items: statFollow(fresh.sources, nowMs),
+        ...fresh.truncated ? { truncated: true, truncated_note: `Only the first ${MAX_FOLLOW_ITEMS} RENDERING or QUEUED items are followed.` } : {},
+        note: "Output files of the RENDERING and QUEUED items, checked on disk now. After Effects gives no percentage; a growing file (grew_since_last_check true) is a sign of life, null means this is the first check. A movie may only be written at the end."
+      }
+    };
+  }
+  const last = followState.lastRead;
+  if (!last) return null;
+  const ageSeconds = Math.max(0, Math.round((nowMs - last.at) / 1e3));
+  return {
+    read_now: false,
+    follow: {
+      items: statFollow(last.sources, nowMs),
+      from_earlier_read: true,
+      earlier_read_seconds_ago: ageSeconds,
+      ...last.truncated ? { truncated: true } : {},
+      note: `After Effects did not answer in time${problem ? ` (${problem.slice(0, 160)})` : ""}; it may be busy rendering. The item list and statuses are from the last successful read ${ageSeconds} s ago and may be out of date; the file facts (exists, bytes, mtime, grew_since_last_check) were taken from disk just now.`
+    }
+  };
+}
+var MAX_FOLLOW_ITEMS, MAX_FOLLOW_MODULES, followDeps, followState;
+var init_rqfollow = __esm({
+  "src/tools/ext/rqfollow.ts"() {
+    "use strict";
+    init_rqrender();
+    MAX_FOLLOW_ITEMS = 20;
+    MAX_FOLLOW_MODULES = 8;
+    followDeps = { answerTimeoutMs: 6e3, now: () => Date.now() };
+    followState = { lastSeen: /* @__PURE__ */ new Map(), lastRead: null };
+  }
+});
+
 // src/tools/render.ts
 function defaultFramesDir() {
-  return path23.join(defaultDataDir(), "frames");
+  return path26.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs21.existsSync(filePath)) {
+    if (!fs24.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs21.statSync(filePath);
+    const stat = fs24.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -23453,19 +27065,19 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs21.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs24.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
   };
 }
-var crypto4, fs21, path23, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, renderTools;
+var crypto6, fs24, path26, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, renderTools;
 var init_render = __esm({
   "src/tools/render.ts"() {
     "use strict";
-    crypto4 = __toESM(require("node:crypto"), 1);
-    fs21 = __toESM(require("node:fs"), 1);
-    path23 = __toESM(require("node:path"), 1);
+    crypto6 = __toESM(require("node:crypto"), 1);
+    fs24 = __toESM(require("node:fs"), 1);
+    path26 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -23477,6 +27089,7 @@ var init_render = __esm({
     init_png_utils();
     init_mutate();
     init_preflight();
+    init_rqfollow();
     AeSnapshotFrameSchema = external_exports.object({
       comp_id: external_exports.number().int().describe("The CompItem ID to snapshot."),
       time: external_exports.number().min(0).describe("Composition time in seconds at which to capture the frame."),
@@ -23506,14 +27119,14 @@ var init_render = __esm({
         handler: async (args, ctx) => {
           const scale = args.scale ?? 0.5;
           const framesDir = defaultFramesDir();
-          fs21.mkdirSync(framesDir, { recursive: true });
+          fs24.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           try {
             return await ctx.queue.run(
               `ae_snapshot_frame(${args.comp_id} @ ${args.time}s)`,
               async () => {
-                const uniqueSuffix1 = `${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
-                const pngPath1 = path23.join(
+                const uniqueSuffix1 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
+                const pngPath1 = path26.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix1}.png`
                 );
@@ -23548,8 +27161,8 @@ var init_render = __esm({
                   };
                 }
                 const nudgedTime = Math.max(0, args.time + 1e-3);
-                const uniqueSuffix2 = `${Date.now()}_${crypto4.randomBytes(4).toString("hex")}`;
-                const pngPath2 = path23.join(
+                const uniqueSuffix2 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
+                const pngPath2 = path26.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix2}.png`
                 );
@@ -23700,19 +27313,24 @@ var init_render = __esm({
       },
       {
         name: "ae_render_queue_status",
-        description: "Read all items currently in the After Effects Render Queue (comp, status, output paths). " + AGENT_SAFETY_GUIDANCE,
+        description: "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check. " + AGENT_SAFETY_GUIDANCE,
         schema: AeRenderQueueStatusSchema,
         handler: async (_args, ctx) => {
-          const res = await ctx.bridge.callHost(
-            "rqStatus",
-            {},
-            {
-              label: "ae_render_queue_status",
-              mutates: false,
-              toolName: "ae_render_queue_status"
-            }
-          );
-          return res.result;
+          const toolName = "ae_render_queue_status";
+          let status = null;
+          let readError;
+          try {
+            const res = await ctx.bridge.callHost("rqStatus", {}, { label: toolName, mutates: false, toolName, timeoutMs: followDeps.answerTimeoutMs });
+            status = res.result ?? {};
+          } catch (err) {
+            readError = err;
+          }
+          const followed = await followQueue(ctx, status, toolName);
+          if (status === null) {
+            if (!followed) throw readError;
+            return { ok: true, answered_from_earlier_read: true, follow: followed.follow };
+          }
+          return followed ? { ...status, follow: followed.follow } : status;
         }
       }
     ];
@@ -23721,10 +27339,10 @@ var init_render = __esm({
 
 // src/tools/ext/frames.ts
 function decodePngFile(filePath) {
-  if (!fs22.existsSync(filePath)) {
+  if (!fs25.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
-  const buf = fs22.readFileSync(filePath);
+  const buf = fs25.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -23894,8 +27512,8 @@ function compareDecodedFrames(pngA, pngB, options = {}) {
 async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
-  const suffix1 = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path24.join(
+  const suffix1 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
+  const pngPath1 = path27.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -23918,8 +27536,8 @@ async function captureCompFrame(params) {
     return { path: pngPath1, time };
   }
   const nudgedTime = Math.max(0, time + 1e-3);
-  const suffix2 = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path24.join(
+  const suffix2 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
+  const pngPath2 = path27.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -23945,13 +27563,13 @@ async function captureCompFrame(params) {
     `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.`
   );
 }
-var crypto5, fs22, path24, import_pngjs3, AeCompareFramesSchema, framesTools;
+var crypto7, fs25, path27, import_pngjs3, AeCompareFramesSchema, framesTools;
 var init_frames = __esm({
   "src/tools/ext/frames.ts"() {
     "use strict";
-    crypto5 = __toESM(require("node:crypto"), 1);
-    fs22 = __toESM(require("node:fs"), 1);
-    path24 = __toESM(require("node:path"), 1);
+    crypto7 = __toESM(require("node:crypto"), 1);
+    fs25 = __toESM(require("node:fs"), 1);
+    path27 = __toESM(require("node:path"), 1);
     import_pngjs3 = __toESM(require_png(), 1);
     init_zod();
     init_host();
@@ -24031,7 +27649,7 @@ var init_frames = __esm({
           const framesDir = defaultFramesDir();
           const capturedItems = [];
           if (args.comp_id !== void 0 && args.times !== void 0) {
-            fs22.mkdirSync(framesDir, { recursive: true });
+            fs25.mkdirSync(framesDir, { recursive: true });
             const opId = ctx.bridge.newOpId();
             const compId = args.comp_id;
             const times = args.times;
@@ -24070,7 +27688,7 @@ var init_frames = __esm({
             );
           }
           if (shouldWriteDiff) {
-            fs22.mkdirSync(framesDir, { recursive: true });
+            fs25.mkdirSync(framesDir, { recursive: true });
           }
           const decodedPngs = [];
           const frameAnalyses = [];
@@ -24097,10 +27715,10 @@ var init_frames = __esm({
             });
             let diffPngPath;
             if (shouldWriteDiff && cmp2.diffPng) {
-              const suffix = `${Date.now()}_${crypto5.randomBytes(4).toString("hex")}`;
-              diffPngPath = path24.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+              const suffix = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
+              diffPngPath = path27.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
               const outBuf = import_pngjs3.PNG.sync.write(cmp2.diffPng);
-              fs22.writeFileSync(diffPngPath, outBuf);
+              fs25.writeFileSync(diffPngPath, outBuf);
               diffPngPaths.push(diffPngPath);
             }
             pairs2.push({
@@ -24621,13 +28239,13 @@ async function runQueued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto6, fs23, path25, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num4, MAX_PARENT_DEPTH, NO_3D_REASON, r23, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
+var crypto8, fs26, path28, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num4, MAX_PARENT_DEPTH, NO_3D_REASON, r23, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
 var init_annotate = __esm({
   "src/tools/ext/annotate.ts"() {
     "use strict";
-    crypto6 = __toESM(require("node:crypto"), 1);
-    fs23 = __toESM(require("node:fs"), 1);
-    path25 = __toESM(require("node:path"), 1);
+    crypto8 = __toESM(require("node:crypto"), 1);
+    fs26 = __toESM(require("node:fs"), 1);
+    path28 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -24717,7 +28335,7 @@ var init_annotate = __esm({
         schema: AeAnnotateFrameSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs23.mkdirSync(framesDir, { recursive: true });
+          fs26.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const times = args.time_b === void 0 ? [args.time] : [args.time, args.time_b];
           const label = `${TOOL}(${args.comp_id} @ ${times.join("s, ")}s)`;
@@ -24810,11 +28428,11 @@ var init_annotate = __esm({
             });
           });
           const final = pair ? composePair(images[0], images[1], timeLabel("A", shots[0].read.time), timeLabel("B", shots[1].read.time)) : images[0];
-          const outPath = path25.join(
+          const outPath = path28.join(
             framesDir,
-            `annotated_c${args.comp_id}_${Date.now()}_${crypto6.randomBytes(4).toString("hex")}.png`
+            `annotated_c${args.comp_id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`
           );
-          fs23.writeFileSync(outPath, encodePng(final));
+          fs26.writeFileSync(outPath, encodePng(final));
           const notes = [...ANNOTATE_NOTES];
           if (frames.some((f) => f.layers.some((e) => e.box?.projection === "3d-estimated"))) notes.push(NOTE_3D);
           return {
@@ -24859,10 +28477,10 @@ function zoomFromLens(compWidth, lens) {
 function angleOfViewFromZoom(compWidth, zoom) {
   return 2 * Math.atan(compWidth / 2 / zoom) * 180 / Math.PI;
 }
-function expectSpan(m, path60, l, duration) {
-  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path60}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
+function expectSpan(m, path61, l, duration) {
+  if (typeof l.in_point === "number") expectThat(m, l.in_point <= 0.05, `${path61}.in_point`, 0, l.in_point, "Layer starts after the comp's start, so the move partly plays without it");
   if (typeof l.out_point === "number" && typeof duration === "number") {
-    expectThat(m, l.out_point >= duration - 0.05, `${path60}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
+    expectThat(m, l.out_point >= duration - 0.05, `${path61}.out_point`, duration, l.out_point, "Layer ends before the comp's end");
   }
 }
 function cameraRigMismatches(args, beforeRaw, afterRaw, w) {
@@ -24952,30 +28570,30 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
     near_far_blur_multiplier: cam.near_far_blur_multiplier
   };
   for (const c of w.changes) {
-    const path60 = `camera.${c.key}`;
+    const path61 = `camera.${c.key}`;
     if (c.key === "depth_of_field") {
-      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path60, c.value === 1, cam.dof, "Depth of field is not as asked");
+      expectThat(m, cam.dof === (c.value === 1 || c.value === true), path61, c.value === 1, cam.dof, "Depth of field is not as asked");
     } else if (c.key === "focus_expression") {
-      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path60, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
+      expectThat(m, typeof cam.expressions.focus_distance === "string" && cam.expressions.focus_distance === c.value, path61, c.value, cam.expressions.focus_distance, "Focus Distance does not hold the focus expression");
     } else if (c.key === "nodes") {
-      expectThat(m, cam.two_node === (c.value === "two"), path60, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
+      expectThat(m, cam.two_node === (c.value === "two"), path61, c.value, cam.two_node ? "two" : "one", "Camera has the wrong number of nodes");
     } else if (c.keyed) {
       const field = keyField[c.key];
       const nowKeys = field ? cam.num_keys?.[field] : void 0;
       const wasKeys = field && was ? was.num_keys?.[field] : void 0;
       if (typeof nowKeys === "number" && typeof wasKeys === "number") {
         const want = wasKeys + (c.replaced_key ? 0 : 1);
-        expectThat(m, nowKeys === want, `${path60}.num_keys`, want, nowKeys, "The new keyframe is not there");
+        expectThat(m, nowKeys === want, `${path61}.num_keys`, want, nowKeys, "The new keyframe is not there");
       }
       const wantV = c.value;
       const keyedV = field ? cam.values_at?.[field] : void 0;
       if (typeof wantV === "number") {
-        expectThat(m, near3(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path60}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
+        expectThat(m, near3(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path61}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
       }
     } else {
       const got = valueOf[c.key];
       const want = c.value;
-      expectThat(m, near3(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path60, want, got, `${c.key} differs from what was asked`);
+      expectThat(m, near3(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path61, want, got, `${c.key} differs from what was asked`);
     }
     if (c.key === "focus_distance" && !c.keyed) {
       expectThat(m, cam.expressions.focus_distance === void 0, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
@@ -25385,11 +29003,11 @@ function proofMismatches(before, after, cleanupError, copyId) {
   }
   return m;
 }
-var fs24, SUSPECTS, AeExplainLayerSchema, AeExplainLayerProofSchema, SEVERITY_RANK2, FIX_HINTS, BOX_SUSPECTS, errMessage, explainTools;
+var fs27, SUSPECTS, AeExplainLayerSchema, AeExplainLayerProofSchema, SEVERITY_RANK2, FIX_HINTS, BOX_SUSPECTS, errMessage2, explainTools;
 var init_explain = __esm({
   "src/tools/ext/explain.ts"() {
     "use strict";
-    fs24 = __toESM(require("node:fs"), 1);
+    fs27 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -25458,7 +29076,7 @@ var init_explain = __esm({
       precomp_missing_footage: "Relink the missing footage inside the nested comp."
     };
     BOX_SUSPECTS = ["layers_above", "adjustment_above"];
-    errMessage = (err) => err instanceof Error ? err.message : String(err);
+    errMessage2 = (err) => err instanceof Error ? err.message : String(err);
     explainTools = [
       {
         name: "ae_explain_layer",
@@ -25513,7 +29131,7 @@ var init_explain = __esm({
               const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
               const sessionFields = await noteBeforeWrite(ctx, note);
               const before = await read3("before");
-              fs24.mkdirSync(framesDir, { recursive: true });
+              fs27.mkdirSync(framesDir, { recursive: true });
               beginInflight(note);
               let begun;
               try {
@@ -25573,7 +29191,7 @@ var init_explain = __esm({
                   identical: cmp2.identical
                 };
               } catch (err) {
-                proofError = errMessage(err);
+                proofError = errMessage2(err);
               }
               let cleanupError = null;
               let removed = false;
@@ -25591,7 +29209,7 @@ var init_explain = __esm({
                 });
                 removed = end.result?.removed === true;
               } catch (err) {
-                cleanupError = errMessage(err);
+                cleanupError = errMessage2(err);
               } finally {
                 endInflight(opId);
               }
@@ -25717,11 +29335,11 @@ function mergeBrandColors(existing, incoming, max = 12) {
   return { merged, added, already_present, not_added };
 }
 function checkSwatchPath(file) {
-  if (!path26.isAbsolute(file)) return "The swatch path must be absolute.";
-  if (path26.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
+  if (!path29.isAbsolute(file)) return "The swatch path must be absolute.";
+  if (path29.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
   let st;
   try {
-    st = fs25.statSync(file);
+    st = fs28.statSync(file);
   } catch {
     return "No file at that path.";
   }
@@ -25731,7 +29349,7 @@ function checkSwatchPath(file) {
   return null;
 }
 function briefPath(projectPath) {
-  return path26.join(path26.dirname(projectPath), `${path26.basename(projectPath, path26.extname(projectPath))}.brief.json`);
+  return path29.join(path29.dirname(projectPath), `${path29.basename(projectPath, path29.extname(projectPath))}.brief.json`);
 }
 function isEmpty(v) {
   if (v === void 0 || v === null || v === "") return true;
@@ -25741,7 +29359,7 @@ function isEmpty(v) {
 }
 function readBrief(file) {
   try {
-    const parsed = JSON.parse(fs25.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs28.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -25849,12 +29467,12 @@ async function parseSwatches(file, ctx) {
 function isLinear(c) {
   return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
 }
-var fs25, path26, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
+var fs28, path29, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
 var init_brief = __esm({
   "src/tools/ext/brief.ts"() {
     "use strict";
-    fs25 = __toESM(require("node:fs"), 1);
-    path26 = __toESM(require("node:path"), 1);
+    fs28 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     init_motion_spec();
@@ -25990,8 +29608,8 @@ var init_brief = __esm({
           }
           if (writes && file && brief) {
             const tmp = `${file}.tmp-${process.pid}`;
-            fs25.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
-            fs25.renameSync(tmp, file);
+            fs28.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
+            fs28.renameSync(tmp, file);
             saved = true;
           }
           const missing = missingFields(brief);
@@ -26532,7 +30150,7 @@ function sheetLayout(n, compWidth, compHeight, tileSize, columns, labels = true)
 }
 function buildContactSheet(tiles, layout) {
   const sheet = createCanvas(layout.width, layout.height, SHEET_BG);
-  const pad = 2 * layout.textScale;
+  const pad2 = 2 * layout.textScale;
   tiles.forEach((tile, i) => {
     const col = i % layout.columns;
     const row = Math.floor(i / layout.columns);
@@ -26542,7 +30160,7 @@ function buildContactSheet(tiles, layout) {
     blit(sheet, flattenOnChecker(small, 8, 112, 88), x, y);
     if (tile.label && layout.labelHeight > 0) {
       fillRect(sheet, x, y + layout.tileHeight, layout.tileWidth, layout.labelHeight, [0, 0, 0, 255]);
-      drawText(sheet, tile.label, x + pad, y + layout.tileHeight + pad, layout.textScale, [255, 255, 255, 255]);
+      drawText(sheet, tile.label, x + pad2, y + layout.tileHeight + pad2, layout.textScale, [255, 255, 255, 255]);
     }
     if (tile.flagged) {
       strokeRect(sheet, x, y, layout.tileWidth, layout.tileHeight, 3, FLAG_COLOUR);
@@ -26681,9 +30299,9 @@ function renderMotionGraph(s, speeds, width, height) {
     vmin = 0;
     vmax = 1;
   } else if (vmax - vmin < 1e-9) {
-    const pad = Math.max(1, Math.abs(vmin) * 0.1);
-    vmin -= pad;
-    vmax += pad;
+    const pad2 = Math.max(1, Math.abs(vmin) * 0.1);
+    vmin -= pad2;
+    vmax += pad2;
   }
   let peak = 0;
   for (const sp of speeds) if (sp.speed !== null && sp.speed > peak) peak = sp.speed;
@@ -26760,14 +30378,14 @@ function fixEase(taste) {
     name: "Your preferred ease"
   };
 }
-function reviewProperty(s, analysis, speeds, path60, target, taste, choreo) {
+function reviewProperty(s, analysis, speeds, path61, target, taste, choreo) {
   const findings = [];
   const motion = MOTION_MATCH_NAMES.has(s.property.matchName);
   const timingOk = !motion && taste?.allow_linear_non_motion === true;
   const unit = s.property.spatial ? "px/s" : "/s";
   const base = {
     layer: s.layer,
-    property: { name: s.property.name, path: path60 }
+    property: { name: s.property.name, path: path61 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
   const fix2 = (keys, extra = {}) => ({
@@ -26775,7 +30393,7 @@ function reviewProperty(s, analysis, speeds, path60, target, taste, choreo) {
     args: {
       comp_id: target.comp_id,
       layer: { id: s.layer.id },
-      path: path60,
+      path: path61,
       keys,
       ease: easeArg,
       ...extra,
@@ -27073,13 +30691,13 @@ async function runQueued2(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto7, fs26, path27, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r34, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, OVERSHOOT_SETTLE_TOLERANCE_PCT, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
+var crypto9, fs29, path30, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r34, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, OVERSHOOT_SETTLE_TOLERANCE_PCT, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
 var init_motion = __esm({
   "src/tools/ext/motion.ts"() {
     "use strict";
-    crypto7 = __toESM(require("node:crypto"), 1);
-    fs26 = __toESM(require("node:fs"), 1);
-    path27 = __toESM(require("node:path"), 1);
+    crypto9 = __toESM(require("node:crypto"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -27201,7 +30819,7 @@ var init_motion = __esm({
         schema: AeContactSheetSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs26.mkdirSync(framesDir, { recursive: true });
+          fs29.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const captured = await runQueued2(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
             const compResp = await ctx.bridge.evalRaw({
@@ -27259,11 +30877,11 @@ var init_motion = __esm({
             frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
           });
           const sheet = buildContactSheet(tiles, layout);
-          const sheetPath = path27.join(
+          const sheetPath = path30.join(
             framesDir,
-            `contact_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
+            `contact_c${args.comp_id}_${Date.now()}_${crypto9.randomBytes(4).toString("hex")}.png`
           );
-          fs26.writeFileSync(sheetPath, encodePng(sheet));
+          fs29.writeFileSync(sheetPath, encodePng(sheet));
           return {
             ok: true,
             path: sheetPath,
@@ -27309,12 +30927,12 @@ var init_motion = __esm({
           const width = args.width ?? 960;
           const height = args.height ?? 540;
           const framesDir = defaultFramesDir();
-          fs26.mkdirSync(framesDir, { recursive: true });
-          const graphPath = path27.join(
+          fs29.mkdirSync(framesDir, { recursive: true });
+          const graphPath = path30.join(
             framesDir,
-            `graph_c${args.comp_id}_${Date.now()}_${crypto7.randomBytes(4).toString("hex")}.png`
+            `graph_c${args.comp_id}_${Date.now()}_${crypto9.randomBytes(4).toString("hex")}.png`
           );
-          fs26.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+          fs29.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
           return {
             ok: true,
             path: graphPath,
@@ -27905,13 +31523,13 @@ function layoutFields(l) {
     ...lay.camera ? { camera: lay.camera } : {}
   };
 }
-var crypto8, fs27, path28, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
+var crypto10, fs30, path31, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
 var init_describe = __esm({
   "src/tools/ext/describe.ts"() {
     "use strict";
-    crypto8 = __toESM(require("node:crypto"), 1);
-    fs27 = __toESM(require("node:fs"), 1);
-    path28 = __toESM(require("node:path"), 1);
+    crypto10 = __toESM(require("node:crypto"), 1);
+    fs30 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
     init_zod();
     init_render();
     init_motion();
@@ -28033,9 +31651,9 @@ var init_describe = __esm({
             try {
               const { png, info } = drawGantt(raw);
               const dir = defaultFramesDir();
-              fs27.mkdirSync(dir, { recursive: true });
-              const file = path28.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`);
-              fs27.writeFileSync(file, encodePng(png));
+              fs30.mkdirSync(dir, { recursive: true });
+              const file = path31.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto10.randomBytes(4).toString("hex")}.png`);
+              fs30.writeFileSync(file, encodePng(png));
               out.gantt = { path: file, ...info };
               if (info.rows_truncated) out.truncated = true;
             } catch (e) {
@@ -28052,29 +31670,29 @@ var init_describe = __esm({
 // src/tools/ext/verify.ts
 function looksLikeSequence(file) {
   if (!STILL.test(file)) return false;
-  const base = path29.basename(file);
+  const base = path32.basename(file);
   if (!/[._-]\d{3,}\.[^.]+$/.test(base)) return false;
   const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(base);
   if (!m) return false;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}\\d{${m[2].length}}${esc(m[3])}$`, "i");
   try {
-    return fs28.readdirSync(path29.dirname(file)).some((n) => n !== base && re.test(n));
+    return fs31.readdirSync(path32.dirname(file)).some((n) => n !== base && re.test(n));
   } catch {
     return false;
   }
 }
 function firstFrameOf(output) {
-  if (!/\[#+\]/.test(output)) return fs28.existsSync(output) ? output : null;
-  const dir = path29.dirname(output);
-  const base = path29.basename(output);
+  if (!/\[#+\]/.test(output)) return fs31.existsSync(output) ? output : null;
+  const dir = path32.dirname(output);
+  const base = path32.basename(output);
   const m = /^(.*)\[(#+)\](.*)$/.exec(base);
   if (!m) return null;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
   try {
-    const frames = fs28.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
-    return frames.length ? path29.join(dir, frames[0]) : null;
+    const frames = fs31.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
+    return frames.length ? path32.join(dir, frames[0]) : null;
   } catch {
     return null;
   }
@@ -28116,7 +31734,7 @@ function checkJobOutputs(paths, startedAt) {
     let size = 0;
     let mtime = 0;
     try {
-      const st = fs28.statSync(file);
+      const st = fs31.statSync(file);
       size = st.size;
       mtime = st.mtimeMs;
     } catch {
@@ -28171,8 +31789,8 @@ function createVerifyTools(options = {}) {
           jobIsSequence = /\[#+\]/.test(outputPath);
           if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
         }
-        if (!file || !path29.isAbsolute(file) || !fs28.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-        const stat = fs28.statSync(file);
+        if (!file || !path32.isAbsolute(file) || !fs31.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+        const stat = fs31.statSync(file);
         if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
         if (args.comp_id === void 0 && jobCompId === void 0 && !compName) {
           return { ok: false, error: "bad_args", message: "Give comp_id to compare with (a whole-queue job renders several comps)." };
@@ -28210,15 +31828,15 @@ function createVerifyTools(options = {}) {
                 problems.push(readBackMismatch(opId, `removing the imported render (item ${imported.item_id}) failed`, removeErr));
               } else {
                 try {
-                  await call2("gone", "verifyRead", { item_id: imported.item_id }, false);
-                  itemState = "left";
-                  problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
-                } catch (errG) {
-                  if (errG instanceof BridgeError && /not_found|No imported item/i.test(errG.message)) itemState = "removed";
+                  const still = (await call2("gone", "verifyExists", { item_id: imported.item_id }, false)).result;
+                  if (still && still.exists === false) itemState = "removed";
                   else {
-                    itemState = "unknown";
-                    problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
+                    itemState = "left";
+                    problems.push({ path: "cleanup", expected: "removed", actual: imported.item_id, message: `The imported render (item ${imported.item_id}) is still in the project after its removal.` });
                   }
+                } catch (errG) {
+                  itemState = "unknown";
+                  problems.push(readBackMismatch(opId, `the check that the imported render (item ${imported.item_id}) is gone failed`, errG));
                 }
               }
             }
@@ -28260,12 +31878,12 @@ function createVerifyTools(options = {}) {
     }
   ];
 }
-var fs28, path29, AeVerifyRenderSchema, STILL, verifyTools;
+var fs31, path32, AeVerifyRenderSchema, STILL, verifyTools;
 var init_verify = __esm({
   "src/tools/ext/verify.ts"() {
     "use strict";
-    fs28 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    fs31 = __toESM(require("node:fs"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -28365,7 +31983,7 @@ function measureFrame(png, index = 0) {
   const bx = Math.max(2, Math.round(w * EDGE_BAND));
   const by = Math.max(2, Math.round(h * EDGE_BAND));
   let lumaSum = 0;
-  let clip5 = 0;
+  let clip6 = 0;
   let top = 0;
   let bottom = 0;
   let left = 0;
@@ -28381,7 +31999,7 @@ function measureFrame(png, index = 0) {
       const a = data[i + 3];
       const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       lumaSum += luma * a / 255;
-      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip5++;
+      if (a >= 250 && (r >= 254 || g >= 254 || b >= 254)) clip6++;
       const inLeft = x < bx;
       const inRight = x >= w - bx;
       if (inTop || inBottom || inLeft || inRight) {
@@ -28398,11 +32016,11 @@ function measureFrame(png, index = 0) {
   const total2 = Math.max(1, w * h);
   const round42 = (n) => Math.round(n * 1e4) / 1e4;
   return {
-    hash: crypto9.createHash("md5").update(data).digest("hex"),
+    hash: crypto11.createHash("md5").update(data).digest("hex"),
     kind,
     flags: analysis.flags,
     mean_luma: round42(lumaSum / (255 * total2)),
-    clip_frac: round42(clip5 / total2),
+    clip_frac: round42(clip6 / total2),
     edges: {
       top: round42(top / Math.max(1, by * w)),
       bottom: round42(bottom / Math.max(1, by * w)),
@@ -28770,8 +32388,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   const verdict = verdictOf(findings);
   const curve = measured.pairs.map((p) => ({ time: p.a_time, diff: p.mean_abs_diff, luma: p.a.mean_luma }));
   const bad4 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
-  fs29.mkdirSync(framesDir, { recursive: true });
-  const stamp3 = `${Date.now()}_${crypto9.randomBytes(4).toString("hex")}`;
+  fs32.mkdirSync(framesDir, { recursive: true });
+  const stamp3 = `${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
   const frameSize = measured.pairs[0] ? { width: measured.pairs[0].a.width, height: measured.pairs[0].a.height } : { width: prep.size.width, height: prep.size.height };
   let chart = null;
   let sheet = null;
@@ -28781,8 +32399,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     if (curve.length > 0) {
       const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST2), bad4);
-      const chartPath = path30.join(framesDir, `scrub_chart_${stamp3}.png`);
-      fs29.writeFileSync(chartPath, encodePng(png));
+      const chartPath = path33.join(framesDir, `scrub_chart_${stamp3}.png`);
+      fs32.writeFileSync(chartPath, encodePng(png));
       chart = { path: chartPath, width: png.width, height: png.height };
     }
   } catch (err) {
@@ -28791,8 +32409,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     const built = buildSuspectSheet(cap2.captured, findings, args.max_suspects ?? 6, frameSize);
     if (built) {
-      const sheetPath = path30.join(framesDir, `scrub_suspects_${stamp3}.png`);
-      fs29.writeFileSync(sheetPath, encodePng(built.png));
+      const sheetPath = path33.join(framesDir, `scrub_suspects_${stamp3}.png`);
+      fs32.writeFileSync(sheetPath, encodePng(built.png));
       sheet = { path: sheetPath, width: built.png.width, height: built.png.height, suspects: built.shown.length };
       shown = built.shown;
       for (const s of built.shown) for (const p of s.paths) kept.add(p);
@@ -28804,7 +32422,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
     for (const c of cap2.captured) {
       if (c && !kept.has(c.path)) {
         try {
-          fs29.unlinkSync(c.path);
+          fs32.unlinkSync(c.path);
         } catch {
         }
       }
@@ -28844,7 +32462,7 @@ function resolveRange(args, base) {
 async function scrubComp(args, ctx) {
   const compId = args.comp_id;
   const framesDir = defaultFramesDir();
-  fs29.mkdirSync(framesDir, { recursive: true });
+  fs32.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const run = await runQueued3(ctx, `ae_scrub_check(${compId})`, opId, async () => {
     const infoResp = await ctx.bridge.evalRaw({
@@ -28886,8 +32504,8 @@ async function scrubComp(args, ctx) {
 }
 async function scrubFile(args, ctx) {
   const file = args.path;
-  if (!path30.isAbsolute(file) || !fs29.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-  const stat = fs29.statSync(file);
+  if (!path33.isAbsolute(file) || !fs32.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+  const stat = fs32.statSync(file);
   if (!stat.isFile() || stat.size === 0) return { ok: false, error: "empty", message: `${file} is not a file with content.` };
   const sequence = STILL_FILE.test(file) && (args.sequence ?? looksLikeSequence(file));
   const jsxPath = file.replace(/\\/g, "/");
@@ -28895,7 +32513,7 @@ async function scrubFile(args, ctx) {
   let sequenceInfo = null;
   if (sequence) {
     try {
-      sequenceInfo = sequenceGaps2(fs29.readdirSync(path30.dirname(file)), path30.basename(file));
+      sequenceInfo = sequenceGaps2(fs32.readdirSync(path33.dirname(file)), path33.basename(file));
     } catch {
       sequenceInfo = null;
     }
@@ -28910,7 +32528,7 @@ async function scrubFile(args, ctx) {
     }
   }
   const framesDir = defaultFramesDir();
-  fs29.mkdirSync(framesDir, { recursive: true });
+  fs32.mkdirSync(framesDir, { recursive: true });
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
   const expect = { project_path: args.expect.project_path, comp_id: args.expect?.comp_id };
@@ -29037,13 +32655,13 @@ async function scrubFile(args, ctx) {
   const result = finish(args, prep, plan2, cap2, [...extra, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
   return { ...result, ...project2 };
 }
-var crypto9, fs29, path30, SCRUB_MAX_SAMPLES, MAX_LIST2, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs2, median2, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
+var crypto11, fs32, path33, SCRUB_MAX_SAMPLES, MAX_LIST2, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs2, median2, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
 var init_scrub = __esm({
   "src/tools/ext/scrub.ts"() {
     "use strict";
-    crypto9 = __toESM(require("node:crypto"), 1);
-    fs29 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
+    crypto11 = __toESM(require("node:crypto"), 1);
+    fs32 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -29296,12 +32914,12 @@ function pathChecksum(p) {
   }
   return Math.round(sum * 1e3) / 1e3;
 }
-function comparePoints(expected, actual, path60, m) {
+function comparePoints(expected, actual, path61, m) {
   for (let i = 0; i < expected.length; i++) {
     const a = actual[i];
     const e = expected[i];
     if (!a || Math.abs(a[0] - e[0]) > PATH_TOLERANCE || Math.abs(a[1] - e[1]) > PATH_TOLERANCE) {
-      m.push({ path: `${path60}[${i}]`, expected: e, actual: a, message: `${path60} differs from what was written at vertex ${i + 1}` });
+      m.push({ path: `${path61}[${i}]`, expected: e, actual: a, message: `${path61} differs from what was written at vertex ${i + 1}` });
       return;
     }
   }
@@ -29776,14 +33394,14 @@ var init_paths = __esm({
         description: "Read one path as JSON: a mask path or a free path ('ADBE Vector Shape - Group') in a shape layer's top-level group, with vertices, inTangents, outTangents and closed (up to 500 vertices, `truncated` says if more), its keyframe times, expression state, feather-point count (masks) and path direction (shapes). include_operators also lists the group's Trim Paths, Offset Paths and Repeater values and keys. Rectangles, ellipses and stars have no vertices and are refused. Read-only: never changes the time, selection or anything else in the project. " + AGENT_SAFETY_GUIDANCE,
         schema: AePathReadSchema,
         handler: async (args, ctx) => {
-          const path60 = await readPath(ctx, "ae_path_read", args);
-          if (!args.include_operators || !args.target.shape || !path60) return path60;
+          const path61 = await readPath(ctx, "ae_path_read", args);
+          if (!args.include_operators || !args.target.shape || !path61) return path61;
           const ops = await ctx.bridge.callHost(
             "pathsOperators",
-            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path60.group?.index } },
+            { comp_id: args.comp_id, layer: args.target.layer, group: args.target.shape.group ?? { index: path61.group?.index } },
             readOpts("ae_path_read", `ae_path_read(${args.comp_id}) operators`)
           );
-          return { ...path60, operators: ops.result };
+          return { ...path61, operators: ops.result };
         }
       },
       {
@@ -29792,24 +33410,24 @@ var init_paths = __esm({
         schema: AePathWriteSchema,
         handler: async (args, ctx) => {
           let current = null;
-          let path60;
+          let path61;
           try {
             if (args.operation === "set") {
-              path60 = toPathData(args.path);
+              path61 = toPathData(args.path);
             } else {
               current = await readPath(ctx, "ae_path_write", args);
               if (!current) return badArgs("The path could not be read.");
               if (current.path.truncated) return badArgs(`The path has ${current.path.vertexCount} vertices; only paths of up to ${MAX_PATH_VERTICES2} can be changed here.`);
               if (current.numKeys > 0 && args.time === void 0) return badArgs(`The path is keyframed (${current.numKeys} keys); give \`time\` to write a key at that time.`);
               if (current.expression.enabled) return badArgs("The path has an expression, which overrides any value written here; remove it first (ae_path_link with unlink).");
-              path60 = applyPathOperation(args, toData(current));
+              path61 = applyPathOperation(args, toData(current));
             }
           } catch (err) {
             if (err instanceof PathMathError) return badArgs(err.message);
             throw err;
           }
           if (args.dry_run) {
-            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path60.vertices.length, path: path60, source: current?.path };
+            return { ok: true, dry_run: true, operation: args.operation, vertex_count: path61.vertices.length, path: path61, source: current?.path };
           }
           const base = current && { count: current.path.vertexCount, checksum: pathChecksum(current.path) };
           return runGuardedWrite(ctx, {
@@ -29823,7 +33441,7 @@ var init_paths = __esm({
               args: {
                 comp_id: args.comp_id,
                 target: args.target,
-                path: path60,
+                path: path61,
                 time: args.time,
                 base,
                 allow_vertex_count_change: args.allow_vertex_count_change,
@@ -29833,7 +33451,7 @@ var init_paths = __esm({
                 label: `Path ${args.operation}`
               }
             },
-            check: (_before, after, w) => pathWriteMismatches(path60, after, args, w),
+            check: (_before, after, w) => pathWriteMismatches(path61, after, args, w),
             present: (_before, after, w) => ({ ...w, path: asReadout(after)?.path, numKeys: asReadout(after)?.numKeys })
           });
         }
@@ -30171,3004 +33789,6 @@ var init_memory = __esm({
         description: "Purge After Effects caches with app.purge, in a guarded write with memory read before and after (separate evalScripts). target image / snapshot free RAM caches only; ram = every memory cache (AE 24.3+; the disk cache stays). image and ram also drop the user's RAM preview. ram and all MAY also clear the Edit > Undo history (not yet measured): the result reports undo_history_cleared: null and undo_history_may_be_cleared: true, so tell the user Ctrl+Z may be gone. So ram is gated like undo: a saved project with no unsaved changes (ae_save), confirm_undo_purge: true, and the user's yes through ae_ask_user first. Use image or snapshot to keep undo without asking. target undo removes the whole Edit > Undo history: the same gate; afterwards Ctrl+Z cannot undo earlier steps, so tell the user. A purge that cleared undo (target undo) is recorded, so ae_session_changes lists earlier steps as not_reachable; one that may have cleared it (ram, all) is recorded too, and those steps stay possibly_reachable with a warning. A purge itself is never listed as an undo step. This tool takes no automatic checkpoint (a purge changes no project data; the saved .aep is the current state, and only checkpoints taken earlier, see ae_checkpoint list, hold earlier states). target all also wipes the disk cache (hours to rebuild) and may clear undo, so it needs confirm_disk_cache_wipe: true and confirm_undo_purge: true after the user's yes to both, on a saved project. only_above_mb makes one call a watchdog: nothing is purged unless memory is above that. There is no automatic watchdog inside ae_batch_set; call this between chunks yourself (target image needs no confirm). The receipt reports memory before and after; memory not dropping is not an error. " + AGENT_SAFETY_GUIDANCE,
         schema: AeMemoryPurgeSchema,
         handler: (args, ctx) => runPurge(args, ctx)
-      }
-    ];
-  }
-});
-
-// src/tools/ext/rqedit.ts
-function unknownNameTokens(tpl) {
-  const bad4 = [];
-  for (const m of tpl.matchAll(/\[([^\]]*)\]/g)) {
-    const t = m[1];
-    if (/^#+$/.test(t)) continue;
-    if (NAME_TOKENS.includes(t)) continue;
-    bad4.push(t);
-  }
-  return bad4;
-}
-function sizeNumbers(got) {
-  if (typeof got === "string") return numbersIn(got);
-  if (got && typeof got === "object" && !Array.isArray(got)) {
-    const o = got;
-    if ("x" in o && "y" in o) return [toNum(o.x), toNum(o.y)];
-    if ("width" in o && "height" in o) return [toNum(o.width), toNum(o.height)];
-    return Object.values(o).map(toNum);
-  }
-  return [];
-}
-function sameSetting(want, got) {
-  if (got === void 0 || got === null) return false;
-  if (typeof want === "boolean") return toBool(got) === want;
-  if (typeof want === "number") {
-    const n = toNum(got);
-    return n !== void 0 && Math.abs(n - want) <= 1e-4 * Math.max(1, Math.abs(want));
-  }
-  if (Array.isArray(want)) {
-    if (Array.isArray(got)) return got.length === want.length && want.every((w, i) => sameSetting(w, got[i]));
-    return sizeNumbers(got).length >= want.length && want.every((w, i) => typeof w === "number" && sizeNumbers(got)[i] !== void 0 && Math.abs(sizeNumbers(got)[i] - w) <= 1e-4);
-  }
-  if (want && typeof want === "object") {
-    if (!got || typeof got !== "object") return false;
-    return Object.entries(want).every(([k, v]) => sameSetting(v, got[k]));
-  }
-  if (typeof want === "string") {
-    if (typeof got === "string") return got.trim().toLowerCase() === want.trim().toLowerCase();
-    if (typeof got === "number") return String(got) === want.trim();
-    if (typeof got === "boolean") return toBool(want) === got;
-  }
-  return false;
-}
-function settingsMismatches(where, want, got, skip) {
-  const m = [];
-  if (!want) return m;
-  for (const [key, value] of Object.entries(want)) {
-    if (skip.has(key)) continue;
-    if (!got) {
-      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: "The settings could not be read back" });
-      continue;
-    }
-    if (!(key in got)) {
-      m.push({ path: `${where}.${key}`, expected: value, actual: void 0, message: `AE does not list "${key}" in the read-back` });
-    } else if (!sameSetting(value, got[key])) {
-      m.push({ path: `${where}.${key}`, expected: value, actual: got[key], message: `"${key}" reads back differently (a format can adjust a size or rate it can't take)` });
-    }
-  }
-  return m;
-}
-function stepMismatches(where, errors, skipped) {
-  const m = [];
-  (errors ?? []).forEach(
-    (e, i) => m.push({ path: `${where}.errors[${i}]`, expected: "the step to succeed", actual: e.message, message: `${e.step} failed: ${e.message}` })
-  );
-  (skipped ?? []).forEach((s, i) => {
-    if (s.optional === true) return;
-    m.push({ path: `${where}.skipped[${i}]`, expected: s.key, actual: void 0, message: `"${s.key}" was not set: ${s.reason ?? "AE does not offer it"}` });
-  });
-  return m;
-}
-function itemMismatches(where, echo, item, skipped) {
-  const m = [];
-  if (!echo) return m;
-  if (!item) {
-    m.push({ path: where, expected: "the item in the read-back", actual: void 0, message: "The render queue item could not be read back" });
-    return m;
-  }
-  const skipAt = (suffix) => new Set((skipped ?? []).filter((s) => !s.where || s.where.endsWith(suffix)).map((s) => s.key));
-  const ne = (ok, p, expected, actual, message) => {
-    if (!ok) m.push({ path: `${where}.${p}`, expected, actual, message });
-  };
-  if (echo.time_span) {
-    ne(item.time_span_start !== void 0 && Math.abs(item.time_span_start - echo.time_span.start) <= TIME_TOL2, "time_span.start", echo.time_span.start, item.time_span_start, "Time span start differs");
-    ne(
-      item.time_span_duration !== void 0 && Math.abs(item.time_span_duration - echo.time_span.duration) <= TIME_TOL2,
-      "time_span.duration",
-      echo.time_span.duration,
-      item.time_span_duration,
-      "Time span length differs"
-    );
-  }
-  if (echo.skip_frames !== void 0) ne(item.skip_frames === echo.skip_frames, "skip_frames", echo.skip_frames, item.skip_frames, "Skip frames differs");
-  if (echo.log_type !== void 0) ne(item.log_type === echo.log_type, "log_type", echo.log_type, item.log_type, "Log type differs");
-  if (echo.queued !== void 0) {
-    if (echo.queued && item.status === "needs_output") {
-      m.push({
-        path: `${where}.queued`,
-        expected: "status queued",
-        actual: item.status,
-        message: "The Render checkbox was set but the item reads NEEDS_OUTPUT: it has no valid output file. Give it one (output_modules[].file) and queue it again"
-      });
-    } else {
-      ne(item.render === echo.queued, "queued", echo.queued, item.render, `The item's Render checkbox reads ${String(item.render)} (status ${item.status ?? "unknown"})`);
-    }
-  }
-  m.push(...settingsMismatches(`${where}.render_settings`, echo.render_settings, item.render_settings, skipAt(" render settings")));
-  ne(item.num_output_modules === echo.num_output_modules, "num_output_modules", echo.num_output_modules, item.num_output_modules, "Output module count differs");
-  for (const e of echo.modules) {
-    const mod = item.output_modules?.find((o) => o.index === e.index);
-    const p = `${where}.output_modules[${e.index}]`;
-    if (!mod) {
-      m.push({ path: p, expected: "the output module in the read-back", actual: void 0, message: `Output module ${e.index} could not be read back` });
-      continue;
-    }
-    if (e.file !== void 0) ne(!!mod.file && pathKey(mod.file) === pathKey(e.file), `output_modules[${e.index}].file`, e.file, mod.file, "Output file differs");
-    if (e.post_render_action !== void 0) {
-      ne(mod.post_render_action === e.post_render_action, `output_modules[${e.index}].post_render_action`, e.post_render_action, mod.post_render_action, "Post-render action differs");
-    }
-    if (e.include_source_xmp !== void 0) {
-      ne(mod.include_source_xmp === e.include_source_xmp, `output_modules[${e.index}].include_source_xmp`, e.include_source_xmp, mod.include_source_xmp, "Include source XMP differs");
-    }
-    m.push(...settingsMismatches(p, e.settings, mod.settings, skipAt(` output module ${e.plan_index ?? e.index}`)));
-  }
-  return m;
-}
-function editMismatches(args, _before, afterRaw, written) {
-  const after = queueOf(afterRaw);
-  const where = `item[${args.item_index}]`;
-  if (args.item_index === void 0) return [];
-  const m = stepMismatches(where, asArray(written.errors), asArray(written.skipped));
-  if (!after) return m;
-  m.push(...itemMismatches(where, written.expect, itemOf2(after, args.item_index), asArray(written.skipped)));
-  if (args.comp_id !== void 0) {
-    const it = itemOf2(after, args.item_index);
-    if (it && it.comp_id !== args.comp_id) m.push({ path: `${where}.comp_id`, expected: args.comp_id, actual: it.comp_id, message: "The item at this index is another comp now" });
-  }
-  return m;
-}
-function copiesMismatches(kind, beforeRaw, afterRaw, entries, compId) {
-  const m = [];
-  const before = queueOf(beforeRaw);
-  const after = queueOf(afterRaw);
-  const made = entries.filter((e) => typeof e.item_index === "number" && e.in_place !== true).length;
-  entries.forEach((e, i) => {
-    const where = `${kind}[${i + 1}]`;
-    m.push(...stepMismatches(where, asArray(e.errors), asArray(e.skipped)));
-    if (typeof e.item_index !== "number") {
-      m.push({ path: where, expected: "a duplicate", actual: void 0, message: "The item could not be duplicated, or its place in the queue could not be found" });
-    }
-  });
-  if (!after) return m;
-  if (before) {
-    const grown = after.numItems - before.numItems;
-    if (grown !== made) m.push({ path: "numItems", expected: before.numItems + made, actual: after.numItems, message: "The queue did not grow by the number of copies" });
-  }
-  entries.forEach((e, i) => {
-    if (typeof e.item_index !== "number") return;
-    const where = `${kind}[${i + 1}]`;
-    const it = itemOf2(after, e.item_index);
-    m.push(...itemMismatches(where, e.expect, it, asArray(e.skipped)));
-    if (it && typeof compId === "number" && it.comp_id !== compId) {
-      m.push({ path: `${where}.comp_id`, expected: compId, actual: it.comp_id, message: "The copy is another comp than the source" });
-    }
-  });
-  const touched = new Set(entries.map((e) => e.item_index).filter((n) => typeof n === "number"));
-  const seen = /* @__PURE__ */ new Map();
-  for (const it of after.items) {
-    if (it.status === "done") continue;
-    for (const o of it.output_modules ?? []) {
-      if (!o.file || /\[#+\]/.test(o.file)) continue;
-      const key = pathKey(o.file);
-      const other = seen.get(key);
-      const here = `item ${it.index} output ${o.index}`;
-      if (other && (touched.has(it.index) || touched.has(other.index))) {
-        m.push({ path: `items[${it.index}]`, expected: "distinct output files", actual: o.file, message: `${here} and ${other.label} write the same file` });
-      }
-      if (!other) seen.set(key, { label: here, index: it.index });
-    }
-  }
-  return m;
-}
-function checkDeliveryFile(spec, filePath) {
-  const issues = [];
-  let size = 0;
-  let exists = false;
-  try {
-    const st = fs30.statSync(filePath);
-    exists = st.isFile();
-    size = st.size;
-  } catch {
-    exists = false;
-  }
-  if (!exists) {
-    issues.push("The file does not exist.");
-  } else {
-    if (size === 0) issues.push("The file is empty.");
-    const ext2 = path31.extname(filePath).replace(/^\./, "").toLowerCase();
-    if (ext2 !== spec.ext) issues.push(`The extension is .${ext2}, the spec's is .${spec.ext}.`);
-    if (spec.max_size_mb !== void 0 && size > spec.max_size_mb * 1024 * 1024) {
-      issues.push(`The file is ${(size / 1048576).toFixed(1)} MB, over the spec's approximate ${spec.max_size_mb} MB limit.`);
-    }
-  }
-  return { ok: issues.length === 0, exists, size_bytes: size, size_mb: Math.round(size / 1048576 * 100) / 100, issues };
-}
-function removeMismatches(beforeRaw, afterRaw, written) {
-  const m = stepMismatches("remove", asArray(written.errors), []);
-  const after = queueOf(afterRaw);
-  if (!after) return m;
-  const removed = asArray(written.removed);
-  const echo = written.expect ?? {};
-  const before = queueOf(beforeRaw);
-  if (before && removed.length > 0 && after.numItems !== before.numItems - removed.length) {
-    m.push({ path: "numItems", expected: before.numItems - removed.length, actual: after.numItems, message: "The queue did not shrink by the number of removed items" });
-  } else if (typeof echo.num_items === "number" && after.numItems !== echo.num_items) {
-    m.push({ path: "numItems", expected: echo.num_items, actual: after.numItems, message: "The queue holds a different number of items than expected" });
-  }
-  const want = echo.survivor_comp_ids;
-  if (Array.isArray(want) && !after.truncated && after.items.length === want.length) {
-    after.items.forEach((it, i) => {
-      if (it.comp_id !== want[i]) {
-        m.push({ path: `items[${i + 1}].comp_id`, expected: want[i], actual: it.comp_id, message: "A surviving item is another comp than expected" });
-      }
-    });
-  }
-  return m;
-}
-var fs30, path31, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
-var init_rqedit = __esm({
-  "src/tools/ext/rqedit.ts"() {
-    "use strict";
-    fs30 = __toESM(require("node:fs"), 1);
-    path31 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_common();
-    init_write_runner();
-    queueOf = (v) => v && typeof v === "object" && Array.isArray(v.items) ? v : null;
-    itemOf2 = (q, index) => q?.items.find((i) => i.index === index);
-    H264 = (mbps) => [
-      { pattern: `^H\\.264.*Match Render Settings.*\\b${mbps} ?Mbps`, flags: "i" },
-      { pattern: "^H\\.264.*Match Render Settings", flags: "i" },
-      { pattern: "^H\\.264", flags: "i" }
-    ];
-    SOCIAL_NOTE = "The bitrate comes from the template (AE ships H.264 15 and 40 Mbps ones); scripts can't set it. The size limit is approximate.";
-    SPEC_LIBRARY = [
-      {
-        id: "youtube_1080p",
-        label: "YouTube 1080p",
-        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(15),
-        resize: { width: 1920, height: 1080 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        note: "YouTube re-encodes; this is the upload master. " + SOCIAL_NOTE
-      },
-      {
-        id: "youtube_4k",
-        label: "YouTube 4K",
-        description: "H.264 MP4, 3840x2160, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(40),
-        resize: { width: 3840, height: 2160 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        note: SOCIAL_NOTE
-      },
-      {
-        id: "instagram_feed",
-        label: "Instagram feed (4:5)",
-        description: "H.264 MP4, 1080x1350, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(15),
-        resize: { width: 1080, height: 1350 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        max_size_mb: 4096,
-        note: SOCIAL_NOTE
-      },
-      {
-        id: "instagram_reels_story",
-        label: "Instagram Reels / Story (9:16)",
-        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(15),
-        resize: { width: 1080, height: 1920 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        max_size_mb: 4096,
-        note: SOCIAL_NOTE
-      },
-      {
-        id: "tiktok",
-        label: "TikTok (9:16)",
-        description: "H.264 MP4, 1080x1920, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(15),
-        resize: { width: 1080, height: 1920 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        max_size_mb: 500,
-        note: SOCIAL_NOTE
-      },
-      {
-        id: "linkedin_1080p",
-        label: "LinkedIn 1080p",
-        description: "H.264 MP4, 1920x1080, 48 kHz audio.",
-        container: "mp4",
-        ext: "mp4",
-        template_candidates: H264(15),
-        resize: { width: 1920, height: 1080 },
-        channels: "RGB",
-        audio_sample_rate: 48e3,
-        name_template: "[compName]_[spec].mp4",
-        max_size_mb: 5120,
-        note: SOCIAL_NOTE
-      },
-      {
-        id: "broadcast_hd",
-        label: "Broadcast HD (ProRes 422 HQ)",
-        description: "Apple ProRes 422 HQ MOV, 1920x1080.",
-        container: "mov",
-        ext: "mov",
-        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
-        resize: { width: 1920, height: 1080 },
-        channels: "RGB",
-        name_template: "[compName]_[spec].mov",
-        note: "Needs a ProRes 422 HQ output module template on this machine (made in the Output Module dialog); refused without one. Frame rate follows the comp."
-      },
-      {
-        id: "broadcast_uhd",
-        label: "Broadcast UHD (ProRes 422 HQ)",
-        description: "Apple ProRes 422 HQ MOV, 3840x2160.",
-        container: "mov",
-        ext: "mov",
-        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
-        resize: { width: 3840, height: 2160 },
-        channels: "RGB",
-        name_template: "[compName]_[spec].mov",
-        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
-      },
-      {
-        id: "prores_422_hq_master",
-        label: "ProRes 422 HQ master",
-        description: "Apple ProRes 422 HQ MOV at the comp's size.",
-        container: "mov",
-        ext: "mov",
-        template_candidates: [{ pattern: "ProRes 422 HQ", flags: "i" }],
-        name_template: "[compName]_master.mov",
-        note: "Needs a ProRes 422 HQ output module template on this machine; refused without one."
-      },
-      {
-        id: "png_sequence",
-        label: "PNG sequence",
-        description: "Numbered PNG frames at the comp's size, with alpha.",
-        container: "png_sequence",
-        ext: "png",
-        sequence: true,
-        template_candidates: [{ pattern: "^PNG Sequence", flags: "i" }, { pattern: "PNG.*alpha", flags: "i" }, { pattern: "PNG", flags: "i" }],
-        channels: "RGB + Alpha",
-        video_output: true,
-        name_template: "[compName]_[spec]_[#####].png",
-        note: 'Needs a PNG output module template on this machine, preferably one with alpha in its name ("PNG + ALPHA"): AE lists no Channels setting for PNG templates, so alpha comes from the template; with a plain "PNG" template the alpha cannot be set and the receipt reports it. The folder should be empty: every frame is a file.'
-      },
-      {
-        id: "wav_audio",
-        label: "WAV audio only",
-        description: "48 kHz WAV, no picture.",
-        container: "wav",
-        ext: "wav",
-        template_candidates: [{ pattern: "\\bWAV\\b", flags: "i" }],
-        video_output: false,
-        audio_sample_rate: 48e3,
-        output_audio: "On",
-        name_template: "[compName]_[spec].wav",
-        note: "Needs a WAV output module template on this machine; refused without one."
-      },
-      {
-        id: "gif",
-        label: "Animated GIF",
-        description: "Not available: After Effects has no animated GIF output module.",
-        container: "gif",
-        ext: "gif",
-        template_candidates: [],
-        name_template: "[compName].gif",
-        refuse: "After Effects has no animated GIF output module (Adobe moved GIF to Media Encoder and Photoshop). Use the png_sequence spec and convert the frames outside AE."
-      }
-    ];
-    SPEC_IDS = SPEC_LIBRARY.map((s) => s.id);
-    specById = (id) => SPEC_LIBRARY.find((s) => s.id === id);
-    NAME_TOKENS = ["compName", "spec", "width", "height", "date", "copy"];
-    isAbsolutePath = (p) => /^([A-Za-z]:[\\/]|\/|\\\\)/.test(p);
-    pathKey = (p) => p.replace(/\\/g, "/").toLowerCase();
-    toBool = (v) => {
-      if (typeof v === "boolean") return v;
-      if (typeof v === "number") return v !== 0;
-      if (typeof v === "string") {
-        if (/^(on|true|yes|1)$/i.test(v.trim())) return true;
-        if (/^(off|false|no|0)$/i.test(v.trim())) return false;
-      }
-      return void 0;
-    };
-    numbersIn = (s) => (s.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
-    toNum = (v) => {
-      if (typeof v === "number") return v;
-      if (typeof v === "string") {
-        const n = numbersIn(v)[0];
-        if (n === void 0) return void 0;
-        return /khz/i.test(v) ? n * 1e3 : n;
-      }
-      return void 0;
-    };
-    TIME_TOL2 = 0.05;
-    ItemIndexSchema = external_exports.number().int().min(1).max(500).describe("1-based position in the Render Queue (see ae_render_queue_inspect). The queue shifts when items are added or removed, so re-read it first.");
-    ItemCompSchema = external_exports.number().int().optional().describe("Expected CompItem id of the queue item at item_index. The tool refuses when it is another comp (the queue changed under you).");
-    SettingValueSchema = external_exports.union([
-      external_exports.string().max(2e3),
-      external_exports.number().finite(),
-      external_exports.boolean(),
-      external_exports.array(external_exports.union([external_exports.string().max(200), external_exports.number().finite()])).max(8),
-      external_exports.record(external_exports.string(), external_exports.union([external_exports.string().max(2e3), external_exports.number().finite(), external_exports.boolean()]))
-    ]);
-    SettingsMapSchema = external_exports.record(external_exports.string().min(1).max(100), SettingValueSchema).refine((r) => Object.keys(r).length <= 40, { message: "At most 40 settings at once." }).refine((r) => !Object.keys(r).some((k) => k.trim().toLowerCase() === "format"), {
-      message: '"Format" is read-only in After Effects. Change the format with an output module template.'
-    });
-    FileSchema = external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Absolute output file path. AE's [#####] frame token is kept for image sequences. The tool refuses a path another queued item uses, or one already on disk unless allow_overwrite is true.");
-    POST_ACTIONS = ["none", "import", "import_and_replace_usage", "set_proxy"];
-    LOG_TYPES = ["errors_only", "errors_and_settings", "errors_and_per_frame_info"];
-    PostActionSchema = external_exports.enum(POST_ACTIONS).describe("What AE does with the rendered file: nothing, import it, import it and replace the comp's usage, or set it as the comp's proxy.");
-    TimeSpanSchema = external_exports.union([
-      external_exports.enum(["comp", "work_area"]),
-      external_exports.object({
-        start: external_exports.number().min(0).describe("Seconds from the comp's start."),
-        duration: external_exports.number().positive().describe("Seconds.")
-      })
-    ]).describe("The time span to render: 'comp' (whole comp), 'work_area', or { start, duration } in seconds. Must end inside the comp.");
-    ModuleBase = {
-      template: external_exports.string().min(1).max(200).optional().describe("Output module template to apply first (this is the only way to change the format, codec or bitrate). Must be installed on this machine; the tool lists the installed ones when it isn't."),
-      settings: SettingsMapSchema.optional().describe(
-        "Output module settings by their STRING_SETTABLE key, e.g. 'Channels', 'Resize', 'Resize to' ([width, height]), 'Audio Sample Rate', 'Output File Info' ({ 'File Name': ... }). Keys are checked against ae_render_queue_inspect's dump before anything changes; values take the dump's type. Applied after the template."
-      ),
-      file: FileSchema.optional(),
-      post_render_action: PostActionSchema.optional(),
-      include_source_xmp: external_exports.boolean().optional().describe("Include the source XMP metadata in the output file.")
-    };
-    hasModuleChange = (m) => [m.template, m.settings, m.file, m.post_render_action, m.include_source_xmp].some((v) => v !== void 0);
-    ModuleEditSchema = external_exports.object({ index: external_exports.number().int().min(1).max(20).describe("1-based output module index."), ...ModuleBase }).refine(hasModuleChange, { message: "Each output module edit changes something." });
-    ModuleAddSchema = external_exports.object(ModuleBase).describe("A new output module (AE starts it from the default template).");
-    REMOVE_STATUSES = ["done", "user_stopped", "err_stopped", "unqueued", "queued", "needs_output"];
-    RemoveRowSchema = external_exports.object({
-      index: ItemIndexSchema,
-      comp_id: external_exports.number().int().describe("The CompItem id the item at index must have. The tool refuses the whole removal when any index holds another comp (the queue shifted).")
-    });
-    RemoveFilterSchema = external_exports.object({
-      status: external_exports.enum(REMOVE_STATUSES).describe("Remove every item with this status ('done' clears finished renders, 'unqueued' the ones switched off). An item that is rendering is never removed."),
-      comp_id: external_exports.number().int().optional().describe("Only items of this comp.")
-    });
-    AeRenderQueueInspectSchema = external_exports.object({
-      item_index: ItemIndexSchema.optional().describe("One item, with its render settings and output module settings. Without it: every item, briefly."),
-      settings: external_exports.boolean().optional().describe("Dump the render settings and each output module's settings (the keys ae_render_queue_edit accepts). Default true with item_index, false without."),
-      include_templates: external_exports.boolean().optional().describe("List the installed render settings and output module templates for the item(s).")
-    });
-    AeRenderQueueEditSchema = external_exports.object({
-      item_index: ItemIndexSchema.optional().describe(
-        "1-based position in the Render Queue (see ae_render_queue_inspect). Required for every edit; not used with remove / remove_filter. The queue shifts when items are added or removed, so re-read it first."
-      ),
-      comp_id: ItemCompSchema,
-      queued: external_exports.boolean().optional().describe(
-        "Set the item's Render checkbox (RenderQueueItem.render): true queues it (needed before ae_aerender_start rq_index can render it, and ae_save so the file holds it), false unqueues it. A DONE or RENDERING item is refused. Queueing an item without a valid output file leaves it NEEDS_OUTPUT: the read-back reports that as a mismatch. Applied after the other changes of the same call."
-      ),
-      remove: external_exports.array(RemoveRowSchema).min(1).max(500).optional().describe("Take these items out of the Render Queue: [{ index, comp_id }], each guarded by its comp. Exclusive: no other change in the same call. Done highest index first in one undo group; refused while the queue is rendering or when an item is rendering."),
-      remove_filter: RemoveFilterSchema.optional().describe("Take out every item with this status (and comp_id), scanning the whole queue; more than 500 matches is refused. Exclusive like remove. Use dry_run first to see what goes."),
-      dry_run: external_exports.boolean().optional().describe("With remove / remove_filter: list the items that would be removed and change nothing."),
-      render_settings_template: external_exports.string().min(1).max(200).optional().describe("Render settings template to apply first."),
-      time_span: TimeSpanSchema.optional(),
-      skip_frames: external_exports.number().int().min(0).max(99).optional().describe("Frames to skip between rendered frames (0 renders every frame)."),
-      log_type: external_exports.enum(LOG_TYPES).optional(),
-      render_settings: SettingsMapSchema.optional().describe(
-        "Render settings by STRING_SETTABLE key (e.g. 'Quality', 'Resolution', 'Frame Rate'). Keys are checked before anything changes. Applied after render_settings_template."
-      ),
-      output_modules: external_exports.array(ModuleEditSchema).max(20).optional().describe("Edits to existing output modules, by index."),
-      add_output_modules: external_exports.array(ModuleAddSchema).max(10).optional().describe("Output modules to add (one more deliverable from the same render)."),
-      remove_output_modules: external_exports.array(external_exports.number().int().min(1).max(20)).max(20).optional().describe("Output modules to remove, by their index before this call. At least one must remain."),
-      allow_overwrite: external_exports.boolean().optional().describe("Allow an output file that already exists on disk."),
-      expect: ExpectSchema
-    }).refine(
-      (v) => [v.render_settings_template, v.time_span, v.skip_frames, v.log_type, v.render_settings, v.output_modules, v.add_output_modules, v.remove_output_modules, v.queued, v.remove, v.remove_filter].some(
-        (x) => x !== void 0
-      ),
-      { message: "Nothing to change: give at least one of the settings." }
-    ).superRefine((v, ctx) => {
-      const removing = v.remove !== void 0 || v.remove_filter !== void 0;
-      if (v.remove !== void 0 && v.remove_filter !== void 0) {
-        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["remove_filter"], message: "Give remove or remove_filter, not both." });
-      }
-      if (removing) {
-        const others = ["item_index", "render_settings_template", "time_span", "skip_frames", "log_type", "render_settings", "output_modules", "add_output_modules", "remove_output_modules", "queued", "allow_overwrite", "comp_id"].filter((k) => v[k] !== void 0);
-        if (others.length > 0) {
-          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: [others[0]], message: `Removing items is a call of its own (indexes shift): drop ${others.join(", ")}.${others.includes("comp_id") ? " To limit a removal to one comp use remove[].comp_id or remove_filter.comp_id." : ""}` });
-        }
-        if (v.remove !== void 0 && new Set(v.remove.map((r) => r.index)).size !== v.remove.length) {
-          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["remove"], message: "An index is listed twice." });
-        }
-      } else {
-        if (v.item_index === void 0) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["item_index"], message: "item_index is required to edit an item." });
-        if (v.dry_run !== void 0) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["dry_run"], message: "dry_run goes with remove / remove_filter." });
-      }
-    });
-    CopySchema = external_exports.object({
-      output_module_template: external_exports.string().min(1).max(200).optional().describe("Output module template for this copy's first output module."),
-      render_settings_template: external_exports.string().min(1).max(200).optional(),
-      file: FileSchema.optional().describe("Output file of this copy's first output module. Required with output_module_template (the format decides the extension, and a PNG sequence needs [#####]). Default: the source's path with the next free _copyN before the extension (a duplicate may keep the source's path, which would render over it)."),
-      settings: SettingsMapSchema.optional().describe("Settings for this copy's first output module (see ae_render_queue_edit)."),
-      render_settings: SettingsMapSchema.optional(),
-      time_span: TimeSpanSchema.optional(),
-      skip_frames: external_exports.number().int().min(0).max(99).optional(),
-      log_type: external_exports.enum(LOG_TYPES).optional(),
-      post_render_action: PostActionSchema.optional()
-    }).refine((c) => c.output_module_template === void 0 || c.file !== void 0, {
-      message: "Give file together with output_module_template: the template can change the container, so the source's path (and its extension) cannot be reused."
-    }).describe("What differs in this copy.");
-    AeRenderQueueDuplicateSchema = external_exports.object({
-      item_index: ItemIndexSchema,
-      comp_id: ItemCompSchema,
-      count: external_exports.number().int().min(1).max(20).optional().describe("Plain copies (each with the next free _copyN path, so a later call continues the numbering). Use copies for per-copy changes."),
-      copies: external_exports.array(CopySchema).min(1).max(20).optional(),
-      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
-      expect: ExpectSchema
-    }).refine((v) => v.count === void 0 !== (v.copies === void 0), { message: "Give either count or copies." });
-    AeDeliverySpecsSchema = external_exports.object({
-      ids: external_exports.array(external_exports.enum(SPEC_IDS)).max(20).optional().describe("Only these specs. Default: all."),
-      item_index: ItemIndexSchema.optional().describe("Judge the specs against this queue item (its installed templates and its comp's size). Default: queue item 1, templates and comp."),
-      comp_id: external_exports.number().int().optional().describe("Judge the aspect ratio against this comp.")
-    });
-    AeApplySpecSchema = external_exports.object({
-      item_index: ItemIndexSchema,
-      comp_id: ItemCompSchema,
-      specs: external_exports.array(external_exports.enum(SPEC_IDS)).min(1).max(12).describe("Spec ids from ae_delivery_specs. One output per spec."),
-      output_folder: external_exports.string().min(1).max(1e3).refine(isAbsolutePath, { message: "An absolute path is needed." }).describe("Folder the files go in. It should exist; the tool warns when it doesn't."),
-      file_name: external_exports.string().min(1).max(300).refine((t) => unknownNameTokens(t).length === 0, { message: `Unknown token. Use ${NAME_TOKENS.map((t) => `[${t}]`).join(", ")} (and AE's [#####] for sequences).` }).optional().describe("File name template; default each spec's own, like '[compName]_[spec].mp4'. A name without an extension gets the spec's; another media extension (like .mp4 on a ProRes spec) is replaced by the spec's."),
-      in_place: external_exports.boolean().optional().describe("Default true: the first spec is applied to the item itself and the rest to duplicates of it. False: every spec gets a duplicate and the item is left as it is. A DONE item is locked by AE, so it defaults to false and in_place: true is refused."),
-      allow_stretch: external_exports.boolean().optional().describe("Apply a spec whose aspect ratio differs from the comp's (the picture stretches). Default false: refused."),
-      allow_overwrite: external_exports.boolean().optional().describe("Allow output files that already exist on disk."),
-      settings: SettingsMapSchema.optional().describe("Extra output module settings for every spec."),
-      post_render_action: PostActionSchema.optional(),
-      expect: ExpectSchema
-    }).refine((v) => new Set(v.specs).size === v.specs.length, { message: "A spec is listed twice." }).refine((v) => v.specs.length < 2 || v.file_name === void 0 || /\[(spec|copy|width|height)\]/.test(v.file_name), {
-      message: "With several specs the file name template needs [spec], [copy], [width] or [height] so the files differ."
-    });
-    AeCheckDeliveryFileSchema = external_exports.object({
-      spec_id: external_exports.enum(SPEC_IDS),
-      file_path: external_exports.string().min(1).max(1e3).describe("The finished file (for a PNG sequence, any one frame).")
-    });
-    readCall2 = (indexes, settings) => ({
-      host: "rqeditRead",
-      args: { item_indexes: indexes, settings }
-    });
-    asArray = (v) => Array.isArray(v) ? v : [];
-    afterCopiesRead = (entries) => {
-      const idx = asArray(entries).map((e) => e.item_index).filter((n) => typeof n === "number");
-      if (!idx.length) return readCall2(void 0, false);
-      return { host: "rqeditRead", args: { item_indexes: void 0, settings: false, settings_indexes: [...new Set(idx)] } };
-    };
-    editHostArgs = (a) => ({
-      item_index: a.item_index,
-      item_comp_id: a.comp_id,
-      queued: a.queued,
-      item_template: a.render_settings_template,
-      time_span: a.time_span,
-      skip_frames: a.skip_frames,
-      log_type: a.log_type,
-      render_settings: a.render_settings,
-      modules: a.output_modules,
-      add_modules: a.add_output_modules,
-      remove_modules: a.remove_output_modules,
-      allow_overwrite: a.allow_overwrite,
-      label: `Edit render queue item ${a.item_index}`
-    });
-    rqeditTools = [
-      {
-        name: "ae_render_queue_inspect",
-        description: "Read Render Queue items: comp, status, the render (queued) flag, time span, skip frames, log type, output modules (file, post-render action) and, with settings, the render settings and each output module's settings by their STRING_SETTABLE key (the keys ae_render_queue_edit takes), with include_templates the installed templates. Changes nothing. The output module Format is shown but cannot be set by script; only a template changes it.",
-        schema: AeRenderQueueInspectSchema,
-        handler: async (args, ctx) => {
-          const res = await ctx.bridge.callHost(
-            "rqeditRead",
-            {
-              item_indexes: args.item_index !== void 0 ? [args.item_index] : void 0,
-              settings: args.settings ?? args.item_index !== void 0,
-              include_templates: args.include_templates === true
-            },
-            { label: "ae_render_queue_inspect", mutates: false, toolName: "ae_render_queue_inspect" }
-          );
-          return res.result;
-        }
-      },
-      {
-        name: "ae_render_queue_edit",
-        description: "Edit an item already in the Render Queue, in one undo group guarded by `expect`: render settings template, time span (comp, work area or start/duration), skip frames, log type, render settings, the queued flag (queued: true/false, the item's Render checkbox: an item must be queued, then saved, before ae_aerender_start rq_index can render it), and per output module the template, settings, output file, post-render action and XMP; add or remove output modules. Or take items out of the queue: remove ([{ index, comp_id }], each guarded by its comp) or remove_filter ({ status: done | user_stopped | err_stopped | unqueued | queued | needs_output, comp_id? }) in a call of their own, highest index first in one undo group, refused while the queue is rendering; dry_run lists what would go. The read-back checks the queue shrank by the count and the survivors are the expected comps. A DONE item is refused (AE locks its settings; duplicate it instead). Everything is checked before AE changes: templates must be installed, setting keys must be ones the item offers (ae_render_queue_inspect lists them), \"Format\" is read-only (use a template), the time span must fit the comp, and an output file must not be another queued item's or already on disk (allow_overwrite). A step that fails inside AE is reported in `errors`, not thrown. The read-back (a separate evalScript) compares every change; a format can adjust a size or rate it can't take, and that shows as a mismatch. A template itself can't be read back. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeRenderQueueEditSchema,
-        handler: async (args, ctx) => {
-          if (args.remove !== void 0 || args.remove_filter !== void 0) {
-            const removeArgs = { remove: args.remove, remove_filter: args.remove_filter };
-            if (args.dry_run === true) {
-              ctx.quarantine.assertClear();
-              const res = await ctx.bridge.callHost(
-                "rqeditRemove",
-                { ...removeArgs, dry_run: true, expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id } },
-                { label: "ae_render_queue_edit (dry run)", mutates: false, toolName: "ae_render_queue_edit" }
-              );
-              return { applied: false, ...res.result ?? {} };
-            }
-            return runGuardedWrite(ctx, {
-              toolName: "ae_render_queue_edit",
-              label: `ae_render_queue_edit(remove ${args.remove !== void 0 ? args.remove.length + " items" : "by status " + args.remove_filter?.status})`,
-              expect: args.expect,
-              read: () => readCall2(void 0, false),
-              write: { host: "rqeditRemove", args: { ...removeArgs, label: "Remove render queue items" } },
-              check: (before, after, w) => removeMismatches(before, after, w),
-              present: (_b, after, w) => ({
-                removed: w.removed,
-                errors: w.errors,
-                warnings: w.warnings,
-                num_items_before: w.num_items_before,
-                num_items: queueOf(after)?.numItems,
-                ...w.no_op === true ? { no_op: true } : {}
-              })
-            });
-          }
-          const itemIndex = args.item_index;
-          return runGuardedWrite(ctx, {
-            toolName: "ae_render_queue_edit",
-            label: `ae_render_queue_edit(item ${itemIndex})`,
-            expect: args.expect,
-            read: () => readCall2([itemIndex], true),
-            write: { host: "rqeditEdit", args: editHostArgs(args) },
-            check: (before, after, w) => editMismatches(args, before, after, w),
-            present: (_b, after, w) => ({
-              item_index: itemIndex,
-              item: itemOf2(queueOf(after), itemIndex),
-              steps_done: w.steps_done,
-              skipped: w.skipped,
-              errors: w.errors,
-              warnings: w.warnings,
-              added_modules: w.added_modules,
-              removed_modules: w.removed_modules,
-              ...w.no_op === true ? { no_op: true } : {}
-            })
-          });
-        }
-      },
-      {
-        name: "ae_render_queue_duplicate",
-        description: "Duplicate a Render Queue item N times (RenderQueueItem.duplicate), each copy with its own output module template, output file and settings, in one undo group guarded by `expect`: H.264 plus ProRes plus a PNG sequence from one comp. A duplicate may keep the source's output path and render over it, so every copy gets its own file (yours, or the source's with the next free _copyN) and the tool refuses a path already queued or on disk. A copy with an output_module_template needs its own file. A finished item's copy is queued again. The read-back (a separate evalScript) checks the queue grew by the copies, each copy's settings and that no copy writes the same file as another unfinished item in the queue. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeRenderQueueDuplicateSchema,
-        handler: (args, ctx) => runGuardedWrite(ctx, {
-          toolName: "ae_render_queue_duplicate",
-          label: `ae_render_queue_duplicate(item ${args.item_index} x${args.count ?? args.copies?.length ?? 0})`,
-          expect: args.expect,
-          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.copies),
-          write: {
-            host: "rqeditDuplicate",
-            args: {
-              item_index: args.item_index,
-              item_comp_id: args.comp_id,
-              copies: args.copies ?? Array.from({ length: args.count ?? 0 }, () => ({})),
-              allow_overwrite: args.allow_overwrite,
-              label: `Duplicate render queue item ${args.item_index}`
-            }
-          },
-          check: (before, after, w) => copiesMismatches("copy", before, after, asArray(w.copies), w.comp_id).concat(stepMismatches("duplicate", asArray(w.errors), [])),
-          present: (_b, after, w) => {
-            const q = queueOf(after);
-            const copies = asArray(w.copies);
-            return {
-              source_index: w.source_index,
-              copies: copies.map((c) => ({ ...c, expect: void 0, item: itemOf2(q, c.item_index) })),
-              errors: w.errors
-            };
-          }
-        })
-      },
-      {
-        name: "ae_delivery_specs",
-        description: "The delivery spec library (YouTube 1080p/4K, Instagram feed and Reels/Story, TikTok, LinkedIn, broadcast HD/UHD and ProRes 422 HQ master, PNG sequence, WAV, GIF) and which of them this After Effects can meet for a queue item: the installed output module template each would use, and why a spec is refused (no matching template, the comp's aspect ratio, GIF). Changes nothing. Specs pick an installed template (AE can't set format, codec or bitrate by script) and set size, channels and audio around it; the bitrate is whatever the template carries. Apply with ae_render_queue_apply_spec.",
-        schema: AeDeliverySpecsSchema,
-        handler: async (args, ctx) => {
-          const specs = args.ids ? SPEC_LIBRARY.filter((s) => args.ids.includes(s.id)) : SPEC_LIBRARY;
-          const res = await ctx.bridge.callHost(
-            "rqeditSpecs",
-            { specs, item_index: args.item_index, comp_id: args.comp_id },
-            { label: "ae_delivery_specs", mutates: false, toolName: "ae_delivery_specs" }
-          );
-          const host = res.result ?? {};
-          const verdicts = asArray(host.specs);
-          return {
-            templates_known: host.templates_known,
-            templates_from: host.templates_from,
-            comp: host.comp,
-            output_module_templates: host.output_module_templates,
-            specs: specs.map((s) => ({ ...s, template_candidates: void 0, ...verdicts.find((v) => v.id === s.id) ?? {}, id: s.id }))
-          };
-        }
-      },
-      {
-        name: "ae_render_queue_apply_spec",
-        description: `Apply delivery specs (ae_delivery_specs) to a Render Queue item, one output per spec, in one undo group guarded by \`expect\`: the output module template is picked from the installed ones, then size (Resize), channels, audio and the output file (from a name template: [compName], [spec], [width], [height], [date], [copy]). By default the first spec edits the item and the others are duplicates of it (a DONE item is locked by AE, so every spec goes on a duplicate). A spec this AE can't meet is refused before anything changes, with the reason (no matching template, GIF, the comp's aspect ratio would stretch unless allow_stretch, an existing file unless allow_overwrite). The item must have exactly one output module. Only these default keys may be left unset when AE does not offer them for the template's format, and they are listed in the result's skipped[] with optional: true without failing the call: Channels "RGB" (an H.264 template has no Channels key and is RGB anyway) and Resize off. Everything else defines the delivery and fails the read-back when it is missing: Channels "RGB + Alpha" (unless the template's name says alpha, e.g. "PNG + ALPHA": AE lists no Channels setting for PNG templates, so the template carries it), Output Audio, Audio Sample Rate, Video Output, Resize on and Resize to, and any key you pass in \`settings\`. The read-back (a separate evalScript) checks each item's file and settings; bitrate and codec come from the template and can't be read back. ` + AGENT_SAFETY_GUIDANCE,
-        schema: AeApplySpecSchema,
-        handler: (args, ctx) => runGuardedWrite(ctx, {
-          toolName: "ae_render_queue_apply_spec",
-          label: `ae_render_queue_apply_spec(item ${args.item_index}: ${args.specs.join(", ")})`,
-          expect: args.expect,
-          read: (phase, w) => phase === "before" ? readCall2(void 0, false) : afterCopiesRead(w?.results),
-          write: {
-            host: "rqeditApplySpec",
-            args: {
-              item_index: args.item_index,
-              item_comp_id: args.comp_id,
-              specs: args.specs.map((id) => specById(id)),
-              output_folder: args.output_folder,
-              file_name: args.file_name,
-              in_place: args.in_place,
-              allow_stretch: args.allow_stretch,
-              allow_overwrite: args.allow_overwrite,
-              settings: args.settings,
-              post_render_action: args.post_render_action,
-              label: `Apply delivery specs to render queue item ${args.item_index}`
-            }
-          },
-          check: (before, after, w) => {
-            const results = asArray(w.results);
-            return copiesMismatches("spec", before, after, results, w.comp_id);
-          },
-          present: (_b, after, w) => {
-            const q = queueOf(after);
-            return {
-              source_index: w.source_index,
-              in_place: w.in_place,
-              results: asArray(w.results).map((r) => ({ ...r, expect: void 0, item: itemOf2(q, r.item_index) }))
-            };
-          }
-        })
-      },
-      {
-        name: "ae_check_delivery_file",
-        description: "Check a finished render against its delivery spec: the file exists and isn't empty, has the spec's extension and is under the spec's approximate size limit (Node fs.stat). Codec, bitrate and dimensions aren't checked here; ae_verify_render imports the file and checks size, frame rate and audio. Changes nothing.",
-        schema: AeCheckDeliveryFileSchema,
-        handler: async (args) => {
-          const spec = specById(args.spec_id);
-          return { spec_id: spec.id, file_path: args.file_path, ...checkDeliveryFile(spec, args.file_path), max_size_mb: spec.max_size_mb ?? null };
-        }
-      }
-    ];
-  }
-});
-
-// src/tools/ext/renderbatch.ts
-function refineJob(val, ctx) {
-  const comps = val.comps ?? [];
-  const queueItems = val.queue_items ?? [];
-  if (comps.length === 0 && queueItems.length === 0) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["comps"], message: "Give comps, queue_items or both." });
-  }
-  if (new Set(comps).size !== comps.length) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["comps"], message: "Comp names must be unique in the list." });
-  }
-  if (new Set(queueItems.map((q) => q.rq_index)).size !== queueItems.length) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["queue_items"], message: "A Render Queue index is listed twice." });
-  }
-  const queueNames = queueItems.map((q) => (q.name ?? `rq${q.rq_index}`).toLowerCase());
-  if (new Set(queueNames).size !== queueNames.length) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["queue_items"], message: "Queue item names must be unique." });
-  }
-  const specNames = (val.specs ?? []).map((s) => s.name.toLowerCase());
-  if (new Set(specNames).size !== specNames.length) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["specs"], message: "Spec names must be unique." });
-  }
-  if (!WIN_OR_POSIX_ABSOLUTE.test(val.output_dir)) {
-    ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["output_dir"], message: "`output_dir` must be an absolute path." });
-  }
-  for (const m of (val.name_template ?? "").matchAll(/\{([^{}]*)\}/g)) {
-    if (!TOKENS.includes(m[1])) {
-      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["name_template"], message: `Unknown token {${m[1]}}. Use ${TOKENS.map((t) => `{${t}}`).join(", ")}.` });
-    }
-  }
-}
-function sanitizeFileToken(s) {
-  const cleaned = s.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
-  return cleaned.length > 0 ? cleaned : "_";
-}
-function isSequencePath(p) {
-  return /\[#+\]/.test(path32.basename(p.replace(/\\/g, "/")));
-}
-function joinOutput(dir, name) {
-  const sep6 = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-  return dir.replace(/[\\/]+$/, "") + sep6 + name;
-}
-function dateStamp(now) {
-  const d = new Date(now);
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
-}
-function outputNameFor(job, compName, spec, n, now) {
-  const base = job.name_template.replace(/\{(comp|spec|date|n)\}/g, (_m, token) => {
-    if (token === "comp") return sanitizeFileToken(compName);
-    if (token === "spec") return sanitizeFileToken(spec.name);
-    if (token === "date") return dateStamp(now);
-    return String(n).padStart(2, "0");
-  });
-  const stem2 = sanitizeFileToken(base);
-  const ext2 = spec.extension ?? job.extension;
-  return spec.sequence ? `${stem2}.[#####].${ext2}` : `${stem2}.${ext2}`;
-}
-function normaliseJob(args) {
-  return {
-    comps: args.comps ?? [],
-    queue_items: args.queue_items ?? [],
-    specs: args.specs && args.specs.length > 0 ? args.specs : [{ name: "default" }],
-    output_dir: args.output_dir,
-    name_template: args.name_template ?? "{comp}_{spec}",
-    extension: args.extension ?? "mov",
-    extension_given: args.extension !== void 0,
-    time_span: args.time_span ?? "comp"
-  };
-}
-function framesFor(info, span) {
-  const fps = info?.frame_rate;
-  const dur = info?.duration;
-  if (!info || !fps || !dur || !(fps > 0) || !(dur > 0)) return { frames: null };
-  const whole = Math.max(1, Math.round(dur * fps));
-  if (span === "template") return { frames: whole };
-  if (span === "work_area") {
-    const ws = info.work_area_start;
-    const wd = info.work_area_duration;
-    if (typeof ws === "number" && typeof wd === "number" && wd > 0) {
-      const start = Math.max(0, Math.round(ws * fps));
-      const frames = Math.max(1, Math.round(wd * fps));
-      return { start, end: start + frames - 1, frames };
-    }
-  }
-  return { start: 0, end: whole - 1, frames: whole };
-}
-function outputsOf(item) {
-  if (item.output_paths && item.output_paths.length > 0) return item.output_paths;
-  return item.output_path ? [item.output_path] : [];
-}
-function folderOf(p) {
-  const m = /^(.*)([\\/])[^\\/]*$/.exec(p);
-  if (!m) return "";
-  if (m[1] === "") return m[2];
-  if (/^[A-Za-z]:$/.test(m[1])) return m[1] + m[2];
-  return m[1];
-}
-function volumeKeyOf(dir) {
-  return driveLetterOf(dir + "/") ?? dir;
-}
-function mayShareVolume(a, b) {
-  const la = driveLetterOf(a + "/");
-  const lb = driveLetterOf(b + "/");
-  return la === null || lb === null || la === lb;
-}
-function spaceDirsOf(item, outputDir) {
-  if (item.rq_index === void 0) return [outputDir];
-  const seen = {};
-  const dirs = [];
-  for (const out of outputsOf(item)) {
-    const d = folderOf(out) || outputDir;
-    const k = volumeKeyOf(d);
-    if (seen[k]) continue;
-    seen[k] = true;
-    dirs.push(d);
-  }
-  return dirs.length > 0 ? dirs : [outputDir];
-}
-function batchSpaceDirs(items, outputDir) {
-  const seen = {};
-  const dirs = [];
-  const add = (d) => {
-    const k = volumeKeyOf(d);
-    if (seen[k]) return;
-    seen[k] = true;
-    dirs.push(d);
-  };
-  if (items.length === 0 || items.some((it) => it.rq_index === void 0)) add(outputDir);
-  for (const it of items) if (it.rq_index !== void 0) for (const d of spaceDirsOf(it, outputDir)) add(d);
-  return dirs;
-}
-function queueItemFrames(q) {
-  if (!q || typeof q.comp_frame_rate !== "number" || !(q.comp_frame_rate > 0)) return null;
-  const dur = q.time_span_duration ?? q.comp_duration;
-  if (typeof dur !== "number" || !(dur > 0)) return null;
-  const skip = typeof q.skip_frames === "number" && q.skip_frames > 0 ? q.skip_frames + 1 : 1;
-  return Math.max(1, Math.round(dur * q.comp_frame_rate / skip));
-}
-function expandItems(job, reads, now, queueReads = []) {
-  const byName = new Map(reads.map((c) => [c.name, c]));
-  const items = [];
-  for (const comp of job.comps) {
-    const info = byName.get(comp);
-    const f = framesFor(info && info.count === 1 ? info : void 0, job.time_span);
-    for (const spec of job.specs) {
-      const index = items.length + 1;
-      items.push({
-        index,
-        comp_name: comp,
-        spec_name: spec.name,
-        ...spec.render_settings_template ? { render_settings_template: spec.render_settings_template } : {},
-        ...spec.output_module_template ? { output_module_template: spec.output_module_template } : {},
-        output_path: joinOutput(job.output_dir, outputNameFor(job, comp, spec, index, now)),
-        ...f.start !== void 0 ? { start_frame: f.start } : {},
-        ...f.end !== void 0 ? { end_frame: f.end } : {},
-        frames: f.frames
-      });
-    }
-  }
-  for (const q of job.queue_items) {
-    const rd = queueReads.find((r) => r.index === q.rq_index && r.found !== false);
-    const outs = rd ? itemOutputs(rd).paths : [];
-    items.push({
-      index: items.length + 1,
-      comp_name: rd?.comp_name ?? "",
-      spec_name: q.name ?? `rq${q.rq_index}`,
-      rq_index: q.rq_index,
-      item_comp_id: q.item_comp_id,
-      output_path: outs[0] ?? "",
-      output_paths: outs,
-      frames: queueItemFrames(rd)
-    });
-  }
-  return items;
-}
-function protectedReason(outputPath, projectPaths = []) {
-  const norm3 = outputPath.replace(/\\/g, "/").toLowerCase();
-  for (const seg of norm3.split("/")) {
-    if (seg === "_mcp_backups" || seg === "_mcp_checkpoints") return `it is inside ${seg}, which holds the MCP's own backups`;
-  }
-  for (const p of projectPaths) {
-    if (p && p !== "<unsaved>" && p.replace(/\\/g, "/").toLowerCase() === norm3) return "it is the project file itself";
-  }
-  return null;
-}
-function validatePlan(job, read3, items, projectPaths = []) {
-  const errors = [];
-  const warnings = [];
-  if (read3) {
-    if (job.queue_items.length > 0) {
-      if (read3.dirty) {
-        errors.push({
-          code: "queue_items_need_saved_project",
-          message: "The open project has unsaved changes. aerender reads the saved file, so Render Queue items added or queued since the last save are not in it: run ae_save, then plan again."
-        });
-      }
-      if (read3.queue_error) warnings.push(`The Render Queue items could not all be read: ${read3.queue_error}`);
-      for (const q of job.queue_items) {
-        const rd = read3.queue_items?.find((r) => r.index === q.rq_index && r.found !== false);
-        const picked = selectRqItem({ numItems: read3.queue_total ?? 0, items: rd ? [rd] : [] }, { rq_index: q.rq_index, item_comp_id: q.item_comp_id });
-        if (!picked.ok) {
-          errors.push({ code: picked.code, comp: rd?.comp_name, message: `Queue item ${q.rq_index}: ${picked.message}` });
-          continue;
-        }
-        for (const w of picked.selection.warnings) warnings.push(`Queue item ${q.rq_index}: ${w}`);
-        for (const f of picked.selection.outputs) {
-          const why = protectedReason(f, projectPaths);
-          if (why) errors.push({ code: "output_protected", comp: rd?.comp_name, message: `Queue item ${q.rq_index} would write ${f}, but ${why}.` });
-        }
-      }
-    }
-    for (const name of job.comps) {
-      const c = read3.comps.find((x) => x.name === name);
-      if (!c || c.count === 0) errors.push({ code: "comp_not_found", comp: name, message: `No comp named "${name}" in the project.` });
-      else if (c.count > 1) {
-        errors.push({ code: "comp_name_ambiguous", comp: name, message: `${c.count} comps are named "${name}"; aerender selects by name. Rename them so the name is unique.` });
-      } else if (!c.frame_rate || !c.duration) {
-        warnings.push(`Comp "${name}": frame rate or duration unreadable; its ETA and frame range are unknown.`);
-      }
-      if (c && c.count === 1 && c.queued_item) {
-        const q = c.queued_item;
-        const files = q.output_files.filter((f) => typeof f === "string");
-        if (q.num_output_modules > 1) {
-          errors.push({
-            code: "queued_item_extra_output_modules",
-            comp: name,
-            message: `Comp "${name}" already has a queued item in the render queue with ${q.num_output_modules} output modules (${files.slice(0, 5).join(", ")}). aerender renders that item, so every module writes to the path stored in the project, outside output_dir, where nothing here checks for overwrites. Take the item out of the render queue (or remove its extra output modules), save, and plan again.`
-          });
-          for (const f of files.slice(1)) {
-            const why = protectedReason(f, projectPaths);
-            if (why) errors.push({ code: "output_protected", comp: name, message: `A queued output module of "${name}" would write ${f}, but ${why}.` });
-          }
-        }
-        const missing = job.specs.filter((sp) => !sp.render_settings_template || !sp.output_module_template).map((sp) => sp.name);
-        if (missing.length > 0) {
-          warnings.push(`Comp "${name}" has a queued render-queue item. aerender renders that item, so spec(s) ${missing.join(", ")} (which leave out a template) use its render settings and output module, which may differ from the defaults (resolution, frame rate, codec).`);
-        }
-      }
-      if (c && c.count === 1 && typeof c.display_start_time === "number" && c.display_start_time !== 0 && (job.time_span === "comp" || job.time_span === "work_area")) {
-        warnings.push(`Comp "${name}" has a non-zero display start time (${c.display_start_time}s): whether aerender's -s/-e frames count from 0 or from that start is unconfirmed, so the rendered range may be shifted. Consider time_span 'template' for this comp.`);
-      }
-    }
-    const rsKnown = read3.templates.source !== "none" && read3.templates.render_settings.length > 0;
-    const omKnown = read3.templates.source !== "none" && read3.templates.output_modules.length > 0;
-    if (read3.templates.source === "none") {
-      warnings.push("Template names were not checked: the render queue is empty, and reading them would need a temporary item (which marks the project changed). An unknown template fails that item with 'aerender ERROR' in its log.");
-    } else {
-      if (!rsKnown && job.specs.some((sp) => sp.render_settings_template)) warnings.push("Render-settings template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
-      if (!omKnown && job.specs.some((sp) => sp.output_module_template)) warnings.push("Output-module template names could not be read, so they were not checked. An unknown template fails that item with 'aerender ERROR' in its log.");
-      for (const spec of job.specs) {
-        if (rsKnown && spec.render_settings_template && !read3.templates.render_settings.includes(spec.render_settings_template)) {
-          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no render-settings template "${spec.render_settings_template}". Known: ${read3.templates.render_settings.slice(0, 20).join(", ")}.` });
-        }
-        if (omKnown && spec.output_module_template && !read3.templates.output_modules.includes(spec.output_module_template)) {
-          errors.push({ code: "template_not_found", message: `Spec "${spec.name}": no output-module template "${spec.output_module_template}". Known: ${read3.templates.output_modules.slice(0, 20).join(", ")}.` });
-        }
-      }
-    }
-    if (read3.truncated) warnings.push("The comp list was capped; some names were not checked.");
-  }
-  for (const spec of job.comps.length === 0 ? [] : job.specs) {
-    if (spec.extension !== void 0 || job.extension_given) continue;
-    if (!spec.output_module_template) {
-      errors.push({
-        code: "extension_required",
-        message: `Spec "${spec.name}" has no output_module_template and no extension (nor does the job), so the file name would be a guess ('.${job.extension}'; recent After Effects versions default to H.264, .mp4). Give the spec or the job an extension that matches what is rendered.`
-      });
-    } else {
-      warnings.push(`Spec "${spec.name}" has no extension, so the file name ends in '.${job.extension}' (a default, not read from the template). Give it the extension the output-module template writes, or the batch fails verifying a file that rendered under another name.`);
-    }
-  }
-  const seen = /* @__PURE__ */ new Map();
-  for (const it of items) {
-    for (const out of outputsOf(it)) {
-      const key = out.replace(/\\/g, "/").toLowerCase();
-      const prev = seen.get(key);
-      if (prev !== void 0) {
-        const who = prev === it.index ? `Item ${it.index} writes the same file from two output modules` : `Items ${prev} and ${it.index} write the same file`;
-        errors.push({ code: "output_collision", item: it.index, message: `${who} (${out}). Add {comp}, {spec} or {n} to name_template, or give the queue items different output files.` });
-      } else seen.set(key, it.index);
-      if (it.rq_index === void 0) {
-        const why = protectedReason(out, projectPaths);
-        if (why) errors.push({ code: "output_protected", item: it.index, message: `Item ${it.index} would write ${out}, but ${why}.` });
-      }
-    }
-  }
-  if (job.time_span === "template") warnings.push("time_span 'template': no -s/-e is passed, so progress and ETA are estimated from the comp length.");
-  return { errors, warnings };
-}
-function sequenceRegex(base) {
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^${base.split(/\[#+\]/).map(esc).join("\\d+")}$`, "i");
-}
-function outputFiles(outputPath) {
-  try {
-    if (isSequencePath(outputPath)) {
-      const norm3 = path32.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
-      const dir = path32.dirname(norm3);
-      const re = sequenceRegex(path32.basename(norm3));
-      return fs31.readdirSync(dir).filter((n) => re.test(n)).map((n) => path32.join(dir, n));
-    }
-    return fs31.existsSync(outputPath) ? [outputPath] : [];
-  } catch {
-    return [];
-  }
-}
-function inspectOutput(outputPath) {
-  let bytes = 0;
-  let newest = null;
-  let count = 0;
-  const files = [];
-  for (const f of outputFiles(outputPath)) {
-    try {
-      const st = fs31.statSync(f);
-      if (!st.isFile()) continue;
-      count++;
-      files.push({ mtime_ms: st.mtimeMs, size: st.size });
-      bytes += st.size;
-      if (newest === null || st.mtimeMs > newest) newest = st.mtimeMs;
-    } catch {
-    }
-  }
-  return { exists: count > 0, bytes, newest_mtime_ms: newest, files };
-}
-function inspectOutputs(paths) {
-  if (paths.length === 1) return inspectOutput(paths[0]);
-  let bytes = 0;
-  let newest = null;
-  let any = false;
-  const files = [];
-  for (const p of paths) {
-    const o = inspectOutput(p);
-    if (!o.exists) continue;
-    any = true;
-    bytes += o.bytes;
-    files.push(...o.files);
-    if (o.newest_mtime_ms !== null && (newest === null || o.newest_mtime_ms > newest)) newest = o.newest_mtime_ms;
-  }
-  return { exists: any, bytes, newest_mtime_ms: newest, files };
-}
-function verifyOutput(outputPath, sinceMs, expectFrames = null) {
-  const o = inspectOutput(outputPath);
-  if (!o.exists) return { ok: false, bytes: 0, reason: "the output file does not exist" };
-  if (o.bytes <= 0) return { ok: false, bytes: 0, reason: "the output file is empty" };
-  const floor = sinceMs === null ? null : sinceMs - MTIME_SLOP_MS;
-  if (isSequencePath(outputPath)) {
-    const fresh = floor === null ? o.files : o.files.filter((f) => f.mtime_ms >= floor);
-    const bytes = fresh.reduce((sum, f) => sum + f.size, 0);
-    if (fresh.length === 0) return { ok: false, bytes: o.bytes, files: 0, reason: "no frame of the sequence is newer than the item's start (aerender did not write it)" };
-    if (expectFrames !== null && expectFrames > 0 && fresh.length !== expectFrames) {
-      return { ok: false, bytes, files: fresh.length, reason: `${fresh.length} of ${expectFrames} frames of the sequence were written` };
-    }
-    if (bytes <= 0) return { ok: false, bytes: 0, files: fresh.length, reason: "the written frames are empty" };
-    return { ok: true, bytes, files: fresh.length };
-  }
-  if (floor !== null && (o.newest_mtime_ms ?? 0) < floor) {
-    return { ok: false, bytes: o.bytes, reason: "the output file is older than the item's start (aerender did not write it)" };
-  }
-  return { ok: true, bytes: o.bytes };
-}
-function verifyOutputs(item, sinceMs, expectFrames = null) {
-  const paths = outputsOf(item);
-  if (paths.length <= 1) return verifyOutput(paths[0] ?? item.output_path, sinceMs, expectFrames);
-  let bytes = 0;
-  let files = 0;
-  let sawFiles = false;
-  for (const p of paths) {
-    const v = verifyOutput(p, sinceMs, null);
-    if (!v.ok) return { ok: false, bytes, reason: `${p}: ${v.reason}` };
-    bytes += v.bytes;
-    if (v.files !== void 0) {
-      files += v.files;
-      sawFiles = true;
-    }
-  }
-  return { ok: true, bytes, ...sawFiles ? { files } : {} };
-}
-function spaceStatus(freeBytes, neededBytes, minFreeGb) {
-  if (freeBytes === null) return "unknown";
-  return freeBytes - (neededBytes ?? 0) >= minFreeGb * GIB ? "ok" : "low";
-}
-function estimateBytes(items, item) {
-  if (!item.frames) return null;
-  let bytes = 0;
-  let frames = 0;
-  for (const i of items) {
-    if (i.state === "succeeded" && i.spec_name === item.spec_name && i.frames && i.output_bytes) {
-      bytes += i.output_bytes;
-      frames += i.frames;
-    }
-  }
-  if (frames === 0) return null;
-  return Math.round(bytes / frames * item.frames * 1.1);
-}
-function parseDfAvailableBytes(text) {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = /\s(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(lines[i]);
-    if (m) return parseInt(m[3], 10) * 1024;
-  }
-  return null;
-}
-function driveLetterOf(p) {
-  const m = /^([A-Za-z]):[\\/]/.exec(p);
-  return m ? m[1].toUpperCase() : null;
-}
-async function getFreeBytes(dir, platform = process.platform, run = defaultRunFile) {
-  try {
-    if (platform === "win32") {
-      const letter = driveLetterOf(dir);
-      if (!letter) return null;
-      const out = await run(powershellExe(), ["-NoProfile", "-NonInteractive", "-Command", `(Get-PSDrive -Name ${letter}).Free`]);
-      const text = out.trim();
-      if (!/^\d+$/.test(text)) return null;
-      const n = Number(text);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    }
-    let probe = dir;
-    while (probe && !fs31.existsSync(probe) && path32.dirname(probe) !== probe) probe = path32.dirname(probe);
-    return parseDfAvailableBytes(await run("df", ["-Pk", probe]));
-  } catch {
-    return null;
-  }
-}
-function effectiveConcurrency(requested, registry) {
-  return Math.max(1, Math.min(requested, registry.gate.opts.max_running));
-}
-function computeEta(b, nowMs, gate = {}) {
-  let secs3 = 0;
-  let frames = 0;
-  for (const i of b.items) {
-    if (i.state === "succeeded" && i.frames && i.started_at && i.finished_at) {
-      const d = (Date.parse(i.finished_at) - Date.parse(i.started_at)) / 1e3;
-      if (d > 0) {
-        secs3 += d;
-        frames += i.frames;
-      }
-    }
-  }
-  const spf = frames > 0 ? secs3 / frames : null;
-  const running = b.items.filter((i) => i.state === "running");
-  const pending = b.items.filter((i) => i.state === "pending");
-  if (running.length === 0 && pending.length === 0) return { eta_seconds: 0, eta_at: null, basis: "nothing left to render" };
-  let unknown = false;
-  let longestRunning = 0;
-  for (const i of running) {
-    const started = i.started_at ? Date.parse(i.started_at) : NaN;
-    if (typeof i.percent === "number" && i.percent > 0 && !Number.isNaN(started)) {
-      longestRunning = Math.max(longestRunning, (nowMs - started) / 1e3 * ((100 - i.percent) / i.percent));
-    } else if (spf !== null && i.frames) {
-      longestRunning = Math.max(longestRunning, spf * i.frames);
-    } else unknown = true;
-  }
-  let pendingSecs = 0;
-  for (const i of pending) {
-    if (spf !== null && i.frames) pendingSecs += spf * i.frames;
-    else unknown = true;
-  }
-  if (unknown) return { eta_seconds: null, eta_at: null, basis: "not enough finished items or frame counts yet" };
-  const conc = Math.max(1, Math.min(b.options.concurrency, gate.concurrency ?? b.options.concurrency));
-  const total2 = Math.round(longestRunning + pendingSecs / conc + (gate.gap_s ?? 0) * Math.ceil(pending.length / conc));
-  return { eta_seconds: total2, eta_at: new Date(nowMs + total2 * 1e3).toISOString(), basis: "running items' progress plus seconds per frame of the finished ones" };
-}
-function countStates(items) {
-  const c = { pending: 0, running: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0 };
-  for (const i of items) c[i.state]++;
-  return c;
-}
-function logFinished(logPath) {
-  const { fullText } = readLogTail(logPath);
-  return /Finished composition/i.test(fullText) && !/^aerender ERROR/im.test(fullText);
-}
-function refreshRunning(item, job, now, stallMs) {
-  const { fullText } = readLogTail(job.log_path);
-  const p = parseAerenderProgress(fullText, { start_frame: job.start_frame, end_frame: job.end_frame, state: job.state });
-  let percent = p.percent;
-  if (percent === null && item.frames && p.frames_completed > 0) percent = Math.min(100, Math.round(p.frames_completed / item.frames * 1e4) / 100);
-  item.percent = percent;
-  item.frames_completed = p.frames_completed;
-  let outBytes = 0;
-  for (const out of outputsOf(item)) {
-    try {
-      outBytes += fs31.existsSync(out) && !isSequencePath(out) ? fs31.statSync(out).size : 0;
-    } catch {
-    }
-  }
-  const sig = `${fullText.length}|${p.progress_lines_count}|${outBytes}`;
-  if (!item.activity || item.activity.sig !== sig || job.phase === "queued") item.activity = { sig, changed_ms: now };
-  item.stalled = job.state === "running" && job.phase !== "queued" && now - item.activity.changed_ms >= stallMs;
-  if (!item.stalled) item.stall_noted = false;
-}
-function expectedFrames(item) {
-  return item.start_frame !== void 0 && isSequencePath(item.output_path) ? item.frames : null;
-}
-function itemView(i) {
-  return {
-    index: i.index,
-    comp: i.comp_name,
-    spec: i.spec_name,
-    state: i.state,
-    output_path: i.output_path,
-    ...i.rq_index !== void 0 ? { rq_index: i.rq_index, output_paths: outputsOf(i) } : {},
-    frames: i.frames,
-    ...i.percent !== void 0 ? { percent: i.percent } : {},
-    ...i.job_id ? { job_id: i.job_id } : {},
-    ...i.error ? { error: i.error } : {},
-    ...i.note ? { note: i.note } : {},
-    ...i.output_bytes !== void 0 ? { output_bytes: i.output_bytes } : {},
-    ...i.output_files !== void 0 ? { output_files: i.output_files } : {},
-    ...i.stalled ? { stalled: true } : {},
-    ...i.overwrote ? { overwrote_existing: true } : {}
-  };
-}
-function batchSummary(b) {
-  return {
-    batch_id: b.batch_id,
-    state: b.state,
-    created_at: b.created_at,
-    finished_at: b.finished_at,
-    output_dir: b.output_dir,
-    counts: countStates(b.items),
-    total: b.items.length
-  };
-}
-function resolveOptions(a, aerenderPath, base) {
-  const pick4 = (v, fallback) => v === void 0 ? fallback : v;
-  return {
-    concurrency: pick4(a.concurrency, base?.concurrency ?? 1),
-    max_cpu_percent: pick4(a.max_cpu_percent, base?.max_cpu_percent ?? 50),
-    on_error: pick4(a.on_error, base?.on_error ?? "stop"),
-    stall_minutes: pick4(a.stall_minutes, base?.stall_minutes ?? 15),
-    if_output_exists: pick4(a.if_output_exists, base?.if_output_exists ?? "protect_recent"),
-    protect_recent_minutes: pick4(a.protect_recent_minutes, base?.protect_recent_minutes ?? 60),
-    min_free_gb: pick4(a.min_free_gb, base?.min_free_gb ?? 2),
-    on_unknown_space: pick4(a.on_unknown_space, base?.on_unknown_space ?? "continue"),
-    aerender_path: aerenderPath
-  };
-}
-function readArgs(job) {
-  return { comp_names: job.comps, ...job.queue_items.length > 0 ? { rq_items: job.queue_items.map((q) => ({ rq_index: q.rq_index })) } : {} };
-}
-function fileSig(p) {
-  try {
-    const st = fs31.statSync(p);
-    return `${st.mtimeMs}|${st.size}`;
-  } catch {
-    return "";
-  }
-}
-function createRenderbatch(options = {}) {
-  const getRegistry = () => options.registry ?? getDefaultAerenderRegistry();
-  const now = options.now ?? (() => Date.now());
-  const freeBytes = options.getFreeBytes ?? ((dir) => getFreeBytes(dir, options.platform));
-  let storeInstance = options.store ?? null;
-  let runnerInstance = null;
-  const getStore = () => {
-    if (!storeInstance) storeInstance = new BatchStore(path32.join(getRegistry().rendersDir, "batches"));
-    return storeInstance;
-  };
-  const pidAlive2 = options.isPidAlive ?? ((pid, jobId) => defaultIsPidAlive(pid, getRegistry(), jobId));
-  const getRunner = () => {
-    if (!runnerInstance) {
-      runnerInstance = new BatchRunner(
-        getStore(),
-        {
-          registry: getRegistry(),
-          spawn: options.spawn ?? childProcess3.spawn,
-          now,
-          getFreeBytes: freeBytes,
-          isPidAlive: pidAlive2,
-          killProcess: options.killProcess,
-          cancelHooks: options.cancelHooks
-        },
-        { tickMs: options.tickMs ?? 5e3, autoTick: options.autoTick ?? true }
-      );
-    }
-    return runnerInstance;
-  };
-  const queued10 = (err, opId) => {
-    if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-    throw err;
-  };
-  const planSpace = async (dir, minFreeGb) => {
-    const free = await freeBytes(dir);
-    return { dir, status: spaceStatus(free, null, minFreeGb), free_bytes: free, needed_bytes: null, checked_at: new Date(now()).toISOString() };
-  };
-  const measureBatchSpace = async (items, outputDir, minFreeGb) => {
-    const rows = [];
-    for (const d of batchSpaceDirs(items, outputDir)) rows.push(await planSpace(d, minFreeGb));
-    let space = rows[0];
-    for (const r of rows) if (space.status !== "low" && (r.status === "low" || r.status === "unknown" && space.status === "ok")) space = r;
-    return { space, rows };
-  };
-  const describeExisting = (items, policy) => items.map((it) => {
-    const ex = inspectOutputs(outputsOf(it));
-    const age = ex.newest_mtime_ms === null ? null : Math.max(0, Math.round((now() - ex.newest_mtime_ms) / 6e4));
-    const blocks = ex.exists && policy.if_output_exists === "protect_recent" && age !== null && age < policy.protect_recent_minutes;
-    return { index: it.index, exists: ex.exists, bytes: ex.bytes, age_minutes: age, ...blocks ? { would_block: true } : {} };
-  });
-  const tools = [
-    {
-      name: "ae_render_batch_plan",
-      description: "Dry run for a render batch. Expands comps x specs into items (comps outer, specs inner), names each output from name_template, and checks (queue_items are existing Render Queue items rendered through aerender -rqindex with all their output modules: each is checked for its comp id, QUEUED status and an output file on every module, the project must be saved and not dirty, and every output file is counted in the collision and overwrite checks, and free space is measured on each queue item's own output volumes): every comp name exists exactly once (aerender selects by name), the template names exist (when the render queue has an item to read them from), no two items write the same file, no output sits in _mcp_backups / _mcp_checkpoints, which outputs already exist and would be protected, and the output volume's free space ('unknown' for a UNC path, never 'ok'). Changes nothing in After Effects or on disk. Run it before ae_render_batch; valid:false lists what to fix.",
-      schema: AeRenderBatchPlanSchema,
-      handler: async (args, ctx) => {
-        const job = normaliseJob(args);
-        const read3 = (await ctx.bridge.callHost("renderbatchRead", readArgs(job), { label: "ae_render_batch_plan", mutates: false, toolName: "ae_render_batch_plan" })).result;
-        const items = expandItems(job, read3.comps, now(), read3.queue_items);
-        const { errors, warnings } = validatePlan(job, read3, items, [read3.project_path]);
-        const policy = resolveOptions(args, "");
-        const { space, rows: spaceRows } = await measureBatchSpace(items, job.output_dir, policy.min_free_gb);
-        if (space.status === "unknown") warnings.push("Free space on the output volume could not be measured; it is reported as unknown, not ok.");
-        if (read3.dirty) warnings.push("The open project has unsaved changes. ae_render_batch renders the saved file and asks for ae_save first.");
-        if (read3.project_path === "<unsaved>") errors.push({ code: "project_unsaved", message: "The project has never been saved; save it so there is a file to render." });
-        const existing = describeExisting(items, policy);
-        return {
-          ok: true,
-          valid: errors.length === 0,
-          project_path: read3.project_path,
-          dirty: read3.dirty,
-          item_count: items.length,
-          items: items.slice(0, MAX_ITEMS).map((it) => ({ ...it, existing: existing.find((e) => e.index === it.index) })),
-          errors,
-          warnings,
-          free_space: space,
-          ...spaceRows.length > 1 ? { free_space_volumes: spaceRows } : {},
-          templates_checked: read3.templates.source !== "none"
-        };
-      }
-    },
-    {
-      name: "ae_render_batch",
-      description: "Start a render batch: comps x specs (and/or existing Render Queue items from queue_items, each rendered with all its output modules through aerender -rqindex; they need a saved, not dirty project, QUEUED items and matching comp ids, checked when the batch starts) rendered one after another by background aerender processes from a frozen copy of the saved project (so later edits and saves don't leak in), given a share of the CPU (-mfr ON <max_cpu_percent>, default 50, split over the processes that can run at once) and one process at a time (the limit counts every aerender job this server runs; the start gate allows only one aerender at a time, so concurrency above 1 is capped to 1, and each item starts 20 s after the one before it ended and not while that one's After Effects engine is still alive; that gap is in the ETA). Also checks the project's image sequences for missing frames (a line in `warnings` and `sequence_check`; the batch still starts; `sequence_check: \"block\"` refuses, also when the check could not finish; \"off\" skips) and reads the GPU (`resource_warnings`: GPU nearly full, or another app such as Cinema 4D running; if present, tell the user before continuing). Refuses, changing nothing, when the project has unsaved changes (call ae_save first, or allow_dirty to render the saved file), the plan is invalid (see ae_render_batch_plan), or the delivery preflight finds a blocker (preflight, default true). Before each item the runner checks free space on the output volume, will not overwrite a recently written file (if_output_exists) or write into _mcp_backups / _mcp_checkpoints, and flags an item with no progress for stall_minutes (advice only; cancel with ae_aerender_cancel). State is kept in batch.json; poll ae_render_batch_status, continue a stopped batch with ae_render_batch_resume. Does not change the After Effects project. Not measured yet: whether footage paths resolve from the frozen copy, how far the -mfr cap limits the CPU, and whether aerender overwrites an existing file silently. A comp with a queued render-queue item renders with that item's settings when a spec leaves out its templates, and extra output modules on it are refused. " + AGENT_SAFETY_GUIDANCE,
-      schema: AeRenderBatchStartSchema,
-      handler: async (args, ctx) => {
-        ctx.quarantine.assertClear();
-        const opId = ctx.bridge.newOpId();
-        const job = normaliseJob(args);
-        let ready;
-        const resourceWarnings2 = await resourceWarningsForRender();
-        try {
-          ready = await ctx.queue.run(`ae_render_batch(${job.comps.length} comps${job.queue_items.length > 0 ? `, ${job.queue_items.length} queue items` : ""})`, async () => {
-            ctx.quarantine.assertClear();
-            const statusResp = await ctx.bridge.evalRaw({
-              id: `${opId}_status`,
-              script: buildJsxCall("status", {}),
-              label: "ae_render_batch (status)",
-              mutates: false,
-              toolName: "ae_render_batch"
-            });
-            const st = statusResp.result ?? {};
-            const projectPath = st.project_path ?? "<unsaved>";
-            if (projectPath === "<unsaved>" || args.expect.project_path === "<unsaved>") {
-              throw new BridgeError({
-                kind: "guard",
-                op_id: opId,
-                message: "Cannot start a render batch on an unsaved project (<unsaved>). Save the project to disk first.",
-                expected: { project_path: args.expect.project_path, dirty: false },
-                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
-              });
-            }
-            if (!pathsMatchForGuard(args.expect.project_path, projectPath)) {
-              throw new BridgeError({
-                kind: "guard",
-                op_id: opId,
-                message: `Target guard refused ae_render_batch: expected project_path "${args.expect.project_path}", but After Effects has "${projectPath}" open.`,
-                expected: args.expect,
-                actual: { project_path: projectPath, dirty: Boolean(st.dirty) }
-              });
-            }
-            if (st.dirty === true && !args.allow_dirty) {
-              throw new BridgeError({
-                kind: "guard",
-                op_id: opId,
-                message: "Cannot start a render batch because the open project has unsaved changes (dirty: true). Call ae_save first so the batch renders what you see, or pass allow_dirty to render the last saved file.",
-                expected: { project_path: args.expect.project_path, dirty: false },
-                actual: { project_path: projectPath, dirty: true }
-              });
-            }
-            if (args.expect.comp_id !== void 0) await verifyTargetGuard(ctx, args.expect, opId);
-            const projectSig = job.queue_items.length > 0 ? fileSig(projectPath) : null;
-            const read3 = (await ctx.bridge.evalRaw({
-              id: `${opId}_read`,
-              script: buildJsxCall("renderbatchRead", readArgs(job)),
-              label: "ae_render_batch (comps)",
-              mutates: false,
-              toolName: "ae_render_batch"
-            })).result;
-            const items = expandItems(job, read3.comps, now(), read3.queue_items);
-            const { errors, warnings } = validatePlan(job, read3, items, [projectPath]);
-            if (errors.length > 0) {
-              return {
-                ok: false,
-                error: "plan_invalid",
-                applied: false,
-                message: `The plan has ${errors.length} problem${errors.length === 1 ? "" : "s"}; nothing was started. Fix them (ae_render_batch_plan shows the full plan).`,
-                errors,
-                warnings
-              };
-            }
-            let preflight;
-            if (args.preflight !== false) {
-              const queueCompIds = job.queue_items.map((q) => q.item_comp_id);
-              const gate = await runPreflightGate(ctx, {
-                toolName: "ae_render_batch",
-                opId,
-                comp_names: job.comps.length > 0 ? job.comps : void 0,
-                ...queueCompIds.length > 0 ? { comp_ids: queueCompIds } : {},
-                sequence_check: "off"
-              });
-              if (gate.blocked) return preflightRefusal("ae_render_batch", gate.summary);
-              preflight = gate.summary;
-            }
-            const sequencePrep = args.sequence_check === "off" ? null : await prepareSequenceCheck(ctx, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()), tolerant: true });
-            const aerenderBin = resolveAerenderPath({
-              platform: options.platform,
-              afterFxPath: options.afterFxPath ?? st.afterfx_path ?? st.app_path,
-              aeVersion: st.aeVersion,
-              existsSync: options.existsSync
-            });
-            if (st.dirty === true) warnings.push("The project had unsaved changes; the batch renders the last saved file on disk.");
-            return { ok: true, project_path: projectPath, aerenderBin, items, warnings, preflight, project_sig: projectSig, sequence_prep: sequencePrep };
-          });
-        } catch (err) {
-          return queued10(err, opId);
-        }
-        if (!ready.ok) return ready;
-        let sequenceCheck;
-        if (ready.sequence_prep) {
-          const seq = sequenceStepFrom(args.sequence_check, "ae_render_batch", await finishSequenceCheck(ready.sequence_prep, { opId, toolName: "ae_render_batch", liveDirs: liveDirsFromJobs(getRegistry().list()) }));
-          if (seq.block && seq.check) return { ok: false, error: blockCode(seq.check), applied: false, message: seq.blockMessage, sequence_check: seq.check };
-          ready.warnings.push(...seq.warnings);
-          sequenceCheck = seq.check;
-        }
-        const store = getStore();
-        const batchId = store.newId();
-        const batchDir = store.batchDir(batchId);
-        const ext2 = path32.extname(ready.project_path) || ".aep";
-        const beside = args.freeze_location === "project_folder";
-        const frozenDir = beside ? path32.dirname(ready.project_path) : batchDir;
-        const frozen = path32.join(frozenDir, beside ? `${path32.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path32.basename(ready.project_path, ext2)}${ext2}`);
-        try {
-          fs31.mkdirSync(frozenDir, { recursive: true });
-          fs31.copyFileSync(ready.project_path, frozen);
-        } catch (err) {
-          return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
-        }
-        if (ready.project_sig !== null && fileSig(ready.project_path) !== ready.project_sig) {
-          try {
-            if (beside) fs31.rmSync(frozen, { force: true });
-          } catch {
-          }
-          store.forget(batchId);
-          return { ok: false, error: "project_changed", applied: false, message: "The project file was saved while the batch was starting, so the Render Queue indexes just checked may not match the frozen copy. Nothing was started; plan and start again." };
-        }
-        const batch = {
-          batch_id: batchId,
-          state: "running",
-          created_at: new Date(now()).toISOString(),
-          finished_at: null,
-          cancel_requested: false,
-          project_path: ready.project_path,
-          frozen_project: frozen,
-          ...beside ? { frozen_temporary: true } : {},
-          batch_dir: batchDir,
-          output_dir: job.output_dir,
-          options: resolveOptions(args, ready.aerenderBin),
-          items: ready.items.map((it) => ({ ...it, state: "pending", attempts: 0 })),
-          warnings: ready.warnings,
-          notices: [],
-          ...ready.preflight ? { preflight: ready.preflight } : {}
-        };
-        try {
-          store.save(batch);
-        } catch (err) {
-          try {
-            if (beside) fs31.rmSync(frozen, { force: true });
-          } catch {
-          }
-          store.forget(batchId);
-          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); the frozen copy was removed and nothing was started.` };
-        }
-        let after = batch;
-        let saveNotice;
-        try {
-          after = await getRunner().begin(batchId) ?? batch;
-        } catch (err) {
-          saveNotice = `The batch started, but its state could not be saved: ${errText(err)}`;
-        }
-        return {
-          ok: true,
-          applied: true,
-          op_id: opId,
-          batch_id: batchId,
-          state: after.state,
-          batch_json: store.jsonPath(batchId),
-          frozen_project: frozen,
-          ...beside ? { frozen_temporary: true } : {},
-          options: after.options,
-          counts: countStates(after.items),
-          items: after.items.slice(0, MAX_ITEMS).map(itemView),
-          warnings: after.warnings,
-          notices: saveNotice ? [...after.notices, saveNotice] : after.notices,
-          ...ready.preflight ? { preflight: ready.preflight } : {},
-          ...sequenceCheck ? { sequence_check: sequenceCheck } : {},
-          ...resourceWarnings2.length > 0 ? { resource_warnings: resourceWarnings2 } : {},
-          next: "Poll ae_render_batch_status with this batch_id. The renders run in the background; the After Effects project is untouched."
-        };
-      }
-    },
-    {
-      name: "ae_render_batch_status",
-      description: "State of a render batch: per-item state, percent, output size and error, counts, an ETA (running items' progress plus seconds-per-frame of the finished ones), stall warnings, notices, and whether this server is still driving the batch (runner_active; false after a panel restart: call ae_render_batch_resume). Without batch_id it lists recent batches. Read-only: nothing is started, cancelled or changed.",
-      schema: AeRenderBatchStatusSchema,
-      handler: async (args) => {
-        const store = getStore();
-        if (!args.batch_id) {
-          return { ok: true, batches: store.list(20).map(batchSummary) };
-        }
-        const stored = store.get(args.batch_id);
-        if (!stored) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
-        const t = now();
-        const b = JSON.parse(JSON.stringify(stored));
-        const registry = getRegistry();
-        for (const item of b.items.filter((i) => i.state === "running")) {
-          const job = item.job_id ? registry.get(item.job_id) : void 0;
-          if (job) refreshRunning(item, job, t, b.options.stall_minutes * 6e4);
-        }
-        const runnerActive = getRunner().isActive(b.batch_id);
-        const measured = args.include_free_space ? await measureBatchSpace(b.items, b.output_dir, b.options.min_free_gb) : null;
-        const space = measured ? measured.space : b.free_space;
-        const orphaned = b.items.filter((i) => {
-          if (i.state !== "running" || !i.job_id) return false;
-          const job = registry.get(i.job_id);
-          return job !== void 0 && job.state === "running" && job.phase !== "queued" && registry.getProcess(job.job_id) === void 0 && !(typeof job.pid === "number" && pidAlive2(job.pid, job.job_id));
-        });
-        const orphanIdx = new Set(orphaned.map((i) => i.index));
-        const stalled = b.items.filter((i) => i.state === "running" && i.stalled && !orphanIdx.has(i.index)).map((i) => ({ index: i.index, job_id: i.job_id, advice: "No progress for a while: check ae_aerender_status, then ae_aerender_cancel if it is stuck." }));
-        return {
-          ok: true,
-          batch_id: b.batch_id,
-          state: b.state,
-          runner_active: runnerActive,
-          ...b.state === "running" && !runnerActive ? { advice: "This server is not driving the batch (it restarted since). Call ae_render_batch_resume to continue; finished renders are kept." } : {},
-          created_at: b.created_at,
-          finished_at: b.finished_at,
-          project_path: b.project_path,
-          frozen_project: b.frozen_project,
-          output_dir: b.output_dir,
-          options: b.options,
-          counts: countStates(b.items),
-          eta: computeEta(b, t, { concurrency: effectiveConcurrency(b.options.concurrency, registry), gap_s: registry.gate.opts.cool_down_ms / 1e3 }),
-          items: b.items.slice(0, MAX_ITEMS).map(itemView),
-          stalled,
-          ...orphaned.length > 0 ? { orphaned: orphaned.map((i) => ({ index: i.index, job_id: i.job_id, advice: "Its aerender process is gone (the server or the machine restarted). Call ae_render_batch_resume; do not cancel it by pid." })) } : {},
-          warnings: b.warnings,
-          notices: b.notices.slice(-50),
-          ...space ? { free_space: space } : {},
-          ...measured && measured.rows.length > 1 ? { free_space_volumes: measured.rows } : {},
-          batch_json: store.jsonPath(b.batch_id)
-        };
-      }
-    },
-    {
-      name: "ae_render_batch_resume",
-      description: "Continue a stopped, failed or interrupted render batch from its frozen project copy. Items that finished and whose output still verifies (exists, not empty, written after the item started; an image sequence must have all its frames) are kept, and so are items skipped on purpose (if_output_exists 'skip': their files are never overwritten by a resume, whatever policy it passes); an item whose runner died is adopted when its aerender ended cleanly or its log says it finished; failed, cancelled and unstarted items run again, a failed item's partial file included. Takes expect so the right project is open, refuses while an aerender of the batch is still alive, and can change concurrency, max_cpu_percent, on_error, stall_minutes and if_output_exists for the rest of the run. Does not re-check image sequences (start did). If `resource_warnings` is present (GPU nearly full, or another app such as Cinema 4D running), tell the user before continuing. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
-      schema: AeRenderBatchResumeSchema,
-      handler: async (args, ctx) => {
-        ctx.quarantine.assertClear();
-        const opId = ctx.bridge.newOpId();
-        const store = getStore();
-        const batch = store.get(args.batch_id);
-        if (!batch) return { ok: false, error: "not_found", applied: false, message: `No render batch "${args.batch_id}".` };
-        try {
-          await ctx.queue.run("ae_render_batch_resume", async () => {
-            ctx.quarantine.assertClear();
-            await verifyTargetGuard(ctx, args.expect, opId);
-            if (!pathsMatchForGuard(args.expect.project_path, batch.project_path)) {
-              throw new BridgeError({
-                kind: "guard",
-                op_id: opId,
-                message: `Target guard refused ae_render_batch_resume: batch ${batch.batch_id} belongs to "${batch.project_path}", but expect.project_path is "${args.expect.project_path}".`,
-                expected: args.expect,
-                actual: { project_path: batch.project_path }
-              });
-            }
-          });
-        } catch (err) {
-          return queued10(err, opId);
-        }
-        if (!fs31.existsSync(batch.frozen_project)) {
-          return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
-        }
-        const runner = getRunner();
-        if (batch.state === "running" && runner.isActive(batch.batch_id)) {
-          return { ok: false, error: "already_running", applied: false, message: "This batch is already running under this server." };
-        }
-        const rec = runner.reconcile(batch);
-        if (!rec.ok) return { ok: false, error: "still_running", applied: false, message: rec.message };
-        const resumeResourceWarnings = await resourceWarningsForRender();
-        batch.options = resolveOptions(args, batch.options.aerender_path, batch.options);
-        batch.notices.push(`Resumed at ${new Date(now()).toISOString()}: ${rec.kept} kept (${rec.skipped_kept} of them skipped on purpose), ${rec.recovered} adopted, ${rec.reset} to render again.`);
-        try {
-          store.save(batch);
-        } catch (err) {
-          batch.state = "stopped";
-          batch.notices.push(`The resume could not be saved to disk (${errText(err)}); nothing was started.`);
-          return { ok: false, error: "state_save_failed", applied: false, message: `The batch state could not be saved (${errText(err)}); nothing was started. Resume again once the disk problem is fixed.` };
-        }
-        let after = batch;
-        let saveNotice;
-        try {
-          after = await runner.begin(batch.batch_id) ?? batch;
-        } catch (err) {
-          saveNotice = `The batch resumed, but its state could not be saved: ${errText(err)}`;
-        }
-        return {
-          ok: true,
-          applied: true,
-          op_id: opId,
-          batch_id: after.batch_id,
-          state: after.state,
-          kept: rec.kept,
-          skipped_kept: rec.skipped_kept,
-          recovered: rec.recovered,
-          reset: rec.reset,
-          counts: countStates(after.items),
-          items: after.items.slice(0, MAX_ITEMS).map(itemView),
-          notices: (saveNotice ? [...after.notices, saveNotice] : after.notices).slice(-50),
-          ...resumeResourceWarnings.length > 0 ? { resource_warnings: resumeResourceWarnings } : {}
-        };
-      }
-    },
-    {
-      name: "ae_render_batch_cancel",
-      description: "Cancel a render batch: terminates its running aerender processes (those items become cancelled) and ends the batch; an item whose process cannot be identified is not killed and stays running (see notices; resume refuses until it is gone); renders already finished are kept and ae_render_batch_resume can pick the rest up later. Does not change the After Effects project. " + AGENT_SAFETY_GUIDANCE,
-      schema: AeRenderBatchCancelSchema,
-      handler: async (args) => {
-        const store = getStore();
-        const b = store.get(args.batch_id);
-        if (!b) return { ok: false, error: "not_found", message: `No render batch "${args.batch_id}".` };
-        if (b.state !== "running") return { ok: true, batch_id: b.batch_id, state: b.state, already_finished: true, counts: countStates(b.items) };
-        getRunner().cancel(b);
-        const unconfirmed = b.items.filter((i) => i.state === "running").map((i) => ({ index: i.index, job_id: i.job_id }));
-        return { ok: true, batch_id: b.batch_id, state: b.state, cancelled: true, ...unconfirmed.length > 0 ? { kill_unconfirmed: unconfirmed, notices: b.notices.slice(-10) } : {}, counts: countStates(b.items), items: b.items.slice(0, MAX_ITEMS).map(itemView) };
-      }
-    }
-  ];
-  return { tools, getRunner, getStore };
-}
-function createRenderbatchTools(options = {}) {
-  return createRenderbatch(options).tools;
-}
-var childProcess3, crypto10, fs31, path32, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
-var init_renderbatch = __esm({
-  "src/tools/ext/renderbatch.ts"() {
-    "use strict";
-    init_win_exe();
-    childProcess3 = __toESM(require("node:child_process"), 1);
-    crypto10 = __toESM(require("node:crypto"), 1);
-    fs31 = __toESM(require("node:fs"), 1);
-    path32 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_common();
-    init_mutate();
-    init_aerender();
-    init_preflight();
-    init_seqcheck();
-    init_system_resources();
-    MAX_ITEMS = 500;
-    MAX_STRING = 2e4;
-    GIB = 1024 * 1024 * 1024;
-    MTIME_SLOP_MS = 2e3;
-    TOKENS = ["comp", "spec", "date", "n"];
-    WIN_OR_POSIX_ABSOLUTE = /^([A-Za-z]:[\\/]|\\\\|\/)/;
-    BatchSpecSchema = external_exports.object({
-      name: external_exports.string().min(1).max(60).regex(/^[A-Za-z0-9._-]+$/, "Spec names use letters, digits, '.', '_' and '-' only (they go into file names).").describe(
-        "Short name of this render spec, e.g. 'h264' or 'prores'. It fills the {spec} token in the file name. This is a free-form label, not an ae_delivery_specs id: a name like 'youtube_1080p' here does not apply that spec's resize, channels or audio."
-      ),
-      render_settings_template: external_exports.string().min(1).optional().describe("Render Settings template name (aerender -RStemplate). Omit to use the settings of the comp's queued render-queue item when it has one (the plan reports it), otherwise After Effects' defaults."),
-      output_module_template: external_exports.string().min(1).optional().describe(
-        "Output Module template name (aerender -OMtemplate), e.g. the installed template an ae_delivery_specs entry names. Omit to use the output module of the comp's queued render-queue item when it has one, otherwise After Effects' default (H.264 in recent versions). A size change needs a reframed comp or a template that resizes."
-      ),
-      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mp4'.").optional().describe("File extension for this spec, without the dot. It must match what the Output Module template writes. Falls back to the job's extension. A spec with no output_module_template and no extension (here or on the job) is refused: the plan would have to guess the file name."),
-      sequence: external_exports.boolean().optional().describe("The spec writes an image sequence: the file name gets a [#####] frame token (name.[#####].png) and the result is verified as a set of numbered files.")
-    });
-    BatchQueueItemSchema = external_exports.object({
-      rq_index: external_exports.number().int().min(1).max(500).describe("1-based Render Queue index of the item to render (aerender -rqindex). It renders with all its output modules and its own settings."),
-      item_comp_id: external_exports.number().int().describe("The CompItem id the item at rq_index must have (ae_render_queue_inspect shows it). The plan and the start refuse when the item there is another comp: indexes shift when the queue changes."),
-      name: external_exports.string().min(1).max(60).regex(/^[A-Za-z0-9._-]+$/, "Names use letters, digits, '.', '_' and '-' only.").optional().describe("Label for this item in the plan and status (default 'rq<index>').")
-    });
-    jobFields = {
-      comps: external_exports.array(external_exports.string().min(1).max(255)).min(1).max(50).optional().describe(
-        "Names of the comps to render. aerender selects a comp by name, so each name must belong to exactly one comp in the project. For other sizes, make the copies first with ae_reframe and list their names here: a size is just another comp. Give comps, queue_items or both."
-      ),
-      queue_items: external_exports.array(BatchQueueItemSchema).min(1).max(50).optional().describe(
-        "Existing Render Queue items to render through aerender -rqindex, each with ALL its output modules (H.264 + ProRes + PNG built with ae_render_queue_edit / _duplicate / _apply_spec) and its own render settings; specs, name_template, extension and time_span do not apply to them (the item holds its output files and time span). Every output file is counted in the overwrite check, and free space is measured on the volume of each item's output modules (output_dir is not used for them). Needs a saved, not dirty project and each item QUEUED with its comp id matching item_comp_id. Item outputs may not sit in _mcp_backups / _mcp_checkpoints."
-      ),
-      specs: external_exports.array(BatchSpecSchema).min(1).max(10).optional().describe(
-        "Render specs: free-form {name, render_settings_template, output_module_template, extension, sequence} objects, not ae_delivery_specs ids (those carry a resize, channels and audio that aerender cannot apply here; pass the installed template an entry names as output_module_template). Every comp is rendered once per spec. Omit for one render per comp with After Effects' default templates (or the comp's queued item); an extension is then required."
-      ),
-      output_dir: external_exports.string().min(1).describe("Absolute folder the renders go into (created when missing). Never a folder named _mcp_backups or _mcp_checkpoints."),
-      name_template: external_exports.string().min(1).max(200).optional().describe("File name without extension, with tokens {comp}, {spec}, {date} (YYYYMMDD) and {n} (item number, two digits). Default '{comp}_{spec}'. Characters Windows forbids in file names become '_'."),
-      extension: external_exports.string().regex(/^[A-Za-z0-9]{1,8}$/, "Extension without the dot, e.g. 'mov'.").optional().describe("Default file extension, without the dot, for specs that give none ('mov' is the name guessed when this is left out, and the plan refuses that for a spec without an output_module_template). A spec's own extension wins."),
-      time_span: external_exports.enum(["comp", "work_area", "template"]).optional().describe(
-        "Which frames each item renders. 'comp' (default) passes -s/-e for the whole comp; 'work_area' for the comp's work area; 'template' passes neither and lets the render-settings template decide (the ETA then uses the comp length as a guess)."
-      )
-    };
-    policyFields = {
-      if_output_exists: external_exports.enum(["protect_recent", "skip", "overwrite"]).optional().describe(
-        "What to do when an output file already exists. 'protect_recent' (default) refuses an item whose file was written in the last protect_recent_minutes and overwrites older ones; 'skip' leaves any existing non-empty file alone and marks the item skipped (a partial file left by this batch's own earlier attempt is not left alone: that item renders again); 'overwrite' always renders. A file in _mcp_backups / _mcp_checkpoints is never written."
-      ),
-      protect_recent_minutes: external_exports.number().int().min(1).max(1e5).optional().describe("How recent counts as 'recent' for protect_recent. Default 60."),
-      min_free_gb: external_exports.number().min(0).max(1e5).optional().describe("Free space (GB) that must remain on the output volume after an item's estimated size. Default 2."),
-      on_unknown_space: external_exports.enum(["continue", "stop"]).optional().describe("When free space can't be measured (a UNC path or a failed lookup): 'continue' (default) renders and flags it, 'stop' blocks the item. Unknown is never reported as ok.")
-    };
-    runFields = {
-      concurrency: external_exports.number().int().min(1).max(4).optional().describe("aerender processes at once. Default 1, so the live After Effects session isn't starved. The start gate lets only ONE aerender of this server run at a time (the last one's After Effects engine must be gone and 20 s must have passed), so a value above 1 is capped to 1: items still go one after another, with a 20 s gap between them. The limit counts every aerender job this server runs (other batches and ae_aerender_start jobs too); an item waits while the limit is used up."),
-      max_cpu_percent: external_exports.number().int().min(1).max(100).optional().describe(
-        "Share of the CPU for the whole batch, split evenly over the aerender processes that can really run at once (each gets floor(max_cpu_percent / that number), at least 1, as aerender -mfr ON <percent>, After Effects 22+). The start gate runs one aerender at a time, so with the default gate the one running render gets the whole share. Default 50. How far -mfr limits the CPU is not measured."
-      ),
-      on_error: external_exports.enum(["stop", "continue"]).optional().describe("A failed item stops the batch ('stop', default; resume retries it) or the batch goes on with the next item ('continue')."),
-      stall_minutes: external_exports.number().int().min(1).max(1e4).optional().describe("Minutes without log or output growth before a running item is flagged as stalled (advice only, nothing is cancelled). Default 15.")
-    };
-    AeRenderBatchPlanSchema = external_exports.object({ ...jobFields, ...policyFields }).superRefine(refineJob);
-    AeRenderBatchStartSchema = external_exports.object({
-      expect: ExpectSchema,
-      ...jobFields,
-      ...policyFields,
-      ...runFields,
-      preflight: external_exports.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
-      sequence_check: SequenceCheckSchema,
-      allow_dirty: external_exports.boolean().optional().describe("Render the last saved state although the open project has unsaved changes. Default false: the tool refuses and asks for ae_save first, so the frozen copy holds what you see."),
-      freeze_location: external_exports.enum(["batch_folder", "project_folder"]).optional().describe(
-        "Where the frozen copy of the .aep goes. 'batch_folder' (default) keeps it with batch.json; 'project_folder' puts it beside the original .aep as <name>.mcp_<batch id>.aep (so a relative footage path resolves from the same folder; whether it does is not measured) and deletes it when the batch ends succeeded. In a synced folder it is synced while it exists."
-      )
-    }).superRefine(refineJob);
-    BATCH_ID_RE = /^batch_\d+_[0-9a-f]{6}$/;
-    BatchIdSchema = external_exports.string().regex(BATCH_ID_RE, "batch_id must look like batch_<digits>_<6 hex>, as returned by ae_render_batch.");
-    AeRenderBatchStatusSchema = external_exports.object({
-      batch_id: BatchIdSchema.optional().describe("Batch to report. Omit to list the most recent batches."),
-      include_free_space: external_exports.boolean().optional().describe("Also measure free space now on every volume the batch writes to (each Render Queue item's own output volumes, and output_dir only when the batch has comp items; runs a PowerShell or df lookup). Reports the worst as free_space, and free_space_volumes when there is more than one. Default false.")
-    });
-    AeRenderBatchResumeSchema = external_exports.object({
-      expect: ExpectSchema,
-      batch_id: BatchIdSchema.describe("Batch to continue."),
-      concurrency: runFields.concurrency,
-      max_cpu_percent: runFields.max_cpu_percent,
-      on_error: runFields.on_error,
-      stall_minutes: runFields.stall_minutes,
-      if_output_exists: policyFields.if_output_exists
-    });
-    AeRenderBatchCancelSchema = external_exports.object({
-      batch_id: BatchIdSchema.describe("Batch to cancel. Running aerender processes are terminated; finished renders are kept.")
-    });
-    clip = (s) => s.length > MAX_STRING ? s.slice(0, MAX_STRING) : s;
-    errText = (e) => clip(e instanceof Error ? e.message : String(e));
-    defaultRunFile = (file, args) => new Promise((resolve7, reject) => {
-      childProcess3.execFile(file, args, { windowsHide: true, timeout: 15e3 }, (err, stdout) => err ? reject(err) : resolve7(String(stdout)));
-    });
-    BatchStore = class {
-      constructor(dir) {
-        this.dir = dir;
-      }
-      cache = /* @__PURE__ */ new Map();
-      newId() {
-        return `batch_${Date.now()}_${crypto10.randomBytes(3).toString("hex")}`;
-      }
-      batchDir(id) {
-        return path32.join(this.dir, id);
-      }
-      jsonPath(id) {
-        return path32.join(this.batchDir(id), "batch.json");
-      }
-      save(b) {
-        this.cache.set(b.batch_id, b);
-        const file = this.jsonPath(b.batch_id);
-        fs31.mkdirSync(path32.dirname(file), { recursive: true });
-        const tmp = `${file}.tmp-${process.pid}-${crypto10.randomBytes(3).toString("hex")}`;
-        const payload = JSON.stringify(b, null, 2);
-        try {
-          fs31.writeFileSync(tmp, payload, "utf8");
-          fs31.renameSync(tmp, file);
-        } catch {
-          fs31.writeFileSync(file, payload, "utf8");
-          try {
-            fs31.unlinkSync(tmp);
-          } catch {
-          }
-        }
-      }
-      /** Drops a batch that never started: the cached record and its folder. */
-      forget(id) {
-        this.cache.delete(id);
-        if (!BATCH_ID_RE.test(id)) return;
-        try {
-          fs31.rmSync(this.batchDir(id), { recursive: true, force: true });
-        } catch {
-        }
-      }
-      get(id) {
-        if (!BATCH_ID_RE.test(id)) return void 0;
-        const cached2 = this.cache.get(id);
-        if (cached2) return cached2;
-        try {
-          const b = JSON.parse(fs31.readFileSync(this.jsonPath(id), "utf8"));
-          if (b && typeof b.batch_id === "string") {
-            this.cache.set(id, b);
-            return b;
-          }
-        } catch {
-        }
-        return void 0;
-      }
-      /** Newest first. */
-      list(limit = 20) {
-        let ids = [];
-        try {
-          ids = fs31.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
-        } catch {
-          ids = [];
-        }
-        ids.sort().reverse();
-        const out = [];
-        for (const id of ids) {
-          const b = this.get(id);
-          if (b) out.push(b);
-          if (out.length >= limit) break;
-        }
-        return out;
-      }
-    };
-    BatchRunner = class {
-      constructor(store, deps, opts = { tickMs: 5e3, autoTick: true }) {
-        this.store = store;
-        this.deps = deps;
-        this.opts = opts;
-      }
-      timers = /* @__PURE__ */ new Map();
-      busy = /* @__PURE__ */ new Set();
-      isActive(id) {
-        return this.timers.has(id) || this.busy.has(id);
-      }
-      /** Marks the batch as driven by this process, ticks once now, and keeps ticking. */
-      async begin(id) {
-        if (this.opts.autoTick && !this.timers.has(id)) {
-          const t = setInterval(() => {
-            this.tick(id).catch(() => {
-            });
-          }, this.opts.tickMs);
-          if (typeof t.unref === "function") t.unref();
-          this.timers.set(id, t);
-        }
-        return this.tick(id);
-      }
-      stopTimer(id) {
-        const t = this.timers.get(id);
-        if (t) clearInterval(t);
-        this.timers.delete(id);
-      }
-      async tick(id) {
-        const b = this.store.get(id);
-        if (!b) {
-          this.stopTimer(id);
-          return void 0;
-        }
-        if (b.state !== "running") {
-          this.stopTimer(id);
-          return b;
-        }
-        if (this.busy.has(id)) return b;
-        this.busy.add(id);
-        try {
-          await this.step(b);
-        } catch (err) {
-          b.notices.push(`The runner stopped on an error: ${errText(err)}`);
-          b.state = "stopped";
-          b.finished_at = new Date(this.deps.now()).toISOString();
-        } finally {
-          this.busy.delete(id);
-          if (b.state === "succeeded" && b.frozen_temporary) {
-            b.frozen_temporary = false;
-            try {
-              fs31.rmSync(b.frozen_project, { force: true });
-              b.notices.push(`Every item finished; the frozen project copy ${b.frozen_project} was deleted.`);
-            } catch (err) {
-              b.notices.push(`Every item finished, but the frozen project copy ${b.frozen_project} could not be deleted (${errText(err)}).`);
-            }
-          }
-          try {
-            this.store.save(b);
-          } catch (err) {
-            const note = `The batch state could not be saved to disk (${errText(err)}); it is kept in memory only.`;
-            if (!b.notices.includes(note)) b.notices.push(note);
-          }
-          if (b.state !== "running") this.stopTimer(id);
-        }
-        return b;
-      }
-      stopping(b) {
-        return b.cancel_requested || b.options.on_error === "stop" && b.items.some((i) => i.state === "failed" || i.state === "cancelled");
-      }
-      async step(b) {
-        const now = this.deps.now();
-        const stallMs = b.options.stall_minutes * 6e4;
-        for (const item of b.items.filter((i) => i.state === "running")) {
-          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
-          if (!job) {
-            this.fail(item, "the aerender job record is gone", now);
-            continue;
-          }
-          refreshRunning(item, job, now, stallMs);
-          if (item.stalled && !item.stall_noted) {
-            item.stall_noted = true;
-            b.notices.push(
-              `Item ${item.index} (${item.comp_name}, ${item.spec_name}) shows no log or output growth for ${b.options.stall_minutes} minutes (job ${job.job_id}). It may be stuck on a slow frame; check ae_aerender_status and call ae_aerender_cancel if it is. The batch does not cancel it for you.`
-            );
-          }
-          if (job.state === "running") continue;
-          item.finished_at = job.finished_at ?? new Date(now).toISOString();
-          if (job.cancelled) {
-            item.state = "cancelled";
-            item.error = "cancelled";
-          } else if (job.state === "succeeded") {
-            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
-            if (v.ok) {
-              item.state = "succeeded";
-              item.output_bytes = v.bytes;
-              if (v.files !== void 0) item.output_files = v.files;
-              item.percent = 100;
-              item.stalled = false;
-            } else this.fail(item, `aerender exited cleanly but ${v.reason}`, now);
-          } else {
-            this.fail(item, job.error ? clip(job.error) : `aerender exited with code ${job.exit_code ?? "unknown"}${job.signal ? ` (${job.signal})` : ""}; see ${job.log_path}`, now);
-          }
-        }
-        let waitingForOthers = false;
-        while (!this.stopping(b)) {
-          const own = b.items.filter((i) => i.state === "running").length;
-          const others = this.othersRunning(b);
-          if (own + others >= effectiveConcurrency(b.options.concurrency, this.deps.registry)) {
-            waitingForOthers = own === 0 && others > 0 && b.items.some((i) => i.state === "pending");
-            break;
-          }
-          const next = b.items.find((i) => i.state === "pending");
-          if (!next) break;
-          await this.startItem(b, next, now);
-        }
-        if (b.items.some((i) => i.state === "running")) return;
-        if (waitingForOthers && b.state === "running" && !b.cancel_requested) {
-          const note = "Waiting: the concurrency limit is used up by aerender jobs that are not part of this batch (another batch or ae_aerender_start). The next item starts when one of them ends.";
-          if (!b.notices.includes(note)) b.notices.push(note);
-          return;
-        }
-        const counts = countStates(b.items);
-        if (b.cancel_requested) b.state = "cancelled";
-        else if (counts.pending > 0) b.state = "stopped";
-        else b.state = counts.failed > 0 || counts.cancelled > 0 ? "failed" : "succeeded";
-        b.finished_at = new Date(now).toISOString();
-      }
-      /** Running aerender jobs of this process that no item of this batch owns (other batches, ae_aerender_start). */
-      othersRunning(b) {
-        const own = new Set(b.items.map((i) => i.job_id).filter((j) => typeof j === "string"));
-        return this.deps.registry.list().filter((j) => j.state === "running" && !own.has(j.job_id) && (this.deps.registry.getProcess(j.job_id) !== void 0 || j.phase === "queued")).length;
-      }
-      fail(item, why, now) {
-        item.state = "failed";
-        item.error = why;
-        item.finished_at = new Date(now).toISOString();
-      }
-      /** The governor, then the launch. Any refusal fails the item with the reason; nothing is thrown. */
-      async startItem(b, item, now) {
-        const o = b.options;
-        for (const out of outputsOf(item)) {
-          const why = protectedReason(out, [b.project_path, b.frozen_project]);
-          if (why) return this.fail(item, `blocked: ${why}`, now);
-        }
-        const existing = inspectOutputs(outputsOf(item));
-        if (existing.exists) {
-          const ours = item.attempts > 0;
-          if (o.if_output_exists === "skip" && existing.bytes > 0 && !ours) {
-            item.state = "skipped";
-            item.note = "the output already exists; left alone (if_output_exists: skip)";
-            item.output_bytes = existing.bytes;
-            item.finished_at = new Date(now).toISOString();
-            return;
-          }
-          const ageMin = existing.newest_mtime_ms === null ? Infinity : (now - existing.newest_mtime_ms) / 6e4;
-          if (o.if_output_exists === "protect_recent" && !ours && ageMin < o.protect_recent_minutes) {
-            return this.fail(item, `blocked: ${item.output_path} was written ${Math.max(0, Math.round(ageMin))} minutes ago (protect_recent_minutes ${o.protect_recent_minutes}). Use another name, wait, or set if_output_exists to 'overwrite' or 'skip'.`, now);
-          }
-          item.overwrote = true;
-        }
-        const spaceDirs = spaceDirsOf(item, b.output_dir);
-        const frees = [];
-        for (const d of spaceDirs) frees.push(await this.deps.getFreeBytes(d));
-        if (b.cancel_requested || b.state !== "running") return;
-        const needed = estimateBytes(b.items, item);
-        let status = "ok";
-        let free = null;
-        let reserved = 0;
-        let shownDir = spaceDirs[0];
-        let worst = -1;
-        for (let di = 0; di < spaceDirs.length; di++) {
-          let res = 0;
-          for (const r of b.items) {
-            if (r.state !== "running" || r === item) continue;
-            if (spaceDirsOf(r, b.output_dir).some((rd) => mayShareVolume(rd, spaceDirs[di]))) res += estimateBytes(b.items, r) ?? 0;
-          }
-          const f = frees[di];
-          const st = spaceStatus(f === null ? null : Math.max(0, f - res), needed, o.min_free_gb);
-          const rank = st === "low" ? 2 : st === "unknown" ? 1 : 0;
-          if (rank > worst) {
-            worst = rank;
-            status = st;
-            free = f;
-            reserved = res;
-            shownDir = spaceDirs[di];
-          }
-        }
-        b.free_space = { dir: shownDir, status, free_bytes: free, needed_bytes: needed, checked_at: new Date(now).toISOString() };
-        if (status === "low") {
-          return this.fail(item, `blocked: only ${((free ?? 0) / GIB).toFixed(1)} GB free on the output volume of ${shownDir}${reserved > 0 ? ` (${(Math.max(0, (free ?? 0) - reserved) / GIB).toFixed(1)} GB after ${(reserved / GIB).toFixed(1)} GB reserved for running items)` : ""}; this item needs about ${((needed ?? 0) / GIB).toFixed(1)} GB plus ${o.min_free_gb} GB spare.`, now);
-        }
-        if (status === "unknown") {
-          if (o.on_unknown_space === "stop") return this.fail(item, "blocked: free space on the output volume could not be measured (on_unknown_space: stop)", now);
-          const note = `Free space on ${shownDir} could not be measured (a network path or a failed lookup); rendering anyway. It is not known to be ok.`;
-          if (!b.notices.includes(note)) b.notices.push(note);
-        }
-        try {
-          const cpu = Math.max(1, Math.floor(o.max_cpu_percent / effectiveConcurrency(o.concurrency, this.deps.registry)));
-          const rec = item.rq_index !== void 0 ? launchAerenderJob({
-            registry: this.deps.registry,
-            spawn: this.deps.spawn,
-            aerender_path: o.aerender_path,
-            project_path: b.frozen_project,
-            comp_name: item.comp_name,
-            rq_index: item.rq_index,
-            item_comp_id: item.item_comp_id,
-            comp_id: item.item_comp_id,
-            output_paths: outputsOf(item),
-            max_cpu_percent: cpu
-          }) : launchAerenderJob({
-            registry: this.deps.registry,
-            spawn: this.deps.spawn,
-            aerender_path: o.aerender_path,
-            project_path: b.frozen_project,
-            comp_name: item.comp_name,
-            output_path: item.output_path,
-            output_module_template: item.output_module_template,
-            render_settings_template: item.render_settings_template,
-            start_frame: item.start_frame,
-            end_frame: item.end_frame,
-            max_cpu_percent: cpu
-          });
-          item.state = "running";
-          item.attempts++;
-          item.job_id = rec.job_id;
-          item.started_at = rec.started_at;
-          item.finished_at = void 0;
-          item.error = void 0;
-          item.percent = 0;
-          item.stalled = false;
-          item.stall_noted = false;
-          item.activity = { sig: "", changed_ms: now };
-        } catch (err) {
-          this.fail(item, `could not start aerender: ${errText(err)}`, now);
-        }
-      }
-      /** Cancels a batch: kills what runs, ends the batch. Finished renders stay. */
-      cancel(b) {
-        b.cancel_requested = true;
-        const now = new Date(this.deps.now()).toISOString();
-        for (const item of b.items.filter((i) => i.state === "running")) {
-          const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
-          if (job && job.state === "running") {
-            const res = cancelAerenderJob(this.deps.registry, job, this.deps.killProcess, "ae_render_batch_cancel", this.deps.cancelHooks);
-            if (res.kill_unconfirmed) {
-              item.note = "cancel not confirmed: the aerender process could not be identified, so it was not killed";
-              b.notices.push(`Item ${item.index} (job ${job.job_id}, pid ${job.pid}): the cancel could not confirm the process is an aerender, so nothing was killed and the job stays running. Check the process, then call ae_aerender_cancel for the job; ae_render_batch_resume refuses until it is gone.`);
-              continue;
-            }
-          }
-          item.state = "cancelled";
-          item.error = "cancelled";
-          item.stalled = false;
-          item.finished_at = now;
-        }
-        b.state = "cancelled";
-        b.finished_at = now;
-        this.stopTimer(b.batch_id);
-        try {
-          this.store.save(b);
-        } catch (err) {
-          b.notices.push(`The cancelled state could not be saved to disk (${errText(err)}).`);
-        }
-      }
-      /**
-       * Gets a stopped or interrupted batch ready to run again: finished renders
-       * that still verify stay, and so do items skipped on purpose (their files
-       * were left alone deliberately and a resume must not overwrite them); an item
-       * whose runner died is adopted when its job ended cleanly or its log says it
-       * finished; everything else goes back to pending. Returns a refusal when an
-       * aerender of the batch is still alive (the pid must still be an aerender).
-       */
-      reconcile(b) {
-        let recovered = 0;
-        let reset = 0;
-        let kept = 0;
-        let skippedKept = 0;
-        for (const item of b.items) {
-          if (item.state === "running") {
-            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
-            if (job && job.state === "running" && typeof job.pid === "number" && this.deps.isPidAlive(job.pid, job.job_id)) {
-              return { ok: false, message: `Item ${item.index} still has a live aerender (job ${job.job_id}, pid ${job.pid}). ${b.state === "cancelled" ? "The batch is already cancelled: stop it with ae_aerender_cancel on that job, or end the process by hand, then resume." : "Wait for it, or stop it with ae_render_batch_cancel / ae_aerender_cancel, then resume."}` };
-            }
-          }
-        }
-        for (const item of b.items) {
-          if (item.state === "succeeded") {
-            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
-            if (v.ok) {
-              kept++;
-              continue;
-            }
-            item.note = `rendered again: ${v.reason}`;
-          } else if (item.state === "skipped") {
-            if (verifyOutputs(item, null).ok) {
-              kept++;
-              skippedKept++;
-              continue;
-            }
-            item.note = "rendered: the file it had left alone is gone";
-          } else if (item.state === "running") {
-            const job = item.job_id ? this.deps.registry.get(item.job_id) : void 0;
-            const v = verifyOutputs(item, item.started_at ? Date.parse(item.started_at) : null, expectedFrames(item));
-            if (job && v.ok && (job.state === "succeeded" || job.state === "running" && logFinished(job.log_path))) {
-              item.state = "succeeded";
-              item.output_bytes = v.bytes;
-              if (v.files !== void 0) item.output_files = v.files;
-              item.percent = 100;
-              item.finished_at = job.finished_at ?? new Date(this.deps.now()).toISOString();
-              item.note = "finished while the runner was away; adopted on resume";
-              recovered++;
-              continue;
-            }
-            if (job && job.state === "running") {
-              this.deps.registry.update(job.job_id, { state: "failed", error: "interrupted: its aerender process is gone", finished_at: new Date(this.deps.now()).toISOString() });
-            }
-            item.note = "interrupted; rendered again";
-          }
-          item.state = "pending";
-          item.error = void 0;
-          item.job_id = void 0;
-          item.finished_at = void 0;
-          item.percent = void 0;
-          item.output_files = void 0;
-          item.stalled = false;
-          item.stall_noted = false;
-          item.activity = void 0;
-          reset++;
-        }
-        b.state = "running";
-        b.cancel_requested = false;
-        b.finished_at = null;
-        return { ok: true, recovered, reset, kept, skipped_kept: skippedKept };
-      }
-    };
-    defaultIsPidAlive = (pid, registry, jobId, identify = (p) => isAerenderProcess(p)) => {
-      try {
-        process.kill(pid, 0);
-      } catch (err) {
-        if (err.code !== "EPERM") return false;
-      }
-      if (registry && pidHeldByLiveJob(registry, pid, jobId)) return false;
-      return identify(pid) !== false;
-    };
-    renderbatchTools = createRenderbatchTools();
-  }
-});
-
-// src/tools/ext/rqrender.ts
-function clip2(s) {
-  return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + "..." : s;
-}
-function renderTimeoutMs(maxHours) {
-  return Math.min(Math.round(maxHours * 36e5), MAX_TIMEOUT_MS);
-}
-function jobsFileFor(ctx) {
-  return path33.join(dataDirOf(ctx), "renders", RQ_RENDER_JOBS_FILE);
-}
-function storeFor(ctx) {
-  const file = jobsFileFor(ctx);
-  let s = stores.get(file);
-  if (!s) {
-    s = new RenderJobStore(file);
-    stores.set(file, s);
-  }
-  return s;
-}
-function isSequencePath2(p) {
-  return SEQ_TOKEN.test(path33.basename(p));
-}
-function escapeRe2(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function sequenceRegex2(fileName) {
-  const m = SEQ_TOKEN.exec(fileName);
-  if (!m) return new RegExp(`^${escapeRe2(fileName)}$`, "i");
-  const before = fileName.slice(0, m.index);
-  const after = fileName.slice(m.index + m[0].length);
-  return new RegExp(`^${escapeRe2(before)}\\d{${m[1].length},}${escapeRe2(after)}$`, "i");
-}
-function statOutput(o) {
-  const dir = path33.dirname(o.file);
-  const sequence = o.sequence ?? isSequencePath2(o.file);
-  const out = {
-    item_index: o.item_index,
-    module: o.module,
-    file: o.file,
-    sequence,
-    folder_exists: false,
-    exists: false,
-    bytes: 0,
-    mtime: null
-  };
-  try {
-    out.folder_exists = fs32.statSync(dir).isDirectory();
-  } catch {
-    return out;
-  }
-  try {
-    if (!sequence) {
-      const st = fs32.statSync(o.file);
-      if (st.isFile()) {
-        out.exists = true;
-        out.bytes = st.size;
-        out.mtime = st.mtime.toISOString();
-      }
-      return out;
-    }
-    const re = sequenceRegex2(path33.basename(o.file));
-    let frames = 0;
-    let bytes = 0;
-    let newest = 0;
-    let statted = 0;
-    for (const name of fs32.readdirSync(dir)) {
-      if (!re.test(name)) continue;
-      frames++;
-      if (statted >= MAX_OUTPUT_FILES_STAT) {
-        out.truncated = true;
-        continue;
-      }
-      statted++;
-      try {
-        const st = fs32.statSync(path33.join(dir, name));
-        if (!st.isFile()) continue;
-        bytes += st.size;
-        if (st.mtimeMs > newest) newest = st.mtimeMs;
-      } catch {
-      }
-    }
-    out.frame_count = frames;
-    out.exists = frames > 0;
-    out.bytes = bytes;
-    out.mtime = newest > 0 ? new Date(newest).toISOString() : null;
-  } catch {
-  }
-  return out;
-}
-function liveOutputsFrom(registry) {
-  const out = [];
-  try {
-    for (const j of registry.list()) {
-      if (j.state !== "running") continue;
-      const files = j.output_paths && j.output_paths.length > 0 ? j.output_paths : j.output_path ? [j.output_path] : [];
-      const real = files.filter((f) => typeof f === "string" && f.length > 0 && !f.startsWith("<"));
-      if (j.whole_queue === true && real.length === 0) {
-        out.push({ file: "", owner: `aerender job ${j.job_id} (it renders the whole Render Queue)` });
-      }
-      for (const f of real) out.push({ file: f, owner: `aerender job ${j.job_id}` });
-    }
-  } catch {
-  }
-  try {
-    const store = new BatchStore(path33.join(registry.rendersDir, "batches"));
-    for (const b of store.list(20)) {
-      if (b.state !== "running") continue;
-      for (const it of b.items) {
-        if (it.state !== "pending" && it.state !== "running") continue;
-        for (const f of outputsOf(it)) out.push({ file: f, owner: `render batch ${b.batch_id}` });
-      }
-    }
-  } catch {
-  }
-  return out;
-}
-function planStart(queue, overwrite, live = []) {
-  const refusals = [];
-  const warnings = [];
-  const items = [];
-  if (!queue) {
-    return {
-      items,
-      refusals: [{ code: "nothing_queued", message: "The Render Queue could not be read." }],
-      warnings
-    };
-  }
-  if (queue.rendering === true) {
-    refusals.push({ code: "already_rendering", message: "After Effects' Render Queue is already rendering (started by a person or another tool). Nothing was started." });
-  }
-  if (queue.truncated === true) {
-    refusals.push({
-      code: "queue_truncated",
-      message: `The Render Queue read stopped at ${queue.items.length} of ${queue.numItems} items, so the rest were not checked and render() would still render them. Nothing was started. Remove or unqueue items first.`
-    });
-  }
-  const queued10 = queue.items.filter((i) => i.status === "queued");
-  for (const it of queue.items) {
-    if (it.status === "needs_output" && it.render === true) {
-      refusals.push({
-        code: "needs_output",
-        item_index: it.index,
-        message: `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) is checked to render but has no output (NEEDS_OUTPUT), so Render would stop at it. Give it an output file with ae_render_queue_edit (output_modules[].file) or uncheck it. Nothing was started.`
-      });
-    }
-  }
-  if (queued10.length === 0) {
-    refusals.push({
-      code: "nothing_queued",
-      message: "No Render Queue item is QUEUED, so Render would do nothing. Queue one with ae_render_queue_edit (queued: true) or add one with ae_render_queue_add. A finished (DONE) item cannot be queued again (After Effects locks it): make a fresh copy of it with ae_render_queue_duplicate."
-    });
-  }
-  if (queued10.length > MAX_ITEMS2) {
-    refusals.push({
-      code: "too_many_items",
-      message: `${queued10.length} items are QUEUED; this tool checks and reports at most ${MAX_ITEMS2}, and render() renders all of them. Nothing was started. Unqueue some items.`
-    });
-  }
-  const seen = /* @__PURE__ */ new Map();
-  const liveByKey = /* @__PURE__ */ new Map();
-  let liveUnknown = null;
-  for (const l of live) {
-    if (l.file === "") liveUnknown = l.owner;
-    else liveByKey.set(pathKey(l.file), l.owner);
-  }
-  if (liveUnknown) {
-    refusals.push({ code: "output_in_use", message: `${liveUnknown} is running, so its outputs are not known and could be the same files. Wait for it or cancel it. Nothing was started.` });
-  }
-  for (const it of queued10.slice(0, MAX_ITEMS2)) {
-    const job = { index: it.index, comp_id: it.comp_id, comp_name: it.comp_name, outputs: [] };
-    if (it.output_modules_truncated === true) {
-      refusals.push({
-        code: "queue_truncated",
-        item_index: it.index,
-        message: `Render Queue item ${it.index} has more output modules than were read, so the unread ones were not checked. Nothing was started. Remove extra output modules.`
-      });
-    }
-    for (const m of it.output_modules ?? []) {
-      const where = `Render Queue item ${it.index} (${it.comp_name ?? "comp " + it.comp_id}) output module ${m.index}`;
-      if (typeof m.file !== "string" || m.file.length === 0) {
-        refusals.push({ code: "no_output_file", item_index: it.index, message: `${where} has no output file. Give it one with ae_render_queue_edit (output_modules[].file).` });
-        continue;
-      }
-      const key = pathKey(m.file);
-      const earlier = seen.get(key);
-      if (earlier) {
-        refusals.push({
-          code: "duplicate_output",
-          item_index: it.index,
-          file: m.file,
-          message: `${where} writes the same file as ${earlier} (${m.file}); they would overwrite each other. Give each its own file with ae_render_queue_edit.`
-        });
-      } else {
-        seen.set(key, where);
-      }
-      const owner = liveByKey.get(key);
-      if (owner) {
-        refusals.push({ code: "output_in_use", item_index: it.index, file: m.file, message: `${where}: ${owner} is going to write ${m.file}. Wait for it, cancel it, or change the file. Nothing was started.` });
-      }
-      const sequence = isSequencePath2(m.file);
-      const stat = statOutput({ item_index: it.index, module: m.index, file: m.file, sequence });
-      if (!stat.folder_exists) {
-        const dir = path33.dirname(m.file);
-        let parentExists = false;
-        try {
-          parentExists = fs32.statSync(path33.dirname(dir)).isDirectory();
-        } catch {
-          parentExists = false;
-        }
-        if (!parentExists) {
-          refusals.push({ code: "folder_missing", item_index: it.index, file: m.file, message: `${where}: the folder ${dir} and its parent do not exist. Nothing is created for you; make the folder or change the file.` });
-          continue;
-        }
-        warnings.push(
-          `${where}: the folder ${dir} does not exist yet, but its parent does. After Effects can make a subfolder at render time ("Save in subfolder"), so this is not refused; if it does not, the render stops at this item. Nothing is created for you.`
-        );
-      } else if (stat.exists && !overwrite) {
-        refusals.push({
-          code: "output_exists",
-          item_index: it.index,
-          file: m.file,
-          message: `${where}: ${sequence ? `${stat.frame_count} frame(s) of ${m.file} already exist` : `${m.file} already exists`}. Nothing is deleted. Change the file, or pass overwrite: true (After Effects then asks "Overwrite?" and the render waits until it is answered).`
-        });
-      }
-      job.outputs.push({ item_index: it.index, comp_id: it.comp_id, module: m.index, file: m.file, sequence });
-    }
-    items.push(job);
-  }
-  return { items, refusals, warnings };
-}
-function stillRendering(read3) {
-  if (!read3) return false;
-  if (read3.rendering === true) return true;
-  return (read3.items ?? []).some((r) => r.status === "rendering" || r.status === "will_continue");
-}
-function judgeResult(items, read3, readBackError) {
-  const statuses = [];
-  for (const it of items) {
-    const row = read3?.items?.find((r) => r.index === it.index);
-    statuses.push({
-      index: it.index,
-      comp_id: row?.comp_id ?? null,
-      comp_name: row?.comp_name ?? it.comp_name,
-      status: row?.status ?? null,
-      ...typeof row?.elapsed_seconds === "number" ? { elapsed_seconds: row.elapsed_seconds } : {},
-      ...row && row.comp_matches === false ? { comp_matches: false } : {},
-      ...row?.error ? { error: clip2(row.error) } : {}
-    });
-  }
-  const outputs = [];
-  for (const it of items) for (const o of it.outputs) outputs.push(statOutput(o));
-  const result = { item_statuses: statuses, outputs, ...readBackError ? { read_back_error: clip2(readBackError) } : {} };
-  if (!read3) {
-    return { result, ok: false, summary: `The render call returned, but the item statuses could not be read back (${clip2(readBackError ?? "no answer")}). Look at After Effects' Render Queue panel; the output files on disk are listed.` };
-  }
-  if (stillRendering(read3)) {
-    return { result, ok: false, summary: "After Effects still reports that it is rendering (the Render Queue, or an item is RENDERING or WILL_CONTINUE), so the render is not over. Look at After Effects." };
-  }
-  const bad4 = statuses.filter((s) => s.status !== "done");
-  const stopped = statuses.filter((s) => s.status === "user_stopped");
-  const errored = statuses.filter((s) => s.status === "err_stopped");
-  const emptyOutputs = outputs.filter((o) => !o.exists || o.bytes <= 0);
-  const moved = statuses.filter((s) => s.comp_matches === false);
-  if (moved.length > 0) {
-    return { result, ok: false, summary: "The Render Queue changed during the render (an item now holds a different comp), so the statuses may not be the ones started. Look at After Effects." };
-  }
-  if (errored.length > 0) {
-    return { result, ok: false, summary: `Stopped by an error on item(s) ${errored.map((s) => s.index).join(", ")} (ERR_STOPPED). See the render log in After Effects; ae_verify_render can check what was written.` };
-  }
-  if (stopped.length > 0) {
-    return { result, ok: false, summary: `Stopped by the user on item(s) ${stopped.map((s) => s.index).join(", ")} (USER_STOPPED). Files already written are on disk (see outputs).` };
-  }
-  if (bad4.length > 0) {
-    return { result, ok: false, summary: `Item(s) ${bad4.map((s) => `${s.index} (${s.status ?? "unknown"})`).join(", ")} did not reach DONE.` };
-  }
-  if (emptyOutputs.length > 0) {
-    return { result, ok: false, summary: `Every item reads DONE, but ${emptyOutputs.length} output(s) are missing or empty on disk (see outputs). Look at After Effects and check the output path.` };
-  }
-  return { result, ok: true, summary: `All ${statuses.length} item(s) reached DONE and every output exists on disk.` };
-}
-function beginRenderGate(store, info, lease) {
-  renderGate.begin(
-    info,
-    () => store.update(info.job_id, {
-      note: "The panel has nothing in flight again, so After Effects answers; the item statuses may never have been read. Look at After Effects' Render Queue panel and the output files, and call ae_render_queue_inspect."
-    }),
-    () => {
-      const cur = store.get(info.job_id);
-      store.update(info.job_id, {
-        ...cur && cur.state === "running" ? { state: "unknown", finished_at: (/* @__PURE__ */ new Date()).toISOString() } : {},
-        note: "The user cleared the render lock in the panel. Nothing was resent or stopped; After Effects may still be rendering. Look at After Effects' Render Queue panel and the output files."
-      });
-      lease?.release();
-    }
-  );
-}
-function errMessage2(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-async function runRenderJob(p) {
-  const { ctx, store, jobId, opId, items } = p;
-  let keepGate = false;
-  try {
-    await rqrenderDeps.defer();
-    let evalProblem = null;
-    try {
-      await ctx.bridge.evalRaw({
-        id: opId,
-        script: buildJsxCall("rqeditRender", {}),
-        label: "ae_render_queue_render (render)",
-        mutates: true,
-        toolName: "ae_render_queue_render",
-        timeoutMs: p.timeoutMs
-      });
-    } catch (err) {
-      evalProblem = { kind: err instanceof BridgeError ? err.kind : "other", message: errMessage2(err) };
-    }
-    if (evalProblem && evalProblem.kind === "timeout") {
-      keepGate = true;
-      renderGate.markUnknown("render_timeout");
-      store.update(jobId, {
-        state: "unknown",
-        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
-        error: clip2(evalProblem.message),
-        note: "The render call reached its time limit, so its outcome is unknown. After Effects may still be rendering. Nothing was resent and nothing was stopped. Look at After Effects' Render Queue panel; other tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders, restarting it clears this."
-      });
-      return;
-    }
-    if (evalProblem && evalProblem.kind === "unreachable") {
-      store.update(jobId, {
-        state: "unknown",
-        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
-        error: clip2(evalProblem.message),
-        note: "The panel could not be reached while the render ran, so its outcome is unknown. Look at After Effects. Nothing was resent."
-      });
-      return;
-    }
-    let read3 = null;
-    let readBackError;
-    let stillGoing = false;
-    const deadline = rqrenderDeps.now() + rqrenderDeps.stillRenderingMaxMs;
-    for (let n = 1; ; n++) {
-      try {
-        const res = await ctx.bridge.evalRaw({
-          id: n === 1 ? `${opId}_after` : `${opId}_after${n}`,
-          script: buildJsxCall("rqeditRenderResult", { indexes: items.map((i) => i.index), comp_ids: items.map((i) => i.comp_id) }),
-          label: "ae_render_queue_render (read-back)",
-          mutates: false,
-          toolName: "ae_render_queue_render",
-          timeoutMs: rqrenderDeps.readBackTimeoutMs
-        });
-        read3 = res.result ?? null;
-      } catch (err) {
-        read3 = null;
-        readBackError = errMessage2(err);
-        if (err instanceof BridgeError && err.kind === "timeout") {
-          keepGate = true;
-          renderGate.markUnknown("read_back_timeout");
-        }
-        break;
-      }
-      if (!stillRendering(read3)) break;
-      if (rqrenderDeps.now() >= deadline) {
-        stillGoing = true;
-        break;
-      }
-      await rqrenderDeps.sleep(rqrenderDeps.stillRenderingPollMs);
-    }
-    const judged = judgeResult(items, read3, readBackError);
-    if (stillGoing) {
-      keepGate = true;
-      renderGate.markUnknown("still_rendering");
-      store.update(jobId, {
-        state: "unknown",
-        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
-        ok: false,
-        summary: judged.summary,
-        result: judged.result,
-        note: "The render call returned, but After Effects kept reporting that it is rendering, so the outcome is unknown and other tools stay refused. Look at After Effects' Render Queue panel. If it no longer renders, restarting After Effects (or the user's Clear render lock button in the panel) clears this."
-      });
-      return;
-    }
-    if (evalProblem) {
-      store.update(jobId, {
-        state: "failed",
-        finished_at: (/* @__PURE__ */ new Date()).toISOString(),
-        ok: false,
-        error: clip2(evalProblem.message),
-        summary: `After Effects raised an error from the render call: ${clip2(evalProblem.message)}. ${judged.summary}`,
-        result: judged.result
-      });
-    } else {
-      store.update(jobId, { state: "finished", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: judged.ok, summary: judged.summary, result: judged.result });
-    }
-    if (read3 && !keepGate) {
-      try {
-        const rec = store.get(jobId);
-        await noteUiWrite(ctx, {
-          opId: `${opId}_rebase`,
-          toolName: "ae_render_queue_render",
-          label: "ae_render_queue_render (session baseline)",
-          expect: { project_path: rec?.project_path ?? "<unsaved>" }
-        });
-      } catch {
-      }
-    }
-  } catch (err) {
-    try {
-      store.update(jobId, { state: "failed", finished_at: (/* @__PURE__ */ new Date()).toISOString(), ok: false, error: clip2(errMessage2(err)), summary: "The render job's bookkeeping failed; look at After Effects and the output files." });
-    } catch {
-    }
-  } finally {
-    if (!keepGate) renderGate.end(jobId);
-    p.lease.release();
-  }
-}
-function elapsedSeconds(rec, nowMs) {
-  const start = Date.parse(rec.started_at);
-  const end = rec.state === "running" || !rec.finished_at ? nowMs : Date.parse(rec.finished_at);
-  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round((end - start) / 1e3)) : 0;
-}
-async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
-  const nowMs = now();
-  const outputs = [];
-  for (const it of rec.items) for (const o of it.outputs) outputs.push(statOutput(o));
-  const totalBytes = outputs.reduce((n, o) => n + o.bytes, 0);
-  const startMs = Date.parse(rec.started_at);
-  const writtenSince = outputs.filter((o) => o.mtime !== null && Date.parse(o.mtime) >= startMs).length;
-  const prev = store.lastSeen.get(rec.job_id);
-  store.lastSeen.set(rec.job_id, { bytes: totalBytes, at: nowMs });
-  const out = {
-    ok: true,
-    job_id: rec.job_id,
-    state: rec.state,
-    started_at: rec.started_at,
-    ...rec.finished_at ? { finished_at: rec.finished_at } : {},
-    elapsed_seconds: elapsedSeconds(rec, nowMs),
-    max_hours: rec.max_hours,
-    project_path: rec.project_path,
-    items: rec.items.map((i) => ({ index: i.index, comp_id: i.comp_id, comp_name: i.comp_name })),
-    outputs
-  };
-  const gate = renderGate.active();
-  if (gate) {
-    out.gate = { job_id: gate.job_id, state: gate.state, ...gate.cause ? { cause: gate.cause } : {} };
-    out.gate_note = "Other tools are refused while this gate is shut. If After Effects no longer renders and it does not clear, restarting After Effects clears it; the user can also press Clear render lock in the Chroma AE MCP panel (shown only while the gate is shut).";
-  }
-  if (rec.state === "running") {
-    out.sign_of_life = {
-      files_written_since_start: writtenSince,
-      total_bytes: totalBytes,
-      ...prev ? { grew_since_last_check: totalBytes > prev.bytes, seconds_since_last_check: Math.round((nowMs - prev.at) / 1e3) } : {},
-      note: "After Effects gives no percentage while it renders for a script. A new or growing output file is a sign of life, not progress; a movie may only be written at the end."
-    };
-    out.message = "Rendering. Other tools can't reach After Effects until it ends; this tool does not touch it.";
-    out.stop = STOP_TEXT;
-  } else {
-    if (rec.ok !== void 0) out.render_ok = rec.ok;
-    if (rec.summary) out.summary = rec.summary;
-    if (rec.error) out.error = rec.error;
-    if (rec.note) out.note = rec.note;
-    if (rec.result) {
-      out.item_statuses = rec.result.item_statuses;
-      if (rec.result.read_back_error) out.read_back_error = rec.result.read_back_error;
-    }
-    if (rec.state === "finished" || rec.state === "failed") {
-      out.next = "Check one real output frame or file with ae_verify_render (path: a single existing file, with expect) once the gate is open; an image sequence path with [#####] is not a file, so give one real frame such as the first.";
-    }
-  }
-  if (includeDialogs) {
-    try {
-      const d = await rqrenderDeps.listDialogs({ screenshots: false });
-      if (d.ok) out.dialogs = (d.dialogs ?? []).slice(0, 20);
-      else out.dialogs_error = clip2(d.error ?? "could not be read");
-      if (d.ok && (d.dialogs?.length ?? 0) > 0) {
-        out.dialogs_note = "A popup is open in After Effects. Read it with ae_dialogs; answer with ae_dialog_respond only under the user's rules. Never suppressed.";
-      }
-    } catch (err) {
-      out.dialogs_error = clip2(errMessage2(err));
-    }
-  }
-  return out;
-}
-var crypto11, fs32, path33, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, rqrenderTools;
-var init_rqrender = __esm({
-  "src/tools/ext/rqrender.ts"() {
-    "use strict";
-    crypto11 = __toESM(require("node:crypto"), 1);
-    fs32 = __toESM(require("node:fs"), 1);
-    path33 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_render_gate();
-    init_system_resources();
-    init_common();
-    init_mutate();
-    init_aerender();
-    init_dialogs();
-    init_renderbatch();
-    init_rqedit();
-    init_seqcheck();
-    init_session();
-    MAX_JOBS_KEPT = 30;
-    MAX_OUTPUT_FILES_STAT = 2e4;
-    MAX_ITEMS2 = 100;
-    STILL_RENDERING_MAX_MS = 30 * 6e4;
-    STILL_RENDERING_POLL_MS = 5e3;
-    MAX_TIMEOUT_MS = 2147e6;
-    READ_BACK_TIMEOUT_MS = 12e4;
-    MAX_TEXT = 2e3;
-    RQ_RENDER_JOBS_FILE = "rq-render-jobs.json";
-    STOP_TEXT = "Measured live (AE 26.3, 2026-11-07, over Remote Desktop): a render started by script LOCKS After Effects' UI for its whole length, so the user could NOT reach the Stop button; ending After Effects was the only way out. A script can stop a render only from an onStatusChanged or app.onError callback set up before render() starts (RenderQueue.stopRendering, AE Scripting Guide); this tool sets none up, so it cannot stop the render, and render() does not return until the render is over. So keep these renders short, save a dirty project first, and prefer ae_aerender_start (or Media Encoder) for long renders. A long 1080p H.264 output grew After Effects past 79 GB of RAM without writing a frame; ProRes of the same comp rendered fine.";
-    RenderJobStore = class {
-      constructor(filePath) {
-        this.filePath = filePath;
-        this.load();
-      }
-      jobs = /* @__PURE__ */ new Map();
-      settled = /* @__PURE__ */ new Map();
-      /** Sizes seen by the last status call, to say whether files grew since. Memory only. */
-      lastSeen = /* @__PURE__ */ new Map();
-      load() {
-        try {
-          if (!fs32.existsSync(this.filePath)) return;
-          const parsed = JSON.parse(fs32.readFileSync(this.filePath, "utf8"));
-          const list2 = Array.isArray(parsed.jobs) ? parsed.jobs : [];
-          let changed = false;
-          for (const raw of list2) {
-            if (!raw || typeof raw !== "object" || typeof raw.job_id !== "string") continue;
-            const rec = { ...raw };
-            if (rec.state === "running") {
-              rec.state = "lost";
-              rec.finished_at = (/* @__PURE__ */ new Date()).toISOString();
-              rec.note = "The panel service restarted while this render was running, so nobody is tracking it any more. After Effects may still be rendering, or may have finished or stopped: look at After Effects' Render Queue panel and at the output files. Nothing was resent.";
-              changed = true;
-            }
-            this.jobs.set(rec.job_id, rec);
-          }
-          if (changed) this.save();
-        } catch {
-        }
-      }
-      save() {
-        try {
-          fs32.mkdirSync(path33.dirname(this.filePath), { recursive: true });
-          const keep = this.list().slice(-MAX_JOBS_KEPT);
-          const payload = JSON.stringify({ jobs: keep }, null, 2);
-          const tmp = `${this.filePath}.tmp-${process.pid}-${crypto11.randomBytes(3).toString("hex")}`;
-          try {
-            fs32.writeFileSync(tmp, payload, "utf8");
-            fs32.renameSync(tmp, this.filePath);
-          } catch {
-            fs32.writeFileSync(this.filePath, payload, "utf8");
-            try {
-              fs32.rmSync(tmp, { force: true });
-            } catch {
-            }
-          }
-        } catch {
-        }
-      }
-      list() {
-        return Array.from(this.jobs.values()).sort((a, b) => a.started_at.localeCompare(b.started_at));
-      }
-      get(jobId) {
-        return this.jobs.get(jobId);
-      }
-      create(rec) {
-        this.jobs.set(rec.job_id, { ...rec });
-        this.save();
-      }
-      update(jobId, patch) {
-        const cur = this.jobs.get(jobId);
-        if (!cur) return;
-        this.jobs.set(jobId, { ...cur, ...patch, job_id: cur.job_id });
-        this.save();
-      }
-      /** The running job, else the newest one. */
-      latest() {
-        const all = this.list();
-        return all.find((j) => j.state === "running") ?? all[all.length - 1];
-      }
-      trackSettled(jobId, p) {
-        this.settled.set(jobId, p);
-      }
-      /** Resolves when the background run of a job has finished (for tests). */
-      done(jobId) {
-        return this.settled.get(jobId) ?? Promise.resolve();
-      }
-    };
-    stores = /* @__PURE__ */ new Map();
-    rqrenderDeps = {
-      listDialogs: listBlockingDialogs,
-      /** Outputs that running aerender jobs and batches are going to write. */
-      liveOutputs: () => liveOutputsFrom(getDefaultAerenderRegistry()),
-      /** One macrotask, so the tool's reply is sent before the render eval is. */
-      defer: () => new Promise((resolve7) => setTimeout(resolve7, 0)),
-      sleep: (ms) => new Promise((resolve7) => setTimeout(resolve7, ms)),
-      now: () => Date.now(),
-      readBackTimeoutMs: READ_BACK_TIMEOUT_MS,
-      stillRenderingMaxMs: STILL_RENDERING_MAX_MS,
-      stillRenderingPollMs: STILL_RENDERING_POLL_MS
-    };
-    SEQ_TOKEN = /\[(#+)\]/;
-    AeRenderQueueRenderSchema = external_exports.object({
-      max_hours: external_exports.number().min(1).max(48).default(12).describe("The most hours the render call may take before the job reports its outcome as unknown (1-48, default 12). A render that is still going then keeps running in After Effects; nothing is resent and nothing is stopped."),
-      overwrite: external_exports.boolean().optional().describe(`Allow output files that already exist. Default false: the call is refused if any queued output already exists. Nothing is ever deleted by this tool. After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was.`),
-      sequence_check: SequenceCheckSchema,
-      expect: ExpectSchema
-    });
-    AeRenderQueueRenderStatusSchema = external_exports.object({
-      job_id: external_exports.string().min(1).max(100).optional().describe("A job id from ae_render_queue_render. Default: the running job, else the newest."),
-      include_dialogs: external_exports.boolean().default(true).optional().describe("Also list popups blocking After Effects (read from outside AE; screenshots are not taken). Default true.")
-    });
-    rqrenderTools = [
-      {
-        name: "ae_render_queue_render",
-        description: `Start After Effects' OWN render of the queued Render Queue items, the same as pressing Render, and return AT ONCE with a job id, the items and their output files. Use it when \`ae_aerender_start\` fails or cannot be used (it never started on some machines), when the user asks for it, or for an UNSAVED or dirty project: it renders the open project exactly as it is now, no save needed. Prefer \`ae_aerender_start\` when it works: this render keeps After Effects busy for its whole length, and the user cannot work in it. TELL THE USER FIRST that After Effects will be busy until the render ends, and on a dirty project ASK THEM TO SAVE FIRST: After Effects' UI is locked for the whole render and the Stop button cannot be reached (measured), so a render cannot be stopped short of ending After Effects. Keep these renders short. NEVER ask the user to press Render in the Render Queue panel: call this instead. While it renders After Effects cannot answer anything else: every other tool that needs AE (reads and writes, also ae_open_panel and ae_list_panels) is refused at once with a message saying so, and nothing is sent to it. These keep working: \`ae_render_queue_render_status\` (state, elapsed, output files, any blocking popup; it never touches AE), \`ae_dialogs\`, \`ae_dialog_respond\`, \`ae_diagnostics\`; \`ae_status\` answers with the render state; \`ae_ask_user\` still queues its question for the panel but does not try to open the panel. Poll the status tool, not AE. Works only inside the After Effects panel service (not the dev stdio server). If the panel service is reloaded during a render, its port stays closed until the render ends (the service waits for After Effects before it listens), and the job then reads \`lost\`. Checked in one read before anything starts, and the call is refused with the reasons if: the queue is already rendering; no item is QUEUED; more than 100 items are QUEUED or the read was cut short; an item that is checked to render has no output (NEEDS_OUTPUT); an output module has no file; two outputs are the same file; a running aerender job or render batch is going to write the same file; its folder and that folder's parent do not exist (a missing folder under an existing parent only warns, since "Save in subfolder" can make it at render time; nothing is created); or an output file already exists (unless \`overwrite: true\`; nothing is ever deleted, and After Effects then asks "<file> already exists. Overwrite?" (OK / Cancel) for each and the render waits on it (measured, AE 26.3): OK there is a destructive answer that needs the user's instruction, and Cancel leaves the item QUEUED and the file as it was). A queued aerender job or batch item is held (not started) while the render runs. When the render call ends, a separate read gets every item's status (DONE, ERR_STOPPED, USER_STOPPED) and elapsed time, and the files on disk are checked; the job keeps the result. Then run \`ae_verify_render\` on one real output file or frame (not a [#####] path). If After Effects still reports rendering after the call returns, the gate stays shut and the read is repeated for up to 30 minutes, then the job reads unknown. Before it starts it also checks the project's image sequences for missing frames and reads the GPU: the result may hold \`sequence_check\` (a warning, the render still starts; \`sequence_check: "block"\` refuses (also when the check could not finish), "off" skips) and \`resource_warnings\` (GPU nearly full, or another app such as Cinema 4D running). If \`resource_warnings\` is present, tell the user before continuing. \`max_hours\` (1-48, default 12) is how long the call may take. At that limit the outcome is UNKNOWN: the job says so, nothing is resent or stopped, and tools stay refused until the panel service has nothing in flight again. If After Effects no longer renders and the lock does not clear, restarting After Effects clears it. Stopping: ${STOP_TEXT} Jobs are kept on disk; if the service restarts during a render the job reads \`lost\` and you must look at After Effects. ` + AGENT_SAFETY_GUIDANCE,
-        schema: AeRenderQueueRenderSchema,
-        handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          if (!ctx.serviceInfo) {
-            return {
-              ok: false,
-              started: false,
-              refused: [
-                {
-                  code: "not_in_panel",
-                  message: "This tool runs only inside the After Effects panel service. The dev stdio server reaches the panel with fetch, whose 300 s timeout would read a long render as unreachable and lift the render gate mid-render. Nothing was started."
-                }
-              ]
-            };
-          }
-          const store = storeFor(ctx);
-          const gate = renderGate.active();
-          if (gate) {
-            return { ok: false, started: false, refused: [{ code: "already_rendering", message: renderGateMessage(gate) }], job_id: gate.job_id };
-          }
-          const maxHours = args.max_hours ?? 12;
-          const opId = ctx.bridge.newOpId();
-          const resourceWarnings2 = await resourceWarningsForRender();
-          let lease;
-          try {
-            lease = await ctx.queue.acquire("ae_render_queue_render");
-          } catch (err) {
-            if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-            throw err;
-          }
-          let handedOff = false;
-          try {
-            const guard = await verifyTargetGuard(ctx, args.expect, opId);
-            const readRes = await ctx.bridge.evalRaw({
-              id: `${opId}_read`,
-              script: buildJsxCall("rqeditRead", { settings: false }),
-              label: "ae_render_queue_render (read)",
-              mutates: false,
-              toolName: "ae_render_queue_render"
-            });
-            let live = [];
-            try {
-              live = rqrenderDeps.liveOutputs();
-            } catch {
-              live = [];
-            }
-            const plan2 = planStart(readRes.result ?? null, args.overwrite === true, live);
-            if (plan2.refusals.length > 0) {
-              return {
-                ok: false,
-                started: false,
-                refused: plan2.refusals,
-                message: "Nothing was started. Fix the reasons above and call again."
-              };
-            }
-            const seq = await runSequenceCheck(ctx, args.sequence_check, { opId, toolName: "ae_render_queue_render", liveDirs: dirsOfFiles(live.map((l) => l.file)) });
-            if (seq.block && seq.check) {
-              return {
-                ok: false,
-                started: false,
-                refused: [{ code: blockCode(seq.check), message: sequenceBlockMessage("ae_render_queue_render", seq.check) }],
-                sequence_check: seq.check,
-                message: seq.check.with_gaps > 0 ? 'Nothing was started. Fix the missing frames, or call again with sequence_check "warn" or "off".' : 'Nothing was started. The sequence check could not finish; try again, or call again with sequence_check "warn" or "off".'
-              };
-            }
-            const jobId = `rqjob_${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
-            const startedAt = (/* @__PURE__ */ new Date()).toISOString();
-            const projectPath = guard.project_path ?? args.expect.project_path;
-            store.create({
-              job_id: jobId,
-              op_id: opId,
-              state: "running",
-              started_at: startedAt,
-              max_hours: maxHours,
-              project_path: projectPath,
-              overwrite: args.overwrite === true,
-              items: plan2.items
-            });
-            const info = { job_id: jobId, op_id: opId, started_at: startedAt };
-            beginRenderGate(store, info, lease);
-            ctx.queue.rejectWaiting(() => new BridgeError({ kind: "queued", message: renderGateMessage({ ...info, state: "rendering" }) }));
-            const timeoutMs = renderTimeoutMs(maxHours);
-            handedOff = true;
-            const run = runRenderJob({ ctx, store, jobId, opId, lease, timeoutMs, items: plan2.items });
-            store.trackSettled(jobId, run);
-            void run.catch(() => void 0);
-            return {
-              ok: true,
-              started: true,
-              job_id: jobId,
-              state: "running",
-              started_at: startedAt,
-              max_hours: maxHours,
-              project_path: projectPath,
-              renders: "the open project exactly as it is now (unsaved or dirty changes included)",
-              items: plan2.items,
-              ...plan2.warnings.length > 0 || seq.warnings.length > 0 ? { warnings: [...plan2.warnings, ...seq.warnings] } : {},
-              ...seq.check ? { sequence_check: seq.check } : {},
-              ...resourceWarnings2.length > 0 ? { resource_warnings: resourceWarnings2 } : {},
-              note: "The render runs in After Effects in the background of this call. After Effects is busy until it ends and the user cannot work in it; every other AE tool is refused meanwhile. Poll ae_render_queue_render_status (it never touches AE). " + STOP_TEXT
-            };
-          } finally {
-            if (!handedOff) lease.release();
-          }
-        }
-      },
-      {
-        name: "ae_render_queue_render_status",
-        description: "Where a render started by ae_render_queue_render is: state (running, finished, failed, unknown, lost), elapsed time, and for every output file whether it exists, its bytes and mtime and, for an image sequence, the frame count; plus any popup blocking After Effects (screenshots are not taken). It NEVER touches After Effects (no evalScript), so it answers during the render. While it renders, After Effects gives no percentage: a new or growing file is a sign of life, not progress. After the end it gives each item's status (DONE, ERR_STOPPED, USER_STOPPED), its elapsed time and a verdict, and suggests ae_verify_render. A job `lost` was cut off by a service restart: look at After Effects. `unknown` means the render call hit its time limit, its read-back timed out, or After Effects kept reporting that it renders. While the gate is shut the answer says that restarting After Effects clears it if AE no longer renders. Changes nothing.",
-        schema: AeRenderQueueRenderStatusSchema,
-        handler: async (args, ctx) => {
-          const store = storeFor(ctx);
-          const rec = args.job_id ? store.get(args.job_id) : store.latest();
-          if (!rec) {
-            return {
-              ok: false,
-              error: args.job_id ? "unknown_job" : "no_jobs",
-              message: args.job_id ? `No render job ${args.job_id}.` : "No render has been started with ae_render_queue_render yet.",
-              ...renderGate.active() ? { gate: renderGate.active() } : {}
-            };
-          }
-          return describeJob(ctx, store, rec, args.include_dialogs !== false);
-        }
       }
     ];
   }
@@ -37121,13 +37741,13 @@ function findOverlaps(items, minShare) {
   pairs2.sort((x, y) => y.share_of_smaller - x.share_of_smaller);
   return { pairs: pairs2.slice(0, MAX_OVERLAPS), truncated: pairs2.length > MAX_OVERLAPS };
 }
-function boxToRegion(box, comp, img, pad = 0) {
+function boxToRegion(box, comp, img, pad2 = 0) {
   const sx = img.width / comp.width;
   const sy = img.height / comp.height;
-  const x0 = Math.max(0, Math.floor((box[0] - pad) * sx));
-  const y0 = Math.max(0, Math.floor((box[1] - pad) * sy));
-  const x1 = Math.min(img.width, Math.ceil((box[2] + pad) * sx));
-  const y1 = Math.min(img.height, Math.ceil((box[3] + pad) * sy));
+  const x0 = Math.max(0, Math.floor((box[0] - pad2) * sx));
+  const y0 = Math.max(0, Math.floor((box[1] - pad2) * sy));
+  const x1 = Math.min(img.width, Math.ceil((box[2] + pad2) * sx));
+  const y1 = Math.min(img.height, Math.ceil((box[3] + pad2) * sy));
   return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
 }
 function sortPaired(ratios, bg) {
@@ -37432,12 +38052,12 @@ function suggestFixes(a) {
     expected_fail_share: r35(share)
   });
   const options = [black, white].map((s) => ({ s, pct: scrimOpacityOver(a.textRgb, a.analysis.bg, s, a.required, a.tolerance) })).filter((o) => o.pct !== null).sort((x, y) => x.pct - y.pct);
-  const pad = Math.max(8, Math.round((a.fontPx ?? Math.max(8, a.box[3] - a.box[1])) * 0.35));
+  const pad2 = Math.max(8, Math.round((a.fontPx ?? Math.max(8, a.box[3] - a.box[1])) * 0.35));
   const rect = [
-    Math.max(0, Math.round(a.box[0] - pad)),
-    Math.max(0, Math.round(a.box[1] - pad)),
-    Math.min(a.comp.width, Math.round(a.box[2] + pad)),
-    Math.min(a.comp.height, Math.round(a.box[3] + pad))
+    Math.max(0, Math.round(a.box[0] - pad2)),
+    Math.max(0, Math.round(a.box[1] - pad2)),
+    Math.min(a.comp.width, Math.round(a.box[2] + pad2)),
+    Math.min(a.comp.height, Math.round(a.box[3] + pad2))
   ];
   const w = Math.max(1, rect[2] - rect[0]);
   const h = Math.max(1, rect[3] - rect[1]);
@@ -39104,12 +39724,12 @@ function keyExtrasMismatches(extras, keys, afterSnapshot) {
   const kfs = afterSnapshot?.keyframes ?? [];
   const truncated = afterSnapshot?.truncated === true;
   const compare = (key, field, want, got, same) => {
-    const path60 = `keyframes[${key}].${field}`;
+    const path61 = `keyframes[${key}].${field}`;
     if (same === void 0 || got === void 0) {
-      unverified.push(path60);
+      unverified.push(path61);
       return;
     }
-    if (!same) mismatches.push({ path: path60, expected: want, actual: got, message: `Expected ${path60} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
+    if (!same) mismatches.push({ path: path61, expected: want, actual: got, message: `Expected ${path61} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
   };
   const flags = [
     ["spatial_continuous", "spatialContinuous"],
@@ -39272,14 +39892,14 @@ function curveEaseMismatches(sides, afterSnapshot) {
       if (!expected) continue;
       const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
       const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path60 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const path61 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
       const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
       if (!ok) {
         mismatches.push({
-          path: path60,
+          path: path61,
           expected: { interp: "bezier", ease: expected },
           actual: { interp, ease: actualList },
-          message: `Expected ${path60} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+          message: `Expected ${path61} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
         });
       }
     }
@@ -39310,13 +39930,13 @@ function typedTextChecks(set2, justify, afterObj, coveredPaths = []) {
   for (const group of ["typography", "paragraph", "box"]) {
     const got = afterObj[group] ?? {};
     for (const [key, value] of Object.entries(want[group])) {
-      const path60 = `${group}.${key}`;
-      if (coveredPaths.includes(path60) || mixed.includes(path60) || got[key] === void 0) {
-        unverified.push(path60);
+      const path61 = `${group}.${key}`;
+      if (coveredPaths.includes(path61) || mixed.includes(path61) || got[key] === void 0) {
+        unverified.push(path61);
         continue;
       }
-      expected[path60] = value;
-      actual[path60] = got[key];
+      expected[path61] = value;
+      actual[path61] = got[key];
     }
   }
   return { expected, actual, unverified };
@@ -46034,11 +46654,11 @@ function placedAt(shape, rt, t) {
 }
 function regionRoom(poly, comp, o) {
   const b = polygonBounds(poly);
-  const pad = o.gapPx + o.ringPx + 2;
-  const wx0 = Math.max(0, Math.floor(b[0] - pad));
-  const wy0 = Math.max(0, Math.floor(b[1] - pad));
-  const wx1 = Math.min(comp.width, Math.ceil(b[2] + pad));
-  const wy1 = Math.min(comp.height, Math.ceil(b[3] + pad));
+  const pad2 = o.gapPx + o.ringPx + 2;
+  const wx0 = Math.max(0, Math.floor(b[0] - pad2));
+  const wy0 = Math.max(0, Math.floor(b[1] - pad2));
+  const wx1 = Math.min(comp.width, Math.ceil(b[2] + pad2));
+  const wy1 = Math.min(comp.height, Math.ceil(b[3] + pad2));
   const ww = wx1 - wx0;
   const wh = wy1 - wy0;
   if (ww < 1 || wh < 1) return { coverage: 0, ring_pixels: 0, fills: true };
@@ -46765,9 +47385,9 @@ function buildContactSheet2(frames, comp, o) {
       const sy = a.height / comp.height;
       const poly = scalePoly(f.polygon, sx, sy);
       const bb = polygonBounds(poly);
-      const pad = Math.max(8, o.ringPx * ((sx + sy) / 2));
-      const ca = cropToBounds(a, bb, pad);
-      const cb = cropToBounds(b, bb, pad);
+      const pad2 = Math.max(8, o.ringPx * ((sx + sy) / 2));
+      const ca = cropToBounds(a, bb, pad2);
+      const cb = cropToBounds(b, bb, pad2);
       if (!ca || !cb) continue;
       let seamCrop = { a: ca.img, b: cb.img };
       if (f.seam) {
@@ -47913,7 +48533,7 @@ function pivotOf(track) {
 function smoothWithMirror(track, sigmaFrames) {
   const n = track.frames.length;
   if (!(sigmaFrames > 0) || n < 3) return smoothFrames(track, sigmaFrames);
-  const pad = Math.min(n - 1, Math.ceil(sigmaFrames * 3));
+  const pad2 = Math.min(n - 1, Math.ceil(sigmaFrames * 3));
   const corners = rectQuad(track.comp_size[0], track.comp_size[1]);
   const dt = 1 / (track.fps > 0 ? track.fps : 25);
   const moved = (f) => {
@@ -47940,11 +48560,11 @@ function smoothWithMirror(track, sigmaFrames) {
   const aFirst = moved(first);
   const aLast = moved(last);
   const head3 = [];
-  for (let k = pad; k >= 1; k--) head3.push(mirror(track.frames[k], aFirst, first.time - k * dt));
+  for (let k = pad2; k >= 1; k--) head3.push(mirror(track.frames[k], aFirst, first.time - k * dt));
   const tail = [];
-  for (let k = 1; k <= pad; k++) tail.push(mirror(track.frames[n - 1 - k], aLast, last.time + k * dt));
+  for (let k = 1; k <= pad2; k++) tail.push(mirror(track.frames[n - 1 - k], aLast, last.time + k * dt));
   const smoothed = smoothFrames({ ...track, frames: [...head3, ...track.frames, ...tail] }, sigmaFrames);
-  return { ...smoothed, frames: smoothed.frames.slice(pad, pad + n) };
+  return { ...smoothed, frames: smoothed.frames.slice(pad2, pad2 + n) };
 }
 function correctionFrames(a) {
   const { track } = a;
@@ -48876,8 +49496,8 @@ async function roundtripBuild(ctx, args) {
     const ins2 = await hostRead(ctx, opId, "inspect", "stabilizeInspect", { comp_id: args.comp_id, layer: args.plate, ref_time: refTime2 }, toolName);
     const kind = based.model === "perspective" || based.model === "affine" ? "corner_pin" : "transform";
     checkRigPlate(ins2, { copy_effects: args.copy_effects, compSize: based.comp_size, kind });
-    const pad2 = args.pad_px ?? defaultPad(based.comp_size);
-    const plan3 = planRig(based, ins2, { pad: pad2 });
+    const pad3 = args.pad_px ?? defaultPad(based.comp_size);
+    const plan3 = planRig(based, ins2, { pad: pad3 });
     const times = pickSheetTimes(plan3.frames, pivotOf(based), refTime2);
     const sheetTimes2 = uniqSorted([times.first, times.ref, times.last]);
     const before = [];
@@ -48894,9 +49514,9 @@ async function roundtripBuild(ctx, args) {
         beforeError = errMessage7(err);
       }
     }
-    return { track: based, info, refTime: refTime2, ins: ins2, plan: plan3, pad: pad2, sheetTimes: sheetTimes2, before, beforeError };
+    return { track: based, info, refTime: refTime2, ins: ins2, plan: plan3, pad: pad3, sheetTimes: sheetTimes2, before, beforeError };
   });
-  const { track, ins, plan: plan2, refTime, pad } = prep;
+  const { track, ins, plan: plan2, refTime, pad: pad2 } = prep;
   const workName = args.name ?? `${ins.layer.name} STAB`;
   const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const motionBlur = args.motion_blur && plan2.kind === "transform";
@@ -48936,7 +49556,7 @@ async function roundtripBuild(ctx, args) {
         guide_mode: args.guide_mode,
         motion_blur: motionBlur,
         comp_motion_blur: motionBlur && args.comp_motion_blur === true,
-        marker: { pad, ref_time: refTime, track_id: track.track_id },
+        marker: { pad: pad2, ref_time: refTime, track_id: track.track_id },
         inner: plan2.inner,
         outer: plan2.outer
       },
@@ -49008,7 +49628,7 @@ async function roundtripBuild(ctx, args) {
     track_id: track.track_id,
     track_model: track.model,
     ref_time: r43(refTime),
-    pad_px: pad,
+    pad_px: pad2,
     rig_kind: plan2.kind,
     plate: { index: ins.layer.index, id: ins.layer.id, name: ins.layer.name },
     work_comp: written.work_comp ?? null,
@@ -49024,10 +49644,10 @@ async function roundtripBuild(ctx, args) {
     ...afterSheet ? { after_sheet_path: afterSheet } : {},
     ...sheetError ? { sheet_error: sheetError } : {},
     how_to_use: [
-      `Open the work comp "${workName}" (id ${written.work_comp?.id}): the plate is steady there, ${pad} px of padding on each side. Frame ${r28(refTime)} s is the reference.`,
+      `Open the work comp "${workName}" (id ${written.work_comp?.id}): the plate is steady there, ${pad2} px of padding on each side. Frame ${r28(refTime)} s is the reference.`,
       "Add patch layers inside the work comp as SEPARATE layers above the guide plate. Paint or masks on the guide plate itself never reach the shot comp, because a guide layer is not rendered there.",
       `Or run ae_cleanplate_setup (comp_id ${written.work_comp?.id}, plate {id: ${written.inner?.layer_id}}, no track) or ae_inpaint_plate (comp_id ${written.work_comp?.id}, plate_layer {id: ${written.inner?.layer_id}}, place_in_comp {comp_id: ${written.work_comp?.id}}: masked and centred, which matches the symmetric pad) on the work comp. Both render the plate copy, which must be visible there: with guide_mode guide_layer it is a guide layer and may render empty (unverified), with opacity_switch tick 'Show Stabilized Plate' on the rig layer first.`,
-      `The rig layer sits directly above the plate in comp ${args.comp_id}; its comment holds pad_px ${pad}, ref_time ${r43(refTime)} and the track id, so other tools can place patches at the right offset.`,
+      `The rig layer sits directly above the plate in comp ${args.comp_id}; its comment holds pad_px ${pad2}, ref_time ${r43(refTime)} and the track id, so other tools can place patches at the right offset.`,
       "Take the rig out again with action remove."
     ],
     budget: { max_renders: args.max_renders, max_seconds: args.max_seconds, renders_used: budget.used.renders },
@@ -56834,7 +57454,7 @@ function pickOpFields(v) {
 }
 function opProblems(op) {
   const out = [];
-  const bad4 = (message, path60) => out.push({ message, path: path60 });
+  const bad4 = (message, path61) => out.push({ message, path: path61 });
   const allowed = new Set(ACTION_FIELDS[op.action]);
   for (const k of ALL_OP_FIELDS) {
     if (!allowed.has(k) && op[k] !== void 0) bad4(`${k} does not apply to the ${op.action} action.`, k);
@@ -57122,7 +57742,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("true: report what would be made and every refusal, change nothing. Default false, except deep duplicates (default true)."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path60) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path60] });
+      const bad4 = (message, path61) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: [path61] });
       if (v.duration !== void 0 && v.duration_frames !== void 0) bad4("Give duration (seconds) or duration_frames, not both.", "duration_frames");
       if (v.bg_color !== void 0 && parseBgColor(v.bg_color) === null) bad4("bg_color must be [r, g, b] in 0..1 or '#rrggbb'.", "bg_color");
       if (v.mode === "new") {
@@ -57196,7 +57816,7 @@ var init_projectitems = __esm({
       dry_run: external_exports.boolean().optional().describe("Default TRUE: report the plan and every refusal and change nothing. Pass false to apply it."),
       expect: ExpectSchema
     }).superRefine((v, ctx) => {
-      const bad4 = (message, path60) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path60 });
+      const bad4 = (message, path61) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path61 });
       const flatKeys = ALL_OP_FIELDS.filter((k) => v[k] !== void 0);
       if (v.ops !== void 0) {
         if (v.action !== void 0 || flatKeys.length > 0) bad4("Give ops or a single action with its fields, not both.", ["ops"]);
@@ -58601,7 +59221,7 @@ var init_layerops = __esm({
       expect: ExpectSchema
     });
     AeLayerOpsSchema = BaseObject.superRefine((v, ctx) => {
-      const bad4 = (message, path60) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path60 ? [path60] : void 0 });
+      const bad4 = (message, path61) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message, path: path61 ? [path61] : void 0 });
       const allowed = new Set(ACTION_FIELDS2[v.action]);
       for (const key of ALL_ACTION_FIELDS) {
         if (!allowed.has(key) && v[key] !== void 0) bad4(`${key} does not apply to the ${v.action} action.`, key);
@@ -58835,8 +59455,8 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
   if (!before || !after || !Array.isArray(w.targets) || w.no_op) return m;
   const find = (r, t) => r.properties.find((p) => keyOf2(p.layer_id, p.path, p.follower) === keyOf2(t.layer_id, t.path, t.follower));
   const ctx = { snap: w.snap, frame_duration: w.frame_duration, span: w.span, pivot: w.pivot };
-  const push2 = (path60, expected, actual, message) => {
-    if (m.length < MAX_MISMATCHES2) m.push({ path: path60, expected, actual, message });
+  const push2 = (path61, expected, actual, message) => {
+    if (m.length < MAX_MISMATCHES2) m.push({ path: path61, expected, actual, message });
   };
   const source = w.targets.find((t) => t.role === "source");
   for (const t of w.targets) {
@@ -59015,7 +59635,7 @@ var init_timeline = __esm({
     });
     readOf5 = (v) => v && typeof v === "object" && Array.isArray(v.properties) ? v : null;
     closeNumber = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
-    keyOf2 = (layerId, path60, follower) => `${layerId}|${path60.join("")}|${follower ?? ""}`;
+    keyOf2 = (layerId, path61, follower) => `${layerId}|${path61.join("")}|${follower ?? ""}`;
     transformTool = {
       name: "ae_keyframes_transform",
       description: "Retime keyframes without losing anything: shift (seconds or frames), scale time around a pivot, reverse, move so the first key lands at a time, or copy to another property (optionally relative to its value). Targets are {layer, path} pairs, or keys: 'selected' for the keys selected in the timeline (resolved to explicit properties and indexes; check them in the dry run). A filter narrows to a time range or key indexes. All moved keys move together as one block (a reverse mirrors the whole span, move_to puts the earliest key at the time), across every target. AE has no move-key call, so each property's keys are rebuilt: value, in and out interpolation, ease per dimension, spatial tangents, continuity, auto-bezier, roving, label and selection are kept; a reverse swaps in and out (and flips the sign of ease speed on non-spatial one-, two- and three-dimensional properties; spatial, Color and Shape speeds have no sign and stay as they are), a scale divides ease speed by the factor and keeps influence. Moved keys snap to whole frames unless snap is false. Two keys landing on one frame, a locked layer, a keyframe-less target or a property with over 500 keys are refused before anything changes. A separated Position (X/Y/Z) moves per dimension. Warns about expressions that read key(n) / nearestKey, roving keys (AE retimes those), and keys landing outside the comp. dry_run returns the planned times per key. The read-back (a separate evalScript) compares each key's time (roving keys excepted: AE retimes those), value, interpolation, eases and tangents. expect is required unless dry_run. " + AGENT_SAFETY_GUIDANCE,
@@ -64599,7 +65219,7 @@ function buildLayoutPlan(args, facts, templates = {}) {
     if (!rect || !size || !content) return;
     const fit = r.fit ?? "fill";
     const placement = fitSource(size[0], size[1], rect, fit, r.align);
-    const clip5 = r.clip ?? fit === "fill";
+    const clip6 = r.clip ?? fit === "fill";
     if (feed) {
       const dev = Math.max(Math.abs(placement.scale[0] - 100), Math.abs(placement.scale[1] - 100));
       if (dev > 0.01) warnings.push(`${tag}: the feed comp is ${feed.width}x${feed.height} for a ${rect[2]}x${rect[3]} region, so it is placed at ${placement.scale[0]}% (whole-pixel comp sizes).`);
@@ -64611,8 +65231,8 @@ function buildLayoutPlan(args, facts, templates = {}) {
       fit,
       placement,
       layer_rect: layerRect(size[0], size[1], placement),
-      clip: clip5,
-      clip_corners: clip5 ? regionToLayerSpace(rect, placement) : null,
+      clip: clip6,
+      clip_corners: clip6 ? regionToLayerSpace(rect, placement) : null,
       content,
       ...feed ? { feed } : {},
       ...above !== void 0 ? { above } : {},
@@ -65150,16 +65770,16 @@ function sameFootage(a, b, sequence) {
   const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
   return dir(a) === dir(b) && ver(a) === ver(b);
 }
-function shapeValueMismatches(want, got, path60) {
+function shapeValueMismatches(want, got, path61) {
   const m = [];
   if (!isObject(got) || !Array.isArray(got.vertices)) {
-    m.push({ path: path60, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
+    m.push({ path: path61, expected: "a path", actual: got, message: "The path could not be read back as a shape" });
     return m;
   }
   const gotVerts = got.vertices;
   const total2 = typeof got.num_vertices === "number" ? got.num_vertices : gotVerts.length;
   if (total2 !== want.vertices.length) {
-    m.push({ path: `${path60}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
+    m.push({ path: `${path61}.vertices.length`, expected: want.vertices.length, actual: total2, message: "The path has a different number of vertices" });
     return m;
   }
   const lists = [["vertices", want.vertices], ["inTangents", want.inTangents], ["outTangents", want.outTangents]];
@@ -65169,27 +65789,27 @@ function shapeValueMismatches(want, got, path60) {
     if (!Array.isArray(gotList)) continue;
     for (let i = 0; i < wantList.length && i < gotList.length; i++) {
       if (!closeEnough2(wantList[i][0], gotList[i][0]) || !closeEnough2(wantList[i][1], gotList[i][1])) {
-        m.push({ path: `${path60}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
+        m.push({ path: `${path61}.${key}[${i}]`, expected: wantList[i], actual: gotList[i], message: `Path ${key} point ${i} differs` });
         break;
       }
     }
   }
   if (want.closed !== void 0 && typeof got.closed === "boolean") {
-    expectThat(m, got.closed === want.closed, `${path60}.closed`, want.closed, got.closed, "The path's closed flag differs");
+    expectThat(m, got.closed === want.closed, `${path61}.closed`, want.closed, got.closed, "The path's closed flag differs");
   }
   return m;
 }
-function markerValueMismatches(want, got, path60) {
+function markerValueMismatches(want, got, path61) {
   const m = [];
   if (!isObject(got)) {
-    m.push({ path: path60, expected: "a marker", actual: got, message: "The marker could not be read back" });
+    m.push({ path: path61, expected: "a marker", actual: got, message: "The marker could not be read back" });
     return m;
   }
-  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path60}.comment`, want.comment, got.comment, "Marker comment differs");
-  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path60}.duration`, want.duration, got.duration, "Marker duration differs");
-  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path60}.label`, want.label, got.label, "Marker label differs");
+  if (want.comment !== void 0) expectThat(m, got.comment === want.comment, `${path61}.comment`, want.comment, got.comment, "Marker comment differs");
+  if (typeof want.duration === "number") expectThat(m, typeof got.duration === "number" && Math.abs(got.duration - want.duration) < 1e-3, `${path61}.duration`, want.duration, got.duration, "Marker duration differs");
+  if (typeof want.label === "number" && typeof got.label === "number") expectThat(m, got.label === want.label, `${path61}.label`, want.label, got.label, "Marker label differs");
   for (const f of ["chapter", "url", "cuePointName"]) {
-    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path60}.${f}`, want[f], got[f], `Marker ${f} differs`);
+    if (typeof want[f] === "string") expectThat(m, got[f] === want[f], `${path61}.${f}`, want[f], got[f], `Marker ${f} differs`);
   }
   return m;
 }
@@ -67659,7 +68279,7 @@ function validCurve(curve) {
 init_assets2();
 init_diagnostics();
 init_dialogs();
-var path59 = __toESM(require("node:path"), 1);
+var path60 = __toESM(require("node:path"), 1);
 
 // src/meta-tools.ts
 init_zod();
@@ -67744,6 +68364,7 @@ function convertFieldSchema(schema) {
 init_common();
 init_registry();
 var TOOLSET_HEADER = "x-chroma-toolset";
+var CLIENT_HEADER = "x-chroma-client";
 function parseToolset(value) {
   const raw = Array.isArray(value) ? value[0] : value;
   if (raw === void 0 || raw === null) return { toolset: "full", invalid: false };
@@ -68061,32 +68682,32 @@ var META_TOOL_NAMES = ["ae_search_tools", "ae_get_tool_schema", "ae_invoke_tool"
 var SCHEMA_POINTER = "More: ae_get_tool_schema.";
 var CORE_DESCRIPTION_OVERRIDES = {
   ae_run_jsx: "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
-  ae_render_queue_render: "Start After Effects' OWN render of the queued items (like pressing Render) and return at once with a job id; follow it with ae_render_queue_render_status. AE stays busy for the whole render and other AE tools are refused meanwhile: tell the user first, ask them to save a dirty project, prefer ae_aerender_start when it works. Never ask the user to press Render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
-  ae_aerender_start: "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow it with ae_aerender_status. `continue_on_missing_footage` renders anyway, with colour bars in place of the missing footage. If it cannot run, use ae_render_queue_render. Result may hold `resource_warnings` (GPU nearly full, or another renderer running) and `sequence_check` (missing frames; `block` refuses every check that could not finish: a cut listing, a sequence that could not be dated, a folder or item not checked): tell the user before going on.",
+  ae_render_queue_render: 'Start After Effects\' OWN render of the queued items (like pressing Render), returning a job id at once; poll ae_render_queue_render_status. AE stays busy until it ends and other AE tools are refused: tell the user first, save a dirty project, prefer ae_aerender_start. Never ask the user to press Render. `engine: "media_encoder"` queues the SAVED project in Media Encoder (AE stays free; the user checks the preset and presses Start): ask the user first, then `user_confirmed: true`; offer only if aerender did not start or a long render would lock AE. `item_indexes` renders only those items, else ALL queued. Tell the user any `resource_warnings` / `sequence_check`.',
+  ae_aerender_start: "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow with ae_aerender_status. `continue_on_missing_footage` renders anyway (colour bars for missing footage). If it cannot run, use ae_render_queue_render. Tell the user any `resource_warnings` / `sequence_check`.",
   ae_aerender_status: "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects.",
-  ae_render_queue_render_status: "Where a render started by ae_render_queue_render is: state, elapsed time, output files (exists, bytes, mtime). Never touches After Effects, so it answers during the render.",
+  ae_render_queue_render_status: "State, elapsed time and output files (exists, bytes, mtime) of a render from ae_render_queue_render. Never touches AE. A Media Encoder job shows grew_since_last_check per file, never finished: confirm with ae_verify_render.",
   ae_render_templates: "List render-settings and output-module template names; action save stores a queue item's settings or module as a named template (NOT undoable, needs `expect`).",
-  ae_dialogs: "READ-ONLY. List modal dialogs open in After Effects (title, text, kind, buttons (with the default marked), screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: read them here, answer only dialogs our own operation caused with ae_dialog_respond, ask the user otherwise.",
-  ae_dialog_respond: "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused. An AE-painted dialog is answered only with Cancel (No and Close beside a Cancel are refused), or with its default (outlined) button when that is OK/Yes/Continue; OK on text about replacing, losing, removing or erasing needs both allow_destructive and a user_instruction; it must have been listed with ae_dialogs first and is re-read right before the key. The result says what the dialog said, so tell the user. Otherwise ask the user.",
-  ae_save: "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` saves as the next free _vNNN. Both retarget the open project.",
+  ae_dialogs: "READ-ONLY. List modal dialogs open in After Effects (title, text, kind, buttons (default marked), screenshot path, caused_by_op) from outside AE's blocked thread. Popups are never suppressed: answer only dialogs our own operation caused, with ae_dialog_respond; else ask the user.",
+  ae_dialog_respond: "Press a button in an open After Effects modal dialog by its handle. Answer only dialogs our own operation caused. An AE-painted dialog is answered only with Cancel (No and Close beside a Cancel are refused), or with its default (outlined) button when that is OK/Yes/Continue; OK on text about replacing, losing, removing or erasing needs both allow_destructive and a user_instruction; it must have been listed with ae_dialogs first and is re-read right before the key. Tell the user what the dialog said; otherwise ask them.",
+  ae_save: "Save the open project (backup copy first by default). `save_as: { path, overwrite? }` saves under a new .aep path (the only way to save an untitled project); `increment: true` the next free _vNNN. Both retarget the open project.",
   ae_create_comp: "Create a comp: mode 'new' (width, height, fps, duration...), 'from_footage' or 'duplicate' (deep duplicate is a DRY RUN unless dry_run: false). Guarded by `expect`.",
-  ae_multi_comp_apply: "Run one existing guarded write tool (op {tool, args}, without comp_id and expect) on many comps picked by comp_ids, folder_id, nested_in or name_pattern. Each comp goes through that tool's own guard and is its own undo step (the way back is the automatic checkpoint); the result is a per-comp table. dry_run resolves the comps first.",
+  ae_multi_comp_apply: "Run one guarded write tool (op {tool, args}, without comp_id and expect) on many comps picked by comp_ids, folder_id, nested_in or name_pattern. Each comp goes through that tool's own guard and is its own undo step (the way back is the automatic checkpoint); per-comp result table. dry_run resolves the comps first.",
   ae_skill_run: "Run a saved AE skill: its numbered steps run in one evalScript (one undo step). Writing skills need `expect`; pass what varies in `args`. List skills with ae_skill_list.",
   ae_comp_tree: "Read how comps nest: with no comp_id every comp with its use counts, depth and render-queue state, plus the top-level and unused comps; with comp_id what that comp contains and where it is used. Read-only.",
   ae_get_project: "Read the project item tree (id, name, type, folder; comps with size, fps, duration; footage with path and missing flag). Filter by kind, name or missing, sort, and page with offset/limit.",
   ae_get_layer_props: "Read a layer's property tree: matchName, name, value, numKeys, expression. `meta: true` adds what each property accepts (type, min/max, units); `shape_values: true` gives path and marker values.",
   ae_get_keyframes: "Read a property's keyframes: time, value, interpolation, temporal ease per side, spatial tangents, continuity flags and roving. Read-only; at most 500 keys per call (`truncated` says more exist).",
-  ae_set_property: "Set a layer property's value, keyframes or expression in one undo group, guarded by `expect`, with a read-back receipt. Everything is validated before the group opens (dimensions, min/max, paths, fonts). Paths are { vertices, inTangents?, outTangents?, closed? }; markers go through keyframes.",
+  ae_set_property: "Set a layer property's value, keyframes or expression in one undo group, guarded by `expect`, with a read-back receipt. Everything is validated before the group opens. Paths are { vertices, inTangents?, outTangents?, closed? }; markers go through keyframes.",
   ae_batch_set: "Set many properties on layers of one comp in one call (values, keyframes, expressions, paths, markers). Everything is validated first, then written in chunks of up to 500 ops, each one undo group guarded by `expect`, with read-back; a font that is not installed refuses the batch unless allow_substitute.",
-  ae_set_text: "Update a text layer's string and styling (font, size, tracking, leading, colours, justification; `ranges` and `paragraphs` style parts; `style` has caps, baseline, kerning, scale...) in one undo group guarded by `expect`, with read-back. A font that is not installed is refused.",
+  ae_set_text: "Update a text layer's string and styling (font, size, tracking, leading, colours, justification; `ranges` / `paragraphs` style parts; `style`: caps, baseline, kerning, scale...) in one undo group guarded by `expect`. A font that is not installed is refused.",
   ae_create_layer: "Create a layer in a comp: solid, null, adjustment, text, shape, camera, light, footage, precomp or mesh, with name, length, start, 3D, parent and stack position, in one undo group guarded by `expect`. Text takes `font`; lights `light_type`; meshes `mesh_type`.",
-  ae_layer_ops: "Everyday layer edits in one call, by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
+  ae_layer_ops: "Layer edits by `action`: parent, reorder, sort, duplicate, delete, trim, rename, switches (shy, solo, lock, 3D, blend mode, label...), replace_source and more. One undo group guarded by `expect`. For solids, `scope: layer_only` makes a new solid item; `solid_settings` changes the item and so every layer using it.",
   ae_import_footage: "Import footage files or an image sequence (PSD/AI as a comp, or a whole project, via import_as) into the project and an optional folder, guarded by `expect`; returns the new item_ids. Many files go through ae_import_assets. Importing may raise dialogs: they are never suppressed, read them with ae_dialogs.",
-  ae_import_assets: "The batch import path: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, with a dry run first. Without it a model imports one file at a time with ae_import_footage. Sequences count as one item; files already in the project are skipped; a long batch stops at `max_seconds` and lists the rest. Guarded by `expect`.",
+  ae_import_assets: "Batch import: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, dry run first. Sequences count as one item; files already in the project are skipped; `max_seconds` stops a long batch and lists the rest. Guarded by `expect`. Without this tool a model imports one file at a time with ae_import_footage.",
   ae_snapshot_frame: "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame.",
-  ae_render_queue_edit: "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add or remove output modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first to see what goes). Refused while the queue renders.",
+  ae_render_queue_edit: "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add/remove modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first). Refused while the queue renders.",
   ae_set_footage_interpretation: "Set footage interpretation without the dialog, one undo group guarded by expect: alpha, fields, pulldown, conform_frame_rate, loop, pixel_aspect. One item (item_id) or many (item_ids, up to 200, with overrides per item; strict, the default, refuses all if one item can't take its settings, strict:false writes the rest). Checked before AE is touched; read back in a separate call.",
-  ae_add_effect: "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect whose value AE refuses is taken out again.",
+  ae_add_effect: "Add an effect to a layer by match name (find it with ae_list_effects), optionally renamed and with static parameter values, in one undo group guarded by `expect`. Returns the effect index and every parameter, read back separately. An effect AE refuses a value for is taken out again.",
   ae_status: "Read panel health, AE version, project path ('<unsaved>' if none), dirty flag, active comp, selected layers and the quarantine list. `detail: true` adds the active item, selected properties, viewer, GPU and warnings. Call first; the selection can change, so act on explicit ids. If AE is busy it answers at once with `ae_answered:false` and `busy` (why, popups, how long), within 10 s at most, instead of waiting."
 };
 function cutAt(text, max) {
@@ -68136,8 +68757,8 @@ function trimToolDescription(tool) {
   const body = override ?? firstSentences(stripSafety(tool.description), TOOL_DESC_MAX);
   return `${body} ${SCHEMA_POINTER}`;
 }
-function trimSchema(node, path60 = "") {
-  if (Array.isArray(node)) return node.map((n) => trimSchema(n, path60));
+function trimSchema(node, path61 = "") {
+  if (Array.isArray(node)) return node.map((n) => trimSchema(n, path61));
   if (node === null || typeof node !== "object") return node;
   const src = node;
   const out = {};
@@ -68145,17 +68766,17 @@ function trimSchema(node, path60 = "") {
   const untyped = src.type === void 0 && src.enum === void 0 && src.properties === void 0 || itemsUntyped;
   for (const [key, value] of Object.entries(src)) {
     if (key === "description" && typeof value === "string") {
-      const cap2 = CORE_PROPERTY_CAPS[path60];
+      const cap2 = CORE_PROPERTY_CAPS[path61];
       const text = cap2 !== void 0 ? firstSentences(value, cap2, true) : untyped ? firstSentences(value, PROP_DESC_MAX_UNTYPED, true) : firstSentences(value, PROP_DESC_MAX);
       if (text) out.description = text;
     } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
       const props = {};
-      for (const [name, sub] of Object.entries(value)) props[name] = trimSchema(sub, path60 ? `${path60}.${name}` : name);
+      for (const [name, sub] of Object.entries(value)) props[name] = trimSchema(sub, path61 ? `${path61}.${name}` : name);
       out.properties = props;
     } else if (key === "items") {
-      out.items = trimSchema(value, `${path60}[]`);
+      out.items = trimSchema(value, `${path61}[]`);
     } else {
-      out[key] = trimSchema(value, path60);
+      out[key] = trimSchema(value, path61);
     }
   }
   return out;
@@ -68335,6 +68956,104 @@ function closestToolNames(name, count = 5) {
 // src/tool-call.ts
 init_common();
 init_registry();
+
+// src/usage-log.ts
+var fs59 = __toESM(require("node:fs"), 1);
+var path59 = __toESM(require("node:path"), 1);
+init_common();
+var USAGE_DIR_NAME = "usage";
+var RETENTION_MONTHS = 3;
+var MAX_ERROR = 160;
+var MAX_LABEL = 120;
+var MAX_QUERY = 80;
+var MAX_TOOL = 80;
+function usageLogEnabled() {
+  const v = process.env.CHROMA_AE_MCP_USAGE_LOG;
+  if (v === void 0) return true;
+  return v.trim().toLowerCase() !== "off";
+}
+function clip5(text, max) {
+  return String(text ?? "").replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ").trim().slice(0, max);
+}
+function pad(n) {
+  return n < 10 ? "0" + n : String(n);
+}
+function monthOf(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+function dayOf(d) {
+  return `${monthOf(d)}-${pad(d.getDate())}`;
+}
+function errorKindOf(err) {
+  if (err && typeof err === "object") {
+    const e = err;
+    if (typeof e.kind === "string" && e.kind) return clip5(e.kind, 40);
+    if (typeof e.code === "string" && e.code) return clip5(e.code, 40);
+  }
+  return "error";
+}
+function errorTextOf(err) {
+  return clip5(err instanceof Error ? err.message : String(err), MAX_ERROR);
+}
+function runJsxFields(args) {
+  const out = {};
+  if (!args || typeof args !== "object") return out;
+  const a = args;
+  if (typeof a.label === "string") out.label = clip5(a.label, MAX_LABEL);
+  if (typeof a.mutates === "boolean") out.mutates = a.mutates;
+  if (typeof a.code === "string") out.codeChars = a.code.length;
+  return out;
+}
+var prunedDirs = /* @__PURE__ */ new Set();
+function pruneOld(dir, now) {
+  if (prunedDirs.has(dir)) return;
+  prunedDirs.add(dir);
+  try {
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1);
+    const keepFrom = monthOf(cutoff);
+    for (const name of fs59.readdirSync(dir)) {
+      const m = /^usage-(\d{4}-\d{2})\.jsonl$/.exec(name);
+      if (m && m[1] < keepFrom) {
+        try {
+          fs59.unlinkSync(path59.join(dir, name));
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
+}
+function recordUsage(ctx, entry, now = /* @__PURE__ */ new Date()) {
+  try {
+    if (!usageLogEnabled()) return;
+    const line = {
+      ts: now.toISOString(),
+      day: dayOf(now),
+      tool: clip5(entry.tool, MAX_TOOL),
+      ms: Math.max(0, Math.round(Number.isFinite(entry.ms) ? entry.ms : 0)),
+      ok: entry.ok
+    };
+    if (!entry.ok) {
+      line.error_kind = clip5(entry.errorKind || "error", 40);
+      line.error = clip5(entry.error ?? "", MAX_ERROR);
+    }
+    if (entry.toolset) line.toolset = clip5(entry.toolset, 10);
+    if (entry.client) line.client = clip5(entry.client, 40);
+    if (entry.via) line.via = entry.via;
+    if (entry.label !== void 0) line.label = clip5(entry.label, MAX_LABEL);
+    if (entry.mutates !== void 0) line.mutates = entry.mutates;
+    if (entry.codeChars !== void 0) line.code_chars = entry.codeChars;
+    if (entry.query !== void 0) line.query = clip5(entry.query, MAX_QUERY);
+    if (entry.hits !== void 0) line.hits = entry.hits;
+    const dir = path59.join(dataDirOf(ctx), USAGE_DIR_NAME);
+    fs59.mkdirSync(dir, { recursive: true });
+    pruneOld(dir, now);
+    fs59.appendFileSync(path59.join(dir, `usage-${monthOf(now)}.jsonl`), JSON.stringify(line) + "\n");
+  } catch {
+  }
+}
+
+// src/tool-call.ts
 function oneLine2(text) {
   return text.replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 80);
 }
@@ -68347,27 +69066,31 @@ function findTool(name) {
   }
   return toolMap.get(name);
 }
-async function callTool(toolName, rawArgs, ctx) {
+async function callTool(toolName, rawArgs, ctx, opts = {}) {
+  const via = opts.via ?? "direct";
+  const usage = (e, extra2) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra2, ...e });
   const tool = findTool(toolName);
   if (!tool) {
+    usage({ ms: 0, ok: false, errorKind: "unknown_tool", error: `Unknown tool: ${oneLine2(toolName)}` });
     return formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`));
   }
   const parsed = tool.schema.safeParse(rawArgs ?? {});
+  const extra = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : void 0;
   if (!parsed.success) {
-    return formatToolError(
-      new Error(
-        `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`
-      )
-    );
+    const why = `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`;
+    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra);
+    return formatToolError(new Error(why));
   }
   const started = Date.now();
   try {
     const output = await tool.handler(parsed.data, ctx);
     ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
+    usage({ ms: Date.now() - started, ok: true }, extra);
     return formatToolResponse(output);
   } catch (err) {
     const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
     ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
+    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra);
     return formatToolError(err);
   }
 }
@@ -68416,7 +69139,7 @@ function nameMatcher(pattern) {
     return n.includes(p);
   };
 }
-async function runSearch(args) {
+async function runSearch(args, usage) {
   const detail = args.detail ?? "summary";
   const limit = args.limit ?? 8;
   const offset = args.offset ?? 0;
@@ -68444,6 +69167,8 @@ async function runSearch(args) {
     ordered = candidates.map((t) => ({ name: t.name, tool: t }));
   }
   const total2 = ordered.length;
+  usage.query = query || pattern || group;
+  usage.hits = total2;
   const page = [];
   for (const o of ordered.slice(offset, offset + limit)) {
     const entry = {
@@ -68536,19 +69261,22 @@ async function runGetSchema(args) {
   }
   return formatToolResponse(result);
 }
-async function runInvoke(args, ctx) {
+async function runInvoke(args, ctx, opts) {
   const name = oneLine3(args.name, NAME_MAX);
+  const base = { toolset: opts.toolset, client: opts.client, via: "ae_invoke_tool" };
   if (META_TOOL_NAMES.includes(args.name)) {
     const why = `ae_invoke_tool cannot call ${name}: it is a meta-tool. Call ${name} directly.`;
     ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    recordUsage(ctx, { tool: "ae_invoke_tool", ms: 0, ok: false, errorKind: "error", error: why, ...base });
     return formatToolError(new Error(why));
   }
   if (!findTool(args.name)) {
     const why = `Unknown tool: ${name}. Closest names: ${closestToolNames(args.name).join(", ")}. Use ae_search_tools to find a tool.`;
     ctx.log?.("err", `tool ae_invoke_tool failed (0ms): ${why}`);
+    recordUsage(ctx, { tool: name, ms: 0, ok: false, errorKind: "unknown_tool", error: why, ...base });
     return formatToolError(new Error(why));
   }
-  return callTool(args.name, args.arguments, ctx);
+  return callTool(args.name, args.arguments, ctx, { toolset: opts.toolset, client: opts.client, via: "ae_invoke_tool" });
 }
 var SEARCH_DESCRIPTION = `Find tools: ${ALL_TOOLS.length} After Effects tools exist but only ${CORE_TOOL_NAMES.length} are listed, so search the rest here. Give \`query\` (keywords, e.g. 'remove object from shot', 'captions', 'track'), \`pattern\` (a name fragment, not a regex: ^ anchors the start and $ the end, e.g. ^ae_track) and/or \`group\`; an empty call lists the groups; \`offset\` pages. Then ae_get_tool_schema { name } for the full schema and ae_invoke_tool { name, arguments } to call it. Never touches After Effects.`;
 var GET_SCHEMA_DESCRIPTION = "Full description and full input schema of up to 5 tools, by `name` or `names`, including the safety text that guarded write tools carry. Read it before the first call of a tool you have not used. Never touches After Effects.";
@@ -68573,7 +69301,7 @@ var META_TOOLS = [
     schema: SearchArgs,
     unknownFieldHint: "Allowed fields: query, pattern, group, limit, offset, detail.",
     logsItself: true,
-    run: (a) => runSearch(a)
+    run: (a, _ctx, _o, u) => runSearch(a, u)
   },
   {
     name: "ae_get_tool_schema",
@@ -68606,7 +69334,7 @@ var META_TOOLS = [
     schema: InvokeArgs,
     unknownFieldHint: "Put the tool's arguments under `arguments`: { name, arguments: { ... } }. Fields beside `name` are not passed on.",
     logsItself: false,
-    run: (a, ctx) => runInvoke(a, ctx)
+    run: (a, ctx, o) => runInvoke(a, ctx, o)
   }
 ];
 var META_BY_NAME = new Map(META_TOOLS.map((m) => [m.name, m]));
@@ -68616,7 +69344,7 @@ function isMetaTool(name) {
 function metaToolList() {
   return META_TOOLS.map((m) => ({ name: m.name, description: m.description, inputSchema: m.inputSchema }));
 }
-async function callMetaTool(name, rawArgs, ctx) {
+async function callMetaTool(name, rawArgs, ctx, opts = {}) {
   const meta = META_BY_NAME.get(name);
   if (!meta) return formatToolError(new Error(`Unknown tool: ${oneLine3(name, NAME_MAX)}`));
   const started = Date.now();
@@ -68625,21 +69353,36 @@ async function callMetaTool(name, rawArgs, ctx) {
     const unknown = parsed.error.issues.some((i) => i.code === "unrecognized_keys");
     const why = (`Invalid arguments for ${meta.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}` + (unknown ? ` ${meta.unknownFieldHint}` : "")).slice(0, 600);
     ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(why, 200)}`);
+    recordUsage(ctx, { tool: meta.name, ms: 0, ok: false, errorKind: "invalid_args", error: why, toolset: opts.toolset, client: opts.client, via: meta.name === "ae_invoke_tool" ? "ae_invoke_tool" : "direct" });
     return formatToolError(new Error(why));
   }
+  const usage = {};
   try {
-    const result = await meta.run(parsed.data, ctx);
+    const result = await meta.run(parsed.data, ctx, opts, usage);
     if (meta.logsItself) {
       const failed = "isError" in result && result.isError === true;
       ctx.log?.(
         failed ? "err" : "ok",
         failed ? `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(result.content[0]?.text ?? "", 120)}` : `tool ${meta.name} ok (${Date.now() - started}ms)`
       );
+      recordUsage(ctx, {
+        tool: meta.name,
+        ms: Date.now() - started,
+        ok: !failed,
+        ...failed ? { errorKind: "error", error: oneLine3(result.content[0]?.text ?? "", 160) } : {},
+        toolset: opts.toolset,
+        client: opts.client,
+        via: "direct",
+        ...usage
+      });
     }
     return result;
   } catch (err) {
     const why = oneLine3(err instanceof Error ? err.message : String(err), 200);
     ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${why}`);
+    if (meta.logsItself) {
+      recordUsage(ctx, { tool: meta.name, ms: Date.now() - started, ok: false, errorKind: "error", error: why, toolset: opts.toolset, client: opts.client, via: "direct", ...usage });
+    }
     return formatToolError(err);
   }
 }
@@ -68922,7 +69665,7 @@ function makeErrorResponse(id, code, message, data) {
 function isPlainObject2(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
-async function handleSingleRpc(message, ctx, toolset) {
+async function handleSingleRpc(message, ctx, toolset, client) {
   if (!isPlainObject2(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
@@ -69011,7 +69754,7 @@ async function handleSingleRpc(message, ctx, toolset) {
           "Invalid params: `arguments` must be an object"
         );
       }
-      const result = isMetaTool(toolName) ? await callMetaTool(toolName, rawArgs, ctx) : await callTool(toolName, rawArgs, ctx);
+      const result = isMetaTool(toolName) ? await callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : await callTool(toolName, rawArgs, ctx, { toolset, client });
       return { jsonrpc: "2.0", id, result };
     }
     case "prompts/list": {
@@ -69076,6 +69819,7 @@ async function handleSingleRpc(message, ctx, toolset) {
 }
 async function handleRpc(message, ctx, opts = {}) {
   const toolset = parseToolset(opts.toolset).toolset;
+  const client = typeof opts.client === "string" && opts.client.trim() ? opts.client : void 0;
   let parsed = message;
   if (typeof message === "string") {
     try {
@@ -69090,14 +69834,14 @@ async function handleRpc(message, ctx, opts = {}) {
     }
     const results = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset);
+      const res = await handleSingleRpc(item, ctx, toolset, client);
       if (res !== null) {
         results.push(res);
       }
     }
     return results.length > 0 ? results : null;
   }
-  return await handleSingleRpc(parsed, ctx, toolset);
+  return await handleSingleRpc(parsed, ctx, toolset, client);
 }
 
 // src/panel-host.ts
@@ -69406,7 +70150,7 @@ function createPanelMcp(opts) {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(
-    path59.join(resolvedDataDir, "quarantine.json")
+    path60.join(resolvedDataDir, "quarantine.json")
   );
   const host = new PanelHost({
     evalScript: opts.evalScript,
@@ -69420,7 +70164,7 @@ function createPanelMcp(opts) {
     queue,
     quarantine,
     cep: opts.cep,
-    settings: new SettingsStore(path59.join(resolvedDataDir, "settings.json")),
+    settings: new SettingsStore(path60.join(resolvedDataDir, "settings.json")),
     asks: new AskStore(),
     dataDir: resolvedDataDir,
     serviceInfo: opts.serviceInfo,
@@ -69517,7 +70261,9 @@ function createPanelMcp(opts) {
         log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
       }
     }
-    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset });
+    const clientHeader = req.headers?.[CLIENT_HEADER];
+    const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "").replace(/[^ -~]+/g, " ").trim().slice(0, 40);
+    const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0 });
     if (rpcResponse === null || Array.isArray(rpcResponse) && rpcResponse.length === 0) {
       if (!res.writableEnded) {
         res.statusCode = 202;

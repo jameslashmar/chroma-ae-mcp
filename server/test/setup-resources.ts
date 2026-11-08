@@ -7,3 +7,6 @@ resourceDeps.run = async () => null;
 
 // A test that leaves fs calls "stuck" (a share that never answers) must not close the gate for the next test.
 beforeEach(() => resetHungFsCalls());
+
+// Tests must not write a usage log into the real data dir. The usage-log tests turn it on for a temp dir.
+process.env.CHROMA_AE_MCP_USAGE_LOG = "off";

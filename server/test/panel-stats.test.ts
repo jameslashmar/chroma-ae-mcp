@@ -54,6 +54,18 @@ describe("panel session stats (panel/client/common.js)", () => {
     expect(snap.entries[1].tool).toBe("ae_t1");
   });
 
+  it("counts a failed render job line as one error and not as a call", () => {
+    const stats = common.createSessionStats(50);
+    stats.ingest("[10:00:00] [OK] tool ae_aerender_start ok (80ms)");
+    stats.ingest("[10:09:00] [ERR] job ae_aerender_start job_17_ab12 failed: aerender never started rendering");
+    stats.ingest("[10:10:00] [ERR] job ae_render_queue_render rqjob_1_cd ended unknown: timed out");
+    stats.ingest("[10:10:01] [ERR] <- ae_verify_render (gone) [mcp_99] not_found: No imported item 270");
+    const snap = stats.snapshot();
+    expect(snap.calls).toBe(1);
+    expect(snap.errors).toBe(2);
+    expect(snap.entries[1]).toMatchObject({ kind: "event", level: "err", title: "Render job failed: ae_aerender_start" });
+  });
+
   it("keeps a session's start-up lines and drops the previous session's", () => {
     const stats = common.createSessionStats(50);
     stats.ingest("[08:00:00] [OK] Token loaded from C:\\old\\token");

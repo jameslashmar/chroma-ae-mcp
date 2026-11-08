@@ -441,6 +441,12 @@ export class AerenderJobRegistry {
   private readonly procs: Map<string, childProcess.ChildProcess> = new Map();
   /** The start gate and startup watchdog of this registry's jobs (see AerenderStartGate). */
   readonly gate: AerenderStartGate;
+  /**
+   * Called once when a running job reaches "failed" (never for a cancelled job). The tools
+   * point it at the service log (bindFailureLog), so a failure that happens in the
+   * background, such as the watchdog's "never started rendering", shows as an [ERR] line.
+   */
+  failureSink: ((rec: AerenderJobRecord) => void) | null = null;
 
   constructor(filePath: string = defaultAerenderJobsFilePath(), gate?: Partial<AerenderGateOptions>) {
     this.filePath = filePath;
@@ -510,6 +516,13 @@ export class AerenderJobRegistry {
     this.saveToDisk();
     // Whatever ended the job (exit, error, cancel, an interrupted mark), the gate learns of it here.
     if (existing.state === "running" && updated.state !== "running") this.gate.noteEnded(jobId);
+    if (existing.state === "running" && updated.state === "failed" && !updated.cancelled && this.failureSink) {
+      try {
+        this.failureSink(updated);
+      } catch {
+        // a log line must never break the job
+      }
+    }
     return updated;
   }
 
@@ -574,6 +587,18 @@ export class AerenderJobRegistry {
 }
 
 let defaultRegistry: AerenderJobRegistry | null = null;
+
+/** The service-log line for a failed render job: panel/client/common.js (JOB_LINE) counts it as an error. */
+export function formatJobFailureLine(tool: string, jobId: string, reason: string | undefined): string {
+  const why = (reason ?? "no reason recorded").replace(/\s+/g, " ").trim().slice(0, 200);
+  return `job ${tool} ${jobId} failed: ${why}`;
+}
+
+/** Sends one [ERR] line to the service log when a job of this registry fails. A call without a log leaves the earlier sink alone. */
+export function bindFailureLog(registry: AerenderJobRegistry, log: ((level: string, msg: string) => void) | undefined): void {
+  if (!log) return;
+  registry.failureSink = (rec) => log("err", formatJobFailureLine("ae_aerender_start", rec.job_id, rec.error));
+}
 
 export function getDefaultAerenderRegistry(): AerenderJobRegistry {
   if (!defaultRegistry) {
@@ -1522,7 +1547,7 @@ export class AerenderStartGate {
       this.schedulePump(0);
       return;
     }
-    const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: call ae_render_queue_render, which starts After Effects' own render of the queued items (tell the user first that After Effects will be busy until it ends).`;
+    const message = `aerender never started rendering: its log showed no render PROGRESS line (nothing after "Launching After Effects...") on each of ${attempts} attempts, and each time its own AfterFX.com engine was gone or idle (last attempt: ${why}). Each time its aerender and that engine were stopped (${what.replace(/^stopped /, "")} on the last). Check that After Effects is not blocked by a dialog and that no other aerender is starting, then run it again. If aerender keeps failing, do not ask the user to press Render: render in After Effects with ae_render_queue_render (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true (After Effects stays free; Media Encoder renders the SAVED project).`;
     this.note(ctl, `AERENDER WATCHDOG: ${message}`);
     this.registry.update(ctl.jobId, {
       state: "failed",
@@ -2097,13 +2122,14 @@ export function createAerenderTools(
         "Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one's engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state \"running\" with phase \"queued\" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job's engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). " +
         "Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender's \"Launching After Effects...\") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level \"errors\" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. " +
         "Before the spawn it checks the project's image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: \"block\"` refuses (also when the check could not finish), \"off\" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. " +
-        "If aerender fails to start (\"never started rendering\") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects' own render of the queued Render Queue items; it keeps AE busy, so tell the user first). Never ask the user to press Render. " +
+        "If aerender fails to start (\"never started rendering\") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects' own render of the queued Render Queue items; it keeps AE busy, so tell the user first), or offer Media Encoder after asking the user (`engine: \"media_encoder\"`, `user_confirmed: true`; AE stays free, the SAVED project is rendered). Never ask the user to press Render. " +
         AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args: AeAerenderStartArgs, ctx: ToolContext) => {
         ctx.quarantine.assertClear();
         const opId = ctx.bridge.newOpId();
         const registry = getRegistry();
+        bindFailureLog(registry, ctx.log);
         const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
         const compName = args.comp_name ?? "";
         const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;

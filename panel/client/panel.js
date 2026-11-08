@@ -616,7 +616,8 @@
       $copySetupBtn.textContent = setup && setup.kind === "config" ? "Copy config for " + label : "Copy setup command";
     }
     // Claude Desktop: the panel can write the entry itself (with a backup), including the core toolset.
-    // An existing entry without CHROMA_AE_MCP_TOOLSET lists every tool, so offer the switch.
+    // An existing entry without CHROMA_AE_MCP_TOOLSET should get core from the relay, but the client
+    // name it relies on is unconfirmed, so the button stays as the one-click way to pin core.
     var desktopAction = "";
     if (chosenClient === "claude-desktop" && entry) {
       if (!entry.registered) desktopAction = "Add to Claude Desktop (core toolset)";
@@ -631,9 +632,9 @@
     var text = setup.where;
     if (chosenClient === "claude-desktop" && already) {
       if (entry && entry.toolset === "unset") {
-        text = "Claude Desktop has chroma-ae but lists all tools. The button switches it to the core toolset (short list plus search) and backs up the config; then quit Claude Desktop from the tray and reopen it.";
+        text = "Claude Desktop has chroma-ae with no CHROMA_AE_MCP_TOOLSET. It should get the core toolset (short list plus search) by default when it reports itself as Claude Desktop; the button pins core in the config to be sure and backs up the config first, then quit Claude Desktop from the tray and reopen it. CHROMA_AE_MCP_TOOLSET=full in the entry's env lists all tools.";
       } else if (entry && entry.toolset === "core") {
-        text = "Claude Desktop has chroma-ae with the core toolset. To list all tools, remove CHROMA_AE_MCP_TOOLSET from the entry's env in claude_desktop_config.json and restart Claude Desktop.";
+        text = "Claude Desktop has chroma-ae with the core toolset. To list all tools, set CHROMA_AE_MCP_TOOLSET=full in the entry's env in claude_desktop_config.json and restart Claude Desktop.";
       } else {
         text = "Claude Desktop already has chroma-ae (CHROMA_AE_MCP_TOOLSET is set by you and is kept).";
       }

@@ -40,7 +40,7 @@ This is an internal Chroma tool, not a consumer product.
 - **Work to sound**: render a comp's audio in the background and read its level, hits, tempo and beats; put markers or pulses on the beats; turn a transcript into VO markers.
 - **Deliver**: check a render by importing it back, version shots up to the latest file on disk, build Essential Graphics templates and export MOGRTs, purge unused items, and check a comp against the brief's fonts, brand colours and safe areas.
 - **Ask the user** in the panel, with buttons, pictures or ease curves they can reshape, and remember the project brief and their motion taste.
-- **Render** through the render queue or `aerender` in the background, **read and answer popups**, and **save a diagnostics file** when something is stuck.
+- **Render** through the render queue or `aerender` in the background (or, only when you agree to it for that render, in Adobe Media Encoder so After Effects stays free), **read and answer popups**, and **save a diagnostics file** when something is stuck.
 
 ## Status
 
@@ -48,7 +48,7 @@ This is an internal Chroma tool, not a consumer product.
 
 - **180 tools**, all through the build, 5,598 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
 - Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions and the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) were checked live on AE 26.3. macOS should work but is untested.
-- Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts.
+- Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts. `ae_render_queue_render` then renders inside After Effects (which locks its UI until the render ends), or, if you say yes when asked, queues the saved project in Adobe Media Encoder (`engine: media_encoder`; After Effects stays free, you check the preset in Media Encoder and press Start, and Media Encoder reports no progress back).
 
 Test details, what is open and what each release added: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -124,7 +124,7 @@ claude mcp add --scope user --transport http chroma-ae http://127.0.0.1:7790/mcp
 
 - `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows (escape backslashes as `\\` in JSON) and `~/Library/Application Support/Adobe/CEP/extensions` on macOS.
 - The relay forwards to the same `/mcp` as Claude Code, so every client shares one write queue.
-- **Toolsets.** All 180 tool schemas are about 795,000 characters (roughly 200,000 tokens). Claude Code loads tool schemas on demand, but whether Claude Desktop does the same is **unconfirmed**, so the Desktop entry above asks for the `core` toolset: 33 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (about 81,000 characters, with shortened descriptions that keep every parameter), and the other tools are reached through those three. In the panel, pick **Desktop** under **Register with** and press **Add to Claude Desktop (core toolset)**: it writes the entry above into `claude_desktop_config.json` (the file is backed up as `claude_desktop_config.json.chroma-bak` first, other servers and other settings are kept), then quit Claude Desktop from the tray and reopen it. If Desktop already has a `chroma-ae` entry without `CHROMA_AE_MCP_TOOLSET`, it keeps listing all tools until you press **Use the core toolset in Claude Desktop**. To go back to all 180 tools, delete the `CHROMA_AE_MCP_TOOLSET` line from the entry's `env` (or set it to `full`) and restart Desktop; the panel never puts the line back by itself, and never overwrites a value you set. Claude Code, Cursor and Codex are registered without it. The details are in [docs/TOOLS.md](docs/TOOLS.md).
+- **Toolsets.** All 180 tool schemas are about 795,000 characters (roughly 200,000 tokens). Claude Code loads tool schemas on demand, but whether Claude Desktop does the same is **unconfirmed**, so Claude Desktop gets the `core` toolset by default: 33 everyday tools plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (about 81,000 characters, with shortened descriptions that keep every parameter), and the other tools are reached through those three. In the panel, pick **Desktop** under **Register with** and press **Add to Claude Desktop (core toolset)**: it writes the entry above into `claude_desktop_config.json` (the file is backed up as `claude_desktop_config.json.chroma-bak` first, other servers and other settings are kept), then quit Claude Desktop from the tray and reopen it. The relay decides when the client connects. With `CHROMA_AE_MCP_TOOLSET` set in the entry's `env`, that value wins (`core` or `full`). With it unset, the relay reads the client's name from `initialize`: Claude Desktop (believed to call itself `claude-ai`, matched exactly) gets `core`, every other client (Cursor, Codex, anything else) gets all 180 tools. So an existing Desktop entry with no `CHROMA_AE_MCP_TOOLSET` line should get `core` after a restart, with no change to the config; to pin it regardless of the name, press **Use the core toolset in Claude Desktop** in the panel (it backs up the config first). To get all 180 tools in Desktop, set `CHROMA_AE_MCP_TOOLSET` to `full` in the entry's `env` and restart; the panel never overwrites a value you set. Claude Code connects over HTTP and always lists everything; Cursor and Codex are registered without the variable and list everything. The relay writes one line to its stderr (Claude Desktop's MCP log) naming the client and the choice, e.g. `toolset core (client claude-ai); client "claude-ai"`, and sends the client's name to the panel, whose usage log records it (`node panel/tools/usage-report.cjs` shows calls per client). The details are in [docs/TOOLS.md](docs/TOOLS.md).
 - While AE is closed the relay answers `tools/list` from the last list the panel served (the core list has its own cache file, so it exists only after the panel has served it once with `CHROMA_AE_MCP_TOOLSET=core`; with no cache yet, `tools/list` returns an error), and calling a tool says to start AE.
 - The panel's buttons back up each config file as `<file>.chroma-bak` before changing it.
 
@@ -161,6 +161,12 @@ Full details, including what can't be undone: [docs/SAFETY.md](docs/SAFETY.md).
 ## Tools
 
 180 tools in 55 groups (the last three, `ae_render_queue_render`, its status and `ae_layout_apply`, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
+
+## Usage log
+
+The server keeps a small local log of tool use, so you can see which tools are used, which fail and what the agent had to do by hand. One JSON line per tool call goes to `<data dir>/usage/usage-YYYY-MM.jsonl` (`%LOCALAPPDATA%\chroma-ae-mcp` on Windows, `~/Library/Application Support/chroma-ae-mcp` on macOS): the time, the tool name, how long it took, whether it worked and, if not, the error kind and a short message. For `ae_run_jsx` it also keeps the `label` (not the code), and for `ae_search_tools` the query and the number of hits. No other arguments and no results are recorded. The log never leaves your machine, and it keeps the current month and the 3 before it, and older files are deleted. Set `CHROMA_AE_MCP_USAGE_LOG=off` in the service's environment to turn it off.
+
+Read it with `node panel/tools/usage-report.cjs [--days 7] [--dir <usage dir>]`: calls per day, top tools, failures, slowest tools, what `ae_run_jsx` was used for, searches that found nothing and refusals while AE was busy.
 
 ## Develop
 

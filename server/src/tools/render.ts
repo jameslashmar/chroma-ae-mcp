@@ -16,6 +16,7 @@ import { readAfterWrite } from "./read-back.js";
 import { writeScaledCopy } from "./ext/png-utils.js";
 import { autoCheckpoint, verifyTargetGuard } from "./mutate.js";
 import { preflightRefusal, runPreflightGate } from "./ext/preflight.js";
+import { followDeps, followQueue } from "./ext/rqfollow.js";
 
 export const AeSnapshotFrameSchema = z.object({
   comp_id: z.number().int().describe("The CompItem ID to snapshot."),
@@ -396,20 +397,26 @@ export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_status",
     description:
-      "Read all items currently in the After Effects Render Queue (comp, status, output paths). " +
+      "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueStatusSchema,
     handler: async (_args, ctx) => {
-      const res = await ctx.bridge.callHost(
-        "rqStatus",
-        {},
-        {
-          label: "ae_render_queue_status",
-          mutates: false,
-          toolName: "ae_render_queue_status",
-        }
-      );
-      return res.result;
+      const toolName = "ae_render_queue_status";
+      let status: Record<string, unknown> | null = null;
+      let readError: unknown;
+      try {
+        const res = await ctx.bridge.callHost("rqStatus", {}, { label: toolName, mutates: false, toolName, timeoutMs: followDeps.answerTimeoutMs });
+        status = (res.result ?? {}) as Record<string, unknown>;
+      } catch (err) {
+        readError = err;
+      }
+      const followed = await followQueue(ctx, status, toolName);
+      if (status === null) {
+        // After Effects did not answer (busy, or the render gate is shut): answer from the last successful read, or fail as before.
+        if (!followed) throw readError;
+        return { ok: true, answered_from_earlier_read: true, follow: followed.follow };
+      }
+      return followed ? { ...status, follow: followed.follow } : status;
     },
   },
 ];
