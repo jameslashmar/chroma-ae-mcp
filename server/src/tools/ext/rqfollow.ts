@@ -4,7 +4,7 @@
  * ae_render_queue_status adds, for each item that is RENDERING or QUEUED (at most 20), the
  * state of its output files on disk: exists, bytes, mtime and grew_since_last_check (null on
  * the first call). The file part is Node-side (statOutput from rqrender.ts); the item list and
- * the named statuses come from AE (rqStatus plus rqeditRead, each with a short wait). When AE
+ * the named statuses come from AE (rqStatus with its usual wait, then rqeditRead with a short wait, only when something renders or is about to). When AE
  * does not answer in time (it may be busy rendering), the answer is built from the output
  * paths of the last successful read, with a note saying so. Memory only; nothing is written.
  */
@@ -83,19 +83,45 @@ export function statFollow(sources: FollowSource[], nowMs: number): FollowItem[]
 }
 
 /**
+ * Does the rqStatus answer show a render, or an item that is going to render (its Render box checked)? Only then is
+ * a second read for the output files worth its eval.
+ */
+export function somethingToFollow(status: Record<string, unknown>): boolean {
+  if (status.rendering === true) return true;
+  const items = Array.isArray(status.items) ? (status.items as Array<Record<string, unknown>>) : [];
+  return items.some((i) => i && (i.render === true || String(i.status ?? "").toLowerCase() === "rendering"));
+}
+
+/** What the failed first read said, for the note: the bridge error's kind and message. */
+function describeReadError(err: unknown): { kind: string; text: string } {
+  const kind = err && typeof err === "object" && typeof (err as { kind?: unknown }).kind === "string" ? (err as { kind: string }).kind : "";
+  const text = err instanceof Error ? err.message : err === undefined ? "" : String(err);
+  return { kind, text: text.replace(/\s+/g, " ").trim().slice(0, 400) };
+}
+
+/**
  * Adds `follow` to the answer of rqStatus. `status` is what the rqStatus read gave (or null when AE did not
- * answer). Never throws for a slow AE: with an earlier read it answers from that; without one it returns null
- * and the caller rethrows its own error.
+ * answer; `firstError` is then what that read threw, named in the note). Never throws for a slow AE: with an
+ * earlier read it answers from that; without one it returns null and the caller rethrows its own error. With a
+ * status that shows nothing rendering or about to render it returns null without a second read.
  */
 export async function followQueue(
   ctx: ToolContext,
   status: Record<string, unknown> | null,
-  toolName: string
+  toolName: string,
+  firstError?: unknown
 ): Promise<{ follow: Record<string, unknown>; read_now: boolean } | null> {
   const nowMs = followDeps.now();
   let fresh: { sources: FollowSource[]; truncated: boolean } | null = null;
   let problem = "";
+  let problemKind = "";
+  if (status === null && firstError !== undefined) {
+    const d = describeReadError(firstError);
+    problem = d.text;
+    problemKind = d.kind;
+  }
   if (status !== null) {
+    if (!somethingToFollow(status)) return null;
     const num = typeof status.numItems === "number" ? status.numItems : 0;
     if (num === 0) {
       fresh = { sources: [], truncated: false };
@@ -108,7 +134,9 @@ export async function followQueue(
         );
         fresh = followSources(res.result);
       } catch (err) {
-        problem = err instanceof Error ? err.message : String(err);
+        const d = describeReadError(err);
+        problem = d.text;
+        problemKind = d.kind;
       }
     }
   }
@@ -134,7 +162,7 @@ export async function followQueue(
       earlier_read_seconds_ago: ageSeconds,
       ...(last.truncated ? { truncated: true } : {}),
       note:
-        `After Effects did not answer in time${problem ? ` (${problem.slice(0, 160)})` : ""}; it may be busy rendering. The item list and statuses are from the last successful read ${ageSeconds} s ago and may be out of date; the file facts (exists, bytes, mtime, grew_since_last_check) were taken from disk just now.`,
+        `${problemKind === "queued" ? "After Effects was not asked" : "After Effects did not answer in time"}${problem ? ` (${problemKind ? problemKind + ": " : ""}${problem})` : ""}; it may be busy rendering. The item list and statuses are from the last successful read ${ageSeconds} s ago and may be out of date; the file facts (exists, bytes, mtime, grew_since_last_check) were taken from disk just now.`,
     },
   };
 }

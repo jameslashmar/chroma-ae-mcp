@@ -11,6 +11,9 @@ import {
   ENGINE_EXIT_GRACE_MS,
   launchAerenderJob,
   listEnginesAsync,
+  autostartExtensionIdsFromManifest,
+  scanCepAutostart,
+  resetCepAutostartCache,
   type AerenderEngineInfo,
   type AerenderEngineList,
   type AerenderGateOptions,
@@ -31,7 +34,7 @@ interface FakeChild extends EventEmitter {
   unref: () => void;
 }
 
-function rig(over: { max_running?: number; engine_wait_ms?: number; engine_cache_ms?: number } = {}) {
+function rig(over: { max_running?: number; engine_wait_ms?: number; engine_cache_ms?: number; engine_poll_ms?: number } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aer-gate-"));
   let now = 1_000_000;
   const timers: Array<{ id: number; at: number; fn: () => void }> = [];
@@ -73,6 +76,7 @@ function rig(over: { max_running?: number; engine_wait_ms?: number; engine_cache
     slow_check_ms: SLOW,
     dead_engine_ms: DEAD,
     poll_ms: 1000,
+    engine_poll_ms: 0,
     engine_cache_ms: 0,
     ...over,
     now: () => now,
@@ -878,5 +882,144 @@ describe("aerender engine left behind after a normal exit", () => {
     r.advance(ENGINE_EXIT_GRACE_MS + 1);
     expect(r.killed).toEqual([]);
     expect(fs.readFileSync(r.logOf(a.job_id), "utf8")).not.toContain("AERENDER EXIT");
+  });
+});
+
+describe("aerender engine exit during the start (CEP extensions)", () => {
+  const OWN = { id: "london.chroma.aemcp.panel", folder: "chroma" };
+  const OTHER = { id: "vendor.tool.panel", folder: "vendor-tool" };
+  afterEach(() => resetCepAutostartCache(null));
+
+  /** One attempt: the engine appears with `cep` CEP children, then vanishes while aerender stays alive. */
+  const failAttempt = (r: ReturnType<typeof make>, child: FakeChild, enginePid: number, cep: number) => {
+    const e = { ...r.engineOf(child, enginePid), cep_children: cep };
+    r.engines.push(e);
+    r.advance(3000); // the fast poll sees the engine
+    r.engines.splice(0, r.engines.length);
+    r.advance(3000); // ... and then sees it gone
+  };
+
+  it("ends an attempt as soon as its engine is gone, retries, and fails with the CEP reason after 3 attempts with one [ERR] line", () => {
+    resetCepAutostartCache([OWN, OTHER]);
+    const r = make({ engine_poll_ms: 3000 });
+    const logged: string[] = [];
+    bindFailureLog(r.registry, (l, m) => logged.push(`${l}: ${m}`));
+    const rec = r.launch();
+    r.say(rec.job_id, "PROGRESS:  Launching After Effects...");
+    failAttempt(r, r.children[0], 7001, 7);
+    let job = r.registry.get(rec.job_id)!;
+    expect(r.children[0].kill).toHaveBeenCalled();
+    expect(job.phase).toBe("queued");
+    expect(job.start_attempts).toBe(1);
+    expect(job.engine_exit_after_ms).toBeGreaterThanOrEqual(3000);
+    expect(job.engine_exit_after_ms).toBeLessThan(15_000);
+    expect(job.cep_children_max).toBe(7);
+    r.advance(COOL + 2000);
+    expect(r.children).toHaveLength(2);
+    failAttempt(r, r.children[1], 7002, 7);
+    expect(r.registry.get(rec.job_id)!.start_attempts).toBe(2);
+    r.advance(COOL + 2000);
+    expect(r.children).toHaveLength(3);
+    failAttempt(r, r.children[2], 7003, 6);
+    job = r.registry.get(rec.job_id)!;
+    expect(job.state).toBe("failed");
+    expect(job.error).toContain("render engine (AfterFX.com) exited about");
+    expect(job.error).toContain("(7 CEPHtmlEngine.exe processes)");
+    expect(job.error).toContain("rendered when 5 or fewer auto-starting CEP extensions started");
+    expect(job.error).toContain("ae_render_queue_render");
+    expect(job.error).toContain("Media Encoder");
+    expect(job.error).toContain("turn off the auto-starting CEP extensions you do not need until it renders");
+    expect(job.error).toContain("failed with 6 or more");
+    expect(job.error).toContain("vendor.tool.panel");
+    expect(job.error).not.toContain("london.chroma.aemcp");
+    expect(job.error).not.toContain("never started rendering");
+    expect(job.cep_autostart).toEqual([OWN, OTHER]);
+    expect(r.children).toHaveLength(3);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatch(/^err: job ae_aerender_start /);
+    r.advance(10 * 60_000);
+    expect(logged).toHaveLength(1);
+  });
+
+  it("does not stop a job whose engine left after render PROGRESS appeared", () => {
+    const r = make({ engine_poll_ms: 3000 });
+    const a = r.launch("A");
+    r.engines.push({ ...r.engineOf(r.children[0], 7001), cep_children: 3 });
+    r.advance(3000);
+    r.say(a.job_id, "PROGRESS:  0:00:00:00 (1): 0 Seconds");
+    r.engines.splice(0, r.engines.length);
+    r.advance(3000);
+    expect(r.children[0].kill).not.toHaveBeenCalled();
+    expect(r.registry.get(a.job_id)!.state).toBe("running");
+    expect(r.registry.get(a.job_id)!.engine_exit_after_ms).toBeUndefined();
+  });
+
+  it("a mixed failure keeps the older wording", () => {
+    resetCepAutostartCache([]);
+    const r = make({ engine_poll_ms: 3000 });
+    const rec = r.launch();
+    failAttempt(r, r.children[0], 7001, 5);
+    r.advance(COOL + 2000);
+    // attempt 2 and 3: no engine ever appears; the 45 s + 10 s watchdog stops them
+    r.advance(LIMIT + GAP + 1000);
+    r.advance(COOL + 2000);
+    r.advance(LIMIT + GAP + 1000);
+    const job = r.registry.get(rec.job_id)!;
+    expect(job.state).toBe("failed");
+    expect(job.error).toContain("never started rendering");
+  });
+
+  it("listEnginesAsync counts the CEPHtmlEngine.exe children of each engine", async () => {
+    const run = async (file: string): Promise<string> => {
+      if (file === "tasklist") return '"AfterFX.com","7001","Console","1","100,000 K"\r\n';
+      return ["7001\t5000\t30000000\td -noui", "CEP\t7001", "CEP\t7001", "CEP\t999", ""].join("\r\n");
+    };
+    const list = await listEnginesAsync(run, "win32");
+    expect(list).toEqual([{ pid: 7001, ppid: 5000, cpu_ms: 3000, command: "d -noui", cep_children: 2 }]);
+  });
+});
+
+describe("CEP auto-start manifest scan", () => {
+  const manifest = (ext: string, host: string, events: string[]) => `<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest ExtensionBundleId="b.${ext}" Version="7.0">
+  <ExtensionList><Extension Id="${ext}" Version="1"/></ExtensionList>
+  <ExecutionEnvironment><HostList><Host Name="${host}" Version="[1.0,99.9]"/></HostList></ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="${ext}"><DispatchInfo><Resources><MainPath>./i.html</MainPath></Resources>
+      <Lifecycle><AutoVisible>true</AutoVisible><StartOn>${events.map((e) => `<Event>${e}</Event>`).join("")}</StartOn></Lifecycle>
+    </DispatchInfo></Extension>
+  </DispatchInfoList>
+</ExtensionManifest>`;
+
+  it("finds AEFT extensions that start on ApplicationActivate or ApplicationInitialized, in any spelling", () => {
+    expect(autostartExtensionIdsFromManifest(manifest("a.one", "AEFT", ["com.adobe.csxs.events.ApplicationActivate"]))).toEqual(["a.one"]);
+    expect(autostartExtensionIdsFromManifest(manifest("a.two", "AEFT", ["applicationInitialized", "x"]))).toEqual(["a.two"]);
+    expect(autostartExtensionIdsFromManifest(manifest("a.three", "PPRO", ["com.adobe.csxs.events.ApplicationActivate"]))).toEqual([]);
+    expect(autostartExtensionIdsFromManifest(manifest("a.four", "AEFT", ["com.adobe.csxs.events.ThemeColorChanged"]))).toEqual([]);
+    expect(autostartExtensionIdsFromManifest("not xml at all")).toEqual([]);
+  });
+
+  it("scans several extension folders read-only, skips bad ones, caps at 30 and never throws", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cep-scan-"));
+    dirs.push(root);
+    const put = (base: string, folder: string, xml: string) => {
+      fs.mkdirSync(path.join(root, base, folder, "CSXS"), { recursive: true });
+      fs.writeFileSync(path.join(root, base, folder, "CSXS", "manifest.xml"), xml);
+    };
+    put("user", "tool-a", manifest("vendor.a", "AEFT", ["com.adobe.csxs.events.ApplicationActivate"]));
+    put("user", "tool-b", manifest("vendor.b", "AEFT", ["com.adobe.csxs.events.ApplicationInitialized"]));
+    put("user", "tool-c", manifest("vendor.c", "ILST", ["com.adobe.csxs.events.ApplicationActivate"]));
+    put("user", "tool-d", "<broken");
+    fs.mkdirSync(path.join(root, "user", "no-manifest"), { recursive: true });
+    put("shared", "own", manifest("london.chroma.aemcp.panel", "AEFT", ["com.adobe.csxs.events.ApplicationActivate"]));
+    const found = scanCepAutostart([path.join(root, "user"), path.join(root, "missing"), path.join(root, "shared")]);
+    expect(found).toEqual([
+      { id: "vendor.a", folder: "tool-a" },
+      { id: "vendor.b", folder: "tool-b" },
+      { id: "london.chroma.aemcp.panel", folder: "own" },
+    ]);
+    for (let i = 0; i < 40; i++) put("many", `m${String(i).padStart(2, "0")}`, manifest(`many.${i}`, "AEFT", ["com.adobe.csxs.events.ApplicationActivate"]));
+    expect(scanCepAutostart([path.join(root, "many")])).toHaveLength(30);
+    expect(scanCepAutostart(["\0bad"])).toEqual([]);
   });
 });

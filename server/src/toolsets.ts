@@ -206,13 +206,13 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_run_jsx:
     "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render:
-    "Start After Effects' OWN render of the queued items (like pressing Render), returning a job id at once; poll ae_render_queue_render_status. AE stays busy until it ends and other AE tools are refused: tell the user first, save a dirty project, prefer ae_aerender_start. Never ask the user to press Render. `engine: \"media_encoder\"` queues the SAVED project in Media Encoder (AE stays free; the user checks the preset and presses Start): ask the user first, then `user_confirmed: true`; offer only if aerender did not start or a long render would lock AE. `item_indexes` renders only those items, else ALL queued. Tell the user any `resource_warnings` / `sequence_check`.",
+    "Start After Effects' OWN render of the queued items (like pressing Render), returning a job id at once; poll ae_render_queue_render_status. AE stays busy until it ends and other AE tools are refused: tell the user first, save a dirty project, prefer ae_aerender_start. Never ask the user to press Render. `engine: \"media_encoder\"` queues the SAVED project in Media Encoder (AE stays free; the user checks the preset and presses Start): ask the user first, then `user_confirmed: true`; offer only if aerender did not start or a long render would lock AE. `item_indexes` renders only those items (not with media_encoder), else ALL queued; items it unchecked that could not be queued again are listed as pending_restores and block a new item_indexes render. Tell the user any `resource_warnings` / `sequence_check`.",
   ae_aerender_start:
     "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow with ae_aerender_status. `continue_on_missing_footage` renders anyway (colour bars for missing footage). If it cannot run, use ae_render_queue_render. Tell the user any `resource_warnings` / `sequence_check`.",
   ae_aerender_status:
-    "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects.",
+    "Status of a background aerender job (running, succeeded, failed): frame progress, exit code, log tail and output paths. Never touches After Effects. `wait_seconds` (0-30) waits for a state change or an output file, so one call replaces several polls.",
   ae_render_queue_render_status:
-    "State, elapsed time and output files (exists, bytes, mtime) of a render from ae_render_queue_render. Never touches AE. A Media Encoder job shows grew_since_last_check per file, never finished: confirm with ae_verify_render.",
+    "State, elapsed time and output files (exists, bytes, mtime) of a render from ae_render_queue_render. Never touches AE. A Media Encoder job shows grew_since_last_check per file, never finished: confirm with ae_verify_render. `wait_seconds` (0-30) waits for a state change or an output file, so one call replaces several polls.",
   ae_render_templates:
     "List render-settings and output-module template names; action save stores a queue item's settings or module as a named template (NOT undoable, needs `expect`).",
   ae_dialogs:
@@ -250,7 +250,7 @@ export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   ae_import_assets:
     "Batch import: scan a folder or pass `paths`, set interpretation with a shared `interpret` and per-pattern `rules`, all in one undo step, dry run first. Sequences count as one item; files already in the project are skipped; `max_seconds` stops a long batch and lists the rest. Guarded by `expect`. Without this tool a model imports one file at a time with ae_import_footage.",
   ae_snapshot_frame:
-    "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame.",
+    "Render one frame of a comp to a PNG under the data dir's frames folder and return its path (`scale` or `max_size` to shrink). The file is checked fresh; `stale_frame` means After Effects returned an old frame. `save_to` with `frames` or `times` keeps full-size frames in a folder.",
   ae_render_queue_edit:
     "Edit a Render Queue item in one undo group guarded by `expect`: render-settings template, time span, queued flag, output module template/file/post-render action, add/remove modules; or remove items (`remove`, or `remove_filter` by status: use dry_run first). Refused while the queue renders.",
   ae_set_footage_interpretation:

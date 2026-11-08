@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BridgeError } from "../src/host.js";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
@@ -12,6 +13,9 @@ import {
   AeRenderQueueRenderSchema,
   AeRenderQueueRenderStatusSchema,
   RenderJobStore,
+  ameNearApp,
+  ameRootCandidates,
+  bindJobFailureLog,
   jobsFileFor,
   planStart,
   rqrenderDeps,
@@ -32,13 +36,16 @@ const tmp = () => {
   return d;
 };
 const realAmeInstalled = rqrenderDeps.ameInstalled;
+const realAmeNear = rqrenderDeps.ameNearApp;
 beforeEach(() => {
   rqrenderDeps.ameInstalled = () => true;
+  rqrenderDeps.ameNearApp = realAmeNear;
   renderGate.reset();
   resetRenderJobStores();
 });
 afterEach(() => {
   rqrenderDeps.ameInstalled = realAmeInstalled;
+  rqrenderDeps.ameNearApp = realAmeNear;
   renderGate.reset();
   resetRenderJobStores();
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
@@ -540,6 +547,14 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
   const ame = (ctx: ToolContext, extra: Record<string, unknown> = {}) =>
     start(ctx, { engine: "media_encoder", user_confirmed: true, expect: { project_path: SAVED_PATH }, ...extra });
   const calledFns = (f: ReturnType<typeof fakeAe>) => f.calls.map((c) => c.fn).filter((fn) => fn.startsWith("rqedit"));
+  /** Leaves only item n QUEUED (the others UNQUEUED with their Render box off), as a person would before a Media Encoder hand-over. */
+  const onlyQueued = (f: ReturnType<typeof fakeAe>, n: number) => {
+    f.list.forEach((it, k) => {
+      if (k + 1 === n) return;
+      it.status = STATUS.UNQUEUED;
+      it.renderFlag = false;
+    });
+  };
 
   it("refuses without user_confirmed and says what to ask the user; nothing is sent to AE", async () => {
     const f = fakeAe({ saved: true });
@@ -618,14 +633,32 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
     expect(st.message).toMatch(/presses Start|presses Start there|pressed Start/);
   });
 
-  it("refuses with ame_not_installed before anything is read or written", async () => {
+  it("refuses with ame_not_installed (usual folders and the AE install folder both lack it) before anything is written", async () => {
     const f = fakeAe({ saved: true });
     rqrenderDeps.ameInstalled = () => false;
+    rqrenderDeps.ameNearApp = () => false;
     const out = await ame(f.ctx);
     expect(out.refused[0].code).toBe("ame_not_installed");
-    expect(f.calls).toHaveLength(0);
+    expect(out.refused[0].message).toContain("C:\\Program Files\\Adobe");
+    expect(out.refused[0].message).not.toContain("C:Program");
+    expect(calledFns(f)).toEqual(["rqeditRead", "rqeditAmeState"]);
     expect(f.rq.ameCalls).toEqual([]);
+    expect(f.undo.begun).toBe(0);
     expect(storeFor(f.ctx).list()).toEqual([]);
+  });
+
+  it("does not refuse as not installed when Media Encoder sits next to After Effects' own install folder", async () => {
+    const f = fakeAe({ saved: true });
+    rqrenderDeps.ameInstalled = () => false;
+    let seen: unknown = "unset";
+    rqrenderDeps.ameNearApp = (p) => {
+      seen = p;
+      return true;
+    };
+    const out = await ame(f.ctx);
+    expect(out).toMatchObject({ ok: true, started: true });
+    expect(seen).toBeNull(); // the fake AE has no Folder.appPackage: the host reports null, never throws
+    expect(f.rq.ameCalls).toEqual([false]);
   });
 
   it("the consent text names the preset risk", async () => {
@@ -634,13 +667,34 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
     expect(out.refused[0].message).toMatch(/last-used preset/);
   });
 
+  it("the consent text says to check preset and format, and that other AME items start too", async () => {
+    const f = fakeAe({ saved: true });
+    const out = await start(f.ctx, { engine: "media_encoder", expect: { project_path: SAVED_PATH } });
+    expect(out.refused[0].message).toMatch(/check the preset and format/);
+    expect(out.refused[0].message).toMatch(/other items already in Media Encoder.s queue start too/);
+    expect(out.refused[0].message).toMatch(/ProRes 4444/);
+  });
+
+  it("start_now true without whole_ame_queue_ok is refused before anything is sent to AE or AME", async () => {
+    const f = fakeAe({ saved: true });
+    const out = await start(f.ctx, { engine: "media_encoder", user_confirmed: true, start_now: true, expect: { project_path: SAVED_PATH } });
+    expect(out).toMatchObject({ ok: false, started: false });
+    expect(out.refused[0].code).toBe("whole_ame_queue_not_confirmed");
+    expect(out.refused[0].message).toMatch(/EVERY item waiting/);
+    const no = await start(f.ctx, { engine: "media_encoder", user_confirmed: true, start_now: true, whole_ame_queue_ok: false, expect: { project_path: SAVED_PATH } });
+    expect(no.refused[0].code).toBe("whole_ame_queue_not_confirmed");
+    expect(f.calls).toHaveLength(0);
+    expect(f.rq.ameCalls).toEqual([]);
+    expect(storeFor(f.ctx).list()).toEqual([]);
+  });
+
   it("start_now true: calls queueInAME(true), sets no render gate, and does not call render()", async () => {
     const f = fakeAe({ saved: true });
     let gateDuring: unknown = "unset";
     f.behaviour.duringAme = () => {
       gateDuring = renderGate.active();
     };
-    const out = await ame(f.ctx, { start_now: true });
+    const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
     expect(out).toMatchObject({ ok: true, started: true, engine: "media_encoder", state: "handed_to_media_encoder" });
     expect(f.rq.ameCalls).toEqual([true]);
     expect(f.rq.renders).toBe(0);
@@ -675,43 +729,34 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
     expect(renderGate.active()).toBeNull();
   });
 
-  it("item_indexes: holds the others, queueInAME sees only the chosen item, then releases them in a separate evalScript", async () => {
+  it("refuses item_indexes with media_encoder before anything is sent: the hold would dirty the saved project", async () => {
     const f = fakeAe({ saved: true });
-    let during: string[] = [];
-    f.behaviour.duringAme = () => {
-      during = f.states();
-    };
-    const out = await ame(f.ctx, { item_indexes: [2], comp_ids: [f.list[1].comp.id], start_now: true });
-    expect(out).toMatchObject({ ok: true, started: true });
-    expect(out.held_back.map((h: any) => h.index)).toEqual([1, 3]);
-    expect(during).toEqual(["unqueued", "queued", "unqueued"]);
-    expect(f.rq.ameCalls).toEqual([true]);
+    const out = await ame(f.ctx, { item_indexes: [2], comp_ids: [f.list[1].comp.id], start_now: true, whole_ame_queue_ok: true });
+    expect(out).toMatchObject({ ok: false, started: false, engine: "media_encoder" });
+    expect(out.refused[0].code).toBe("item_indexes_with_media_encoder");
+    expect(out.refused[0].message).toMatch(/ae_render_queue_edit/);
+    expect(out.refused[0].message).toMatch(/ae_save/);
+    expect(f.calls).toHaveLength(0);
+    expect(f.undo.begun).toBe(0);
+    expect(f.rq.ameCalls).toEqual([]);
     expect(f.states()).toEqual(["queued", "queued", "queued"]);
-    expect(f.list.map((i) => i.render)).toEqual([true, true, true]);
-    expect(calledFns(f)).toEqual(["rqeditRead", "rqeditAmeState", "rqeditHold", "rqeditRead", "rqeditQueueInAme", "rqeditRenderResult", "rqeditRelease", "rqeditRead"]);
-    expect(f.calls.find((c) => c.fn === "rqeditQueueInAme")!.script).toContain('"expected_queued":1');
-    expect(f.undo.begun).toBe(2);
-    expect(f.undo.ended).toBe(2);
-    const rec = storeFor(f.ctx).get(out.job_id)!;
-    expect(rec.state).toBe("handed_to_media_encoder");
-    expect(rec.only_item_indexes).toEqual([2]);
-    expect(rec.restore?.state).toBe("restored");
-    expect(rec.summary).toMatch(/QUEUED again/);
-    expect(renderGate.active()).toBeNull();
+    expect(storeFor(f.ctx).list()).toEqual([]);
   });
 
-  it("item_indexes: releases the held items even when queueInAME fails", async () => {
+  it("a project with only the wanted item queued hands over that item and leaves the project clean", async () => {
     const f = fakeAe({ saved: true });
-    f.behaviour.ameThrows = true;
-    const out = await ame(f.ctx, { item_indexes: [1] });
-    expect(out.ok).toBe(false);
-    expect(f.states()).toEqual(["queued", "queued", "queued"]);
-    expect(storeFor(f.ctx).get(out.job_id)!.restore?.state).toBe("restored");
+    onlyQueued(f, 2);
+    const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
+    expect(out).toMatchObject({ ok: true, started: true });
+    expect(out.items.map((i: any) => i.index)).toEqual([2]);
+    expect(calledFns(f)).toEqual(["rqeditRead", "rqeditAmeState", "rqeditQueueInAme", "rqeditRenderResult"]);
+    expect(f.undo.begun).toBe(0);
   });
 
   it("status: handed_to_media_encoder, per-file exists/bytes and growth, never finished", async () => {
     const f = fakeAe({ saved: true });
-    const out = await ame(f.ctx, { item_indexes: [1], start_now: true });
+    onlyQueued(f, 1);
+    const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
     const file = f.list[0].mods[0].file.fsName;
 
     const s1 = await status(f.ctx, { job_id: out.job_id });
@@ -746,7 +791,8 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
     const old = new Date(Date.now() - 3_600_000);
     fs.utimesSync(stale, old, old);
     fs.writeFileSync(path.join(f.outDir, "bravo.mov"), "other item"); // another base name
-    const out = await ame(f.ctx, { item_indexes: [1], start_now: true });
+    onlyQueued(f, 1);
+    const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
     const s0 = await status(f.ctx, { job_id: out.job_id });
     expect(s0.other_extension_files).toBeUndefined();
     const later = new Date(Date.now() + 5_000);
@@ -769,7 +815,7 @@ describe("ae_render_queue_render engine media_encoder (opt-in)", () => {
 
   it("a job handed to Media Encoder survives a service restart as it was", async () => {
     const f = fakeAe({ saved: true });
-    const out = await ame(f.ctx, { start_now: true });
+    const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
     resetRenderJobStores();
     const again = new RenderJobStore(jobsFileFor(f.ctx));
     expect(again.get(out.job_id)?.state).toBe("handed_to_media_encoder");
@@ -856,5 +902,422 @@ describe("rqeditHold and rqeditRelease (fake AE)", () => {
     expect(out.restored.map((r: any) => r.index)).toEqual([3]);
     expect(out.not_restored[0]).toMatchObject({ index: 1, code: "changed" });
     expect(out.not_restored[0].reason).toMatch(/done/);
+  });
+});
+
+// ---------- review fixes ----------
+
+describe("review fixes", () => {
+  const calledFns = (f: ReturnType<typeof fakeAe>) => f.calls.map((c) => c.fn).filter((fn) => fn.startsWith("rqedit"));
+  const ame = (ctx: ToolContext, extra: Record<string, unknown> = {}) => start(ctx, { engine: "media_encoder", user_confirmed: true, expect: { project_path: SAVED_PATH }, ...extra });
+  const onlyQueued = (f: ReturnType<typeof fakeAe>, n: number) => {
+    f.list.forEach((it, k) => {
+      if (k + 1 === n) return;
+      it.status = STATUS.UNQUEUED;
+      it.renderFlag = false;
+    });
+  };
+  /** Makes the evalRaw whose id ends with `suffix` fail with a bridge error of `kind`. */
+  const failEval = (f: ReturnType<typeof fakeAe>, suffix: string, kind: "timeout" | "queued" | "unreachable") => {
+    const realEval = f.ctx.bridge.evalRaw.bind(f.ctx.bridge);
+    (f.ctx.bridge as any).evalRaw = async (p: any) => {
+      if (String(p.id).endsWith(suffix)) throw new BridgeError({ kind, message: `${kind} on ${suffix}` });
+      return realEval(p);
+    };
+  };
+
+  describe("1: a Media Encoder hand-over that times out is not 'not started'", () => {
+    it("answers started 'unknown' with ame_handover_unknown, never resends, and the record stays unknown", async () => {
+      const f = fakeAe({ saved: true });
+      failEval(f, "_ame", "timeout");
+      const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
+      expect(out).toMatchObject({ ok: false, started: "unknown", engine: "media_encoder" });
+      expect(out.refused[0].code).toBe("ame_handover_unknown");
+      expect(out.refused[0].message).toMatch(/NOT KNOWN whether Media Encoder got/);
+      expect(out.refused[0].message).toMatch(/Do not call ae_render_queue_render again/);
+      expect(f.rq.ameCalls).toEqual([]);
+      expect(calledFns(f)).not.toContain("rqeditQueueInAme");
+      expect(calledFns(f)).not.toContain("rqeditRenderResult");
+      const rec = storeFor(f.ctx).get(out.job_id)!;
+      expect(rec.state).toBe("unknown");
+    });
+  });
+
+  describe("2: a pending restore is not hidden by the next job", () => {
+    const strand = async (f: ReturnType<typeof fakeAe>) => {
+      f.behaviour.unreachable = true;
+      const out = await start(f.ctx, { item_indexes: [2] });
+      await finish(f.ctx, out);
+      f.behaviour.unreachable = false;
+      renderGate.reset();
+      return out.job_id as string;
+    };
+
+    it("refuses a new item_indexes render (restore_pending) while the items are still unchecked", async () => {
+      const f = fakeAe();
+      const first = await strand(f);
+      expect(f.states()).toEqual(["unqueued", "queued", "unqueued"]);
+      const callsBefore = f.calls.length;
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out).toMatchObject({ ok: false, started: false });
+      expect(out.refused[0].code).toBe("restore_pending");
+      expect(out.pending_restores).toHaveLength(1);
+      expect(out.pending_restores[0]).toMatchObject({ job_id: first, restore_state: "pending" });
+      expect(out.pending_restores[0].items.map((h: any) => h.index)).toEqual([1, 3]);
+      expect(out.restore_how).toMatch(/ae_render_queue_edit/);
+      expect(f.calls.slice(callsBefore).map((c) => c.fn).filter((fn) => fn === "rqeditHold" || fn === "rqeditRender")).toEqual([]);
+      expect(storeFor(f.ctx).list()).toHaveLength(1);
+    });
+
+    it("a render without item_indexes still starts and lists them; status without a job_id shows them behind the newer job", async () => {
+      const f = fakeAe();
+      const first = await strand(f);
+      const out = await start(f.ctx);
+      expect(out).toMatchObject({ ok: true, started: true });
+      expect(out.pending_restores[0].job_id).toBe(first);
+      expect(out.restore_how).toBeDefined();
+      await finish(f.ctx, out);
+      const st = await status(f.ctx);
+      expect(st.job_id).toBe(out.job_id);
+      expect(st.pending_restores.map((p: any) => p.job_id)).toEqual([first]);
+      expect(st.pending_restores[0].items.map((h: any) => h.index)).toEqual([1, 3]);
+      expect(st.restore_how).toBeDefined();
+      // With a job id the answer is that job's alone.
+      const byId = await status(f.ctx, { job_id: out.job_id });
+      expect(byId.pending_restores).toBeUndefined();
+    });
+
+    it("lets item_indexes through once the items are queued again, and closes the old record", async () => {
+      const f = fakeAe();
+      const first = await strand(f);
+      for (const k of [0, 2]) f.list[k].render = true; // the user queued them again
+      expect(f.states()).toEqual(["queued", "queued", "queued"]);
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out).toMatchObject({ ok: true, started: true });
+      expect(out.pending_restores).toBeUndefined();
+      await finish(f.ctx, out);
+      const old = storeFor(f.ctx).get(first)!;
+      expect(old.restore?.state).toBe("partial");
+      const st = await status(f.ctx);
+      expect(st.pending_restores).toBeUndefined();
+    });
+
+    it("an item that changed since is not waited for either", async () => {
+      const f = fakeAe();
+      await strand(f);
+      f.list[0].mods[0].file = new FakeFile(path.join(f.outDir, "alpha-moved.mp4"));
+      f.list.splice(2, 1);
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out).toMatchObject({ ok: true, started: true });
+      await finish(f.ctx, out);
+    });
+
+    it("never prunes a job that still has items to put back, however many jobs follow", () => {
+      const dir = tmp();
+      const file = path.join(dir, "jobs.json");
+      const store = new RenderJobStore(file);
+      const base = { op_id: "o", state: "finished" as const, max_hours: 1, project_path: "p", overwrite: false, items: [] };
+      store.create({ ...base, job_id: "j000", started_at: "2026-01-01T00:00:00.000Z", restore: { state: "pending", held: [{ index: 1, comp_id: 5, files: ["a"] }], restored: [], not_restored: [] } });
+      store.create({ ...base, job_id: "j001", started_at: "2026-01-01T00:00:01.000Z" });
+      for (let i = 2; i < 40; i++) store.create({ ...base, job_id: `j${String(i).padStart(3, "0")}`, started_at: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z` });
+      const back = new RenderJobStore(file);
+      expect(back.get("j000")?.restore?.state).toBe("pending");
+      expect(back.get("j001")).toBeUndefined(); // pruned: finished, nothing to restore
+      expect(back.list()).toHaveLength(31);
+    });
+
+    it("the descriptions no longer promise a restore 'even when it failed or was stopped'", () => {
+      const d = tool("ae_render_queue_render").description;
+      expect(d).not.toMatch(/even when it failed or was stopped/);
+      expect(d).toMatch(/restore_pending/);
+      expect(d).toMatch(/pending_restores/);
+      const argDesc = String((AeRenderQueueRenderSchema.shape.item_indexes as any).description ?? (AeRenderQueueRenderSchema.shape.item_indexes as any)._def.innerType?._def.description);
+      expect(argDesc).not.toMatch(/even when it failed or was stopped/);
+      expect(argDesc).toMatch(/stay unchecked/);
+    });
+  });
+
+  describe("3: the hold rollback runs only when the hold may have written", () => {
+    it("a hold refused by the busy door (queued) is a clean refusal: no release, nothing left, 'Nothing was unchecked'", async () => {
+      const f = fakeAe();
+      failEval(f, "_hold", "queued");
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out).toMatchObject({ ok: false, started: false });
+      expect(out.refused[0].code).toBe("hold_failed");
+      expect(out.refused[0].message).toMatch(/Nothing was unchecked/);
+      expect(out.refused[0].message).not.toMatch(/QUEUED again/);
+      expect(calledFns(f)).toEqual(["rqeditRead"]);
+      expect(storeFor(f.ctx).list()).toEqual([]);
+      expect(out.job_id).toBeUndefined();
+    });
+
+    it("a hold refused by a host guard is the same", async () => {
+      const f = fakeAe();
+      const realEval = f.ctx.bridge.evalRaw.bind(f.ctx.bridge);
+      (f.ctx.bridge as any).evalRaw = async (p: any) => {
+        if (String(p.id).endsWith("_hold")) f.list[0].mods[0].file = new FakeFile(path.join(f.outDir, "changed-since-read.mp4"));
+        return realEval(p);
+      };
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out.refused[0].code).toBe("hold_failed");
+      expect(calledFns(f)).not.toContain("rqeditRelease");
+      expect(f.undo.begun).toBe(0);
+      expect(storeFor(f.ctx).list()).toEqual([]);
+    });
+
+    it("a hold that times out may have written: the rollback is still sent", async () => {
+      const f = fakeAe();
+      failEval(f, "_hold", "timeout");
+      const out = await start(f.ctx, { item_indexes: [2] });
+      expect(out.refused[0].code).toBe("hold_failed");
+      expect(calledFns(f)).toContain("rqeditRelease");
+    });
+
+    it("rqeditRelease tests QUEUED (already_queued) before the output files", () => {
+      const f = fakeAe();
+      const row = { index: 1, comp_id: f.list[0].comp.id, files: ["C:\\elsewhere\\old-name.mp4"] };
+      // The item is QUEUED and its file differs from the held list: it was queued again by the user, nothing to put back.
+      const out = JSON.parse(JSON.stringify(f.A.rqeditRelease({ items: [row] })));
+      expect(out.not_restored).toHaveLength(1);
+      expect(out.not_restored[0].code).toBe("already_queued");
+      expect(out.restored).toEqual([]);
+      // An UNQUEUED item with other files is still "changed".
+      f.list[0].status = STATUS.UNQUEUED;
+      f.list[0].renderFlag = false;
+      const out2 = JSON.parse(JSON.stringify(f.A.rqeditRelease({ items: [row] })));
+      expect(out2.not_restored[0].code).toBe("changed");
+    });
+  });
+
+  describe("4: Media Encoder with overwrite: a stale file is not the result", () => {
+    it("marks a file older than the hand-over stale and finds the _1 file Media Encoder wrote", async () => {
+      const f = fakeAe({ saved: true });
+      onlyQueued(f, 1);
+      const file = f.list[0].mods[0].file.fsName;
+      fs.writeFileSync(file, "old render");
+      const old = new Date(Date.now() - 3_600_000);
+      fs.utimesSync(file, old, old);
+      const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true, overwrite: true });
+      expect(out).toMatchObject({ ok: true, started: true });
+      const s0 = await status(f.ctx, { job_id: out.job_id });
+      expect(s0.outputs[0]).toMatchObject({ exists: true, stale: true });
+      expect(s0.stale_note).toMatch(/OLDER than the hand-over/);
+      expect(s0.stale_note).toMatch(/_1/);
+      expect(s0.other_extension_files).toBeUndefined();
+
+      const later = new Date(Date.now() + 5_000);
+      const suffixed = path.join(f.outDir, "alpha_1.mp4");
+      fs.writeFileSync(suffixed, "new render");
+      fs.utimesSync(suffixed, later, later);
+      const other = path.join(f.outDir, "alpha_2.mov");
+      fs.writeFileSync(other, "new");
+      fs.utimesSync(other, later, later);
+      fs.writeFileSync(path.join(f.outDir, "alpha_final.mp4"), "unrelated");
+      const s1 = await status(f.ctx, { job_id: out.job_id });
+      const names = (s1.other_extension_files ?? []).map((x: any) => path.basename(x.file)).sort();
+      expect(names).toEqual(["alpha_1.mp4", "alpha_2.mov"]);
+      expect(s1.outputs[0].stale).toBe(true);
+    });
+
+    it("a file written after the hand-over is not stale", async () => {
+      const f = fakeAe({ saved: true });
+      onlyQueued(f, 1);
+      const out = await ame(f.ctx, { start_now: true, whole_ame_queue_ok: true });
+      const file = f.list[0].mods[0].file.fsName;
+      const later = new Date(Date.now() + 5_000);
+      fs.writeFileSync(file, "fresh");
+      fs.utimesSync(file, later, later);
+      const s = await status(f.ctx, { job_id: out.job_id });
+      expect(s.outputs[0].exists).toBe(true);
+      expect(s.outputs[0].stale).toBeUndefined();
+      expect(s.stale_note).toBeUndefined();
+    });
+
+    it("otherExtensionFiles takes _<n> files of any extension but not _name files", () => {
+      const dir = tmp();
+      const file = path.join(dir, "shot.mp4");
+      const since = Date.now() - 1000;
+      for (const n of ["shot_1.mp4", "shot_12.mov", "shot.mov", "shot_x.mp4", "shot_1a.mp4", "other_1.mp4"]) fs.writeFileSync(path.join(dir, n), "z");
+      expect(otherExtensionFiles(file, since).map((x) => path.basename(x.file)).sort()).toEqual(["shot.mov", "shot_1.mp4", "shot_12.mov"]);
+    });
+  });
+
+  describe("6: the failure sink", () => {
+    const sinkLines = (f: ReturnType<typeof fakeAe>) => {
+      const lines: string[] = [];
+      (f.ctx as any).log = (level: string, msg: string) => lines.push(`[${level}] ${msg}`);
+      return lines;
+    };
+
+    it("a render the user stopped (finished, ok false) writes exactly one line", async () => {
+      const f = fakeAe();
+      const lines = sinkLines(f);
+      f.behaviour.mode = "stopped";
+      const out = await start(f.ctx, { item_indexes: [1] });
+      const rec = await finish(f.ctx, out);
+      expect(rec.state).toBe("finished");
+      expect(rec.ok).toBe(false);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/^\[err\] job ae_render_queue_render rqjob_\S+ failed: .*USER_STOPPED/);
+      await status(f.ctx);
+      expect(lines).toHaveLength(1);
+    });
+
+    it("a render that finished ok writes none", async () => {
+      const f = fakeAe();
+      const lines = sinkLines(f);
+      const out = await start(f.ctx);
+      await finish(f.ctx, out);
+      expect(lines).toEqual([]);
+    });
+
+    it("a read-back timeout makes the job unknown (not finished) and writes one line", async () => {
+      const f = fakeAe();
+      const lines = sinkLines(f);
+      const realEval = f.ctx.bridge.evalRaw.bind(f.ctx.bridge);
+      (f.ctx.bridge as any).evalRaw = async (p: any) => {
+        if (String(p.id).includes("_after")) throw new BridgeError({ kind: "timeout", message: "read timed out" });
+        return realEval(p);
+      };
+      const out = await start(f.ctx, { item_indexes: [2] });
+      const rec = await finish(f.ctx, out);
+      expect(rec.state).toBe("unknown");
+      expect(rec.ok).toBe(false);
+      expect(rec.result?.read_back_error).toMatch(/timed out/);
+      expect(rec.restore?.state).toBe("pending");
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/ended unknown/);
+      expect(renderGate.active()).toMatchObject({ state: "unknown", cause: "read_back_timeout" });
+    });
+
+    it("jobs a restart turned into lost or unknown are reported once when a sink is set", () => {
+      const dir = tmp();
+      const file = path.join(dir, "jobs.json");
+      const first = new RenderJobStore(file);
+      const base = { op_id: "o", max_hours: 1, project_path: "p", overwrite: false, items: [], started_at: "2026-01-01T00:00:00.000Z" };
+      first.create({ ...base, job_id: "j_ae", state: "running" });
+      first.create({ ...base, job_id: "j_ame", state: "running", engine: "media_encoder", started_at: "2026-01-01T00:00:01.000Z" });
+      first.create({ ...base, job_id: "j_ok", state: "finished", ok: true, started_at: "2026-01-01T00:00:02.000Z" });
+      const second = new RenderJobStore(file);
+      expect(second.get("j_ae")?.state).toBe("lost");
+      expect(second.get("j_ame")?.state).toBe("unknown");
+      const lines: string[] = [];
+      bindJobFailureLog(second, (l, m) => lines.push(`[${l}] ${m}`));
+      expect(lines).toHaveLength(2);
+      expect(lines.join("\n")).toMatch(/j_ae ended unknown/);
+      expect(lines.join("\n")).toMatch(/j_ame ended unknown/);
+      bindJobFailureLog(second, (l, m) => lines.push(`[${l}] ${m}`));
+      second.update("j_ae", { note: "again" });
+      expect(lines).toHaveLength(2);
+      // A third start finds the file as it was left: those jobs are not new failures.
+      const third = new RenderJobStore(file);
+      const lines3: string[] = [];
+      bindJobFailureLog(third, (l, m) => lines3.push(m));
+      expect(lines3).toEqual([]);
+    });
+
+    it("the status tool binds the sink, so a lost job is reported on the first status call", async () => {
+      const f = fakeAe();
+      const lines = sinkLines(f);
+      const store = storeFor(f.ctx);
+      store.create({ job_id: "j_lost", op_id: "o", state: "running", started_at: "2026-01-01T00:00:00.000Z", max_hours: 1, project_path: "p", overwrite: false, items: [] });
+      resetRenderJobStores();
+      const st = await status(f.ctx);
+      expect(st.state).toBe("lost");
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/j_lost ended unknown/);
+    });
+  });
+
+  describe("7: the Media Encoder install check", () => {
+    it("builds C:\\Program Files\\Adobe with its backslash (the old literal lost it)", () => {
+      expect(ameRootCandidates("win32", {})).toEqual(["C:\\Program Files\\Adobe"]);
+      expect(ameRootCandidates("win32", { ProgramFiles: "D:\\PF" })).toEqual(["D:\\PF\\Adobe", "C:\\Program Files\\Adobe"]);
+      expect(ameRootCandidates("darwin", {})).toEqual(["/Applications"]);
+      expect(ameRootCandidates("linux", {})).toEqual([]);
+    });
+
+    it("finds a Media Encoder folder beside After Effects' own install folder (a custom location)", () => {
+      const dir = tmp();
+      const adobe = path.join(dir, "Adobe");
+      const appPath = path.join(adobe, "Adobe After Effects 2026", "Support Files");
+      fs.mkdirSync(appPath, { recursive: true });
+      expect(ameNearApp(appPath)).toBe(false);
+      fs.mkdirSync(path.join(adobe, "Adobe Media Encoder 2026"));
+      expect(ameNearApp(appPath)).toBe(true);
+      expect(ameNearApp(null)).toBe(false);
+      expect(ameNearApp("")).toBe(false);
+      expect(ameNearApp(path.join(dir, "nowhere", "x"))).toBe(false);
+    });
+
+    it("the host returns After Effects' Folder.appPackage path, or null", () => {
+      const f = fakeAe();
+      expect(JSON.parse(JSON.stringify(f.A.rqeditAmeState({}))).app_path).toBeNull();
+      Object.assign(f.G, { Folder: { appPackage: { fsName: "D:\\Adobe\\Adobe After Effects 2026\\Support Files" } } });
+      expect(JSON.parse(JSON.stringify(f.A.rqeditAmeState({}))).app_path).toBe("D:\\Adobe\\Adobe After Effects 2026\\Support Files");
+    });
+
+    it("the handler passes the app path to the check and refuses only when neither place has it", async () => {
+      const f = fakeAe({ saved: true });
+      rqrenderDeps.ameInstalled = () => false;
+      Object.assign(f.G, { Folder: { appPackage: { fsName: "D:\\Adobe\\Adobe After Effects 2026\\Support Files" } } });
+      const seen: unknown[] = [];
+      rqrenderDeps.ameNearApp = (p) => {
+        seen.push(p);
+        return false;
+      };
+      const out = await ame(f.ctx);
+      expect(out.refused[0].code).toBe("ame_not_installed");
+      expect(out.refused[0].message).toContain("D:\\Adobe\\Adobe After Effects 2026\\Support Files");
+      expect(seen).toEqual(["D:\\Adobe\\Adobe After Effects 2026\\Support Files"]);
+    });
+  });
+
+  describe("8: the status gives restore_how while items still need queuing", () => {
+    it("a partial restore with items left says restore_pending and gives restore_how", async () => {
+      const f = fakeAe();
+      f.behaviour.during = () => {
+        f.list[0].mods[0].file = new FakeFile(path.join(f.outDir, "alpha-other.mp4"));
+        f.list.splice(2, 1);
+      };
+      const out = await start(f.ctx, { item_indexes: [2] });
+      await finish(f.ctx, out);
+      const st = await status(f.ctx);
+      expect(st.restore.state).toBe("partial");
+      expect(st.restore_pending).toBe(true);
+      expect(st.restore_how).toMatch(/ae_render_queue_edit/);
+    });
+
+    it("a restore that finished leaves neither", async () => {
+      const f = fakeAe();
+      const out = await start(f.ctx, { item_indexes: [2] });
+      await finish(f.ctx, out);
+      const st = await status(f.ctx);
+      expect(st.restore_pending).toBeUndefined();
+      expect(st.restore_how).toBeUndefined();
+    });
+  });
+
+  describe("10: a running Media Encoder hand-over is not described as the AE render lock", () => {
+    it("says After Effects is not locked and gives no Stop text", async () => {
+      const f = fakeAe({ saved: true });
+      storeFor(f.ctx).create({ job_id: "j_ame", op_id: "o", state: "running", engine: "media_encoder", started_at: new Date().toISOString(), max_hours: 12, project_path: SAVED_PATH, overwrite: false, items: [] });
+      const st = await status(f.ctx);
+      expect(st.state).toBe("running");
+      expect(st.engine).toBe("media_encoder");
+      expect(st.message).toMatch(/hands the queue to Adobe Media Encoder/);
+      expect(st.message).toMatch(/NOT render-locked/);
+      expect(st.message).not.toMatch(/can't reach After Effects/);
+      expect(st.stop).toBeUndefined();
+      expect(st.sign_of_life).toBeUndefined();
+    });
+
+    it("a plain AE render still reads as the lock", async () => {
+      const f = fakeAe();
+      storeFor(f.ctx).create({ job_id: "j_ae", op_id: "o", state: "running", started_at: new Date().toISOString(), max_hours: 12, project_path: "p", overwrite: false, items: [] });
+      const st = await status(f.ctx);
+      expect(st.message).toMatch(/can't reach After Effects/);
+      expect(st.stop).toBeDefined();
+    });
   });
 });

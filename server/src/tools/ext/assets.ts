@@ -45,6 +45,8 @@ import { readAfterWrite } from "../read-back.js";
 import { InterpretSettingsSchema, interpretMismatches, type InterpretRead } from "./interpret.js";
 
 export const SETTLE_MS = 2000;
+/** The settle time the tool and the watcher use. Production keeps SETTLE_MS; a test that must age files past it sets a short one. */
+export const assetDeps = { settleMs: SETTLE_MS };
 /** Sequences are renders in progress: wait longer after the newest frame. */
 const SEQUENCE_SETTLE_MS = 10_000;
 const BACKOFF_BASE_MS = 5000;
@@ -391,7 +393,7 @@ export class AssetWatcher {
       if (candidates.length === 0) return null;
       const inProject = await readFootagePaths(this.ctx, "quiet: asset watch (footage)", "asset_watch");
       const now = (this.opts.now ?? Date.now)();
-      const picked = pickNewAssets(candidates, inProject.paths, now, SETTLE_MS, SEQUENCE_SETTLE_MS);
+      const picked = pickNewAssets(candidates, inProject.paths, now, assetDeps.settleMs, SEQUENCE_SETTLE_MS);
       const { already } = picked;
       for (const c of already) seen.add(normPath(c.path));
       // A sequence with missing frames would stop AE behind its modal "is missing N frames" warning with no one
@@ -490,7 +492,7 @@ export const assetsTools: ToolDefinition<any>[] = [
         candidates = candidates.filter((c) => !c.incomplete);
       }
 
-      const settle = args.paths && args.allow_writing === true ? Number.NEGATIVE_INFINITY : SETTLE_MS;
+      const settle = args.paths && args.allow_writing === true ? Number.NEGATIVE_INFINITY : assetDeps.settleMs;
       const sequenceSettle = args.paths && args.allow_writing === true ? Number.NEGATIVE_INFINITY : SEQUENCE_SETTLE_MS;
       const picked = pickNewAssets(candidates, current.paths, Date.now(), settle, sequenceSettle);
       const { already, settling } = picked;

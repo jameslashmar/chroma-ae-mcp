@@ -101,6 +101,7 @@ export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
   ) => Promise<Record<string, unknown> | unknown>;
 }
 
+/** Tool output is compact JSON (no indentation): it is read by a model, and the indentation was 25-52% of the characters. */
 export function formatToolResponse(data: unknown): {
   content: Array<{ type: "text"; text: string }>;
 } {
@@ -109,7 +110,7 @@ export function formatToolResponse(data: unknown): {
     content: [
       {
         type: "text",
-        text: JSON.stringify(bounded, null, 2),
+        text: JSON.stringify(bounded),
       },
     ],
   };
@@ -125,7 +126,7 @@ export function formatToolError(err: unknown): {
       content: [
         {
           type: "text",
-          text: JSON.stringify(err.toJSON(), null, 2),
+          text: JSON.stringify(err.toJSON()),
         },
       ],
     };
@@ -141,9 +142,7 @@ export function formatToolError(err: unknown): {
               kind: err.kind,
               message: err.message,
               quarantine: err.entries,
-            },
-            null,
-            2
+            }
           ),
         },
       ],
@@ -162,9 +161,7 @@ export function formatToolError(err: unknown): {
               op: err.op,
               waitedMs: err.waitedMs,
               behindOp: err.behindOp,
-            },
-            null,
-            2
+            }
           ),
         },
       ],
@@ -180,9 +177,7 @@ export function formatToolError(err: unknown): {
           {
             kind: "error",
             message,
-          },
-          null,
-          2
+          }
         ),
       },
     ],

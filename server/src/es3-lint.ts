@@ -3,7 +3,7 @@
  *
  * Checks ExtendScript source for syntax AE's ES3 engine rejects or misreads,
  * with the same rules as scripts/lint-jsx.mjs:
- * - let, const, class, arrow functions and backtick strings;
+ * - let, const, class, arrow functions, for...of loops and backtick strings;
  * - chained ternaries (`a ? b : c ? d : e`), which ExtendScript parses
  *   left-associatively, silently changing the logic.
  *
@@ -159,6 +159,7 @@ const FORBIDDEN: Array<{ regex: RegExp; message: string }> = [
   { regex: /\bconst\b/g, message: "'const' is not ES3; use var" },
   { regex: /\bclass\b/g, message: "'class' is not ES3; use functions" },
   { regex: /=>/g, message: "arrow functions are not ES3; use function () {}" },
+  { regex: /\bfor\s*\(\s*(?:(?:var|let|const)\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s+of\b/g, message: "for...of is not ES3; use a for loop with an index" },
 ];
 
 const STATEMENT_STARTERS = new Set([

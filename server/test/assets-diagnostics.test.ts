@@ -8,7 +8,7 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import { SettingsStore } from "../src/settings.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AeImportAssetsSchema, AssetWatcher, SETTLE_MS, assetsTools } from "../src/tools/ext/assets.js";
+import { AeImportAssetsSchema, AssetWatcher, assetDeps, assetsTools } from "../src/tools/ext/assets.js";
 import { pickEnvironment, redact, tailLines, writeDiagnostics } from "../src/tools/ext/diagnostics.js";
 import { AUTO_CHECKPOINT_TOOLS } from "../src/tools/ext/receipts.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
@@ -19,6 +19,9 @@ function tempDir(prefix: string): string {
   tmpDirs.push(dir);
   return dir;
 }
+// Files must age past the settle time before they count; a short one keeps the real waits short (production keeps 2 s).
+assetDeps.settleMs = 300;
+
 afterEach(() => {
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
@@ -125,9 +128,9 @@ describe("ae_import_assets", () => {
     const { ctx, calls } = fakeAe(state);
     // The settle check now keys off arrivedMs (real ctime/birthtime), not
     // the backdated mtime touch() sets -- Node has no portable way to
-    // backdate ctime/birthtime, so a real wait past SETTLE_MS is needed to
+    // backdate ctime/birthtime, so a real wait past the settle time is needed to
     // simulate "this file finished arriving a while ago".
-    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     const out: any = await assetsTools[0].handler(AeImportAssetsSchema.parse({ expect: { project_path: project } }), ctx);
     expect(out.ok).toBe(true);
     expect(out.already_in_project).toBe(1);
@@ -182,9 +185,9 @@ describe("ae_import_assets", () => {
     // The settle check keys off that real arrival time, so -- unlike the
     // raw-mtime check this replaced -- it is NOT treated as already settled
     // just because its mtime looks old; it needs real time to pass too,
-    // same as writing.png below. Wait past SETTLE_MS so it genuinely has.
+    // same as writing.png below. Wait past the settle time so it genuinely has.
     touch(path.join(dir, "_assets", "new.png"), 10_000);
-    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     // Arrives right before the tick: still (correctly) judged as settling.
     touch(path.join(dir, "_assets", "writing.png"), 0);
     const res = await watcher.tick();
@@ -197,7 +200,7 @@ describe("ae_import_assets", () => {
     // tick imports it; the one after has nothing left to do.
     const before = calls.length;
     touch(path.join(dir, "_assets", "writing.png"), 10_000);
-    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+    await new Promise((r) => setTimeout(r, assetDeps.settleMs + 100));
     expect(await watcher.tick()).toEqual({ imported: 1, failed: 0 });
     expect(await watcher.tick()).toBeNull();
     expect(calls.slice(before).filter((c) => c.fn === "footagePaths")).toHaveLength(2);

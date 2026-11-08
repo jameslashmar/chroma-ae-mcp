@@ -46,6 +46,7 @@ import { verifyTargetGuard } from "../mutate.js";
 import {
   cancelAerenderJob,
   type CancelHooks,
+  bindFailureLog,
   getDefaultAerenderRegistry,
   isAerenderProcess,
   itemOutputs,
@@ -1330,6 +1331,7 @@ export class BatchRunner {
               spawn: this.deps.spawn,
               aerender_path: o.aerender_path,
               project_path: b.frozen_project,
+              launched_by: "ae_render_batch",
               comp_name: item.comp_name,
               rq_index: item.rq_index,
               item_comp_id: item.item_comp_id,
@@ -1342,6 +1344,7 @@ export class BatchRunner {
               spawn: this.deps.spawn,
               aerender_path: o.aerender_path,
               project_path: b.frozen_project,
+              launched_by: "ae_render_batch",
               comp_name: item.comp_name,
               output_path: item.output_path,
               output_module_template: item.output_module_template,
@@ -1689,6 +1692,8 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
       schema: AeRenderBatchStartSchema,
       handler: async (args: AeRenderBatchStartArgs, ctx: ToolContext) => {
         ctx.quarantine.assertClear();
+        // Items launch jobs on this registry from a background runner: a failed one needs its [ERR] line (under ae_render_batch).
+        bindFailureLog(getRegistry(), ctx.log);
         const opId = ctx.bridge.newOpId();
         const job = normaliseJob(args);
         type Ready =
@@ -1951,6 +1956,7 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
       schema: AeRenderBatchResumeSchema,
       handler: async (args: AeRenderBatchResumeArgs, ctx: ToolContext) => {
         ctx.quarantine.assertClear();
+        bindFailureLog(getRegistry(), ctx.log);
         const opId = ctx.bridge.newOpId();
         const store = getStore();
         const batch = store.get(args.batch_id);

@@ -229,6 +229,18 @@ function readListCache(key) {
   }
 }
 
+let warnedCoreCacheFallback = false;
+
+// The full tool list's cache file, whatever the toolset (the 0.7.0 name).
+function readFullToolsCache() {
+  try {
+    const cached = JSON.parse(fs.readFileSync(cachePath("tools"), "utf8"));
+    return cached && Array.isArray(cached.tools) ? cached.tools : null;
+  } catch {
+    return null;
+  }
+}
+
 function writeListCache(key, list) {
   try {
     const file = cachePath(listFileKey(key));
@@ -370,7 +382,16 @@ function offlineReply(msg, reason) {
     case "prompts/list":
     case "resources/list": {
       const key = LIST_RESULT_KEY[msg.method];
-      const list = readListCache(key);
+      let list = readListCache(key);
+      if (!list && key === "tools" && TOOLSET.toolset === "core") {
+        // An upgrader from 0.7.0 has only the full cache. A full list beats a session with no
+        // tools (listChanged is false, so Desktop would not ask again).
+        list = readFullToolsCache();
+        if (list && !warnedCoreCacheFallback) {
+          warnedCoreCacheFallback = true;
+          log("no core tools cache yet; answering tools/list from the full cache until AE has served the core list once");
+        }
+      }
       if (list) return { jsonrpc: "2.0", id, result: { [key]: list } };
       // Before the panel has ever been reached, an empty list beats an error for these two.
       if (key !== "tools") return { jsonrpc: "2.0", id, result: { [key]: [] } };
