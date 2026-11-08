@@ -30088,6 +30088,24 @@ var init_explain = __esm({
   }
 });
 
+// src/tools/ext/segment-profile.ts
+function segmentProfile(startSpeed, endSpeed, peak, hold) {
+  if (hold) return "hold";
+  if (peak < 1e-6) return "static";
+  const s = startSpeed / peak;
+  const e = endSpeed / peak;
+  if (s > 0.8 && e > 0.8) return "constant";
+  if (s < 0.5 && e < 0.5) return "ease in-out";
+  if (s < 0.5 && e > 0.8) return "speeds up";
+  if (s > 0.8 && e < 0.5) return "slows down";
+  return "uneven";
+}
+var init_segment_profile = __esm({
+  "src/tools/ext/segment-profile.ts"() {
+    "use strict";
+  }
+});
+
 // src/tools/ext/brief.ts
 function labToSrgb(L, a, b) {
   const fy = (L + 16) / 116;
@@ -30528,6 +30546,40 @@ function keyedOvershoots(s) {
 function influence(list2) {
   return list2 && list2.length ? list2[0].influence : null;
 }
+function passesThrough(a, b, keyAt) {
+  if (a.to_key !== b.from_key) return false;
+  const moving = (g) => g.profile !== "hold" && g.profile !== "static" && g.peak_speed > 0;
+  if (!moving(a) || !moving(b)) return false;
+  if (a.end_speed < 0.5 * a.peak_speed || b.start_speed < 0.5 * b.peak_speed) return false;
+  const hi = Math.max(a.end_speed, b.start_speed);
+  const lo = Math.min(a.end_speed, b.start_speed);
+  if (hi <= 0 || lo / hi <= 0.75) return false;
+  const k0 = keyAt.get(a.from_key);
+  const k1 = keyAt.get(a.to_key);
+  const k2 = keyAt.get(b.to_key);
+  if (!k0 || !k1 || !k2) return false;
+  let dot = 0;
+  for (let d = 0; d < k1.value.length; d++) dot += (k1.value[d] - k0.value[d]) * (k2.value[d] - k1.value[d]);
+  return dot > 0;
+}
+function joinSegments(a, b) {
+  const aPeakT = a.peak_at === null ? a.start : a.start + a.peak_at * (a.end - a.start);
+  const bPeakT = b.peak_at === null ? b.start : b.start + b.peak_at * (b.end - b.start);
+  const peak = Math.max(a.peak_speed, b.peak_speed);
+  const peakT = a.peak_speed >= b.peak_speed ? aPeakT : bPeakT;
+  return {
+    from_key: a.from_key,
+    to_key: b.to_key,
+    start: a.start,
+    end: b.end,
+    distance: Math.round((a.distance + b.distance) * 1e3) / 1e3,
+    start_speed: a.start_speed,
+    end_speed: b.end_speed,
+    peak_speed: peak,
+    peak_at: peak < 1e-6 ? null : Math.round((peakT - a.start) / (b.end - a.start) * 100) / 100,
+    profile: segmentProfile(a.start_speed, b.end_speed, peak, false)
+  };
+}
 function extractTweens(props) {
   const out = [];
   for (const p of props) {
@@ -30537,8 +30589,14 @@ function extractTweens(props) {
     else if (p.samples.property.value_type === "COLOR") cls = "color";
     else if (TRANSFORM_NAMES.has(m)) cls = "move";
     const keyAt = new Map(p.samples.keys.map((k) => [k.index, k]));
+    const joined = [];
     for (const g of p.analysis.segments) {
       if (g.profile === "hold" || g.profile === "static") continue;
+      const prev = joined[joined.length - 1];
+      if (prev && passesThrough(prev, g, keyAt)) joined[joined.length - 1] = joinSegments(prev, g);
+      else joined.push(g);
+    }
+    for (const g of joined) {
       const a = keyAt.get(g.from_key);
       const b = keyAt.get(g.to_key);
       if (!a || !b) continue;
@@ -30899,6 +30957,7 @@ var CHOREOGRAPHY_CHECKS, r24, MOVE_NAMES, TRANSFORM_NAMES, COUNT_WORDS, KEYED_SE
 var init_choreography = __esm({
   "src/tools/ext/choreography.ts"() {
     "use strict";
+    init_segment_profile();
     CHOREOGRAPHY_CHECKS = [
       "ease_monotony",
       "direction",
@@ -31025,17 +31084,6 @@ function sampleSpeeds(s) {
     });
   }
   return out;
-}
-function segmentProfile(startSpeed, endSpeed, peak, hold) {
-  if (hold) return "hold";
-  if (peak < 1e-6) return "static";
-  const s = startSpeed / peak;
-  const e = endSpeed / peak;
-  if (s > 0.8 && e > 0.8) return "constant";
-  if (s < 0.5 && e < 0.5) return "ease in-out";
-  if (s < 0.5 && e > 0.8) return "speeds up";
-  if (s > 0.8 && e < 0.5) return "slows down";
-  return "uneven";
 }
 function analyzeMotion(s, speeds) {
   const dims = s.values[0]?.length ?? 0;
@@ -31531,6 +31579,7 @@ var crypto9, fs30, path31, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG
 var init_motion = __esm({
   "src/tools/ext/motion.ts"() {
     "use strict";
+    init_segment_profile();
     crypto9 = __toESM(require("node:crypto"), 1);
     fs30 = __toESM(require("node:fs"), 1);
     path31 = __toESM(require("node:path"), 1);

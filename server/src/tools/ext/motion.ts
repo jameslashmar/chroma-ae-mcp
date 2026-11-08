@@ -1,3 +1,4 @@
+import { segmentProfile, type SegmentProfile } from "./segment-profile.js";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -421,14 +422,7 @@ export function sampleSpeeds(s: Pick<PropertySamples, "times" | "values" | "keys
   return out;
 }
 
-export type SegmentProfile =
-  | "hold"
-  | "static"
-  | "constant"
-  | "ease in-out"
-  | "speeds up"
-  | "slows down"
-  | "uneven";
+export { segmentProfile, type SegmentProfile };
 
 export interface MotionSegment {
   from_key: number;
@@ -444,22 +438,6 @@ export interface MotionSegment {
   profile: SegmentProfile;
 }
 
-/**
- * Names how speed changes between two keys. "Slow" means under half the
- * segment's peak: an Easy Ease starts and ends near zero, while linear keys
- * keep one speed throughout.
- */
-export function segmentProfile(startSpeed: number, endSpeed: number, peak: number, hold: boolean): SegmentProfile {
-  if (hold) return "hold";
-  if (peak < 1e-6) return "static";
-  const s = startSpeed / peak;
-  const e = endSpeed / peak;
-  if (s > 0.8 && e > 0.8) return "constant";
-  if (s < 0.5 && e < 0.5) return "ease in-out";
-  if (s < 0.5 && e > 0.8) return "speeds up";
-  if (s > 0.8 && e < 0.5) return "slows down";
-  return "uneven";
-}
 
 export interface MotionAnalysis {
   speed: { peak: number; peak_time: number | null; mean: number };

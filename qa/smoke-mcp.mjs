@@ -490,7 +490,7 @@ async function main() {
   }
   r = await call("ae_motion_review", { comp_id: LC });
   const moverLeft = (r.findings ?? []).filter((f) => f.layer?.name === "Mover" && f.severity === "medium");
-  check("ae_motion_review (after roving)", r.ok && moverLeft.length === 0, `${moverLeft.length} medium on Mover`);
+  check("ae_motion_review (after roving)", r.ok && moverLeft.length === 0, `${moverLeft.length} medium on Mover: ${moverLeft.map((f) => f.kind).join(",")}`);
 
   // A box that comes to rest half past the right edge.
   await call("ae_create_layer", { comp_id: LC, type: "solid", name: "Edge", color: [0.2, 1, 0.4], width: 100, height: 100, expect });
@@ -1070,9 +1070,9 @@ async function main() {
     r = await call("ae_layout_apply", { comp_id: LAYOUT, regions: [{ name: "Smoke Panel A", rect: [0, 0, 100, 100], content: { footage_id: BATCH[1] } }, { name: "Smoke Panel A", rect: [100, 0, 100, 100], content: { footage_id: BATCH[1] } }], dry_run: true, expect });
     check("ae_layout_apply (a duplicate region name is refused)", refused(r), why(r).slice(0, 120));
 
-    // The template read that ae_layout_apply works from.
+    // The template read that ae_layout_apply works from. The layout fields (rect, masks, flags, source) are merged flat into each layer row; only the top-level `layout` and `regions` are nested.
     r = await call("ae_describe_comp", { comp_id: LAYOUT, layout: true, include_layers: true });
-    check("ae_describe_comp (layout: true)", r.ok === true && r.layout !== undefined && Array.isArray(r.regions) && r.layers?.some((l) => l.layout !== undefined), `${r.regions?.length} region(s); ${r.layers?.length} layer(s)`);
+    check("ae_describe_comp (layout: true)", r.ok === true && r.layout !== undefined && Array.isArray(r.regions) && r.layers?.some((l) => l.rect !== undefined && l.masks_total !== undefined), `${r.regions?.length} region(s); ${r.layers?.length} layer(s); row keys ${Object.keys(r.layers?.[0] ?? {}).join(",")}`);
   }
 
   // ---------- wave 3: legibility (Wave Legibility: two overlapping texts) ----------

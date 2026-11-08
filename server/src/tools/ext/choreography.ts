@@ -9,6 +9,7 @@
  */
 import type { ResolvedMotionSpec } from "../../motion-spec.js";
 import type { MotionAnalysis, MotionFinding, MotionSegment, PropertyKey, PropertyPath, PropertySamples } from "./motion.js";
+import { segmentProfile } from "./segment-profile.js";
 
 export const CHOREOGRAPHY_CHECKS = [
   "ease_monotony",
@@ -128,7 +129,56 @@ function influence(list: PropertyKey["in_ease"]): number | null {
   return list && list.length ? list[0].influence : null;
 }
 
-/** One tween per moving segment of every keyframed property (ancestors excluded by the caller). */
+/**
+ * True when a move carries straight through the key between two segments: both segments move,
+ * both are still near their own top speed at the key, the speeds match, and the value keeps its
+ * direction. That is one gesture with a pass-through key in the middle (a roving key, or a key
+ * left on a long move), not two tweens. A key where the move stops, turns or jumps in speed
+ * stays a boundary.
+ */
+function passesThrough(a: MotionSegment, b: MotionSegment, keyAt: Map<number, PropertyKey>): boolean {
+  if (a.to_key !== b.from_key) return false;
+  const moving = (g: MotionSegment) => g.profile !== "hold" && g.profile !== "static" && g.peak_speed > 0;
+  if (!moving(a) || !moving(b)) return false;
+  if (a.end_speed < 0.5 * a.peak_speed || b.start_speed < 0.5 * b.peak_speed) return false;
+  const hi = Math.max(a.end_speed, b.start_speed);
+  const lo = Math.min(a.end_speed, b.start_speed);
+  if (hi <= 0 || lo / hi <= 0.75) return false;
+  const k0 = keyAt.get(a.from_key);
+  const k1 = keyAt.get(a.to_key);
+  const k2 = keyAt.get(b.to_key);
+  if (!k0 || !k1 || !k2) return false;
+  let dot = 0;
+  for (let d = 0; d < k1.value.length; d++) dot += (k1.value[d] - k0.value[d]) * (k2.value[d] - k1.value[d]);
+  return dot > 0;
+}
+
+/** Joins two segments that meet at a pass-through key into one. */
+function joinSegments(a: MotionSegment, b: MotionSegment): MotionSegment {
+  const aPeakT = a.peak_at === null ? a.start : a.start + a.peak_at * (a.end - a.start);
+  const bPeakT = b.peak_at === null ? b.start : b.start + b.peak_at * (b.end - b.start);
+  const peak = Math.max(a.peak_speed, b.peak_speed);
+  const peakT = a.peak_speed >= b.peak_speed ? aPeakT : bPeakT;
+  return {
+    from_key: a.from_key,
+    to_key: b.to_key,
+    start: a.start,
+    end: b.end,
+    distance: Math.round((a.distance + b.distance) * 1000) / 1000,
+    start_speed: a.start_speed,
+    end_speed: b.end_speed,
+    peak_speed: peak,
+    peak_at: peak < 1e-6 ? null : Math.round(((peakT - a.start) / (b.end - a.start)) * 100) / 100,
+    profile: segmentProfile(a.start_speed, b.end_speed, peak, false),
+  };
+}
+
+/**
+ * One tween per moving segment of every keyframed property (ancestors excluded by the caller).
+ * Segments that meet at a pass-through key (see passesThrough) are one tween: the review's fix
+ * for a linear move eases the two ends and roves the keys between, which leaves two segments
+ * that read as "speeds up" and "slows down" on their own but as one ease in-out together.
+ */
 export function extractTweens(props: ChoreoProp[]): Tween[] {
   const out: Tween[] = [];
   for (const p of props) {
@@ -138,8 +188,14 @@ export function extractTweens(props: ChoreoProp[]): Tween[] {
     else if (p.samples.property.value_type === "COLOR") cls = "color";
     else if (TRANSFORM_NAMES.has(m)) cls = "move";
     const keyAt = new Map<number, PropertyKey>(p.samples.keys.map((k) => [k.index, k]));
+    const joined: MotionSegment[] = [];
     for (const g of p.analysis.segments) {
       if (g.profile === "hold" || g.profile === "static") continue;
+      const prev = joined[joined.length - 1];
+      if (prev && passesThrough(prev, g, keyAt)) joined[joined.length - 1] = joinSegments(prev, g);
+      else joined.push(g);
+    }
+    for (const g of joined) {
       const a = keyAt.get(g.from_key);
       const b = keyAt.get(g.to_key);
       if (!a || !b) continue;
