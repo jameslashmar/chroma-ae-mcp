@@ -19,6 +19,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # esbuild is 0.x, so its "minor" releases can break the panel bundle: upgrade it by
+      # hand (rebuild the bundle, run scripts/check-bundle.cjs on Node 17.7.2). Patches still come.
+      - dependency-name: "esbuild"
+        versions: [">=0.29.0"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
