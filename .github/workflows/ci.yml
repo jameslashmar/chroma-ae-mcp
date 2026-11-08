@@ -106,6 +106,25 @@ jobs:
         working-directory: server
         run: npm audit --omit=dev --audit-level=critical
 
+  live-evidence:
+    # No CI machine runs After Effects, so a PR that changes AE code must carry a report
+    # from qa/live-evidence.mjs run on its latest commit (docs/LIVE-EVIDENCE.md).
+    name: Live evidence
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Report from a live After Effects run
+        run: node scripts/check-live-evidence.mjs "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
   cep-node:
     # AE 26's CEP panels run Node v17.7.2 (measured 2026-10-27 over the panel's
     # debug port). The MCP server runs inside the panel, so its bundle must work there.

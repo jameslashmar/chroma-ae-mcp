@@ -187,6 +187,7 @@ Building, the dev install, releasing and QA are in [docs/DEVELOP.md](docs/DEVELO
 - `docs/TOOLS.md`: every tool by group, the motion guidance, and where the MCP keeps its files.
 - `docs/SAFETY.md`: the safety model in full.
 - `docs/DEVELOP.md`: building, releasing and QA.
+- `docs/LIVE-EVIDENCE.md`: the live After Effects report every pull request that changes AE code must carry.
 - `docs/ROADMAP.md`: test status, open items and what each release added.
 - `SPEC.md`: the original design.
 - `CLAUDE.md`: the ExtendScript and CEP rules every change must follow, and how to verify a change.
