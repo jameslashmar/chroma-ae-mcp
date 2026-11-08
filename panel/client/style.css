@@ -125,6 +125,21 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* In a panel too short for everything, the top scrolls; the Log bar never gets squeezed. */
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chart-card,
+.register {
   flex-shrink: 0;
 }
 
@@ -435,6 +450,11 @@ input:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
+}
+
+/* Closed, the Log is just its bar: it keeps its full height however short the panel is. */
+body:not(.log-open) .log-section {
+  flex-shrink: 0;
 }
 
 body.log-open .log-section {
@@ -878,4 +898,52 @@ body.asking .minor-actions {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------- Panel sizes: full, midi, mini ----------
+   Full needs about 560 px of height. Below that the panel switches layout by its own
+   height (the panel is the viewport, so media queries see it; CEP 12's Chromium has no
+   container queries). Clear render lock stays at every size: it only shows when needed. */
+
+/* Midi: compact tiles, a short chart and the Log; no Register or footer links. */
+@media (max-height: 560px) {
+  body { padding: 10px; gap: 8px; }
+  .top, .stats { gap: 6px; }
+  .tiles { gap: 6px; }
+  .tile { padding: 5px 9px; }
+  .tile-label { font-size: 10px; }
+  .tile-value { font-size: 17px; line-height: 1.25; }
+  .tile-unit { font-size: 11px; }
+  .chart-card { padding: 7px 10px; gap: 5px; }
+  .chart { height: 26px; }
+  .chart-note { display: none; }
+  .register { display: none; }
+  .minor-actions .btn-link:not(#clear-render-lock-btn) { display: none; }
+}
+
+/* Mini: status and one line of stats only. */
+@media (max-height: 360px), (max-width: 250px) {
+  body { padding: 8px; gap: 6px; }
+  .title { font-size: 12px; }
+  .stats {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+  .tiles { display: contents; }
+  .tile {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+  .tile-label { font-size: 10.5px; white-space: nowrap; }
+  .tile-value { font-size: 12px; font-weight: 700; line-height: 1.4; }
+  .tile-unit { font-size: 10.5px; }
+  .chart-card { display: none; }
+  .log-section { display: none; }
+  /* The Log may have been left full in a bigger size: the stats still show. */
+  body.log-full .top { display: flex; }
 }

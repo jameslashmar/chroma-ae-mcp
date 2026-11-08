@@ -47,14 +47,16 @@
   </section>
 
   <div id="top" class="top">
-    <div class="tiles tiles-3">
-      <div class="tile"><div class="tile-label">Tool calls</div><div id="stat-calls" class="tile-value">0</div></div>
-      <div class="tile"><div class="tile-label">Queued</div><div id="queue-depth" class="tile-value">0</div></div>
-      <div class="tile" id="tile-errors"><div class="tile-label">Errors</div><div id="stat-errors" class="tile-value">0</div></div>
-    </div>
-    <div class="tiles tiles-2">
-      <div class="tile"><div class="tile-label">Median reply</div><div class="tile-value"><span id="stat-median">–</span><span class="tile-unit"> ms</span></div></div>
-      <div class="tile"><div class="tile-label">Checkpoints</div><div id="stat-checkpoints" class="tile-value">0</div></div>
+    <div class="stats">
+      <div class="tiles tiles-3">
+        <div class="tile"><div class="tile-label">Tool calls</div><div id="stat-calls" class="tile-value">0</div></div>
+        <div class="tile"><div class="tile-label">Queued</div><div id="queue-depth" class="tile-value">0</div></div>
+        <div class="tile" id="tile-errors"><div class="tile-label">Errors</div><div id="stat-errors" class="tile-value">0</div></div>
+      </div>
+      <div class="tiles tiles-2">
+        <div class="tile"><div class="tile-label">Median reply</div><div class="tile-value"><span id="stat-median">–</span><span class="tile-unit"> ms</span></div></div>
+        <div class="tile"><div class="tile-label">Checkpoints</div><div id="stat-checkpoints" class="tile-value">0</div></div>
+      </div>
     </div>
 
     <div class="chart-card">
@@ -74,8 +76,8 @@
         <button id="write-desktop-btn" class="btn btn-wide" type="button" hidden>Add to Claude Desktop</button>
         <div id="setup-where" class="setup-where"></div>
       </div>
-      <span id="inflight-label" class="inflight" title="The call After Effects is running now"></span>
     </div>
+    <span id="inflight-label" class="inflight" title="The call After Effects is running now"></span>
   </div>
 
   <section id="log-section" class="log-section">
