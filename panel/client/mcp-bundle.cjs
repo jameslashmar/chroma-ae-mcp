@@ -5,11 +5,20 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -3822,7 +3831,7 @@ var init_types = __esm({
         ...processCreateParams(params)
       });
     };
-    BRAND = Symbol("zod_brand");
+    BRAND = /* @__PURE__ */ Symbol("zod_brand");
     ZodBranded = class extends ZodType {
       _parse(input) {
         const { ctx } = this._processInputParams(input);
@@ -3996,14 +4005,14 @@ var init_types = __esm({
     onumber = () => numberType().optional();
     oboolean = () => booleanType().optional();
     coerce = {
-      string: (arg) => ZodString.create({ ...arg, coerce: true }),
-      number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-      boolean: (arg) => ZodBoolean.create({
+      string: ((arg) => ZodString.create({ ...arg, coerce: true })),
+      number: ((arg) => ZodNumber.create({ ...arg, coerce: true })),
+      boolean: ((arg) => ZodBoolean.create({
         ...arg,
         coerce: true
-      }),
-      bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-      date: (arg) => ZodDate.create({ ...arg, coerce: true })
+      })),
+      bigint: ((arg) => ZodBigInt.create({ ...arg, coerce: true })),
+      date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
     };
     NEVER = INVALID;
   }
@@ -9189,6 +9198,7 @@ var init_aerender = __esm({
         this.registry = registry;
         this.opts = { ...defaultGateOptions(), ...opts ?? {} };
       }
+      registry;
       opts;
       ctls = /* @__PURE__ */ new Map();
       queue = [];
@@ -10251,7 +10261,7 @@ function installSessionBridgeHook(bridge) {
   const hadOwn = Object.prototype.hasOwnProperty.call(target, "evalRaw");
   const ownOriginal = target.evalRaw;
   const original = target.evalRaw.bind(bridge);
-  const hooked = async (p) => {
+  const hooked = (async (p) => {
     const t = tracker;
     if (!t || p.mutates !== true || renderGate.isRenderOp(p.id)) return original(p);
     const opensProject = typeof p.script === "string" && p.script.includes("openProject(");
@@ -10314,7 +10324,7 @@ function installSessionBridgeHook(bridge) {
     } catch {
     }
     return res;
-  };
+  });
   target.evalRaw = hooked;
   return () => {
     if (target.evalRaw !== hooked) return;
@@ -12373,6 +12383,8 @@ var init_assets2 = __esm({
         this.ctx = ctx;
         this.opts = opts;
       }
+      ctx;
+      opts;
       timer = null;
       busy = false;
       failures = 0;
@@ -13821,7 +13833,7 @@ var require_bitpacker = __commonJS({
         options.colorType
       ) !== -1;
       if (options.colorType === options.inputColorType) {
-        let bigEndian = function() {
+        let bigEndian = (function() {
           let buffer = new ArrayBuffer(2);
           new DataView(buffer).setInt16(
             0,
@@ -13830,7 +13842,7 @@ var require_bitpacker = __commonJS({
             /* littleEndian */
           );
           return new Int16Array(buffer)[0] !== 256;
-        }();
+        })();
         if (options.bitDepth === 8 || options.bitDepth === 16 && bigEndian) {
           return dataIn;
         }
@@ -19078,6 +19090,8 @@ var init_transcribe = __esm({
         this.code = code;
         this.status = status;
       }
+      code;
+      status;
     };
     defaultExecFile = (file, args) => new Promise((resolve7, reject) => {
       childProcess2.execFile(file, args, { windowsHide: true, timeout: 1e4 }, (err, stdout) => err ? reject(err) : resolve7(String(stdout)));
@@ -32009,6 +32023,7 @@ var init_renderbatch = __esm({
       constructor(dir) {
         this.dir = dir;
       }
+      dir;
       cache = /* @__PURE__ */ new Map();
       newId() {
         return `batch_${Date.now()}_${crypto10.randomBytes(3).toString("hex")}`;
@@ -32083,6 +32098,9 @@ var init_renderbatch = __esm({
         this.deps = deps;
         this.opts = opts;
       }
+      store;
+      deps;
+      opts;
       timers = /* @__PURE__ */ new Map();
       busy = /* @__PURE__ */ new Set();
       isActive(id) {
@@ -32945,6 +32963,7 @@ var init_rqrender = __esm({
         this.filePath = filePath;
         this.load();
       }
+      filePath;
       jobs = /* @__PURE__ */ new Map();
       settled = /* @__PURE__ */ new Map();
       /** Sizes seen by the last status call, to say whether files grew since. Memory only. */
@@ -43573,6 +43592,7 @@ var init_track = __esm({
         this.current = this.first;
         this.last = { x, y };
       }
+      opts;
       first;
       current;
       last;
@@ -44948,6 +44968,7 @@ var init_planar = __esm({
         this.code = code;
         this.name = "PlanarError";
       }
+      code;
     };
     fail2 = (e) => ({ ok: false, error: e.code, message: e.message });
     errMessage5 = (err) => err instanceof Error ? err.message : String(err);
@@ -45075,6 +45096,11 @@ var init_planar = __esm({
           }
         });
       }
+      refGray;
+      refPoints;
+      scale;
+      opts;
+      quad;
       dropped = [];
       trackers = [];
       imgRef;
@@ -49060,6 +49086,7 @@ async function roundtripRemove(ctx, args) {
       expectThat(m, a.work?.found !== true, "work.found", false, a.work?.found, "The work comp is still in the project");
       const b = before;
       if (b) expectThat(m, a.comp.num_layers === b.comp.num_layers - 1, "comp.num_layers", b.comp.num_layers - 1, a.comp.num_layers, "The shot comp's layer count did not drop by one");
+      void written;
       return m;
     }
   });
@@ -51317,6 +51344,7 @@ var init_inpaint_math = __esm({
         this.code = code;
         this.name = "InpaintError";
       }
+      code;
     };
     boxCount = (ii, w, x0, y0, x1, y1) => {
       const iw = w + 1;
@@ -54399,6 +54427,7 @@ function finishMismatches(plan2, before, after, written) {
   if (plan2.comp?.motion_blur) expectThat(m, a.comp.motion_blur === true, "comp.motion_blur", true, a.comp.motion_blur, "Comp motion blur is off");
   if (plan2.comp?.shutter_angle !== void 0) expectThat(m, a.comp.shutter_angle !== null && Math.abs(a.comp.shutter_angle - plan2.comp.shutter_angle) <= 0.5, "comp.shutter_angle", plan2.comp.shutter_angle, a.comp.shutter_angle, "Comp shutter angle differs");
   if (plan2.force_motion_blur) expectThat(m, a.force_motion_blur !== null, "force_motion_blur", "CC Force Motion Blur", a.force_motion_blur, "CC Force Motion Blur is not on the layer");
+  void before;
   return m;
 }
 async function finishHandler(args, ctx) {
@@ -56896,6 +56925,7 @@ function projectItemsMismatches(beforeRaw, afterRaw, w, ops) {
   const m = [];
   const after = itemsOf(afterRaw);
   if (!after) return m;
+  void beforeRaw;
   const judged = (id) => findItem(after, id);
   const gone = /* @__PURE__ */ new Set();
   for (const d of w.deleted ?? []) {
@@ -67568,6 +67598,7 @@ var AskStore = class {
   constructor(now = Date.now) {
     this.now = now;
   }
+  now;
   entries = /* @__PURE__ */ new Map();
   counter = 0;
   ask(q) {
