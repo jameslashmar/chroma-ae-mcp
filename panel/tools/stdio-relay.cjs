@@ -530,8 +530,14 @@ async function relay(message) {
 let pending = 0;
 let stdinClosed = false;
 
+// Exits once stdin has closed and every reply is out. On macOS a pipe is written asynchronously, so a
+// process.exit straight after a large reply cut it at 64 KB; an empty write's callback runs only after
+// every earlier write has been handed to the OS.
+let exiting = false;
 function maybeExit() {
-  if (stdinClosed && pending === 0) process.exit(0);
+  if (!stdinClosed || pending !== 0 || exiting) return;
+  exiting = true;
+  process.stdout.write("", () => process.exit(0));
 }
 
 process.stdout.on("error", () => process.exit(0));
