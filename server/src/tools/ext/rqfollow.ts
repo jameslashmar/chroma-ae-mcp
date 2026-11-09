@@ -106,12 +106,24 @@ export function statFollow(sources: FollowSource[], nowMs: number): FollowItem[]
 
 /**
  * Does the rqStatus answer show a render, or an item that is going to render (its Render box checked)? Only then is
- * a second read for the output files worth its eval.
+ * a second read for the output files worth its eval. rqStatus gives each item a named `state` next to its raw
+ * `status`: a finished state (done, user_stopped, err_stopped) does not count even though the Render box stays checked
+ * after a render, "rendering" counts, anything else counts when `render` is true. An item without `state` (an older
+ * host) counts when `render` is true, as before. An item followed last time still gets its one last check via
+ * followState.followed in followQueue.
  */
 export function somethingToFollow(status: Record<string, unknown>): boolean {
   if (status.rendering === true) return true;
   const items = Array.isArray(status.items) ? (status.items as Array<Record<string, unknown>>) : [];
-  return items.some((i) => i && (i.render === true || String(i.status ?? "").toLowerCase() === "rendering"));
+  return items.some((i) => {
+    if (!i) return false;
+    if (typeof i.state === "string") {
+      const st = i.state.toLowerCase();
+      if (FINISHED_STATUSES.has(st)) return false;
+      if (st === "rendering") return true;
+    }
+    return i.render === true || String(i.status ?? "").toLowerCase() === "rendering";
+  });
 }
 
 /** What the failed first read said, for the note: the bridge error's kind and message. */
@@ -125,7 +137,9 @@ function describeReadError(err: unknown): { kind: string; text: string } {
  * Adds `follow` to the answer of rqStatus. `status` is what the rqStatus read gave (or null when AE did not
  * answer; `firstError` is then what that read threw, named in the note). Never throws for a slow AE: with an
  * earlier read it answers from that; without one it returns null and the caller rethrows its own error. With a
- * status that shows nothing rendering or about to render it returns null without a second read.
+ * status that shows nothing rendering or about to render it returns null without a second read. When the fresh read
+ * has no item in progress and no item that just finished, it returns null too (no empty block) and forgets the
+ * earlier read, so a later failed read does not answer with an empty earlier list.
  */
 export async function followQueue(
   ctx: ToolContext,
@@ -162,6 +176,11 @@ export async function followQueue(
         problemKind = d.kind;
       }
     }
+  }
+  if (fresh && fresh.sources.length === 0 && fresh.finished.length === 0) {
+    followState.lastRead = null;
+    followState.followed = new Set();
+    return null;
   }
   if (fresh) {
     followState.lastRead = { at: nowMs, sources: fresh.sources, truncated: fresh.truncated };

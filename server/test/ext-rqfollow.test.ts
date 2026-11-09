@@ -252,4 +252,65 @@ describe("ae_render_queue_status: a finished item stays in follow for one more c
     expect((await q.call()).follow).toBeUndefined();
   });
 
+  it("a done item whose Render box is still checked gives no follow block, and no second read", async () => {
+    for (const state of ["done", "user_stopped", "err_stopped"]) {
+      resetFollowState();
+      const { ctx, calls } = stubCtx({
+        rqStatus: () => ({ numItems: 1, rendering: false, items: [{ index: 1, status: "3417", state, render: true }] }),
+        rqeditRead: () => readOf([{ index: 1, comp_name: "Main", status: "done", file: path.join(tmp(), "a.mov") }]),
+      });
+      const res: any = await statusTool.handler({}, ctx);
+      expect(res.follow, state).toBeUndefined();
+      expect(calls.map((c) => c.fn)).toEqual(["rqStatus"]);
+    }
+  });
+
+  it("somethingToFollow ignores finished items but counts queued and rendering ones", () => {
+    expect(somethingToFollow({ rendering: false, items: [{ status: "x", state: "done", render: true }] })).toBe(false);
+    expect(somethingToFollow({ rendering: false, items: [{ status: "x", state: "err_stopped", render: true }] })).toBe(false);
+    expect(somethingToFollow({ rendering: false, items: [{ status: "x", state: "queued", render: true }] })).toBe(true);
+    expect(somethingToFollow({ rendering: false, items: [{ status: "x", state: "rendering", render: false }] })).toBe(true);
+    expect(somethingToFollow({ rendering: false, items: [{ status: "x", state: "unqueued", render: false }] })).toBe(false);
+    // an older host gives no state: the Render box decides, as before
+    expect(somethingToFollow({ rendering: false, items: [{ status: "3417", render: true }] })).toBe(true);
+    expect(somethingToFollow({ rendering: false, items: [{ status: "3417", render: false }] })).toBe(false);
+    expect(somethingToFollow({ rendering: true, items: [] })).toBe(true);
+  });
+
+  it("an item followed last time that has just finished (Render box still checked) still shows once, then nothing", async () => {
+    const f = path.join(tmp(), "a.mov");
+    fs.writeFileSync(f, "x".repeat(10));
+    const items: It[] = [{ index: 1, comp_name: "Main", status: "rendering", file: f }];
+    const stub = stubCtx({
+      rqStatus: () => ({ numItems: 1, rendering: items[0].status === "rendering", items: [{ index: 1, status: "3414", state: items[0].status, render: true }] }),
+      rqeditRead: () => readOf(items),
+    });
+    const call = async (): Promise<any> => statusTool.handler({}, stub.ctx);
+    expect((await call()).follow.items[0].finished).toBeUndefined();
+    items[0].status = "done";
+    const r2 = await call();
+    expect(r2.follow.items).toHaveLength(1);
+    expect(r2.follow.items[0]).toMatchObject({ status: "done", finished: true });
+    const r3 = await call();
+    expect(r3.follow).toBeUndefined();
+  });
+
+  it("no empty follow block: a fresh read with nothing in progress and nothing finished returns null and forgets the earlier read", async () => {
+    const f = path.join(tmp(), "a.mov");
+    const items: It[] = [{ index: 1, comp_name: "Main", status: "rendering", file: f }];
+    const ok = stubCtx({ rqeditRead: () => readOf(items) });
+    const st = { numItems: 1, rendering: true, items: [{ index: 1, status: "rendering", render: true }] };
+    expect((await followQueue(ok.ctx, st, "t"))!.follow.items).toHaveLength(1);
+    // the item left the rendering/queued state without a finished check (e.g. the user unqueued it)
+    items[0].status = "unqueued";
+    expect(await followQueue(ok.ctx, st, "t")).toBeNull();
+    // a later failed read must not answer with an empty earlier list
+    const bad = stubCtx({
+      rqeditRead: () => {
+        throw new Error("busy");
+      },
+    });
+    expect(await followQueue(bad.ctx, st, "t")).toBeNull();
+    expect(await followQueue(bad.ctx, null, "t", new Error("x"))).toBeNull();
+  });
 });

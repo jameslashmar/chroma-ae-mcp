@@ -1455,9 +1455,15 @@ export interface AmePresetRead {
   source_file: string;
   /** When AME last wrote that file. AME writes prefs when a setting changes or on exit, so while it runs this can lag. */
   source_mtime?: string;
+  /**
+   * When AME last wrote AMEEncodingLog.txt in the same folder (absent when the file is missing). If this is newer than
+   * source_mtime, AME has encoded since it last wrote its prefs, so the preset it uses now may differ from the one read.
+   */
+  encoding_log_mtime?: string;
 }
 
-const FORMAT_EXTENSIONS: Record<string, string[]> = { MooV: ["mov"], H264: ["mp4", "m4v"] };
+// The key is the fourCC of <PresetFileType> (HEVC = 1212503619 = 0x48455643, read from PresetCache.xml).
+const FORMAT_EXTENSIONS: Record<string, string[]> = { MooV: ["mov"], H264: ["mp4", "m4v"], HEVC: ["mp4", "m4v"] };
 
 function fourCC(n: number): string | undefined {
   if (!Number.isInteger(n) || n <= 0 || n > 0xffffffff) return undefined;
@@ -1524,6 +1530,13 @@ export function readAmePreset(home: string = process.env["USERPROFILE"] ?? proce
         const folder = /<FolderDisplayPath>([\s\S]*?)<\/FolderDisplayPath>/.exec(block)?.[1]?.trim().replace(/&amp;/g, "&");
         const code = fourCC(Number(/<PresetFileType>(\d+)<\/PresetFileType>/.exec(block)?.[1]));
         const exts = code ? FORMAT_EXTENSIONS[code] : undefined;
+        let logMtime: string | undefined;
+        try {
+          const ls = fs.statSync(path.join(dir, "AMEEncodingLog.txt"));
+          if (ls.isFile()) logMtime = ls.mtime.toISOString();
+        } catch {
+          // a missing log is fine
+        }
         return {
           name: name.slice(0, 200),
           ...(folder ? { folder: folder.slice(0, 200) } : {}),
@@ -1531,6 +1544,7 @@ export function readAmePreset(home: string = process.env["USERPROFILE"] ?? proce
           ...(exts ? { extensions: exts } : {}),
           source_file: prefs,
           ...(mtime ? { source_mtime: mtime } : {}),
+          ...(logMtime ? { encoding_log_mtime: logMtime } : {}),
         };
       }
     }
@@ -1542,6 +1556,15 @@ export function readAmePreset(home: string = process.env["USERPROFILE"] ?? proce
 
 const AME_PRESET_WARNING =
   "Media Encoder applies its own last-used preset to the handed-over items, not the output module's format (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4).";
+
+const AME_PRESET_SOFT_WARNING =
+  "The last-used preset matches the format the output module(s) ask for, but Media Encoder still applies its own preset settings (codec settings, bitrate, size), not the output module's. Check them in Media Encoder's queue before pressing Start.";
+
+function isoDay(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The warnings and the format facts for a hand-over. Never throws. */
 export function ameHandOverNotes(plan: StartPlan): { warnings: string[]; asked_for: Array<{ item_index: number; module: number; extension: string }>; ame_preset: AmePresetRead | { read: false; reason: string } } {
@@ -1564,16 +1587,34 @@ export function ameHandOverNotes(plan: StartPlan): { warnings: string[]; asked_f
     return { warnings, asked_for: asked, ame_preset: { read: false, reason: "AME's preferences (Documents/Adobe/Adobe Media Encoder/<version>/AMEPrefs.xml) were missing, unreadable or had no last preset" } };
   }
   const wanted = Array.from(new Set(asked.map((a) => a.extension).filter((e) => e !== "")));
+  // How old the preference is, and whether Media Encoder has encoded since it was written.
+  let lastUsed = "Media Encoder's last-used preset";
+  let encodedSince = "";
+  const srcMs = preset.source_mtime ? Date.parse(preset.source_mtime) : NaN;
+  if (Number.isFinite(srcMs)) {
+    if (rqrenderDeps.now() - srcMs > DAY_MS) lastUsed += `, as of ${isoDay(srcMs)} (when its preferences were last written),`;
+    const logMs = preset.encoding_log_mtime ? Date.parse(preset.encoding_log_mtime) : NaN;
+    if (Number.isFinite(logMs) && logMs > srcMs) {
+      encodedSince = ` Media Encoder has encoded since then (its encoding log was written ${isoDay(logMs)}), so the preset it uses now may be different.`;
+    }
+  }
   if (preset.extensions) {
     const bad = wanted.filter((e) => !preset!.extensions!.includes(e));
+    if (bad.length === 0 && wanted.length > 0) {
+      warnings[0] = AME_PRESET_SOFT_WARNING;
+    }
     if (bad.length > 0) {
       warnings.push(
-        `Media Encoder's last-used preset is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.`
+        `${lastUsed} is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.${encodedSince}`
       );
+    } else if (encodedSince) {
+      warnings.push(`${lastUsed} is "${preset.name}".${encodedSince}`);
+    } else if (lastUsed.includes("as of")) {
+      warnings.push(`${lastUsed} is "${preset.name}".`);
     }
   } else {
     warnings.push(
-      `Media Encoder's last-used preset reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.`
+      `${lastUsed} reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.${encodedSince}`
     );
   }
   return { warnings, asked_for: asked, ame_preset: preset };

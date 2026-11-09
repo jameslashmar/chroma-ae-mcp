@@ -13,6 +13,7 @@ import {
   AeRenderQueueRenderSchema,
   AeRenderQueueRenderStatusSchema,
   RenderJobStore,
+  ameHandOverNotes,
   ameNearApp,
   ameRootCandidates,
   readAmePreset,
@@ -1390,5 +1391,109 @@ describe("review fixes", () => {
       expect(st.message).toMatch(/can't reach After Effects/);
       expect(st.stop).toBeDefined();
     });
+  });
+});
+
+describe("ameHandOverNotes: dated preset, encoded-since line, HEVC, soft versus general warning", () => {
+  const NOW = Date.parse("2026-11-09T12:00:00.000Z");
+  const realNow = rqrenderDeps.now;
+  beforeEach(() => {
+    rqrenderDeps.now = () => NOW;
+  });
+  afterEach(() => {
+    rqrenderDeps.now = realNow;
+  });
+  const planFor = (...files: string[]): any => ({
+    items: [{ outputs: files.map((file, i) => ({ file, item_index: 1, module: i + 1, sequence: false })) }],
+    warnings: [],
+  });
+  const GENERAL = /not the output module's format/;
+  const SOFT = /matches the format the output module\(s\) ask for, but Media Encoder still applies its own preset settings/;
+  const h264 = { name: "Match Source - High bitrate", format_code: "H264", extensions: ["mp4", "m4v"], source_file: "AMEPrefs.xml" };
+  const mov = { ...h264, format_code: "MooV", extensions: ["mov"] };
+
+  it("says the date when the prefs are more than 24 hours old", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...mov, source_mtime: "2026-10-07T09:00:00.000Z" });
+    const text = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ");
+    expect(text).toContain(`Media Encoder's last-used preset, as of 2026-10-07 (when its preferences were last written), is "Match Source - High bitrate"`);
+    expect(text).not.toMatch(/[^\x20-\x7e]/);
+  });
+
+  it("gives no date when the prefs are fresh (under 24 hours)", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...mov, source_mtime: "2026-11-09T01:00:00.000Z" });
+    const text = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ");
+    expect(text).not.toMatch(/as of 20/);
+    expect(text).toContain(`Media Encoder's last-used preset is "Match Source - High bitrate"`);
+  });
+
+  it("adds the encoded-since line only when the encoding log is newer than the prefs", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...h264, source_mtime: "2026-10-07T09:00:00.000Z", encoding_log_mtime: "2026-11-06T10:00:00.000Z" });
+    const newer = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ");
+    expect(newer).toMatch(/has encoded since then \(its encoding log was written 2026-11-06\)/);
+    expect(newer).toMatch(/may be different/);
+    rqrenderDeps.readAmePreset = () => ({ ...h264, source_mtime: "2026-11-08T20:25:00.000Z", encoding_log_mtime: "2026-06-29T18:01:00.000Z" });
+    expect(ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ")).not.toMatch(/encoded since/);
+    rqrenderDeps.readAmePreset = () => ({ ...h264, source_mtime: "2026-11-08T20:25:00.000Z" });
+    expect(ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ")).not.toMatch(/encoded since/);
+  });
+
+  it("the encoded-since line also shows on a mismatch", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...mov, source_mtime: "2026-10-07T09:00:00.000Z", encoding_log_mtime: "2026-11-06T10:00:00.000Z" });
+    const text = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings.join(" ");
+    expect(text).toMatch(/will not be what the output module asked for/);
+    expect(text).toMatch(/encoded since/);
+  });
+
+  it("an HEVC preset matches an .mp4 module: soft line, no general line", () => {
+    rqrenderDeps.readAmePreset = () => ({ name: "HEVC - Match Source - 2020", format_code: "HEVC", extensions: ["mp4", "m4v"], source_file: "AMEPrefs.xml", source_mtime: "2026-11-09T01:00:00.000Z" });
+    const w = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings;
+    expect(w[0]).toMatch(SOFT);
+    expect(w.join(" ")).not.toMatch(GENERAL);
+    expect(w.join(" ")).not.toMatch(/will not be what the output module asked for/);
+  });
+
+  it("a matching preset gets the soft line instead of the general one", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...h264, source_mtime: "2026-11-09T01:00:00.000Z" });
+    const w = ameHandOverNotes(planFor("C:\\o\\a.mp4", "C:\\o\\b.m4v")).warnings;
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatch(SOFT);
+  });
+
+  it("a mismatch keeps the general line and the specific one", () => {
+    rqrenderDeps.readAmePreset = () => ({ ...h264, source_mtime: "2026-11-09T01:00:00.000Z" });
+    const w = ameHandOverNotes(planFor("C:\\o\\a.mp4", "C:\\o\\b.mov")).warnings;
+    expect(w[0]).toMatch(GENERAL);
+    expect(w.join(" ")).toMatch(/ask for \.mov: the file will not be what/);
+  });
+
+  it("an unknown preset and a preset with unknown extensions keep the general line", () => {
+    rqrenderDeps.readAmePreset = () => null;
+    expect(ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings[0]).toMatch(GENERAL);
+    rqrenderDeps.readAmePreset = () => ({ name: "Odd", format_code: "ZZZZ", source_file: "AMEPrefs.xml", source_mtime: "2026-11-09T01:00:00.000Z" });
+    const w = ameHandOverNotes(planFor("C:\\o\\a.mp4")).warnings;
+    expect(w[0]).toMatch(GENERAL);
+    expect(w.length).toBeGreaterThan(1);
+  });
+
+  it("readAmePreset returns the encoding log's mtime; a missing log is fine; the HEVC code decodes", () => {
+    const home = tmp();
+    const cur = path.join(home, "Documents", "Adobe", "Adobe Media Encoder", "26.0");
+    fs.mkdirSync(cur, { recursive: true });
+    const id = "4f438bf2-a5eb-4c95-875c-eec3cffe9759";
+    fs.writeFileSync(path.join(cur, "AMEPrefs.xml"), `<key>Preset Preference</key>\n<ustring>${id}</ustring>`);
+    fs.writeFileSync(
+      path.join(cur, "PresetCache.xml"),
+      `<Key Version="3" Index="1"><PresetFileType>1212503619</PresetFileType>` +
+        `<PresetName>($$$/AME/EncoderHost/Presets/${id}/PresetName=HEVC - Match Source - 2020)</PresetName><PresetID>${id}</PresetID>` +
+        `<FolderDisplayPath>System Presets/Broadcast/HEVC (H.265)</FolderDisplayPath></Key>`
+    );
+    const without = readAmePreset(home);
+    expect(without).toMatchObject({ name: "HEVC - Match Source - 2020", format_code: "HEVC", extensions: ["mp4", "m4v"] });
+    expect(without?.encoding_log_mtime).toBeUndefined();
+    const log = path.join(cur, "AMEEncodingLog.txt");
+    fs.writeFileSync(log, "log");
+    const when = new Date("2026-11-06T10:00:00.000Z");
+    fs.utimesSync(log, when, when);
+    expect(readAmePreset(home)?.encoding_log_mtime).toBe(when.toISOString());
   });
 });

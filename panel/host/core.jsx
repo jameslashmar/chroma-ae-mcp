@@ -653,6 +653,20 @@
     return { project_path: projectPath(), numItems: app.project.numItems, items: names };
   };
 
+  // The named render-queue item status (rqStatus keeps status as String(it.status); this adds the name beside it).
+  function rqStateName(s) {
+    if (typeof RQItemStatus === "undefined") return null;
+    if (s === RQItemStatus.WILL_CONTINUE) return "will_continue";
+    if (s === RQItemStatus.NEEDS_OUTPUT) return "needs_output";
+    if (s === RQItemStatus.UNQUEUED) return "unqueued";
+    if (s === RQItemStatus.QUEUED) return "queued";
+    if (s === RQItemStatus.RENDERING) return "rendering";
+    if (s === RQItemStatus.USER_STOPPED) return "user_stopped";
+    if (s === RQItemStatus.ERR_STOPPED) return "err_stopped";
+    if (s === RQItemStatus.DONE) return "done";
+    return null;
+  }
+
   A.rqStatus = function () {
     var rq = app.project.renderQueue;
     var items = [];
@@ -665,14 +679,17 @@
           outs.push(om.file ? om.file.fsName : null);
         } catch (e1) {}
       }
-      items.push({
+      var row = {
         index: i,
         comp_id: it.comp.id,
         comp_name: it.comp.name,
         status: String(it.status),
         render: it.render,
         outputs: outs
-      });
+      };
+      var stateName = rqStateName(it.status);
+      if (stateName !== null) row.state = stateName;
+      items.push(row);
     }
     return { numItems: rq.numItems, rendering: rq.rendering, items: items };
   };

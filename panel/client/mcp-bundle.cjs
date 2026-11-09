@@ -26791,19 +26791,29 @@ function readAmePreset(home = process.env["USERPROFILE"] ?? process.env["HOME"] 
         const folder = /<FolderDisplayPath>([\s\S]*?)<\/FolderDisplayPath>/.exec(block)?.[1]?.trim().replace(/&amp;/g, "&");
         const code = fourCC(Number(/<PresetFileType>(\d+)<\/PresetFileType>/.exec(block)?.[1]));
         const exts = code ? FORMAT_EXTENSIONS[code] : void 0;
+        let logMtime;
+        try {
+          const ls = fs23.statSync(path25.join(dir, "AMEEncodingLog.txt"));
+          if (ls.isFile()) logMtime = ls.mtime.toISOString();
+        } catch {
+        }
         return {
           name: name.slice(0, 200),
           ...folder ? { folder: folder.slice(0, 200) } : {},
           ...code ? { format_code: code } : {},
           ...exts ? { extensions: exts } : {},
           source_file: prefs,
-          ...mtime ? { source_mtime: mtime } : {}
+          ...mtime ? { source_mtime: mtime } : {},
+          ...logMtime ? { encoding_log_mtime: logMtime } : {}
         };
       }
     }
   } catch {
   }
   return null;
+}
+function isoDay(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
 }
 function ameHandOverNotes(plan2) {
   const warnings = [AME_PRESET_WARNING];
@@ -26825,16 +26835,33 @@ function ameHandOverNotes(plan2) {
     return { warnings, asked_for: asked, ame_preset: { read: false, reason: "AME's preferences (Documents/Adobe/Adobe Media Encoder/<version>/AMEPrefs.xml) were missing, unreadable or had no last preset" } };
   }
   const wanted = Array.from(new Set(asked.map((a) => a.extension).filter((e) => e !== "")));
+  let lastUsed = "Media Encoder's last-used preset";
+  let encodedSince = "";
+  const srcMs = preset.source_mtime ? Date.parse(preset.source_mtime) : NaN;
+  if (Number.isFinite(srcMs)) {
+    if (rqrenderDeps.now() - srcMs > DAY_MS) lastUsed += `, as of ${isoDay(srcMs)} (when its preferences were last written),`;
+    const logMs = preset.encoding_log_mtime ? Date.parse(preset.encoding_log_mtime) : NaN;
+    if (Number.isFinite(logMs) && logMs > srcMs) {
+      encodedSince = ` Media Encoder has encoded since then (its encoding log was written ${isoDay(logMs)}), so the preset it uses now may be different.`;
+    }
+  }
   if (preset.extensions) {
     const bad4 = wanted.filter((e) => !preset.extensions.includes(e));
+    if (bad4.length === 0 && wanted.length > 0) {
+      warnings[0] = AME_PRESET_SOFT_WARNING;
+    }
     if (bad4.length > 0) {
       warnings.push(
-        `Media Encoder's last-used preset is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad4.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.`
+        `${lastUsed} is "${preset.name}" (${preset.format_code}, writes .${preset.extensions.join("/.")}), but the output module(s) ask for .${bad4.join(", .")}: the file will not be what the output module asked for. Change the preset in Media Encoder's queue before pressing Start.${encodedSince}`
       );
+    } else if (encodedSince) {
+      warnings.push(`${lastUsed} is "${preset.name}".${encodedSince}`);
+    } else if (lastUsed.includes("as of")) {
+      warnings.push(`${lastUsed} is "${preset.name}".`);
     }
   } else {
     warnings.push(
-      `Media Encoder's last-used preset reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.`
+      `${lastUsed} reads "${preset.name}"${preset.folder ? ` (${preset.folder})` : ""}; the output module(s) ask for ${wanted.length > 0 ? "." + wanted.join(", .") : "another format"}. Check they match in Media Encoder's queue before pressing Start. This preference can lag while Media Encoder is open.${encodedSince}`
     );
   }
   return { warnings, asked_for: asked, ame_preset: preset };
@@ -27089,7 +27116,7 @@ async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
   }
   return out;
 }
-var crypto5, fs23, path25, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, FORMAT_EXTENSIONS, AME_PRESET_WARNING, WAITABLE_STATES, rqrenderTools;
+var crypto5, fs23, path25, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, FORMAT_EXTENSIONS, AME_PRESET_WARNING, AME_PRESET_SOFT_WARNING, DAY_MS, WAITABLE_STATES, rqrenderTools;
 var init_rqrender = __esm({
   "src/tools/ext/rqrender.ts"() {
     "use strict";
@@ -27312,8 +27339,10 @@ var init_rqrender = __esm({
     } : {};
     AME_CALL_TIMEOUT_MS = 12e4;
     AME_REFUSAL_ASK = "Ask the user first, then call again with user_confirmed: true. Say to them: After Effects stays free while it renders; Media Encoder renders the SAVED project, so changes made after the last save are not in it; Media Encoder may take a moment to open; it uses its own last-used preset, so the format may differ from After Effects' output module (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4), so check the preset and format in Media Encoder's queue before pressing Start; other items already in Media Encoder's queue start too when you press Start.";
-    FORMAT_EXTENSIONS = { MooV: ["mov"], H264: ["mp4", "m4v"] };
+    FORMAT_EXTENSIONS = { MooV: ["mov"], H264: ["mp4", "m4v"], HEVC: ["mp4", "m4v"] };
     AME_PRESET_WARNING = "Media Encoder applies its own last-used preset to the handed-over items, not the output module's format (measured 2026-11-08: ProRes 4444 .mov instead of the module's H.264 .mp4).";
+    AME_PRESET_SOFT_WARNING = "The last-used preset matches the format the output module(s) ask for, but Media Encoder still applies its own preset settings (codec settings, bitrate, size), not the output module's. Check them in Media Encoder's queue before pressing Start.";
+    DAY_MS = 24 * 60 * 60 * 1e3;
     WAITABLE_STATES = /* @__PURE__ */ new Set(["running", "queued_in_media_encoder", "handed_to_media_encoder"]);
     rqrenderTools = [
       {
@@ -27631,7 +27660,15 @@ function statFollow(sources, nowMs) {
 function somethingToFollow(status) {
   if (status.rendering === true) return true;
   const items = Array.isArray(status.items) ? status.items : [];
-  return items.some((i) => i && (i.render === true || String(i.status ?? "").toLowerCase() === "rendering"));
+  return items.some((i) => {
+    if (!i) return false;
+    if (typeof i.state === "string") {
+      const st = i.state.toLowerCase();
+      if (FINISHED_STATUSES.has(st)) return false;
+      if (st === "rendering") return true;
+    }
+    return i.render === true || String(i.status ?? "").toLowerCase() === "rendering";
+  });
 }
 function describeReadError(err) {
   const kind = err && typeof err === "object" && typeof err.kind === "string" ? err.kind : "";
@@ -27667,6 +27704,11 @@ async function followQueue(ctx, status, toolName, firstError) {
         problemKind = d.kind;
       }
     }
+  }
+  if (fresh && fresh.sources.length === 0 && fresh.finished.length === 0) {
+    followState.lastRead = null;
+    followState.followed = /* @__PURE__ */ new Set();
+    return null;
   }
   if (fresh) {
     followState.lastRead = { at: nowMs, sources: fresh.sources, truncated: fresh.truncated };
@@ -28585,7 +28627,7 @@ var init_render = __esm({
       },
       {
         name: "ae_render_queue_status",
-        description: "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check (a second read, made only when something renders or an item's Render box is checked). If After Effects does not answer, the earlier read is used and `follow.note` says why (the refusal or timeout, naming the render job when one is running). " + AGENT_SAFETY_GUIDANCE,
+        description: "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check (a second read, made only when something renders or an unfinished item's Render box is checked). If After Effects does not answer, the earlier read is used and `follow.note` says why (the refusal or timeout, naming the render job when one is running). " + AGENT_SAFETY_GUIDANCE,
         schema: AeRenderQueueStatusSchema,
         handler: async (_args, ctx) => {
           const toolName = "ae_render_queue_status";

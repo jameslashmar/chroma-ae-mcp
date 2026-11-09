@@ -514,7 +514,7 @@ export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_render_queue_status",
     description:
-      "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check (a second read, made only when something renders or an item's Render box is checked). If After Effects does not answer, the earlier read is used and `follow.note` says why (the refusal or timeout, naming the render job when one is running). " +
+      "Read all items currently in the After Effects Render Queue (comp, status, output paths). For RENDERING and QUEUED items (even a render the user started by hand) `follow` adds each output file's exists, bytes, mtime and grew_since_last_check (a second read, made only when something renders or an unfinished item's Render box is checked). If After Effects does not answer, the earlier read is used and `follow.note` says why (the refusal or timeout, naming the render job when one is running). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeRenderQueueStatusSchema,
     handler: async (_args, ctx) => {
