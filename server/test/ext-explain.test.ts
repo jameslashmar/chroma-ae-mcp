@@ -153,13 +153,16 @@ describe("proof logic", () => {
 const tmpDirs: string[] = [];
 const origLocalAppData = process.env.LOCALAPPDATA;
 
+const origHome = process.env.HOME;
 beforeEach(() => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-explain-"));
   tmpDirs.push(d);
-  process.env.LOCALAPPDATA = d;
+  process.env.LOCALAPPDATA = process.env.HOME = d;
 });
 
 afterEach(() => {
+  if (origHome === undefined) delete process.env.HOME;
+  else process.env.HOME = origHome;
   if (origLocalAppData === undefined) delete process.env.LOCALAPPDATA;
   else process.env.LOCALAPPDATA = origLocalAppData;
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });

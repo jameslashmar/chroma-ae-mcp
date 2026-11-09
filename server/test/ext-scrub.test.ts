@@ -36,6 +36,7 @@ import { FakeProject, GUARD, loadHost, MarkerValue } from "./support/fake-ae.js"
 const tmpDirs: string[] = [];
 const origLocalAppData = process.env.LOCALAPPDATA;
 
+const origHome = process.env.HOME;
 function tempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tmpDirs.push(dir);
@@ -44,10 +45,12 @@ function tempDir(prefix: string): string {
 
 beforeEach(() => {
   // Frames, the chart and the sheet are written under the data dir.
-  process.env.LOCALAPPDATA = tempDir("chroma-scrub-data-");
+  process.env.LOCALAPPDATA = process.env.HOME = tempDir("chroma-scrub-data-");
 });
 
 afterEach(() => {
+  if (origHome === undefined) delete process.env.HOME;
+  else process.env.HOME = origHome;
   if (origLocalAppData === undefined) delete process.env.LOCALAPPDATA;
   else process.env.LOCALAPPDATA = origLocalAppData;
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });

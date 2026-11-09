@@ -55,6 +55,7 @@ describe("ext/frames (ae_compare_frames)", () => {
   const tmpDirs: string[] = [];
   const origLocalAppData = process.env.LOCALAPPDATA;
 
+  const origHome = process.env.HOME;
   function makeTempDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-frames-"));
     tmpDirs.push(dir);
@@ -63,10 +64,12 @@ describe("ext/frames (ae_compare_frames)", () => {
 
   beforeEach(() => {
     const dir = makeTempDir();
-    process.env.LOCALAPPDATA = dir;
+    process.env.LOCALAPPDATA = process.env.HOME = dir;
   });
 
   afterEach(() => {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
     if (origLocalAppData === undefined) {
       delete process.env.LOCALAPPDATA;
     } else {

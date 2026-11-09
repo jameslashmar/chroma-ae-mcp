@@ -542,15 +542,18 @@ describe("drawing", () => {
 describe("ae_annotate_frame handler", () => {
   const tmpDirs: string[] = [];
   const origLocalAppData = process.env.LOCALAPPDATA;
+  const origHome = process.env.HOME;
   const tmp = () => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-annotate-"));
     tmpDirs.push(d);
     return d;
   };
   beforeEach(() => {
-    process.env.LOCALAPPDATA = tmp();
+    process.env.LOCALAPPDATA = process.env.HOME = tmp();
   });
   afterEach(() => {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
     if (origLocalAppData === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = origLocalAppData;
     for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });

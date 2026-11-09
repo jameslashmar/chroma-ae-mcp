@@ -32,6 +32,8 @@ import { AGENT_SAFETY_GUIDANCE } from "../src/tools/common.js";
 import { resetResourceCache, resourceDeps } from "../src/system-resources.js";
 import { footagePage, makeSequence, useOldFiles } from "./support/seq-fixtures.js";
 import { seqscanDeps } from "../src/seqscan.js";
+// The guard folds case on Windows only (as AE's own guard in core.jsx does), so the different-case spelling is a Windows test.
+const EXPECT_DEMO = process.platform === "win32" ? "c:/projects/demo.aep" : "C:/Projects/Demo.aep";
 
 const NO_GATE = { cool_down_ms: 0, list_engines: () => [] };
 
@@ -281,7 +283,7 @@ describe("ext/aerender (background aerender jobs)", () => {
     const outMov = path.join(dir, "out", "final.mov");
     const started = (await startTool.handler(
       {
-        expect: { project_path: "c:/projects/demo.aep" },
+        expect: { project_path: EXPECT_DEMO },
         comp_name: "Hero Comp",
         output_path: outMov,
         output_module_template: "Lossless",
@@ -625,7 +627,7 @@ describe("w5render: ae_aerender_start from the Render Queue, through a fake brid
     const ctx = { bridge: host, queue, quarantine };
     return { dir, registry, child, calls, start, status, ctx, spawned: () => spawned };
   }
-  const expectArg = { project_path: "c:/projects/demo.aep" };
+  const expectArg = { project_path: EXPECT_DEMO };
 
   it("renders one queue item by -rqindex, with all its outputs on the record", async () => {
     const t = setup();

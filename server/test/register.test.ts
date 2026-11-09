@@ -42,6 +42,13 @@ function fakeEnv(platform: string = process.platform) {
   return { env, execs, node: path.join(bin, nodeName), relayPath };
 }
 
+/** Where register.cjs keeps Claude Desktop's config on the fake machine's platform. */
+function desktopFile(env: { platform: string; home: string; appData: string }): string {
+  if (env.platform === "win32") return path.join(env.appData, "Claude", "claude_desktop_config.json");
+  if (env.platform === "darwin") return path.join(env.home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  return path.join(env.home, ".config", "Claude", "claude_desktop_config.json");
+}
+
 describe("register.cjs config editing", () => {
   it("adds, replaces and removes the chroma-ae table in Codex's TOML, leaving the rest alone", () => {
     const table = register.codexTable("C:\\Program Files\\nodejs\\node.exe", "C:\\ext\\tools\\stdio-relay.cjs");
@@ -67,7 +74,7 @@ describe("register.cjs config editing", () => {
 
   it("registers Claude Desktop, Cursor and Codex with the relay, backing up, and removes them again", async () => {
     const { env, node, relayPath } = fakeEnv();
-    const desktop = path.join(env.appData, "Claude", "claude_desktop_config.json");
+    const desktop = desktopFile(env);
     fs.mkdirSync(path.dirname(desktop), { recursive: true });
     fs.writeFileSync(desktop, JSON.stringify({ mcpServers: { blender: { command: "uvx" } }, theme: "dark" }));
 
@@ -96,7 +103,7 @@ describe("register.cjs config editing", () => {
     fs.writeFileSync(path.join(env.pathEnv, process.platform === "win32" ? "claude.exe" : "claude"), "");
     for (const id of ["claude-desktop", "cursor", "codex", "claude-code"]) await register.setRegistered(id, true, { port: 7790, token: "t" }, env);
 
-    const desktop = JSON.parse(fs.readFileSync(path.join(env.appData, "Claude", "claude_desktop_config.json"), "utf8"));
+    const desktop = JSON.parse(fs.readFileSync(desktopFile(env), "utf8"));
     expect(desktop.mcpServers["chroma-ae"].env).toEqual({ CHROMA_AE_MCP_TOOLSET: "core" });
     const cursor = JSON.parse(fs.readFileSync(path.join(env.home, ".cursor", "mcp.json"), "utf8"));
     expect(cursor.mcpServers["chroma-ae"]).toEqual({ command: node, args: [relayPath] });
@@ -111,7 +118,7 @@ describe("register.cjs config editing", () => {
 
   it("keeps the user's own env and toolset choice when Claude Desktop is registered again", async () => {
     const { env, node, relayPath } = fakeEnv();
-    const file = path.join(env.appData, "Claude", "claude_desktop_config.json");
+    const file = desktopFile(env);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { "chroma-ae": { command: "old", args: ["x"], env: { CHROMA_AE_MCP_PORT: "7791", CHROMA_AE_MCP_TOOLSET: "full" } } } }));
     await register.setRegistered("claude-desktop", true, {}, env);
@@ -139,7 +146,7 @@ describe("register.cjs config editing", () => {
 
   it("the panel's explicit Claude Desktop action adds core to an existing entry, keeping its other keys, with a backup", async () => {
     const { env, node, relayPath } = fakeEnv();
-    const file = path.join(env.appData, "Claude", "claude_desktop_config.json");
+    const file = desktopFile(env);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const original = { theme: "dark", mcpServers: { blender: { command: "uvx" }, "chroma-ae": { command: "old", disabled: false, env: { CHROMA_AE_MCP_PORT: "7791" } } } };
     fs.writeFileSync(file, JSON.stringify(original));
