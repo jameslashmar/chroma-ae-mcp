@@ -80,6 +80,10 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.2** (#15, #17):
+- the stdio relay waits for its output to flush before exiting: on macOS a reply over 64 KB (the full tool list) was cut off when the host closed stdin;
+- the unit tests pass on macOS, and no longer write into the real data folder there (`~/Library/Application Support/chroma-ae-mcp`).
+
 **Done in 0.7.1** (Emre's PRs #11 and #14, live-checked on AE 26.3):
 - a usage log on the machine (tool, time, outcome, size, toolset, client; no arguments or results; `CHROMA_AE_MCP_USAGE_LOG=off`) and `panel/tools/usage-report.cjs` to sum it up;
 - `ae_render_queue_render` renders only chosen items (`item_indexes`), or hands the queue to Media Encoder with the user's OK (`engine: media_encoder`), with a warning naming Media Encoder's last-used preset when it differs from the output module;
