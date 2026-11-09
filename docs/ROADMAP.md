@@ -80,6 +80,14 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.1** (Emre's PRs #11 and #14, live-checked on AE 26.3):
+- a usage log on the machine (tool, time, outcome, size, toolset, client; no arguments or results; `CHROMA_AE_MCP_USAGE_LOG=off`) and `panel/tools/usage-report.cjs` to sum it up;
+- `ae_render_queue_render` renders only chosen items (`item_indexes`), or hands the queue to Media Encoder with the user's OK (`engine: media_encoder`), with a warning naming Media Encoder's last-used preset when it differs from the output module;
+- `ae_render_queue_status` follows a render the user started (output files, sizes, growth), and shows a finished item once with its final size; status calls take `wait_seconds`;
+- the stdio relay gives every client the core toolset except Claude Code, which gets the full list (`CHROMA_AE_MCP_TOOLSET` still wins);
+- `ae_snapshot_frame save_to` saves full-resolution PNGs; tool results are 8-46% smaller; `ae_run_jsx` refuses non-ES3 code before AE sees it;
+- fixes: `ae_motion_review` no longer flags its own roving fix, and an aerender attempt that dies when 6 or more auto-starting CEP extensions load fails fast with that diagnosis.
+
 **Done in 0.7.0** (Emre's PR #10, live-checked on AE 26.3):
 - render inside After Effects (`ae_render_queue_render`, `ae_render_queue_render_status`) for when aerender can't run, with pre-checks for missing frames, existing outputs and busy GPUs;
 - a core tool list for Claude Desktop (`CHROMA_AE_MCP_TOOLSET=core`: 33 tools plus search, schema and invoke gateways) and a panel button that sets it;

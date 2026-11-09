@@ -44,10 +44,10 @@ This is an internal Chroma tool, not a consumer product.
 
 ## Status
 
-**v0.7.0, released 2026-11-07** (signed ZXP on the [v0.7.0 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.0)). The panel updates itself from GitHub releases (see [Updates](#updates)).
+**v0.7.1, released 2026-11-09** (signed ZXP on the [v0.7.1 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.1)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **180 tools**, all through the build, 5,598 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
-- Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions and the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) were checked live on AE 26.3. macOS should work but is untested.
+- **180 tools**, all through the build, 5,810 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) and the 0.7.1 changes (rendering chosen queue items, following a render, the core toolset per client, the Media Encoder warnings) were checked live on AE 26.3. macOS should work but is untested.
 - Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts. `ae_render_queue_render` then renders inside After Effects (which locks its UI until the render ends), or, if you say yes when asked, queues the saved project in Adobe Media Encoder (`engine: media_encoder`; After Effects stays free, you check the preset in Media Encoder and press Start, and Media Encoder reports no progress back).
 
 Test details, what is open and what each release added: [docs/ROADMAP.md](docs/ROADMAP.md).
