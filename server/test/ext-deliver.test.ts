@@ -1305,7 +1305,7 @@ describe("ae_deliver_step: a full delivery", () => {
     const ok = await w.step({ action: "start", recipe: "Acme" });
     expect(ok).toMatchObject({ ok: true, state: "done" });
     expect(calls).toBe(3);
-    expect(w.calls.every((c) => c.args.dry_run === false && c.args.dest === "C:/d")).toBe(true);
+    expect(w.calls.every((c) => c.args.dry_run === false && c.args.dest === DEST_D)).toBe(true);
 
     const never = world();
     addAll(never);
