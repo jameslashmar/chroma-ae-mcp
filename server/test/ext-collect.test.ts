@@ -224,7 +224,9 @@ describe("names and sequences", () => {
   });
 
   it("keys any frame of a sequence the same", () => {
-    expect(sourceKey("C:/s/a.0001.exr", true)).toBe(sourceKey("C:\\s\\a.0042.exr", true));
+    // Backslashes are separators on Windows only (on macOS path.dirname keeps them in the name).
+    const other = process.platform === "win32" ? "C:\\s\\a.0042.exr" : "C:/s/a.0042.exr";
+    expect(sourceKey("C:/s/a.0001.exr", true)).toBe(sourceKey(other, true));
     expect(sourceKey("C:/s/a.0001.exr", false)).not.toBe(sourceKey("C:/s/a.0042.exr", false));
   });
 

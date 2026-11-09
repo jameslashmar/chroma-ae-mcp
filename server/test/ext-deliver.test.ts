@@ -49,6 +49,9 @@ import {
   type StageState,
 } from "../src/tools/ext/deliver.js";
 import { FakeProject, loadHost } from "./support/fake-ae.js";
+// The collect's dest must be absolute on the machine running the test: "C:/d" is relative on macOS.
+const DEST_D = process.platform === "win32" ? "C:/d" : "/d";
+const DEST_ACME = process.platform === "win32" ? "C:/deliver/acme" : "/deliver/acme";
 
 const tmpDirs: string[] = [];
 afterEach(() => {
@@ -339,9 +342,9 @@ describe("buildStageArgs", () => {
     expect(buildStageArgs(loud, tool(["comp_id", "job_id", "audio_path", "expect"]), run)).toEqual({ comp_id: 7, expect: { project_path: "C:/p/show.aep" } });
     const ownFile = normalizeStages([{ kind: "loudness", args: { audio_path: "C:/o/mix.wav" } }])[0];
     expect(buildStageArgs(ownFile, tool(["comp_id", "job_id", "audio_path", "expect"]), run)).not.toHaveProperty("comp_id");
-    const collect = normalizeStages([{ kind: "collect", args: { dest: "C:/d" } }])[0];
-    expect(buildStageArgs(collect, tool(["dest", "dry_run", "expect"]), run)).toMatchObject({ dest: "C:/d", dry_run: false });
-    const asked = normalizeStages([{ kind: "collect", args: { dest: "C:/d", dry_run: true } }])[0];
+    const collect = normalizeStages([{ kind: "collect", args: { dest: DEST_D } }])[0];
+    expect(buildStageArgs(collect, tool(["dest", "dry_run", "expect"]), run)).toMatchObject({ dest: DEST_D, dry_run: false });
+    const asked = normalizeStages([{ kind: "collect", args: { dest: DEST_D, dry_run: true } }])[0];
     expect(buildStageArgs(asked, tool(["dest", "dry_run"]), run)).toMatchObject({ dry_run: true });
     expect(stagePrecheck(normalizeStages([{ kind: "collect" }])[0])).toContain("args.dest");
     expect(stagePrecheck(collect)).toBeNull();
@@ -628,7 +631,7 @@ const FULL = [
   { kind: "scrub" },
   { kind: "save", id: "save_final", checkpoint: false },
   { kind: "loudness" },
-  { kind: "collect", args: { dest: "C:/deliver/acme" } },
+  { kind: "collect", args: { dest: DEST_ACME } },
 ];
 
 describe("ae_deliver_recipe", () => {
@@ -751,7 +754,7 @@ describe("ae_deliver_step: a full delivery", () => {
     expect(loud).toHaveLength(1);
     expect(loud[0].args).toMatchObject({ comp_id: 7, expect: { project_path: w.projectPath } });
     expect(loud[0].args).not.toHaveProperty("path");
-    expect(w.calls.find((c) => c.name === "ae_collect_files")!.args).toMatchObject({ dest: "C:/deliver/acme", dry_run: false });
+    expect(w.calls.find((c) => c.name === "ae_collect_files")!.args).toMatchObject({ dest: DEST_ACME, dry_run: false });
     expect(done.stages.find((s: any) => s.id === "verify").outputs).toHaveLength(2);
     expect(done.stages.find((s: any) => s.id === "loudness").summary).toContain("-23.1 LUFS");
     expect(done.stages.find((s: any) => s.id === "collect").summary).toContain("collected 3");
@@ -793,7 +796,7 @@ describe("ae_deliver_step: a full delivery", () => {
     const w = world();
     addAll(w);
     w.state.dirty = true;
-    await w.recipe({ action: "set", name: "C", stages: [{ kind: "collect", args: { dest: "C:/d" } }] });
+    await w.recipe({ action: "set", name: "C", stages: [{ kind: "collect", args: { dest: DEST_D } }] });
     const res = await w.step({ action: "start", recipe: "C" });
     expect(res).toMatchObject({ ok: false, state: "blocked", stopped_at: "collect" });
     expect(res.stages[0].summary).toContain("unsaved changes");
@@ -992,7 +995,7 @@ describe("ae_deliver_step: a full delivery", () => {
   it("honours max_stages and continues with next", async () => {
     const w = world();
     addAll(w);
-    await w.recipe({ action: "set", name: "Acme", stages: [{ kind: "preflight" }, { kind: "house_style" }, { kind: "collect", checkpoint: false, args: { dest: "C:/d" } }] });
+    await w.recipe({ action: "set", name: "Acme", stages: [{ kind: "preflight" }, { kind: "house_style" }, { kind: "collect", checkpoint: false, args: { dest: DEST_D } }] });
     const one = await w.step({ action: "start", recipe: "Acme", max_stages: 2 });
     expect(one).toMatchObject({ ok: true, state: "in_progress", stopped_at: "collect" });
     expect(names(w)).toEqual(["ae_preflight", "ae_house_style_check"]);
@@ -1298,7 +1301,7 @@ describe("ae_deliver_step: a full delivery", () => {
       calls++;
       return calls < 3 ? { dry_run: false, complete: false, files_done: calls, files_total: 5, remaining: 5 - calls, errors_total: 0 } : { dry_run: false, complete: true, files_done: 5, files_total: 5, remaining: 0, errors_total: 0 };
     };
-    await w.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: "C:/d" } }] });
+    await w.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: DEST_D } }] });
     const ok = await w.step({ action: "start", recipe: "Acme" });
     expect(ok).toMatchObject({ ok: true, state: "done" });
     expect(calls).toBe(3);
@@ -1307,7 +1310,7 @@ describe("ae_deliver_step: a full delivery", () => {
     const never = world();
     addAll(never);
     never.reply.ae_collect_files = () => ({ dry_run: false, complete: false, files_done: 1, files_total: 5, remaining: 4, errors_total: 0 });
-    await never.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: "C:/d" } }] });
+    await never.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: DEST_D } }] });
     const stuck = await never.step({ action: "start", recipe: "Acme" });
     expect(stuck).toMatchObject({ ok: false, state: "blocked", stopped_at: "collect" });
     expect(stuck.stages[0].summary).toContain("not complete");
@@ -1322,7 +1325,7 @@ describe("ae_deliver_step: a full delivery", () => {
     expect(res).toMatchObject({ ok: false, state: "blocked", stopped_at: "collect" });
     expect(res.stages[0].summary).toContain("args.dest");
     expect(w.calls).toHaveLength(0);
-    await w.recipe({ action: "set", name: "Dry", stages: [{ kind: "collect", checkpoint: false, args: { dest: "C:/d", dry_run: true } }] });
+    await w.recipe({ action: "set", name: "Dry", stages: [{ kind: "collect", checkpoint: false, args: { dest: DEST_D, dry_run: true } }] });
     const dry = await w.step({ action: "start", recipe: "Dry" });
     expect(dry).toMatchObject({ ok: true, state: "done" });
     expect(dry.stages[0]).toMatchObject({ status: "warn" });
@@ -1440,7 +1443,7 @@ describe("ae_deliver_step: a full delivery", () => {
     const w = world();
     addAll(w);
     w.tools.delete("ae_collect_files");
-    await w.recipe({ action: "set", name: "Acme", comp_id: 7, stages: [{ kind: "preflight" }, { kind: "save" }, { kind: "verify" }, { kind: "collect", args: { dest: "C:/d" } }, { kind: "collect", id: "collect_b" }] });
+    await w.recipe({ action: "set", name: "Acme", comp_id: 7, stages: [{ kind: "preflight" }, { kind: "save" }, { kind: "verify" }, { kind: "collect", args: { dest: DEST_D } }, { kind: "collect", id: "collect_b" }] });
     const before = fs.readFileSync(deliverPath(w.projectPath), "utf8");
     const plan = await w.step({ action: "start", recipe: "Acme", dry_run: true });
     expect(plan).toMatchObject({ ok: true, dry_run: true, applied: false });
@@ -1609,7 +1612,7 @@ describe("ae_deliver_step: a full delivery", () => {
       const base = { dry_run: false, complete: true, files_total: 3, remaining: 0, errors_total: 0 };
       return n < 3 ? { ...base, zip: { ok: false, status: "running", message: "still being written" } } : { ...base, zip: { ok: true, verified: true } };
     };
-    await running.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: "C:/d", zip: true } }] });
+    await running.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: DEST_D, zip: true } }] });
     // asked again while the zip runs, then done
     expect(await running.step({ action: "start", recipe: "Acme" })).toMatchObject({ ok: true, state: "done" });
     expect(n).toBe(3);
@@ -1617,7 +1620,7 @@ describe("ae_deliver_step: a full delivery", () => {
     const failed = world();
     addAll(failed);
     failed.reply.ae_collect_files = () => ({ dry_run: false, complete: true, files_total: 3, remaining: 0, errors_total: 0, zip: { ok: false, error: "The zip could not be written: disk full" } });
-    await failed.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: "C:/d", zip: true } }] });
+    await failed.recipe({ action: "set", name: "Acme", stages: [{ kind: "collect", checkpoint: false, args: { dest: DEST_D, zip: true } }] });
     const res = await failed.step({ action: "start", recipe: "Acme" });
     expect(res).toMatchObject({ ok: false, state: "blocked", stopped_at: "collect" });
     expect(res.stages[0].summary).toContain("disk full");

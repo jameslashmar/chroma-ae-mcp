@@ -51,6 +51,8 @@ import {
   TextDocument,
   loadHost,
 } from "./support/fake-ae.js";
+// The guard folds case on Windows only (as AE's own guard in core.jsx does), so the different-case spelling is a Windows test.
+const EXPECT_DEMO = process.platform === "win32" ? "c:/projects/demo.aep" : "C:/Projects/Demo.aep";
 
 const tmpDirs: string[] = [];
 beforeEach(() => clearPreflightSessions());
@@ -592,7 +594,7 @@ describe("ae_preflight health", () => {
           { info: comp(3, "Leaf", { used_n: 1, used_in: [2] }), layers: ["d"], precomps: [4] },
           { info: comp(4, "Deep", { used_n: 1, used_in: [3], width: 16000, height: 9000 }), layers: ["e"] },
         ],
-        footage: [footage(10, "a.mov", { file: "C:/m/A.mov", used_in: [1] }), footage(11, "a copy.mov", { file: "c:/m/a.mov", used_in: [2] }), footage(12, "unused.mov", { used_n: 0, used_in: [] })],
+        footage: [footage(10, "a.mov", { file: "C:/m/A.mov", used_in: [1] }), footage(11, "a copy.mov", { file: process.platform === "win32" ? "c:/m/a.mov" : "C:/m/A.mov", used_in: [2] }), footage(12, "unused.mov", { used_n: 0, used_in: [] })],
       })
     );
     const r = (await tool.handler(AePreflightSchema.parse({ scope: "health", max_nesting: 2, top: 2, naming: { allow_default_names: true }, project_spec: { bits_per_channel: 16, linear_blending: true } }), ctx)) as any;
@@ -691,7 +693,7 @@ describe("runPreflightGate", () => {
       },
     });
     const start = tools.find((t) => t.name === "ae_aerender_start")!;
-    const out = (await start.handler(start.schema.parse({ expect: { project_path: "c:/projects/demo.aep" }, comp_name: "Main", output_path: path.join(dir, "o.mov"), preflight: true }), ctx)) as any;
+    const out = (await start.handler(start.schema.parse({ expect: { project_path: EXPECT_DEMO }, comp_name: "Main", output_path: path.join(dir, "o.mov"), preflight: true }), ctx)) as any;
     expect(out).toMatchObject({ ok: false, error: "preflight_blocked" });
     expect(spawned).toBe(false);
   });

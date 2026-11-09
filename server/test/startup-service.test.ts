@@ -15,6 +15,13 @@ const common = require(path.join(repoRoot, "panel", "client", "common.js")) as {
   getPaths: (dir?: string) => Record<string, string>;
 };
 
+/** The panel service's state dir under a temp home, as common.js resolveStateDir picks it on this platform. */
+function stateDirUnder(home: string): string {
+  if (process.platform === "win32") return path.join(home, "chroma-ae-mcp");
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "chroma-ae-mcp");
+  return path.join(home, ".chroma-ae-mcp");
+}
+
 describe("buildInstanceInfo (pure)", () => {
   it("names the AE from its install path, falls back to the version, and has no user or machine name field", () => {
     const info = common.buildInstanceInfo(
@@ -104,7 +111,7 @@ describe("service: which After Effects owns the port", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const stateDir = () => path.join(root, "chroma-ae-mcp");
+  const stateDir = () => stateDirUnder(root);
   const readLog = () => {
     try {
       return fs.readFileSync(path.join(stateDir(), "service.log"), "utf8");

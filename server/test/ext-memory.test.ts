@@ -210,7 +210,8 @@ describe("tools with a fake bridge", () => {
       const plain = fakeAe({ memoryRead: [read(2000 * MB)] });
       const out = (await tool("ae_memory_status").handler(AeMemoryStatusSchema.parse({}), plain.ctx)) as any;
       expect(probes).toBe(0);
-      expect(out.preflight).toEqual({ ready: true, warnings: [] });
+      // No GPU warning without a probe. The free-RAM warning depends on the test machine (a macOS runner reports a few hundred MB free), so it is left out.
+      expect(out.preflight.warnings.filter((w: string) => !/of free RAM/.test(w))).toEqual([]);
       const asked = fakeAe({ memoryRead: [read(2000 * MB)] });
       await tool("ae_memory_status").handler(AeMemoryStatusSchema.parse({ warn_above_mb: 8000 }), asked.ctx);
       expect(probes).toBe(1);

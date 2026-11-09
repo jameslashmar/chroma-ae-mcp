@@ -24,15 +24,18 @@ function pngBytes(w: number, h: number, shade: number): Buffer {
 
 const tmp: string[] = [];
 const origLocalAppData = process.env.LOCALAPPDATA;
+const origHome = process.env.HOME;
 function tempDir(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-snapsave-"));
   tmp.push(d);
   return d;
 }
 beforeEach(() => {
-  process.env.LOCALAPPDATA = tempDir();
+  process.env.LOCALAPPDATA = process.env.HOME = tempDir();
 });
 afterEach(() => {
+  if (origHome === undefined) delete process.env.HOME;
+  else process.env.HOME = origHome;
   if (origLocalAppData === undefined) delete process.env.LOCALAPPDATA;
   else process.env.LOCALAPPDATA = origLocalAppData;
   for (const d of tmp.splice(0)) fs.rmSync(d, { recursive: true, force: true });

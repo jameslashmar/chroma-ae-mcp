@@ -315,6 +315,7 @@ describe("ext/motion tools against a fake AE", () => {
   const written: string[] = [];
   const origLocalAppData = process.env.LOCALAPPDATA;
 
+  const origHome = process.env.HOME;
   function makeTempDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-ae-motion-"));
     tmpDirs.push(dir);
@@ -322,10 +323,12 @@ describe("ext/motion tools against a fake AE", () => {
   }
 
   beforeEach(() => {
-    process.env.LOCALAPPDATA = makeTempDir();
+    process.env.LOCALAPPDATA = process.env.HOME = makeTempDir();
   });
 
   afterEach(() => {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
     if (origLocalAppData === undefined) {
       delete process.env.LOCALAPPDATA;
     } else {

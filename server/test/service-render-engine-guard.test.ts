@@ -18,6 +18,13 @@ const common = require(path.join(repoRoot, "panel", "client", "common.js")) as {
   decideServiceStart: (input: { probe?: unknown; env?: Record<string, string | undefined> }) => Verdict;
 };
 
+/** The panel service's state dir under a temp home, as common.js resolveStateDir picks it on this platform. */
+function stateDirUnder(home: string): string {
+  if (process.platform === "win32") return path.join(home, "chroma-ae-mcp");
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "chroma-ae-mcp");
+  return path.join(home, ".chroma-ae-mcp");
+}
+
 describe("render-engine guard: pure decision", () => {
   it("stops only on the exact render-engine answer", () => {
     const v = common.decideServiceStart({ probe: "chroma-guard:render-engine", env: {} });
@@ -145,7 +152,7 @@ describe("render-engine guard: service boot", () => {
     delete require.cache[servicePath];
     service = require(servicePath) as { shutdown: () => void };
   }
-  const stateDir = () => path.join(stateRoot, "chroma-ae-mcp");
+  const stateDir = () => stateDirUnder(stateRoot);
   const readLog = () => {
     try {
       return fs.readFileSync(path.join(stateDir(), "service.log"), "utf8");
@@ -385,7 +392,7 @@ describe("service routes while the render gate is shut", () => {
   async function boot(): Promise<string> {
     delete require.cache[servicePath];
     service = require(servicePath) as { shutdown: () => void };
-    const tokenFile = path.join(root, "chroma-ae-mcp", "token");
+    const tokenFile = path.join(stateDirUnder(root), "token");
     for (let i = 0; i < 300; i++) {
       try {
         const t = fs.readFileSync(tokenFile, "utf8").trim();
