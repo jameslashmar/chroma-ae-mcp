@@ -80,6 +80,8 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.3**: After Effects 2027 (27.0). The extension already accepted AE 25.0 and later, and the 27.0 SDK changes only native C++ effect headers, so nothing in the extension had to change for it. aerender lookup now tries `Adobe After Effects 2027` first, and `install-dev.ps1` also sets PlayerDebugMode under `CSXS.13` in case AE 27 ships a newer CEP. Not yet run in AE 27.
+
 **Done in 0.7.2** (#15, #17):
 - the stdio relay waits for its output to flush before exiting: on macOS a reply over 64 KB (the full tool list) was cut off when the host closed stdin;
 - the unit tests pass on macOS, and no longer write into the real data folder there (`~/Library/Application Support/chroma-ae-mcp`).

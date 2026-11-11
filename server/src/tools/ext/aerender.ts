@@ -170,8 +170,8 @@ export function resolveAerenderPath(options?: {
     }
 
     const years = versionYear
-      ? [versionYear, 2026, 2025, 2024]
-      : [2026, 2025, 2024];
+      ? [versionYear, 2027, 2026, 2025, 2024]
+      : [2027, 2026, 2025, 2024];
     for (const yr of years) {
       const appParent = `/Applications/Adobe After Effects ${yr}`;
       const candidate = `${appParent}/aerender`;
@@ -204,8 +204,8 @@ export function resolveAerenderPath(options?: {
   }
 
   const years = versionYear
-    ? [versionYear, 2026, 2025, 2024]
-    : [2026, 2025, 2024];
+    ? [versionYear, 2027, 2026, 2025, 2024]
+    : [2027, 2026, 2025, 2024];
   for (const yr of years) {
     const supportDir = `C:/Program Files/Adobe/Adobe After Effects ${yr}/Support Files`;
     const candidate = `${supportDir}/aerender.exe`;

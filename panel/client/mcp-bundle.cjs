@@ -8327,7 +8327,7 @@ function resolveAerenderPath(options) {
         return candidate;
       }
     }
-    const years2 = versionYear ? [versionYear, 2026, 2025, 2024] : [2026, 2025, 2024];
+    const years2 = versionYear ? [versionYear, 2027, 2026, 2025, 2024] : [2027, 2026, 2025, 2024];
     for (const yr of years2) {
       const appParent = `/Applications/Adobe After Effects ${yr}`;
       const candidate = `${appParent}/aerender`;
@@ -8352,7 +8352,7 @@ function resolveAerenderPath(options) {
       return `${execDir}/aerender.exe`;
     }
   }
-  const years = versionYear ? [versionYear, 2026, 2025, 2024] : [2026, 2025, 2024];
+  const years = versionYear ? [versionYear, 2027, 2026, 2025, 2024] : [2027, 2026, 2025, 2024];
   for (const yr of years) {
     const supportDir = `C:/Program Files/Adobe/Adobe After Effects ${yr}/Support Files`;
     const candidate = `${supportDir}/aerender.exe`;
@@ -70653,7 +70653,7 @@ var SUPPORTED_PROTOCOL_VERSIONS = [
 ];
 var DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 var SERVER_NAME = "chroma-ae-mcp";
-var SERVER_VERSION = "0.7.2";
+var SERVER_VERSION = "0.7.3";
 function makeErrorResponse(id, code, message, data) {
   const error = { code, message };
   if (data !== void 0) {

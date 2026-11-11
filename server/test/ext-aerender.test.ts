@@ -109,6 +109,19 @@ describe("ext/aerender (background aerender jobs)", () => {
     expect(macFallback).toBe(MACOS_FALLBACK_AERENDER);
   });
 
+  it("finds an AE 2027 install from aeVersion 27.x, and prefers 2027 when the version is unknown", () => {
+    const has2027 = (p: string) => p.includes("After Effects 2027");
+    expect(
+      resolveAerenderPath({ platform: "win32", aeVersion: "27.0x12", existsSync: has2027 })
+    ).toBe("C:/Program Files/Adobe/Adobe After Effects 2027/Support Files/aerender.exe");
+    expect(resolveAerenderPath({ platform: "win32", existsSync: has2027 })).toBe(
+      "C:/Program Files/Adobe/Adobe After Effects 2027/Support Files/aerender.exe"
+    );
+    expect(
+      resolveAerenderPath({ platform: "darwin", aeVersion: "27.0", existsSync: has2027 })
+    ).toBe("/Applications/Adobe After Effects 2027/aerender");
+  });
+
   it("validates schemas and converts to JSON Schema cleanly", () => {
     const startJson = zodToJsonSchema(AeAerenderStartSchema);
     expect(startJson.type).toBe("object");

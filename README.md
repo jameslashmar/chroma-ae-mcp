@@ -15,7 +15,7 @@
 
 ## What is this?
 
-An MCP server that lets Claude Code, Claude Desktop, Cursor and Codex drive **Adobe After Effects 2026** (AE 26.x, CEP 12) safely, alongside a person who is editing live. It runs **inside After Effects** and starts with it, so there is no separate server to install or run.
+An MCP server that lets Claude Code, Claude Desktop, Cursor and Codex drive **Adobe After Effects 2026 and 2027** (AE 26.x and 27.x; installs on 25.0 and later, CEP 12+) safely, alongside a person who is editing live. It runs **inside After Effects** and starts with it, so there is no separate server to install or run.
 
 This is an internal Chroma tool, not a consumer product.
 
@@ -44,7 +44,7 @@ This is an internal Chroma tool, not a consumer product.
 
 ## Status
 
-**v0.7.2, released 2026-11-09** (signed ZXP on the [v0.7.2 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.2)). The panel updates itself from GitHub releases (see [Updates](#updates)).
+**v0.7.3, released 2026-11-11** (signed ZXP on the [v0.7.3 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.3)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
 - **180 tools**, all through the build, 5,810 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
 - Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) and the 0.7.1 changes (rendering chosen queue items, following a render, the core toolset per client, the Media Encoder warnings) were checked live on AE 26.3. macOS should work but is untested in After Effects; the unit tests pass on macOS in CI.

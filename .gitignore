@@ -6,3 +6,4 @@ build/ZXPSignCmd.exe
 build/*.p12
 qa/out/
 server/coverage/
+sdks/

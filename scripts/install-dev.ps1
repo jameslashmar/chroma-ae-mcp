@@ -1,11 +1,11 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Installs or uninstalls the Chroma AE MCP extension for Adobe After Effects 2026.
+    Installs or uninstalls the Chroma AE MCP extension for Adobe After Effects 2025, 2026 and 2027.
 
 .DESCRIPTION
     Creates a directory junction from %APPDATA%\Adobe\CEP\extensions\london.chroma.aemcp
-    to the repo's panel folder, sets HKCU:\Software\Adobe\CSXS.12 PlayerDebugMode=1 (string '1'),
+    to the repo's panel folder, sets HKCU:\Software\Adobe\CSXS.12 and CSXS.13 PlayerDebugMode=1 (string '1'),
     and prints next steps.
     With -Uninstall, removes the directory junction only.
 
@@ -99,18 +99,20 @@ else {
     Write-Host "  Target: $targetJunction"
 }
 
-# 3. Set HKCU:\Software\Adobe\CSXS.12 PlayerDebugMode = "1"
-$registryKey = 'HKCU:\Software\Adobe\CSXS.12'
-try {
-    if (-not (Test-Path -LiteralPath $registryKey)) {
-        New-Item -Path $registryKey -Force | Out-Null
+# 3. Set PlayerDebugMode = "1" for CEP 12 (AE 2025/2026) and CEP 13 (in case AE 2027 ships a newer
+#    runtime). Each CEP major reads its own CSXS.<n> key; setting an unused key is harmless.
+foreach ($registryKey in @('HKCU:\Software\Adobe\CSXS.12', 'HKCU:\Software\Adobe\CSXS.13')) {
+    try {
+        if (-not (Test-Path -LiteralPath $registryKey)) {
+            New-Item -Path $registryKey -Force | Out-Null
+        }
+        Set-ItemProperty -LiteralPath $registryKey -Name 'PlayerDebugMode' -Value '1' -Type String
+        Write-Host "Configured registry: $registryKey\PlayerDebugMode = '1'" -ForegroundColor Green
     }
-    Set-ItemProperty -LiteralPath $registryKey -Name 'PlayerDebugMode' -Value '1' -Type String
-    Write-Host "Configured registry: $registryKey\PlayerDebugMode = '1'" -ForegroundColor Green
-}
-catch {
-    Write-Error "Failed to set PlayerDebugMode in registry '$registryKey': $_"
-    exit 1
+    catch {
+        Write-Error "Failed to set PlayerDebugMode in registry '$registryKey': $_"
+        exit 1
+    }
 }
 
 # 4. Print next steps
@@ -121,7 +123,7 @@ Write-Host "   cd `"$repoRoot\server`"" -ForegroundColor Gray
 Write-Host "   npm install" -ForegroundColor Gray
 Write-Host "   npm run build" -ForegroundColor Gray
 Write-Host ""
-Write-Host "2. Restart Adobe After Effects (2026 / 26.x)." -ForegroundColor White
+Write-Host "2. Restart Adobe After Effects (2025-2027)." -ForegroundColor White
 Write-Host "3. In After Effects, open the panel via:" -ForegroundColor White
 Write-Host "   Window > Extensions > Chroma AE MCP" -ForegroundColor Yellow
 Write-Host "   Verify the panel opens and displays status (listening on 127.0.0.1:7790)." -ForegroundColor Gray
