@@ -42,6 +42,13 @@ describe("live evidence check", () => {
     expect(p.join(" ")).toMatch(/changed after the tested commit/);
   });
 
+  it("accepts files outside the AE code paths changed after the tested commit", () => {
+    const later = ["server/test/a.test.ts", "scripts/check-live-evidence.mjs", ".github/workflows/ci.yml", "panel/client/style.css", "README.md"];
+    expect(problemsWith(good(), { isAncestor: true, changedSince: later }, new Set()).join(" ")).not.toMatch(/changed after the tested commit/);
+    const p = problemsWith(good(), { isAncestor: true, changedSince: [...later, "panel/host/core.jsx", "panel/client/mcp-bundle.cjs"] }, new Set());
+    expect(p.join(" ")).toMatch(/changed after the tested commit [0-9a-f]+: panel\/host\/core\.jsx, panel\/client\/mcp-bundle\.cjs \(/);
+  });
+
   it("refuses a commit outside the PR's history", () => {
     expect(problemsWith(good(), { isAncestor: false }, new Set()).join(" ")).toMatch(/not in this PR's history/);
   });

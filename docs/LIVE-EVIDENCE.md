@@ -22,7 +22,7 @@ On a machine with After Effects 2026:
 
 5. Commit the file it writes, `qa/evidence/<commit>.json`, on top of the tested commit and push.
 
-After the tested commit, only evidence files and Markdown may change. Any later code change needs a new run on the new commit.
+After the tested commit, anything that would not need evidence on its own may change: evidence files, Markdown, and files outside the After Effects code paths (`AE_CODE` in `scripts/check-live-evidence.mjs`: unit tests, CI, scripts). A later change to After Effects code needs a new run on the new commit.
 
 ## Notes: manual checks and failures
 

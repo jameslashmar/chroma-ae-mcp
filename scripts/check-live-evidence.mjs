@@ -23,7 +23,7 @@ export const SCHEMA = "chroma-ae-mcp.live-evidence.v1";
 
 /** Paths whose changes need evidence from a live After Effects. */
 export const AE_CODE = /^(panel\/host\/|panel\/tools\/|panel\/CSXS\/|panel\/client\/[^/]+\.(js|cjs|html)$|server\/src\/)/;
-/** What may change after the commit the evidence names. */
+/** What may change after the commit the evidence names, besides any file outside AE_CODE (unit tests, CI, scripts, docs). */
 export const AFTER_EVIDENCE_OK = /^(qa\/evidence\/[^/]+\.json|.*\.md)$/;
 export const EVIDENCE_FILE = /^qa\/evidence\/[^/]+\.json$/;
 /** A tool name as a tool definition writes it in server/src. */
@@ -53,7 +53,7 @@ export function problemsWith(report, facts, newTools) {
   if (!/^[0-9a-f]{40}$/.test(String(report.sourceCommit ?? ""))) p.push("sourceCommit must be a full 40-character commit SHA");
   else if (!facts.isAncestor) p.push(`commit ${report.sourceCommit.slice(0, 12)} is not in this PR's history`);
   else {
-    const later = (facts.changedSince ?? []).filter((f) => !AFTER_EVIDENCE_OK.test(f));
+    const later = (facts.changedSince ?? []).filter((f) => AE_CODE.test(f) && !AFTER_EVIDENCE_OK.test(f));
     if (later.length) p.push(`files changed after the tested commit ${report.sourceCommit.slice(0, 12)}: ${later.slice(0, 8).join(", ")}${later.length > 8 ? ", …" : ""} (run qa/live-evidence.mjs again on the latest commit)`);
   }
   if (!String(report.ae?.version ?? "").trim()) p.push("ae.version is missing");
