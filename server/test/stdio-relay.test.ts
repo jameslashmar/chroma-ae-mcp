@@ -159,17 +159,19 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
       callStatus(3),
     ], { toolset: "full" });
 
-    expect(panel.seen.map((s) => s.body.method)).toEqual([
+    // The relay sends each line as its own request, at once (a real client waits for initialize first), so they can arrive in any order.
+    expect(panel.seen.map((s) => s.body.method).sort()).toEqual([
       "initialize",
       "notifications/initialized",
-      "tools/list",
       "tools/call",
+      "tools/list",
     ]);
     expect(panel.seen.every((s) => s.auth === "Bearer tok-123")).toBe(true);
     // The notification's 202 sends nothing back.
-    expect(replies.map((r) => r.id)).toEqual([1, 2, 3]);
-    expect(replies[0].result).toEqual({ echo: "initialize" });
-    expect(replies[1].result.tools).toEqual(TOOLS);
+    const byId = [...replies].sort((x, y) => x.id - y.id);
+    expect(byId.map((r) => r.id)).toEqual([1, 2, 3]);
+    expect(byId[0].result).toEqual({ echo: "initialize" });
+    expect(byId[1].result.tools).toEqual(TOOLS);
     const cache = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-cache.json"), "utf8"));
     expect(cache.tools).toEqual(TOOLS);
   });
