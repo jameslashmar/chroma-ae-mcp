@@ -80,6 +80,13 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.4** (#18 and follow-ups, live-checked on AE 26.2.1 on Windows):
+- the Microsoft Store build of Claude Desktop no longer gets 401s from a stale token copy in its package's private AppData: the service updates that copy, the relay retries once and names it, and `relay-diagnose` reports `store_app_token_copy`;
+- Media Encoder: the preset read is dated when the prefs are old, HEVC maps to `mp4`, and a finished render no longer leaves an empty `follow` block;
+- panel: a settings menu (gear), confirmations inside the panel, a render lock strip, and a two-column layout from 600 px;
+- the aerender tools refuse up front with 6 or more auto-starting CEP extensions (`allow_many_cep_extensions` overrides it);
+- the live-evidence check only asks for a new run when After Effects code changed after the tested commit.
+
 **Done in 0.7.3**: After Effects 2027 (27.0). The extension already accepted AE 25.0 and later, and the 27.0 SDK changes only native C++ effect headers, so nothing in the extension had to change for it. aerender lookup now tries `Adobe After Effects 2027` first, and `install-dev.ps1` also sets PlayerDebugMode under `CSXS.13` in case AE 27 ships a newer CEP. Not yet run in AE 27.
 
 **Done in 0.7.2** (#15, #17):

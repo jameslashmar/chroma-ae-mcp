@@ -44,11 +44,11 @@ This is an internal Chroma tool, not a consumer product.
 
 ## Status
 
-**v0.7.3, released 2026-11-11** (signed ZXP on the [v0.7.3 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.3)). The panel updates itself from GitHub releases (see [Updates](#updates)).
+**v0.7.4, released 2026-11-21** (signed ZXP on the [v0.7.4 release](https://github.com/jameslashmar/chroma-ae-mcp/releases/tag/v0.7.4)). The panel updates itself from GitHub releases (see [Updates](#updates)).
 
-- **180 tools**, all through the build, 5,810 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
-- Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) and the 0.7.1 changes (rendering chosen queue items, following a render, the core toolset per client, the Media Encoder warnings) were checked live on AE 26.3. macOS should work but is untested in After Effects; the unit tests pass on macOS in CI.
-- Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts. `ae_render_queue_render` then renders inside After Effects (which locks its UI until the render ends), or, if you say yes when asked, queues the saved project in Adobe Media Encoder (`engine: media_encoder`; After Effects stays free, you check the preset in Media Encoder and press Start, and Media Encoder reports no progress back).
+- **180 tools**, all through the build, 5,845 unit tests and the ExtendScript lint; CI also runs the in-panel MCP end to end on AE's own Node (17.7.2).
+- Live-tested on AE 26.2.1 and 26.3 on Windows; the 0.6.0 motion guidance and captions the core of 0.7.0 (render in AE, busy handling, dialogs, batch import, layouts) and the 0.7.1 changes (rendering chosen queue items, following a render, the core toolset per client, the Media Encoder warnings) were checked live on AE 26.3, and the 0.7.4 changes (the Store token fix and the new panel layout) on AE 26.2.1. macOS should work but is untested in After Effects; the unit tests pass on macOS in CI.
+- Known issue: some background `aerender` jobs never start rendering; they now fail cleanly after 3 attempts. With 6 or more CEP extensions that start by themselves in AE, the aerender tools refuse straight away instead (see [Troubleshooting](#troubleshooting)). `ae_render_queue_render` then renders inside After Effects (which locks its UI until the render ends), or, if you say yes when asked, queues the saved project in Adobe Media Encoder (`engine: media_encoder`; After Effects stays free, you check the preset in Media Encoder and press Start, and Media Encoder reports no progress back).
 
 Test details, what is open and what each release added: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -86,13 +86,15 @@ Several items come from [premiere-pro-mcp](https://github.com/leancoderkavy/prem
 
 **What you need:** Claude Code needs nothing but AE: the MCP runs on the Node built into AE's CEP. Claude Desktop, Cursor and Codex go through a small stdio relay, which needs Node 16 or later on the machine.
 
-**The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** at the bottom lists each tool call and checkpoint, and the service's own events (started, token loaded, warnings), newest first, with the raw service log inside it. Its twirl opens it below the tiles; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. The panel remembers which you chose.
+**The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** lists each tool call and checkpoint, and the service's own events (started, token loaded, warnings), newest first, with the raw service log inside it. From 600 px wide the panel has two columns with the Log always open on the right. In one column the Log sits below the tiles and opens by itself when there is room; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. When space runs out the chart is hidden first.
+
+**The gear** in the panel's header opens **New token**, **Save diagnostics**, **Check for updates** and the version. It works with the arrow keys and Escape. Actions that change something (New token, Clear render lock) ask first in a dialog inside the panel, with Cancel selected.
 
 ### Updates
 
 <img src="docs/images/panel-update.png" width="240" align="right" alt="The panel with an update bar at the top: v0.4.2 is out, You have v0.4.1, with What's new and Update buttons">
 
-The panel checks GitHub for a newer release when it opens, and again when you click **Check for updates** at the bottom of the panel. When there is one, a bar at the top says so:
+The panel checks GitHub for a newer release when it opens, and again when you click **Check for updates** in the gear menu. When there is one, a bar at the top says so:
 
 - **What's new** opens the release notes in your browser.
 - **Update** downloads the release's `.zxp` to your Downloads folder, checks it against the release's SHA256 (nothing is installed if it doesn't match), and opens it, so the ZXP installer registered for `.zxp` files (the aescripts ZXP Installer, or Anastasiy's) installs it.
@@ -102,7 +104,7 @@ Coming from 0.4.0, which has no update button, install 0.4.1 by hand once.
 
 <br clear="right">
 
-**The token** belongs to this machine and survives restarts. **New token** in the panel replaces it, and Claude Code's user-scope `chroma-ae` entry is registered again automatically. The relay clients read the token themselves and need nothing.
+**The token** belongs to this machine and survives restarts. **New token** in the gear menu replaces it (after you confirm), and Claude Code's user-scope `chroma-ae` entry is registered again automatically. The relay clients read the token themselves and need nothing.
 
 ### Registering by hand
 
@@ -184,12 +186,13 @@ Building, the dev install, releasing and QA are in [docs/DEVELOP.md](docs/DEVELO
 - **Tools fail with `unreachable`:** is AE running and the service up? The panel shows Connected, and `curl -H "Authorization: Bearer <token>" http://127.0.0.1:7790/health` answers. The service starts about 30 s after AE launches.
 - **401 errors:** the token was regenerated. Pick **Code** under Register with, click **Copy setup command** and paste it into a terminal again.
 - **401 errors in the Microsoft Store build of Claude Desktop:** a Store app (an MSIX package) gets a private overlay of AppData, so its relay can read an old copy of the token at `%LOCALAPPDATA%\Packages\<package>\LocalCache\Local\chroma-ae-mcp\token` instead of the file After Effects writes. Regenerating the token or restarting AE does not change that copy. The service now rewrites such a copy itself (only if it already exists) when it starts, when the token is regenerated, and when it rejects a request, and the log says `Updated the out-of-date token copy ...`. If the error stays: quit Claude Desktop from the tray, rename that `chroma-ae-mcp` folder to `chroma-ae-mcp.old`, and reopen Claude Desktop. Keep `chroma-ae` in `claude_desktop_config.json`.
-- **Something is stuck:** click **Save diagnostics** in the panel (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
+- **Something is stuck:** click **Save diagnostics** in the gear menu (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
 - **A call is refused with 'After Effects is busy':** a popup, a script or a render holds AE. Call `ae_status` (answers within 10 s, names the popup), answer the popup under the dialog rules, don't retry in a loop. Nothing was sent and nothing is quarantined.
 - **'Not reachable':** run `node panel/tools/relay-diagnose.cjs` (exit 0 fine, 2 wrong, `--json` available). Codes: `no_token`, `panel_not_installed`, `ae_not_running`, `only_unsupported_ae`, `debug_mode_off` (development install only), `service_down`, `port_other_program`, `token_rejected`, `store_app_token_copy`, `other_ae_holds_port`, `service_busy`.
 - **Two After Effects versions running:** the first to start keeps port 7790. The other panel shows 'Other AE has the connection (2025)' and `service.log` names the owner.
 - **`CHROMA_AE_MCP_DIAGNOSE=off`** (old one-line relay text) or `quick` (no process probes).
 - **Port 7790 is busy:** the service retries every 5 s and never starts a second server. Check that an old AE instance isn't still running.
+- **aerender refused with `too_many_cep_extensions`:** 6 or more CEP extensions start by themselves in AE on this machine (our own included). On the machine where this was measured, aerender's engine exited during every start with that many and rendered with 5 or fewer, so the tools refuse instead of spending minutes on 3 failed attempts. Render in AE (`ae_render_queue_render`), use Media Encoder, or turn off auto-starting extensions you don't need. If aerender is known to work on your machine, the agent can pass `allow_many_cep_extensions: true`.
 - **Windows Firewall prompt when rendering:** `aerender` starts a background AE. Renders don't need network access, so cancelling the prompt is fine.
 - **The ZXP installer can't parse the package:** `ExtensionManifest Version` must be the manifest *schema* version (7.0), not the CEP version (12.0).
 - **Blank panel or JavaScript errors:** open `http://localhost:8097` (service) or `8096` (panel) in Chrome or Edge.
