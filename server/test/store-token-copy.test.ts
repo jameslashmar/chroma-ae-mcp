@@ -149,7 +149,10 @@ describe("common.js packaged token copies", () => {
 
 function relayHome(token: string) {
   const dir = tmp();
-  const dataDir = path.join(dir, "chroma-ae-mcp");
+  // Where stdio-relay.cjs's dataDir() looks once LOCALAPPDATA and HOME point at dir.
+  let dataDir = path.join(dir, ".chroma-ae-mcp");
+  if (process.platform === "win32") dataDir = path.join(dir, "chroma-ae-mcp");
+  if (process.platform === "darwin") dataDir = path.join(dir, "Library", "Application Support", "chroma-ae-mcp");
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(path.join(dataDir, "token"), token + "\n");
   return { dir, tokenFile: path.join(dataDir, "token") };
