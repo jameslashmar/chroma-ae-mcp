@@ -53,6 +53,56 @@ function dataDir() {
   return path.join(os.homedir(), ".chroma-ae-mcp");
 }
 
+// A Microsoft Store app (an MSIX package, such as the Store build of Claude Desktop) and every process
+// it starts see a private overlay of AppData: a file created there lands in
+// %LOCALAPPDATA%\Packages\<family>\LocalCache\Local\chroma-ae-mcp\token and from then on the packaged
+// processes read that copy, not the real token. This lists such copies (Windows only, never throws).
+// Mirrors findPackagedTokenCopies() in panel/client/common.js, which this file cannot require:
+// the two must stay in step.
+function findPackagedTokenCopies() {
+  const found = [];
+  try {
+    if (process.platform !== "win32") return found;
+    const localAppData =
+      process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    const packagesDir = path.join(localAppData, "Packages");
+    for (const entry of fs.readdirSync(packagesDir, { withFileTypes: true })) {
+      try {
+        if (!entry.isDirectory()) continue;
+        const tokenPath = path.join(packagesDir, entry.name, "LocalCache", "Local", "chroma-ae-mcp", "token");
+        if (fs.statSync(tokenPath).isFile()) found.push({ package: entry.name, path: tokenPath });
+      } catch {}
+    }
+  } catch {}
+  return found;
+}
+
+// How long to wait for the service to rewrite a stale packaged copy (it does so when it rejects a request).
+const STORE_COPY_WAIT_MS = (() => {
+  const n = Number.parseInt(process.env.CHROMA_AE_MCP_STORE_COPY_WAIT_MS || "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1500;
+})();
+
+function storeAppName(packageName) {
+  return /^Claude_/i.test(packageName)
+    ? "Claude Desktop (Microsoft Store build)"
+    : packageName + " (a Microsoft Store app)";
+}
+
+function storeCopyMessage(copy) {
+  const isClaude = /^Claude_/i.test(copy.package);
+  const copyDir = path.dirname(copy.path);
+  return (
+    storeAppName(copy.package) + " reads its own copy of the token at " + copy.path +
+    ", not the file After Effects writes (" + TOKEN_PATH + "), and that copy is out of date. Quit " +
+    (isClaude ? "Claude Desktop" : "that app") + " from the tray, rename the folder " + copyDir +
+    " to chroma-ae-mcp.old, then reopen " + (isClaude ? "Claude Desktop" : "it") + "." +
+    (isClaude
+      ? " Don't remove chroma-ae from claude_desktop_config.json; Claude Desktop doesn't read Claude Code's settings."
+      : "")
+  );
+}
+
 function resolvePort() {
   const n = Number.parseInt((process.env.CHROMA_AE_MCP_PORT || "").trim(), 10);
   return Number.isFinite(n) && n > 0 && n <= 65535 ? n : 7790;
@@ -196,7 +246,7 @@ function post(bodyText) {
         const chunks = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () =>
-          resolve({ status: res.statusCode || 0, text: Buffer.concat(chunks).toString("utf8") })
+          resolve({ status: res.statusCode || 0, text: Buffer.concat(chunks).toString("utf8"), token })
         );
         res.on("error", reject);
       }
@@ -481,11 +531,44 @@ async function relay(message) {
     replyOffline(message, await reasonFor(message, err.message));
     return;
   }
+  let storeCopies = [];
+  if (res.status === 401) {
+    storeCopies = findPackagedTokenCopies();
+    if (storeCopies.length) {
+      // The service rewrites a stale packaged copy when it rejects a request. Give it a moment, and if
+      // the token we read has changed, send the same request once more. The retry is safe because a 401
+      // means the service did nothing with the request: auth is checked before any routing.
+      await new Promise((resolve) => setTimeout(resolve, STORE_COPY_WAIT_MS));
+      let after = "";
+      try { after = readToken(); } catch {}
+      if (after && after !== res.token) {
+        try {
+          res = await post(JSON.stringify(message));
+        } catch (err) {
+          if (!(err instanceof PanelUnavailable)) throw err;
+          replyOffline(message, await reasonFor(message, err.message));
+          return;
+        }
+      }
+    }
+  }
   if (res.status === 202) return;
   if (res.status === 401) {
+    if (storeCopies.length) {
+      // Not diagnosed: inside the package the "real" token path is the stale copy too, so the check
+      // could not see the difference.
+      replyOffline(message, storeCopyMessage(storeCopies[0]));
+      return;
+    }
     replyOffline(
       message,
-      await reasonFor(message, "The Chroma AE MCP panel rejected the token in " + TOKEN_PATH + ". Restart After Effects.")
+      await reasonFor(
+        message,
+        "The Chroma AE MCP panel rejected the token in " + TOKEN_PATH +
+          ". Another After Effects, or an old Chroma service, may hold the port with a different token. " +
+          "Quit After Effects, make sure no AfterFX.exe is left in Task Manager, and start it again. " +
+          'Running node "' + path.join(__dirname, "relay-diagnose.cjs") + '" tells which.'
+      )
     );
     return;
   }

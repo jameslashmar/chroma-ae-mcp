@@ -46,6 +46,43 @@ function stateDir(env) {
   return path.join(os.homedir(), ".chroma-ae-mcp");
 }
 
+/**
+ * Windows only: token copies that a Microsoft Store app (an MSIX package) keeps in its private overlay of
+ * AppData, <LOCALAPPDATA>\Packages\<family>\LocalCache\Local\chroma-ae-mcp\token. Mirrors findPackagedTokenCopies()
+ * in panel/client/common.js and stdio-relay.cjs; keep the three in step. Each entry says whether its content
+ * equals `token`; the content itself is never kept.
+ */
+function packagedTokenCopies(env, token) {
+  const found = [];
+  if (process.platform !== "win32") return found;
+  const e = env || process.env;
+  const packagesDir = path.join(e.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Packages");
+  let entries;
+  try {
+    entries = fs.readdirSync(packagesDir, { withFileTypes: true });
+  } catch (err) {
+    return found;
+  }
+  for (const entry of entries) {
+    try {
+      if (!entry.isDirectory()) continue;
+      const p = path.join(packagesDir, entry.name, "LocalCache", "Local", "chroma-ae-mcp", "token");
+      const st = fs.statSync(p);
+      if (!st.isFile()) continue;
+      let matches = null;
+      try {
+        matches = fs.readFileSync(p, "utf8").trim() === token;
+      } catch (err) {}
+      found.push({ package: entry.name, path: p, mtime: st.mtime.toISOString(), matches });
+    } catch (err) {}
+  }
+  return found;
+}
+
+function storeAppName(pkg) {
+  return /^Claude_/i.test(pkg) ? "Claude Desktop (Microsoft Store build)" : pkg + " (a Microsoft Store app)";
+}
+
 function resolvePort(env) {
   const n = Number.parseInt(String((env || process.env).CHROMA_AE_MCP_PORT || "").trim(), 10);
   return Number.isFinite(n) && n > 0 && n <= 65535 ? n : 7790;
@@ -442,6 +479,8 @@ async function gather(opts) {
     "token"
   );
 
+  const copies = await safe(() => (o.packagedCopies !== undefined ? o.packagedCopies : packagedTokenCopies(env, token)), failed, "packaged token copies");
+
   const jobs = {
     owner: safe(() => readOwner(path.join(dir, "owner.json"), now), failed, "owner"),
     health: safe(async () => summariseHealth(await httpGet(port, token, HTTP_TIMEOUT_MS)), failed, "health"),
@@ -476,6 +515,7 @@ async function gather(opts) {
     quick,
     state_dir: dir,
     token: tokenFact,
+    packaged_copies: copies,
     owner: r.owner,
     health: r.health,
     processes: procs
@@ -527,6 +567,14 @@ function summaryLines(f) {
   }
   if (f.port_holder) lines.push("port held by: " + (f.port_holder.name || "unknown program") + " (pid " + f.port_holder.pid + ")");
   if (f.token) lines.push("token file: " + (f.token.present ? "present" : "missing"));
+  if (f.packaged_copies) {
+    f.packaged_copies.forEach((c) =>
+      lines.push(
+        "Microsoft Store app token copy: " + c.package + ", " + c.path + ", modified " + c.mtime + ", " +
+          (c.matches === true ? "same token as the real file" : c.matches === false ? "differs from the real file" : "not readable")
+      )
+    );
+  }
   if (f.probes_failed && f.probes_failed.length) lines.push("probes that failed: " + f.probes_failed.join("; "));
   return lines;
 }
@@ -545,6 +593,16 @@ function decide(facts) {
 
   // The port answers.
   if (health && health.status === 401 && health.auth_error) {
+    const stale = (f.packaged_copies || []).find((c) => c.matches === false);
+    if (stale) {
+      const claude = /^Claude_/i.test(stale.package);
+      const app = claude ? "Claude Desktop" : "that app";
+      return result(f, "store_app_token_copy", false,
+        prefix + storeAppName(stale.package) + " reads its own copy of the token at " + stale.path +
+          ", not the file After Effects writes (" + path.join(f.state_dir || "the data folder", "token") + "), and that copy is out of date.",
+        ["Quit " + app + " from the tray, rename the folder " + path.dirname(stale.path) + " to chroma-ae-mcp.old, then reopen " + (claude ? "Claude Desktop" : "it") + "." +
+          (claude ? " Don't remove chroma-ae from claude_desktop_config.json; Claude Desktop doesn't read Claude Code's settings." : "")]);
+    }
     return result(f, "token_rejected", false,
       prefix + "the service on 127.0.0.1:" + port + " rejected the token" + (f.token && f.token.present ? "" : " (there is no token file)") + ".",
       ["Regenerate the token in the Chroma AE MCP panel, run the registration again, and restart the MCP client."]);
@@ -691,6 +749,7 @@ module.exports = {
   parseWindowsProcesses,
   parseMacProcesses,
   stateDir,
+  packagedTokenCopies,
   resolvePort,
   CACHE_MS,
 };

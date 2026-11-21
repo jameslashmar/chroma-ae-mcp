@@ -88,6 +88,26 @@
     common.appendServiceLog(paths.logPath, level, msg, common.LOG_MAX_BYTES);
   }
 
+  // A Microsoft Store app keeps its own copy of AppData files; bring any stale token copy up to date.
+  var STORE_COPY_SYNC_MIN_MS = 5000;
+  var lastStoreCopySyncAt = 0;
+  function syncStoreTokenCopies(rateLimited) {
+    try {
+      if (!sessionToken) return;
+      var now = Date.now();
+      if (rateLimited && now - lastStoreCopySyncAt < STORE_COPY_SYNC_MIN_MS) return;
+      lastStoreCopySyncAt = now;
+      var updated = common.syncPackagedTokenCopies(common.resolveLocalAppData(), sessionToken, log);
+      for (var i = 0; i < updated.length; i++) {
+        log(
+          "warn",
+          "Updated the out-of-date token copy that " + updated[i].package +
+            " keeps (a Microsoft Store app reads its own copy of AppData): " + updated[i].path
+        );
+      }
+    } catch (e) {}
+  }
+
   // ---------- FIFO Serialised evalScript Queue ----------
   var queue = [];
   var inFlight = null;
@@ -534,6 +554,7 @@
     // 3. Every request requires Authorization: Bearer <token>.
     if (!verifyBearerToken(headers.authorization)) {
       log("warn", "Rejected unauthorized request to " + String(req.url));
+      syncStoreTokenCopies(true);
       sendJson(res, 401, {
         ok: false,
         error: { kind: "auth", message: "Missing or invalid Bearer token" }
@@ -593,6 +614,7 @@
           });
           sessionToken = nextToken;
           log("warn", "Token regenerated. Copy and paste the setup command again.");
+          syncStoreTokenCopies(false);
           sendJson(res, 200, { ok: true });
         } catch (err) {
           log("err", "Failed to regenerate token: " + (err && err.message ? err.message : String(err)));
@@ -1064,6 +1086,7 @@
         "ok",
         (tokenState && tokenState.reused ? "Token loaded from " : "Token written to ") + paths.tokenPath
       );
+      syncStoreTokenCopies(false);
     } catch (storageErr) {
       log("err", "Failed to initialize private token storage: " + storageErr.message);
       return;

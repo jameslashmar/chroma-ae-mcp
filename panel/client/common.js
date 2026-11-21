@@ -168,10 +168,13 @@
   }
 
   // ---------- State folder, ACL & Bearer token ----------
+  function resolveLocalAppData() {
+    return process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  }
+
   function resolveStateDir() {
     if (process.platform === "win32") {
-      var localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-      return path.join(localAppData, "chroma-ae-mcp");
+      return path.join(resolveLocalAppData(), "chroma-ae-mcp");
     }
     if (process.platform === "darwin") {
       return path.join(os.homedir(), "Library", "Application Support", "chroma-ae-mcp");
@@ -247,6 +250,60 @@
       }
     } catch (e) {}
     return "";
+  }
+
+  // A Microsoft Store app (MSIX package) gets a private overlay of AppData: a file it creates under
+  // %LOCALAPPDATA% lands in %LOCALAPPDATA%\Packages\<family>\LocalCache\Local\ and from then on the
+  // packaged processes read that copy instead of the real file. These two helpers find such token
+  // copies and bring them up to date. Keep them in step with findPackagedTokenCopies in
+  // panel/tools/stdio-relay.cjs, which cannot require this file.
+  // opts (tests only): { platform, fs }.
+  function findPackagedTokenCopies(localAppData, opts) {
+    var found = [];
+    try {
+      var platform = (opts && opts.platform) || process.platform;
+      var fsImpl = (opts && opts.fs) || fs;
+      if (platform !== "win32" || !localAppData) return found;
+      var packagesDir = path.join(localAppData, "Packages");
+      var entries = fsImpl.readdirSync(packagesDir, { withFileTypes: true });
+      for (var i = 0; i < entries.length; i++) {
+        try {
+          if (!entries[i].isDirectory()) continue;
+          var name = entries[i].name;
+          var tokenPath = path.join(packagesDir, name, "LocalCache", "Local", "chroma-ae-mcp", "token");
+          if (fsImpl.statSync(tokenPath).isFile()) {
+            found.push({ package: name, path: tokenPath });
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return found;
+  }
+
+  // Only overwrites a copy that already exists and differs. Never creates anything, never throws.
+  function syncPackagedTokenCopies(localAppData, token, onLog, opts) {
+    var updated = [];
+    try {
+      if (!isValidToken(token)) return updated;
+      var fsImpl = (opts && opts.fs) || fs;
+      var copies = findPackagedTokenCopies(localAppData, opts);
+      for (var i = 0; i < copies.length; i++) {
+        try {
+          var current = String(fsImpl.readFileSync(copies[i].path, "utf8")).trim();
+          if (current === token) continue;
+          fsImpl.writeFileSync(copies[i].path, token, { encoding: "utf8", mode: 384 }); // 0o600
+          updated.push(copies[i]);
+        } catch (e) {
+          if (typeof onLog === "function") {
+            try {
+              onLog("warn", "Could not update the token copy that " + copies[i].package +
+                " keeps: " + copies[i].path + " (" + (e && e.message ? e.message : String(e)) + ")");
+            } catch (e2) {}
+          }
+        }
+      }
+    } catch (e) {}
+    return updated;
   }
 
   function initPrivateStorage(paths, onWarn) {
@@ -744,6 +801,9 @@
     createHostAdapter: createHostAdapter,
     resolveExtensionDir: resolveExtensionDir,
     resolveStateDir: resolveStateDir,
+    resolveLocalAppData: resolveLocalAppData,
+    findPackagedTokenCopies: findPackagedTokenCopies,
+    syncPackagedTokenCopies: syncPackagedTokenCopies,
     getPaths: getPaths,
     isValidToken: isValidToken,
     generateToken: generateToken,

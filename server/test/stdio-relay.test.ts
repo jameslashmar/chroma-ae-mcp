@@ -415,7 +415,7 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const port = (server.address() as AddressInfo).port;
     const replies = await runRelay(dir, port, [callStatus(1)], { diagnose: "quick" });
     expect(seen).toContain("GET /health");
-    expect(replies[0].result.content[0].text).toMatch(/rejected the token in .*Restart After Effects/);
+    expect(replies[0].result.content[0].text).toMatch(/rejected the token in .*make sure no AfterFX.exe is left in Task Manager/);
   });
 
   /** A copy of the relay beside a stand-in relay-diagnose.cjs, so the hook runs against a diagnosis we control. */
