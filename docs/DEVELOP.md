@@ -12,6 +12,7 @@ node qa/smoke-mcp.mjs --dir <a fresh /_work/qa/ folder>           # live: most t
 - Commit the output of `npm run bundle`: CI checks that the bundle is up to date.
 - Host code can be tested without AE: `server/test/support/fake-ae.ts` is a small simulated AE DOM, and `host-jsx*.test.ts` run `panel/host/*.jsx` against it under `node:vm`. It follows AE where the host code depends on it, but only a live run in AE proves the code.
 - **Never install the ZXP on a machine that has the dev junction.** An installer could delete through it into the repo. Run `install-dev.ps1 -Uninstall` first.
+- **A system-wide install hides the dev junction.** With the same bundle id in `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions` (for example a ZXP install of a release), CEP loads that copy and ignores the per-user junction in `%APPDATA%\Adobe\CEP\extensions`, so AE runs the release, not your checkout. Move that folder out of `extensions` for the dev run (and back afterwards), then restart AE (Emre, 2026-11-21).
 
 ## Releasing
 
