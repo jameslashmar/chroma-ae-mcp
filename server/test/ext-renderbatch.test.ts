@@ -8,7 +8,7 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import { zodToJsonSchema } from "../src/schema.js";
 import type { ToolContext } from "../src/tools/common.js";
-import { AerenderJobRegistry, buildAerenderArgs, cancelAerenderJob, isAerenderProcess, type AerenderJobRecord, type SpawnLike } from "../src/tools/ext/aerender.js";
+import { AerenderJobRegistry, buildAerenderArgs, cancelAerenderJob, isAerenderProcess, resetCepAutostartCache, type AerenderJobRecord, type SpawnLike } from "../src/tools/ext/aerender.js";
 import {
   AeRenderBatchCancelSchema,
   AeRenderBatchPlanSchema,
@@ -1822,5 +1822,28 @@ describe("ae_render_batch: missing frames in image sequences and the GPU", () =>
     const quiet = await r2.tool("ae_render_batch").handler(startArgs(r2), r2.ctx);
     expect(quiet.ok).toBe(true);
     expect("resource_warnings" in quiet).toBe(false);
+  });
+});
+
+describe("ae_render_batch with many auto-starting CEP extensions", () => {
+  const six = Array.from({ length: 6 }, (_, i) => ({ id: `vendor.tool${i}.panel`, folder: `tool${i}` }));
+
+  it("refuses before any read, copy or spawn, and starts with allow_many_cep_extensions", async () => {
+    resetCepAutostartCache(six);
+    const r = rig();
+    const out = await r.tool("ae_render_batch").handler(startArgs(r), r.ctx);
+    expect(out).toMatchObject({ ok: false, error: "too_many_cep_extensions", applied: false });
+    expect(r.calls).toEqual([]);
+    expect(r.spawned).toHaveLength(0);
+    const ok = await r.tool("ae_render_batch").handler(startArgs(r, { allow_many_cep_extensions: true }), r.ctx);
+    expect(ok).toMatchObject({ ok: true, state: "running" });
+    expect(r.spawned).toHaveLength(1);
+  });
+
+  it("refuses ae_render_batch_resume the same way", async () => {
+    resetCepAutostartCache(six);
+    const r = rig();
+    const out = await r.tool("ae_render_batch_resume").handler(AeRenderBatchResumeSchema.parse({ expect: expectArg(r.project), batch_id: "batch_1_abcdef" }), r.ctx);
+    expect(out).toMatchObject({ ok: false, error: "too_many_cep_extensions" });
   });
 });

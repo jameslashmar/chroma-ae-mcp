@@ -8251,6 +8251,8 @@ __export(aerender_exports, {
   AeAerenderStatusSchema: () => AeAerenderStatusSchema,
   AerenderJobRegistry: () => AerenderJobRegistry,
   AerenderStartGate: () => AerenderStartGate,
+  AllowManyCepExtensionsSchema: () => AllowManyCepExtensionsSchema,
+  CEP_AUTOSTART_LIMIT: () => CEP_AUTOSTART_LIMIT,
   DEFAULT_GATE_COOL_DOWN_MS: () => DEFAULT_GATE_COOL_DOWN_MS,
   DEFAULT_GATE_DEAD_ENGINE_MS: () => DEFAULT_GATE_DEAD_ENGINE_MS,
   DEFAULT_GATE_SAMPLE_GAP_MS: () => DEFAULT_GATE_SAMPLE_GAP_MS,
@@ -8266,6 +8268,7 @@ __export(aerender_exports, {
   buildAerenderArgs: () => buildAerenderArgs,
   cancelAerenderJob: () => cancelAerenderJob,
   cepAutostartCached: () => cepAutostartCached,
+  cepAutostartRefusal: () => cepAutostartRefusal,
   cepEngineExitMessage: () => cepEngineExitMessage,
   createAerenderTools: () => createAerenderTools,
   defaultAerenderJobsFilePath: () => defaultAerenderJobsFilePath,
@@ -8750,6 +8753,18 @@ function cepEngineExitMessage(afterS, cepChildren, attempts, list2) {
   }
   return `aerender's render engine (AfterFX.com) exited about ${afterS} s after starting, while CEP extensions were starting in it (${cepChildren} CEPHtmlEngine.exe processes), on each of ${attempts} attempts; aerender then waited for it for ever, so each attempt was stopped. On the machine where this was measured (After Effects 26.2.1), aerender rendered when 5 or fewer auto-starting CEP extensions started in its engine and failed with 6 or more; no single extension and no pair caused it, so it is the number of them together. Meanwhile, do not ask the user to press Render: render in After Effects with ae_render_queue_render (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true (After Effects stays free; Media Encoder renders the SAVED project). To use aerender, turn off the auto-starting CEP extensions you do not need until it renders.${named}`;
 }
+function cepAutostartRefusal(toolName, allow, list2 = cepAutostartCached()) {
+  if (allow === true || list2.length < CEP_AUTOSTART_LIMIT) return null;
+  const others = list2.filter((e) => !e.id.toLowerCase().startsWith(OWN_CEP_ID_PREFIX));
+  const shown = others.slice(0, 10).map((e) => e.id).join(", ");
+  return {
+    ok: false,
+    error: "too_many_cep_extensions",
+    applied: false,
+    message: `${toolName} did not start aerender: ${list2.length} CEP extensions start by themselves in After Effects on this machine. On the machine where this was measured (After Effects 26.2.1), aerender's engine exited during every start with ${CEP_AUTOSTART_LIMIT} or more and rendered with 5 or fewer; no single extension caused it. Render in After Effects with ae_render_queue_render instead (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true. To use aerender, the user turns off auto-starting extensions they do not need${shown ? ` (${shown}${others.length > 10 ? ` and ${others.length - 10} more` : ""})` : ""}; if aerender is known to work here, call again with allow_many_cep_extensions: true.`,
+    cep_autostart: list2
+  };
+}
 function defaultGateOptions() {
   return {
     max_running: 1,
@@ -8941,6 +8956,8 @@ function createAerenderTools(options = {}) {
         const opId = ctx.bridge.newOpId();
         const registry = getRegistry();
         bindFailureLog(registry, ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_aerender_start", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const fromQueue = args.rq_index !== void 0 || args.whole_queue === true;
         const compName = args.comp_name ?? "";
         const labelOf2 = args.whole_queue === true ? "whole queue" : args.rq_index !== void 0 ? `rq ${args.rq_index}` : compName;
@@ -9245,7 +9262,7 @@ async function waitForAerenderJob(registry, jobId, seconds) {
   });
   return { waited_ms: res.waited_ms };
 }
-var childProcess, crypto2, fs9, path11, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, DEFAULT_GATE_COOL_DOWN_MS, DEFAULT_GATE_STARTUP_LIMIT_MS, DEFAULT_GATE_SAMPLE_GAP_MS, DEFAULT_GATE_SLOW_CHECK_MS, DEFAULT_GATE_DEAD_ENGINE_MS, OWN_CEP_ID_PREFIX, CEP_LIST_MAX, cepAutostartCache, AerenderStartGate, ENGINE_EXIT_GRACE_MS, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
+var childProcess, crypto2, fs9, path11, WINDOWS_FALLBACK_AERENDER, MACOS_FALLBACK_AERENDER, AerenderJobRegistry, defaultRegistry, DEFAULT_GATE_COOL_DOWN_MS, DEFAULT_GATE_STARTUP_LIMIT_MS, DEFAULT_GATE_SAMPLE_GAP_MS, DEFAULT_GATE_SLOW_CHECK_MS, DEFAULT_GATE_DEAD_ENGINE_MS, OWN_CEP_ID_PREFIX, CEP_LIST_MAX, cepAutostartCache, CEP_AUTOSTART_LIMIT, AllowManyCepExtensionsSchema, AerenderStartGate, ENGINE_EXIT_GRACE_MS, AeAerenderStartSchema, AeAerenderStatusSchema, AeAerenderCancelSchema, aerenderTools;
 var init_aerender = __esm({
   "src/tools/ext/aerender.ts"() {
     "use strict";
@@ -9411,6 +9428,10 @@ var init_aerender = __esm({
     OWN_CEP_ID_PREFIX = "london.chroma.aemcp";
     CEP_LIST_MAX = 30;
     cepAutostartCache = null;
+    CEP_AUTOSTART_LIMIT = 6;
+    AllowManyCepExtensionsSchema = external_exports.boolean().optional().describe(
+      `Windows: start aerender although ${CEP_AUTOSTART_LIMIT} or more CEP extensions start by themselves in After Effects on this machine. Default false: the tool refuses up front, because on the machine where this was measured aerender's engine exited during every start with that many (3 attempts, several minutes, then a failure). Pass true only after the user turned some off and it still refuses, or when aerender is known to work on this machine.`
+    );
     AerenderStartGate = class {
       constructor(registry, opts) {
         this.registry = registry;
@@ -10143,7 +10164,8 @@ ${why}: also ended its AfterFX.com engine pid ${killed.join(", ")}
         max_mem_percent: external_exports.number().int().min(1).max(100).describe("Share of RAM After Effects may use in all, percent.")
       }).optional().describe("Pass -mem_usage <image_cache_percent> <max_mem_percent>: caps the memory aerender uses."),
       log_level: external_exports.enum(["errors", "errors_and_progress"]).optional().describe("aerender -v: 'errors' logs only errors, 'errors_and_progress' (aerender's own default) also the PROGRESS lines that ae_aerender_status turns into a percent. Leave it out to keep the progress. With 'errors' there are no PROGRESS lines, so ae_aerender_status shows no percent and the startup watchdog (which restarts a hung start) is off for that job; only the slow dead-engine check applies."),
-      sound: external_exports.boolean().optional().describe("Pass -sound ON or OFF: play a sound when the render finishes. Leave out to keep aerender's default.")
+      sound: external_exports.boolean().optional().describe("Pass -sound ON or OFF: play a sound when the render finishes. Leave out to keep aerender's default."),
+      allow_many_cep_extensions: AllowManyCepExtensionsSchema
     }).superRefine((val, ctx) => {
       const issue = (p, message) => ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: [p], message });
       if (val.start_frame !== void 0 && val.end_frame !== void 0 && val.end_frame < val.start_frame) {
@@ -24379,6 +24401,8 @@ function createRenderbatch(options = {}) {
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
         bindFailureLog(getRegistry(), ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_render_batch", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const opId = ctx.bridge.newOpId();
         const job = normaliseJob(args);
         let ready;
@@ -24613,6 +24637,8 @@ function createRenderbatch(options = {}) {
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
         bindFailureLog(getRegistry(), ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_render_batch_resume", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const opId = ctx.bridge.newOpId();
         const store = getStore();
         const batch = store.get(args.batch_id);
@@ -24779,6 +24805,7 @@ var init_renderbatch = __esm({
       ...runFields,
       preflight: external_exports.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
       sequence_check: SequenceCheckSchema,
+      allow_many_cep_extensions: AllowManyCepExtensionsSchema,
       allow_dirty: external_exports.boolean().optional().describe("Render the last saved state although the open project has unsaved changes. Default false: the tool refuses and asks for ae_save first, so the frozen copy holds what you see."),
       freeze_location: external_exports.enum(["batch_folder", "project_folder"]).optional().describe(
         "Where the frozen copy of the .aep goes. 'batch_folder' (default) keeps it with batch.json; 'project_folder' puts it beside the original .aep as <name>.mcp_<batch id>.aep (so a relative footage path resolves from the same folder; whether it does is not measured) and deletes it when the batch ends succeeded. In a synced folder it is synced while it exists."
@@ -24797,7 +24824,8 @@ var init_renderbatch = __esm({
       max_cpu_percent: runFields.max_cpu_percent,
       on_error: runFields.on_error,
       stall_minutes: runFields.stall_minutes,
-      if_output_exists: policyFields.if_output_exists
+      if_output_exists: policyFields.if_output_exists,
+      allow_many_cep_extensions: AllowManyCepExtensionsSchema
     });
     AeRenderBatchCancelSchema = external_exports.object({
       batch_id: BatchIdSchema.describe("Batch to cancel. Running aerender processes are terminated; finished renders are kept.")

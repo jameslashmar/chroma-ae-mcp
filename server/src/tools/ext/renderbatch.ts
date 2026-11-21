@@ -44,6 +44,8 @@ import { QueueWaitError } from "../../queue.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { verifyTargetGuard } from "../mutate.js";
 import {
+  AllowManyCepExtensionsSchema,
+  cepAutostartRefusal,
   cancelAerenderJob,
   type CancelHooks,
   bindFailureLog,
@@ -243,6 +245,7 @@ export const AeRenderBatchStartSchema = z
     ...runFields,
     preflight: z.boolean().optional().describe("Run the ae_preflight delivery check on the listed comps once, before anything is copied or started, and refuse on a blocker. Default true."),
     sequence_check: SequenceCheckSchema,
+    allow_many_cep_extensions: AllowManyCepExtensionsSchema,
     allow_dirty: z
       .boolean()
       .optional()
@@ -274,6 +277,7 @@ export const AeRenderBatchResumeSchema = z.object({
   on_error: runFields.on_error,
   stall_minutes: runFields.stall_minutes,
   if_output_exists: policyFields.if_output_exists,
+  allow_many_cep_extensions: AllowManyCepExtensionsSchema,
 });
 export type AeRenderBatchResumeArgs = z.infer<typeof AeRenderBatchResumeSchema>;
 
@@ -1694,6 +1698,8 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
         ctx.quarantine.assertClear();
         // Items launch jobs on this registry from a background runner: a failed one needs its [ERR] line (under ae_render_batch).
         bindFailureLog(getRegistry(), ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_render_batch", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const opId = ctx.bridge.newOpId();
         const job = normaliseJob(args);
         type Ready =
@@ -1957,6 +1963,8 @@ export function createRenderbatch(options: RenderbatchOptions = {}) {
       handler: async (args: AeRenderBatchResumeArgs, ctx: ToolContext) => {
         ctx.quarantine.assertClear();
         bindFailureLog(getRegistry(), ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_render_batch_resume", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const opId = ctx.bridge.newOpId();
         const store = getStore();
         const batch = store.get(args.batch_id);

@@ -1115,6 +1115,41 @@ export function cepEngineExitMessage(afterS: number, cepChildren: number, attemp
   );
 }
 
+/** Auto-starting extensions (ours included) at which aerender's engine exited in every measured run (docs/HANDOVER.md, 2026-11-08). */
+export const CEP_AUTOSTART_LIMIT = 6;
+
+export const AllowManyCepExtensionsSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    `Windows: start aerender although ${CEP_AUTOSTART_LIMIT} or more CEP extensions start by themselves in After Effects on this machine. Default false: the tool refuses up front, because on the machine where this was measured aerender's engine exited during every start with that many (3 attempts, several minutes, then a failure). Pass true only after the user turned some off and it still refuses, or when aerender is known to work on this machine.`
+  );
+
+/**
+ * The refusal, before anything starts, when so many CEP extensions start by themselves that aerender is
+ * expected to fail (Windows only; `list` is cepAutostartCached()). Null when aerender may start.
+ */
+export function cepAutostartRefusal(
+  toolName: string,
+  allow: boolean | undefined,
+  list: CepAutostartEntry[] = cepAutostartCached()
+): { ok: false; error: "too_many_cep_extensions"; applied: false; message: string; cep_autostart: CepAutostartEntry[] } | null {
+  if (allow === true || list.length < CEP_AUTOSTART_LIMIT) return null;
+  const others = list.filter((e) => !e.id.toLowerCase().startsWith(OWN_CEP_ID_PREFIX));
+  const shown = others.slice(0, 10).map((e) => e.id).join(", ");
+  return {
+    ok: false,
+    error: "too_many_cep_extensions",
+    applied: false,
+    message:
+      `${toolName} did not start aerender: ${list.length} CEP extensions start by themselves in After Effects on this machine. ` +
+      `On the machine where this was measured (After Effects 26.2.1), aerender's engine exited during every start with ${CEP_AUTOSTART_LIMIT} or more and rendered with 5 or fewer; no single extension caused it. ` +
+      `Render in After Effects with ae_render_queue_render instead (tell the user first that After Effects will be busy until it ends), or offer Media Encoder: ask the user first, then call ae_render_queue_render with engine "media_encoder" and user_confirmed true. ` +
+      `To use aerender, the user turns off auto-starting extensions they do not need${shown ? ` (${shown}${others.length > 10 ? ` and ${others.length - 10} more` : ""})` : ""}; if aerender is known to work here, call again with allow_many_cep_extensions: true.`,
+    cep_autostart: list,
+  };
+}
+
 function defaultGateOptions(): AerenderGateOptions {
   return {
     max_running: 1,
@@ -2313,6 +2348,7 @@ export const AeAerenderStartSchema = z
       .optional()
       .describe("aerender -v: 'errors' logs only errors, 'errors_and_progress' (aerender's own default) also the PROGRESS lines that ae_aerender_status turns into a percent. Leave it out to keep the progress. With 'errors' there are no PROGRESS lines, so ae_aerender_status shows no percent and the startup watchdog (which restarts a hung start) is off for that job; only the slow dead-engine check applies."),
     sound: z.boolean().optional().describe("Pass -sound ON or OFF: play a sound when the render finishes. Leave out to keep aerender's default."),
+    allow_many_cep_extensions: AllowManyCepExtensionsSchema,
   })
   .superRefine((val, ctx) => {
     const issue = (p: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [p], message });
@@ -2407,6 +2443,8 @@ export function createAerenderTools(
         const opId = ctx.bridge.newOpId();
         const registry = getRegistry();
         bindFailureLog(registry, ctx.log);
+        const cepRefusal = cepAutostartRefusal("ae_aerender_start", args.allow_many_cep_extensions);
+        if (cepRefusal) return cepRefusal;
         const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
         const compName = args.comp_name ?? "";
         const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;
