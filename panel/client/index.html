@@ -6,54 +6,71 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <header class="header">
-    <h1 class="title">This session</h1>
-    <span id="status-badge" class="badge" title="">
-      <span class="badge-dot" aria-hidden="true"></span><span id="status-text">Starting</span><span id="ae-version" class="badge-host"></span>
-    </span>
-  </header>
-
-  <div id="update-bar" class="update-bar" hidden>
-    <div class="update-text">
-      <span id="update-title" class="update-title"></span>
-      <span id="update-status" class="update-status" role="status" aria-live="polite"></span>
-    </div>
-    <button id="update-notes" class="btn-link" type="button" title="Open the release notes in your browser">What's new</button>
-    <button id="update-btn" class="btn btn-primary btn-small" type="button">Update</button>
-  </div>
-
-  <section id="ask" class="ask" hidden>
-    <div class="ask-head">
-      <span class="ask-title">Claude asks</span>
-      <span id="ask-more" class="ask-more"></span>
-    </div>
-    <div id="ask-question" class="ask-question"></div>
-    <div id="ask-context" class="ask-context"></div>
-    <div id="ask-options" class="ask-options"></div>
-    <div id="ask-editor" class="ask-editor" hidden>
-      <svg id="ask-editor-svg" class="ask-editor-svg" viewBox="0 0 200 200" aria-label="Curve editor"></svg>
-      <div class="ask-editor-side">
-        <div class="ask-editor-hint">Drag the handles to adjust.</div>
-        <div id="ask-curve-value" class="ask-curve-value"></div>
-        <div class="ask-track"><span id="ask-editor-dot" class="ask-dot"></span></div>
+  <div class="head-stack">
+    <header class="header">
+      <h1 class="title">This session</h1>
+      <span id="status-badge" class="badge" title="">
+        <span class="badge-dot" aria-hidden="true"></span><span id="status-text">Starting</span><span id="ae-version" class="badge-host"></span>
+      </span>
+      <div class="settings-wrap">
+        <button id="settings-btn" class="icon-btn settings-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu" aria-label="Settings" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+        <div id="settings-menu" class="settings-menu" role="menu" aria-label="Settings" hidden>
+          <button id="regen-token-btn" class="menu-item" type="button" role="menuitem" title="Make a new Bearer token">New token</button>
+          <button id="diagnostics-btn" class="menu-item" type="button" role="menuitem" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
+          <button id="update-check-btn" class="menu-item" type="button" role="menuitem" title="Look for a newer release on GitHub">Check for updates</button>
+          <div id="settings-status" class="settings-status" role="status" aria-live="polite"></div>
+          <div id="settings-version" class="settings-version">Chroma AE MCP</div>
+        </div>
       </div>
+    </header>
+
+    <div id="update-bar" class="update-bar" hidden>
+      <div class="update-text">
+        <span id="update-title" class="update-title"></span>
+        <span id="update-status" class="update-status" role="status" aria-live="polite"></span>
+      </div>
+      <button id="update-notes" class="btn-link" type="button" title="Open the release notes in your browser">What's new</button>
+      <button id="update-btn" class="btn btn-primary btn-small" type="button">Update</button>
     </div>
-    <input id="ask-other" class="ask-other" type="text" placeholder="Or type your own answer" />
-    <div class="ask-actions">
-      <button id="ask-send" class="btn btn-primary" type="button" disabled>Send</button>
-      <button id="ask-dismiss" class="btn" type="button">Skip</button>
-      <span id="ask-status" class="ask-status"></span>
+
+    <div id="lock-bar" class="lock-bar" hidden>
+      <span class="lock-text">A render lock is held.</span>
+      <button id="clear-render-lock-btn" class="btn btn-small" type="button" hidden title="Only if After Effects is no longer rendering: lets the other tools reach it again">Clear render lock</button>
     </div>
-  </section>
+
+    <section id="ask" class="ask" hidden>
+      <div class="ask-head">
+        <span class="ask-title">Claude asks</span>
+        <span id="ask-more" class="ask-more"></span>
+      </div>
+      <div id="ask-question" class="ask-question"></div>
+      <div id="ask-context" class="ask-context"></div>
+      <div id="ask-options" class="ask-options"></div>
+      <div id="ask-editor" class="ask-editor" hidden>
+        <svg id="ask-editor-svg" class="ask-editor-svg" viewBox="0 0 200 200" aria-label="Curve editor"></svg>
+        <div class="ask-editor-side">
+          <div class="ask-editor-hint">Drag the handles to adjust.</div>
+          <div id="ask-curve-value" class="ask-curve-value"></div>
+          <div class="ask-track"><span id="ask-editor-dot" class="ask-dot"></span></div>
+        </div>
+      </div>
+      <input id="ask-other" class="ask-other" type="text" placeholder="Or type your own answer" />
+      <div class="ask-actions">
+        <button id="ask-send" class="btn btn-primary" type="button" disabled>Send</button>
+        <button id="ask-dismiss" class="btn" type="button">Skip</button>
+        <span id="ask-status" class="ask-status"></span>
+      </div>
+    </section>
+  </div>
 
   <div id="top" class="top">
     <div class="stats">
-      <div class="tiles tiles-3">
+      <div class="tiles">
         <div class="tile"><div class="tile-label">Tool calls</div><div id="stat-calls" class="tile-value">0</div></div>
         <div class="tile"><div class="tile-label">Queued</div><div id="queue-depth" class="tile-value">0</div></div>
         <div class="tile" id="tile-errors"><div class="tile-label">Errors</div><div id="stat-errors" class="tile-value">0</div></div>
-      </div>
-      <div class="tiles tiles-2">
         <div class="tile"><div class="tile-label">Median reply</div><div class="tile-value"><span id="stat-median">–</span><span class="tile-unit"> ms</span></div></div>
         <div class="tile"><div class="tile-label">Checkpoints</div><div id="stat-checkpoints" class="tile-value">0</div></div>
       </div>
@@ -102,12 +119,16 @@
     </div>
   </section>
 
-  <footer class="minor-actions">
-    <button id="regen-token-btn" class="btn-link" type="button" title="Make a new Bearer token">New token</button>
-    <button id="clear-render-lock-btn" class="btn-link" type="button" hidden title="Only if After Effects is no longer rendering: lets the other tools reach it again">Clear render lock</button>
-    <button id="diagnostics-btn" class="btn-link" type="button" title="Save versions, queue, popups and the log to one file">Save diagnostics</button>
-    <button id="update-check-btn" class="btn-link" type="button" title="Look for a newer release on GitHub">Check for updates</button>
-  </footer>
+  <div id="confirm-dialog" class="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" hidden>
+    <div class="confirm-card">
+      <div id="confirm-title" class="confirm-title"></div>
+      <div id="confirm-body" class="confirm-body"></div>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" class="btn" type="button">Cancel</button>
+        <button id="confirm-yes" class="btn btn-primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
 
   <script src="./common.js"></script>
   <script src="./panel.js"></script>

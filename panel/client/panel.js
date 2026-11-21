@@ -183,6 +183,148 @@
   var $logToggle = el("log-toggle");
   var $logFull = el("log-full");
   var $logBody = el("log-body");
+  var $top = el("top");
+
+  // ---------- Settings menu (gear in the header) ----------
+  var $settingsBtn = el("settings-btn");
+  var $settingsMenu = el("settings-menu");
+  var $settingsStatus = el("settings-status");
+  var $settingsVersion = el("settings-version");
+
+  function setSettingsStatus(text, isErr) {
+    if (!$settingsStatus) return;
+    $settingsStatus.textContent = text || "";
+    $settingsStatus.classList.toggle("err", !!isErr);
+  }
+
+  function settingsItems() {
+    var out = [];
+    if (!$settingsMenu) return out;
+    var all = $settingsMenu.querySelectorAll("[role=menuitem]");
+    for (var i = 0; i < all.length; i++) if (!all[i].disabled && !all[i].hidden) out.push(all[i]);
+    return out;
+  }
+
+  function settingsOpen() {
+    return !!($settingsMenu && !$settingsMenu.hidden);
+  }
+
+  function openSettings() {
+    if (!$settingsMenu || !$settingsBtn) return;
+    setSettingsStatus("");
+    $settingsMenu.hidden = false;
+    $settingsBtn.setAttribute("aria-expanded", "true");
+    var items = settingsItems();
+    if (items.length) items[0].focus();
+  }
+
+  function closeSettings(returnFocus) {
+    if (!$settingsMenu || !$settingsBtn) return;
+    $settingsMenu.hidden = true;
+    $settingsBtn.setAttribute("aria-expanded", "false");
+    if (returnFocus) $settingsBtn.focus();
+  }
+
+  function bindSettings() {
+    if (typeof document === "undefined" || !$settingsBtn || !$settingsMenu) return;
+    if ($settingsVersion && common && common.PANEL_VERSION) {
+      $settingsVersion.textContent = "Chroma AE MCP v" + common.PANEL_VERSION;
+    }
+    $settingsBtn.addEventListener("click", function () {
+      if (settingsOpen()) closeSettings(false);
+      else openSettings();
+    });
+    document.addEventListener("mousedown", function (ev) {
+      if (!settingsOpen()) return;
+      var t = ev.target;
+      if ($settingsMenu.contains(t) || $settingsBtn.contains(t)) return;
+      closeSettings(false);
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (!settingsOpen()) return;
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        ev.preventDefault();
+        closeSettings(true);
+        return;
+      }
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      var items = settingsItems();
+      if (!items.length) return;
+      ev.preventDefault();
+      var idx = items.indexOf(document.activeElement);
+      if (ev.key === "ArrowDown") idx = idx < 0 ? 0 : (idx + 1) % items.length;
+      else idx = idx <= 0 ? items.length - 1 : idx - 1;
+      items[idx].focus();
+    });
+  }
+
+  // ---------- In-panel confirm dialog (the native window.confirm clips long text and ignores the theme) ----------
+  var $confirm = el("confirm-dialog");
+  var $confirmTitle = el("confirm-title");
+  var $confirmBody = el("confirm-body");
+  var $confirmYes = el("confirm-yes");
+  var $confirmCancel = el("confirm-cancel");
+  var confirmYesFn = null;
+  var confirmBackTo = null;
+
+  function confirmIsOpen() {
+    return !!($confirm && !$confirm.hidden);
+  }
+
+  function closeConfirm(run) {
+    if (!$confirm) return;
+    var yes = confirmYesFn;
+    var back = confirmBackTo;
+    confirmYesFn = null;
+    confirmBackTo = null;
+    $confirm.hidden = true;
+    if (back && typeof back.focus === "function") {
+      try { back.focus(); } catch (e) {}
+    }
+    if (run && typeof yes === "function") yes();
+  }
+
+  // opts: { title, body, yes, focusBack }. Cancel, Escape and a click on the backdrop do nothing.
+  function confirmInPanel(opts, onYes) {
+    opts = opts || {};
+    if (!$confirm || !$confirmYes || !$confirmCancel) {
+      if (typeof window !== "undefined" && typeof window.confirm === "function" &&
+          window.confirm(String(opts.body || opts.title || ""))) onYes();
+      return;
+    }
+    confirmYesFn = onYes;
+    confirmBackTo = opts.focusBack || document.activeElement;
+    if ($confirmTitle) $confirmTitle.textContent = opts.title || "";
+    if ($confirmBody) $confirmBody.textContent = opts.body || "";
+    $confirmYes.textContent = opts.yes || "OK";
+    $confirm.hidden = false;
+    $confirmCancel.focus();
+  }
+
+  function bindConfirm() {
+    if (typeof document === "undefined" || !$confirm || !$confirmYes || !$confirmCancel) return;
+    $confirmYes.addEventListener("click", function () { closeConfirm(true); });
+    $confirmCancel.addEventListener("click", function () { closeConfirm(false); });
+    $confirm.addEventListener("click", function (ev) {
+      if (ev.target === $confirm) closeConfirm(false);
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (!confirmIsOpen()) return;
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeConfirm(false);
+        return;
+      }
+      if (ev.key !== "Tab") return;
+      var active = document.activeElement;
+      ev.preventDefault();
+      ev.stopPropagation();
+      // Two buttons: Tab and Shift+Tab both just go to the other one.
+      if (active === $confirmCancel) $confirmYes.focus();
+      else $confirmCancel.focus();
+    }, true);
+  }
 
   // "26.0.0x45" -> "26.0"
   function shortVersion(v) {
@@ -292,15 +434,41 @@
     return "closed";
   }
 
-  function setLogView(v) {
-    logView = v;
-    try { window.localStorage.setItem(LOG_VIEW_KEY, v); } catch (e) {}
-    var open = v !== "closed";
-    var full = v === "full";
+  // In the two-column layout (panel at least 600 px wide) the Log is always shown open;
+  // the stored choice is kept for when the panel gets narrow again.
+  var wideMq = null;
+  try {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      wideMq = window.matchMedia("(min-width: 600px)");
+    }
+  } catch (e) { wideMq = null; }
+
+  function isWideLayout() {
+    return !!(wideMq && wideMq.matches);
+  }
+
+  // The Log shows open (display only, the stored choice is untouched) when the panel is wide
+  // or, in one column, when there is plenty of free height below the content.
+  var tallForced = false;
+  var FORCE_OPEN_MIN = 120;
+  var FORCE_OPEN_KEEP = 100;
+
+  function logForcedOpen() {
+    return isWideLayout() || tallForced;
+  }
+
+  function applyLogView() {
+    var forced = logForcedOpen();
+    var open = logView !== "closed" || forced;
+    var full = logView === "full";
     document.body.classList.toggle("log-open", open);
     document.body.classList.toggle("log-full", full);
+    document.body.classList.toggle("log-forced", forced);
     if ($logBody) $logBody.hidden = !open;
-    if ($logToggle) $logToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if ($logToggle) {
+      $logToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      $logToggle.tabIndex = forced ? -1 : 0;
+    }
     if ($logFull) {
       $logFull.setAttribute("aria-pressed", full ? "true" : "false");
       $logFull.setAttribute("aria-label", full ? "Exit full panel" : "Fill the panel");
@@ -308,10 +476,87 @@
     }
   }
 
+  function setLogView(v) {
+    logView = v;
+    try { window.localStorage.setItem(LOG_VIEW_KEY, v); } catch (e) {}
+    applyLogView();
+    relayout();
+  }
+
+  // Free height below the content in the single-column layout, from numbers that do not
+  // depend on the Log's own state: the body's inner height, minus the header block, minus the
+  // top's scrollHeight (its full content, not its shrunk height), minus the Log bar (toggle
+  // row plus the bar's own padding and the section border), minus the two gaps between them.
+  // Height the top has to live in: body inner height minus the header block, the Log bar
+  // (+2 for its border) and the two gaps around the top. Closed-Log baseline.
+  function measureAvailable() {
+    var cs = window.getComputedStyle(document.body);
+    var padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var gap = parseFloat(cs.rowGap) || 0;
+    var head = document.querySelector(".head-stack");
+    var bar = $logToggle.parentNode;
+    return document.body.clientHeight - padV - (head ? head.offsetHeight : 0) -
+      (bar.offsetHeight + 2) - 2 * gap;
+  }
+
+  function measureFreeHeight() {
+    return measureAvailable() - $top.scrollHeight;
+  }
+
+  // The chart is the lowest-priority block: it shows whenever the top's content with the chart
+  // fits in the available height. It is measured with the chart shown (the class is dropped for
+  // the read; layout is not painted in between), so the number never depends on the Log or on the
+  // previous decision except for CHART_HYST pixels of hysteresis at the edge.
+  var CHART_HYST = 6;
+
+  function decideChart() {
+    var cls = document.body.classList;
+    var wasHidden = cls.contains("no-chart");
+    if (wasHidden) cls.remove("no-chart");
+    var need = $top.scrollHeight;
+    var avail = measureAvailable();
+    var fits = wasHidden ? need + CHART_HYST <= avail : need <= avail;
+    if (!fits) cls.add("no-chart");
+  }
+
+  // Fade the bottom of the top when it has more below its visible part.
+  function updateMore() {
+    if (!$top) return;
+    var more = $top.scrollHeight - $top.scrollTop - $top.clientHeight > 2;
+    $top.classList.toggle("more-below", more);
+  }
+
+  // Called when the panel size or anything that changes content height changes.
+  // Opening the Log does not change the measurement, so it cannot loop.
+  function relayout() {
+    if (typeof document === "undefined" || !document.body || !$top || !$logToggle) return;
+    if (typeof window.getComputedStyle !== "function") return;
+    var before = logForcedOpen();
+    if (isWideLayout()) {
+      tallForced = false;
+      document.body.classList.remove("no-chart");
+    } else if (logView !== "full" && !document.body.classList.contains("asking")) {
+      decideChart();
+      var free = measureFreeHeight();
+      tallForced = tallForced ? free >= FORCE_OPEN_KEEP : free >= FORCE_OPEN_MIN;
+    }
+    if (logForcedOpen() !== before) applyLogView();
+    updateMore();
+  }
+
   function bindLogView() {
     if (typeof document === "undefined" || !$logToggle) return;
     setLogView(readLogView());
+    if (wideMq) {
+      if (typeof wideMq.addEventListener === "function") wideMq.addEventListener("change", function () { applyLogView(); relayout(); });
+      else if (typeof wideMq.addListener === "function") wideMq.addListener(function () { applyLogView(); relayout(); });
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("resize", relayout);
+    }
+    if ($top) $top.addEventListener("scroll", updateMore);
     $logToggle.addEventListener("click", function () {
+      if (logForcedOpen()) return;
       setLogView(logView === "closed" ? "open" : "closed");
     });
     if ($logFull) {
@@ -441,7 +686,7 @@
         if ($ae) $ae.textContent = "AE " + otherLabel + " (not this AE)";
         if ($inflight) $inflight.textContent = "";
         if ($queueDepth) $queueDepth.textContent = "0";
-        if ($clearLockBtn) $clearLockBtn.hidden = true;
+        setLockHidden(true);
         setBadge("Other AE has the connection (" + otherLabel + ")", "err");
         if ($badge) $badge.title = "The MCP service on 127.0.0.1:" + boundPort + " belongs to After Effects " + otherLabel + ". This After Effects is not serving MCP; close one of them.";
         return;
@@ -472,11 +717,8 @@
       // "Clear render lock" shows only while the render gate is shut.
       if ($clearLockBtn) {
         var locked = !!(body.renderLock && typeof body.renderLock === "object");
-        $clearLockBtn.hidden = !locked;
-        if (!locked) {
-          clearLockArmed = false;
-          $clearLockBtn.textContent = "Clear render lock";
-        }
+        setLockHidden(!locked);
+        if (!locked) $clearLockBtn.textContent = "Clear render lock";
       }
 
       if (body.busy || body.inFlight) {
@@ -512,16 +754,22 @@
 
     if ($regenTokenBtn) {
       $regenTokenBtn.addEventListener("click", function () {
-        if (typeof window !== "undefined" && typeof window.confirm === "function") {
-          var confirmed = window.confirm(
-            "Regenerate the MCP Bearer token? Claude Code's user-scope chroma-ae entry is registered again automatically (whether it was added from this panel or with the pasted command). Claude Desktop, Cursor and Codex use the relay and need nothing."
-          );
-          if (!confirmed) return;
-        }
+        closeSettings(false);
+        confirmInPanel({
+          title: "Make a new token?",
+          body: "Claude Code's chroma-ae entry is registered again automatically. Claude Desktop, Cursor and Codex use the relay and need nothing.",
+          yes: "Make new token",
+          focusBack: $settingsBtn
+        }, regenerateToken);
+      });
+    }
+  }
 
+  function regenerateToken() {
         requestService("POST", "/admin/regenerate-token", function (err, statusCode, body) {
           if (err) {
             logUi("err", "Failed to regenerate token: " + err.message);
+            setSettingsStatus("New token failed: " + err.message, true);
             return;
           }
           if (statusCode !== 200 || !body || body.ok !== true) {
@@ -529,16 +777,16 @@
               ? body.error.message
               : "HTTP " + statusCode;
             logUi("err", "Failed to regenerate token: " + errMsg);
+            setSettingsStatus("New token failed: " + errMsg, true);
             return;
           }
+          setSettingsStatus("New token made");
           refreshTokenFromDisk();
           updateSetupUi();
           reregisterClaudeCode();
           pollServiceLog();
           pollHealth();
         });
-      });
-    }
   }
 
   // ---------- Register with clients, and Save diagnostics ----------
@@ -547,7 +795,14 @@
   var $registerClients = typeof document !== "undefined" ? document.getElementById("register-clients") : null;
   var $diagnosticsBtn = typeof document !== "undefined" ? document.getElementById("diagnostics-btn") : null;
   var $clearLockBtn = typeof document !== "undefined" ? document.getElementById("clear-render-lock-btn") : null;
-  var clearLockArmed = false;
+  var $lockBar = typeof document !== "undefined" ? document.getElementById("lock-bar") : null;
+
+  // The warning strip and its button show and hide together.
+  function setLockHidden(hide) {
+    if ($clearLockBtn) $clearLockBtn.hidden = !!hide;
+    if ($lockBar) $lockBar.hidden = !!hide;
+    relayout();
+  }
   var register = null;
 
   function loadRegister() {
@@ -691,6 +946,7 @@
     if (stored === "1" || stored === "0") setRegisterOpen(stored === "1", false);
     $registerToggle.addEventListener("click", function () {
       setRegisterOpen($registerToggle.getAttribute("aria-expanded") !== "true", true);
+      relayout();
     });
   }
 
@@ -764,28 +1020,31 @@
     );
   }
 
-  // Two clicks: the first arms it, the second sends. Only the user can press it; no tool can.
+  // The button asks first (in-panel dialog). Only the user can press it; no tool can.
+  function clearRenderLock() {
+    $clearLockBtn.disabled = true;
+    requestService("POST", "/admin/clear-render-lock", function (err, statusCode, body) {
+      $clearLockBtn.disabled = false;
+      $clearLockBtn.textContent = "Clear render lock";
+      if (err || statusCode !== 200 || !body || body.ok !== true) {
+        var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
+        logUi("err", "Clearing the render lock failed: " + why);
+        return;
+      }
+      logUi("ok", body.cleared ? "Render lock cleared (job " + body.cleared.job_id + ")" : "There was no render lock");
+      pollHealth();
+    });
+  }
+
   function bindClearRenderLock() {
     if (!$clearLockBtn) return;
     $clearLockBtn.addEventListener("click", function () {
-      if (!clearLockArmed) {
-        clearLockArmed = true;
-        $clearLockBtn.textContent = "Click again: After Effects is NOT rendering";
-        return;
-      }
-      clearLockArmed = false;
-      $clearLockBtn.disabled = true;
-      requestService("POST", "/admin/clear-render-lock", function (err, statusCode, body) {
-        $clearLockBtn.disabled = false;
-        $clearLockBtn.textContent = "Clear render lock";
-        if (err || statusCode !== 200 || !body || body.ok !== true) {
-          var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
-          logUi("err", "Clearing the render lock failed: " + why);
-          return;
-        }
-        logUi("ok", body.cleared ? "Render lock cleared (job " + body.cleared.job_id + ")" : "There was no render lock");
-        pollHealth();
-      });
+      confirmInPanel({
+        title: "Clear the render lock?",
+        body: "Only do this if After Effects is not rendering. It lets the other tools reach After Effects again.",
+        yes: "Clear render lock",
+        focusBack: $clearLockBtn
+      }, clearRenderLock);
     });
   }
 
@@ -798,10 +1057,12 @@
         if (err || statusCode !== 200 || !body || body.ok !== true) {
           var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
           logUi("err", "Diagnostics failed: " + why);
+          setSettingsStatus("Diagnostics failed: " + why, true);
           return;
         }
         common.copyTextToClipboard(body.path, function () {});
         logUi("ok", "Diagnostics saved (path copied): " + body.path);
+        setSettingsStatus("Diagnostics saved, path copied");
       }, 30000);
     });
   }
@@ -1108,6 +1369,7 @@
     renderEditor();
     $ask.hidden = false;
     document.body.classList.add("asking");
+    relayout();
     $ask.classList.remove("ask-new");
     void $ask.offsetWidth; // restart the flash animation
     $ask.classList.add("ask-new");
@@ -1122,6 +1384,7 @@
     askCurve = null;
     if ($ask) $ask.hidden = true;
     if (typeof document !== "undefined") document.body.classList.remove("asking");
+    relayout();
   }
 
   function pollAsks() {
@@ -1198,6 +1461,7 @@
     if (statsDirty) renderStats();
     pollHealth();
     pollAsks();
+    relayout();
   }
 
   function shutdown() {
@@ -1280,20 +1544,30 @@
         var rel = null;
         try { rel = common.parseLatestRelease(JSON.parse(body)); } catch (e) {}
         if (!rel) {
-          if (manual) logUi("warn", "Update check: the latest release has no installable .zxp");
+          if (manual) {
+            logUi("warn", "Update check: the latest release has no installable .zxp");
+            setSettingsStatus("No update found");
+          }
           done(manual ? "No update found" : "");
           return;
         }
         if (common.compareVersions(rel.version, common.PANEL_VERSION) > 0) {
           showUpdate(rel);
+          if (manual) setSettingsStatus("Update available: v" + rel.version);
           done("");
         } else {
-          if (manual) logUi("ok", "Up to date (v" + common.PANEL_VERSION + ")");
+          if (manual) {
+            logUi("ok", "Up to date (v" + common.PANEL_VERSION + ")");
+            setSettingsStatus("Up to date (v" + common.PANEL_VERSION + ")");
+          }
           done(manual ? "Up to date" : "");
         }
       });
     }, function (err) {
-      if (manual) logUi("warn", "Update check failed: " + err.message);
+      if (manual) {
+        logUi("warn", "Update check failed: " + err.message);
+        setSettingsStatus("Update check failed", true);
+      }
       done(manual ? "Check failed" : "");
     });
   }
@@ -1310,6 +1584,7 @@
       setUpdateStatus("You have v" + common.PANEL_VERSION + ".");
     }
     $updateBar.hidden = false;
+    relayout();
   }
 
   function downloadDir() {
@@ -1430,6 +1705,8 @@
       }
     }
     bindLogView();
+    bindSettings();
+    bindConfirm();
 
     refreshTokenFromDisk();
     updateSetupUi();
@@ -1441,6 +1718,7 @@
     bindUpdate();
     bindRegisterToggle();
     renderRegister();
+    relayout();
 
     tick();
     pollTimer = setInterval(tick, POLL_INTERVAL_MS);
