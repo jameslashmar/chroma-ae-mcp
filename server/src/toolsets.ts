@@ -1,8 +1,9 @@
+import { familyTool, listedTools } from "./tool-families.js";
 import { annotationsFor, type ToolAnnotations } from "./tool-annotations.js";
 import { ENVELOPE_OUTPUT_SCHEMA, structuredResultsOn } from "./tool-call.js";
 import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
-import { AGENT_SAFETY_GUIDANCE, type ToolDefinition } from "./tools/common.js";
+import { AGENT_SAFETY_GUIDANCE, toolInputSchema, type ToolDefinition } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 
 /**
@@ -162,7 +163,11 @@ for (const [group, def] of Object.entries(TOOL_GROUPS)) {
 }
 
 export function groupOf(toolName: string): string | undefined {
-  return GROUP_BY_TOOL.get(toolName);
+  const own = GROUP_BY_TOOL.get(toolName);
+  if (own) return own;
+  // A family is in the group of its first member.
+  const fam = familyTool(toolName);
+  return fam ? GROUP_BY_TOOL.get(fam.members[0].tool.name) : undefined;
 }
 
 /** Extra search words for tools whose description does not use the words people reach for. */
@@ -376,11 +381,11 @@ export interface ListedTool {
 }
 
 export function fullListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name), ...(structuredResultsOn() ? { outputSchema: ENVELOPE_OUTPUT_SCHEMA } : {}) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, toolInputSchema(t)), annotations: annotationsFor(t.name), ...(structuredResultsOn() ? { outputSchema: ENVELOPE_OUTPUT_SCHEMA } : {}) };
 }
 
 export function trimmedListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: trimToolDescription(t), inputSchema: withIdempotencyKey(t.name, trimSchema(zodToJsonSchema(t.schema), t.name), true), annotations: annotationsFor(t.name) };
+  return { name: t.name, description: trimToolDescription(t), inputSchema: withIdempotencyKey(t.name, trimSchema(toolInputSchema(t), t.name), true), annotations: annotationsFor(t.name) };
 }
 
 export function coreTools(): ToolDefinition<any>[] {
@@ -396,7 +401,13 @@ export function coreTools(): ToolDefinition<any>[] {
 // ---------- instructions (core mode) ----------
 
 export function groupCounts(): Array<{ group: string; blurb: string; tools: number }> {
-  return Object.entries(TOOL_GROUPS).map(([group, def]) => ({ group, blurb: def.blurb, tools: def.tools.length }));
+  // What the search shows per group: a family counts once.
+  const counts = new Map<string, number>();
+  for (const t of listedTools()) {
+    const g = groupOf(t.name);
+    if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
+  }
+  return Object.entries(TOOL_GROUPS).map(([group, def]) => ({ group, blurb: def.blurb, tools: counts.get(group) ?? 0 }));
 }
 
 export function coreInstructions(): string {
@@ -404,7 +415,7 @@ export function coreInstructions(): string {
   return [
     `Chroma AE MCP drives Adobe After Effects. ${AGENT_SAFETY_GUIDANCE}`,
     "",
-    `This list shows ${CORE_TOOL_NAMES.length} everyday tools; ${ALL_TOOLS.length} exist in all. The rest are reached through three tools. ae_search_tools and ae_get_tool_schema never touch After Effects, so they work while it is busy or blocked; ae_invoke_tool runs a tool like any other, so it is refused while AE is rendering, and with a busy message while a popup or a long operation holds AE (ae_status says why):`,
+    `This list shows ${CORE_TOOL_NAMES.length} everyday tools; ${listedTools().length} exist in all. The rest are reached through three tools. ae_search_tools and ae_get_tool_schema never touch After Effects, so they work while it is busy or blocked; ae_invoke_tool runs a tool like any other, so it is refused while AE is rendering, and with a busy message while a popup or a long operation holds AE (ae_status says why):`,
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
@@ -465,22 +476,41 @@ interface IndexedTool {
 
 const FIELD_WEIGHT = { name: 5, hints: 3, group: 2, props: 2, desc: 1 };
 
-let searchIndex: { built: number; docs: IndexedTool[]; df: Map<string, number>; avg: number } | null = null;
+let searchIndex: { built: string; docs: IndexedTool[]; df: Map<string, number>; avg: number } | null = null;
+
+const indexKey = () => `${ALL_TOOLS.length}:${ALL_TOOLS[ALL_TOOLS.length - 1]?.name ?? ""}`;
+
+/** The bare names a tool is found by: its own, and for a family each action's old tool name too. */
+function searchNames(tool: ToolDefinition<any>): string[] {
+  const names = [tool.name.replace(/^ae_/, "")];
+  for (const m of familyTool(tool.name)?.members ?? []) {
+    const bare = m.tool.name.replace(/^ae_/, "");
+    if (!names.includes(bare)) names.push(bare);
+  }
+  return names;
+}
+
+function searchHints(tool: ToolDefinition<any>): string {
+  const fam = familyTool(tool.name);
+  if (!fam) return SEARCH_HINTS[tool.name] ?? "";
+  return [...new Set(fam.members.map((m) => SEARCH_HINTS[m.tool.name] ?? "").filter(Boolean))].join(" ");
+}
 
 function buildIndex() {
-  if (searchIndex && searchIndex.built === ALL_TOOLS.length) return searchIndex;
+  if (searchIndex && searchIndex.built === indexKey()) return searchIndex;
+  const searchable = listedTools();
   const docs: IndexedTool[] = [];
   const df = new Map<string, number>();
-  for (const tool of ALL_TOOLS) {
+  for (const tool of searchable) {
     const group = groupOf(tool.name) ?? "other";
     const props = new Set<string>();
-    propertyNames(zodToJsonSchema(tool.schema), props);
+    propertyNames(toolInputSchema(tool), props);
     const tf = new Map<string, number>();
     const add = (text: string, weight: number) => {
       for (const tok of tokenize(text)) tf.set(tok, (tf.get(tok) ?? 0) + weight);
     };
-    add(tool.name.replace(/^ae_/, ""), FIELD_WEIGHT.name);
-    add(SEARCH_HINTS[tool.name] ?? "", FIELD_WEIGHT.hints);
+    add(searchNames(tool).join(" "), FIELD_WEIGHT.name);
+    add(searchHints(tool), FIELD_WEIGHT.hints);
     add(group, FIELD_WEIGHT.group);
     add([...props].join(" "), FIELD_WEIGHT.props);
     add(stripSafety(tool.description), FIELD_WEIGHT.desc);
@@ -490,7 +520,7 @@ function buildIndex() {
     docs.push({ tool, group, tf, length });
   }
   const avg = docs.reduce((a, d) => a + d.length, 0) / Math.max(1, docs.length);
-  searchIndex = { built: ALL_TOOLS.length, docs, df, avg };
+  searchIndex = { built: indexKey(), docs, df, avg };
   return searchIndex;
 }
 
@@ -513,9 +543,9 @@ export function rankTools(query: string, candidates?: Set<string>): Array<{ tool
       score += (idf * f * (k1 + 1)) / (f + k1 * (1 - b + (b * doc.length) / idx.avg));
     }
     // A query word inside the tool name is a strong signal (track -> ae_track_point).
-    const bare = doc.tool.name.replace(/^ae_/, "");
+    const bares = searchNames(doc.tool);
     const rawTerms = query.toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
-    for (const w of rawTerms) if (bare.includes(w)) score += 1.5;
+    for (const w of rawTerms) if (bares.some((bare) => bare.includes(w))) score += 1.5;
     if (score > 0) scored.push({ tool: doc.tool, group: doc.group, score });
   }
   scored.sort((a, b2) => b2.score - a.score || a.tool.name.localeCompare(b2.tool.name));
@@ -540,11 +570,12 @@ function editDistance(a: string, b: string): number {
 /** The closest tool names to a name that does not exist. */
 export function closestToolNames(name: string, count = 5): string[] {
   const wanted = name.slice(0, 80).toLowerCase().replace(/^ae_/, "");
-  const scored = ALL_TOOLS.map((t) => {
-    const bare = t.name.replace(/^ae_/, "");
+  const names = [...new Set([...listedTools(), ...ALL_TOOLS].map((t) => t.name))];
+  const scored = names.map((n) => {
+    const bare = n.replace(/^ae_/, "");
     let score = editDistance(wanted, bare);
     if (bare.includes(wanted) || wanted.includes(bare)) score = Math.min(score, 1 + Math.abs(bare.length - wanted.length) / 10);
-    return { name: t.name, score };
+    return { name: n, score };
   });
   scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   return scored.slice(0, count).map((s) => s.name);

@@ -1,3 +1,4 @@
+import { familyTools } from "./tool-families.js";
 import { z } from "zod";
 import {
   formatToolError,
@@ -41,6 +42,9 @@ export function findTool(name: string): ToolDefinition<any> | undefined {
   // Rebuilt when the registry changes (tests add and remove fake tools).
   if (mappedKey !== registryKey()) {
     toolMap = new Map(ALL_TOOLS.map((t) => [t.name, t] as const));
+    // A family answers under its own name, also where it shares one with a member (that member's
+    // calls carry no action and run as the family's default, i.e. as before).
+    for (const f of familyTools()) toolMap.set(f.name, f);
     mappedKey = registryKey();
   }
   return toolMap.get(name);

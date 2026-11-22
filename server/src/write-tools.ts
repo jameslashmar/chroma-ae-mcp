@@ -8,6 +8,7 @@
  */
 
 import { zodToJsonSchema } from "./schema.js";
+import { familyTools } from "./tool-families.js";
 import { AUTO_CHECKPOINT_TOOLS } from "./tools/ext/receipts.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 
@@ -24,6 +25,8 @@ export function writeToolNames(): Set<string> {
     const props = (zodToJsonSchema(t.schema) as { properties?: Record<string, unknown> }).properties ?? {};
     if (auto.has(t.name) || Object.prototype.hasOwnProperty.call(props, "expect")) out.add(t.name);
   }
+  // A family writes when any of its actions does.
+  for (const f of familyTools()) if (f.members.some((m) => out.has(m.tool.name))) out.add(f.name);
   writeSet = out;
   mappedKey = key;
   return out;

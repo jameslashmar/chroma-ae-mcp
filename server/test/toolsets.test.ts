@@ -13,6 +13,7 @@ import { createPanelMcp } from "../src/panel-entry.js";
 import { lintJsxSafety } from "../src/jsx-safety-lint.js";
 import { zodToJsonSchema } from "../src/schema.js";
 import { annotationsFor } from "../src/tool-annotations.js";
+import { familyTool, listedTools } from "../src/tool-families.js";
 import { withIdempotencyKey } from "../src/write-tools.js";
 import { META_TOOLS, NAME_MAX, SCHEMA_OUTPUT_SOFT_MAX, SEARCH_OUTPUT_MAX, nameMatcher } from "../src/meta-tools.js";
 import {
@@ -27,7 +28,7 @@ import {
   parseToolset,
   trimSchema,
 } from "../src/toolsets.js";
-import { AGENT_SAFETY_GUIDANCE, type ToolContext, type ToolDefinition } from "../src/tools/common.js";
+import { AGENT_SAFETY_GUIDANCE, toolInputSchema, type ToolContext, type ToolDefinition } from "../src/tools/common.js";
 
 /** The size budget for the core tools/list JSON plus the core `instructions` (about 20k tokens). */
 const CORE_BUDGET_CHARS = 84_000;
@@ -109,8 +110,8 @@ describe("toolset choice", () => {
 });
 
 describe("full toolset", () => {
-  it("is exactly ALL_TOOLS: same names, order and text, no meta-tools, no instructions", async () => {
-    const expected = ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) }));
+  it("is every tool, families in place of their members: same order and text, no meta-tools, no instructions", async () => {
+    const expected = listedTools().map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, toolInputSchema(t)), annotations: annotationsFor(t.name) }));
     for (const toolset of [undefined, "full", "bogus", ""]) {
       const result = await rpc("tools/list", undefined, noAeCtx(), toolset);
       expect(result.tools).toEqual(expected);
@@ -165,7 +166,7 @@ describe("core toolset list", () => {
   it("says in ae_search_tools itself that many more tools exist and how to reach them", async () => {
     const list = await rpc("tools/list", undefined, noAeCtx(), "core");
     const search = list.tools.find((t: any) => t.name === "ae_search_tools");
-    expect(search.description).toContain(String(ALL_TOOLS.length));
+    expect(search.description).toContain(String(listedTools().length));
     expect(search.description).toContain("ae_get_tool_schema");
     expect(search.description).toContain("ae_invoke_tool");
   });
@@ -497,28 +498,30 @@ describe("ae_search_tools", () => {
 
   it("lists the groups with counts for an empty call", async () => {
     const { body } = await search({});
-    expect(body.total_tools).toBe(ALL_TOOLS.length);
+    expect(body.total_tools).toBe(listedTools().length);
     expect(body.groups.map((g: any) => g.group)).toEqual(Object.keys(TOOL_GROUPS));
-    expect(body.groups.reduce((a: number, g: any) => a + g.tools, 0)).toBe(ALL_TOOLS.length);
+    expect(body.groups.reduce((a: number, g: any) => a + g.tools, 0)).toBe(listedTools().length);
     for (const g of body.groups) expect(g.blurb.length).toBeGreaterThan(0);
   });
 
   it("finds the expected tool for natural phrases", async () => {
     expect(top((await search({ query: "remove something from a shot" })).body, 4)).toEqual(
-      expect.arrayContaining([expect.stringMatching(/ae_(inpaint_plate|cleanplate_setup|cleanplate_pick|caf_prep)/)])
+      expect.arrayContaining([expect.stringMatching(/ae_(inpaint_plate|cleanplate|caf_prep)/)])
     );
-    expect(top((await search({ query: "track" })).body)).toContain("ae_track_point");
+    expect(top((await search({ query: "track" })).body)).toContain("ae_track");
     expect(top((await search({ query: "captions" })).body)).toContain("ae_captions");
-    expect(top((await search({ query: "render in after effects" })).body)).toContain("ae_render_queue_render");
-    expect(top((await search({ query: "replace the screen of a phone" })).body)).toContain("ae_screen_replace");
-    expect(top((await search({ query: "loudness" })).body)).toContain("ae_loudness_check");
+    expect(top((await search({ query: "render in after effects" })).body)).toContain("ae_render_queue");
+    expect(top((await search({ query: "replace the screen of a phone" })).body)).toContain("ae_screen");
+    expect(top((await search({ query: "loudness" })).body)).toContain("ae_loudness");
   });
 
   it("filters by group and by name pattern, and combines them with a query", async () => {
     const g = (await search({ group: "captions_audio", limit: 20 })).body;
-    expect(g.matches.map((m: any) => m.name).sort()).toEqual([...TOOL_GROUPS.captions_audio.tools].sort());
+    expect(g.matches.map((m: any) => m.name).sort()).toEqual(listedTools().map((t) => t.name).filter((n) => groupOf(n) === "captions_audio").sort());
+    // A family is found by its actions' old names, and says which actions it has.
     const p = (await search({ pattern: "^ae_track_" })).body;
-    expect(p.matches.map((m: any) => m.name).sort()).toEqual(["ae_track_apply", "ae_track_multi", "ae_track_point", "ae_track_read"]);
+    expect(p.matches.map((m: any) => m.name)).toEqual(["ae_track"]);
+    expect(p.matches[0].actions).toEqual(["point (ae_track_point)", "multi (ae_track_multi)", "read (ae_track_read)", "apply (ae_track_apply)"]);
     const both = (await search({ group: "render", query: "template" })).body;
     expect(both.matches.every((m: any) => groupOf(m.name) === "render")).toBe(true);
     expect(both.matches[0].name).toBe("ae_render_templates");
@@ -526,10 +529,12 @@ describe("ae_search_tools", () => {
     // The pattern is a literal fragment, not a regex: ^ anchors the start, $ the end.
     expect((await search({ pattern: "(" })).body.matches).toEqual([]);
     expect((await search({ pattern: "layer$" })).body.matches.map((m: any) => m.name)).toEqual(
-      ALL_TOOLS.map((t) => t.name).filter((n) => n.endsWith("layer"))
+      listedTools()
+        .filter((t) => t.name.endsWith("layer") || familyTool(t.name)?.members.some((m) => m.tool.name.endsWith("layer")))
+        .map((t) => t.name)
     );
     expect((await search({ pattern: "^ae_status$" })).body.matches.map((m: any) => m.name)).toEqual(["ae_status"]);
-    expect((await search({ pattern: "AE_TRACK_P" })).body.matches.map((m: any) => m.name)).toEqual(["ae_track_point"]);
+    expect((await search({ pattern: "AE_TRACK_P" })).body.matches.map((m: any) => m.name)).toEqual(["ae_track"]);
     // Group names that are only inherited object keys are not groups.
     for (const g of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
       const r = await search({ group: g });
@@ -622,9 +627,9 @@ describe("ae_search_tools", () => {
       names.push(...body.matches.map((m: any) => m.name));
       offset = body.next_offset;
     }
-    expect(names).toEqual(ALL_TOOLS.map((t) => t.name));
+    expect(names).toEqual(listedTools().map((t) => t.name));
     expect((await search({ group: "inspect", limit: 20, offset: 20 })).body.matches.map((m: any) => m.name)).toEqual(
-      ALL_TOOLS.map((t) => t.name).filter((n) => TOOL_GROUPS.inspect.tools.includes(n)).slice(20)
+      listedTools().map((t) => t.name).filter((n) => groupOf(n) === "inspect").slice(20)
     );
     expect((await search({ query: "layer", offset: 5000 })).res.isError).toBe(true);
   });
@@ -869,7 +874,7 @@ describe("X-Chroma-Toolset header through the panel's HTTP handler", () => {
     expect(core.result.tools.map((t: any) => t.name)).toEqual([...META_TOOL_NAMES, ...CORE_TOOL_NAMES]);
     for (const headers of [{}, { "x-chroma-toolset": "full" }, { "x-chroma-toolset": "tiny" }]) {
       const full = await post(headers, list);
-      expect(full.result.tools).toHaveLength(ALL_TOOLS.length);
+      expect(full.result.tools).toHaveLength(listedTools().length);
     }
     const init = await post({ "x-chroma-toolset": "core" }, { jsonrpc: "2.0", id: 2, method: "initialize", params: {} });
     expect(init.result.instructions).toContain("ae_search_tools");

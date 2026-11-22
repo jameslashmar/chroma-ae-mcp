@@ -14,6 +14,7 @@
  */
 
 import { isWriteTool } from "./write-tools.js";
+import { familyTool } from "./tool-families.js";
 
 export interface ToolAnnotations {
   readOnlyHint?: boolean;
@@ -134,6 +135,22 @@ const IDEMPOTENT = new Set([
 const OPEN_WORLD = new Set(["ae_transcribe"]);
 
 export function annotationsFor(name: string): ToolAnnotations {
+  const fam = familyTool(name);
+  if (fam) {
+    const each = fam.members.map((m) => memberAnnotations(m.tool.name));
+    const out: ToolAnnotations = {};
+    if (each.every((a) => a.readOnlyHint === true)) out.readOnlyHint = true;
+    else {
+      if (each.every((a) => a.readOnlyHint === true || a.destructiveHint === false)) out.destructiveHint = false;
+      if (each.every((a) => a.readOnlyHint === true || a.idempotentHint === true)) out.idempotentHint = true;
+    }
+    if (each.every((a) => a.openWorldHint === false)) out.openWorldHint = false;
+    return out;
+  }
+  return memberAnnotations(name);
+}
+
+function memberAnnotations(name: string): ToolAnnotations {
   const readOnly = READS_WITH_GUARD.has(name) || (!isWriteTool(name) && !SIDE_EFFECTS.has(name));
   const out: ToolAnnotations = {};
   if (readOnly) out.readOnlyHint = true;

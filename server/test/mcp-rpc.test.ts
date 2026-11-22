@@ -9,6 +9,7 @@ import {
   type JsonRpcSuccessResponse,
 } from "../src/mcp-rpc.js";
 import { createPanelMcp } from "../src/panel-entry.js";
+import { listedTools } from "../src/tool-families.js";
 import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
@@ -169,7 +170,7 @@ describe("mcp-rpc and panel-entry", () => {
       }
     ).tools;
 
-    expect(tools).toHaveLength(ALL_TOOLS.length);
+    expect(tools).toHaveLength(listedTools().length);
     for (const tool of tools) {
       expect(typeof tool.name).toBe("string");
       expect(tool.name.length).toBeGreaterThan(0);
@@ -179,7 +180,8 @@ describe("mcp-rpc and panel-entry", () => {
     }
 
     const names = tools.map((t) => t.name);
-    expect(names.slice(0, 12)).toEqual([
+    // The Render Queue tools are one family, listed where its first member was.
+    expect(names.slice(0, 11)).toEqual([
       "ae_status",
       "ae_get_project",
       "ae_get_comp",
@@ -188,8 +190,7 @@ describe("mcp-rpc and panel-entry", () => {
       "ae_set_property",
       "ae_save",
       "ae_snapshot_frame",
-      "ae_render_queue_add",
-      "ae_render_queue_status",
+      "ae_render_queue",
       "ae_quarantine_status",
       "ae_acknowledge",
     ]);

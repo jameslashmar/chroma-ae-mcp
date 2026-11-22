@@ -6,7 +6,7 @@ Every tool the MCP serves, by group. Each tool's schema and description, as the 
 
 `tools/list` has two shapes, chosen per request by the `X-Chroma-Toolset` header (the stdio relay sends it for core: when `CHROMA_AE_MCP_TOOLSET=core` is in its environment, or, with the variable unset, for every client except `claude-code`, which defers tool schemas itself and gets the full list; `CHROMA_AE_MCP_TOOLSET=full` opts out of core for any client, and Claude Code over HTTP gets the full list). The counts in this file are for the tools themselves: the three meta-tools below are not in the 181.
 
-- **full** (the default; also an unset, empty or unknown value): all 181 tools, exactly as the tools define themselves, about 807,000 characters. No meta-tools are listed and `initialize` sends no `instructions`. Use it for a client that defers tool schemas itself (Claude Code does).
+- **full** (the default; also an unset, empty or unknown value): all 181 tools as 131 entries, because 19 [tool families](#tool-families) stand in for 69 of them; about 784,000 characters (807,000 before the families). Every other tool is listed exactly as it defines itself. No meta-tools are listed and `initialize` sends no `instructions`. Use it for a client that defers tool schemas itself (Claude Code does).
 - **core**: 33 everyday tools with shortened text, plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`. The list and the `instructions` that `initialize` returns (the safety text once, how to use the three tools, the group index) are held to 84,000 characters (about 20,000 tokens; measured 82,210 on 2026-11-08) by a test. We added it because it is **not confirmed** that Claude Desktop defers tool schemas the way Claude Code does, and 200,000 tokens of schemas per conversation is too much to risk.
 
 The shortened text keeps every property name, type, enum, `required` and nested structure; only descriptions shrink (the first clause; 28 of the 33 tools have a hand-written summary, and a few untyped values such as `ae_set_property.value`, `ae_batch_set` `ops[].value` and the effect `params[].value` keep up to 400-600 characters because their text is the only description of what they accept). Calls are always validated against the full schema.
@@ -23,9 +23,43 @@ All three reject fields they do not know (put a tool's arguments under `argument
 
 The core list: `ae_status`, `ae_get_project`, `ae_get_comp`, `ae_comp_tree`, `ae_get_layer_props`, `ae_find_layers`, `ae_get_keyframes`, `ae_set_property`, `ae_batch_set`, `ae_set_text`, `ae_create_layer`, `ae_create_comp`, `ae_layer_ops`, `ae_import_footage`, `ae_add_effect`, `ae_set_effect`, `ae_save`, `ae_snapshot_frame`, `ae_run_jsx`, `ae_dialogs`, `ae_dialog_respond`, `ae_skill_run`, `ae_multi_comp_apply`, `ae_render_queue_add`, `ae_render_queue_edit`, `ae_render_queue_status`, `ae_render_queue_render`, `ae_render_queue_render_status`, `ae_render_templates`, `ae_aerender_start`, `ae_aerender_status`, `ae_set_footage_interpretation`, `ae_import_assets`.
 
+### Tool families
+
+Runs of tools that work on one thing are listed as one tool with an `action` field (`server/src/tool-families.ts`): `ae_track { action: "point", ... }` instead of `ae_track_point { ... }`. The agent has fewer, clearer tools to choose between, and the safety text is in each family once instead of in every member.
+
+Nothing breaks. The member tools are still registered and still answer under their old names, through `tools/call`, `ae_invoke_tool` and `ae_get_tool_schema`; skills, receipts and usage logs that name them keep working. Each action is validated with its member's own schema and run by its member's own handler, so its errors, checkpoints and receipts are the member's; a validation error names both (`Invalid arguments for ae_track (action read, as ae_track_read): ...`). The family's listed schema is the members' fields merged: `action` is an enum, and a field that only some actions take starts its description with them (`[point, multi] ...`); fields the members define differently are an `anyOf`. Annotations take the worst case of the members (read-only only when every action is), and a family takes an `idempotency_key` when any action writes.
+
+A member that has an `action` field of its own takes it as `<action>_action` in the family: `ae_deliver { action: "step", step_action: "next" }` is `ae_deliver_step { action: "next" }` (also `rules_action` in `ae_taste`, `recipe_action` in `ae_deliver`, `roundtrip_action` in `ae_stabilize`, `setup_action` in `ae_cleanplate`).
+
+Five families share their name with the member that was there before (`ae_captions`, `ae_render_batch`, `ae_taste`, `ae_variants`, `ae_stabilize`): called without `action` they run that member, exactly as before. The others require `action`.
+
+`ae_search_tools` returns the family, with an `actions` list such as `["point (ae_track_point)", ...]`; a `pattern` also matches the members' old names (`^ae_track_` finds `ae_track`), and the closest-name hints for an unknown tool include the old names. The **core** list is unchanged: it lists member tools, because its size budget is tight.
+
+| Family | Actions (old tool) |
+|---|---|
+| `ae_render_queue` | `add` (`ae_render_queue_add`), `status`, `inspect`, `edit`, `duplicate`, `apply_spec`, `render`, `render_status` (`ae_render_queue_<action>`) |
+| `ae_render_batch` | `start` (`ae_render_batch`, the default), `plan`, `status`, `resume`, `cancel` (`ae_render_batch_<action>`) |
+| `ae_aerender` | `start`, `status`, `cancel` (`ae_aerender_<action>`) |
+| `ae_captions` | `build` (`ae_captions`, the default), `plan`, `read`, `export`, `qa` (`ae_captions_<action>`) |
+| `ae_rig` | `add_controls`, `link`, `unlink`, `rename`, `list` (`ae_rig_<action>`) |
+| `ae_path` | `read`, `write`, `operator`, `link`, `connector` (`ae_path_<action>`) |
+| `ae_track` | `point`, `multi`, `read`, `apply` (`ae_track_<action>`) |
+| `ae_patch` | `check`, `color_match`, `grain`, `finish` (`ae_patch_<action>`) |
+| `ae_checkpoint` | `create`, `list`, `revert` (`ae_checkpoint_<action>`) |
+| `ae_skill` | `list`, `save`, `run` (`ae_skill_<action>`) |
+| `ae_taste` | `prefs` (`ae_taste`, the default), `baseline` (`ae_taste_baseline`), `learn` (`ae_learn_taste`), `rules` (`ae_taste_rules`) |
+| `ae_variants` | `create` (`ae_variants`, the default), `pick`, `discard` (`ae_variants_<action>`) |
+| `ae_dialog` | `list` (`ae_dialogs`), `respond` (`ae_dialog_respond`) |
+| `ae_deliver` | `specs` (`ae_delivery_specs`), `recipe`, `step`, `status` (`ae_deliver_<action>`) |
+| `ae_collect` | `files`, `relink`, `report` (`ae_collect_<action>`) |
+| `ae_loudness` | `check`, `apply` (`ae_loudness_<action>`) |
+| `ae_stabilize` | `apply` (`ae_stabilize`, the default), `roundtrip` (`ae_stabilize_roundtrip`) |
+| `ae_cleanplate` | `pick`, `setup` (`ae_cleanplate_<action>`) |
+| `ae_screen` | `corners`, `replace` (`ae_screen_<action>`) |
+
 ### Search groups
 
-Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.ts`; a test fails for a tool without one). These are for `ae_search_tools`, not the sections below.
+Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.ts`; a test fails for a tool without one); a family is in the group of its first action. These are for `ae_search_tools`, not the sections below. The counts are what the search shows, a family once (the group's own tools in brackets where that differs).
 
 | Group | Tools | What |
 |---|---|---|
@@ -35,14 +69,14 @@ Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.t
 | `effects` | 5 | Add, change and remove effects, presets, green-screen keying |
 | `text` | 9 | Text content and styling, animators, fitting, measuring, backdrops, fonts, legibility |
 | `motion` | 9 | Keyframe easing and retiming, staggers, time remap, graphs, timing checks, camera rigs |
-| `rig_paths` | 15 | Rigs and controls, paths, expression recipes, Essential Graphics, .mogrt |
-| `tracking_patching` | 19 | Tracking, stabilizing, object removal, patches, screen replacement |
-| `render` | 18 | Render queue, rendering in After Effects or with aerender, batches, templates, verifying |
-| `delivery` | 10 | Delivery specs and recipes, preflight, house style, collect and relink |
-| `captions_audio` | 10 | Captions, transcription, audio analysis, loudness, cue keys |
-| `review` | 11 | Stills, contact sheets, annotated frames, motion review, brief and taste |
-| `safety` | 11 | Quarantine, checkpoints, variants, session changes, project sessions |
-| `app` | 14 | ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer |
+| `rig_paths` | 7 (15) | Rigs and controls, paths, expression recipes, Essential Graphics, .mogrt |
+| `tracking_patching` | 10 (19) | Tracking, stabilizing, object removal, patches, screen replacement |
+| `render` | 5 (18) | Render queue, rendering in After Effects or with aerender, batches, templates, verifying |
+| `delivery` | 5 (10) | Delivery specs and recipes, preflight, house style, collect and relink |
+| `captions_audio` | 5 (10) | Captions, transcription, audio analysis, loudness, cue keys |
+| `review` | 8 (11) | Stills, contact sheets, annotated frames, motion review, brief and taste |
+| `safety` | 8 (11) | Quarantine, checkpoints, variants, session changes, project sessions |
+| `app` | 11 (14) | ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer |
 
 ## Motion guidance
 

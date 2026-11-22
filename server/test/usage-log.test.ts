@@ -330,7 +330,7 @@ describe("usage log", () => {
     await callMetaTool("ae_search_tools", { pattern: "^ae_track", group: "tracking_patching" }, ctx);
     await callMetaTool("ae_search_tools", { query: "zzzz qqqq nonsense" }, ctx);
     const [q, g, p, none] = await lines();
-    expect(q.top).toBe("ae_track_point");
+    expect(q.top).toBe("ae_track");
     expect(q.top_score).toBeGreaterThan(4);
     expect(q).not.toHaveProperty("group");
     expect(g).toMatchObject({ group: "tracking_patching" });

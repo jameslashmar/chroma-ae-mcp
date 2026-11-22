@@ -1,3 +1,4 @@
+import { listedTools } from "./tool-families.js";
 import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
 import { cancelCall, deliverClientResponse, requestFromClient, runInCall } from "./call-context.js";
 import { callTool } from "./tool-call.js";
@@ -62,7 +63,7 @@ export function listTools(toolset: Toolset): ListedTool[] {
   if (toolset === "core") {
     return [...metaToolList(), ...coreTools().map(trimmedListEntry)];
   }
-  return ALL_TOOLS.map(fullListEntry);
+  return listedTools().map(fullListEntry);
 }
 
 export const SUPPORTED_PROTOCOL_VERSIONS = [
