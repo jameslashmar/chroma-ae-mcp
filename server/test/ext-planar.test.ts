@@ -35,6 +35,7 @@ import {
   type LayerSample,
   cornerJitter,
   flagUnreliableFrames,
+  lensCheck,
   slidingPoints,
 } from "../src/tools/ext/planar.js";
 import { applyH, identityH, invertH, mulH, type Mat3, type PlanarFrame, type PlanarTrack, type Vec2 } from "../src/tools/ext/planar-math.js";
@@ -1965,5 +1966,44 @@ describe("track honesty: sliding points and corner jitter", () => {
     // The H noise is 0.5 px per axis: about 0.5 px of shake.
     expect(shaky).toBeGreaterThan(0.3);
     expect(shaky).toBeLessThan(0.8);
+  });
+});
+
+describe("lens distortion seen through a track", () => {
+  const W = 960;
+  const H = 540;
+  const c = [W / 2, H / 2];
+  const half = Math.hypot(W / 2, H / 2);
+  const distort = (p: Vec2, k: number): Vec2 => {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const f = 1 + (k * (dx * dx + dy * dy)) / (half * half);
+    return [c[0] + dx * f, c[1] + dy * f];
+  };
+  const ref: Vec2[] = [[80, 60], [480, 50], [880, 70], [90, 270], [870, 280], [70, 480], [480, 490], [890, 470]];
+  function track(k: number): PlanarTrack {
+    const frames: PlanarFrame[] = [];
+    for (let i = 0; i < 25; i++) {
+      // A pan and a slight zoom: the points cross different distances from the centre.
+      const Hm: Mat3 = [1 + 0.004 * i, 0, 6 * i - 1.9 * i, 0, 1 + 0.004 * i, 3 * i - 1.1 * i, 0, 0, 1];
+      const pts = ref.map((p) => distort(applyH(Hm, p)!, k));
+      frames.push({ time: i / 25, ok: true, H: Hm, points: pts, confidence: pts.map(() => 1), rms_px: 0, inliers: 8 });
+    }
+    return { version: 1, track_id: "l", comp_id: 1, comp_size: [W, H], fps: 25, ref_time: 0, model: "perspective", ref_points: ref.map((p) => distort(p, k)), frames, source: "test", created: "" };
+  }
+
+  it("finds the bend of a distorted lens and how far it moves a corner", () => {
+    const l = lensCheck(track(0.08))!;
+    expect(l.distorted).toBe(true);
+    expect(l.k).toBeGreaterThan(0.06);
+    expect(l.k).toBeLessThan(0.1);
+    expect(l.edge_px).toBeGreaterThan(30);
+  });
+
+  it("says nothing of a straight lens, and needs points that reach out", () => {
+    expect(lensCheck(track(0))!.distorted).toBe(false);
+    const t = track(0.08);
+    t.ref_points = t.ref_points.map((p) => [c[0] + (p[0] - c[0]) * 0.3, c[1] + (p[1] - c[1]) * 0.3] as Vec2);
+    expect(lensCheck(t)).toBeNull();
   });
 });

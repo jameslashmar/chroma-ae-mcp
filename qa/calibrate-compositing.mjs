@@ -1054,6 +1054,33 @@ async function stageClone(ids, expect) {
   return { ok: true, mode: r.motion?.mode ?? null, pinned: (r.notes ?? []).some((nt) => /Corner Pin on the plate copy/.test(nt)), rows };
 }
 
+// ---------- lens distortion warning (item 11) ----------
+
+// The clean pin shot, and the same with AE's Optics Compensation (field of view 40 and 80) after the
+// pin: a track over the whole frame should call the clean one straight and the others bent, more so at 80.
+function lensJsx() {
+  const times = [];
+  for (let i = 0; i < FRAMES; i++) times.push(i / FPS);
+  const lines = [];
+  for (const fov of [0, 40, 80]) {
+    lines.push(`var lz${fov} = mk("Cal lens ${fov}"); var ll${fov} = lz${fov}.layers.add(src); var lpin${fov} = ll${fov}.property("ADBE Effect Parade").addProperty("ADBE Corner Pin");`);
+    for (let k = 0; k < 4; k++) lines.push(`lpin${fov}.property(${k + 1}).setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(times.map((t) => pinCorners(t, 1)[k].map(r3)))});`);
+    if (fov) lines.push(`var oc${fov} = ll${fov}.property("ADBE Effect Parade").addProperty("ADBE Optics Compensation"); oc${fov}.property(1).setValue(${fov});`);
+    lines.push(`ids.lens_${fov} = lz${fov}.id;`);
+  }
+  return lines.join("\n");
+}
+
+async function stageLens(ids) {
+  const out = {};
+  for (const fov of [0, 40, 80]) {
+    let r = await call("ae_track_multi", { comp_id: ids[`lens_${fov}`], auto_points: { region: { rect: [40, 30, 880, 480] }, count: 8 }, ref_time: 0, start: 0, end: END, model: "perspective", preview: false, max_frames: 1000, max_seconds: 300 });
+    while (r.ok && r.complete === false && r.continue_track_id) r = await call("ae_track_multi", { comp_id: ids[`lens_${fov}`], continue_track_id: r.continue_track_id, preview: false, max_frames: 1000, max_seconds: 300 });
+    out[`fov_${fov}`] = r.ok ? { lens: r.lens ?? null, note: r.lens_note ? r.lens_note.slice(0, 90) : null, expected_error_px: r.expected_error_px?.mean ?? null } : { message: r.message ?? brief(r) };
+  }
+  return out;
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -1163,6 +1190,7 @@ async function main() {
       matteJsx(),
       paintedJsx(),
       cloneJsx(),
+      lensJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -1271,6 +1299,10 @@ async function main() {
     report.clone = await stageClone(ids, expect);
     const c = report.clone;
     console.log(`clone         ${c.ok ? `pinned ${c.pinned}; hole against the truth: ${c.rows.map((r) => `${r.t}s ${r.mad_levels} levels (shift-only clone off by ${r.shift_only_would_be_px} px)`).join(" | ")}` : c.message}`);
+  }
+  if (want("lens")) {
+    report.lens = await stageLens(ids);
+    for (const [k, v] of Object.entries(report.lens)) console.log(`lens          ${k.padEnd(7)} ${v.lens ? `distorted ${v.lens.distorted}, k ${v.lens.k}, corner ${v.lens.edge_px ?? "-"} px, residual ${v.lens.residual_without_px ?? "-"} -> ${v.lens.residual_px ?? "-"} px; expected error ${v.expected_error_px}` : v.message ?? "no lens result (points did not reach out)"}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);

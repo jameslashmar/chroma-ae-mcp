@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,painted,clone,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,painted,clone,lens,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -114,6 +114,18 @@ A still patch is made (the tool keeps a hidden copy of the PNG as rendered, `.ch
 ### Offset clone under rotation and zoom (`ae_cleanplate_setup` source `clone_offset` with a track)
 
 The plate turns 0.4 degrees, zooms 0.5% and pans per frame; a clone 150 px and 8 frames away should show at the hole the photo 150 px over (the truth comp moves that shifted photo the same way). The clone used to be moved by the region centre's shift only, which is exact for a spatial offset under a similarity but not across frames of a turning or zooming shot: here it would have been 5.4-6.0 px off at the hole's corner. It is now a Corner Pin on the plate copy, `H(t) . T(-offset) . H(t+k)^-1` carried into the copy's layer space, and the hole matched the truth within **0.27-0.62 levels** (resampling) at 0, 0.4, 0.8 and 1.2 s. The offset is in comp pixels as the shot looks at `ref_time`.
+
+### Lens distortion warning (`lens` in the track summaries)
+
+The clean pin shot and the same shot through AE's Optics Compensation (field of view 40 and 80) after the pin, tracked with 8 points over the whole frame. A one-parameter radial model about the frame centre is fitted to the fit's inliers; the plate counts as distorted when the model lowers the residual by a quarter and 0.1 px or more and moves a corner over 5 px.
+
+| Shot | Residual without -> with the lens model | k | Corner moved | Verdict |
+|---|---|---|---|---|
+| straight | 0.179 -> 0.179 px | (flat) | | straight |
+| field of view 40 | 0.607 -> 0.419 px | -0.064 | 35 px | distorted |
+| field of view 80 | 0.909 -> 0.365 px | -0.297 | 163 px | distorted |
+
+Fitting all points, outliers included, read 7 px of residual on the straight shot; the inliers only fix that. Tracks whose points stay in the middle of the frame (none reach half the half-diagonal) get no verdict: 57 earlier calibration tracks, none flagged.
 
 ### Inpaint (`ae_inpaint_plate`)
 

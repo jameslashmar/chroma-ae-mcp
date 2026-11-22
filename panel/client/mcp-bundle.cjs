@@ -46353,6 +46353,76 @@ function channelGray(img, channel) {
   }
   return { width: img.width, height: img.height, data };
 }
+function lensCheck(track) {
+  const [w, h] = track.comp_size;
+  const c = [w / 2, h / 2];
+  const half = Math.hypot(w / 2, h / 2);
+  const reach = Math.max(...track.ref_points.map((p) => Math.hypot(p[0] - c[0], p[1] - c[1]) / half));
+  if (track.ref_points.length < 6 || !(reach >= 0.5)) return null;
+  const model = track.ref_points.length >= 5 ? "perspective" : track.model;
+  const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
+  const step2 = Math.max(1, Math.ceil(solved.length / 30));
+  const frames = solved.filter((_, i) => i % step2 === 0);
+  if (frames.length < 3) return null;
+  const undistort = (p, k2) => {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const rd2 = (dx * dx + dy * dy) / (half * half);
+    let f = 1 + k2 * rd2;
+    for (let it = 0; it < 8; it++) {
+      if (!(f > 0.2)) break;
+      const ru2 = rd2 / (f * f);
+      f = 1 + k2 * ru2;
+    }
+    if (!(f > 0.2)) f = 1;
+    return [c[0] + dx / f, c[1] + dy / f];
+  };
+  const cost = (k2) => {
+    let sq = 0;
+    let n = 0;
+    for (const f of frames) {
+      const idx = f.points.map((p, i) => p ? i : -1).filter((i) => i >= 0);
+      if (idx.length < 6) continue;
+      const from = idx.map((i) => undistort(track.ref_points[i], k2));
+      const to = idx.map((i) => undistort(f.points[i], k2));
+      const fit = ransacModel(model, from, to, { thresholdPx: 3, iterations: 40, seed: 1 });
+      if (!fit) continue;
+      const inl = fit.inliers.filter(Boolean).length;
+      if (inl < 6) continue;
+      sq += fit.rms_px * fit.rms_px * inl;
+      n += inl;
+    }
+    return n ? Math.sqrt(sq / n) : Infinity;
+  };
+  let bestK = 0;
+  let bestC = cost(0);
+  const base = bestC;
+  if (!Number.isFinite(base)) return null;
+  for (let k2 = -0.3; k2 <= 0.3001; k2 += 0.03) {
+    const v = cost(k2);
+    if (v < bestC) {
+      bestC = v;
+      bestK = k2;
+    }
+  }
+  let lo = bestK - 0.03;
+  let hi = bestK + 0.03;
+  const g = (Math.sqrt(5) - 1) / 2;
+  for (let it = 0; it < 30; it++) {
+    const a = hi - g * (hi - lo);
+    const b = lo + g * (hi - lo);
+    if (cost(a) < cost(b)) hi = b;
+    else lo = a;
+  }
+  const k = (lo + hi) / 2;
+  const kc = cost(k);
+  if (kc < bestC) {
+    bestC = kc;
+    bestK = k;
+  }
+  const edge = Math.abs(bestK) * half;
+  return { k: r4(bestK), edge_px: r26(edge), residual_px: r4(bestC), residual_without_px: r4(base), distorted: base - bestC > 0.1 && bestC < base * 0.75 && edge > 5 };
+}
 function flagUnreliableFrames(track) {
   const ex = track.frames.filter((f) => f.ok && typeof f.expected_px === "number" && f.time !== track.ref_time).map((f) => f.expected_px).sort((a, b) => a - b);
   if (ex.length < 5) return [];
@@ -46414,6 +46484,15 @@ function cornerJitter(track, quad) {
   }
   return r26(worst);
 }
+function lensSummary(track) {
+  const l = lensCheck(track);
+  if (!l) return {};
+  if (!l.distorted) return { lens: { distorted: false, residual_px: l.residual_px, residual_without_px: l.residual_without_px } };
+  return {
+    lens: { ...l },
+    lens_note: `The points bend the way a lens does (radial k ${l.k}; a frame corner moves about ${l.edge_px} px): one plane's motion leaves ${l.residual_without_px} px of fit residual that a lens model brings to ${l.residual_px} px. A 2D track and anything pinned to it will slide near the edges. Undistort the plate first (Optics Compensation, or the lens profile from the camera), track and composite on it, then put the distortion back; or keep the points and the insert near the middle of the frame.`
+  };
+}
 function slidingSummary(track) {
   const sliding = slidingPoints(track);
   if (!sliding.length) return {};
@@ -46448,6 +46527,7 @@ function trackSummary(track, maxFrames = 500) {
     error_note: EXPECTED_ERROR_NOTE,
     corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
     ...slidingSummary(track),
+    ...lensSummary(track),
     frames_lost_per_point: lostPer,
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r26(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
@@ -47515,7 +47595,7 @@ var init_planar = __esm({
     planarTools = [
       {
         name: "ae_track_multi",
-        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px` and `sliding_points` (points that do not move with the plane), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
+        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
         schema: AeTrackMultiSchema,
         handler: async (args, ctx) => {
           try {
