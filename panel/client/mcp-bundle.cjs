@@ -29237,8 +29237,8 @@ function transformPoint(m, p) {
   ];
 }
 function layerRotation(t) {
-  const ori = mat4Mul(rotationZ(num4(t.orientation, 2, 0)), mat4Mul(rotationY(num4(t.orientation, 1, 0)), rotationX(num4(t.orientation, 0, 0))));
-  return mat4Mul(rotationZ(t.rotation_z), mat4Mul(rotationY(t.rotation_y), mat4Mul(rotationX(t.rotation_x), ori)));
+  const ori = mat4Mul(rotationX(num4(t.orientation, 0, 0)), mat4Mul(rotationY(num4(t.orientation, 1, 0)), rotationZ(num4(t.orientation, 2, 0))));
+  return mat4Mul(ori, mat4Mul(rotationX(t.rotation_x), mat4Mul(rotationY(t.rotation_y), rotationZ(t.rotation_z))));
 }
 function layerLocalMatrix(t, threeD) {
   const ax = num4(t.anchor, 0, 0);
@@ -29719,11 +29719,11 @@ var init_annotate = __esm({
       "Outlines are each layer's content rect (sourceRectAtTime) moved through its transforms and parents. Effects that move or grow pixels, masks, track mattes and motion blur are not in them, so a box can disagree with the pixels.",
       "Tag numbers are layer indexes in the comp; `index` maps each to the layer id and name. Names are drawn in capitals, cut to 20 characters."
     ];
-    NOTE_3D = "3D boxes are projected through the active camera (or AE's default camera) by the tool's own maths. This is an estimate until checked against the render: X/Y rotation signs and the rotation order are unmeasured.";
+    NOTE_3D = "3D boxes are projected through the active camera (or AE's default camera) by the tool's own maths. The camera and layer maths matches AE's own toComp (measured: one- and two-node cameras with every rotation, rotated and scaled layers); a parented camera's point of interest is still unmeasured.";
     annotateTools = [
       {
         name: TOOL,
-        description: "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera by an unmeasured, experimental estimate (`projection: '3d-estimated'`). Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " + AGENT_SAFETY_GUIDANCE,
+        description: "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera with maths checked against AE's own toComp (`projection: '3d-estimated'`: content rects only, no effects or masks). Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " + AGENT_SAFETY_GUIDANCE,
         schema: AeAnnotateFrameSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
@@ -30054,7 +30054,6 @@ function analyseScene(read3, cameraId) {
     );
   }
   if (camLayer && camLayer.parent_id !== null) notes.push("The camera is parented: its point of interest and rotation signs are unmeasured through a parent, so treat the depths as approximate.");
-  if (camLayer?.camera?.two_node) notes.push("X and Y rotation signs are unmeasured; a two-node camera that also has rotation values may be off.");
   if (read3.active_camera_beyond_list) warnings.push("The active camera is past the layers that were read, so depths are measured from AE's default camera instead.");
   if (read3.truncated) warnings.push(`The comp has ${read3.total_layers} layers; only the first ${read3.layers.length} were read.`);
   for (const u of unresolved) warnings.push(`"${u.name}" skipped: ${u.reason}`);
@@ -30286,7 +30285,7 @@ var init_camera = __esm({
       },
       {
         name: "ae_scene_3d_report",
-        description: "Read-only report on a comp's 3D scene at one time: the 3D layers sorted by depth along the camera's view axis (nearest first) with world position, where they land in the frame and how large they look, which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. Also lists the lights (`lights`: type including environment, the environment light's source layer, intensity, colour, cone, shadows; warns about an environment light with no source, with a 3D source, or in a comp whose renderer is not Advanced 3D) and the 3D model and parametric mesh layers (`models`). Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; X/Y rotation signs and a parented camera's point of interest are unmeasured, so rotated or parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " + AGENT_SAFETY_GUIDANCE,
+        description: "Read-only report on a comp's 3D scene at one time: the 3D layers sorted by depth along the camera's view axis (nearest first) with world position, where they land in the frame and how large they look, which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. Also lists the lights (`lights`: type including environment, the environment light's source layer, intensity, colour, cone, shadows; warns about an environment light with no source, with a 3D source, or in a comp whose renderer is not Advanced 3D) and the 3D model and parametric mesh layers (`models`). Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; Screen positions match AE's own toComp for one- and two-node cameras with any rotation; a parented camera's point of interest is unmeasured, so parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " + AGENT_SAFETY_GUIDANCE,
         schema: AeScene3dReportSchema,
         handler: async (args, ctx) => {
           const res = await ctx.bridge.callHost(

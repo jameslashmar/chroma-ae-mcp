@@ -790,7 +790,7 @@ Each line is a guess the code makes or works around. Where the code can work eit
 
 **camera**
 - The camera's point of interest is `ADBE Point of Interest` (falls back to `ADBE Anchor Point`).
-- The sign of X/Y rotation (inherited from `annotate`), and a parented two-node camera's point of interest.
+- A parented two-node camera's point of interest. (The rotation order and signs were measured in 2026-11 against AE's own `toComp`: `Orientation(X.Y.Z) . Rotation(X.Y.Z)`, all positive; a two-node camera looks at its point of interest with +Y down, then the same rotations. The old order was up to 470 px off; see docs/CALIBRATION.md.)
 - Setting `autoOrient` to no auto-orient hides the Point of Interest.
 - The zoom set by script matches the Camera Settings dialog for the comp's film size.
 - The Focus Distance expression lands on the target's sharp plane in Classic and Advanced 3D.

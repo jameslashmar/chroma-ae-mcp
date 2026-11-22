@@ -581,6 +581,74 @@ async function stageGrainCurve(ids) {
   return rows;
 }
 
+// ---------- 3D projection (for the camera solve check, item 3) ----------
+
+// Where AE itself puts 3D points on screen (an expression's toComp) against the Node maths that
+// ae_scene_3d_report, ae_annotate_frame and the solve check share. Cameras with every rotation.
+const PROJ_TIMES = [0, 0.6, 1.2, 1.8];
+const PROJ_POINTS = [[-300, -150, 200], [250, -100, -150], [0, 0, 0], [400, 200, 300], [-200, 250, -300], [120, -260, 500], [-420, 60, 80], [300, 300, -50]];
+const PROJ_CAMS = [
+  { name: "one-node", twoNode: false, pos: [[480, 270, -1200], [700, 150, -900]], ori: [[0, 0, 0], [10, 25, 5]], rot: [[0, 0, 0], [-8, 12, 4]], zoom: [1000, 1300] },
+  { name: "two-node", twoNode: true, pos: [[200, 100, -1100], [800, 400, -800]], poi: [[480, 270, 0], [520, 250, 100]], rot: [[0, 0, 0], [6, -9, 15]], zoom: [900, 1100] },
+];
+function projectionJsx() {
+  const lines = ["ids.proj = [];"];
+  PROJ_CAMS.forEach((c, k) => {
+    lines.push(`var pc${k} = mk("Cal projection ${c.name}");`);
+    PROJ_POINTS.forEach((p, i) => lines.push(`var pn${k}_${i} = pc${k}.layers.addNull(); pn${k}_${i}.threeDLayer = true; pn${k}_${i}.name = "P${i}"; pn${k}_${i}.property("ADBE Transform Group").property("ADBE Position").setValue([${p[0] + W / 2}, ${p[1] + H / 2}, ${p[2]}]);`));
+    lines.push(`var cam${k} = pc${k}.layers.addCamera("Cam", [${W / 2}, ${H / 2}]);`);
+    lines.push(`cam${k}.autoOrient = ${c.twoNode ? "AutoOrientType.CAMERA_OR_POINT_OF_INTEREST" : "AutoOrientType.NO_AUTO_ORIENT"};`);
+    lines.push(`var ct${k} = cam${k}.property("ADBE Transform Group");`);
+    lines.push(`ct${k}.property("ADBE Position").setValuesAtTimes([0, ${END}], ${JSON.stringify(c.pos)});`);
+    if (c.twoNode) lines.push(`ct${k}.property("ADBE Anchor Point").setValuesAtTimes([0, ${END}], ${JSON.stringify(c.poi)});`);
+    else lines.push(`ct${k}.property("ADBE Orientation").setValuesAtTimes([0, ${END}], ${JSON.stringify(c.ori)});`);
+    lines.push(`ct${k}.property("ADBE Rotate X").setValuesAtTimes([0, ${END}], [${c.rot[0][0]}, ${c.rot[1][0]}]);`);
+    lines.push(`ct${k}.property("ADBE Rotate Y").setValuesAtTimes([0, ${END}], [${c.rot[0][1]}, ${c.rot[1][1]}]);`);
+    lines.push(`ct${k}.property("ADBE Rotate Z").setValuesAtTimes([0, ${END}], [${c.rot[0][2]}, ${c.rot[1][2]}]);`);
+    lines.push(`cam${k}.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValuesAtTimes([0, ${END}], ${JSON.stringify(c.zoom)});`);
+    // AE's own answer: a 2D probe per point whose Position is toComp of that point.
+    PROJ_POINTS.forEach((_, i) => lines.push(`var pr${k}_${i} = pc${k}.layers.addNull(); pr${k}_${i}.name = "Probe${i}"; pr${k}_${i}.property("ADBE Transform Group").property("ADBE Position").expression = 'var L = thisComp.layer("P${i}"); L.toComp(L.anchorPoint);';`));
+    lines.push(`var truth${k} = []; for (var ti = 0; ti < ${PROJ_TIMES.length}; ti++) { var row = []; for (var pi = 0; pi < ${PROJ_POINTS.length}; pi++) { var v = pc${k}.layer("Probe" + pi).property("ADBE Transform Group").property("ADBE Position").valueAtTime(${JSON.stringify(PROJ_TIMES)}[ti], false); row.push([v[0], v[1]]); } truth${k}.push(row); }`);
+    lines.push(`for (var pd = ${PROJ_POINTS.length - 1}; pd >= 0; pd--) pc${k}.layer("Probe" + pd).remove();`);
+    // A rotated 3D layer: three of its own points through toComp, to check the layer rotation too.
+    lines.push(`var q${k} = pc${k}.layers.addNull(); q${k}.threeDLayer = true; q${k}.name = "Q"; var qg${k} = q${k}.property("ADBE Transform Group"); qg${k}.property("ADBE Position").setValuesAtTimes([0, ${END}], [[${W / 2 + 60}, ${H / 2 - 40}, 150], [${W / 2 - 80}, ${H / 2 + 30}, -120]]); qg${k}.property("ADBE Orientation").setValue([20, -35, 10]); qg${k}.property("ADBE Rotate X").setValuesAtTimes([0, ${END}], [15, -25]); qg${k}.property("ADBE Rotate Y").setValuesAtTimes([0, ${END}], [-30, 40]); qg${k}.property("ADBE Rotate Z").setValuesAtTimes([0, ${END}], [5, 60]); qg${k}.property("ADBE Scale").setValue([120, 80, 150]); qg${k}.property("ADBE Anchor Point").setValue([10, -20, 30]);`);
+    lines.push(`var qp${k} = pc${k}.layers.addNull(); qp${k}.name = "QProbe"; var qtruth${k} = []; var qlocal = [[100, 0, 0], [0, 80, 0], [40, -60, 90]]; for (var qi = 0; qi < qlocal.length; qi++) { qp${k}.property("ADBE Transform Group").property("ADBE Position").expression = 'thisComp.layer("Q").toComp([' + qlocal[qi].join(",") + '])'; var qrow = []; for (var qt = 0; qt < ${PROJ_TIMES.length}; qt++) { var qv = qp${k}.property("ADBE Transform Group").property("ADBE Position").valueAtTime(${JSON.stringify(PROJ_TIMES)}[qt], false); qrow.push([qv[0], qv[1]]); } qtruth${k}.push(qrow); } qp${k}.remove();`);
+    // The camera's own values at the same times, for checking the maths offline.
+    lines.push(`var camv${k} = []; for (var tj = 0; tj < ${PROJ_TIMES.length}; tj++) { var tt = ${JSON.stringify(PROJ_TIMES)}[tj]; var g = cam${k}.property("ADBE Transform Group"); camv${k}.push({ position: g.property("ADBE Position").valueAtTime(tt, false), poi: g.property("ADBE Anchor Point").valueAtTime(tt, false), orientation: g.property("ADBE Orientation").valueAtTime(tt, false), rx: g.property("ADBE Rotate X").valueAtTime(tt, false), ry: g.property("ADBE Rotate Y").valueAtTime(tt, false), rz: g.property("ADBE Rotate Z").valueAtTime(tt, false), zoom: cam${k}.property("ADBE Camera Options Group").property("ADBE Camera Zoom").valueAtTime(tt, false) }); }`);
+    lines.push(`ids.proj.push({ id: pc${k}.id, name: "${c.name}", two_node: ${c.twoNode}, truth: truth${k}, cam: camv${k}, q_truth: qtruth${k} });`);
+  });
+  return lines.join("\n");
+}
+
+async function stageProjection(ids) {
+  const out = [];
+  for (const c of ids.proj ?? []) {
+    let worst = 0;
+    let sum = 0;
+    let n = 0;
+    const bad = [];
+    for (let ti = 0; ti < PROJ_TIMES.length; ti++) {
+      const r = await call("ae_scene_3d_report", { comp_id: c.id, time: PROJ_TIMES[ti] });
+      for (let pi = 0; pi < PROJ_POINTS.length; pi++) {
+        const e = (r.layers_by_depth ?? []).find((x) => x.name === `P${pi}`);
+        const truth = c.truth[ti][pi];
+        if (!e?.screen) {
+          bad.push(`P${pi}@${PROJ_TIMES[ti]}: no screen`);
+          continue;
+        }
+        const d = dist(e.screen, truth);
+        sum += d;
+        n++;
+        if (d > worst) worst = d;
+        if (d > 0.5 && bad.length < 6) bad.push(`P${pi}@${PROJ_TIMES[ti]}: node [${e.screen}] ae [${truth.map(r3)}]`);
+      }
+    }
+    // The rotated layer: ae_scene_3d_report gives its anchor's screen point; the local points need the maths, done in the analysis below.
+    out.push({ camera: c.name, mean_px: n ? r3(sum / n) : null, max_px: r3(worst), points: n, examples: bad, q_truth: c.q_truth, raw: { two_node: c.two_node, times: PROJ_TIMES, points: PROJ_POINTS.map((p) => [p[0] + W / 2, p[1] + H / 2, p[2]]), comp: [W, H], cam: c.cam, truth: c.truth } });
+  }
+  return out;
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -682,6 +750,7 @@ async function main() {
       ...SHOTS.map(shotJsx),
       stageBJsx(),
       grainCurveJsx(),
+      projectionJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -746,6 +815,10 @@ async function main() {
     report.grain = await stageGrain(ids, expect);
     const g = report.grain;
     console.log(`grain         ${g.ok ? `plate ${g.after?.plate_ring.sigma} (lag1 ${g.after?.plate_ring.lag1_corr}), patch before ${g.before?.patch.sigma}, after ${g.after?.patch.sigma} (lag1 ${g.after?.patch.lag1_corr}); ratio ${g.sigma_ratio_after}; tool size ${g.tool?.size} (${g.tool?.size_from}), intensity ${g.tool?.start_intensity} -> ${g.tool?.final_intensity}` : g.message ?? g.raw}`);
+  }
+  if (want("projection")) {
+    report.projection = await stageProjection(ids);
+    for (const p of report.projection) console.log(`projection    ${p.camera.padEnd(9)} node vs AE toComp: mean ${p.mean_px}px max ${p.max_px}px over ${p.points}${p.examples.length ? `; ${p.examples.join("; ")}` : ""}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);

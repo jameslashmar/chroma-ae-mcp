@@ -17,9 +17,9 @@
  *
  * ExtendScript has no toWorld/fromWorld, so the report's world positions are
  * worked out here in Node from each layer's transform at the time, with the
- * same matrix maths ae_annotate_frame uses (annotate.ts). The camera's X/Y
- * rotation signs there are unmeasured; so is a parented two-node camera's
- * point of interest.
+ * same matrix maths ae_annotate_frame uses (annotate.ts), checked against AE's
+ * own toComp for one- and two-node cameras with every rotation. A parented two-node camera's
+ * point of interest is still unmeasured.
  */
 
 import { z } from "zod";
@@ -575,7 +575,6 @@ export function analyseScene(read: SceneRead, cameraId?: number) {
     );
   }
   if (camLayer && camLayer.parent_id !== null) notes.push("The camera is parented: its point of interest and rotation signs are unmeasured through a parent, so treat the depths as approximate.");
-  if (camLayer?.camera?.two_node) notes.push("X and Y rotation signs are unmeasured; a two-node camera that also has rotation values may be off.");
   if (read.active_camera_beyond_list) warnings.push("The active camera is past the layers that were read, so depths are measured from AE's default camera instead.");
   if (read.truncated) warnings.push(`The comp has ${read.total_layers} layers; only the first ${read.layers.length} were read.`);
   for (const u of unresolved) warnings.push(`"${u.name}" skipped: ${u.reason}`);
@@ -751,7 +750,7 @@ export const cameraTools: ToolDefinition<any>[] = [
       "which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. " +
       "Also lists the lights (`lights`: type including environment, the environment light's source layer, intensity, colour, cone, shadows; warns about an environment light with no source, with a 3D source, or in a comp whose renderer is not Advanced 3D) and the 3D model and parametric mesh layers (`models`). " +
       "Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; " +
-      "X/Y rotation signs and a parented camera's point of interest are unmeasured, so rotated or parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " +
+      "Screen positions match AE's own toComp for one- and two-node cameras with any rotation; a parented camera's point of interest is unmeasured, so parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeScene3dReportSchema,
     handler: async (args: z.infer<typeof AeScene3dReportSchema>, ctx) => {

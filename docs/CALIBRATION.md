@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -46,6 +46,10 @@ Add Grain on 50% gray, measured per pixel over 6 frames:
 Per-pixel noise matches Size 0.25; AE's default Size 1 is clumped. The old first guess (sigma / 20) started 7x too low at Size 1. `ae_patch_grain` now picks Size from the plate's grain coarseness (the neighbour correlation of a two-frame difference) and the first Intensity from the table for that Size. On a plate with Noise 10%: Size 0.253, patch correlation 0.001 against the plate's 0.000, sigma 0.94 of the plate's (0.86 with the old defaults, at correlation 0.77).
 
 The table is from mid-gray; on a photograph the sigma per Intensity at Size 0.25 came out higher, so the tuning rounds still matter.
+
+### 3D projection (`ae_scene_3d_report`, `ae_annotate_frame` with `include_3d`)
+
+Eight 3D points and a rotated, scaled 3D layer, seen through a one-node camera (orientation and X/Y/Z rotation keyed) and a two-node camera (point of interest and rotations keyed), against where AE's own `toComp` puts them at four times. The maths used to apply X, Y and Z rotation in the wrong order: **up to 472 px off** (82 px mean) for the one-node camera, 65 px for the two-node one. Measured rule, now in `annotate.ts`: a layer's rotation is `Orientation(X . Y . Z) . Rotation(X . Y . Z)` with the usual right-hand matrices and all signs positive (Z acts first on a point); a two-node camera looks at its point of interest with +Y down, then the same rotations. Now 0.000 px for the points and under 0.006 px for the rotated layer; `server/test/projection-ae.test.ts` pins it with AE's numbers.
 
 ### Inpaint (`ae_inpaint_plate`)
 

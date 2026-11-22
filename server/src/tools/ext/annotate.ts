@@ -207,9 +207,9 @@ export interface HostRead {
 export type Mat4 = number[];
 export type Vec3 = [number, number, number];
 
-// How AE's X and Y Rotation signs map to the right-hand rule in a y-down, z-away
-// frame. Z matches the 2D code that is already measured (positive is clockwise
-// on screen); X and Y are unmeasured, so a live check can flip them here.
+// AE's rotation signs in its y-down, z-away frame: all positive with the usual
+// right-hand matrices. Measured against AE's own toComp (qa/calibrate-compositing.mjs,
+// projection: one- and two-node cameras with every rotation, 0.000 px).
 const ROT_SIGN = { x: 1, y: 1, z: 1 };
 
 export function mat4Identity(): Mat4 {
@@ -297,10 +297,14 @@ const num = (v: number[] | undefined, i: number, fill: number): number => {
   return typeof x === "number" && Number.isFinite(x) ? x : fill;
 };
 
-/** Rotation of a 3D layer: orientation first, then X, Y and Z Rotation. */
+/**
+ * Rotation of a 3D layer, measured against AE's toComp: Orientation(X . Y . Z) . Rotation(X . Y . Z).
+ * Applied to a point, Z Rotation acts first, then Y, then X, then the orientation the same way.
+ * (Until 2026-11 this was the reverse order, up to 470 px off for a rotated camera.)
+ */
 function layerRotation(t: HostTransform): Mat4 {
-  const ori = mat4Mul(rotationZ(num(t.orientation, 2, 0)), mat4Mul(rotationY(num(t.orientation, 1, 0)), rotationX(num(t.orientation, 0, 0))));
-  return mat4Mul(rotationZ(t.rotation_z), mat4Mul(rotationY(t.rotation_y), mat4Mul(rotationX(t.rotation_x), ori)));
+  const ori = mat4Mul(rotationX(num(t.orientation, 0, 0)), mat4Mul(rotationY(num(t.orientation, 1, 0)), rotationZ(num(t.orientation, 2, 0))));
+  return mat4Mul(ori, mat4Mul(rotationX(t.rotation_x), mat4Mul(rotationY(t.rotation_y), rotationZ(t.rotation_z))));
 }
 
 /**
@@ -932,7 +936,7 @@ export const ANNOTATE_NOTES = [
 ];
 
 export const NOTE_3D =
-  "3D boxes are projected through the active camera (or AE's default camera) by the tool's own maths. This is an estimate until checked against the render: X/Y rotation signs and the rotation order are unmeasured.";
+  "3D boxes are projected through the active camera (or AE's default camera) by the tool's own maths. The camera and layer maths matches AE's own toComp (measured: one- and two-node cameras with every rotation, rotated and scaled layers); a parented camera's point of interest is still unmeasured.";
 
 interface Shot {
   read: HostRead;
@@ -946,7 +950,7 @@ export const annotateTools: ToolDefinition<any>[] = [
       "READ-ONLY. Renders one frame and draws on it what After Effects does not show an agent: each layer's outline (a rotated box), a `<number> <NAME>` tag, an anchor cross and the action/title-safe rectangles, so you and the user can point at the same 'Shape Layer 12'. " +
       "Returns `path` (the annotated PNG, shrunk to `max_size` before drawing so tags stay sharp) and `frames[].layers`, the index from tag number (= layer index) to layer id, name, kind, parent, box corners and anchor in comp pixels, and why a layer has no box. " +
       "Options: `layers` filters to visible, selected or all layers (and `layer_ids`); `zoom` crops a comp-pixel region from the full-size render and enlarges it up to 8x; `grid` and `rulers` add a coordinate grid; `time_b` makes a pair, A beside B; `stats` returns mean colour and luma per quadrant or grid cell (a brand colour, a fade) as numbers. Transparency shows as a checkerboard. " +
-      "Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera by an unmeasured, experimental estimate (`projection: '3d-estimated'`). " +
+      "Boxes are content rects: effects, masks, mattes and motion blur are not in them. 3D layers come back with `box: null` unless `include_3d: true`, which projects them through the camera with maths checked against AE's own toComp (`projection: '3d-estimated'`: content rects only, no effects or masks). " +
       "Strictly read-only: the comp's time, resolution, selection and solo are not touched, and nothing lands on the undo stack. Each frame is a render, so heavy comps take a while. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeAnnotateFrameSchema,
