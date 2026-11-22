@@ -72,4 +72,4 @@ Emre's Windows PC, AE 26.2.1, Node 22.23.2, branch `mac/live-fixes-2026-11-22` (
 9. **Calibration:** projection 0.001 px max (Mac 0.000); the Add Grain curve is the same as the Mac's to two decimals, so no per-platform `ADD_GRAIN_CURVE`. Plate and other numbers in `docs/CALIBRATION.md`.
 10. **New tools:** all ran in smoke wave 6 and the calibration and passed. Wave 6: projection 0.0006 px, solve check mean 0.028 px, element colour match left 1.17 levels, slip along `region_track` 0.029 px, matte check clean and the copy removed.
 
-**Then (evidence):** `6a3637e`, `qa/live-evidence.mjs` on `de8388a`: 566/578 passed, 13 skipped, the 12 aerender failures explained in the notes, the in-AE render passed (2 items DONE, 5 frames, fps and size match).
+**Then (evidence):** `6a3637e`, `qa/live-evidence.mjs` on `de8388a`: 566/578 passed, 13 skipped, the 12 aerender failures explained in the notes, the in-AE render passed (2 items DONE, 5 frames, fps and size match). After smoke checks were added under every new tool and family name: `b73b523` on `7cb337d`, 579/591 passed, 13 skipped, the same 12 explained failures.

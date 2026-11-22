@@ -4,7 +4,7 @@
 
 ### Where it is
 - **Branch.** `mac/live-fixes-2026-11-22` on the private remote `xmadbad/chroma-ae-mcp`. It is not on origin and not merged. It is 37 commits on top of origin/main: 33 from the Mac session (`cd21c06` to `b3a9b2a`) and 4 from the Windows run (`5b903d1`, `a4d01e1`, `de8388a`, `6a3637e`). The tip is `6a3637e` plus the commit that carries these docs.
-- **Evidence.** `6a3637e` is the live evidence for `de8388a` (Emre's Windows PC, AE 26.2.1): 566 of 578 passed, 13 skipped, the 12 failures explained in the notes, the in-AE render passed. The Mac's evidence is the commit bodies and `docs/WINDOWS-FOLLOWUP.md`.
+- **Evidence.** `b73b523` is the live evidence for `7cb337d` (Emre's Windows PC, AE 26.2.1): 579 of 591 passed, 13 skipped, the 12 failures (the aerender family) explained in the notes, the in-AE render passed. `7cb337d` and `020f932` give every new tool and family name a smoke check of its own (each family compared with its member under the old name), which the PR's evidence check requires. The earlier `6a3637e` (566 of 578, on `de8388a`) predates those steps. The Mac's evidence is the commit bodies and `docs/WINDOWS-FOLLOWUP.md`.
 - **To do.** It needs a PR to main. Detail on the Mac side is in `docs/WINDOWS-FOLLOWUP.md` (what changed, the checklist, now with Windows results) and `docs/CALIBRATION.md` (both platforms).
 
 ### What the Mac session did
