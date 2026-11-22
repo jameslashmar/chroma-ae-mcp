@@ -974,7 +974,8 @@ describe("ae_cleanplate_setup (build)", () => {
     const still = path.join(plates, "Plate still f4.png");
     expect(out.still_path).toBe(still);
     expect(fs.existsSync(still)).toBe(true);
-    expect(fs.readdirSync(plates)).toEqual(["Plate still f4.png"]);
+    // The still, and a hidden copy as rendered that the reload compares the painted file with.
+    expect(fs.readdirSync(plates).sort()).toEqual([".chroma-original-Plate still f4.png", "Plate still f4.png"]);
     expect(calls.find((c) => c.fn === "cleanplateBuild")!.args.still_path).toBe(still);
     expect(out.imported_item).toMatchObject({ id: 55 });
     expect(out.temp_comp).toEqual({ copy_removed: true });
