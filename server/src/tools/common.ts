@@ -10,7 +10,7 @@ import type { SettingsStore } from "../settings.js";
 export const AGENT_SAFETY_GUIDANCE =
   "IMPORTANT: (1) Always re-read project/comp state before writing. " +
   "(2) Long synchronous loops in ExtendScript freeze After Effects' UI. " +
-  "(3) Jay may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.";
+  "(3) The user may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.";
 
 export const ExpectSchema = z
   .object({

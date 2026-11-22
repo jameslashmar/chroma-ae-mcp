@@ -5718,7 +5718,7 @@ var init_common = __esm({
     init_quarantine();
     init_receipts();
     init_queue();
-    AGENT_SAFETY_GUIDANCE = "IMPORTANT: (1) Always re-read project/comp state before writing. (2) Long synchronous loops in ExtendScript freeze After Effects' UI. (3) Jay may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state\u2014do NOT retry with stale expectations.";
+    AGENT_SAFETY_GUIDANCE = "IMPORTANT: (1) Always re-read project/comp state before writing. (2) Long synchronous loops in ExtendScript freeze After Effects' UI. (3) The user may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state\u2014do NOT retry with stale expectations.";
     ExpectSchema = external_exports.object({
       project_path: external_exports.string().min(1).describe(
         "Expected absolute path to the open .aep project file, or '<unsaved>' if the project has not been saved yet."
@@ -9019,7 +9019,7 @@ function createAerenderTools(options = {}) {
   return [
     {
       name: "ae_aerender_start",
-      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. Before the spawn it checks the project\'s image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: "block"` refuses (also when the check could not finish), "off" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. If aerender fails to start ("never started rendering") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects\' own render of the queued Render Queue items; it keeps AE busy, so tell the user first), or offer Media Encoder after asking the user (`engine: "media_encoder"`, `user_confirmed: true`; AE stays free, the SAVED project is rendered). Never ask the user to press Render. ' + AGENT_SAFETY_GUIDANCE,
+      description: 'Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to renders/<job>.log in the data folder (ae_status: state_dir) and tracking the job in a JSON-mirrored registry. Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect\'s reader right before the spawn and refused with the reason otherwise. output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. Also: continue_on_missing_footage (-continueOnMissingFootage), mem_usage (-mem_usage), log_level (-v; leave it out to keep the PROGRESS lines) and sound (-sound). Never uses -reuse. Start gate: only one aerender job of this server runs at a time, a new one starts at least 20 s after the last one exited, and not while an AfterFX.com engine of an earlier job of this server is still alive (so a new aerender does not start while the last one\'s engine is still shutting down). An engine still alive 10 s after its own aerender exited is ended, since aerender often leaves it idle.A job that has to wait is not refused: it returns state "running" with phase "queued" (pid null, queued_reason says why) and starts by itself on a Node timer, without holding the After Effects queue; ae_aerender_status shows phase and start_attempts. If an earlier job\'s engine is still alive 120 s after the job began to wait for it, the queued job fails and names that process, which is not touched (an engine of a job that is still running never fails the wait). Startup watchdog: a job whose log shows no render PROGRESS line (any PROGRESS line other than aerender\'s "Launching After Effects...") 45 s after its aerender was spawned is looked at: the CPU time of its own AfterFX.com engine (the process whose parent is that aerender) is sampled twice, 10 s apart. Only a job whose engine is gone or idle in both samples is stopped (that aerender and that engine, nothing else; never AfterFX.exe or another engine) and started again, at most twice; after the third attempt it is failed with an error that says what happened. An engine that is working (a big project opening slowly) is never stopped, however long it takes, and when the process list cannot be read the job keeps waiting. A job that shows render progress is not touched by it; with log_level "errors" (no PROGRESS lines to read) the start watchdog is off. After the start every job gets a slow check once a minute: if its engine has been gone for 5 minutes while aerender neither exits nor writes to its log, the job is failed, so a dead engine cannot hold the only slot for ever. Before the spawn it checks the project\'s image sequences for missing frames and reads the GPU: the result may hold `sequence_check` (a warning in `warnings`, the render still starts; `sequence_check: "block"` refuses (also when the check could not finish), "off" skips) and `resource_warnings` (GPU nearly full, or another app such as Cinema 4D running). If `resource_warnings` is present, tell the user before continuing. If aerender fails to start ("never started rendering") or the project cannot be saved, use `ae_render_queue_render` instead (After Effects\' own render of the queued Render Queue items; it keeps AE busy, so tell the user first), or offer Media Encoder after asking the user (`engine: "media_encoder"`, `user_confirmed: true`; AE stays free, the SAVED project is rendered). Never ask the user to press Render. ' + AGENT_SAFETY_GUIDANCE,
       schema: AeAerenderStartSchema,
       handler: async (args, ctx) => {
         ctx.quarantine.assertClear();
@@ -11305,7 +11305,7 @@ async function verifyTargetGuard(ctx, expect, opId) {
     throw new BridgeError({
       kind: "guard",
       op_id: opId,
-      message: `Target guard refused mutation: expected project_path "${expect.project_path}", but After Effects has "${actualPath}" open. Jay may be editing live \u2014 stop and re-read state, do not retry blindly.`,
+      message: `Target guard refused mutation: expected project_path "${expect.project_path}", but After Effects has "${actualPath}" open. The user may be editing live \u2014 stop and re-read state, do not retry blindly.`,
       expected: expect,
       actual: {
         project_path: actualPath,
@@ -15833,7 +15833,7 @@ function evaluateRespondPolicy(params) {
     return {
       allowed: false,
       error: "refused_not_caused_by_our_op",
-      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided."
+      message: "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting the user was provided."
     };
   }
   if (isDestructiveButton(params.button)) {
@@ -15841,7 +15841,7 @@ function evaluateRespondPolicy(params) {
       return {
         allowed: false,
         error: "refused_destructive_button",
-        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`
+        message: `Refused to click destructive button "${params.button}": buttons matching ${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting the user's explicit instruction.`
       };
     }
   }
@@ -15976,7 +15976,7 @@ var init_dialogs = __esm({
     init_dialog_geometry();
     init_win_exe();
     import_meta2 = {};
-    JAY_DIALOG_RULES = "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
+    JAY_DIALOG_RULES = "The user's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). (2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless the user gave an explicit user_instruction. (3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting the user's explicit instruction.";
     DESTRUCTIVE_BUTTON_PATTERN = /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
     DIALOG_EXEC_TIMEOUT_MS = 15e3;
     MAX_DIALOG_TEXT_CHARS = 4e3;
@@ -15989,7 +15989,7 @@ var init_dialogs = __esm({
     MAX_PNG_BYTES = 4 * 1024 * 1024;
     AeDialogsSchema = external_exports.object({
       screenshots: external_exports.boolean().default(true).optional().describe(
-        "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true). One file per dialog handle, overwritten on each call."
+        "Whether to capture a PNG screenshot of each open dialog into dialogs/ in the data folder (ae_status: state_dir) (default: true). One file per dialog handle, overwritten on each call."
       )
     });
     AeDialogRespondSchema = external_exports.object({
@@ -16007,14 +16007,14 @@ var init_dialogs = __esm({
         "Must be true (along with user_instruction) to press destructive buttons matching /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i."
       ),
       user_instruction: external_exports.string().optional().describe(
-        "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
+        "Verbatim quote of the user's explicit instruction authorizing answering an external dialog or pressing a destructive button."
       )
     });
     RESULT_TEXT_CHARS = 500;
     dialogsTools = [
       {
         name: "ae_dialogs",
-        description: 'READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE\'s blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, caused_by_op and kind (info: one OK button, nothing to decide; question; destructive: a button that loses work; advisory only). AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). The button row is the bottom row of the dialog only (a wrapped last line of the message is never a button) and the DEFAULT button is the one outlined in blue (buttons[].default, default_button, default_source "ring" or "only_button"; null when no outline was found). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: Cancel/No/Close, and the default button when it is OK/Yes/Continue. Look at the screenshot when in doubt. ' + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+        description: 'READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE\'s blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in dialogs/ in the data folder (ae_status: state_dir)), first_seen, caused_by_op and kind (info: one OK button, nothing to decide; question; destructive: a button that loses work; advisory only). AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: "ocr"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). The button row is the bottom row of the dialog only (a wrapped last line of the message is never a button) and the DEFAULT button is the one outlined in blue (buttons[].default, default_button, default_source "ring" or "only_button"; null when no outline was found). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: Cancel/No/Close, and the default button when it is OK/Yes/Continue. Look at the screenshot when in doubt. ' + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
         schema: AeDialogsSchema,
         handler: async (args) => {
           if (!dialogsSupported()) {
@@ -16045,7 +16045,7 @@ var init_dialogs = __esm({
       },
       {
         name: "ae_dialog_respond",
-        description: "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask Jay to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell Jay what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask Jay. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
+        description: "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask the user to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell the user what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask the user. Logs every response to dialogs/responses.jsonl in the data folder (ae_status: state_dir). " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
         schema: AeDialogRespondSchema,
         handler: async (args) => {
           if (!dialogsSupported()) {
@@ -16085,7 +16085,7 @@ var init_dialogs = __esm({
               return {
                 ok: false,
                 error: "refused_destructive_dialog",
-                message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`,
+                message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
                 handle: args.handle,
                 button: args.button
               };
@@ -16142,7 +16142,7 @@ var init_dialogs = __esm({
                       } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
                         refuse2(
                           "refused_destructive_dialog",
-                          `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`
+                          `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
                         );
                       } else {
                         psArgs.push("-Key", decision.action);
@@ -28886,10 +28886,10 @@ var init_frames = __esm({
         "Per-pixel channel difference threshold in [0..1] above which a pixel is counted as changed (default: 0.02)."
       ),
       write_diff_png: external_exports.boolean().default(false).describe(
-        "If true, writes a visual diff PNG for each compared pair to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "If true, writes a visual diff PNG for each compared pair to frames/ in the data folder (ae_status: state_dir)."
       ),
       diff_png: external_exports.boolean().optional().describe(
-        "Optional alias for `write_diff_png` to write diff PNGs to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "Optional alias for `write_diff_png` to write diff PNGs to frames/ in the data folder (ae_status: state_dir)."
       )
     }).superRefine((val, ctx) => {
       const hasComp = val.comp_id !== void 0;
@@ -28933,7 +28933,7 @@ var init_frames = __esm({
     framesTools = [
       {
         name: "ae_compare_frames",
-        description: "Compare 2 to 20 composition frames captured at `times` (via `snapshotFrame` + `waitForFreshPng`) or two existing PNG files (`a_path`, `b_path`). Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to `%LOCALAPPDATA%\\chroma-ae-mcp\\frames`. " + AGENT_SAFETY_GUIDANCE,
+        description: "Compare 2 to 20 composition frames captured at `times` (via `snapshotFrame` + `waitForFreshPng`) or two existing PNG files (`a_path`, `b_path`). Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to frames/ in the data folder (ae_status: state_dir). " + AGENT_SAFETY_GUIDANCE,
         schema: AeCompareFramesSchema,
         handler: async (args, ctx) => {
           const threshold = args.threshold ?? 0.02;
@@ -29310,7 +29310,7 @@ var init_render = __esm({
     renderTools = [
       {
         name: "ae_snapshot_frame",
-        description: "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
+        description: "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
         schema: AeSnapshotFrameSchema,
         handler: async (args, ctx) => {
           const scale = args.scale ?? 0.5;
@@ -37594,7 +37594,7 @@ function describeError(err) {
 function nextHint(run) {
   const cur = currentStage(run);
   if (run.state === "cancelled") return "The run was cancelled. Start a new one with action 'start'.";
-  if (!cur) return "Delivery is complete. Show Jay the report; the files are listed under outputs.";
+  if (!cur) return "Delivery is complete. Show the user the report; the files are listed under outputs.";
   if (run.state === "waiting") return `Stage "${cur.id}" is still running. Call ae_deliver_step with action 'next' again to check it.`;
   if (run.state === "blocked") {
     if (isPollable(cur) && cur.status !== "running") {
@@ -37603,8 +37603,8 @@ function nextHint(run) {
       }
       return `Stopped at stage "${cur.id}". Call ae_deliver_step with action 'next' to check its render or audio job again. 'retry' starts a new one, and is refused while the old one may still be running.`;
     }
-    if (cur.status === "unavailable") return `Stage "${cur.id}" needs ${cur.tool}, which this server doesn't have. Make it optional in the recipe and retry, or skip it with an acknowledgement if Jay agrees.`;
-    return `Stopped at stage "${cur.id}". Fix what it reports, then call ae_deliver_step with action 'retry'. Skip it (action 'skip', with acknowledge) only if Jay accepts what it found.`;
+    if (cur.status === "unavailable") return `Stage "${cur.id}" needs ${cur.tool}, which this server doesn't have. Make it optional in the recipe and retry, or skip it with an acknowledgement if the user agrees.`;
+    return `Stopped at stage "${cur.id}". Fix what it reports, then call ae_deliver_step with action 'retry'. Skip it (action 'skip', with acknowledge) only if the user accepts what it found.`;
   }
   return "Call ae_deliver_step with action 'next' to run the remaining stages.";
 }
@@ -38135,7 +38135,7 @@ async function pollLoudness(env, st) {
   const tool = await lookupTool(st.def.tool);
   const jobId = st.job_ids?.[0];
   if (!tool || !jobId) {
-    Object.assign(st, { status: "error", error: "unavailable", summary: `${st.def.tool} is not registered, so the audio render can't be followed. Skip this stage with an acknowledgement if Jay agrees.` });
+    Object.assign(st, { status: "error", error: "unavailable", summary: `${st.def.tool} is not registered, so the audio render can't be followed. Skip this stage with an acknowledgement if the user agrees.` });
     return;
   }
   const args = { job_id: jobId, wait_seconds: 10 };
@@ -38694,12 +38694,12 @@ var init_deliver = __esm({
     });
     AeDeliverStepSchema = external_exports.object({
       action: external_exports.enum(["start", "next", "retry", "skip", "cancel"]).describe(
-        "start: a new run from a recipe, then stages run until one blocks or waits. next: continue the run (polls a render that is in flight first). retry: run the stopped stage again, after you fixed what it reported. skip: pass the stopped stage with a written acknowledgement (only when Jay accepts what it found). cancel: stop the run and any render it started."
+        "start: a new run from a recipe, then stages run until one blocks or waits. next: continue the run (polls a render that is in flight first). retry: run the stopped stage again, after you fixed what it reported. skip: pass the stopped stage with a written acknowledgement (only when the user accepts what it found). cancel: stop the run and any render it started."
       ),
       recipe: RecipeNameSchema.optional().describe("start: which recipe."),
       run_id: external_exports.string().regex(/^dl_[a-z0-9_]+$/).optional().describe("The run. Default: the latest run that is not done or cancelled."),
       stage: StageIdSchema.optional().describe("retry / skip: the stopped stage's id. Optional; it must be the stage the run stopped at."),
-      acknowledge: external_exports.string().min(5).max(500).optional().describe("skip: why the stopped stage may be passed (kept in the record and the report). Never skip a blocker on your own: ask Jay."),
+      acknowledge: external_exports.string().min(5).max(500).optional().describe("skip: why the stopped stage may be passed (kept in the record and the report). Never skip a blocker on your own: ask the user."),
       max_stages: external_exports.number().int().min(1).max(MAX_STAGES).optional().describe("Run at most this many stages in this call. Default: until one blocks, waits or the recipe ends."),
       dry_run: external_exports.boolean().optional().describe("start: show the stages, their tools and whether each is available, check the arguments that don't depend on the render, and write nothing."),
       expect: DeliverExpectSchema
@@ -38741,7 +38741,7 @@ var init_deliver = __esm({
       },
       {
         name: "ae_deliver_step",
-        description: "Run a delivery recipe one safe step at a time. 'start' makes a run from a recipe and runs its stages in order until one blocks, a render is in flight or max_stages is reached; 'next' continues (it follows a render that is running first), 'retry' runs the stopped stage again after you fixed what it reported, 'skip' passes it with a written acknowledgement (only when Jay accepts it), 'cancel' ends the run and its render. Each stage is an existing tool run through its own handler (guard, undo group and read-back stay that tool's); a checkpoint is taken before each stage that writes. A blocker stops the run; a warning is listed and the run goes on. A tool that isn't registered is reported as 'unavailable' (optional stages go on). The run is recorded in <project>.deliver.json, so it survives a restart, and every call returns the stage table and, when done or stopped, a report. dry_run on start shows the plan without running it. Each stage is its own undo step; the way back is the checkpoint (ae_checkpoint_revert). A verify or scrub that leaves its imported render or temporary comp in the project, or can't confirm it removed them, blocks the run and can't be retried (inspect, then skip). A collect with a zip waits for the zip and blocks if it failed. A render batch is not retried (use ae_render_batch_resume, then next). Up to 500 rendered files are followed; long lists are cut to 40 rows with outputs_total. expect takes project_path only. " + AGENT_SAFETY_GUIDANCE,
+        description: "Run a delivery recipe one safe step at a time. 'start' makes a run from a recipe and runs its stages in order until one blocks, a render is in flight or max_stages is reached; 'next' continues (it follows a render that is running first), 'retry' runs the stopped stage again after you fixed what it reported, 'skip' passes it with a written acknowledgement (only when the user accepts it), 'cancel' ends the run and its render. Each stage is an existing tool run through its own handler (guard, undo group and read-back stay that tool's); a checkpoint is taken before each stage that writes. A blocker stops the run; a warning is listed and the run goes on. A tool that isn't registered is reported as 'unavailable' (optional stages go on). The run is recorded in <project>.deliver.json, so it survives a restart, and every call returns the stage table and, when done or stopped, a report. dry_run on start shows the plan without running it. Each stage is its own undo step; the way back is the checkpoint (ae_checkpoint_revert). A verify or scrub that leaves its imported render or temporary comp in the project, or can't confirm it removed them, blocks the run and can't be retried (inspect, then skip). A collect with a zip waits for the zip and blocks if it failed. A render batch is not retried (use ae_render_batch_resume, then next). Up to 500 rendered files are followed; long lists are cut to 40 rows with outputs_total. expect takes project_path only. " + AGENT_SAFETY_GUIDANCE,
         schema: AeDeliverStepSchema,
         handler: deliverStep
       },
@@ -69016,7 +69016,7 @@ var init_quarantine2 = __esm({
     quarantineTools = [
       {
         name: "ae_quarantine_status",
-        description: "Read the list of uncertain-outcome mutating operations currently in quarantine (`%LOCALAPPDATA%\\chroma-ae-mcp\\quarantine.json`). While any op is quarantined, all mutating tools refuse to run. " + AGENT_SAFETY_GUIDANCE,
+        description: "Read the list of uncertain-outcome mutating operations currently in quarantine (quarantine.json in the data folder (ae_status: state_dir)). While any op is quarantined, all mutating tools refuse to run. " + AGENT_SAFETY_GUIDANCE,
         schema: AeQuarantineStatusSchema,
         handler: async (_args, ctx) => {
           const entries2 = ctx.quarantine.list();
@@ -71714,7 +71714,7 @@ var PanelHost = class {
           const x = d;
           const btns = (x.buttons ?? []).map((b) => b.name).filter(Boolean).join(" | ");
           return `"${x.title ?? "untitled"}"${btns ? ` [${btns}]` : ""}`;
-        }).join("; ") + ". Read them with ae_dialogs; answer with ae_dialog_respond only under Jay's rules." : "";
+        }).join("; ") + ". Read them with ae_dialogs; answer with ae_dialog_respond only under the user's rules." : "";
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,

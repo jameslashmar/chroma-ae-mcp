@@ -335,8 +335,8 @@ describe("schemas", () => {
 
   it("the mutating tools say so in their descriptions", () => {
     expect(planarTools.map((t) => t.name)).toEqual(["ae_track_multi", "ae_track_read", "ae_track_apply"]);
-    for (const name of ["ae_track_multi", "ae_track_apply"]) expect(tool(name).description).toContain("Jay may be editing live");
-    expect(tool("ae_track_read").description).not.toContain("Jay may be editing live");
+    for (const name of ["ae_track_multi", "ae_track_apply"]) expect(tool(name).description).toContain("The user may be editing live");
+    expect(tool("ae_track_read").description).not.toContain("The user may be editing live");
   });
 });
 

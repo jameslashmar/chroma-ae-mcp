@@ -93,13 +93,13 @@ export const AeCompareFramesSchema = z
       .boolean()
       .default(false)
       .describe(
-        "If true, writes a visual diff PNG for each compared pair to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "If true, writes a visual diff PNG for each compared pair to frames/ in the data folder (ae_status: state_dir)."
       ),
     diff_png: z
       .boolean()
       .optional()
       .describe(
-        "Optional alias for `write_diff_png` to write diff PNGs to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "Optional alias for `write_diff_png` to write diff PNGs to frames/ in the data folder (ae_status: state_dir)."
       ),
   })
   .superRefine((val, ctx) => {
@@ -499,7 +499,7 @@ export const framesTools: ToolDefinition<any>[] = [
     name: "ae_compare_frames",
     description:
       "Compare 2 to 20 composition frames captured at `times` (via `snapshotFrame` + `waitForFreshPng`) or two existing PNG files (`a_path`, `b_path`). " +
-      "Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to `%LOCALAPPDATA%\\chroma-ae-mcp\\frames`. " +
+      "Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to frames/ in the data folder (ae_status: state_dir). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCompareFramesSchema,
     handler: async (args: AeCompareFramesArgs, ctx: ToolContext) => {

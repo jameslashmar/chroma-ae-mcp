@@ -655,8 +655,8 @@ describe("schemas", () => {
   it("describes every field and ends the writer's description with the safety guidance", () => {
     const shape = (AeScreenReplaceSchema as any)._def.schema._def.schema.shape ?? (AeScreenReplaceSchema as any)._def.schema.shape;
     expect(Object.keys(shape)).toContain("expansion_pct");
-    expect(tool("ae_screen_replace").description).toMatch(/Jay may be editing live/);
-    expect(tool("ae_screen_corners").description).not.toMatch(/Jay may be editing live/);
+    expect(tool("ae_screen_replace").description).toMatch(/The user may be editing live/);
+    expect(tool("ae_screen_corners").description).not.toMatch(/The user may be editing live/);
     expect(screenrepTools.map((t) => t.name)).toEqual(["ae_screen_corners", "ae_screen_replace"]);
   });
 });

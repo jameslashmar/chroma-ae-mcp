@@ -166,10 +166,10 @@ describe("legibility schemas", () => {
 
   it("exports the three tools, and only the exact one ends its description with the safety guidance", () => {
     expect(legibilityTools.map((t) => t.name)).toEqual(["ae_check_text_overlap", "ae_estimate_legibility", "ae_check_legibility"]);
-    expect(tool("ae_check_legibility").description).toContain("(3) Jay may be editing live");
+    expect(tool("ae_check_legibility").description).toContain("(3) The user may be editing live");
     expect(tool("ae_check_text_overlap").description).toContain("READ-ONLY");
     expect(tool("ae_estimate_legibility").description).toContain("READ-ONLY");
-    expect(tool("ae_estimate_legibility").description).not.toContain("(3) Jay may be editing live");
+    expect(tool("ae_estimate_legibility").description).not.toContain("(3) The user may be editing live");
   });
 });
 

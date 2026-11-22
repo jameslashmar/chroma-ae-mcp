@@ -291,7 +291,7 @@ export class PanelHost implements HostTransport {
                   return `"${x.title ?? "untitled"}"${btns ? ` [${btns}]` : ""}`;
                 })
                 .join("; ") +
-              ". Read them with ae_dialogs; answer with ae_dialog_respond only under Jay's rules."
+              ". Read them with ae_dialogs; answer with ae_dialog_respond only under the user's rules."
             : "";
         throw new BridgeError({
           kind: "timeout",

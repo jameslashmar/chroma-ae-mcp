@@ -26,7 +26,7 @@ export const quarantineTools: ToolDefinition<any>[] = [
   {
     name: "ae_quarantine_status",
     description:
-      "Read the list of uncertain-outcome mutating operations currently in quarantine (`%LOCALAPPDATA%\\chroma-ae-mcp\\quarantine.json`). " +
+      "Read the list of uncertain-outcome mutating operations currently in quarantine (quarantine.json in the data folder (ae_status: state_dir)). " +
       "While any op is quarantined, all mutating tools refuse to run. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeQuarantineStatusSchema,

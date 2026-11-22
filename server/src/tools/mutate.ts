@@ -296,7 +296,7 @@ export async function verifyTargetGuard(
     throw new BridgeError({
       kind: "guard",
       op_id: opId,
-      message: `Target guard refused mutation: expected project_path "${expect.project_path}", but After Effects has "${actualPath}" open. Jay may be editing live — stop and re-read state, do not retry blindly.`,
+      message: `Target guard refused mutation: expected project_path "${expect.project_path}", but After Effects has "${actualPath}" open. The user may be editing live — stop and re-read state, do not retry blindly.`,
       expected: expect,
       actual: {
         project_path: actualPath,
