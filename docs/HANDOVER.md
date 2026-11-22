@@ -571,7 +571,7 @@ Each line is a guess the code makes or works around. Where the code can work eit
 | Roto Brush and Track Mask (strokes, propagation, Freeze) | `ae_mask_follow` and `ae_garbage_matte` follow planar motion only. A moving person or hand needs the user's own roto layer, used as `matte_layer` or a holdout. Screens are keyed with `ae_key_greenscreen` |
 | Mocha AE (running it, reading its project data) | The user tracks in Mocha and uses Create Track Data; `ae_track_read` reads the Corner Pin or CC Power Pin keys that leaves. `ae_track_multi` tracks planes inside the MCP |
 | Warp Stabilizer VFX (starting, waiting for or reading the analysis) | `ae_stabilize` from a track made by `ae_track_multi` or read by `ae_track_read` |
-| The 3D Camera Tracker solve | `ae_track_read` reads keys made from it; nothing reads the solve itself |
+| The 3D Camera Tracker solve | Nothing reads it: the Camera Tracker makes 3D nulls and a 3D camera, and `ae_track_read` refuses 3D layers |
 | AE's Tracker panel and Track Motion (driving them) | `ae_track_point` and `ae_track_multi`; `ae_track_read` reads the points an AE Tracker already made |
 | Clone Stamp and other paint strokes | `ae_cleanplate_setup` builds a freeze, still, spatial or time clone patch; the user paints inside the PATCH precomp and `action: "reload"` takes a painted still |
 | Menu commands such as Trim Comp to Work Area through `app.executeCommand` (it does nothing through CEP except Window-menu panels) | Native DOM methods; `ae_comp_settings` trims to the work area itself |

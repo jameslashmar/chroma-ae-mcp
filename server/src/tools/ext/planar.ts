@@ -1981,7 +1981,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Read a track that already exists in the project into the shared track format, and store it under a new `track_id` for ae_track_apply and the other planar tools. Changes nothing in the project. " +
       "Sources: `nulls` (1-8 layers' Position keys, ae_track_point's nulls included), `corner_pin` (a Corner Pin or CC Power Pin's four points, in the layer's own space converted to comp pixels: what Mocha AE's 'Create Track Data' and AE's Perspective Corner Pin tracker leave), `tracker` (AE Tracker track points on a layer), `transform` (a layer's Position/Rotation/Scale keys as a similarity track of its corners), or an existing `track_id`. " +
       "Keys are sampled on the comp's frame grid: the result says how many frames were interpolated, how many keys are off the grid, and which properties are expression-driven. It returns the parameter table it used for pin effects, because those point names are unverified. 3D layers and non-square pixels are refused. " +
-      "Returns the same bounded summary and (with `preview`) contact sheet as ae_track_multi. Mocha's project data and the Warp Stabilizer / 3D Camera Tracker solves cannot be read; only keyframes made from them can.",
+      "Returns the same bounded summary and (with `preview`) contact sheet as ae_track_multi. Mocha's project data and the Warp Stabilizer / 3D Camera Tracker solves cannot be read. Keyframes Mocha or a Warp Stabilizer leave on 2D layers can; the 3D Camera Tracker's nulls and camera are 3D layers, which are refused.",
     schema: AeTrackReadSchema,
     handler: async (args: AeTrackReadArgs, ctx: ToolContext) => {
       const toolName = "ae_track_read";
