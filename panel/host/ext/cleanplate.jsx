@@ -721,7 +721,16 @@
     if (source === "clone_offset") {
       if (!clone) fail("bad_args", "clone_offset needs the clone description");
       if (!isNum(clone.frames)) fail("bad_args", "clone.frames must be a number");
-      if (clone.position) {
+      if (clone.pin) {
+        // The clone as a Corner Pin on the plate copy: it follows rotation, zoom and perspective.
+        checkTimes(clone.pin.times, "clone pin");
+        if (!clone.pin.values) fail("bad_args", "clone pin needs values");
+        var pinRoles = ["ul", "ur", "ll", "lr"];
+        for (var pr = 0; pr < pinRoles.length; pr++) {
+          if (!isArr(clone.pin.values[pinRoles[pr]]) || clone.pin.values[pinRoles[pr]].length !== clone.pin.times.length) fail("bad_args", "clone pin " + pinRoles[pr] + " must match the times");
+        }
+        if (clone.pin.times.length > 0 && typeof A.planarWriteRaw !== "function") fail("not_found", "planar.jsx is not loaded, so the clone cannot be keyed");
+      } else if (clone.position) {
         checkTimes(clone.position.times, "clone position");
         if (!isArr(clone.position.shifts) || clone.position.shifts.length !== clone.position.times.length) fail("bad_args", "clone shifts must match the times");
         if (clone.position.times.length > 0 && typeof A.planarWriteRaw !== "function") fail("not_found", "planar.jsx is not loaded, so the clone cannot be keyed");
@@ -830,7 +839,9 @@
               notes.push("The clone's in and out points could not be restored after the time shift; check its length.");
             }
           }
-          if (clone.position) {
+          if (clone.pin) {
+            A.planarWriteRaw({ comp_id: comp.id, writes: [{ layer_index: src.index, layer_id: src.id, target: "corner_pin", add_effect: true, replace_keys: true, times: clone.pin.times, values: clone.pin.values }] });
+          } else if (clone.position) {
             var base = xy(child(src.property("ADBE Transform Group"), "ADBE Position").valueAtTime(refTime, false));
             var vals = [];
             for (i = 0; i < clone.position.shifts.length; i++) vals.push([base[0] + clone.position.shifts[i][0], base[1] + clone.position.shifts[i][1]]);

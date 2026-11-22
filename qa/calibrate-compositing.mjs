@@ -987,6 +987,73 @@ async function stagePainted(ids, expect) {
   return { ok: true, cases: out };
 }
 
+// ---------- clone that follows rotation and zoom (item 10) ----------
+
+// The plate turns 0.4 degrees, zooms 0.5% and pans per frame (inside a precomp, so the plate layer
+// itself is static). A clone 150 px and 8 frames away must show, at the hole, the photo 150 px to the
+// right: the truth comp moves that shifted photo the same way.
+const CLONE_OFF = { dx: 150, dy: 0, frames: 8 };
+function cloneJsx() {
+  const times = [];
+  for (let i = 0; i < FRAMES; i++) times.push(i / FPS);
+  const keys = (layer) => [
+    `${layer}.property("ADBE Transform Group").property("ADBE Position").setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(times.map((_, i) => [W / 2 + 3 * i, H / 2 + i]))});`,
+    `${layer}.property("ADBE Transform Group").property("ADBE Rotate Z").setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(times.map((_, i) => r3(0.4 * i)))});`,
+    `${layer}.property("ADBE Transform Group").property("ADBE Scale").setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(times.map((_, i) => [r3(100 * (1 + 0.005 * i)), r3(100 * (1 + 0.005 * i))]))});`,
+  ];
+  return [
+    'var cs = mk("Cal clone src"); var cph = cs.layers.add(src); cph.name = "Photo";',
+    ...keys("cph"),
+    'var csh = mk("Cal clone shifted"); csh.layers.add(src).property("ADBE Transform Group").property("ADBE Position").setValue([' + (W / 2 - CLONE_OFF.dx) + ", " + (H / 2 - CLONE_OFF.dy) + "]);",
+    'var ct = mk("Cal clone truth src"); var ctl = ct.layers.add(csh); ctl.name = "Photo";',
+    ...keys("ctl"),
+    'var ctr = mk("Cal clone truth"); ctr.layers.add(ct); ids.clone_truth = ctr.id;',
+    'var cm = mk("Cal clone"); var cpl = cm.layers.add(cs); cpl.name = "Plate"; ids.clone = cm.id; ids.clone_src = cs.id;',
+  ].join("\n");
+}
+
+async function stageClone(ids, expect) {
+  const trk = await call("ae_track_read", { comp_id: ids.clone_src, source: { transform: { layer: { name: "Photo" } } }, preview: false });
+  if (!trk.ok) return { ok: false, message: `track: ${trk.message ?? brief(trk)}` };
+  // The offset is in comp pixels at ref_time; at frame 0 the photo is not turned or scaled yet, so the truth's 150 px is the same 150 px.
+  const ref = 0;
+  const region = [400, 220, 120, 100];
+  const r = await call("ae_cleanplate_setup", { comp_id: ids.clone, plate: { name: "Plate" }, source: "clone_offset", offset: CLONE_OFF, track: { track_id: trk.track_id }, ref_time: ref, region: { rect: region }, name: "Cal Clone", feather_px: 0, expect });
+  if (r.ok === false) return { ok: false, message: r.message ?? brief(r) };
+  // The hole's centre at each time: the shot's motion from the reference frame.
+  const sim = (i) => {
+    const th = (0.4 * i * Math.PI) / 180;
+    const s = 1 + 0.005 * i;
+    return [s * Math.cos(th), -s * Math.sin(th), W / 2 + 3 * i - s * Math.cos(th) * (W / 2) + s * Math.sin(th) * (H / 2), s * Math.sin(th), s * Math.cos(th), H / 2 + i - s * Math.sin(th) * (W / 2) - s * Math.cos(th) * (H / 2), 0, 0, 1];
+  };
+  const c0 = [region[0] + region[2] / 2, region[1] + region[3] / 2];
+  const rows = [];
+  for (const t of [0, 0.4, 0.8, 1.2]) {
+    const i = Math.round(t * FPS);
+    const c = apply(mul(sim(i), inv(sim(Math.round(ref * FPS)))), c0);
+    const box = [Math.round(c[0] - 30), Math.round(c[1] - 22), Math.round(c[0] + 30), Math.round(c[1] + 22)];
+    const a = await frame(ids.clone, t);
+    const b = await frame(ids.clone_truth, t);
+    let mad = 0;
+    let n = 0;
+    for (const k of pixels(a, box)) {
+      for (let ch = 0; ch < 3; ch++) mad += Math.abs(a.data[k + ch] - b.data[k + ch]);
+      n += 3;
+    }
+    // What a shift-only clone would be off by at the box corner: the turn and zoom between t and t + k.
+    const H1 = sim(i);
+    const H2 = sim(i + CLONE_OFF.frames);
+    const corner = [region[0], region[1]];
+    const p = apply(H1, corner);
+    const q = apply(H2, [corner[0] + CLONE_OFF.dx, corner[1]]);
+    const pc = apply(H1, c0);
+    const qc = apply(H2, [c0[0] + CLONE_OFF.dx, c0[1]]);
+    const shiftOnlyErr = Math.hypot(p[0] - (q[0] + pc[0] - qc[0]), p[1] - (q[1] + pc[1] - qc[1]));
+    rows.push({ t, mad_levels: r3(mad / n), shift_only_would_be_px: r3(shiftOnlyErr) });
+  }
+  return { ok: true, mode: r.motion?.mode ?? null, pinned: (r.notes ?? []).some((nt) => /Corner Pin on the plate copy/.test(nt)), rows };
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -1095,6 +1162,7 @@ async function main() {
       lightJsx(),
       matteJsx(),
       paintedJsx(),
+      cloneJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -1198,6 +1266,11 @@ async function main() {
     report.painted = await stagePainted(ids, expect);
     if (!report.painted.ok) console.log(`painted       ${report.painted.message}`);
     else for (const [k, v] of Object.entries(report.painted.cases)) console.log(`painted       ${k.padEnd(13)} ${v.verdict}; colour ${JSON.stringify(v.colour_shift)} offset ${JSON.stringify(v.offset)} bbox ${JSON.stringify(v.bbox)}${v.findings.length ? `; ${v.findings[0]}` : ""}${v.message ? `; ${v.message}` : ""}`);
+  }
+  if (want("clone")) {
+    report.clone = await stageClone(ids, expect);
+    const c = report.clone;
+    console.log(`clone         ${c.ok ? `pinned ${c.pinned}; hole against the truth: ${c.rows.map((r) => `${r.t}s ${r.mad_levels} levels (shift-only clone off by ${r.shift_only_would_be_px} px)`).join(" | ")}` : c.message}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);

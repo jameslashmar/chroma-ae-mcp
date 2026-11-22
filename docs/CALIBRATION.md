@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,painted,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,painted,clone,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -110,6 +110,10 @@ A still patch is made (the tool keeps a hidden copy of the PNG as rendered, `.ch
 | red +6 everywhere (a colour profile) | check; colour shift 6, 0, 0 levels |
 | the whole picture moved 3 px | check; offset 3, 0 px |
 | cropped to 940 px wide | check; 940 x 540 against 960 x 540 |
+
+### Offset clone under rotation and zoom (`ae_cleanplate_setup` source `clone_offset` with a track)
+
+The plate turns 0.4 degrees, zooms 0.5% and pans per frame; a clone 150 px and 8 frames away should show at the hole the photo 150 px over (the truth comp moves that shifted photo the same way). The clone used to be moved by the region centre's shift only, which is exact for a spatial offset under a similarity but not across frames of a turning or zooming shot: here it would have been 5.4-6.0 px off at the hole's corner. It is now a Corner Pin on the plate copy, `H(t) . T(-offset) . H(t+k)^-1` carried into the copy's layer space, and the hole matched the truth within **0.27-0.62 levels** (resampling) at 0, 0.4, 0.8 and 1.2 s. The offset is in comp pixels as the shot looks at `ref_time`.
 
 ### Inpaint (`ae_inpaint_plate`)
 

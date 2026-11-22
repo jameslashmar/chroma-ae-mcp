@@ -10,7 +10,7 @@
  *   searches the ring around the hole for spatial clone offsets. Read only
  *   unless `isolate` is on (a temporary copy of the comp, removed again).
  * - ae_cleanplate_setup: builds the patch rig in one undo step: a freeze, a
- *   rendered still or an offset clone (compensated for the region centre's translation only) of the plate in a
+ *   rendered still or an offset clone (following the track's whole motion through a Corner Pin) of the plate in a
  *   comp-size patch precomp, masked from the region with the expansion at
  *   least half the feather, tracked back onto the shot from the reference
  *   frame (planar's A.planarWriteRaw), optional holdout matte; with a
@@ -83,6 +83,8 @@ import {
   type PlanarTrack,
   type ShapeData,
   type Vec2,
+  invertH,
+  mulH,
 } from "./planar-math.js";
 import {
   buildLayerKeys,
@@ -97,6 +99,7 @@ import {
   withIsolatedPlate,
   type LayerKeys,
   type Region,
+  layerSpaceMatrices,
 } from "./planar.js";
 import { blit, createCanvas, drawLabel, drawPolygon, encodePng, fitWithin, resizeArea, type RgbaImage } from "./png-utils.js";
 import {
@@ -263,6 +266,46 @@ export function cloneShifts(a: { track: PlanarTrack; centre: Vec2; offset: Clone
     shifts.push([r4(p[0] - q[0]), r4(p[1] - q[1])]);
   }
   return { times, shifts, skipped };
+}
+
+/**
+ * The clone as a Corner Pin on the plate copy, per frame: the content of ref point y + o at frame
+ * t + k must land where ref point y is at frame t, so in comp space the clone is moved by
+ * D(t) = H(t) . T(-o) . H(t+k)^-1, and in the copy's own layer space by L^-1 . D(t) . L (L: the
+ * plate's layer -> comp matrix, static). That follows rotation, zoom and perspective; the shift of
+ * the region centre alone (cloneShifts) is exact only for a spatial offset under similarity motion,
+ * and a time offset on a shot that turns or zooms sends the cloned content in turned or scaled.
+ */
+export function clonePins(a: { track: PlanarTrack; offset: CloneOffset; frames: PlanarFrame[]; L: Mat3; layerSize: Vec2 }): { times: number[]; pins: Record<"ul" | "ur" | "ll" | "lr", Vec2[]>; skipped: number[] } {
+  const times: number[] = [];
+  const pins: Record<"ul" | "ur" | "ll" | "lr", Vec2[]> = { ul: [], ur: [], ll: [], lr: [] };
+  const skipped: number[] = [];
+  const fps = a.track.fps > 0 ? a.track.fps : 25;
+  const Linv = invertH(a.L);
+  const T: Mat3 = [1, 0, -a.offset.dx, 0, 1, -a.offset.dy, 0, 0, 1];
+  const [w, h] = a.layerSize;
+  const corners: Array<["ul" | "ur" | "ll" | "lr", Vec2]> = [["ul", [0, 0]], ["ur", [w, 0]], ["ll", [0, h]], ["lr", [w, h]]];
+  for (const f of a.frames) {
+    let Hk: Mat3 | null = f.ok ? f.H : null;
+    if (Hk && a.offset.frames !== 0) {
+      const g = frameAt(a.track, f.time + a.offset.frames / fps);
+      Hk = g && g.ok && g.H ? g.H : null;
+    }
+    const Hkinv = Hk ? invertH(Hk) : null;
+    if (!f.ok || !f.H || !Hkinv || !Linv) {
+      skipped.push(f.time);
+      continue;
+    }
+    const M = mulH(Linv, mulH(f.H, mulH(T, mulH(Hkinv, a.L))));
+    const pts = corners.map(([, c]) => applyH(M, c));
+    if (pts.some((p) => !p)) {
+      skipped.push(f.time);
+      continue;
+    }
+    times.push(f.time);
+    corners.forEach(([k], i) => pins[k].push([r4(pts[i]![0]), r4(pts[i]![1])]));
+  }
+  return { times, pins, skipped };
 }
 
 /** The region shapes moved by the track at each ok frame (clone mode, where the patch layer itself stays put and its mask follows the shot). */
@@ -786,7 +829,7 @@ export const AeCleanplateSetupSchema = z
       .describe(
         "freeze: duplicate the plate and time-remap one hold key at ref_time (the plate's own transform keys are replaced by their value at ref_time). " +
           "still: render the isolated plate at ref_time to a PNG in '<project> chroma plates/' next to the saved project and import it (paint it in Photoshop, then action 'reload'), or place `still_footage_id`. 8-bit sRGB: in 16/32 bpc or linear projects prefer freeze. " +
-          "clone_offset: duplicate the plate shifted by `offset` (a live clone that moves with the shot; with a track the shift is compensated per frame for the translation of the region centre only (not rotation, zoom or perspective))."
+          "clone_offset: duplicate the plate shifted by `offset` (comp pixels as the shot looks at ref_time, and/or frames): a live clone that moves with the shot. With a track it follows the whole motion, shift, rotation, zoom and perspective, through a Corner Pin on the plate copy inside the patch comp."
       ),
     ref_time: z.number().min(0).optional().describe("build: the reference frame in seconds: the freeze/still frame, and the frame `region` is drawn at (the track is re-based so this frame is the identity). Snapped to the comp's frame grid (the result says so) and must lie inside the plate layer's in/out. After ae_cleanplate_pick use its setup_args: the region there is drawn at the recommended frame."),
     region: RegionSchema.optional().describe("build: the thing to cover, in comp pixels at ref_time. One shape."),
@@ -1213,7 +1256,7 @@ interface SetupPlan {
   mode: "transform" | "transform_pin" | null;
   keys: LayerKeys | null;
   writes: Array<Record<string, unknown>>;
-  cloneInfo: { position_keys: number; mask_keys: number; frames_skipped: number } | null;
+  cloneInfo: { position_keys: number; pin_keys?: number; mask_keys: number; frames_skipped: number } | null;
   /** First and last key time (seconds) of the track keys; null when nothing is keyed from a track. */
   span: { start: number; end: number } | null;
   clone: Record<string, unknown> | null;
@@ -1233,7 +1276,7 @@ export function uniqueStillPath(dir: string, plateName: string, frame: number): 
 }
 
 /** Builds the keys and clone data the host writes; pure given the track. Throws PlanarError for what the caller can fix. */
-export function planSetup(a: { args: AeCleanplateSetupArgs; track: PlanarTrack | null; size: Vec2; shapes: ShapeData[]; centre: Vec2 }): SetupPlan {
+export function planSetup(a: { args: AeCleanplateSetupArgs; track: PlanarTrack | null; size: Vec2; shapes: ShapeData[]; centre: Vec2; plate?: { L: Mat3; size: Vec2 } }): SetupPlan {
   const { args, track } = a;
   const plan: SetupPlan = { mode: null, keys: null, writes: [], cloneInfo: null, span: null, clone: null, maskKeys: null, notes: [] };
   const cloneMode = args.source === "clone_offset";
@@ -1255,10 +1298,19 @@ export function planSetup(a: { args: AeCleanplateSetupArgs; track: PlanarTrack |
     const mk = maskKeysFor(a.shapes, frames);
     if (mk.every((m) => m.times.length === 0)) throw badArgs("The track moves every region behind the horizon, so the mask cannot follow it.");
     plan.clone = { frames: off.frames, static_shift: null, position: { times: sh.times, shifts: sh.shifts } };
+    // With the plate's layer matrix the clone follows the whole motion as a Corner Pin instead.
+    const cp = a.plate ? clonePins({ track, offset: off, frames, L: a.plate.L, layerSize: a.plate.size }) : null;
+    if (cp && cp.times.length === sh.times.length) plan.clone = { frames: off.frames, static_shift: null, position: null, pin: { times: cp.times, values: cp.pins } };
     plan.maskKeys = mk;
     plan.span = { start: sh.times[0], end: sh.times[sh.times.length - 1] };
-    plan.cloneInfo = { position_keys: sh.times.length, mask_keys: Math.max(...mk.map((m) => m.times.length)), frames_skipped: sh.skipped.length };
-    plan.notes.push("The clone is motion-compensated by the shift of the region centre only (no rotation or zoom); the patch layer stays put and its mask follows the shot.");
+    // With the Corner Pin the clone has no position keys of its own: the pin carries the motion.
+    const pinned = Boolean((plan.clone as { pin?: unknown }).pin);
+    plan.cloneInfo = { position_keys: pinned ? 0 : sh.times.length, ...(pinned ? { pin_keys: sh.times.length } : {}), mask_keys: Math.max(...mk.map((m) => m.times.length)), frames_skipped: sh.skipped.length };
+    plan.notes.push(
+      pinned
+        ? "The clone follows the shot's whole motion (shift, rotation, zoom and perspective) through a Corner Pin on the plate copy inside the patch comp; the patch layer stays put and its mask follows the shot."
+        : "The clone is motion-compensated by the shift of the region centre only (no rotation or zoom); the patch layer stays put and its mask follows the shot."
+    );
     if (sh.skipped.length) plan.notes.push(`${sh.skipped.length} frame(s) have no solved motion (or none at the offset frame); the keys interpolate across them.`);
     return plan;
   }
@@ -1482,7 +1534,17 @@ async function setupBuild(ctx: ToolContext, args: AeCleanplateSetupArgs): Promis
       const rf = frameAt(track, refTime);
       if (!rf || !rf.ok || !rf.H) throw badArgs(`The track has no solved motion at ref_time ${r2(refTime)} s, so it cannot be the frame the patch looks right at. Choose a ref_time inside the tracked range (ae_cleanplate_pick recommends one).`);
     }
-    const plan = planSetup({ args, track, size: [c.width, c.height], shapes, centre });
+    // An offset clone with a track follows the whole motion as a Corner Pin on the plate copy, which needs the plate's layer matrix.
+    let plateSpace: { L: Mat3; size: Vec2 } | undefined;
+    if (args.source === "clone_offset" && track && args.offset) {
+      try {
+        const [L] = await layerSpaceMatrices(ctx, opId, args.comp_id, { index: plate.index, id: plate.id }, [refTime]);
+        if (L && plate.width > 0 && plate.height > 0) plateSpace = { L, size: [plate.width, plate.height] };
+      } catch {
+        // Without it the clone is shifted by the region centre's motion, as before.
+      }
+    }
+    const plan = planSetup({ args, track, size: [c.width, c.height], shapes, centre, plate: plateSpace });
     const local: string[] = [];
     let cloneFix: "small" | "time" | null = null;
     if (args.source === "freeze") {
@@ -2039,7 +2101,7 @@ export const cleanplateTools: ToolDefinition<any>[] = [
   {
     name: "ae_cleanplate_setup",
     description:
-      "Build the patch rig for a removal in one undo step. `source`: freeze (the plate duplicated with a time remap and one hold key at ref_time, frame blending off), still (the isolated plate rendered at ref_time to a PNG in '<project> chroma plates/' next to the saved project and imported, so it can be painted in Photoshop and reloaded; or `still_footage_id`), clone_offset (the plate duplicated and shifted by `offset` in space and/or frames: a live clone; with a track the shift is compensated per frame for the translation of the region centre only (not rotation, zoom or perspective)). " +
+      "Build the patch rig for a removal in one undo step. `source`: freeze (the plate duplicated with a time remap and one hold key at ref_time, frame blending off), still (the isolated plate rendered at ref_time to a PNG in '<project> chroma plates/' next to the saved project and imported, so it can be painted in Photoshop and reloaded; or `still_footage_id`), clone_offset (the plate duplicated and shifted by `offset` in space and/or frames: a live clone; with a track it follows the shot's whole motion through a Corner Pin on the plate copy, so a clone from other frames of a turning or zooming shot lands in place). " +
       "The source goes into a comp-size patch precomp '<plate> PATCH f<frame>' (identity transform, so layer space = comp space), where paint, solids or a cleaned PNG can be added. In the shot comp the patch layer sits directly above the plate with a mask from `region` / `regions` (up to 16 Add masks), expansion at least half the feather (enforced), feather default 2% of the diagonal, bicubic sampling, and is tracked back from ref_time: translate/similarity tracks key the transform (motion blur on), affine/perspective add a Corner Pin; the mask rides the pin. `holdout` is an inverted alpha track matte (AE 23+) so the patch never covers something crossing in front. " +
       "A freeze or still shows the object unless the frame is clean in the hole: the result has needs_fix: true with the fixes in order (ae_inpaint_plate into the PATCH precomp, Clone Stamp in the PATCH precomp, paint the PNG and `action: 'reload'`, or clone_offset); never report the removal done while needs_fix is true. Say `clean_frame: true` when the frozen frame is clean. " +
       "ref_time is snapped to the frame grid and must be inside the plate's in/out. A freeze bakes the plate copy's keyed or expression-driven effect parameters (Corner Pin, CC Power Pin, Transform ...) and Opacity to their value at ref_time (a stabilize rig's Corner Pin and 'Show Stabilized Plate' switch would otherwise warp or hide the frozen frame); a clone keeps its effects. Where the track (or range) does not cover the plate's in/out, the patch layer is trimmed to the keyed span and the uncovered ranges are returned (AE would otherwise hold the last key): continue the track or re-track. What is NOT measured: whether the frozen or cloned pixels are clean (needs_fix says so; a clone_offset whose spatial offset does not clear the hole plus the mask rim is flagged unless clean_frame: true), and rotation, zoom or perspective of a tracked clone. next_steps are ready-to-call argument blocks for the patch tools, with your track source as you gave it (ae_patch_check gets no region: it reads the footprint from the patch layer's masks, which includes the expansion and half the feather). The patch layer's trim is reported as confirmed only when a separate read-back shows its in/out points at the keyed span (patch_trimmed, trim_confirmed). " +
