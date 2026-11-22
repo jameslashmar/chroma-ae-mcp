@@ -1,3 +1,4 @@
+import { annotationsFor, type ToolAnnotations } from "./tool-annotations.js";
 import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolDefinition } from "./tools/common.js";
@@ -304,6 +305,7 @@ export function carriesSafetyText(tool: ToolDefinition<any>): boolean {
 }
 
 const TOOL_DESC_MAX = 260;
+const EXPECT_FIELD = /\.expect\.(project_path|comp_id)$/;
 const PROP_DESC_MAX = 64;
 const PROP_DESC_MAX_UNTYPED = 250;
 /** Properties whose whole text is the contract (path = tool.property.sub[]): kept longer. */
@@ -339,6 +341,9 @@ export function trimSchema(node: unknown, path = ""): unknown {
   const untyped = (src.type === undefined && src.enum === undefined && src.properties === undefined) || itemsUntyped;
   for (const [key, value] of Object.entries(src)) {
     if (key === "description" && typeof value === "string") {
+      // The core instructions explain `expect` once (copy project_path from ae_status), so its two
+      // fields carry no text of their own here; the full list and ae_get_tool_schema keep it.
+      if (EXPECT_FIELD.test(path)) continue;
       const cap = CORE_PROPERTY_CAPS[path];
       const text = cap !== undefined
         ? firstSentences(value, cap, true)
@@ -363,14 +368,16 @@ export interface ListedTool {
   name: string;
   description: string;
   inputSchema: unknown;
+  /** MCP tool annotations (tool-annotations.ts): read-only, destructive, idempotent, open world. */
+  annotations?: ToolAnnotations;
 }
 
 export function fullListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) };
 }
 
 export function trimmedListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name) };
+  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name), annotations: annotationsFor(t.name) };
 }
 
 export function coreTools(): ToolDefinition<any>[] {

@@ -12,6 +12,7 @@ import {
 import { createPanelMcp } from "../src/panel-entry.js";
 import { lintJsxSafety } from "../src/jsx-safety-lint.js";
 import { zodToJsonSchema } from "../src/schema.js";
+import { annotationsFor } from "../src/tool-annotations.js";
 import { withIdempotencyKey } from "../src/write-tools.js";
 import { META_TOOLS, NAME_MAX, SCHEMA_OUTPUT_SOFT_MAX, SEARCH_OUTPUT_MAX, nameMatcher } from "../src/meta-tools.js";
 import {
@@ -109,7 +110,7 @@ describe("toolset choice", () => {
 
 describe("full toolset", () => {
   it("is exactly ALL_TOOLS: same names, order and text, no meta-tools, no instructions", async () => {
-    const expected = ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)) }));
+    const expected = ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) }));
     for (const toolset of [undefined, "full", "bogus", ""]) {
       const result = await rpc("tools/list", undefined, noAeCtx(), toolset);
       expect(result.tools).toEqual(expected);

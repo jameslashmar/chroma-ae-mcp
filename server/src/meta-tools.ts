@@ -355,7 +355,13 @@ export function isMetaTool(name: string): boolean {
 }
 
 export function metaToolList(): ListedTool[] {
-  return META_TOOLS.map((m) => ({ name: m.name, description: m.description, inputSchema: m.inputSchema }));
+  // Search and schema never touch After Effects; invoke runs whatever tool it is given.
+  return META_TOOLS.map((m) => ({
+    name: m.name,
+    description: m.description,
+    inputSchema: m.inputSchema,
+    annotations: m.name === "ae_invoke_tool" ? { openWorldHint: false } : { readOnlyHint: true, openWorldHint: false },
+  }));
 }
 
 export async function callMetaTool(

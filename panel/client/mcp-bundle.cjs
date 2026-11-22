@@ -69767,6 +69767,126 @@ function withIdempotencyKey(name, schema) {
   return { ...obj, properties: { ...props, idempotency_key: IDEMPOTENCY_KEY_PROPERTY } };
 }
 
+// src/tool-annotations.ts
+var SIDE_EFFECTS = /* @__PURE__ */ new Set([
+  "ae_acknowledge",
+  // clears a quarantine entry
+  "ae_auto_checkpoint",
+  // changes the setting when given values
+  "ae_ask_user",
+  // opens the panel and waits for the user
+  "ae_taste",
+  "ae_taste_baseline",
+  "ae_learn_taste",
+  "ae_taste_rules",
+  "ae_aerender_cancel",
+  // kills a process
+  "ae_render_batch_cancel",
+  "ae_dialog_respond",
+  // presses a button in After Effects
+  "ae_diagnostics",
+  // writes a diagnostics file
+  "ae_open_panel",
+  // toggles a panel
+  "ae_transcribe",
+  // uploads audio to ElevenLabs
+  "ae_captions_export",
+  // writes (and may overwrite) a sidecar file
+  "ae_collect_report"
+]);
+var READS_WITH_GUARD = /* @__PURE__ */ new Set(["ae_checkpoint_list", "ae_deliver_status"]);
+var ADDITIVE = /* @__PURE__ */ new Set([
+  // add to the project
+  "ae_checkpoint_create",
+  "ae_render_queue_add",
+  "ae_render_queue_duplicate",
+  "ae_import_footage",
+  "ae_import_assets",
+  "ae_add_effect",
+  "ae_add_markers",
+  "ae_create_layer",
+  "ae_create_comp",
+  "ae_build_from_data",
+  "ae_reframe",
+  "ae_rig_add_controls",
+  "ae_camera_rig",
+  "ae_text_backdrop",
+  "ae_text_animator",
+  "ae_shape",
+  "ae_path_operator",
+  "ae_path_connector",
+  "ae_key_greenscreen",
+  "ae_garbage_matte",
+  "ae_caf_prep",
+  "ae_cleanplate_setup",
+  "ae_inpaint_plate",
+  "ae_stabilize",
+  "ae_stabilize_roundtrip",
+  "ae_screen_replace",
+  "ae_track_point",
+  "ae_track_multi",
+  "ae_variants",
+  // start background work whose output goes to new files
+  "ae_aerender_start",
+  "ae_render_batch",
+  "ae_render_batch_resume",
+  // measure on temporary copies, removed again
+  "ae_audio_analyze",
+  "ae_loudness_check",
+  "ae_render_templates",
+  "ae_verify_render",
+  "ae_scrub_check",
+  "ae_check_legibility",
+  "ae_explain_layer_proof",
+  "ae_patch_check",
+  "ae_region_stats",
+  "ae_cleanplate_pick",
+  "ae_screen_corners",
+  // state that is not the user's work
+  "ae_acknowledge",
+  "ae_auto_checkpoint",
+  "ae_ask_user",
+  "ae_taste",
+  "ae_taste_baseline",
+  "ae_learn_taste",
+  "ae_taste_rules",
+  "ae_diagnostics",
+  "ae_open_panel",
+  "ae_transcribe",
+  "ae_collect_report",
+  "ae_view"
+]);
+var IDEMPOTENT = /* @__PURE__ */ new Set([
+  "ae_set_property",
+  "ae_set_text",
+  "ae_set_keyframe_ease",
+  "ae_set_track_matte",
+  "ae_batch_set",
+  "ae_comp_settings",
+  "ae_project_settings",
+  "ae_set_footage_interpretation",
+  "ae_footage_proxy",
+  "ae_rig_unlink",
+  "ae_remove_markers",
+  "ae_save",
+  "ae_auto_checkpoint",
+  "ae_taste",
+  "ae_acknowledge",
+  "ae_view"
+]);
+var OPEN_WORLD = /* @__PURE__ */ new Set(["ae_transcribe"]);
+function annotationsFor(name) {
+  const readOnly = READS_WITH_GUARD.has(name) || !isWriteTool(name) && !SIDE_EFFECTS.has(name);
+  const out = {};
+  if (readOnly) out.readOnlyHint = true;
+  else {
+    if (ADDITIVE.has(name)) out.destructiveHint = false;
+    if (IDEMPOTENT.has(name)) out.idempotentHint = true;
+  }
+  if (!OPEN_WORLD.has(name)) out.openWorldHint = false;
+  return out;
+}
+
 // src/toolsets.ts
 init_common();
 init_registry();
@@ -70150,6 +70270,7 @@ function stripSafety(description) {
   return description.split(AGENT_SAFETY_GUIDANCE).join("").replace(/\s+$/, "");
 }
 var TOOL_DESC_MAX = 260;
+var EXPECT_FIELD = /\.expect\.(project_path|comp_id)$/;
 var PROP_DESC_MAX = 64;
 var PROP_DESC_MAX_UNTYPED = 250;
 var CORE_PROPERTY_CAPS = {
@@ -70174,6 +70295,7 @@ function trimSchema(node, path62 = "") {
   const untyped = src.type === void 0 && src.enum === void 0 && src.properties === void 0 || itemsUntyped;
   for (const [key, value] of Object.entries(src)) {
     if (key === "description" && typeof value === "string") {
+      if (EXPECT_FIELD.test(path62)) continue;
       const cap2 = CORE_PROPERTY_CAPS[path62];
       const text = cap2 !== void 0 ? firstSentences(value, cap2, true) : untyped ? firstSentences(value, PROP_DESC_MAX_UNTYPED, true) : firstSentences(value, PROP_DESC_MAX);
       if (text) out.description = text;
@@ -70190,10 +70312,10 @@ function trimSchema(node, path62 = "") {
   return out;
 }
 function fullListEntry(t) {
-  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) };
 }
 function trimmedListEntry(t) {
-  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name) };
+  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name), annotations: annotationsFor(t.name) };
 }
 function coreTools() {
   const byName = new Map(ALL_TOOLS.map((t) => [t.name, t]));
@@ -70910,7 +71032,12 @@ function isMetaTool(name) {
   return META_BY_NAME.has(name);
 }
 function metaToolList() {
-  return META_TOOLS.map((m) => ({ name: m.name, description: m.description, inputSchema: m.inputSchema }));
+  return META_TOOLS.map((m) => ({
+    name: m.name,
+    description: m.description,
+    inputSchema: m.inputSchema,
+    annotations: m.name === "ae_invoke_tool" ? { openWorldHint: false } : { readOnlyHint: true, openWorldHint: false }
+  }));
 }
 async function callMetaTool(name, rawArgs, ctx, opts = {}) {
   const meta = META_BY_NAME.get(name);
