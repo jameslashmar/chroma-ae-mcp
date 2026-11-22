@@ -1630,6 +1630,10 @@ async function main() {
       r = await call("ae_patch_check", { comp_id: W6.slip, patch_layers: [{ name: "Insert" }], region: { kind: "rect", rect: [158, 118, 278, 208] }, region_track: { transform: { layer: { name: "Plate" } } }, times: [0, 0.2, 0.4, 0.6, 0.8], grain_probes: 0, max_renders: 30, expect });
       const slip = (r.checks ?? []).find((c) => c.check === "slip");
       check("ae_patch_check (slip along region_track: a parented insert sticks)", slip?.verdict === "ok" && (slip?.numbers?.max_slip_px ?? 99) < 0.5, `${slip?.summary ?? why(r)}`);
+
+      // Matte check: the masked insert's alpha is one clean piece with a hard edge, and the temporary copy goes away.
+      r = await call("ae_matte_check", { comp_id: W6.slip, layer: { name: "Insert" }, samples: 2, expect });
+      check("ae_matte_check (a clean rectangular matte)", r.ok === true && r.frames?.every((f) => f.holes_total === 0 && f.garbage_total === 0 && f.edge_chatter === 0) && r.temp_comp?.copy_removed === true, `${r.verdict}; ${JSON.stringify(r.frames?.[0] ?? null).slice(0, 160)}; ${why(r)}`);
     }
   }
 
