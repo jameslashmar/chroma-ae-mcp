@@ -815,7 +815,7 @@ export type AeCleanplatePickArgs = z.infer<typeof AeCleanplatePickSchema>;
 const OffsetSchema = z.object({
   dx: z.number().min(-10000).max(10000).default(0).describe("Take pixels from this far to the right of the hole (comp px, negative: left)."),
   dy: z.number().min(-10000).max(10000).default(0).describe("Take pixels from this far below the hole (comp px, negative: above)."),
-  frames: z.number().int().min(-1000).max(1000).default(0).describe("Take pixels from this many frames later (negative: earlier). With a track the shift is compensated per frame for the translation of the region centre only (not rotation, zoom or perspective)."),
+  frames: z.number().int().min(-1000).max(1000).default(0).describe("Take pixels from this many frames later (negative: earlier). With a track the clone follows the motion between the two frames (shift, rotation, zoom, perspective)."),
 });
 
 export const AeCleanplateSetupSchema = z

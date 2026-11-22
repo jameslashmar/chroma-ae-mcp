@@ -53756,7 +53756,7 @@ var init_cleanplate = __esm({
     OffsetSchema = external_exports.object({
       dx: external_exports.number().min(-1e4).max(1e4).default(0).describe("Take pixels from this far to the right of the hole (comp px, negative: left)."),
       dy: external_exports.number().min(-1e4).max(1e4).default(0).describe("Take pixels from this far below the hole (comp px, negative: above)."),
-      frames: external_exports.number().int().min(-1e3).max(1e3).default(0).describe("Take pixels from this many frames later (negative: earlier). With a track the shift is compensated per frame for the translation of the region centre only (not rotation, zoom or perspective).")
+      frames: external_exports.number().int().min(-1e3).max(1e3).default(0).describe("Take pixels from this many frames later (negative: earlier). With a track the clone follows the motion between the two frames (shift, rotation, zoom, perspective).")
     });
     AeCleanplateSetupSchema = external_exports.object({
       comp_id: external_exports.number().int().describe("The composition that holds the shot (for a steady shot, the work comp from ae_stabilize_roundtrip: pass it here and omit `track`)."),
