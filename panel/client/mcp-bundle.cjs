@@ -12366,7 +12366,7 @@ async function runGuardedWrite(ctx, spec) {
         custom2 = [readBackFailure];
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom2 });
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true, undoable: spec.undoable !== false });
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true && written.no_undo_step !== true, undoable: spec.undoable !== false });
       return {
         op_id: opId,
         applied: true,
