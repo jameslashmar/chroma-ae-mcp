@@ -105,6 +105,7 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
       "ae_patch_color_match", "ae_patch_grain", "ae_patch_finish", "ae_region_stats", "ae_stabilize",
       "ae_stabilize_roundtrip", "ae_cleanplate_pick", "ae_cleanplate_setup", "ae_inpaint_plate",
       "ae_mask_follow", "ae_garbage_matte", "ae_caf_prep", "ae_screen_corners", "ae_screen_replace",
+      "ae_camera_solve_check",
     ],
   },
   render: {
@@ -172,6 +173,7 @@ export function groupOf(toolName: string): string | undefined {
 
 /** Extra search words for tools whose description does not use the words people reach for. */
 export const SEARCH_HINTS: Record<string, string> = {
+  ae_camera_solve_check: "3d camera tracker solve check reprojection error sliding nulls stick matchmove camera track quality mocha synthEyes",
   ae_layout_apply: "layout screens regions wall floor atlas template fit comp into rectangle copy camera place feed",
   ae_cleanplate_setup: "remove object person wire rig logo from shot paint out hide",
   ae_cleanplate_pick: "remove object person wire rig logo from shot paint out hide",

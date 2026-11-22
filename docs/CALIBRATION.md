@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -50,6 +50,17 @@ The table is from mid-gray; on a photograph the sigma per Intensity at Size 0.25
 ### 3D projection (`ae_scene_3d_report`, `ae_annotate_frame` with `include_3d`)
 
 Eight 3D points and a rotated, scaled 3D layer, seen through a one-node camera (orientation and X/Y/Z rotation keyed) and a two-node camera (point of interest and rotations keyed), against where AE's own `toComp` puts them at four times. The maths used to apply X, Y and Z rotation in the wrong order: **up to 472 px off** (82 px mean) for the one-node camera, 65 px for the two-node one. Measured rule, now in `annotate.ts`: a layer's rotation is `Orientation(X . Y . Z) . Rotation(X . Y . Z)` with the usual right-hand matrices and all signs positive (Z acts first on a point); a two-node camera looks at its point of interest with +Y down, then the same rotations. Now 0.000 px for the points and under 0.006 px for the rotated layer; `server/test/projection-ae.test.ts` pins it with AE's numbers.
+
+### Camera solve check (`ae_camera_solve_check`)
+
+The plate as a 3D plane under a camera that dollies 18%, pans and tilts; eight nulls on the plane (features) and one 250 px in front of it. The check through the true camera should read only the tracker's noise; through a copy with 3% more zoom and 8 px of offset, the slide that camera really has against the picture (from the projection maths above, at the frames the tool measured).
+
+| Camera | Nulls on the plane: largest error, tool | The same, true | Verdict |
+|---|---|---|---|
+| true | 0.04-0.28 px | 0 | mostly sticks; the off-plane null slides (lost) |
+| 3% zoom, 8 px off | 1.5-4.0 px | 2.1-4.9 px | slides |
+
+A fixed first-frame pattern read 1-3 px on the perfect solve (the dolly scales the picture 22%), and chaining the pattern frame to frame added up the matching noise (up to 1.5 px); the tool warps the first frame's pattern by how the camera turns and scales a small patch facing it (the projection's local affine), which gives the numbers above. Points within half a pattern of the frame edge stop being measured there.
 
 ### Inpaint (`ae_inpaint_plate`)
 

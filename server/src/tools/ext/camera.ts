@@ -749,7 +749,7 @@ export const cameraTools: ToolDefinition<any>[] = [
       "Read-only report on a comp's 3D scene at one time: the 3D layers sorted by depth along the camera's view axis (nearest first) with world position, where they land in the frame and how large they look, " +
       "which rendered layers are behind the camera or whose centre falls outside the frame, other enabled cameras that are not used, and depth of field with a fixed focus that tracks nothing. " +
       "Also lists the lights (`lights`: type including environment, the environment light's source layer, intensity, colour, cone, shadows; warns about an environment light with no source, with a 3D source, or in a comp whose renderer is not Advanced 3D) and the 3D model and parametric mesh layers (`models`). " +
-      "Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included; " +
+      "Looks through the front-most enabled camera (or the one named), or AE's default camera when there is none. World positions are computed here from the layers' transforms, parent chains included. " +
       "Screen positions match AE's own toComp for one- and two-node cameras with any rotation; a parented camera's point of interest is unmeasured, so parented cameras give approximate depths. Changes nothing: not time, selection or solo. Lists are capped at 500 layers. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeScene3dReportSchema,

@@ -649,6 +649,87 @@ async function stageProjection(ids) {
   return out;
 }
 
+// ---------- camera solve check (item 3) ----------
+
+// The plate as a 3D plane seen by a moving camera, nulls on the plane (features), one null off it.
+// The check through the true camera should read the tracker's noise; through a camera with 3% more
+// zoom and 8 px of offset, the slide that camera really has against the picture.
+const SOLVE_NULLS = [[-260, -140], [220, -150], [-300, 120], [280, 130], [0, 0], [-120, 60], [140, -40], [60, 170]];
+function solveJsx() {
+  const lines = [
+    'var sc = mk("Cal solve"); var sp = sc.layers.add(src); sp.threeDLayer = true; sp.name = "Plate3D";',
+    `sp.property("ADBE Transform Group").property("ADBE Position").setValue([${W / 2}, ${H / 2}, 0]);`,
+  ];
+  SOLVE_NULLS.forEach(([x, y], i) => lines.push(`var sn${i} = sc.layers.addNull(); sn${i}.threeDLayer = true; sn${i}.name = "Track ${i}"; sn${i}.property("ADBE Transform Group").property("ADBE Position").setValue([${W / 2 + x}, ${H / 2 + y}, 0]);`));
+  lines.push(`var off = sc.layers.addNull(); off.threeDLayer = true; off.name = "Off plane"; off.property("ADBE Transform Group").property("ADBE Position").setValue([${W / 2 - 40}, ${H / 2 - 90}, -250]);`);
+  const cam = (name, zoomK, dx, enabled) => [
+    `var ${name} = sc.layers.addCamera("${name === "tc" ? "True Cam" : "Off Cam"}", [${W / 2}, ${H / 2}]); ${name}.autoOrient = AutoOrientType.NO_AUTO_ORIENT;`,
+    `var ${name}g = ${name}.property("ADBE Transform Group");`,
+    `${name}g.property("ADBE Position").setValuesAtTimes([0, ${END}], [[${W / 2 + dx}, ${H / 2}, -1000], [${W / 2 + 140 + dx}, ${H / 2 - 60}, -820]]);`,
+    `${name}g.property("ADBE Rotate Y").setValuesAtTimes([0, ${END}], [0, -7]);`,
+    `${name}g.property("ADBE Rotate X").setValuesAtTimes([0, ${END}], [0, 3]);`,
+    `${name}.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValue(${1000 * zoomK});`,
+    `${name}.enabled = ${enabled};`,
+  ];
+  lines.push(...cam("oc", 1.03, 8, false), ...cam("tc", 1, 0, true));
+  lines.push("ids.solve = sc.id;");
+  return lines.join("\n");
+}
+
+async function stageSolve(ids) {
+  const out = {};
+  const nullNames = [...SOLVE_NULLS.map((_, i) => `Track ${i}`), "Off plane"];
+  for (const camName of ["True Cam", "Off Cam"]) {
+    const t0 = Date.now();
+    const r = await call("ae_camera_solve_check", { comp_id: ids.solve, camera: { name: camName }, max_frames: 20 });
+    if (r.ok === false) {
+      out[camName] = { ok: false, message: r.message ?? brief(r) };
+      continue;
+    }
+    // What that camera's slide against the picture really is: its projection's motion from the first
+    // frame against the true camera's, from ae_scene_3d_report (the maths checked against toComp).
+    // Compare at the times the tool measured each null (up to 6 of them, including its last).
+    const at = async (cam, t) => {
+      const rep = await call("ae_scene_3d_report", { comp_id: ids.solve, time: t, camera: { name: cam } });
+      return Object.fromEntries((rep.layers_by_depth ?? []).filter((e) => nullNames.includes(e.name)).map((e) => [e.name, e.screen]));
+    };
+    const pts = Object.fromEntries((r.points ?? []).map((p) => [p.name, p]));
+    const cache = new Map();
+    const atCached = async (cam, t) => {
+      const key = `${cam}@${t}`;
+      if (!cache.has(key)) cache.set(key, await at(cam, t));
+      return cache.get(key);
+    };
+    const expected = {};
+    const toolAt = {};
+    for (const n of nullNames.slice(0, SOLVE_NULLS.length)) {
+      const ser = pts[n]?.series ?? [];
+      if (ser.length < 2) continue;
+      const t0 = ser[0][0];
+      const pick = ser.length <= 6 ? ser.slice(1) : [1, 2, 3, 4, 5].map((q) => ser[Math.round((q * (ser.length - 1)) / 5)]);
+      const T0 = await atCached("True Cam", t0);
+      const C0 = await atCached(camName, t0);
+      for (const [t, e] of pick) {
+        const tr = await atCached("True Cam", t);
+        const cm = await atCached(camName, t);
+        const d = [cm[n][0] - C0[n][0] - (tr[n][0] - T0[n][0]), cm[n][1] - C0[n][1] - (tr[n][1] - T0[n][1])];
+        expected[n] = Math.max(expected[n] ?? 0, Math.hypot(d[0], d[1]));
+        toolAt[n] = Math.max(toolAt[n] ?? 0, e);
+      }
+    }
+    out[camName] = {
+      ok: true,
+      ms: Date.now() - t0,
+      verdict: r.verdict,
+      error_px: r.error_px,
+      off_plane: pts["Off plane"] ? { verdict: pts["Off plane"].verdict, max_px: pts["Off plane"].max_px } : null,
+      // Per plane null: the tool's largest error against the slide that camera really has (largest of the sampled times).
+      plane_nulls: nullNames.slice(0, SOLVE_NULLS.length).map((n) => ({ name: n, tool_max_px: toolAt[n] !== undefined ? r3(toolAt[n]) : null, true_max_px: r3(expected[n] ?? 0), verdict: pts[n]?.verdict, left_frame: pts[n]?.left_frame ?? false })),
+    };
+  }
+  return out;
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -751,6 +832,7 @@ async function main() {
       stageBJsx(),
       grainCurveJsx(),
       projectionJsx(),
+      solveJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -819,6 +901,18 @@ async function main() {
   if (want("projection")) {
     report.projection = await stageProjection(ids);
     for (const p of report.projection) console.log(`projection    ${p.camera.padEnd(9)} node vs AE toComp: mean ${p.mean_px}px max ${p.max_px}px over ${p.points}${p.examples.length ? `; ${p.examples.join("; ")}` : ""}`);
+  }
+  if (want("solve")) {
+    report.solve = await stageSolve(ids);
+    for (const [k, v] of Object.entries(report.solve)) {
+      if (!v.ok) {
+        console.log(`solve check   ${k}: ${v.message}`);
+        continue;
+      }
+      const tool = v.plane_nulls.map((p) => p.tool_max_px ?? NaN);
+      const truth = v.plane_nulls.map((p) => p.true_max_px);
+      console.log(`solve check   ${k.padEnd(8)} ${v.verdict}; mean ${v.error_px?.mean} p95 ${v.error_px?.p95}; plane nulls max tool ${tool.map((x) => x.toFixed(2)).join(" ")} | true ${truth.map((x) => x.toFixed(2)).join(" ")}; off plane ${JSON.stringify(v.off_plane)}`);
+    }
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);
