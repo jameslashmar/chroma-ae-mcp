@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -72,6 +72,17 @@ An insert (a different texture, masked to a 200 x 160 rect) pinned with exactly 
 | drifting | 0.63 / 1.19 / 1.74 / 2.46 / 2.88 px | 0.61 / 1.22 / 1.84 / 2.45 / 3.00 |
 
 Before, the slip measure ignored the track: it followed features with no prediction and modelled the ring's motion as a similarity. It read 0.7 px of slip a frame apart (the plate's perspective), lost most features across 10 frames of motion, and reported 9-29 px of slip on the locked insert. Now, with a region track, each feature is looked for where the track puts it with its pattern warped by the track's local affine, and the slip is the patch features' offset from the track minus the ring's. `ae_track_apply` returns a ready `verify_with` call for this check.
+
+### Element colour match (`ae_color_match_element`)
+
+The element is the photo shifted 300 px and masked, with a known mismatch: red output white 0.85, green gamma 1.3, blue output black 0.06. Three 16 px pairs (dark, mid, bright) are picked where the element shows what the plate shows 300 px to the left.
+
+| | Whole element area against the plate | Fitted |
+|---|---|---|
+| before | 11.8 levels mean absolute difference | |
+| after | 0.34 levels | red input white 0.850 (truth 0.85), green gamma 0.787 (1/1.3 = 0.769), blue input black 0.062 (0.06) |
+
+AE's Levels gamma lifts the mids above 1 (out = in^(1/gamma)), as the tool assumes. With three pairs and five Levels values the fit is underdetermined: a free five-value fit found exact but odd answers (blue gamma 1.3 with output white 0.63), so the tool fits two three-value families (output side, input side) and keeps the better, or the one that changes least.
 
 ### Inpaint (`ae_inpaint_plate`)
 

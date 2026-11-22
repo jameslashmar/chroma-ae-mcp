@@ -26,6 +26,7 @@ import { learntasteTools } from "./learntaste.js";
 import { projectsessionTools } from "./projectsession.js";
 import { planarTools } from "./planar.js";
 import { solveCheckTools } from "./solvecheck.js";
+import { elementMatchTools } from "./elementmatch.js";
 import { patchcheckTools } from "./patchcheck.js";
 import { stabilizeTools } from "./stabilize.js";
 import { cleanplateTools } from "./cleanplate.js";
@@ -137,6 +138,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...projectsessionTools,
   ...planarTools,
   ...solveCheckTools,
+  ...elementMatchTools,
   ...patchcheckTools,
   ...stabilizeTools,
   ...cleanplateTools,

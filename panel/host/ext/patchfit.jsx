@@ -656,6 +656,8 @@
     var roles = LEVELS_ROLES;
     if (args.mode === "exposure") roles = EXPOSURE_ROLES;
     else if (args.mode !== "levels") fail("bad_args", "mode must be levels or exposure");
+    // Levels with gamma: the element match fits black, white and gamma per channel.
+    if (args.mode === "levels" && args.with_gamma === true) roles = LEVELS_ROLES.concat([{ role: "gamma", suffix: "Gamma" }]);
     if (!args.series) fail("bad_args", "series missing");
     for (var c = 0; c < CHANNELS.length; c++) {
       var ch = args.series[CHANNELS[c].key];
@@ -680,18 +682,24 @@
     var comp = requireComp(args.comp_id);
     var layer = findLayer(comp, args.layer);
     var roles = checkSeries(args);
+    // The effect's name: the patch drift match by default, or the caller's (the element match).
+    var nameColor = NAME_COLOR;
+    if (args.effect_name !== undefined) {
+      if (typeof args.effect_name !== "string" || args.effect_name.length < 1 || args.effect_name.length > 60) fail("bad_args", "effect_name must be 1-60 characters");
+      nameColor = args.effect_name;
+    }
     if (layer.locked === true) fail("bad_args", "Layer \"" + layer.name + "\" is locked; unlock it first.");
     if (!hasVideo(layer)) fail("bad_args", "Layer \"" + layer.name + "\" has no video, so it takes no colour effect.");
     if (!effectGroup(layer)) fail("bad_args", "Layer \"" + layer.name + "\" has no effects group.");
-    var existing = findEffectByName(layer, NAME_COLOR);
+    var existing = findEffectByName(layer, nameColor);
     if (existing && args.replace_existing !== true) {
-      fail("bad_args", "Layer \"" + layer.name + "\" already has an effect named \"" + NAME_COLOR + "\" (effect " + existing.index + "). Pass replace_existing to replace it.");
+      fail("bad_args", "Layer \"" + layer.name + "\" already has an effect named \"" + nameColor + "\" (effect " + existing.index + "). Pass replace_existing to replace it.");
     }
     var matchName = "ADBE Pro Levels2";
     if (args.mode === "exposure") matchName = "ADBE Exposure2";
     var times = args.times;
 
-    var tmpName = NAME_COLOR + TMP_SUFFIX;
+    var tmpName = nameColor + TMP_SUFFIX;
 
     return A.withUndo(args.label || "Chroma AE MCP: patch colour match", function () {
       // The new effect goes in under a temporary name and the earlier one is removed only
@@ -764,7 +772,7 @@
           var scaled = [];
           for (var i = 0; i < vals.length; i++) {
             var v = vals[i];
-            if (args.mode === "levels") v = v * scale;
+            if (args.mode === "levels" && w.role !== "gamma") v = v * scale;
             scaled.push(limited(prop, v, w.channel + "." + w.role, clamped));
           }
           setKeyed(prop, times, scaled);
@@ -777,20 +785,20 @@
       var replaced = false;
       if (existing) {
         try {
-          removeEffectNamed(layer, NAME_COLOR);
+          removeEffectNamed(layer, nameColor);
           replaced = true;
         } catch (eOld) {
-          extras.push("The earlier \"" + NAME_COLOR + "\" effect could not be removed: " + (eOld && eOld.message ? eOld.message : eOld));
+          extras.push("The earlier \"" + nameColor + "\" effect could not be removed: " + (eOld && eOld.message ? eOld.message : eOld));
         }
       }
-      var fin = finalizeName(layer, tmpName, NAME_COLOR);
+      var fin = finalizeName(layer, tmpName, nameColor);
       var finalIndex = fin ? fin.index : added.index;
-      if (fin && !fin.renamed) extras.push("The new effect could not be renamed to \"" + NAME_COLOR + "\"; it is still named \"" + tmpName + "\".");
+      if (fin && !fin.renamed) extras.push("The new effect could not be renamed to \"" + nameColor + "\"; it is still named \"" + tmpName + "\".");
       var slotWanted = added.slot_wanted;
       if (replaced && existing.index < added.index) slotWanted = added.slot_wanted - 1;
       return {
         layer: layerBrief(layer),
-        effect: { index: finalIndex, name: NAME_COLOR, matchName: matchName },
+        effect: { index: finalIndex, name: nameColor, matchName: matchName },
         mode: args.mode,
         scale: scale,
         table: table,

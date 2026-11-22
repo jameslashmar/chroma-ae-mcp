@@ -792,6 +792,64 @@ async function stageSlip(ids, expect) {
   return out;
 }
 
+// ---------- element colour match (item 6) ----------
+
+// The element is the photo shifted 300 px right, masked to the right of the frame, with a known
+// mismatch (red output white 0.85, green gamma 1.3, blue output black 0.06): its pixel at x shows
+// what the plate shows at x - 300, so an element area and the plate area 300 px left should match.
+const EL_SHIFT = 300;
+const EL_AREA = [540, 180, 800, 400];
+function elementJsx() {
+  return [
+    'var ec = mk("Cal element"); var ep = ec.layers.add(src); ep.name = "Plate"; var el = ec.layers.add(src); el.name = "Element";',
+    `el.property("ADBE Transform Group").property("ADBE Position").setValue([${W / 2 + EL_SHIFT}, ${H / 2}]);`,
+    `var em = el.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var es = new Shape(); es.vertices = [[${520 - EL_SHIFT}, 160], [${880 - EL_SHIFT}, 160], [${880 - EL_SHIFT}, 420], [${520 - EL_SHIFT}, 420]]; es.closed = true; em.property("ADBE Mask Shape").setValue(es);`,
+    'var lv = el.property("ADBE Effect Parade").addProperty("ADBE Pro Levels2"); lv.name = "Mismatch";',
+    "function lvp(n) { for (var i = 1; i <= lv.numProperties; i++) { if (lv.property(i).name === n) return lv.property(i); } return null; }",
+    'var unit = lvp("Red Input White").value; if (!(unit > 1.5)) unit = 1;',
+    'lvp("Red Output White").setValue(0.85 * unit); lvp("Green Gamma").setValue(1.3); lvp("Blue Output Black").setValue(0.06 * unit);',
+    "ids.element = ec.id;",
+  ].join("\n");
+}
+
+async function stageElement(ids, expect) {
+  // Pick dark, mid and bright 16 px boxes from the plate alone (the same picture the element shows, shifted).
+  const plate = await frame(ids.src, 0);
+  const boxes = [];
+  for (let y = EL_AREA[1]; y + 16 <= EL_AREA[3]; y += 8) {
+    for (let x = EL_AREA[0]; x + 16 <= EL_AREA[2]; x += 8) {
+      const idx = pixels(plate, [x - EL_SHIFT, y, x - EL_SHIFT + 16, y + 16]);
+      const m = channelMeans(plate, idx);
+      const lum = (m[0] + m[1] + m[2]) / 3;
+      let v = 0;
+      for (const i of idx) v += ((plate.data[i] + plate.data[i + 1] + plate.data[i + 2]) / 3 - lum) ** 2;
+      boxes.push({ x, y, lum, sd: Math.sqrt(v / idx.length) });
+    }
+  }
+  const calm = boxes.filter((b) => b.sd < 18).sort((a, b) => a.lum - b.lum);
+  const pick = [0.1, 0.5, 0.9].map((q) => calm[Math.min(calm.length - 1, Math.floor(q * calm.length))]);
+  const pairs = pick.map((b, i) => ({ name: ["dark", "mid", "bright"][i], element: { kind: "rect", rect: [b.x, b.y, b.x + 16, b.y + 16] }, plate: { kind: "rect", rect: [b.x - EL_SHIFT, b.y, b.x - EL_SHIFT + 16, b.y + 16] } }));
+  const diff = async () => {
+    const f = await frame(ids.element, 0);
+    const a = channelMeans(f, pixels(f, EL_AREA));
+    const b = channelMeans(f, pixels(f, [EL_AREA[0] - EL_SHIFT, EL_AREA[1], EL_AREA[2] - EL_SHIFT, EL_AREA[3]]));
+    // Per-pixel mean absolute difference over the whole element area against the plate it copies.
+    let mad = 0;
+    let n = 0;
+    for (let y = EL_AREA[1]; y < EL_AREA[3]; y++) for (let x = EL_AREA[0]; x < EL_AREA[2]; x++) {
+      const i = (y * f.width + x) * 4;
+      const j = (y * f.width + x - EL_SHIFT) * 4;
+      for (let c = 0; c < 3; c++) mad += Math.abs(f.data[i + c] - f.data[j + c]);
+      n += 3;
+    }
+    return { mean_offset_rgb: a.map((v, c) => r3(v - b[c])), mean_abs_diff_levels: r3(mad / n) };
+  };
+  const before = await diff();
+  const r = await call("ae_color_match_element", { comp_id: ids.element, layer: { name: "Element" }, pairs, time: 0, expect });
+  const after = r.ok === false ? null : await diff();
+  return { ok: r.ok !== false, before, after, tool_worst_left: r.worst_left_levels ?? null, levels: r.levels ?? null, message: r.message ?? null, pairs: pairs.map((p) => p.element.rect) };
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -896,6 +954,7 @@ async function main() {
       projectionJsx(),
       solveJsx(),
       slipJsx(),
+      elementJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -980,6 +1039,11 @@ async function main() {
   if (want("slip")) {
     report.slip = await stageSlip(ids, expect);
     for (const [k, v] of Object.entries(report.slip)) console.log(`slip          ${k.padEnd(6)} ${v.verdict}: max ${v.max_slip_px}px; ${v.series.map((x) => `${x.time}s tool ${x.tool_px} true ${x.true_px}`).join(" | ")}${v.ok ? "" : `; ${v.summary}`}`);
+  }
+  if (want("element")) {
+    report.element = await stageElement(ids, expect);
+    const e = report.element;
+    console.log(`element       ${e.ok ? `whole area off by ${e.before.mean_abs_diff_levels} levels before, ${e.after?.mean_abs_diff_levels} after (mean offset ${JSON.stringify(e.after?.mean_offset_rgb)}); tool worst pair ${e.tool_worst_left}; levels ${JSON.stringify(e.levels)}` : e.message}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);
