@@ -38,11 +38,14 @@ export const IDEMPOTENCY_KEY_PROPERTY = {
   description: "Optional: a new unique key per write. A resend with the same key and arguments returns the first answer instead of running again.",
 };
 
-/** A write tool's JSON schema with `idempotency_key` added (other tools' schemas unchanged). */
-export function withIdempotencyKey(name: string, schema: unknown): Record<string, unknown> {
+/**
+ * A write tool's JSON schema with `idempotency_key` added (other tools' schemas unchanged). `compact`
+ * (the core list, which has a size budget) adds the bare field; the core instructions say what it is.
+ */
+export function withIdempotencyKey(name: string, schema: unknown, compact = false): Record<string, unknown> {
   const obj = schema as Record<string, unknown>;
   if (!isWriteTool(name) || !obj || typeof obj !== "object") return obj;
   const props = (obj.properties as Record<string, unknown> | undefined) ?? {};
   if (Object.prototype.hasOwnProperty.call(props, "idempotency_key")) return obj;
-  return { ...obj, properties: { ...props, idempotency_key: IDEMPOTENCY_KEY_PROPERTY } };
+  return { ...obj, properties: { ...props, idempotency_key: compact ? { type: "string" } : IDEMPOTENCY_KEY_PROPERTY } };
 }

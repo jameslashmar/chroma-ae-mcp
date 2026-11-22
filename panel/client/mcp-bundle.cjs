@@ -69759,12 +69759,12 @@ var IDEMPOTENCY_KEY_PROPERTY = {
   maxLength: 128,
   description: "Optional: a new unique key per write. A resend with the same key and arguments returns the first answer instead of running again."
 };
-function withIdempotencyKey(name, schema) {
+function withIdempotencyKey(name, schema, compact2 = false) {
   const obj = schema;
   if (!isWriteTool(name) || !obj || typeof obj !== "object") return obj;
   const props = obj.properties ?? {};
   if (Object.prototype.hasOwnProperty.call(props, "idempotency_key")) return obj;
-  return { ...obj, properties: { ...props, idempotency_key: IDEMPOTENCY_KEY_PROPERTY } };
+  return { ...obj, properties: { ...props, idempotency_key: compact2 ? { type: "string" } : IDEMPOTENCY_KEY_PROPERTY } };
 }
 
 // src/tool-annotations.ts
@@ -70315,7 +70315,7 @@ function fullListEntry(t) {
   return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) };
 }
 function trimmedListEntry(t) {
-  return { name: t.name, description: trimToolDescription(t), inputSchema: trimSchema(zodToJsonSchema(t.schema), t.name), annotations: annotationsFor(t.name) };
+  return { name: t.name, description: trimToolDescription(t), inputSchema: withIdempotencyKey(t.name, trimSchema(zodToJsonSchema(t.schema), t.name), true), annotations: annotationsFor(t.name) };
 }
 function coreTools() {
   const byName = new Map(ALL_TOOLS.map((t) => [t.name, t]));
@@ -70338,7 +70338,7 @@ function coreInstructions() {
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
-    "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. It also takes an optional `idempotency_key` (a new unique string per write): a resend with the same key and arguments returns the first answer instead of running twice.",
+    "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",
     ...lines

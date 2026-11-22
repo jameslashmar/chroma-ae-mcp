@@ -221,7 +221,8 @@ describe("trimmed schemas", () => {
     const byName = new Map<string, any>(list.tools.map((t: any) => [t.name, t]));
     let propertyCount = 0;
     for (const name of CORE_TOOL_NAMES) {
-      const full = zodToJsonSchema(ALL_TOOLS.find((t) => t.name === name)!.schema);
+      // The core list adds a bare idempotency_key to write tools (tool-call.ts takes it off before validation).
+      const full = withIdempotencyKey(name, zodToJsonSchema(ALL_TOOLS.find((t) => t.name === name)!.schema), true);
       const trimmed = byName.get(name).inputSchema;
       expect(sameStructure(full, trimmed, name), name).toEqual([]);
       propertyCount += JSON.stringify(full).split('"type"').length;
