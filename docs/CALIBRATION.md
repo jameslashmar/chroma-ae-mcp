@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -83,6 +83,10 @@ The element is the photo shifted 300 px and masked, with a known mismatch: red o
 | after | 0.34 levels | red input white 0.850 (truth 0.85), green gamma 0.787 (1/1.3 = 0.769), blue input black 0.062 (0.06) |
 
 AE's Levels gamma lifts the mids above 1 (out = in^(1/gamma)), as the tool assumes. With three pairs and five Levels values the fit is underdetermined: a free five-value fit found exact but odd answers (blue gamma 1.3 with output white 0.63), so the tool fits two three-value families (output side, input side) and keeps the better, or the one that changes least.
+
+### Light tracking on an element (`ae_patch_color_match` on any layer)
+
+The colour shot's light change (the plate darkened by a black solid to 25% and tinted by a warm Multiply solid to 60% over the shot), with an element of other content on top (the photo at 60% and shifted, masked to 220 x 180): run on the element, the colour match makes it follow the plate's light. Its colour at every checked frame was its colour at 0 times the shot's gain within **0.19 levels** (15.1 levels uncorrected). The fit works on ratios against `ref_time`, so the element's own content does not matter; light direction and shadows are not matched.
 
 ### Inpaint (`ae_inpaint_plate`)
 

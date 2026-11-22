@@ -850,6 +850,45 @@ async function stageElement(ids, expect) {
   return { ok: r.ok !== false, before, after, tool_worst_left: r.worst_left_levels ?? null, levels: r.levels ?? null, message: r.message ?? null, pairs: pairs.map((p) => p.element.rect) };
 }
 
+// ---------- light tracking on an element (item 7) ----------
+
+// The colour shot's light change (warm Multiply to 60%, black to 25%), with an element of different
+// content on top (a sign, a CG object): ae_patch_color_match on the element should make it follow the
+// plate's light, so its colour at t is its colour at 0 times the shot's gain.
+const LIGHT_RECT = [600, 120, 820, 300];
+function lightJsx() {
+  return [
+    'var lc = mk("Cal light"); var lp = lc.layers.add(src); lp.name = "Plate";',
+    `var lw = lc.layers.addSolid(${JSON.stringify(WARM)}, "Warm", ${W}, ${H}, 1); lw.blendingMode = BlendingMode.MULTIPLY;`,
+    `lw.property("ADBE Transform Group").property("ADBE Opacity").setValuesAtTimes([0, ${END}], [0, 60]);`,
+    `var lwo = lw.property("ADBE Transform Group").property("ADBE Opacity"); for (var lk = 1; lk <= lwo.numKeys; lk++) lwo.setInterpolationTypeAtKey(lk, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);`,
+    `var ld = lc.layers.addSolid([0, 0, 0], "Dim", ${W}, ${H}, 1); var ldt = []; var ldv = []; for (var lf = 0; lf < ${FRAMES}; lf++) { ldt.push(lf / ${FPS}); ldv.push(25 * Math.sin(Math.PI * Math.min(1, (lf / ${FPS}) / ${END}) / 2)); } ld.property("ADBE Transform Group").property("ADBE Opacity").setValuesAtTimes(ldt, ldv);`,
+    // The element: the photo at 60% and shifted (other content than the plate around it), masked, on top.
+    'var le = lc.layers.add(src); le.name = "Element"; le.moveToBeginning(); le.property("ADBE Transform Group").property("ADBE Scale").setValue([60, 60]); le.property("ADBE Transform Group").property("ADBE Position").setValue([300, 420]);',
+    // Mask in the element's layer space: comp = 0.6 * (layer - anchor) + position.
+    `var lem = le.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var les = new Shape(); var lx0 = (${LIGHT_RECT[0]} - 300) / 0.6 + ${W / 2}, ly0 = (${LIGHT_RECT[1]} - 420) / 0.6 + ${H / 2}, lx1 = (${LIGHT_RECT[2]} - 300) / 0.6 + ${W / 2}, ly1 = (${LIGHT_RECT[3]} - 420) / 0.6 + ${H / 2}; les.vertices = [[lx0, ly0], [lx1, ly0], [lx1, ly1], [lx0, ly1]]; les.closed = true; lem.property("ADBE Mask Shape").setValue(les);`,
+    "ids.light = lc.id;",
+  ].join("\n");
+}
+
+async function stageLight(ids, expect) {
+  const compId = ids.light;
+  const r = await call("ae_patch_color_match", { comp_id: compId, layer: { name: "Element" }, region: { kind: "rect", rect: LIGHT_RECT }, ref_time: 0, start: 0, end: END, step: 2, expect });
+  if (r.ok === false || r.complete === false) return { ok: false, message: r.message ?? brief(r) };
+  const inner = shrink(LIGHT_RECT, 10);
+  const f0 = await frame(compId, 0);
+  const base = channelMeans(f0, pixels(f0, inner));
+  const rows = [];
+  for (const t of [0.4, 0.8, 1.2, 1.6, END]) {
+    const f = await frame(compId, t);
+    const got = channelMeans(f, pixels(f, inner));
+    const g = colourGain(Math.round(t * FPS) / FPS);
+    rows.push({ t, left: got.map((v, c) => r3(v - base[c] * g[c])), uncorrected: base.map((v, c) => r3(v - base[c] * g[c])) });
+  }
+  const worst = (k) => r3(Math.max(...rows.map((row) => Math.max(...row[k].map(Math.abs)))));
+  return { ok: true, rows, worst_left_levels: worst("left"), worst_uncorrected_levels: worst("uncorrected") };
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -955,6 +994,7 @@ async function main() {
       solveJsx(),
       slipJsx(),
       elementJsx(),
+      lightJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -1044,6 +1084,11 @@ async function main() {
     report.element = await stageElement(ids, expect);
     const e = report.element;
     console.log(`element       ${e.ok ? `whole area off by ${e.before.mean_abs_diff_levels} levels before, ${e.after?.mean_abs_diff_levels} after (mean offset ${JSON.stringify(e.after?.mean_offset_rgb)}); tool worst pair ${e.tool_worst_left}; levels ${JSON.stringify(e.levels)}` : e.message}`);
+  }
+  if (want("light")) {
+    report.light = await stageLight(ids, expect);
+    const l = report.light;
+    console.log(`light         ${l.ok ? `element follows the plate's light within ${l.worst_left_levels} levels (uncorrected ${l.worst_uncorrected_levels})` : l.message}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);
