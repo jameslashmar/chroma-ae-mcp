@@ -91,6 +91,7 @@ import {
   regionToPolygon,
   ringMask,
   seamScore,
+  temporalLag1,
   temporalNoise,
   warpPolygon,
   type Pt,
@@ -115,8 +116,23 @@ const KEEP_STATES = 50;
 const EIGHT_BIT_HALF = 0.5 / 255;
 /** A patch whose detail is within this factor of the plate's is left alone: texture differs between two areas of the same surface. */
 export const SHARPNESS_SLACK = 1.1;
-/** First estimate of Add Grain's noise sigma (gray levels) per unit of Intensity; the tuning rounds correct it. */
-export const GRAIN_SIGMA_PER_INTENSITY = 20;
+/**
+ * Add Grain measured on AE 26.2 (qa/calibrate-compositing.mjs, 50% gray, 8 bpc, full-resolution
+ * renders): per Size, the grain's temporal sigma per unit of Intensity (at Intensity 0.3) and how
+ * coarse it is (the lag-1 correlation of neighbouring pixels in the difference of two frames).
+ * Sigma is not monotonic in Size. Per-pixel white noise matches Size 0.25; AE's default 1 is a
+ * clumped grain (correlation 0.68).
+ */
+export const ADD_GRAIN_CURVE: ReadonlyArray<{ size: number; sigmaPerIntensity: number; lag1: number }> = [
+  { size: 0.25, sigmaPerIntensity: 8.59, lag1: 0.0 },
+  { size: 0.5, sigmaPerIntensity: 5.56, lag1: 0.254 },
+  { size: 0.75, sigmaPerIntensity: 3.37, lag1: 0.585 },
+  { size: 1, sigmaPerIntensity: 2.58, lag1: 0.681 },
+  { size: 1.5, sigmaPerIntensity: 3.75, lag1: 0.841 },
+  { size: 2, sigmaPerIntensity: 4.94, lag1: 0.907 },
+];
+/** Kept for callers that ask for the default Size's figure. */
+export const GRAIN_SIGMA_PER_INTENSITY = 2.58;
 
 const r2 = (v: number): number => Math.round(v * 100) / 100;
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
@@ -610,9 +626,25 @@ export function seamColour(img: RgbaImage, polyPng: Pt[], gapPx: number, ringPx:
 
 // ---------- pure: grain, sharpness, motion blur, edge ----------
 
-/** Add Grain Intensity for a target noise sigma (gray levels), through the placeholder calibration. */
-export function grainIntensityFor(sigma: number): number {
-  return r4(clamp(sigma / GRAIN_SIGMA_PER_INTENSITY, 0.02, 10));
+/** Linear interpolation along the curve, clamped to its ends. */
+function alongCurve(x: number, xs: number[], ys: number[]): number {
+  if (x <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) {
+    if (x <= xs[i]) return ys[i - 1] + ((ys[i] - ys[i - 1]) * (x - xs[i - 1])) / (xs[i] - xs[i - 1]);
+  }
+  return ys[ys.length - 1];
+}
+
+/** Add Grain Intensity for a target noise sigma (gray levels) at a Size, through the measured curve. */
+export function grainIntensityFor(sigma: number, size = 1): number {
+  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity));
+  return r4(clamp(sigma / per, 0.02, 10));
+}
+
+/** The Add Grain Size whose grain is as coarse as the plate's (its neighbour correlation), or null when that was not measured. */
+export function grainSizeFor(lag1: number | null): number | null {
+  if (lag1 === null || !Number.isFinite(lag1)) return null;
+  return r3(alongCurve(lag1, ADD_GRAIN_CURVE.map((c) => c.lag1), ADD_GRAIN_CURVE.map((c) => c.size)));
 }
 
 /** The next Intensity: scaled by target over measured, the step capped at 4x either way. */
@@ -1122,7 +1154,7 @@ export const AePatchGrainSchema = z
     method: z.enum(["add", "match"]).default("add").describe("add: Add Grain ('VISINF Grain Implant') set from the measured sigma. match: Match Grain ('VISINF Grain Duplication') sampling `plate_layer`, which may pick a poor sample area."),
     plate_layer: LayerSel.optional().describe("Match Grain only: the layer whose grain is copied (the plate)."),
     degrain: z.enum(["none", "median", "remove_grain"]).default("none").describe("Remove the patch's own frozen grain first: Median radius 1, or Remove Grain with Final Output. Use it when the patch's grain is stronger than the plate's."),
-    grain_size: z.number().min(0.1).max(10).default(1).describe("Add Grain's Size. Its unit is unmeasured in this build, so it is the one setting not derived from the plate; the default is the effect's own."),
+    grain_size: z.number().min(0.1).max(10).optional().describe("Add Grain's Size. Default: as coarse as the plate's grain (the neighbour correlation of its moving grain, through a curve measured on Add Grain: per-pixel noise is Size 0.25, AE's default 1 is clumped grain); 1 when that cannot be measured."),
     intensity: z.number().min(0).max(20).optional().describe("Start the tuning from this Intensity instead of the default start (the calibration curve from the measured sigma for method 'add'; 1 for method 'match'). The tuning rounds still adjust it."),
     viewing_mode_index: z.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in the grain effect's Viewing Mode (built-in guess: Add Grain 3, Match Grain 5), when it is wrong for this AE. Checked against the menu's range before it is set."),
     degrain_viewing_mode_index: z.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in Remove Grain's Viewing Mode (built-in guess 4), when degrain is 'remove_grain' and the guess is wrong for this AE."),
@@ -1746,6 +1778,8 @@ interface SigmaSet {
   spatial: [number, number, number];
   /** Temporal noise sigma of the luma, median over the sampled frames; 0 when not measurable. */
   temporal: number;
+  /** How coarse the moving grain is: neighbour correlation of a two-frame difference (0 per-pixel noise, near 1 large soft grain); null when not measurable. */
+  lag1: number | null;
   frames: number;
 }
 
@@ -1760,21 +1794,27 @@ interface GrainBody {
 const ERODE_PX = 2;
 
 /** Sigma of the plate ring and of the patch interior (composite) on one sampled frame, in the images' own pixels. */
-function grainFrame(inp: { plate: RgbaImage | null; plateN: RgbaImage | null; comp: RgbaImage | null; compN: RgbaImage | null; sample: GrainSample; compW: number; ringPx: number; gapPx: number }): { ring: { spatial: number[]; temporal: number } | null; patch: { spatial: number[]; temporal: number } | null } {
+type GrainRow = { spatial: number[]; temporal: number; lag1: number | null };
+
+function grainFrame(inp: { plate: RgbaImage | null; plateN: RgbaImage | null; comp: RgbaImage | null; compN: RgbaImage | null; sample: GrainSample; compW: number; ringPx: number; gapPx: number }): { ring: GrainRow | null; patch: GrainRow | null } {
   const s = (inp.plate ?? inp.comp)!.width / inp.compW;
   const w = (inp.plate ?? inp.comp)!.width;
   const h = (inp.plate ?? inp.comp)!.height;
   const polyPng = scalePoly(inp.sample.poly, s);
   const Hr = mulH(inp.sample.Hn, invertH(inp.sample.H) ?? identityH());
-  const measure = (img: RgbaImage, imgN: RgbaImage | null, set: RingSet) => {
+  const measure = (img: RgbaImage, imgN: RgbaImage | null, set: RingSet): GrainRow | null => {
     if (set.idx.length < 60) return null;
     const spatial = (["red", "green", "blue"] as const).map((c) => noiseSigma(channelGray(img, c), set.mask));
     let temporal = 0;
+    let lag1: number | null = null;
     if (imgN) {
       const warped = warpGrayToRef(toGray(imgN), Hr, s, set);
-      if (warped.validCount >= 60) temporal = temporalNoise(toGray(img), warped.gray, warped.valid);
+      if (warped.validCount >= 60) {
+        temporal = temporalNoise(toGray(img), warped.gray, warped.valid);
+        lag1 = temporalLag1(toGray(img), warped.gray, warped.valid);
+      }
     }
-    return { spatial, temporal };
+    return { spatial, temporal, lag1 };
   };
   let ring = null;
   if (inp.plate) ring = measure(inp.plate, inp.plateN, makeRingSet(w, h, polyPng, inp.gapPx * s, (inp.gapPx + inp.ringPx) * s));
@@ -1783,10 +1823,11 @@ function grainFrame(inp: { plate: RgbaImage | null; plateN: RgbaImage | null; co
   return { ring, patch };
 }
 
-function medianSigma(rows: Array<{ spatial: number[]; temporal: number }>): SigmaSet {
+function medianSigma(rows: GrainRow[]): SigmaSet {
   const spatial: [number, number, number] = [0, 1, 2].map((c) => r3(median(rows.map((r) => r.spatial[c])))) as [number, number, number];
   const temps = rows.map((r) => r.temporal).filter((t) => t > 0);
-  return { spatial, temporal: temps.length ? r3(median(temps)) : 0, frames: rows.length };
+  const lags = rows.map((r) => r.lag1).filter((v): v is number => v !== null);
+  return { spatial, temporal: temps.length ? r3(median(temps)) : 0, lag1: lags.length ? r3(median(lags)) : null, frames: rows.length };
 }
 
 const sigmaMean = (s: SigmaSet): number => mean(s.spatial);
@@ -1905,8 +1946,8 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
       }
     },
     body: async (env, prep) => {
-      const ringRows: Array<{ spatial: number[]; temporal: number }> = [];
-      const patchRows: Array<{ spatial: number[]; temporal: number }> = [];
+      const ringRows: GrainRow[] = [];
+      const patchRows: GrainRow[] = [];
       const skipped: string[] = [];
       let plateCrop: RgbaImage | null = null;
       let compCrop: RgbaImage | null = null;
@@ -1942,7 +1983,7 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
       if (ringRows.length === 0) throw new Error("no frame could be measured in the plate ring");
       return {
         ring: medianSigma(ringRows),
-        patch: patchRows.length ? medianSigma(patchRows) : { spatial: [0, 0, 0], temporal: 0, frames: 0 },
+        patch: patchRows.length ? medianSigma(patchRows) : { spatial: [0, 0, 0], temporal: 0, lag1: null, frames: 0 },
         plateCrop,
         compCrop,
         skipped,
@@ -1978,11 +2019,16 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
   if (patchSigma > ringSigma * 1.3 && args.degrain === "none") {
     notes.push("The patch's own grain is stronger than the plate's: add degrain ('median' or 'remove_grain') so the new grain is not on top of it.");
   }
-  // Match Grain samples the plate's own noise, so Intensity 1 already reproduces it; only Add Grain goes through the calibration curve.
-  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(ringSigma));
   // A frozen patch with no degrain already holds the plate's spatial grain: the added grain would sum with it. Then the tuning aims at the moving (temporal) grain.
   const tuneTemporal = args.degrain === "none" && body.ring.temporal >= args.min_sigma;
   const tuneTarget = tuneTemporal ? body.ring.temporal : ringSigma;
+  // Size: given, else as coarse as the plate's grain (its neighbour correlation through the Add Grain curve), else AE's default 1.
+  const measuredSize = grainSizeFor(body.ring.lag1);
+  const grainSize = args.grain_size ?? measuredSize ?? 1;
+  const sizeFrom = args.grain_size !== undefined ? "given" : measuredSize !== null ? "measured" : "default";
+  if (sizeFrom === "default") notes.push("The plate's grain texture could not be measured (no temporal grain in the ring), so Size is Add Grain's default 1; give grain_size if the grain looks too coarse or too fine.");
+  // Match Grain samples the plate's own noise, so Intensity 1 already reproduces it; only Add Grain goes through the calibration curve.
+  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize));
   const preview = (compImg: RgbaImage | null): string | null => {
     if (!body.plateCrop || !compImg) return null;
     try {
@@ -1998,7 +2044,7 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
   };
   if (args.dry_run) {
     notes.push("dry_run: nothing was added. The plan below is what a real run would write.");
-    return { ...header, grain_added: false, plan: { method: args.method, degrain: args.degrain, start_intensity: startIntensity, size: args.grain_size, rounds: args.rounds }, notes };
+    return { ...header, grain_added: false, plan: { method: args.method, degrain: args.degrain, start_intensity: startIntensity, size: grainSize, size_from: sizeFrom, rounds: args.rounds }, notes };
   }
 
   // First write: degrain, the matted adjustment layer and the grain.
@@ -2020,7 +2066,7 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
         method: args.method,
         degrain: args.degrain,
         intensity: startIntensity,
-        size: args.grain_size,
+        size: grainSize,
         viewing_mode_index: args.viewing_mode_index,
         degrain_viewing_mode_index: args.degrain_viewing_mode_index,
         plate_layer: args.plate_layer,
@@ -2051,7 +2097,7 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
       let measured: { set: SigmaSet; last: RgbaImage | null } | null = null;
       try {
         measured = await compLease(ctx, toolName, `${label} round ${round}`, args.comp_id, { maxRenders: samples.length * 2 + 2, maxSeconds: 60 }, async (snap) => {
-          const rows: Array<{ spatial: number[]; temporal: number }> = [];
+          const rows: GrainRow[] = [];
           let lastImg: RgbaImage | null = null;
           for (const sample of samples) {
             const comp = await snap(sample.time);
@@ -2063,7 +2109,7 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
             lastImg = comp;
             await yieldLoop();
           }
-          return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0] as [number, number, number], temporal: 0, frames: 0 }, last: lastImg };
+          return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0] as [number, number, number], temporal: 0, lag1: null, frames: 0 }, last: lastImg };
         });
       } catch (err) {
         tuneFailure = `Round ${round} could not render: ${errMessage(err)}`;
@@ -2134,6 +2180,13 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
     degrain: args.degrain,
     start_intensity: startIntensity,
     final_intensity: intensity,
+    size: grainSize,
+    size_from: sizeFrom,
+    grain_texture: {
+      plate_lag1: body.ring.lag1,
+      patch_lag1: patchNow.lag1,
+      note: "Neighbour correlation of the moving grain: 0 is per-pixel noise, near 1 large soft grain. A patch far from the plate (0.2 or more apart) has the wrong grain size: set grain_size.",
+    },
     converged,
     rounds,
     sigma_after: { plate_ring: body.ring, patch: patchNow, temporal_ratio: body.ring.temporal > 0 && patchNow.temporal > 0 ? r3(patchNow.temporal / body.ring.temporal) : null },
@@ -2572,9 +2625,9 @@ export const patchfitTools: ToolDefinition<any>[] = [
     name: "ae_patch_grain",
     description:
       "Measures and matches grain so a frozen patch does not look dead. Measures per channel spatial noise sigma in the plate's ring (plate render) and inside the patch (composite), and temporal sigma on the next frame aligned through the track: temporal sigma near 0 in the patch while the plate's is not is the frozen-grain tell. " +
-      "Then, in one undo step: optionally degrains the patch (`degrain`: Median radius 1, or Remove Grain with Final Output), adds an adjustment layer '<patch> GRAIN' directly above the patch, track-matted to its alpha (AE 23+; the grain does not move with a pin), and puts Add Grain ('VISINF Grain Implant', Final Output, Intensity from the measured sigma through a calibration curve for Add Grain, 1 for Match Grain (it samples the plate's own noise), Animation Speed 1, a random seed) or Match Grain on it. " +
+      "Then, in one undo step: optionally degrains the patch (`degrain`: Median radius 1, or Remove Grain with Final Output), adds an adjustment layer '<patch> GRAIN' directly above the patch, track-matted to its alpha (AE 23+; the grain does not move with a pin), and puts Add Grain ('VISINF Grain Implant', Final Output, Intensity from the measured sigma through Add Grain's measured curve for the chosen Size, 1 for Match Grain (it samples the plate's own noise), Animation Speed 1, a random seed) or Match Grain on it. " +
       "Then up to `rounds` (default 2, max 3) tuning rounds, each its own undo step: render, measure the patch against the plate, scale Intensity by the ratio. With degrain 'none' the patch still holds its own frozen spatial grain, so the rounds compare the moving (temporal) grain, which is what the frozen grain lacks; with a degrain they compare the spatial sigma. Returns sigma before and after per channel, the temporal ratio, the rounds and a 2x preview PNG (plate ring left, composite right). " +
-      "A plate whose sigma is under `min_sigma` is clean and gets no grain. Viewing Mode must be Final Output, the last menu item (Preview renders a small box, Blending Matte a matte image): the tool sets it (Add Grain 3, Match Grain 5, Remove Grain 4; unmeasured on AE 26), checks the index against the menu's range first and reads it back; `viewing_mode_index` and `degrain_viewing_mode_index` override the item numbers. If setTrackMatte switches the patch layer off the tool switches it back on and says so. Add Grain has no 32-bpc support; the result warns. Size is `grain_size` (its unit is unmeasured). With degrain 'none' the patch's frozen grain stays under the new grain, so the total spatial grain can end above the plate's (up to about 1.4x for a patch as grainy as the plate); the result then says so, and degrain removes the excess. `dry_run` measures only. " +
+      "A plate whose sigma is under `min_sigma` is clean and gets no grain. Viewing Mode must be Final Output, the last menu item (Preview renders a small box, Blending Matte a matte image): the tool sets it (Add Grain 3, Match Grain 5, Remove Grain 4; unmeasured on AE 26), checks the index against the menu's range first and reads it back; `viewing_mode_index` and `degrain_viewing_mode_index` override the item numbers. If setTrackMatte switches the patch layer off the tool switches it back on and says so. Add Grain has no 32-bpc support; the result warns. Size is `grain_size`, by default as coarse as the plate's grain (measured; per-pixel noise maps to 0.25, AE's default 1 is clumped), and the first Intensity comes from the sigma Add Grain gives at that Size (measured on AE 26.2), so the rounds only fine-tune. With degrain 'none' the patch's frozen grain stays under the new grain, so the total spatial grain can end above the plate's (up to about 1.4x for a patch as grainy as the plate); the result then says so, and degrain removes the excess. `dry_run` measures only. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AePatchGrainSchema,
     handler: async (args: AePatchGrainArgs, ctx) => {

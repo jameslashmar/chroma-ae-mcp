@@ -28167,11 +28167,19 @@ function decodePngFile(filePath) {
   if (!fs25.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
+  const deadline = Date.now() + 3e3;
+  while (!pngComplete(filePath) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
   const buf = fs25.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
-  return import_pngjs3.PNG.sync.read(buf);
+  try {
+    return import_pngjs3.PNG.sync.read(buf);
+  } catch (e) {
+    throw new Error(`PNG file could not be decoded (${e.message}); AE may not have finished writing it: ${filePath}`);
+  }
 }
 function analyzeDecodedFrame(png, meta) {
   const { width, height, data } = png;
@@ -28710,6 +28718,23 @@ function isFreshPngFile(filePath, requestStartMs) {
     return { fresh: false, size: 0, mtimeMs: 0 };
   }
 }
+function pngComplete(filePath) {
+  let fd = null;
+  try {
+    fd = fs27.openSync(filePath, "r");
+    const size = fs27.fstatSync(fd).size;
+    const head3 = Buffer.alloc(8);
+    if (fs27.readSync(fd, head3, 0, 8, 0) < 8 || !head3.equals(PNG_SIGNATURE)) return true;
+    if (size < 20) return false;
+    const tail = Buffer.alloc(8);
+    fs27.readSync(fd, tail, 0, 8, size - 8);
+    return tail.equals(PNG_IEND);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs27.closeSync(fd);
+  }
+}
 async function waitForFreshPng(filePath, requestStartMs, timeoutMs = pngWaitDeps.timeoutMs, intervalMs = pngWaitDeps.intervalMs) {
   const deadline = Date.now() + timeoutMs;
   let last = isFreshPngFile(filePath, requestStartMs);
@@ -28717,7 +28742,7 @@ async function waitForFreshPng(filePath, requestStartMs, timeoutMs = pngWaitDeps
     if (Date.now() >= deadline) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
     const next = isFreshPngFile(filePath, requestStartMs);
-    if (next.fresh && last.fresh && next.size === last.size) return next;
+    if (next.fresh && last.fresh && next.size === last.size && pngComplete(filePath)) return next;
     last = next;
   }
 }
@@ -28812,7 +28837,7 @@ async function saveChosenFrames(args, ctx, framesDir, opId) {
     throw err;
   }
 }
-var crypto7, fs27, path29, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, pngWaitDeps, frameCaptureDeps, renderTools;
+var crypto7, fs27, path29, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, PNG_SIGNATURE, PNG_IEND, pngWaitDeps, frameCaptureDeps, renderTools;
 var init_render = __esm({
   "src/tools/render.ts"() {
     "use strict";
@@ -28861,6 +28886,8 @@ var init_render = __esm({
       expect: ExpectSchema
     });
     AeRenderQueueStatusSchema = external_exports.object({});
+    PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    PNG_IEND = Buffer.from([73, 69, 78, 68, 174, 66, 96, 130]);
     pngWaitDeps = { intervalMs: 100, timeoutMs: 1e4 };
     frameCaptureDeps = { lateWriteMs: 2e4, settleAfterFailMs: 2e4 };
     renderTools = [
@@ -45106,6 +45133,88 @@ function reprojectionErrors(H, from, to) {
   }
   return out;
 }
+function expectedError(model, H, from, to, targets) {
+  const k = MODEL_PARAMS[model];
+  const n = from.length;
+  if (n !== to.length || 2 * n <= k || targets.length === 0) return null;
+  const err = reprojectionErrors(H, from, to);
+  if (!err) return null;
+  const sigma2 = err.reduce((a, e) => a + e * e, 0) / (2 * n - k);
+  const c = centroid(from);
+  let spread = 0;
+  for (const p of from) spread += Math.hypot(p[0] - c[0], p[1] - c[1]);
+  const sc = spread / n > 1e-6 ? spread / n / Math.SQRT2 : 1;
+  const Hn = mulH(H, [sc, 0, c[0], 0, sc, c[1], 0, 0, 1]);
+  const rows = (p) => {
+    const x = (p[0] - c[0]) / sc;
+    const y = (p[1] - c[1]) / sc;
+    if (model === "translate") return [[1, 0], [0, 1]];
+    if (model === "similarity") return [[x, -y, 1, 0], [y, x, 0, 1]];
+    if (model === "affine") return [[x, y, 1, 0, 0, 0], [0, 0, 0, x, y, 1]];
+    const w = Hn[6] * x + Hn[7] * y + Hn[8];
+    if (!(Math.abs(w) > 1e-9)) return null;
+    const u = (Hn[0] * x + Hn[1] * y + Hn[2]) / w;
+    const v = (Hn[3] * x + Hn[4] * y + Hn[5]) / w;
+    return [
+      [x / w, y / w, 1 / w, 0, 0, 0, -u * x / w, -u * y / w],
+      [0, 0, 0, x / w, y / w, 1 / w, -v * x / w, -v * y / w]
+    ];
+  };
+  const A = Array.from({ length: k }, () => new Array(k).fill(0));
+  for (const p of from) {
+    const r = rows(p);
+    if (!r) return null;
+    for (const row of r) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) A[i][j] += row[i] * row[j];
+  }
+  const inv = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_2, j) => i === j ? 1 : 0));
+  for (let col = 0; col < k; col++) {
+    let piv = col;
+    for (let r = col + 1; r < k; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    if (!(Math.abs(A[piv][col]) > 1e-12)) return null;
+    [A[col], A[piv]] = [A[piv], A[col]];
+    [inv[col], inv[piv]] = [inv[piv], inv[col]];
+    const d = A[col][col];
+    for (let j = 0; j < k; j++) {
+      A[col][j] /= d;
+      inv[col][j] /= d;
+    }
+    for (let r = 0; r < k; r++) {
+      if (r === col) continue;
+      const f = A[r][col];
+      if (f === 0) continue;
+      for (let j = 0; j < k; j++) {
+        A[r][j] -= f * A[col][j];
+        inv[r][j] -= f * inv[col][j];
+      }
+    }
+  }
+  let sum = 0;
+  let max = 0;
+  for (const t of targets) {
+    const r = rows(t);
+    if (!r) return null;
+    let v = 0;
+    for (const row of r) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) v += row[i] * inv[i][j] * row[j];
+    const e = Math.sqrt(Math.max(0, sigma2 * v));
+    sum += e;
+    if (e > max) max = e;
+  }
+  if (!Number.isFinite(sum)) return null;
+  return { sigma_px: Math.sqrt(sigma2), mean_px: sum / targets.length, max_px: max };
+}
+function quadGrid(quad, steps = 4) {
+  const out = [];
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      const s = i / steps;
+      const t = j / steps;
+      const top = [quad[0][0] + (quad[1][0] - quad[0][0]) * s, quad[0][1] + (quad[1][1] - quad[0][1]) * s];
+      const bottom = [quad[3][0] + (quad[2][0] - quad[3][0]) * s, quad[3][1] + (quad[2][1] - quad[3][1]) * s];
+      out.push([top[0] + (bottom[0] - top[0]) * t, top[1] + (bottom[1] - top[1]) * t]);
+    }
+  }
+  return out;
+}
 function mulberry322(seed) {
   let a = seed >>> 0;
   return () => {
@@ -45403,7 +45512,7 @@ function boxSum(src, w, h, r) {
   }
   return out;
 }
-var MODEL_MIN_POINTS, identityH, translationH, centroid, rectQuad, cubic;
+var MODEL_MIN_POINTS, identityH, translationH, centroid, MODEL_PARAMS, rectQuad, cubic;
 var init_planar_math = __esm({
   "src/tools/ext/planar-math.ts"() {
     "use strict";
@@ -45419,6 +45528,7 @@ var init_planar_math = __esm({
       }
       return [x / pts.length, y / pts.length];
     };
+    MODEL_PARAMS = { translate: 2, similarity: 4, affine: 6, perspective: 8 };
     rectQuad = (w, h, x = 0, y = 0) => [
       [x, y],
       [x + w, y],
@@ -46109,10 +46219,11 @@ function trackFromSeries(a) {
       const v = a.confidence?.[i]?.[k];
       return v === null || v === void 0 ? null : Math.min(1, Math.max(0, v / confScale));
     });
-    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, inliers: n };
+    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, expected_px: 0, inliers: n };
     const sol = solveModel(a.model, refPoints, pts);
     if (!sol) return { time: t, ok: false, H: null, points: pts, confidence: conf, rms_px: null, inliers: 0, note: "the points are degenerate at this frame (coincident or collinear)" };
-    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), inliers: n };
+    const ex = expectedError(a.model, sol.H, refPoints, pts, quadGrid(boundingQuad(refPoints)));
+    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers: n };
   });
   return {
     version: 1,
@@ -46243,9 +46354,81 @@ function channelGray(img, channel) {
   }
   return { width: img.width, height: img.height, data };
 }
+function flagUnreliableFrames(track) {
+  const ex = track.frames.filter((f) => f.ok && typeof f.expected_px === "number" && f.time !== track.ref_time).map((f) => f.expected_px).sort((a, b) => a - b);
+  if (ex.length < 5) return [];
+  const typical = ex[Math.floor(ex.length / 2)];
+  const limit = Math.max(2, 8 * typical);
+  const flagged = [];
+  for (const f of track.frames) {
+    if (f.ok && typeof f.expected_px === "number" && f.expected_px > limit) {
+      f.ok = false;
+      f.note = `unreliable fit: expected error ${r26(f.expected_px)} px against a typical ${r26(typical)} px (too few points agreeing, or points off the plane)`;
+      flagged.push(f.time);
+    }
+  }
+  return flagged;
+}
+function slidingPoints(track) {
+  const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
+  if (solved.length < 5) return [];
+  const per = track.ref_points.map(() => []);
+  for (const f of solved) {
+    track.ref_points.forEach((rp, k) => {
+      const p = f.points[k];
+      const q = applyH(f.H, rp);
+      if (p && q) per[k].push(Math.hypot(p[0] - q[0], p[1] - q[1]));
+    });
+  }
+  const median7 = (xs) => {
+    const v = xs.slice().sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)] : 0;
+  };
+  const all = per.flat();
+  const noise = Math.max(0.15, median7(all) * 1.4826);
+  const limit = Math.max(1.5, 5 * noise);
+  const out = [];
+  per.forEach((res, k) => {
+    if (res.length < 5) return;
+    const late2 = res.slice(Math.floor(res.length / 2));
+    const off = res.filter((e) => e > limit).length;
+    if (median7(late2) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r26(median7(res)), frames_off_plane: off, frames: res.length });
+  });
+  return out;
+}
+function cornerJitter(track, quad) {
+  const frames = track.frames.filter((f) => f.ok && f.H);
+  if (frames.length < 8) return null;
+  let worst = 0;
+  for (const corner of quad) {
+    const path63 = frames.map((f) => applyH(f.H, corner));
+    const d3 = [];
+    for (let i = 3; i < path63.length; i++) {
+      const [a, b, c, d] = [path63[i - 3], path63[i - 2], path63[i - 1], path63[i]];
+      if (!a || !b || !c || !d) continue;
+      d3.push(Math.hypot(d[0] - 3 * c[0] + 3 * b[0] - a[0], d[1] - 3 * c[1] + 3 * b[1] - a[1]));
+    }
+    if (d3.length < 4) continue;
+    d3.sort((x, y) => x - y);
+    const sigma = d3[Math.floor(d3.length / 2)] / (1.1774 * Math.sqrt(20));
+    if (sigma > worst) worst = sigma;
+  }
+  return r26(worst);
+}
+function slidingSummary(track) {
+  const sliding = slidingPoints(track);
+  if (!sliding.length) return {};
+  const many = sliding.length >= 2 && sliding.length >= track.ref_points.length / 4;
+  return {
+    sliding_points: sliding,
+    sliding_note: many ? `${sliding.length} of ${track.ref_points.length} points do not move with the plane the others define. Either they are off it (parallax: different depths), on something moving, or the shot is not one plane at all; then a 2D track cannot hold, and the shot needs a 3D camera solve (AE's 3D Camera Tracker, or Mocha with the right plane). Track again with points on one surface only (auto_points.exclude), or check the preview.` : `Point ${sliding.map((p) => p.index).join(", ")} does not move with the plane the others define (off the plane, on something moving, or a reflection). The fit votes it out, but the track is safer without it: track again with auto_points.exclude over it, or check the preview.`
+  };
+}
 function trackSummary(track, maxFrames = 500) {
   const ok = track.frames.filter((f) => f.ok);
   const rms = ok.map((f) => f.rms_px).filter((v) => v !== null);
+  const exp = ok.filter((f) => typeof f.expected_px === "number" && f.time !== track.ref_time);
+  const worst = exp.reduce((w, f) => w === null || f.expected_px > w.expected_px ? f : w, null);
   const step2 = Math.max(1, Math.ceil(track.frames.length / maxFrames));
   const sampled = track.frames.filter((_, i) => i % step2 === 0 || i === track.frames.length - 1).slice(0, maxFrames);
   const lostPer = track.ref_points.map((_, k) => track.frames.filter((f) => f.points[k] === null).length);
@@ -46262,6 +46445,10 @@ function trackSummary(track, maxFrames = 500) {
     first_time: track.frames.length ? r4(track.frames[0].time) : null,
     last_time: track.frames.length ? r4(track.frames[track.frames.length - 1].time) : null,
     rms_px: rms.length ? { mean: r26(rms.reduce((a, b) => a + b, 0) / rms.length), max: r26(Math.max(...rms)) } : null,
+    expected_error_px: exp.length && worst ? { mean: r26(exp.reduce((a, f) => a + f.expected_px, 0) / exp.length), max: r26(worst.expected_px), worst_time: r4(worst.time), frames_without: Math.max(0, ok.length - 1 - exp.length) } : null,
+    error_note: EXPECTED_ERROR_NOTE,
+    corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...slidingSummary(track),
     frames_lost_per_point: lostPer,
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r26(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
@@ -46815,6 +47002,7 @@ async function trackMulti(ctx, args) {
         points: refPoints.map((p, i) => aliveRef[i] ? p : null),
         confidence: refPoints.map((_, i) => aliveRef[i] ? 1 : null),
         rms_px: 0,
+        expected_px: 0,
         inliers: aliveRef.filter(Boolean).length
       };
       const added = [refFrame];
@@ -46878,6 +47066,7 @@ async function trackMulti(ctx, args) {
       };
       remember(track2.track_id, { forward: fwd, backward: bwd });
       track2.tracking.options = o;
+      if (track2.tracking.forward.done && track2.tracking.backward.done) flagUnreliableFrames(track2);
       saveTrack(track2);
       let previewPath;
       let previewError;
@@ -47006,7 +47195,7 @@ async function trackMulti(ctx, args) {
   }
   return result;
 }
-var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, EXPECTED_ERROR_NOTE, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
@@ -47291,14 +47480,17 @@ var init_planar = __esm({
           }
         }
         if (ok) this.lastH = sol.H;
+        const fit = survivors.filter((_, k) => sol.inliers[k]);
+        const ex = expectedError(this.opts.model, sol.H, fit.map((i) => this.refPoints[i]), fit.map((i) => pos[i]), quadGrid(this.quad));
         return {
-          frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), inliers, ...note ? { note } : {} },
+          frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers, ...note ? { note } : {} },
           stop: null,
           lost: alive.filter((i) => pos[i] === null),
           reacquired
         };
       }
     };
+    EXPECTED_ERROR_NOTE = "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
     round23 = (v) => [r4(v[0]), r4(v[1])];
     sampleIdx = (n) => Array.from(/* @__PURE__ */ new Set([0, Math.floor((n - 1) / 2), n - 1])).filter((i) => i >= 0 && i < n);
     near5 = (a, b, tol) => Math.abs(a - b) <= tol;
@@ -47316,7 +47508,7 @@ var init_planar = __esm({
     planarTools = [
       {
         name: "ae_track_multi",
-        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
+        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px` and `sliding_points` (points that do not move with the plane), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
         schema: AeTrackMultiSchema,
         handler: async (args, ctx) => {
           try {
@@ -47743,6 +47935,35 @@ function temporalNoise(a, b, mask) {
   for (let k = 0; k < n; k++) if (mask[k] >= 0.5) diff.push(a.data[k] - b.data[k]);
   if (diff.length < 50) return 0;
   return madSigma(diff) / Math.SQRT2;
+}
+function temporalLag1(a, b, mask) {
+  const w = a.width;
+  const n = Math.min(a.data.length, b.data.length, mask.length);
+  const d = new Float32Array(n);
+  const all = [];
+  for (let k = 0; k < n; k++) {
+    if (mask[k] < 0.5) continue;
+    d[k] = a.data[k] - b.data[k];
+    all.push(d[k]);
+  }
+  if (all.length < 50) return null;
+  const sigma = madSigma(all) || 1;
+  const m = median4(all);
+  const ok = (k) => k < n && mask[k] >= 0.5 && Math.abs(d[k] - m) <= 4 * sigma;
+  let num5 = 0;
+  let den = 0;
+  for (let k = 0; k < n; k++) {
+    if (!ok(k)) continue;
+    const x = k % w;
+    const v = d[k] - m;
+    for (const j of [x + 1 < w ? k + 1 : -1, k + w]) {
+      if (j < 0 || !ok(j)) continue;
+      const u = d[j] - m;
+      num5 += v * u;
+      den += (v * v + u * u) / 2;
+    }
+  }
+  return den > 0 ? num5 / den : null;
 }
 function gaussianBlurGray(gray, sigma) {
   const { width: w, height: h } = gray;
@@ -55375,8 +55596,20 @@ function seamColour(img, polyPng, gapPx, ringPx) {
   const diff = [a.mean_rgb[0] - b.mean_rgb[0], a.mean_rgb[1] - b.mean_rgb[1], a.mean_rgb[2] - b.mean_rgb[2]];
   return { diff: [r47(diff[0]), r47(diff[1]), r47(diff[2])], mean_abs: r47((Math.abs(diff[0]) + Math.abs(diff[1]) + Math.abs(diff[2])) / 3), luma: r47(a.luma_mean - b.luma_mean) };
 }
-function grainIntensityFor(sigma) {
-  return r47(clamp2(sigma / GRAIN_SIGMA_PER_INTENSITY, 0.02, 10));
+function alongCurve(x, xs, ys) {
+  if (x <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) {
+    if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+  }
+  return ys[ys.length - 1];
+}
+function grainIntensityFor(sigma, size = 1) {
+  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity));
+  return r47(clamp2(sigma / per, 0.02, 10));
+}
+function grainSizeFor(lag1) {
+  if (lag1 === null || !Number.isFinite(lag1)) return null;
+  return r39(alongCurve(lag1, ADD_GRAIN_CURVE.map((c) => c.lag1), ADD_GRAIN_CURVE.map((c) => c.size)));
 }
 function nextGrainIntensity(current, measured, target) {
   const ratio = measured > 1e-3 ? clamp2(target / measured, 0.25, 4) : 4;
@@ -56096,11 +56329,15 @@ function grainFrame(inp) {
     if (set2.idx.length < 60) return null;
     const spatial = ["red", "green", "blue"].map((c) => noiseSigma(channelGray(img, c), set2.mask));
     let temporal = 0;
+    let lag1 = null;
     if (imgN) {
       const warped = warpGrayToRef(toGray(imgN), Hr, s, set2);
-      if (warped.validCount >= 60) temporal = temporalNoise(toGray(img), warped.gray, warped.valid);
+      if (warped.validCount >= 60) {
+        temporal = temporalNoise(toGray(img), warped.gray, warped.valid);
+        lag1 = temporalLag1(toGray(img), warped.gray, warped.valid);
+      }
     }
-    return { spatial, temporal };
+    return { spatial, temporal, lag1 };
   };
   let ring = null;
   if (inp.plate) ring = measure(inp.plate, inp.plateN, makeRingSet(w, h, polyPng, inp.gapPx * s, (inp.gapPx + inp.ringPx) * s));
@@ -56111,7 +56348,8 @@ function grainFrame(inp) {
 function medianSigma(rows) {
   const spatial = [0, 1, 2].map((c) => r39(median5(rows.map((r) => r.spatial[c]))));
   const temps = rows.map((r) => r.temporal).filter((t) => t > 0);
-  return { spatial, temporal: temps.length ? r39(median5(temps)) : 0, frames: rows.length };
+  const lags = rows.map((r) => r.lag1).filter((v) => v !== null);
+  return { spatial, temporal: temps.length ? r39(median5(temps)) : 0, lag1: lags.length ? r39(median5(lags)) : null, frames: rows.length };
 }
 function grainMismatches(args, patchId, before, after, written) {
   const m = [];
@@ -56245,7 +56483,7 @@ async function grainHandler(args, ctx) {
       if (ringRows.length === 0) throw new Error("no frame could be measured in the plate ring");
       return {
         ring: medianSigma(ringRows),
-        patch: patchRows.length ? medianSigma(patchRows) : { spatial: [0, 0, 0], temporal: 0, frames: 0 },
+        patch: patchRows.length ? medianSigma(patchRows) : { spatial: [0, 0, 0], temporal: 0, lag1: null, frames: 0 },
         plateCrop,
         compCrop,
         skipped
@@ -56280,9 +56518,13 @@ async function grainHandler(args, ctx) {
   if (patchSigma > ringSigma * 1.3 && args.degrain === "none") {
     notes.push("The patch's own grain is stronger than the plate's: add degrain ('median' or 'remove_grain') so the new grain is not on top of it.");
   }
-  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(ringSigma));
   const tuneTemporal = args.degrain === "none" && body.ring.temporal >= args.min_sigma;
   const tuneTarget = tuneTemporal ? body.ring.temporal : ringSigma;
+  const measuredSize = grainSizeFor(body.ring.lag1);
+  const grainSize = args.grain_size ?? measuredSize ?? 1;
+  const sizeFrom = args.grain_size !== void 0 ? "given" : measuredSize !== null ? "measured" : "default";
+  if (sizeFrom === "default") notes.push("The plate's grain texture could not be measured (no temporal grain in the ring), so Size is Add Grain's default 1; give grain_size if the grain looks too coarse or too fine.");
+  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize));
   const preview = (compImg) => {
     if (!body.plateCrop || !compImg) return null;
     try {
@@ -56298,7 +56540,7 @@ async function grainHandler(args, ctx) {
   };
   if (args.dry_run) {
     notes.push("dry_run: nothing was added. The plan below is what a real run would write.");
-    return { ...header, grain_added: false, plan: { method: args.method, degrain: args.degrain, start_intensity: startIntensity, size: args.grain_size, rounds: args.rounds }, notes };
+    return { ...header, grain_added: false, plan: { method: args.method, degrain: args.degrain, start_intensity: startIntensity, size: grainSize, size_from: sizeFrom, rounds: args.rounds }, notes };
   }
   const patchId = info.layer.id;
   const stateRead2 = () => ({ host: "patchfitGrainState", args: { comp_id: args.comp_id, patch: { id: patchId } } });
@@ -56318,7 +56560,7 @@ async function grainHandler(args, ctx) {
           method: args.method,
           degrain: args.degrain,
           intensity: startIntensity,
-          size: args.grain_size,
+          size: grainSize,
           viewing_mode_index: args.viewing_mode_index,
           degrain_viewing_mode_index: args.degrain_viewing_mode_index,
           plate_layer: args.plate_layer,
@@ -56360,7 +56602,7 @@ async function grainHandler(args, ctx) {
             lastImg = comp;
             await yieldLoop6();
           }
-          return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0], temporal: 0, frames: 0 }, last: lastImg };
+          return { set: rows.length ? medianSigma(rows) : { spatial: [0, 0, 0], temporal: 0, lag1: null, frames: 0 }, last: lastImg };
         });
       } catch (err2) {
         tuneFailure = `Round ${round6} could not render: ${errMessage11(err2)}`;
@@ -56430,6 +56672,13 @@ async function grainHandler(args, ctx) {
     degrain: args.degrain,
     start_intensity: startIntensity,
     final_intensity: intensity,
+    size: grainSize,
+    size_from: sizeFrom,
+    grain_texture: {
+      plate_lag1: body.ring.lag1,
+      patch_lag1: patchNow.lag1,
+      note: "Neighbour correlation of the moving grain: 0 is per-pixel noise, near 1 large soft grain. A patch far from the plate (0.2 or more apart) has the wrong grain size: set grain_size."
+    },
     converged,
     rounds,
     sigma_after: { plate_ring: body.ring, patch: patchNow, temporal_ratio: body.ring.temporal > 0 && patchNow.temporal > 0 ? r39(patchNow.temporal / body.ring.temporal) : null },
@@ -56763,7 +57012,7 @@ async function finishHandler(args, ctx) {
   }
   return result;
 }
-var crypto19, fs50, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, GRAIN_SIGMA_PER_INTENSITY, r211, r39, r47, errMessage11, yieldLoop6, clamp2, median5, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
+var crypto19, fs50, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, ADD_GRAIN_CURVE, r211, r39, r47, errMessage11, yieldLoop6, clamp2, median5, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
 var init_patchfit = __esm({
   "src/tools/ext/patchfit.ts"() {
     "use strict";
@@ -56796,7 +57045,14 @@ var init_patchfit = __esm({
     KEEP_STATES = 50;
     EIGHT_BIT_HALF = 0.5 / 255;
     SHARPNESS_SLACK = 1.1;
-    GRAIN_SIGMA_PER_INTENSITY = 20;
+    ADD_GRAIN_CURVE = [
+      { size: 0.25, sigmaPerIntensity: 8.59, lag1: 0 },
+      { size: 0.5, sigmaPerIntensity: 5.56, lag1: 0.254 },
+      { size: 0.75, sigmaPerIntensity: 3.37, lag1: 0.585 },
+      { size: 1, sigmaPerIntensity: 2.58, lag1: 0.681 },
+      { size: 1.5, sigmaPerIntensity: 3.75, lag1: 0.841 },
+      { size: 2, sigmaPerIntensity: 4.94, lag1: 0.907 }
+    ];
     r211 = (v) => Math.round(v * 100) / 100;
     r39 = (v) => Math.round(v * 1e3) / 1e3;
     r47 = (v) => Math.round(v * 1e4) / 1e4;
@@ -56866,7 +57122,7 @@ var init_patchfit = __esm({
       method: external_exports.enum(["add", "match"]).default("add").describe("add: Add Grain ('VISINF Grain Implant') set from the measured sigma. match: Match Grain ('VISINF Grain Duplication') sampling `plate_layer`, which may pick a poor sample area."),
       plate_layer: LayerSel.optional().describe("Match Grain only: the layer whose grain is copied (the plate)."),
       degrain: external_exports.enum(["none", "median", "remove_grain"]).default("none").describe("Remove the patch's own frozen grain first: Median radius 1, or Remove Grain with Final Output. Use it when the patch's grain is stronger than the plate's."),
-      grain_size: external_exports.number().min(0.1).max(10).default(1).describe("Add Grain's Size. Its unit is unmeasured in this build, so it is the one setting not derived from the plate; the default is the effect's own."),
+      grain_size: external_exports.number().min(0.1).max(10).optional().describe("Add Grain's Size. Default: as coarse as the plate's grain (the neighbour correlation of its moving grain, through a curve measured on Add Grain: per-pixel noise is Size 0.25, AE's default 1 is clumped grain); 1 when that cannot be measured."),
       intensity: external_exports.number().min(0).max(20).optional().describe("Start the tuning from this Intensity instead of the default start (the calibration curve from the measured sigma for method 'add'; 1 for method 'match'). The tuning rounds still adjust it."),
       viewing_mode_index: external_exports.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in the grain effect's Viewing Mode (built-in guess: Add Grain 3, Match Grain 5), when it is wrong for this AE. Checked against the menu's range before it is set."),
       degrain_viewing_mode_index: external_exports.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in Remove Grain's Viewing Mode (built-in guess 4), when degrain is 'remove_grain' and the guess is wrong for this AE."),
@@ -56932,7 +57188,7 @@ var init_patchfit = __esm({
       },
       {
         name: "ae_patch_grain",
-        description: "Measures and matches grain so a frozen patch does not look dead. Measures per channel spatial noise sigma in the plate's ring (plate render) and inside the patch (composite), and temporal sigma on the next frame aligned through the track: temporal sigma near 0 in the patch while the plate's is not is the frozen-grain tell. Then, in one undo step: optionally degrains the patch (`degrain`: Median radius 1, or Remove Grain with Final Output), adds an adjustment layer '<patch> GRAIN' directly above the patch, track-matted to its alpha (AE 23+; the grain does not move with a pin), and puts Add Grain ('VISINF Grain Implant', Final Output, Intensity from the measured sigma through a calibration curve for Add Grain, 1 for Match Grain (it samples the plate's own noise), Animation Speed 1, a random seed) or Match Grain on it. Then up to `rounds` (default 2, max 3) tuning rounds, each its own undo step: render, measure the patch against the plate, scale Intensity by the ratio. With degrain 'none' the patch still holds its own frozen spatial grain, so the rounds compare the moving (temporal) grain, which is what the frozen grain lacks; with a degrain they compare the spatial sigma. Returns sigma before and after per channel, the temporal ratio, the rounds and a 2x preview PNG (plate ring left, composite right). A plate whose sigma is under `min_sigma` is clean and gets no grain. Viewing Mode must be Final Output, the last menu item (Preview renders a small box, Blending Matte a matte image): the tool sets it (Add Grain 3, Match Grain 5, Remove Grain 4; unmeasured on AE 26), checks the index against the menu's range first and reads it back; `viewing_mode_index` and `degrain_viewing_mode_index` override the item numbers. If setTrackMatte switches the patch layer off the tool switches it back on and says so. Add Grain has no 32-bpc support; the result warns. Size is `grain_size` (its unit is unmeasured). With degrain 'none' the patch's frozen grain stays under the new grain, so the total spatial grain can end above the plate's (up to about 1.4x for a patch as grainy as the plate); the result then says so, and degrain removes the excess. `dry_run` measures only. " + AGENT_SAFETY_GUIDANCE,
+        description: "Measures and matches grain so a frozen patch does not look dead. Measures per channel spatial noise sigma in the plate's ring (plate render) and inside the patch (composite), and temporal sigma on the next frame aligned through the track: temporal sigma near 0 in the patch while the plate's is not is the frozen-grain tell. Then, in one undo step: optionally degrains the patch (`degrain`: Median radius 1, or Remove Grain with Final Output), adds an adjustment layer '<patch> GRAIN' directly above the patch, track-matted to its alpha (AE 23+; the grain does not move with a pin), and puts Add Grain ('VISINF Grain Implant', Final Output, Intensity from the measured sigma through Add Grain's measured curve for the chosen Size, 1 for Match Grain (it samples the plate's own noise), Animation Speed 1, a random seed) or Match Grain on it. Then up to `rounds` (default 2, max 3) tuning rounds, each its own undo step: render, measure the patch against the plate, scale Intensity by the ratio. With degrain 'none' the patch still holds its own frozen spatial grain, so the rounds compare the moving (temporal) grain, which is what the frozen grain lacks; with a degrain they compare the spatial sigma. Returns sigma before and after per channel, the temporal ratio, the rounds and a 2x preview PNG (plate ring left, composite right). A plate whose sigma is under `min_sigma` is clean and gets no grain. Viewing Mode must be Final Output, the last menu item (Preview renders a small box, Blending Matte a matte image): the tool sets it (Add Grain 3, Match Grain 5, Remove Grain 4; unmeasured on AE 26), checks the index against the menu's range first and reads it back; `viewing_mode_index` and `degrain_viewing_mode_index` override the item numbers. If setTrackMatte switches the patch layer off the tool switches it back on and says so. Add Grain has no 32-bpc support; the result warns. Size is `grain_size`, by default as coarse as the plate's grain (measured; per-pixel noise maps to 0.25, AE's default 1 is clumped), and the first Intensity comes from the sigma Add Grain gives at that Size (measured on AE 26.2), so the rounds only fine-tune. With degrain 'none' the patch's frozen grain stays under the new grain, so the total spatial grain can end above the plate's (up to about 1.4x for a patch as grainy as the plate); the result then says so, and degrain removes the excess. `dry_run` measures only. " + AGENT_SAFETY_GUIDANCE,
         schema: AePatchGrainSchema,
         handler: async (args, ctx) => {
           try {

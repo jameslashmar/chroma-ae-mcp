@@ -470,6 +470,42 @@ export function temporalNoise(a: GrayImage, b: GrayImage, mask: Float32Array): n
   return madSigma(diff) / Math.SQRT2;
 }
 
+/**
+ * How coarse the grain is: the correlation between neighbouring pixels of the difference of two
+ * aligned frames (static content cancels, the grain of both frames stays), averaged over x and y
+ * neighbours. White per-pixel noise gives about 0, soft large grain approaches 1. Pixels whose
+ * difference is far out (something moved) are left out. Null without enough pixels.
+ */
+export function temporalLag1(a: GrayImage, b: GrayImage, mask: Float32Array): number | null {
+  const w = a.width;
+  const n = Math.min(a.data.length, b.data.length, mask.length);
+  const d = new Float32Array(n);
+  const all: number[] = [];
+  for (let k = 0; k < n; k++) {
+    if (mask[k] < 0.5) continue;
+    d[k] = a.data[k] - b.data[k];
+    all.push(d[k]);
+  }
+  if (all.length < 50) return null;
+  const sigma = madSigma(all) || 1;
+  const m = median(all);
+  const ok = (k: number) => k < n && mask[k] >= 0.5 && Math.abs(d[k] - m) <= 4 * sigma;
+  let num = 0;
+  let den = 0;
+  for (let k = 0; k < n; k++) {
+    if (!ok(k)) continue;
+    const x = k % w;
+    const v = d[k] - m;
+    for (const j of [x + 1 < w ? k + 1 : -1, k + w]) {
+      if (j < 0 || !ok(j)) continue;
+      const u = d[j] - m;
+      num += v * u;
+      den += (v * v + u * u) / 2;
+    }
+  }
+  return den > 0 ? num / den : null;
+}
+
 /** A separable Gaussian blur with clamped edges. A sigma under 0.05 returns a copy. */
 export function gaussianBlurGray(gray: GrayImage, sigma: number): GrayImage {
   const { width: w, height: h } = gray;
