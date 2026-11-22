@@ -224,10 +224,12 @@
     return { project_path: projectPath(), dirty: readDirty() };
   }
 
-  // Opening, closing and creating projects open no undo group: no_op keeps the
-  // server from recording a Ctrl+Z step for them.
+  // Opening, closing and creating projects open no undo group: no_undo_step keeps the
+  // server from recording a Ctrl+Z step for them. A result that did not apply (the close was
+  // cancelled or failed, so nothing was changed) says no_op instead.
   function withState(out) {
-    out.no_op = true;
+    if (out.applied === true) out.no_undo_step = true;
+    else out.no_op = true;
     var s = state();
     out.project_path = s.project_path;
     out.dirty = s.dirty;
@@ -567,8 +569,8 @@
     // What was written stays in memory even when a later key failed: save it
     // and let the read-back report the difference, instead of throwing.
     try { app.preferences.saveToDisk(); } catch (eSave) {
-      return { applied: true, no_op: true, written: written, failed: failed, saved_to_disk: false, error: bound(eSave.message || String(eSave)) };
+      return { applied: true, no_undo_step: true, written: written, failed: failed, saved_to_disk: false, error: bound(eSave.message || String(eSave)) };
     }
-    return { applied: true, no_op: true, written: written, failed: failed, saved_to_disk: true };
+    return { applied: true, no_undo_step: true, written: written, failed: failed, saved_to_disk: true };
   };
 })($.global);

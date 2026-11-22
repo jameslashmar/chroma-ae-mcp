@@ -14,11 +14,18 @@ import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import type { ToolContext } from "../src/tools/common.js";
 import { AeBatchSetSchema, productionTools } from "../src/tools/ext/production.js";
+import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
 import { runGuardedWrite } from "../src/tools/ext/write-runner.js";
 import { FakeProject, loadHost } from "./support/fake-ae.js";
 
 const tmpDirs: string[] = [];
+const tmpDir = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-outcome-track-"));
+  tmpDirs.push(d);
+  return d;
+};
 afterEach(() => {
+  resetSessionTracking();
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
@@ -134,6 +141,18 @@ describe("runGuardedWrite outcomes", () => {
   it("success says applied, a host no-op says no_op", async () => {
     const { ctx } = fakeAe(() => ({ ok: true, result: {} }));
     expect(await runGuardedWrite(ctx, spec)).toMatchObject({ applied: true, outcome: "applied" });
+    const noop = fakeAe(() => ({ ok: true, result: { no_op: true } }));
+    expect(await runGuardedWrite(noop.ctx, spec)).toMatchObject({ outcome: "no_op" });
+  });
+
+  it("a host that changed state without an undo group says applied but records no undo step or agent write", async () => {
+    const tracker = installSessionTracking({ dataDir: tmpDir() });
+    const noUndo = fakeAe((fn) => (fn === "sessionSnapshot" ? { ok: true, result: {} } : { ok: true, result: { no_undo_step: true } }));
+    const res = await runGuardedWrite(noUndo.ctx, spec);
+    expect(res).toMatchObject({ applied: true, outcome: "applied" });
+    expect(tracker.steps()).toEqual([]);
+    expect(tracker.agentWritesSince("<unsaved>", null)).toEqual([]);
+    resetSessionTracking();
     const noop = fakeAe(() => ({ ok: true, result: { no_op: true } }));
     expect(await runGuardedWrite(noop.ctx, spec)).toMatchObject({ outcome: "no_op" });
   });

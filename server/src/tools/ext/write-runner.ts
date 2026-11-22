@@ -134,8 +134,9 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom });
       // A failed read-back means AE is likely stuck: no session snapshot behind it.
-      // A host that changed nothing returns no_op: true and opened no undo group.
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true, undoable: spec.undoable !== false });
+      // No undo step is recorded for a host that changed nothing (no_op: true) or that changed
+      // state without opening an undo group (no_undo_step: true). Only no_op says "nothing happened".
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true && written.no_undo_step !== true, undoable: spec.undoable !== false });
       return {
         op_id: opId,
         applied: true as const,

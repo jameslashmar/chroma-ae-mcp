@@ -1084,7 +1084,7 @@
   };
 
   // args: { comp_id, footage_id? | patch_comp_id?, expect }. Guarded. Reloading
-  // is not an undo step, so no undo group is opened and the call reports no_op.
+  // is not an undo step, so no undo group is opened and the call reports no_undo_step.
   A.cleanplateReload = function (args) {
     assertGuard(args.expect);
     var item = null;
@@ -1125,6 +1125,6 @@
     }
     if (A.touch) A.touch();
     item.mainSource.reload();
-    return { no_op: true, reloaded: true, footage: { id: item.id, name: item.name, path: path } };
+    return { no_undo_step: true, reloaded: true, footage: { id: item.id, name: item.name, path: path } };
   };
 })($.global);

@@ -609,7 +609,7 @@ function fakeAe(opts: AeOpts = {}) {
         });
       }
       if (fn === "cleanplateFootage") return ok({ found: true, id: args.footage_id, name: "still.png", path: "x.png", missing: false, width: W, height: H });
-      if (fn === "cleanplateReload") return ok({ no_op: true, reloaded: true, footage: { id: args.footage_id ?? 55, name: "still.png", path: "x.png" } });
+      if (fn === "cleanplateReload") return ok({ no_undo_step: true, reloaded: true, footage: { id: args.footage_id ?? 55, name: "still.png", path: "x.png" } });
       throw new Error(`Unexpected script: ${script}`);
     },
     queue,
@@ -1613,7 +1613,7 @@ describe("cleanplate.jsx", () => {
     let reloaded = 0;
     item.mainSource.reload = () => reloaded++;
     const out = A.cleanplateReload({ footage_id: item.id, expect: GUARD });
-    expect(out).toMatchObject({ no_op: true, reloaded: true, footage: { id: item.id } });
+    expect(out).toMatchObject({ no_undo_step: true, reloaded: true, footage: { id: item.id } });
     expect(reloaded).toBe(1);
     expect(undo.begun).toBe(0);
     fs.rmSync(file);

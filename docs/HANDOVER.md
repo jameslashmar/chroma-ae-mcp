@@ -698,7 +698,7 @@ Each group has the same three files: `panel/host/ext/<group>.jsx`, `server/src/t
 
 **Shared pieces these waves added or lean on:**
 - `server/src/tools/ext/session.ts`: the session tracker. After each guarded write it keeps a snapshot, writes a write-ahead record while the write runs (a record left at the next start becomes a quarantine entry), and logs every agent write per project (`agentWritesSince`). `installSessionTracking()` and `installSessionBridgeHook(bridge)` run at startup. `ae_learn_taste` and `ae_project_session` read the write log.
-- `write-runner.ts`: `HostCall.timeoutMs` for slow writes, and `no_op: true` from a host means no undo step is recorded.
+- `write-runner.ts`: `HostCall.timeoutMs` for slow writes, and `no_op: true` from a host means nothing changed (no undo step, outcome `no_op`); `no_undo_step: true` means state changed with no undo group (no undo step, outcome `applied`).
 - A tool that closes or reopens a project calls `markReopened()` so earlier undo steps are reported as gone (`ae_collect_relink`, `ae_project_session`). The bridge hook does the same for any write whose script calls `openProject(`.
 - Write tools that touch a locked layer, a keyframed property or a missing sub-property refuse before the undo group, and look a property up again after `addProperty`.
 

@@ -103,7 +103,8 @@ export async function callTool(
 /**
  * Every write that succeeded says so the same way: a result with `applied: true` and no `outcome`
  * of its own (tools that do not go through runGuardedWrite) gets `outcome: "applied"`, or "no_op"
- * when it changed nothing. A result that already has an outcome is left as it is.
+ * when it changed nothing (`no_op`; `no_undo_step` only means no Ctrl+Z step and stays "applied").
+ * A result that already has an outcome is left as it is.
  */
 function withSuccessOutcome(response: ToolCallResult): ToolCallResult {
   if ((response as { isError?: boolean }).isError === true) return response;
