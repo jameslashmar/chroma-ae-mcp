@@ -33,6 +33,9 @@ import {
   TrackSourceSchema,
   type MultiTrackOptions,
   type LayerSample,
+  cornerJitter,
+  flagUnreliableFrames,
+  slidingPoints,
 } from "../src/tools/ext/planar.js";
 import { applyH, identityH, invertH, mulH, type Mat3, type PlanarFrame, type PlanarTrack, type Vec2 } from "../src/tools/ext/planar-math.js";
 import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
@@ -1908,5 +1911,59 @@ describe("planar.jsx", () => {
       expect(fx.numProperties).toBe(1);
       expect(undo.begun).toBe(0);
     });
+  });
+});
+
+describe("track honesty: sliding points and corner jitter", () => {
+  let seed = 99;
+  const uni = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32;
+  const gauss = () => Math.sqrt(-2 * Math.log(uni())) * Math.cos(2 * Math.PI * uni());
+  const refPoints: Vec2[] = [[100, 100], [300, 110], [520, 90], [110, 300], [310, 290], [500, 310], [200, 200], [420, 210]];
+  /** 40 frames of a smooth pan; `extra` moves some points on their own (a nearer surface). */
+  function makeTrack(noise: number, extra: (k: number, i: number) => Vec2 = () => [0, 0]): PlanarTrack {
+    const frames: PlanarFrame[] = [];
+    for (let i = 0; i < 40; i++) {
+      const H: Mat3 = [1, 0, 30 * Math.sin(i / 12), 0, 1, 8 * Math.sin(i / 20), 0, 0, 1];
+      const points = refPoints.map((p, k) => {
+        const q = applyH(H, p)!;
+        const e = extra(k, i);
+        return [q[0] + e[0] + noise * gauss(), q[1] + e[1] + noise * gauss()] as Vec2;
+      });
+      // The track's own H carries the noise of the fit: jitter it the same way.
+      const Hj: Mat3 = [1, 0, H[2] + noise * gauss() * 0.5, 0, 1, H[5] + noise * gauss() * 0.5, 0, 0, 1];
+      frames.push({ time: i / 25, ok: true, H: i === 0 ? identityH() : Hj, points, confidence: points.map(() => 0.9), rms_px: 0.1, inliers: 8 });
+    }
+    return { version: 1, track_id: "t", comp_id: 1, comp_size: [640, 360], fps: 25, ref_time: 0, model: "perspective", ref_points: refPoints, frames, source: "test", created: "" };
+  }
+
+  it("finds no sliding point on one plane, and names the ones on a second surface", () => {
+    expect(slidingPoints(makeTrack(0.2))).toEqual([]);
+    // Points 2 and 5 drift away: 0.4 px more each frame.
+    const sliding = slidingPoints(makeTrack(0.2, (k, i) => (k === 2 || k === 5 ? [0.4 * i, 0] : [0, 0])));
+    expect(sliding.map((p) => p.index)).toEqual([2, 5]);
+    expect(sliding[0].frames_off_plane).toBeGreaterThan(10);
+  });
+
+  it("marks frames whose expected error is far above the track's typical one as not ok", () => {
+    const t = makeTrack(0.2);
+    t.frames.forEach((f, i) => (f.expected_px = i === 0 ? 0 : 0.3 + (i % 3) * 0.05));
+    t.frames[17].expected_px = 25;
+    t.frames[30].expected_px = 1.9; // high, but under the 2 px floor
+    expect(flagUnreliableFrames(t)).toEqual([t.frames[17].time]);
+    expect(t.frames[17].ok).toBe(false);
+    expect(t.frames[17].note).toMatch(/unreliable fit/);
+    expect(t.frames[30].ok).toBe(true);
+    // A track with no expected errors (an old one) is left alone.
+    expect(flagUnreliableFrames(makeTrack(0.2))).toEqual([]);
+  });
+
+  it("estimates the corners' frame-to-frame shake, not their motion", () => {
+    const quad: Vec2[] = [[100, 90], [520, 90], [520, 310], [100, 310]];
+    const still = cornerJitter(makeTrack(0), quad)!;
+    expect(still).toBeLessThan(0.05); // a smooth pan alone leaves almost nothing
+    const shaky = cornerJitter(makeTrack(1), quad)!;
+    // The H noise is 0.5 px per axis: about 0.5 px of shake.
+    expect(shaky).toBeGreaterThan(0.3);
+    expect(shaky).toBeLessThan(0.8);
   });
 });

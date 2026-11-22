@@ -60,6 +60,8 @@ import { captureCompFrame, decodePngFile } from "./frames.js";
 import {
   applyH,
   boundingQuad,
+  expectedError,
+  quadGrid,
   decomposeLayerMatrix,
   decomposeSimilarity,
   frameAt,
@@ -630,10 +632,11 @@ export function trackFromSeries(a: {
       const v = a.confidence?.[i]?.[k];
       return v === null || v === undefined ? null : Math.min(1, Math.max(0, v / confScale));
     });
-    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, inliers: n };
+    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, expected_px: 0, inliers: n };
     const sol = solveModel(a.model, refPoints, pts);
     if (!sol) return { time: t, ok: false, H: null, points: pts, confidence: conf, rms_px: null, inliers: 0, note: "the points are degenerate at this frame (coincident or collinear)" };
-    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), inliers: n };
+    const ex = expectedError(a.model, sol.H, refPoints, pts, quadGrid(boundingQuad(refPoints)));
+    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers: n };
   });
   return {
     version: 1,
@@ -923,8 +926,10 @@ export class MultiTracker {
       }
     }
     if (ok) this.lastH = sol.H;
+    const fit = survivors.filter((_, k) => sol!.inliers[k]);
+    const ex = expectedError(this.opts.model, sol.H, fit.map((i) => this.refPoints[i]), fit.map((i) => pos[i] as Vec2), quadGrid(this.quad));
     return {
-      frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), inliers, ...(note ? { note } : {}) },
+      frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers, ...(note ? { note } : {}) },
       stop: null,
       lost: alive.filter((i) => pos[i] === null),
       reacquired,
@@ -1013,9 +1018,113 @@ export function channelGray(img: RgbaImage, channel: Channel): GrayImage {
 
 // ---------- the track summary and preview ----------
 
+/**
+ * Once a track is finished: a frame whose expected error is far above the track's own typical one
+ * (8x its median and over 2 px) got a wild fit, usually from too few inliers or a point off the plane
+ * voting with the rest. Seen on a parallax shot: such frames were 20-120 px off while marked ok. They
+ * become not ok with a note, so ae_track_apply interpolates across them instead of writing the jump.
+ */
+export function flagUnreliableFrames(track: PlanarTrack): number[] {
+  const ex = track.frames
+    .filter((f) => f.ok && typeof f.expected_px === "number" && f.time !== track.ref_time)
+    .map((f) => f.expected_px as number)
+    .sort((a, b) => a - b);
+  if (ex.length < 5) return [];
+  const typical = ex[Math.floor(ex.length / 2)];
+  const limit = Math.max(2, 8 * typical);
+  const flagged: number[] = [];
+  for (const f of track.frames) {
+    if (f.ok && typeof f.expected_px === "number" && f.expected_px > limit) {
+      f.ok = false;
+      f.note = `unreliable fit: expected error ${r2(f.expected_px)} px against a typical ${r2(typical)} px (too few points agreeing, or points off the plane)`;
+      flagged.push(f.time);
+    }
+  }
+  return flagged;
+}
+
+/**
+ * Points that do not move with the plane the others define: per point, how far it sits from where
+ * the solved motion puts it, frame by frame. A point on the plane stays within the trackers' noise;
+ * one off the plane (parallax), on a moving object or in a reflection drifts away, and the robust fit
+ * votes it out more and more often.
+ */
+export function slidingPoints(track: PlanarTrack): Array<{ index: number; median_px: number; frames_off_plane: number; frames: number }> {
+  const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
+  if (solved.length < 5) return [];
+  const per: number[][] = track.ref_points.map(() => []);
+  for (const f of solved) {
+    track.ref_points.forEach((rp, k) => {
+      const p = f.points[k];
+      const q = applyH(f.H!, rp);
+      if (p && q) per[k].push(Math.hypot(p[0] - q[0], p[1] - q[1]));
+    });
+  }
+  const median = (xs: number[]) => {
+    const v = xs.slice().sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)] : 0;
+  };
+  // The noise floor: the median residual over every point and frame, as a robust sigma.
+  const all = per.flat();
+  const noise = Math.max(0.15, median(all) * 1.4826);
+  const limit = Math.max(1.5, 5 * noise);
+  const out: Array<{ index: number; median_px: number; frames_off_plane: number; frames: number }> = [];
+  per.forEach((res, k) => {
+    if (res.length < 5) return;
+    // The later half carries parallax: it grows with the motion since the reference frame.
+    const late = res.slice(Math.floor(res.length / 2));
+    const off = res.filter((e) => e > limit).length;
+    if (median(late) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r2(median(res)), frames_off_plane: off, frames: res.length });
+  });
+  return out;
+}
+
+/**
+ * Frame-to-frame shake of the surface corners that the motion does not explain, px: third differences
+ * of each corner's path (smooth motion, even accelerating, leaves almost none; white noise of sigma
+ * leaves sqrt(20) sigma), as a robust sigma. The largest corner's.
+ */
+export function cornerJitter(track: PlanarTrack, quad: Vec2[]): number | null {
+  const frames = track.frames.filter((f) => f.ok && f.H);
+  if (frames.length < 8) return null;
+  let worst = 0;
+  for (const corner of quad) {
+    const path = frames.map((f) => applyH(f.H!, corner));
+    const d3: number[] = [];
+    for (let i = 3; i < path.length; i++) {
+      const [a, b, c, d] = [path[i - 3], path[i - 2], path[i - 1], path[i]];
+      if (!a || !b || !c || !d) continue;
+      d3.push(Math.hypot(d[0] - 3 * c[0] + 3 * b[0] - a[0], d[1] - 3 * c[1] + 3 * b[1] - a[1]));
+    }
+    if (d3.length < 4) continue;
+    d3.sort((x, y) => x - y);
+    // |d3| of 2-D white noise is Rayleigh with scale sqrt(20) sigma; its median is 1.1774 times that.
+    const sigma = d3[Math.floor(d3.length / 2)] / (1.1774 * Math.sqrt(20));
+    if (sigma > worst) worst = sigma;
+  }
+  return r2(worst);
+}
+
+const EXPECTED_ERROR_NOTE =
+  "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
+
+function slidingSummary(track: PlanarTrack): Record<string, unknown> {
+  const sliding = slidingPoints(track);
+  if (!sliding.length) return {};
+  const many = sliding.length >= 2 && sliding.length >= track.ref_points.length / 4;
+  return {
+    sliding_points: sliding,
+    sliding_note: many
+      ? `${sliding.length} of ${track.ref_points.length} points do not move with the plane the others define. Either they are off it (parallax: different depths), on something moving, or the shot is not one plane at all; then a 2D track cannot hold, and the shot needs a 3D camera solve (AE's 3D Camera Tracker, or Mocha with the right plane). Track again with points on one surface only (auto_points.exclude), or check the preview.`
+      : `Point ${sliding.map((p) => p.index).join(", ")} does not move with the plane the others define (off the plane, on something moving, or a reflection). The fit votes it out, but the track is safer without it: track again with auto_points.exclude over it, or check the preview.`,
+  };
+}
+
 export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string, unknown> {
   const ok = track.frames.filter((f) => f.ok);
   const rms = ok.map((f) => f.rms_px).filter((v): v is number => v !== null);
+  const exp = ok.filter((f) => typeof f.expected_px === "number" && f.time !== track.ref_time);
+  const worst = exp.reduce<PlanarFrame | null>((w, f) => (w === null || (f.expected_px as number) > (w.expected_px as number) ? f : w), null);
   const step = Math.max(1, Math.ceil(track.frames.length / maxFrames));
   const sampled = track.frames.filter((_, i) => i % step === 0 || i === track.frames.length - 1).slice(0, maxFrames);
   const lostPer = track.ref_points.map((_, k) => track.frames.filter((f) => f.points[k] === null).length);
@@ -1032,6 +1141,13 @@ export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string
     first_time: track.frames.length ? r4(track.frames[0].time) : null,
     last_time: track.frames.length ? r4(track.frames[track.frames.length - 1].time) : null,
     rms_px: rms.length ? { mean: r2(rms.reduce((a, b) => a + b, 0) / rms.length), max: r2(Math.max(...rms)) } : null,
+    expected_error_px:
+      exp.length && worst
+        ? { mean: r2(exp.reduce((a, f) => a + (f.expected_px as number), 0) / exp.length), max: r2(worst.expected_px as number), worst_time: r4(worst.time), frames_without: Math.max(0, ok.length - 1 - exp.length) }
+        : null,
+    error_note: EXPECTED_ERROR_NOTE,
+    corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...slidingSummary(track),
     frames_lost_per_point: lostPer,
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r2(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
@@ -1745,6 +1861,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         points: refPoints.map((p, i) => (aliveRef[i] ? p : null)),
         confidence: refPoints.map((_, i) => (aliveRef[i] ? 1 : null)),
         rms_px: 0,
+        expected_px: 0,
         inliers: aliveRef.filter(Boolean).length,
       };
 
@@ -1815,6 +1932,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           };
       remember(track.track_id, { forward: fwd, backward: bwd });
       track.tracking!.options = o as unknown as Record<string, unknown>;
+      if (track.tracking!.forward.done && track.tracking!.backward.done) flagUnreliableFrames(track);
       saveTrack(track);
 
       let previewPath: string | undefined;
@@ -1963,7 +2081,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
       "`isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). " +
       "Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. " +
-      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
+      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px` and `sliding_points` (points that do not move with the plane), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeTrackMultiSchema,
     handler: async (args: AeTrackMultiArgs, ctx: ToolContext) => {
