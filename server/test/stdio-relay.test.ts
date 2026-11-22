@@ -700,3 +700,54 @@ describe("panel/tools/stdio-relay.cjs: progress over an event stream", { timeout
     expect(out.find((m) => m.id === 4)?.result.content[0].text).toBe("{\"ok\":true}");
   });
 });
+
+describe("panel/tools/stdio-relay.cjs: elicitation", { timeout: 20000 }, () => {
+  it("tells the panel the client elicits, passes the panel's question on, and the client's answer back", async () => {
+    const { dir } = home();
+    const headers: string[] = [];
+    let answer: any = null;
+    let finish: (() => void) | null = null;
+    const server = http.createServer((req, res) => {
+      let text = "";
+      req.on("data", (c) => (text += c));
+      req.on("end", () => {
+        const body = JSON.parse(text);
+        if (body.method === "initialize") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "x", version: "1" } } }));
+          return;
+        }
+        if (body.method === undefined) {
+          // The client's answer to our question.
+          answer = body;
+          res.statusCode = 202;
+          res.end("");
+          finish?.();
+          return;
+        }
+        headers.push(String(req.headers["x-chroma-elicitation"] ?? ""));
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream");
+        res.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: "chroma-srv-1", method: "elicitation/create", params: { message: "Which?", requestedSchema: { type: "object", properties: {} } } })}\n\n`);
+        const done = () => {
+          res.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ got: answer?.result?.action }) }] } })}\n\n`);
+          res.end();
+        };
+        if (answer) done();
+        else finish = done;
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: { elicitation: {} }, clientInfo: { name: "claude-code", version: "1" } } };
+    const call = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ae_ask_user", arguments: {} } };
+    const reply = { jsonrpc: "2.0", id: "chroma-srv-1", result: { action: "accept", content: { choice: "a" } } };
+    const out = await runRelay(dir, port, [init, call, reply]);
+    expect(headers).toEqual(["1"]);
+    expect(out.some((m) => m.method === "elicitation/create" && m.id === "chroma-srv-1")).toBe(true);
+    expect(answer).toMatchObject({ id: "chroma-srv-1", result: { action: "accept" } });
+    expect(JSON.parse(out.find((m) => m.id === 2).result.content[0].text)).toEqual({ got: "accept" });
+    expect(out.some((m) => m.id === "chroma-srv-1" && m.error)).toBe(false); // nothing answered back for the client's own reply
+  });
+});

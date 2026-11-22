@@ -5066,12 +5066,44 @@ var init_jsx = __esm({
 });
 
 // src/call-context.ts
+function requestFromClient(notify, method, params, timeoutMs) {
+  const id = `chroma-srv-${++serverRequestSeq}`;
+  return new Promise((resolve7) => {
+    const timer = setTimeout(() => {
+      waitingForClient.delete(id);
+      resolve7(null);
+    }, timeoutMs);
+    waitingForClient.set(id, (message) => {
+      clearTimeout(timer);
+      waitingForClient.delete(id);
+      resolve7(message);
+    });
+    try {
+      notify({ jsonrpc: "2.0", id, method, params });
+    } catch {
+      clearTimeout(timer);
+      waitingForClient.delete(id);
+      resolve7(null);
+    }
+  });
+}
+function deliverClientResponse(message) {
+  const id = message.id;
+  if (typeof id !== "string") return false;
+  const waiter = waitingForClient.get(id);
+  if (!waiter) return false;
+  waiter(message);
+  return true;
+}
 function runInCall(state, fn) {
   const key = keyOf(state.client, state.requestId);
   running.set(key, state);
   return storage.run(state, fn).finally(() => {
     if (running.get(key) === state) running.delete(key);
   });
+}
+function currentCall() {
+  return storage.getStore();
 }
 function cancelCall(client, requestId, reason) {
   if (typeof requestId !== "string" && typeof requestId !== "number") return false;
@@ -5094,7 +5126,7 @@ function noteProgress(label) {
   } catch {
   }
 }
-var import_node_async_hooks, CancelledError, storage, running, keyOf;
+var import_node_async_hooks, CancelledError, waitingForClient, serverRequestSeq, storage, running, keyOf;
 var init_call_context = __esm({
   "src/call-context.ts"() {
     "use strict";
@@ -5112,6 +5144,8 @@ var init_call_context = __esm({
       /** Set by a guarded write: not_applied when it stopped before the write was sent. */
       outcome;
     };
+    waitingForClient = /* @__PURE__ */ new Map();
+    serverRequestSeq = 0;
     storage = new import_node_async_hooks.AsyncLocalStorage();
     running = /* @__PURE__ */ new Map();
     keyOf = (client, id) => `${client}
@@ -43093,6 +43127,46 @@ function checkImagePath(p) {
   }
   return null;
 }
+async function askByElicitation(request2, args, timeoutMs) {
+  const allowOther = args.allow_other ?? true;
+  const ids = args.options.map((o) => o.id);
+  const lines = [args.question, ...args.context ? [args.context] : [], ...args.options.filter((o) => o.description).map((o) => `${o.label}: ${o.description}`)];
+  const requestedSchema = {
+    type: "object",
+    properties: {
+      choice: { type: "string", title: "Answer", enum: ids, enumNames: args.options.map((o) => o.label) },
+      ...allowOther ? { other: { type: "string", title: "Or your own answer" } } : {}
+    },
+    required: allowOther ? [] : ["choice"]
+  };
+  const res = await request2("elicitation/create", { message: lines.join("\n"), requestedSchema }, timeoutMs);
+  if (!res) {
+    return {
+      status: "no_answer",
+      via: "elicitation",
+      question: args.question,
+      message: "The user did not answer in the client in time. Ask again later, or go on with a sensible default and say which."
+    };
+  }
+  if (res.error) return null;
+  const result = res.result ?? {};
+  const q = {
+    id: `elicit_${Date.now()}`,
+    question: args.question,
+    kind: "choice",
+    options: args.options,
+    multi_select: false,
+    allow_other: allowOther,
+    ...args.context ? { context: args.context } : {},
+    asked_at: Date.now()
+  };
+  const choice = typeof result.content?.choice === "string" && ids.includes(result.content.choice) ? [result.content.choice] : [];
+  const other = typeof result.content?.other === "string" && result.content.other.trim() ? result.content.other.trim().slice(0, 2e3) : void 0;
+  if (result.action === "accept" && (choice.length || other)) {
+    return { ...presentAnswer(q, { status: "answered", choice_ids: choice, ...other ? { other } : {}, answered_at: Date.now() }), via: "elicitation" };
+  }
+  return { ...presentAnswer(q, { status: "dismissed", choice_ids: [], answered_at: Date.now() }), via: "elicitation" };
+}
 function presentAnswer(q, a) {
   if (!a) {
     return {
@@ -43132,6 +43206,7 @@ var fs41, path41, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, Ask
 var init_ask = __esm({
   "src/tools/ext/ask.ts"() {
     "use strict";
+    init_call_context();
     fs41 = __toESM(require("node:fs"), 1);
     path41 = __toESM(require("node:path"), 1);
     init_zod();
@@ -43174,9 +43249,14 @@ var init_ask = __esm({
     askTools = [
       {
         name: "ae_ask_user",
-        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project.",
+        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project. When the client handles MCP elicitation, a plain single choice without pictures is asked in the client's own UI instead (via: 'elicitation'; 'no_answer' when it was not answered in time); ease curves, several answers and pictures always use the panel.",
         schema: AeAskUserSchema,
         handler: async (args, ctx) => {
+          const call2 = currentCall();
+          if (!args.ask_id && call2?.request && args.question && args.options && (args.kind ?? "choice") === "choice" && !args.multi_select && !args.options.some((o) => o.image_path)) {
+            const viaClient = await askByElicitation(call2.request, { ...args, question: args.question, options: args.options }, (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1e3);
+            if (viaClient) return viaClient;
+          }
           const asks = ctx.asks;
           if (!asks) {
             return {
@@ -71626,7 +71706,7 @@ function makeErrorResponse(id, code, message, data) {
 function isPlainObject2(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
-async function handleSingleRpc(message, ctx, toolset, client, notify) {
+async function handleSingleRpc(message, ctx, toolset, client, notify, elicitation) {
   if (!isPlainObject2(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
@@ -71634,6 +71714,10 @@ async function handleSingleRpc(message, ctx, toolset, client, notify) {
   const rawId = message.id;
   const id = typeof rawId === "string" || typeof rawId === "number" || rawId === null ? rawId : null;
   const method = message.method;
+  if (method === void 0 && hasId && ("result" in message || "error" in message)) {
+    deliverClientResponse(message);
+    return null;
+  }
   if (typeof method !== "string" || method.length === 0) {
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
@@ -71726,7 +71810,8 @@ async function handleSingleRpc(message, ctx, toolset, client, notify) {
         cancelled: false,
         progress: 0,
         ...typeof token === "string" || typeof token === "number" ? { progressToken: token } : {},
-        ...notify ? { notify } : {}
+        ...notify ? { notify } : {},
+        ...notify && elicitation ? { request: (m, p, ms) => requestFromClient(notify, m, p, ms) } : {}
       };
       const result = await runInCall(
         state,
@@ -71811,14 +71896,14 @@ async function handleRpc(message, ctx, opts = {}) {
     }
     const results = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation);
       if (res !== null) {
         results.push(res);
       }
     }
     return results.length > 0 ? results : null;
   }
-  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation);
 }
 
 // src/panel-host.ts
@@ -72237,8 +72322,11 @@ function createPanelMcp(opts) {
     const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "").replace(/[^ -~]+/g, " ").trim().slice(0, 40);
     const accept = String(req.headers?.accept ?? "");
     const p = parsed;
-    const token = p && !Array.isArray(parsed) && p.method === "tools/call" ? p.params?._meta?.progressToken : void 0;
-    if ((typeof token === "string" || typeof token === "number") && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
+    const isCall = !!p && !Array.isArray(parsed) && p.method === "tools/call";
+    const token = isCall ? p.params?._meta?.progressToken : void 0;
+    const elicitHeader = req.headers?.["x-chroma-elicitation"];
+    const elicitation = isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    if ((typeof token === "string" || typeof token === "number" || elicitation) && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
@@ -72248,7 +72336,7 @@ data: ${JSON.stringify(msg)}
 
 `);
       };
-      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, notify: event });
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, notify: event, elicitation });
       if (streamed) event(streamed);
       if (!res.writableEnded) res.end();
       return;

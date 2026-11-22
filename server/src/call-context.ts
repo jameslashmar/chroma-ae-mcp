@@ -35,7 +35,54 @@ export interface CallState {
   progressToken?: string | number;
   /** Sends one JSON-RPC notification on the call's own response stream; absent when the transport cannot. */
   notify?: (message: Record<string, unknown>) => void;
+  /**
+   * Sends a request to the client on the call's stream and waits for its answer (elicitation/create).
+   * Only when the client said it handles elicitation; resolves null when it does not answer in time.
+   */
+  request?: (method: string, params: Record<string, unknown>, timeoutMs: number) => Promise<Record<string, unknown> | null>;
   progress: number;
+}
+
+// Requests this server sent to clients, waiting for the client's answer (it arrives as its own POST).
+const waitingForClient = new Map<string, (message: Record<string, unknown>) => void>();
+let serverRequestSeq = 0;
+
+/** Sends `method` through `notify` as a request and waits up to timeoutMs for the client's answer message. */
+export function requestFromClient(
+  notify: (message: Record<string, unknown>) => void,
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number
+): Promise<Record<string, unknown> | null> {
+  const id = `chroma-srv-${++serverRequestSeq}`;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      waitingForClient.delete(id);
+      resolve(null);
+    }, timeoutMs);
+    waitingForClient.set(id, (message) => {
+      clearTimeout(timer);
+      waitingForClient.delete(id);
+      resolve(message);
+    });
+    try {
+      notify({ jsonrpc: "2.0", id, method, params });
+    } catch {
+      clearTimeout(timer);
+      waitingForClient.delete(id);
+      resolve(null);
+    }
+  });
+}
+
+/** A client's answer to one of our requests (a JSON-RPC response). False when nothing is waiting for that id. */
+export function deliverClientResponse(message: Record<string, unknown>): boolean {
+  const id = message.id;
+  if (typeof id !== "string") return false;
+  const waiter = waitingForClient.get(id);
+  if (!waiter) return false;
+  waiter(message);
+  return true;
 }
 
 const storage = new AsyncLocalStorage<CallState>();

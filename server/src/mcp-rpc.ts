@@ -1,5 +1,5 @@
 import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
-import { cancelCall, runInCall } from "./call-context.js";
+import { cancelCall, deliverClientResponse, requestFromClient, runInCall } from "./call-context.js";
 import { callTool } from "./tool-call.js";
 import {
   coreInstructions,
@@ -53,6 +53,8 @@ export interface RpcOptions {
   client?: string | null;
   /** Sends a notification on this request's response stream (progress); only when the transport streams. */
   notify?: (message: Record<string, unknown>) => void;
+  /** The client handles elicitation/create (the relay's X-Chroma-Elicitation header): tools may ask it questions. */
+  elicitation?: boolean;
 }
 
 /** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
@@ -122,7 +124,8 @@ async function handleSingleRpc(
   ctx: ToolContext,
   toolset: Toolset,
   client?: string,
-  notify?: (message: Record<string, unknown>) => void
+  notify?: (message: Record<string, unknown>) => void,
+  elicitation?: boolean
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -136,6 +139,11 @@ async function handleSingleRpc(
       : null;
 
   const method = message.method;
+  // A client's answer to a request this server sent on a response stream (elicitation/create).
+  if (method === undefined && hasId && ("result" in message || "error" in message)) {
+    deliverClientResponse(message);
+    return null;
+  }
   if (typeof method !== "string" || method.length === 0) {
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
@@ -248,6 +256,7 @@ async function handleSingleRpc(
         progress: 0,
         ...(typeof token === "string" || typeof token === "number" ? { progressToken: token } : {}),
         ...(notify ? { notify } : {}),
+        ...(notify && elicitation ? { request: (m: string, p: Record<string, unknown>, ms: number) => requestFromClient(notify, m, p, ms) } : {}),
       };
       const result = await runInCall(state, () =>
         isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
@@ -348,7 +357,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation);
       if (res !== null) {
         results.push(res);
       }
@@ -356,5 +365,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation);
 }

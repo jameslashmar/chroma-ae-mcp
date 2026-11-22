@@ -248,15 +248,19 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     // else stays a single JSON reply.
     const accept = String(req.headers?.accept ?? "");
     const p = parsed as { method?: unknown; params?: { _meta?: { progressToken?: unknown } } };
-    const token = p && !Array.isArray(parsed) && p.method === "tools/call" ? p.params?._meta?.progressToken : undefined;
-    if ((typeof token === "string" || typeof token === "number") && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
+    const isCall = !!p && !Array.isArray(parsed) && p.method === "tools/call";
+    const token = isCall ? p.params?._meta?.progressToken : undefined;
+    // The relay says the client handles elicitation/create; a call can then ask it questions on its stream.
+    const elicitHeader = req.headers?.["x-chroma-elicitation"];
+    const elicitation = isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    if ((typeof token === "string" || typeof token === "number" || elicitation) && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       const event = (msg: unknown) => {
         if (!res.writableEnded) res.write?.(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
       };
-      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, notify: event });
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, notify: event, elicitation });
       if (streamed) event(streamed);
       if (!res.writableEnded) res.end();
       return;
