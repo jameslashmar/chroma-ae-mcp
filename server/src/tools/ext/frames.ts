@@ -12,7 +12,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, stillWriting, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, stillWriting, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -159,11 +159,20 @@ export function decodePngFile(filePath: string): PNG {
   if (!fs.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
+  // A frame AE is still writing (it can pause mid-file): wait up to 3 s for its IEND before decoding.
+  const deadline = Date.now() + 3000;
+  while (!pngComplete(filePath) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
   const buf = fs.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
-  return PNG.sync.read(buf);
+  try {
+    return PNG.sync.read(buf);
+  } catch (e) {
+    throw new Error(`PNG file could not be decoded (${(e as Error).message}); AE may not have finished writing it: ${filePath}`);
+  }
 }
 
 /**

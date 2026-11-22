@@ -122,6 +122,33 @@ export function isFreshPngFile(
   }
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_IEND = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+
+/**
+ * A PNG file ends with its IEND chunk. AE can pause while it writes a frame (seen under load: about
+ * 4 in 1000 renders during a long track), so a size that held still across two polls is not enough:
+ * a file that starts like a PNG but does not end like one is still being written. Files that are not
+ * PNGs (test doubles) are not judged.
+ */
+export function pngComplete(filePath: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const size = fs.fstatSync(fd).size;
+    const head = Buffer.alloc(8);
+    if (fs.readSync(fd, head, 0, 8, 0) < 8 || !head.equals(PNG_SIGNATURE)) return true;
+    if (size < 20) return false;
+    const tail = Buffer.alloc(8);
+    fs.readSync(fd, tail, 0, 8, size - 8);
+    return tail.equals(PNG_IEND);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
 /** The poll of waitForFreshPng. Production keeps 100 ms / 10 s; test/setup-resources.ts sets a short interval so render tests do not sleep. */
 export const pngWaitDeps = { intervalMs: 100, timeoutMs: 10_000 };
 
@@ -142,7 +169,7 @@ export async function waitForFreshPng(
     if (Date.now() >= deadline) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
     const next = isFreshPngFile(filePath, requestStartMs);
-    if (next.fresh && last.fresh && next.size === last.size) return next;
+    if (next.fresh && last.fresh && next.size === last.size && pngComplete(filePath)) return next;
     last = next;
   }
 }
