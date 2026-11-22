@@ -5065,6 +5065,60 @@ var init_jsx = __esm({
   }
 });
 
+// src/call-context.ts
+function runInCall(state, fn) {
+  const key = keyOf(state.client, state.requestId);
+  running.set(key, state);
+  return storage.run(state, fn).finally(() => {
+    if (running.get(key) === state) running.delete(key);
+  });
+}
+function cancelCall(client, requestId, reason) {
+  if (typeof requestId !== "string" && typeof requestId !== "number") return false;
+  const state = running.get(keyOf(client, requestId));
+  if (!state) return false;
+  state.cancelled = true;
+  if (typeof reason === "string" && reason) state.reason = reason.slice(0, 200);
+  return true;
+}
+function checkCancelled(where) {
+  const s = storage.getStore();
+  if (s?.cancelled) throw new CancelledError(where, s.reason);
+}
+function noteProgress(label) {
+  const s = storage.getStore();
+  if (!s || s.progressToken === void 0 || !s.notify) return;
+  s.progress += 1;
+  try {
+    s.notify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: s.progressToken, progress: s.progress, message: label.slice(0, 200) } });
+  } catch {
+  }
+}
+var import_node_async_hooks, CancelledError, storage, running, keyOf;
+var init_call_context = __esm({
+  "src/call-context.ts"() {
+    "use strict";
+    import_node_async_hooks = require("node:async_hooks");
+    CancelledError = class extends Error {
+      constructor(where, reason) {
+        super(`Cancelled by the client${reason ? ` (${reason})` : ""} before ${where}. An eval already sent to After Effects was let finish.`);
+        this.where = where;
+        this.reason = reason;
+        this.name = "CancelledError";
+      }
+      where;
+      reason;
+      kind = "cancelled";
+      /** Set by a guarded write: not_applied when it stopped before the write was sent. */
+      outcome;
+    };
+    storage = new import_node_async_hooks.AsyncLocalStorage();
+    running = /* @__PURE__ */ new Map();
+    keyOf = (client, id) => `${client}
+${typeof id}:${id}`;
+  }
+});
+
 // src/render-gate.ts
 function renderGateMessage(info) {
   if (info.state === "unknown") {
@@ -5191,6 +5245,7 @@ var QueueWaitError, DEFAULT_MAX_WAIT_MS, GUARD_RECHECK_MS, SingleWriterQueue;
 var init_queue = __esm({
   "src/queue.ts"() {
     "use strict";
+    init_call_context();
     init_render_gate();
     QueueWaitError = class extends Error {
       kind = "queued";
@@ -5313,8 +5368,10 @@ var init_queue = __esm({
         return n;
       }
       async run(op, fn) {
+        checkCancelled("it entered the write queue");
         const lease = await this.acquire(op);
         try {
+          checkCancelled("its turn in the write queue");
           return await fn(lease);
         } finally {
           lease.release();
@@ -5673,6 +5730,12 @@ function formatToolError(err) {
       ]
     };
   }
+  if (err instanceof CancelledError) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ kind: "cancelled", code: "cancelled", message: err.message, ...err.outcome ? { outcome: err.outcome } : {} }) }]
+    };
+  }
   if (err instanceof QueueWaitError) {
     return {
       isError: true,
@@ -5712,6 +5775,7 @@ var path4, AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema;
 var init_common = __esm({
   "src/tools/common.ts"() {
     "use strict";
+    init_call_context();
     path4 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -9720,15 +9784,15 @@ var init_aerender = __esm({
         if (rendering) {
           return { text: `After Effects is rendering for ae_render_queue_render (job ${rendering.job_id}); this aerender job starts after it` };
         }
-        let running = 0;
+        let running2 = 0;
         let firstRunning = "";
         for (const c of this.ctls.values()) {
           if (c.child !== null) {
-            running++;
+            running2++;
             if (firstRunning === "") firstRunning = c.jobId;
           }
         }
-        if (running >= this.opts.max_running) return { text: `aerender job ${firstRunning} is still running` };
+        if (running2 >= this.opts.max_running) return { text: `aerender job ${firstRunning} is still running` };
         const sinceEnd = this.opts.now() - this.lastEndMs;
         if (sinceEnd < this.opts.cool_down_ms) {
           return { text: `cool-down after the last aerender exit (${Math.ceil((this.opts.cool_down_ms - sinceEnd) / 1e3)} s left)` };
@@ -10855,7 +10919,7 @@ async function readSnapshotOrNull(read3, ids) {
     return null;
   }
 }
-var crypto3, fs11, path13, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_PENDING_LINES, MAX_AGENT_WRITES, SNAPSHOT_TIMEOUT_MS, UNSAVED, UNKNOWN_PROJECT, MAX_INFLIGHT_AGE_MS, emptyState, isPlainObject, keyOf, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
+var crypto3, fs11, path13, MAX_SNAPSHOTS, MAX_STEPS, MAX_TOUCHED, MAX_OP_PROJECTS, MAX_INTERRUPTED, MAX_SHOWN_IDS, MAX_STEP_ITEM_IDS, MAX_PENDING_LINES, MAX_AGENT_WRITES, SNAPSHOT_TIMEOUT_MS, UNSAVED, UNKNOWN_PROJECT, MAX_INFLIGHT_AGE_MS, emptyState, isPlainObject, keyOf2, SessionTracker, tracker, AeSessionChangesSchema, REVISION_NOTE, sessionTools;
 var init_session = __esm({
   "src/tools/ext/session.ts"() {
     "use strict";
@@ -10892,7 +10956,7 @@ var init_session = __esm({
       agent_writes: {}
     });
     isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-    keyOf = (projectPath) => process.platform === "win32" ? projectPath.replace(/\\/g, "/").toLowerCase() : projectPath;
+    keyOf2 = (projectPath) => process.platform === "win32" ? projectPath.replace(/\\/g, "/").toLowerCase() : projectPath;
     SessionTracker = class {
       /** Op ids whose write-ahead record this process holds right now (guarded writes and the bridge hook share it). */
       active = /* @__PURE__ */ new Set();
@@ -10987,7 +11051,7 @@ var init_session = __esm({
       }
       /** Logs an agent write to a project: guarded writes from noteAfterWrite, the rest from the bridge hook. */
       noteAgentWrite(projectPath, w) {
-        const key = keyOf(projectPath);
+        const key = keyOf2(projectPath);
         const list2 = this.state.agent_writes[key] ?? [];
         list2.push({ at: this.now().toISOString(), ...w });
         delete this.state.agent_writes[key];
@@ -11002,7 +11066,7 @@ var init_session = __esm({
        * undo steps (imports, effects, text, keyframe ease, ...).
        */
       agentWritesSince(projectPath, since) {
-        const list2 = this.state.agent_writes[keyOf(projectPath)] ?? [];
+        const list2 = this.state.agent_writes[keyOf2(projectPath)] ?? [];
         const ms = since ? Date.parse(since) : NaN;
         return Number.isFinite(ms) ? list2.filter((w) => Date.parse(w.at) > ms) : list2.slice();
       }
@@ -11010,20 +11074,20 @@ var init_session = __esm({
         writeJson(this.statePath, this.state);
       }
       baselineFor(projectPath) {
-        return this.state.snapshots[keyOf(projectPath)] ?? null;
+        return this.state.snapshots[keyOf2(projectPath)] ?? null;
       }
       lastBaseline() {
         return this.state.last_key ? this.state.snapshots[this.state.last_key] ?? null : null;
       }
       /** Comps worth reading again for a project: the ones writes touched. */
       touchedComps(projectPath) {
-        return this.state.touched[keyOf(projectPath)] ?? [];
+        return this.state.touched[keyOf2(projectPath)] ?? [];
       }
       /** After Save As / increment: the comps touched under the old path are tracked under the new one too. */
       carryTouched(fromPath, toPath) {
-        const from = this.state.touched[keyOf(fromPath)] ?? [];
+        const from = this.state.touched[keyOf2(fromPath)] ?? [];
         if (from.length === 0) return;
-        const key = keyOf(toPath);
+        const key = keyOf2(toPath);
         const merged = new Set(this.state.touched[key] ?? []);
         for (const id of from) merged.add(id);
         this.state.touched[key] = [...merged].slice(-MAX_TOUCHED);
@@ -11044,7 +11108,7 @@ var init_session = __esm({
       }
       /** Whether the path is the project the last write (or rebase) was in. True when there is no baseline yet. */
       isLastProject(projectPath) {
-        return this.state.last_key === null || this.state.last_key === keyOf(projectPath);
+        return this.state.last_key === null || this.state.last_key === keyOf2(projectPath);
       }
       /** Whether this process holds a write-ahead record for the op. */
       isInflight(opId) {
@@ -11053,7 +11117,7 @@ var init_session = __esm({
       /** Stores a snapshot as the new baseline for its project. */
       record(snap, meta) {
         const stored = { ...snap, taken_at: this.now().toISOString(), op_id: meta.op_id, tool: meta.tool, service_id: this.serviceId };
-        const key = keyOf(snap.project_path);
+        const key = keyOf2(snap.project_path);
         delete this.state.snapshots[key];
         this.state.snapshots[key] = stored;
         this.state.last_key = key;
@@ -12148,6 +12212,7 @@ async function runGuardedWrite(ctx, spec) {
       beginInflight(note);
       let write;
       try {
+        checkCancelled("the write was sent");
         sent = true;
         write = await ctx.bridge.evalRaw({
           id: opId,
@@ -12198,6 +12263,10 @@ async function runGuardedWrite(ctx, spec) {
       throw withOutcome(new BridgeError({ kind: "queued", op_id: opId, message: err.message }), "not_applied", spec.label);
     }
     if (err instanceof QuarantineBlockedError) throw err;
+    if (err instanceof CancelledError) {
+      err.outcome = sent ? "unknown" : "not_applied";
+      throw err;
+    }
     if (err instanceof BridgeError) throw withOutcome(err, sent ? "unknown" : "not_applied", spec.label, checkpointPath);
     const message = err instanceof Error ? err.message : String(err);
     throw withOutcome(new BridgeError({ kind: "evalscript_error", op_id: opId, message }), sent ? "unknown" : "not_applied", spec.label, checkpointPath);
@@ -12209,6 +12278,7 @@ function expectThat(mismatches, ok, path63, expected, actual, message) {
 var init_write_runner = __esm({
   "src/tools/ext/write-runner.ts"() {
     "use strict";
+    init_call_context();
     init_host();
     init_jsx();
     init_quarantine();
@@ -25127,12 +25197,12 @@ function computeEta(b, nowMs, gate = {}) {
     }
   }
   const spf = frames > 0 ? secs3 / frames : null;
-  const running = b.items.filter((i) => i.state === "running");
+  const running2 = b.items.filter((i) => i.state === "running");
   const pending = b.items.filter((i) => i.state === "pending");
-  if (running.length === 0 && pending.length === 0) return { eta_seconds: 0, eta_at: null, basis: "nothing left to render" };
+  if (running2.length === 0 && pending.length === 0) return { eta_seconds: 0, eta_at: null, basis: "nothing left to render" };
   let unknown = false;
   let longestRunning = 0;
-  for (const i of running) {
+  for (const i of running2) {
     const started = i.started_at ? Date.parse(i.started_at) : NaN;
     if (typeof i.percent === "number" && i.percent > 0 && !Number.isNaN(started)) {
       longestRunning = Math.max(longestRunning, (nowMs - started) / 1e3 * ((100 - i.percent) / i.percent));
@@ -28887,6 +28957,7 @@ async function captureCompFrame(params) {
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
   const reqStart1 = Date.now();
+  checkCancelled(`rendering frame ${frameIndex + 1} at ${time}s`);
   await ctx.bridge.evalRaw({
     id: `${opId}_f${frameIndex}_try1`,
     script: buildJsxCall("snapshotFrame", {
@@ -28955,6 +29026,7 @@ var crypto6, fs26, path28, import_pngjs3, AeCompareFramesSchema, framesTools;
 var init_frames = __esm({
   "src/tools/ext/frames.ts"() {
     "use strict";
+    init_call_context();
     crypto6 = __toESM(require("node:crypto"), 1);
     fs26 = __toESM(require("node:fs"), 1);
     path28 = __toESM(require("node:path"), 1);
@@ -36445,10 +36517,10 @@ async function collectFilesBody(args, ctx, hold) {
     hold.release = () => {
       collectLocks.delete(lockKey);
     };
-    const running = zipJobs.get(lockKey);
-    if (running && running.state === "running") {
-      await Promise.race([running.promise, sleep(Math.max(1e3, (args.max_seconds ?? 50) * 1e3))]);
-      if (running.state === "running") {
+    const running2 = zipJobs.get(lockKey);
+    if (running2 && running2.state === "running") {
+      await Promise.race([running2.promise, sleep(Math.max(1e3, (args.max_seconds ?? 50) * 1e3))]);
+      if (running2.state === "running") {
         return {
           dry_run: false,
           complete: destInfo.manifest?.complete === true,
@@ -38354,8 +38426,8 @@ async function pollJobs(env, st) {
   }
   const failed = states.filter((s) => s.state === "failed");
   const unknown = states.filter((s) => s.state === "unknown");
-  const running = states.filter((s) => s.state === "running");
-  st.live = running.length > 0 || unknown.length > 0;
+  const running2 = states.filter((s) => s.state === "running");
+  st.live = running2.length > 0 || unknown.length > 0;
   st.children = states.map((s) => ({
     output: s.output_path ?? s.job_id,
     status: s.state === "succeeded" ? "ok" : s.state === "running" ? "ok" : "blocked",
@@ -38366,9 +38438,9 @@ async function pollJobs(env, st) {
     Object.assign(st, { status: "blocked", error: "render_failed", summary: clip3(`Render job ${f.job_id} failed (exit code ${String(f.exit_code)}). ${f.log_tail ? `Log tail: ${f.log_tail}` : ""}`, 600) });
   } else if (unknown.length > 0) {
     Object.assign(st, { status: "error", error: "job_unknown", summary: clip3(`Could not read render job ${unknown[0].job_id}: ${unknown[0].error ?? "unknown state"}. Check it by hand.`, 400) });
-  } else if (running.length > 0) {
-    const pct2 = running.map((s) => s.percent).filter((p) => typeof p === "number");
-    st.summary = `${running.length} of ${states.length} render job${states.length === 1 ? "" : "s"} still running${pct2.length ? ` (${Math.round(pct2.reduce((a, b) => a + b, 0) / pct2.length)}%)` : ""}`;
+  } else if (running2.length > 0) {
+    const pct2 = running2.map((s) => s.percent).filter((p) => typeof p === "number");
+    st.summary = `${running2.length} of ${states.length} render job${states.length === 1 ? "" : "s"} still running${pct2.length ? ` (${Math.round(pct2.reduce((a, b) => a + b, 0) / pct2.length)}%)` : ""}`;
   } else {
     st.status = "ok";
     st.summary = `${states.length} render job${states.length === 1 ? "" : "s"} finished`;
@@ -61424,7 +61496,7 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
   const after = readOf5(afterRaw);
   const w = written;
   if (!before || !after || !Array.isArray(w.targets) || w.no_op) return m;
-  const find = (r, t) => r.properties.find((p) => keyOf2(p.layer_id, p.path, p.follower) === keyOf2(t.layer_id, t.path, t.follower));
+  const find = (r, t) => r.properties.find((p) => keyOf3(p.layer_id, p.path, p.follower) === keyOf3(t.layer_id, t.path, t.follower));
   const ctx = { snap: w.snap, frame_duration: w.frame_duration, span: w.span, pivot: w.pivot };
   const push2 = (path63, expected, actual, message) => {
     if (m.length < MAX_MISMATCHES2) m.push({ path: path63, expected, actual, message });
@@ -61528,7 +61600,7 @@ function detectCutsMismatches(mode, beforeRaw, afterRaw, w) {
   expectThat(m, after.numLayers >= before.numLayers - 1, "numLayers", `>= ${before.numLayers - 1}`, after.numLayers, "Layers were lost");
   return m;
 }
-var TIME_TOLERANCE, MAX_MISMATCHES2, PathSchema2, TransformTargetSchema, KeyFilterSchema, TransformOperationSchema, AeKeyframesTransformSchema, readOf5, closeNumber, keyOf2, transformTool, AeDetectCutsSchema, LONG_CLIP_NOTE, detectTool, timelineTools;
+var TIME_TOLERANCE, MAX_MISMATCHES2, PathSchema2, TransformTargetSchema, KeyFilterSchema, TransformOperationSchema, AeKeyframesTransformSchema, readOf5, closeNumber, keyOf3, transformTool, AeDetectCutsSchema, LONG_CLIP_NOTE, detectTool, timelineTools;
 var init_timeline = __esm({
   "src/tools/ext/timeline.ts"() {
     "use strict";
@@ -61606,7 +61678,7 @@ var init_timeline = __esm({
     });
     readOf5 = (v) => v && typeof v === "object" && Array.isArray(v.properties) ? v : null;
     closeNumber = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
-    keyOf2 = (layerId, path63, follower) => `${layerId}|${path63.join("")}|${follower ?? ""}`;
+    keyOf3 = (layerId, path63, follower) => `${layerId}|${path63.join("")}|${follower ?? ""}`;
     transformTool = {
       name: "ae_keyframes_transform",
       description: "Retime keyframes without losing anything: shift (seconds or frames), scale time around a pivot, reverse, move so the first key lands at a time, or copy to another property (optionally relative to its value). Targets are {layer, path} pairs, or keys: 'selected' for the keys selected in the timeline (resolved to explicit properties and indexes; check them in the dry run). A filter narrows to a time range or key indexes. All moved keys move together as one block (a reverse mirrors the whole span, move_to puts the earliest key at the time), across every target. AE has no move-key call, so each property's keys are rebuilt: value, in and out interpolation, ease per dimension, spatial tangents, continuity, auto-bezier, roving, label and selection are kept; a reverse swaps in and out (and flips the sign of ease speed on non-spatial one-, two- and three-dimensional properties; spatial, Color and Shape speeds have no sign and stay as they are), a scale divides ease speed by the factor and keeps influence. Moved keys snap to whole frames unless snap is false. Two keys landing on one frame, a locked layer, a keyframe-less target or a property with over 500 keys are refused before anything changes. A separated Position (X/Y/Z) moves per dimension. Warns about expressions that read key(n) / nearestKey, roving keys (AE retimes those), and keys landing outside the comp. dry_run returns the planned times per key. The read-back (a separate evalScript) compares each key's time (roving keys excepted: AE retimes those), value, interpolation, eases and tangents. expect is required unless dry_run. " + AGENT_SAFETY_GUIDANCE,
@@ -67926,6 +67998,7 @@ var init_production = __esm({
     init_host();
     init_jsx();
     init_quarantine();
+    init_call_context();
     init_receipts();
     init_versions();
     init_common();
@@ -68232,19 +68305,20 @@ var init_production = __esm({
               });
             } catch (err) {
               const quarantined = err instanceof QuarantineBlockedError;
-              if (chunks.length === 0 || !(err instanceof BridgeError || quarantined)) throw err;
-              const chunkOutcome = quarantined ? "not_applied" : err.outcome ?? "unknown";
+              const cancelled = err instanceof CancelledError;
+              if (chunks.length === 0 || !(err instanceof BridgeError || quarantined || cancelled)) throw err;
+              const chunkOutcome = quarantined ? "not_applied" : cancelled ? err.outcome ?? "not_applied" : err.outcome ?? "unknown";
               return {
                 ok: false,
-                error: quarantined ? "quarantined" : err.kind,
-                ...!quarantined && err.code ? { code: err.code } : {},
+                error: quarantined ? "quarantined" : cancelled ? "cancelled" : err.kind,
+                ...!quarantined && !cancelled && err.code ? { code: err.code } : {},
                 outcome: "partial",
                 failed_chunk: `${start + 1}-${start + ops.length}`,
                 failed_chunk_outcome: chunkOutcome,
                 message: `Ops 1-${start} were applied (${chunks.length} undo step(s)); ops ${start + 1}-${start + ops.length} failed (${chunkOutcome}): ${err.message} Later chunks were not run.`,
                 done,
                 chunks,
-                ...quarantined ? {} : { next_steps: err.next_steps }
+                ...quarantined || cancelled ? {} : { next_steps: err.next_steps }
               };
             }
             const chunkDone = typeof res.done === "number" ? res.done : 0;
@@ -69197,7 +69271,7 @@ function classifyBusy(input, opts = {}) {
   else if (input.dialogs.length > 0) cause = "dialog_open";
   else if (longForeign || abandoned || opts.force && longRunning) cause = "script_running";
   else cause = "unknown";
-  const running = input.inFlight ? `"${input.inFlight.label}" has been in flight ${humanDuration(input.inFlight.runningMs)}` : null;
+  const running2 = input.inFlight ? `"${input.inFlight.label}" has been in flight ${humanDuration(input.inFlight.runningMs)}` : null;
   let message;
   if (cause === "rendering") {
     message = renderGateMessage(gate);
@@ -69207,15 +69281,15 @@ function classifyBusy(input, opts = {}) {
       const shown = input.dialogs.slice(0, 3).map(describeDialog).join("; ");
       const more = input.dialogs.length > 3 ? ` and ${input.dialogs.length - 3} more` : "";
       why = `${input.dialogs.length === 1 ? "a popup is open" : `${input.dialogs.length} popups are open`} (${shown}${more})`;
-      if (running) why += `; the running operation ${running}`;
+      if (running2) why += `; the running operation ${running2}`;
     } else if (cause === "script_running") {
       if (abandoned && !longForeign && input.sentActive === 0) {
-        why = `an earlier request of this server (${input.abandoned} in all) timed out and has not finished in After Effects` + (running ? `; ${running}` : "");
+        why = `an earlier request of this server (${input.abandoned} in all) timed out and has not finished in After Effects` + (running2 ? `; ${running2}` : "");
       } else {
-        why = `${running ?? "an operation"} (a script, or AE's own work such as a manual render or playback; cannot tell from outside)`;
+        why = `${running2 ?? "an operation"} (a script, or AE's own work such as a manual render or playback; cannot tell from outside)`;
       }
     } else {
-      why = running ? `${running}, and AE did not answer` : "it did not answer, and the cause could not be read from outside";
+      why = running2 ? `${running2}, and AE did not answer` : "it did not answer, and the cause could not be read from outside";
     }
     message = `After Effects is busy: ${why}. ` + (opts.requestSent ? "The request was sent and has not been answered (it is not cancelled). " : "Nothing was sent to AE. ") + (input.dialogs.length > 0 ? "Read the popups with ae_dialogs; answer only under the dialog rules or ask the user. " : "Look at After Effects, or ask the user. ") + "Do not retry in a loop: call ae_status, it answers at once and shows when AE is free.";
   }
@@ -69511,8 +69585,8 @@ var init_read = __esm({
             };
           }
           const threshold = sources.thresholdMs ?? BUSY_REFUSE_AFTER_MS;
-          const running = serviceRunningMs(ctx);
-          if (running !== null && running >= threshold) {
+          const running2 = serviceRunningMs(ctx);
+          if (running2 !== null && running2 >= threshold) {
             const report = ctx.queue?.inFlight ? await describeBusy(sources, { withDialogs: true, force: true, dialogBudgetMs: dialogBudget() }) : await describePopupBlock(sources, { dialogBudgetMs: dialogBudget() });
             if (report) {
               return {
@@ -71274,6 +71348,7 @@ async function callMetaTool(name, rawArgs, ctx, opts = {}) {
 }
 
 // src/mcp-rpc.ts
+init_call_context();
 init_registry();
 
 // src/guidance/content.generated.ts
@@ -71551,7 +71626,7 @@ function makeErrorResponse(id, code, message, data) {
 function isPlainObject2(val) {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
-async function handleSingleRpc(message, ctx, toolset, client) {
+async function handleSingleRpc(message, ctx, toolset, client, notify) {
   if (!isPlainObject2(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
   }
@@ -71563,6 +71638,9 @@ async function handleSingleRpc(message, ctx, toolset, client) {
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
   if (!hasId) {
+    if (method === "notifications/cancelled" && isPlainObject2(message.params)) {
+      cancelCall(client ?? "", message.params.requestId, message.params.reason);
+    }
     return null;
   }
   const rawParams = message.params;
@@ -71640,7 +71718,20 @@ async function handleSingleRpc(message, ctx, toolset, client) {
           "Invalid params: `arguments` must be an object"
         );
       }
-      const result = isMetaTool(toolName) ? await callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : await callTool(toolName, rawArgs, ctx, { toolset, client });
+      const meta = isPlainObject2(params._meta) ? params._meta : {};
+      const token = meta.progressToken;
+      const state = {
+        requestId: id ?? "",
+        client: client ?? "",
+        cancelled: false,
+        progress: 0,
+        ...typeof token === "string" || typeof token === "number" ? { progressToken: token } : {},
+        ...notify ? { notify } : {}
+      };
+      const result = await runInCall(
+        state,
+        () => isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
+      );
       return { jsonrpc: "2.0", id, result };
     }
     case "prompts/list": {
@@ -71720,17 +71811,18 @@ async function handleRpc(message, ctx, opts = {}) {
     }
     const results = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify);
       if (res !== null) {
         results.push(res);
       }
     }
     return results.length > 0 ? results : null;
   }
-  return await handleSingleRpc(parsed, ctx, toolset, client);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify);
 }
 
 // src/panel-host.ts
+init_call_context();
 var crypto22 = __toESM(require("node:crypto"), 1);
 init_dialogs();
 init_host();
@@ -71824,6 +71916,7 @@ var PanelHost = class {
    */
   async evalRaw(params) {
     renderGate.check(params.id);
+    noteProgress(params.label);
     const isRender = renderGate.isRenderOp(params.id);
     const readBack = params.mutates !== true && Date.now() < this.readBackUntil;
     if (!isRender && !params.mustSend && !readBack) await this.refuseIfBusy(params.id);
@@ -72142,6 +72235,24 @@ function createPanelMcp(opts) {
     }
     const clientHeader = req.headers?.[CLIENT_HEADER];
     const client = String(Array.isArray(clientHeader) ? clientHeader[0] : clientHeader ?? "").replace(/[^ -~]+/g, " ").trim().slice(0, 40);
+    const accept = String(req.headers?.accept ?? "");
+    const p = parsed;
+    const token = p && !Array.isArray(parsed) && p.method === "tools/call" ? p.params?._meta?.progressToken : void 0;
+    if ((typeof token === "string" || typeof token === "number") && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      const event = (msg) => {
+        if (!res.writableEnded) res.write?.(`event: message
+data: ${JSON.stringify(msg)}
+
+`);
+      };
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0, notify: event });
+      if (streamed) event(streamed);
+      if (!res.writableEnded) res.end();
+      return;
+    }
     const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || void 0 });
     if (rpcResponse === null || Array.isArray(rpcResponse) && rpcResponse.length === 0) {
       if (!res.writableEnded) {

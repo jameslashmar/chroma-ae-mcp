@@ -670,3 +670,33 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     expect(cached.tools).toHaveLength(36);
   });
 });
+
+describe("panel/tools/stdio-relay.cjs: progress over an event stream", { timeout: 20000 }, () => {
+  it("asks for an event stream, passes progress notifications on as they come, then the result", async () => {
+    const { dir } = home();
+    let accept = "";
+    const server = http.createServer((req, res) => {
+      accept = String(req.headers.accept ?? "");
+      let text = "";
+      req.on("data", (c) => (text += c));
+      req.on("end", () => {
+        const body = JSON.parse(text);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream");
+        const ev = (m: unknown) => res.write(`event: message\ndata: ${JSON.stringify(m)}\n\n`);
+        ev({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: "t", progress: 1, message: "frame 1" } });
+        ev({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: "t", progress: 2, message: "frame 2" } });
+        ev({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "{\"ok\":true}" }] } });
+        res.end();
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    const out = await runRelay(dir, port, [{ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "ae_status", arguments: {}, _meta: { progressToken: "t" } } }]);
+    expect(accept).toMatch(/text\/event-stream/);
+    const progress = out.filter((m) => m.method === "notifications/progress");
+    expect(progress.map((m) => m.params.message)).toEqual(["frame 1", "frame 2"]);
+    expect(out.find((m) => m.id === 4)?.result.content[0].text).toBe("{\"ok\":true}");
+  });
+});

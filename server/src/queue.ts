@@ -1,3 +1,4 @@
+import { checkCancelled } from "./call-context.js";
 import { renderGate } from "./render-gate.js";
 
 export type QueueErrorKind = "queued";
@@ -185,8 +186,11 @@ export class SingleWriterQueue {
   }
 
   async run<T>(op: string, fn: (lease: QueueLease) => Promise<T>): Promise<T> {
+    checkCancelled("it entered the write queue");
     const lease = await this.acquire(op);
     try {
+      // Cancelled while waiting for its turn: nothing was sent yet.
+      checkCancelled("its turn in the write queue");
       return await fn(lease);
     } finally {
       lease.release();

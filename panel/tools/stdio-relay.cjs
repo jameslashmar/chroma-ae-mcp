@@ -233,7 +233,8 @@ function post(bodyText) {
           {
             Authorization: "Bearer " + token,
             "Content-Type": "application/json",
-            Accept: "application/json",
+            // A tools/call with _meta.progressToken is answered as an event stream (progress, then the result).
+            Accept: "application/json, text/event-stream",
             "Content-Length": Buffer.byteLength(bodyText),
           },
           // The panel is stateless, so the choice goes with every request. A panel that does
@@ -243,6 +244,37 @@ function post(bodyText) {
         ),
       },
       (res) => {
+        if (/text\/event-stream/i.test(String(res.headers["content-type"] || ""))) {
+          // Progress notifications go out as they arrive; the result is handled below like a JSON reply.
+          let buf = "";
+          let final = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => {
+            buf += c;
+            let i;
+            while ((i = buf.indexOf("\n\n")) !== -1) {
+              const event = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const data = event
+                .split("\n")
+                .filter((l) => l.startsWith("data:"))
+                .map((l) => l.slice(5).replace(/^ /, ""))
+                .join("\n");
+              if (!data) continue;
+              let msg;
+              try {
+                msg = JSON.parse(data);
+              } catch {
+                continue;
+              }
+              if (msg && typeof msg === "object" && !Array.isArray(msg) && msg.id === undefined) send(msg);
+              else final = data;
+            }
+          });
+          res.on("end", () => resolve({ status: res.statusCode || 0, text: final, token }));
+          res.on("error", reject);
+          return;
+        }
         const chunks = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () =>

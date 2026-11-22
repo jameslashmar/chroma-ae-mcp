@@ -1,3 +1,4 @@
+import { checkCancelled } from "../../call-context.js";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -420,6 +421,8 @@ export async function captureCompFrame(params: {
   );
   const reqStart1 = Date.now();
 
+  // A safe point between frames: a cancelled call renders no more (an eval already sent has ended by now).
+  checkCancelled(`rendering frame ${frameIndex + 1} at ${time}s`);
   await ctx.bridge.evalRaw<Record<string, unknown>>({
     id: `${opId}_f${frameIndex}_try1`,
     script: buildJsxCall("snapshotFrame", {

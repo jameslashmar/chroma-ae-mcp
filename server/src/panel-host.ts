@@ -1,3 +1,4 @@
+import { noteProgress } from "./call-context.js";
 import * as crypto from "node:crypto";
 import { noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
 import {
@@ -189,6 +190,8 @@ export class PanelHost implements HostTransport {
   }): Promise<EvalSuccessResponse<T>> {
     // While AE renders for ae_render_queue_render it cannot answer: refuse at once, send nothing.
     renderGate.check(params.id);
+    // One step of the running tools/call: a progress notification when the client asked for them.
+    noteProgress(params.label);
     const isRender = renderGate.isRenderOp(params.id);
     // AE has been busy for a while with something this server is not waiting on (a popup, a script,
     // a manual render), or an earlier eval of ours is still running in it: refuse at once, send nothing.

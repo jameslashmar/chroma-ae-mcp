@@ -17,6 +17,7 @@ import { z } from "zod";
 import { BridgeError } from "../../host.js";
 import { normalizeGuardPath } from "../../jsx.js";
 import { QuarantineBlockedError } from "../../quarantine.js";
+import { CancelledError } from "../../call-context.js";
 import type { ReceiptMismatch } from "../../receipts.js";
 import { compareValues } from "../../receipts.js";
 import { appendVersionLog, planVersion, versionToken, type VersionLogEntry } from "../../versions.js";
@@ -672,20 +673,22 @@ export const productionTools: ToolDefinition<any>[] = [
           // The first chunk's error is the whole answer (it carries its own outcome). A later chunk's
           // must not hide the chunks that were written before it.
           const quarantined = err instanceof QuarantineBlockedError;
-          if (chunks.length === 0 || !(err instanceof BridgeError || quarantined)) throw err;
-          // A quarantine refusal (another write timed out while this batch waited between chunks) stops the chunk before it is sent.
-          const chunkOutcome = quarantined ? "not_applied" : (err as BridgeError).outcome ?? "unknown";
+          const cancelled = err instanceof CancelledError;
+          if (chunks.length === 0 || !(err instanceof BridgeError || quarantined || cancelled)) throw err;
+          // A quarantine refusal (another write timed out while this batch waited between chunks) stops the chunk before
+          // it is sent; a cancellation says itself whether the chunk was sent.
+          const chunkOutcome = quarantined ? "not_applied" : cancelled ? (err as CancelledError).outcome ?? "not_applied" : (err as BridgeError).outcome ?? "unknown";
           return {
             ok: false,
-            error: quarantined ? "quarantined" : (err as BridgeError).kind,
-            ...(!quarantined && (err as BridgeError).code ? { code: (err as BridgeError).code } : {}),
+            error: quarantined ? "quarantined" : cancelled ? "cancelled" : (err as BridgeError).kind,
+            ...(!quarantined && !cancelled && (err as BridgeError).code ? { code: (err as BridgeError).code } : {}),
             outcome: "partial" as const,
             failed_chunk: `${start + 1}-${start + ops.length}`,
             failed_chunk_outcome: chunkOutcome,
             message: `Ops 1-${start} were applied (${chunks.length} undo step(s)); ops ${start + 1}-${start + ops.length} failed (${chunkOutcome}): ${(err as Error).message} Later chunks were not run.`,
             done,
             chunks,
-            ...(quarantined ? {} : { next_steps: (err as BridgeError).next_steps }),
+            ...(quarantined || cancelled ? {} : { next_steps: (err as BridgeError).next_steps }),
           };
         }
         // runGuardedWrite spreads the write's own result at the top level, also when the read-back failed.

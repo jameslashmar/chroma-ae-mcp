@@ -1,3 +1,4 @@
+import { CancelledError } from "../call-context.js";
 import * as path from "node:path";
 import { z } from "zod";
 import type { AskStore } from "../asks.js";
@@ -146,6 +147,12 @@ export function formatToolError(err: unknown): {
           ),
         },
       ],
+    };
+  }
+  if (err instanceof CancelledError) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ kind: "cancelled", code: "cancelled", message: err.message, ...(err.outcome ? { outcome: err.outcome } : {}) }) }],
     };
   }
   if (err instanceof QueueWaitError) {

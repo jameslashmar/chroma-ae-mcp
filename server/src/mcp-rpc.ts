@@ -1,4 +1,5 @@
 import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
+import { cancelCall, runInCall } from "./call-context.js";
 import { callTool } from "./tool-call.js";
 import {
   coreInstructions,
@@ -48,8 +49,10 @@ const PROMPTS: PromptDef[] = [
 /** Per-request options. `toolset` comes from the X-Chroma-Toolset header (see toolsets.ts). */
 export interface RpcOptions {
   toolset?: Toolset | string | null;
-  /** The X-Chroma-Client value (the MCP client's name, sanitised by the relay). Usage log only. */
+  /** The X-Chroma-Client value (the MCP client's name, sanitised by the relay). Usage log and cancellation scope. */
   client?: string | null;
+  /** Sends a notification on this request's response stream (progress); only when the transport streams. */
+  notify?: (message: Record<string, unknown>) => void;
 }
 
 /** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
@@ -118,7 +121,8 @@ async function handleSingleRpc(
   message: unknown,
   ctx: ToolContext,
   toolset: Toolset,
-  client?: string
+  client?: string,
+  notify?: (message: Record<string, unknown>) => void
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -136,8 +140,11 @@ async function handleSingleRpc(
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
 
-  // Notifications (no `id`) produce no response.
+  // Notifications (no `id`) produce no response. notifications/cancelled stops a running call at its next safe point.
   if (!hasId) {
+    if (method === "notifications/cancelled" && isPlainObject(message.params)) {
+      cancelCall(client ?? "", message.params.requestId, message.params.reason);
+    }
     return null;
   }
 
@@ -232,9 +239,19 @@ async function handleSingleRpc(
 
       // Meta-tools answer in either toolset (they are only listed in core). Everything else,
       // listed or not, goes through the one shared path in tool-call.ts.
-      const result = isMetaTool(toolName)
-        ? await callMetaTool(toolName, rawArgs, ctx, { toolset, client })
-        : await callTool(toolName, rawArgs, ctx, { toolset, client });
+      const meta = isPlainObject(params._meta) ? params._meta : {};
+      const token = meta.progressToken;
+      const state = {
+        requestId: id ?? "",
+        client: client ?? "",
+        cancelled: false,
+        progress: 0,
+        ...(typeof token === "string" || typeof token === "number" ? { progressToken: token } : {}),
+        ...(notify ? { notify } : {}),
+      };
+      const result = await runInCall(state, () =>
+        isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
+      );
       return { jsonrpc: "2.0", id, result };
     }
 
@@ -331,7 +348,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify);
       if (res !== null) {
         results.push(res);
       }
@@ -339,5 +356,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx, toolset, client);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify);
 }

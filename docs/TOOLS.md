@@ -133,3 +133,9 @@ Every tool result is a JSON object (in the text content) that carries these fiel
 Write tools also take an optional `idempotency_key` (a resend with the same key and arguments returns the first answer) and are listed by `ae_recent_ops`. Every tool carries MCP annotations (read-only, destructive, idempotent, open world; server/src/tool-annotations.ts).
 
 With `CHROMA_AE_MCP_STRUCTURED=1` the same object is also sent as `structuredContent`, and the full tool list declares this envelope as each tool's `outputSchema`. It is off by default until Claude Desktop and Claude Code are measured with it (a client that passes both the text and the structure to the model would pay for the result twice).
+
+## Progress and cancellation
+
+- **Progress.** A `tools/call` with `_meta.progressToken`, sent with `Accept: text/event-stream`, is answered as an event stream: one `notifications/progress` per After Effects eval of the call (a growing count and the eval's label, such as `ae_scrub_check(12 @ 0.24s)`; no total, since most tools do not know how many evals they need), then the result. The stdio relay asks for the stream and passes each notification on as it arrives. Without the header or the token the reply is one JSON object, as before.
+- **Cancellation.** `notifications/cancelled` (with the call's `requestId`, from the same client) stops the call at its next safe point: before it enters the write queue, before each frame a loop renders, and just before a guarded write is sent (then `outcome: not_applied`). An eval already sent to After Effects is always let finish: abandoning one wedges the ExtendScript bridge. The answer carries `code: cancelled`; `ae_batch_set` still lists the chunks it wrote.
+- On macOS the panel page cannot answer while After Effects runs a long ExtendScript (`qa/cep-freeze-check.mjs`), so progress and cancellation reach it only between evals there.

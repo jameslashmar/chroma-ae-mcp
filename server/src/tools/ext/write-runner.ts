@@ -1,3 +1,4 @@
+import { CancelledError, checkCancelled } from "../../call-context.js";
 /**
  * server/src/tools/ext/write-runner.ts
  *
@@ -91,6 +92,8 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       beginInflight(note);
       let write;
       try {
+        // The last safe point: after this the write is in After Effects' hands.
+        checkCancelled("the write was sent");
         sent = true;
         write = await ctx.bridge.evalRaw<W>({
           id: opId,
@@ -148,6 +151,10 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       throw withOutcome(new BridgeError({ kind: "queued", op_id: opId, message: err.message }), "not_applied", spec.label);
     }
     if (err instanceof QuarantineBlockedError) throw err;
+    if (err instanceof CancelledError) {
+      err.outcome = sent ? "unknown" : "not_applied";
+      throw err;
+    }
     if (err instanceof BridgeError) throw withOutcome(err, sent ? "unknown" : "not_applied", spec.label, checkpointPath);
     // Not a bridge error (a bug in a read or check before the write, or a host transport fault).
     const message = err instanceof Error ? err.message : String(err);
