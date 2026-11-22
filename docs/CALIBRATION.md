@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -61,6 +61,17 @@ The plate as a 3D plane under a camera that dollies 18%, pans and tilts; eight n
 | 3% zoom, 8 px off | 1.5-4.0 px | 2.1-4.9 px | slides |
 
 A fixed first-frame pattern read 1-3 px on the perfect solve (the dolly scales the picture 22%), and chaining the pattern frame to frame added up the matching noise (up to 1.5 px); the tool warps the first frame's pattern by how the camera turns and scales a small patch facing it (the projection's local affine), which gives the numbers above. Points within half a pattern of the frame edge stop being measured there.
+
+### Slip of a pinned insert (`ae_patch_check` with `region_track`)
+
+An insert (a different texture, masked to a 200 x 160 rect) pinned with exactly the plate's Corner Pin, and one whose pins drift 3 px to the right over the shot; `region_track` is the plate's Corner Pin.
+
+| Insert | Slip read, 0.4 / 0.8 / 1.2 / 1.6 / 1.96 s | True |
+|---|---|---|
+| locked | 0.05 / 0.04 / 0.06 / 0.05 / 0.13 px | 0 |
+| drifting | 0.63 / 1.19 / 1.74 / 2.46 / 2.88 px | 0.61 / 1.22 / 1.84 / 2.45 / 3.00 |
+
+Before, the slip measure ignored the track: it followed features with no prediction and modelled the ring's motion as a similarity. It read 0.7 px of slip a frame apart (the plate's perspective), lost most features across 10 frames of motion, and reported 9-29 px of slip on the locked insert. Now, with a region track, each feature is looked for where the track puts it with its pattern warped by the track's local affine, and the slip is the patch features' offset from the track minus the ring's. `ae_track_apply` returns a ready `verify_with` call for this check.
 
 ### Inpaint (`ae_inpaint_plate`)
 

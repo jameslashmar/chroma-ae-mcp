@@ -730,6 +730,68 @@ async function stageSolve(ids) {
   return out;
 }
 
+// ---------- slip of a pinned insert (item 5) ----------
+
+// An insert pinned with exactly the plate's Corner Pin (no slip), and one whose pins drift 3 px to the
+// right over the shot: ae_patch_check's slip should read about 0 and about 3.
+const SLIP_RECT = [380, 190, 580, 350];
+const SLIP_PX = 3;
+function slipJsx() {
+  const times = [];
+  for (let i = 0; i < FRAMES; i++) times.push(i / FPS);
+  const lines = [
+    // The insert's picture: the same photo, half size and shifted, so it has texture of its own.
+    'var ins = mk("Cal slip insert src"); var il2 = ins.layers.add(src); il2.property("ADBE Transform Group").property("ADBE Scale").setValue([60, 60]); il2.property("ADBE Transform Group").property("ADBE Position").setValue([300, 200]);',
+  ];
+  for (const [name, drift] of [["exact", 0], ["drift", SLIP_PX]]) {
+    lines.push(`var sl_${name} = mk("Cal slip ${name}"); var slp_${name} = sl_${name}.layers.add(src); slp_${name}.name = "Plate"; var sp_${name} = slp_${name}.property("ADBE Effect Parade").addProperty("ADBE Corner Pin");`);
+    lines.push(`var sli_${name} = sl_${name}.layers.add(ins); sli_${name}.name = "Insert"; var si_${name} = sli_${name}.property("ADBE Effect Parade").addProperty("ADBE Corner Pin");`);
+    lines.push(`var sm_${name} = sli_${name}.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var ss_${name} = new Shape(); ss_${name}.vertices = [[${SLIP_RECT[0]}, ${SLIP_RECT[1]}], [${SLIP_RECT[2]}, ${SLIP_RECT[1]}], [${SLIP_RECT[2]}, ${SLIP_RECT[3]}], [${SLIP_RECT[0]}, ${SLIP_RECT[3]}]]; ss_${name}.closed = true; sm_${name}.property("ADBE Mask Shape").setValue(ss_${name});`);
+    for (let k = 0; k < 4; k++) {
+      const plate = times.map((t) => pinCorners(t, 1)[k].map(r3));
+      const insert = times.map((t, i) => [r3(pinCorners(t, 1)[k][0] + (drift * i) / (FRAMES - 1)), r3(pinCorners(t, 1)[k][1])]);
+      lines.push(`sp_${name}.property(${k + 1}).setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(plate)});`);
+      lines.push(`si_${name}.property(${k + 1}).setValuesAtTimes(${JSON.stringify(times)}, ${JSON.stringify(insert)});`);
+    }
+    lines.push(`ids.slip_${name} = sl_${name}.id;`);
+  }
+  return lines.join("\n");
+}
+
+async function stageSlip(ids, expect) {
+  const out = {};
+  for (const name of ["exact", "drift"]) {
+    const t0 = Date.now();
+    const r = await call("ae_patch_check", {
+      comp_id: ids[`slip_${name}`],
+      patch_layers: [{ name: "Insert" }],
+      region: { kind: "rect", rect: SLIP_RECT },
+      region_track: { corner_pin: { layer: { name: "Plate" } } },
+      times: [0, 0.4, 0.8, 1.2, 1.6, END],
+      grain_probes: 0,
+      max_renders: 40,
+      expect,
+    });
+    const slip = (r.checks ?? []).find((c) => c.check === "slip");
+    let series = null;
+    try {
+      series = JSON.parse(fs.readFileSync(r.series_path, "utf8")).slip?.series ?? null;
+    } catch {
+      // no series
+    }
+    out[name] = {
+      ok: r.applied === true,
+      ms: Date.now() - t0,
+      verdict: slip?.verdict ?? null,
+      summary: slip?.summary ?? r.message ?? brief(r),
+      max_slip_px: slip?.numbers?.max_slip_px ?? null,
+      // The truth: the insert's pins are off by SLIP_PX * t / END along x.
+      series: (series ?? []).map((row) => ({ time: row.time, tool_px: row.slip_px, true_px: name === "drift" ? r3((SLIP_PX * Math.round(row.time * FPS)) / (FRAMES - 1)) : 0 })),
+    };
+  }
+  return out;
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -833,6 +895,7 @@ async function main() {
       grainCurveJsx(),
       projectionJsx(),
       solveJsx(),
+      slipJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -913,6 +976,10 @@ async function main() {
       const truth = v.plane_nulls.map((p) => p.true_max_px);
       console.log(`solve check   ${k.padEnd(8)} ${v.verdict}; mean ${v.error_px?.mean} p95 ${v.error_px?.p95}; plane nulls max tool ${tool.map((x) => x.toFixed(2)).join(" ")} | true ${truth.map((x) => x.toFixed(2)).join(" ")}; off plane ${JSON.stringify(v.off_plane)}`);
     }
+  }
+  if (want("slip")) {
+    report.slip = await stageSlip(ids, expect);
+    for (const [k, v] of Object.entries(report.slip)) console.log(`slip          ${k.padEnd(6)} ${v.verdict}: max ${v.max_slip_px}px; ${v.series.map((x) => `${x.time}s tool ${x.tool_px} true ${x.true_px}`).join(" | ")}${v.ok ? "" : `; ${v.summary}`}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);

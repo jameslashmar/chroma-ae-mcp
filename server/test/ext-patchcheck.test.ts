@@ -2363,3 +2363,56 @@ describe("patchcheck.jsx review fixes: pins, mask grow, open paths, thinning, pi
     expect(read(project, comp).polygon).toEqual([[0, 0], [200, 0], [200, 50], [0, 50]]);
   });
 });
+
+describe("slip along the region's track", () => {
+  // A smooth random texture, shifted by whole pixels: the shot pans 4 px right and 1 down per frame.
+  let seed = 3;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const W = 160;
+  const H = 120;
+  const base = new Float32Array((W + 60) * (H + 60));
+  for (let i = 0; i < base.length; i++) base[i] = rnd() * 255;
+  const tex = (x: number, y: number) => {
+    // A 3x3 box blur of the noise, so patterns have structure at more than one pixel.
+    let s = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += base[(y + 30 + dy) * (W + 60) + (x + 30 + dx)];
+    return s / 9;
+  };
+  const square: Pt[] = [[55, 35], [105, 35], [105, 85], [55, 85]];
+  const inSquare = (x: number, y: number) => x >= 55 && x < 105 && y >= 35 && y < 85;
+  /** Frame k: the plate panned by (4k, k); inside the square the composite holds the insert, which slides `slide` px right per frame on top of that. */
+  function frames(slide: number) {
+    const out = [];
+    for (let k = 0; k < 4; k++) {
+      const plate = new Float32Array(W * H);
+      const comp = new Float32Array(W * H);
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const px = x - 4 * k;
+          const py = y - k;
+          const v = tex(Math.max(-28, Math.min(W + 28, px)), Math.max(-28, Math.min(H + 28, py)));
+          plate[y * W + x] = v;
+          // The insert: a different picture (the texture mirrored), panned with the plate plus the slide, shown inside the square as it is at frame k.
+          const ix = px - slide * k;
+          comp[y * W + x] = inSquare(x - 4 * k, y - k) ? tex(Math.max(-28, Math.min(W + 28, W - ix)), Math.max(-28, Math.min(H + 28, py))) : v;
+        }
+      }
+      out.push({ time: k / 25, composite: { width: W, height: H, data: comp }, plate: { width: W, height: H, data: plate }, motion: [1, 0, 4 * k, 0, 1, k, 0, 0, 1] });
+    }
+    return out;
+  }
+  const opts = { patchSize: 11, searchPx: 6, features: 8, scale: 1, gapPx: 2, ringPx: 20 };
+
+  it("reads about 0 for an insert locked to the plate and the slide for one that swims", () => {
+    const locked = measureSlip(frames(0), square, opts);
+    expect(locked.status).toBe("ok");
+    expect(locked.max_slip_px!).toBeLessThan(0.3);
+    const swim = measureSlip(frames(1), square, opts);
+    expect(swim.status).toBe("ok");
+    const s = swim.series.map((r) => r.slip_px);
+    expect(s[0]!).toBeGreaterThan(0.7);
+    expect(s[0]!).toBeLessThan(1.3);
+    expect(s[2]!).toBeGreaterThan(2.5);
+    expect(s[2]!).toBeLessThan(3.5);
+  });
+});

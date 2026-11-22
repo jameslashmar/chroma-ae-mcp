@@ -46806,6 +46806,14 @@ async function applyTrackTo(ctx, a) {
     frames_written: keys ? keys.times.length : Math.max(0, ...nullKeys.map((n) => n.times.length)),
     ...skipped.length ? { frames_skipped: skipped.slice(0, 100).map(r4), frames_skipped_total: skipped.length } : {},
     ...lay ? { layer: { index: lay.index, id: lay.id, name: lay.name } } : {},
+    // The keys say where the layer should be; the render says whether it sticks. This call measures slip on renders along the same track.
+    ...lay ? {
+      verify_with: {
+        tool: "ae_patch_check",
+        why: "Renders a few frames and measures whether the layer slides against the plate along this track (slip, within 0.1 px on a test insert), plus seam and edge.",
+        arguments: { comp_id: a.compId, patch_layers: [{ id: lay.id }], region_track: { track_id: based.track_id }, grain_probes: 0 }
+      }
+    } : {},
     written: w.written ?? [],
     nulls: (w.nulls ?? []).map((n) => ({ id: n.layer_id, index: n.layer_index, name: n.name, keys: n.props.map((p) => `${p.role}:${p.numKeys}`).join(" ") })),
     notes,
@@ -48933,6 +48941,46 @@ function analyseFrame(inp) {
     ...grain ? { grain } : {}
   };
 }
+function slipAlongTrack(frames, patch, ring, result, scale, patchSize) {
+  const f0 = frames[0];
+  let maxSlip = 0;
+  let measured = 0;
+  const residual = (list2, img, refImg, fr) => {
+    const out = [];
+    for (const f of list2) {
+      if (f.lost) continue;
+      const pred = applyH(fr.motion, [f.x0, f.y0]);
+      if (!pred) continue;
+      const J = jacobianAt(fr.motion, [f.x0, f.y0]);
+      const tpl = J ? makeWarpedTemplate(refImg, f.x0, f.y0, patchSize, [J[0], J[1], 0, J[2], J[3], 0]) : null;
+      const s = f.tracker.step(img(fr), { x: pred[0], y: pred[1] }, tpl && tpl.std >= 3 ? tpl : void 0);
+      if (!s) {
+        f.lost = true;
+        continue;
+      }
+      out.push([s.x - pred[0], s.y - pred[1]]);
+    }
+    return out;
+  };
+  for (let i = 1; i < frames.length; i++) {
+    const fr = frames[i];
+    const pr = residual(patch, (f) => f.composite, f0.composite, fr);
+    const rr = residual(ring, (f) => f.plate, f0.plate, fr);
+    if (pr.length >= 2 && rr.length >= 2) {
+      const dx = medianOf(pr.map((r) => r[0])) - medianOf(rr.map((r) => r[0]));
+      const dy = medianOf(pr.map((r) => r[1])) - medianOf(rr.map((r) => r[1]));
+      const slip = Math.hypot(dx, dy) / scale;
+      result.series.push({ time: fr.time, slip_px: r38(slip), patch_live: pr.length, ring_live: rr.length });
+      if (slip > maxSlip) maxSlip = slip;
+      measured++;
+    } else {
+      result.series.push({ time: fr.time, slip_px: null, patch_live: pr.length, ring_live: rr.length });
+    }
+  }
+  result.ring_model = { similarity: 0, translate: 0 };
+  if (measured === 0) return { ...result, reason: "the features were lost in every later frame even along the region's track: check the track (ae_track_multi's expected_error_px) or sample closer frames" };
+  return { ...result, status: "ok", max_slip_px: r38(maxSlip) };
+}
 function measureSlip(frames, poly0, o) {
   const base = { status: "not_measurable", patch_features: 0, ring_features: 0, start_time: frames.length > 0 ? frames[0].time : null, series: [], max_slip_px: null };
   if (frames.length < 2) return { ...base, reason: "fewer than two frames were rendered" };
@@ -48966,6 +49014,7 @@ function measureSlip(frames, poly0, o) {
     return { ...result, reason: "the patch has no texture to follow (a flat or nearly flat fill, or a region too small for a pattern), so slip can't be measured; it is not 0" };
   }
   if (ring.length < 3) return { ...result, reason: "the ring around the patch has no texture to follow, so slip can't be measured" };
+  if (frames.every((f) => f.motion)) return slipAlongTrack(frames, patch, ring, result, o.scale, o.patchSize);
   const liveOf = (list2) => list2.filter((f) => !f.lost && f.dx !== null && f.dy !== null);
   const modelFrames = { similarity: 0, translate: 0 };
   const ringPredictor = (rl) => {
@@ -49678,6 +49727,7 @@ async function patchCheckHandler(args, ctx) {
       const notes = [];
       const slipFrames = [];
       let slipPoly0 = null;
+      let slipCrop = null;
       let slipBytes = 0;
       let blocked = false;
       let imgScale = 1;
@@ -49746,6 +49796,7 @@ async function patchCheckHandler(args, ctx) {
               slipFrames.push({ time: pair.time, composite: toGray(ca.img), plate: toGray(cb.img) });
               await yieldLoop2();
               if (!slipPoly0) slipPoly0 = scalePoly(poly, sx, sy).map((p) => [p[0] - ca.x0, p[1] - ca.y0]);
+              if (!slipCrop) slipCrop = { x0: ca.x0, y0: ca.y0, sx, sy };
             } else if (ca && ca.img.width * ca.img.height > 4e6 && !notes.some((n) => n.startsWith("Slip"))) {
               notes.push("Slip was skipped: the region travels over more than 4 million pixels of the render. Give a smaller range or a lower resolution factor.");
             }
@@ -49757,6 +49808,13 @@ async function patchCheckHandler(args, ctx) {
       }
       let slip = null;
       if (slipFrames.length >= 2 && slipPoly0) {
+        if (prep.track && slipCrop) {
+          const c = slipCrop;
+          const toCrop = [c.sx, 0, -c.x0, 0, c.sy, -c.y0, 0, 0, 1];
+          const fromCrop = invertH(toCrop);
+          const h0 = invertH(homographyAt(prep.track.entries, slipFrames[0].time));
+          if (fromCrop && h0) for (const sf of slipFrames) sf.motion = mulH(toCrop, mulH(mulH(homographyAt(prep.track.entries, sf.time), h0), fromCrop));
+        }
         try {
           await yieldLoop2();
           slip = measureSlip(slipFrames, slipPoly0, { patchSize: PATCH_SIZE, searchPx: 16, features: 8, scale: imgScale, gapPx: (args.ring_gap_px + halfFeather) * imgScale, ringPx: args.ring_px * imgScale });
@@ -50303,7 +50361,7 @@ var init_patchcheck = __esm({
       "How the region moves: per time, the homography that takes the region AS GIVEN to its place at that time (the identity where it is where you drew it). Between entries the matrix is interpolated, outside them the nearest entry is held. Without it the region stays put."
     );
     RegionTrackInputSchema = external_exports.union([RegionTrackSchema, TrackSourceSchema]).describe(
-      "How the region moves: either a list of { time, homography } entries, or a track source (track_id from ae_track_multi / ae_track_read, nulls, corner_pin, tracker or transform) that is resolved to the same thing. A track source's motion is reference frame -> frame, so the region must be given AS IT LOOKS AT THE TRACK'S REFERENCE FRAME (the track's ref_time; the result reports it)."
+      "How the region moves: either a list of { time, homography } entries, or a track source (track_id from ae_track_multi / ae_track_read, nulls, corner_pin, tracker or transform) that is resolved to the same thing. A track source's motion is reference frame -> frame, so the region must be given AS IT LOOKS AT THE TRACK'S REFERENCE FRAME (the track's ref_time; the result reports it). With a track, slip is measured along it (every feature looked for where the track puts it): within 0.1 px of the truth on a pinned test insert. Without one the slip comes from the ring's own motion and reads perspective and big moves between samples as slip."
     );
     budgetFields = (renders) => ({
       max_renders: external_exports.number().int().min(2).max(400).default(renders).describe(`The most renders this call starts (each captured frame is one; a pair is only started when two are left, but a stale-frame retry or a time-mismatch re-render can add one or two), default ${renders}. When it is used up the remaining sampled times are left unmeasured and reported as 'sampled N of M frames'.`),
@@ -59140,7 +59198,7 @@ var init_screenrep = __esm({
     near7 = (a, b, tol) => Math.abs(a - b) <= tol;
     FOLLOW_UPS = [
       "Hands, fingers or objects that cross the screen are not rotoscoped by this tool (Roto Brush and Mocha have no scripting): make a roto layer of your own and use it as a holdout (a garbage-matte tool with matte_layer, or a track matte on the insert).",
-      "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check (seam, flicker, slip) before delivering."
+      "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check before delivering: patch_layers the insert, region_track the same track this call used, so slip (does the insert slide on the plate?) is measured along it on renders, with seam and flicker."
     ];
     screenrepTools = [
       {

@@ -1938,7 +1938,7 @@ async function measureLook(
 
 const FOLLOW_UPS = [
   "Hands, fingers or objects that cross the screen are not rotoscoped by this tool (Roto Brush and Mocha have no scripting): make a roto layer of your own and use it as a holdout (a garbage-matte tool with matte_layer, or a track matte on the insert).",
-  "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check (seam, flicker, slip) before delivering.",
+  "Match the plate's grain with ae_patch_grain, then check the result with ae_patch_check before delivering: patch_layers the insert, region_track the same track this call used, so slip (does the insert slide on the plate?) is measured along it on renders, with seam and flicker.",
 ];
 
 async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promise<Record<string, unknown>> {

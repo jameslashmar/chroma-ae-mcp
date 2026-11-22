@@ -1608,6 +1608,16 @@ async function applyTrackTo(
     frames_written: keys ? keys.times.length : Math.max(0, ...nullKeys.map((n) => n.times.length)),
     ...(skipped.length ? { frames_skipped: skipped.slice(0, 100).map(r4), frames_skipped_total: skipped.length } : {}),
     ...(lay ? { layer: { index: lay.index, id: lay.id, name: lay.name } } : {}),
+    // The keys say where the layer should be; the render says whether it sticks. This call measures slip on renders along the same track.
+    ...(lay
+      ? {
+          verify_with: {
+            tool: "ae_patch_check",
+            why: "Renders a few frames and measures whether the layer slides against the plate along this track (slip, within 0.1 px on a test insert), plus seam and edge.",
+            arguments: { comp_id: a.compId, patch_layers: [{ id: lay.id }], region_track: { track_id: based.track_id }, grain_probes: 0 },
+          },
+        }
+      : {}),
     written: w.written ?? [],
     nulls: (w.nulls ?? []).map((n) => ({ id: n.layer_id, index: n.layer_index, name: n.name, keys: n.props.map((p) => `${p.role}:${p.numKeys}`).join(" ") })),
     notes,
