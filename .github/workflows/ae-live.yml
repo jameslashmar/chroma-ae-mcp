@@ -1,10 +1,18 @@
 name: AE live
 
 # Runs the live smoke test against a real After Effects on a self-hosted
-# runner labelled `after-effects` (setup: docs/CI-RUNNER.md). Manual until
-# such a runner is registered; then add `push: branches: [main]` here.
+# runner labelled `after-effects` (setup: docs/CI-RUNNER.md), on Windows or
+# macOS. Manual until such a runner is registered; then add
+# `push: branches: [main]` here. Never `pull_request`: the repo is public, and a
+# fork's pull request could change this file and run code on the runner.
 on:
   workflow_dispatch:
+    inputs:
+      os:
+        description: "Which runner: windows or macos"
+        type: choice
+        options: [windows, macos]
+        default: windows
 
 concurrency:
   group: ae-live
@@ -12,7 +20,8 @@ concurrency:
 
 jobs:
   live:
-    name: Live smoke on After Effects
+    name: Live smoke on After Effects (Windows)
+    if: github.event_name != 'workflow_dispatch' || inputs.os == 'windows'
     runs-on: [self-hosted, windows, after-effects]
     timeout-minutes: 30
     defaults:
@@ -52,5 +61,50 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ae-live-report
+          path: qa/out/
+          if-no-files-found: ignore
+
+  live-mac:
+    name: Live smoke on After Effects (macOS)
+    if: github.event_name == 'workflow_dispatch' && inputs.os == 'macos'
+    runs-on: [self-hosted, macOS, after-effects]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install
+        working-directory: server
+        run: npm ci
+
+      - name: Build
+        working-directory: server
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: server
+        run: npm test
+
+      - name: Bundle the panel
+        working-directory: server
+        run: npm run bundle
+
+      - name: ExtendScript lint
+        run: node scripts/lint-jsx.mjs
+
+      - name: Live smoke (reloads the panel service from this checkout)
+        run: node qa/ci-live.mjs --wait 300
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ae-live-report-macos
           path: qa/out/
           if-no-files-found: ignore
