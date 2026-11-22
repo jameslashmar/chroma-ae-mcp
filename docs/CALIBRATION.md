@@ -45,7 +45,9 @@ Add Grain on 50% gray, measured per pixel over 6 frames:
 
 Per-pixel noise matches Size 0.25; AE's default Size 1 is clumped. The old first guess (sigma / 20) started 7x too low at Size 1. `ae_patch_grain` now picks Size from the plate's grain coarseness (the neighbour correlation of a two-frame difference) and the first Intensity from the table for that Size. On a plate with Noise 10%: Size 0.253, patch correlation 0.001 against the plate's 0.000, sigma 0.94 of the plate's (0.86 with the old defaults, at correlation 0.77).
 
-The table is from mid-gray; on a photograph the sigma per Intensity at Size 0.25 came out higher, so the tuning rounds still matter.
+The response to Intensity is a straight line (Size 0.25: sigma 0.90, 1.73, 2.58, 3.85, 5.13, 6.85 at Intensity 0.1, 0.2, 0.3, 0.45, 0.6, 0.8; Size 0.5 about 5.5 per unit; Size 1 about 2.5 per unit above 0.2), but Add Grain puts more grain in the shadows: at Size 0.25 and Intensity 0.3, gray 0.25 gave 3.86, gray 0.5 2.58 and gray 0.75 1.32, a straight line in the gray level (factor 1 + 1.98 (0.5 - gray)). The first Intensity now allows for the area's mean gray, so on the photograph it starts at 0.37 (0.66 without the tone factor) and needs at most one round; the default tolerance is now 5%.
+
+On this test plate the tool's robust temporal sigma (from the frame difference's median absolute deviation) reads the plate's AE Noise at 0.82 of the per-pixel standard deviation: the effect's noise is not Gaussian. So by the per-pixel measure the patch ends at 0.89 of the plate (0.81 with the old 10% tolerance). Film grain is closer to Gaussian, where the two measures agree; a check on real grain is still to do.
 
 ### 3D projection (`ae_scene_3d_report`, `ae_annotate_frame` with `include_3d`)
 

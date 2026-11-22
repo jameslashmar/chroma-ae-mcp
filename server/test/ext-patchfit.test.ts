@@ -346,6 +346,9 @@ describe("grain, sharpness, motion blur and edge helpers", () => {
     expect(grainIntensityFor(4, 0.25)).toBeCloseTo(4 / 8.59, 3);
     expect(grainIntensityFor(4, 0.875)).toBeCloseTo(4 / ((3.37 + 2.58) / 2), 3);
     expect(grainIntensityFor(0.01)).toBe(0.02);
+    // Darker areas get more grain per unit: a shadow needs less Intensity for the same sigma.
+    expect(grainIntensityFor(4, 0.25, 0.25)).toBeCloseTo(4 / (8.59 * 1.495), 3);
+    expect(grainIntensityFor(4, 0.25, 0.75)).toBeCloseTo(4 / (8.59 * 0.505), 3);
     expect(nextGrainIntensity(0.2, 8, 4)).toBeCloseTo(0.1);
     expect(nextGrainIntensity(0.2, 0.5, 4)).toBeCloseTo(0.8);
     expect(nextGrainIntensity(0.2, 0, 4)).toBeCloseTo(0.8);
@@ -424,7 +427,7 @@ describe("schemas", () => {
 
   it("takes defaults for ae_patch_grain and needs plate_layer for match", () => {
     const a = AePatchGrainSchema.parse(base);
-    expect(a).toMatchObject({ method: "add", degrain: "none", rounds: 2, samples: 3, tolerance: 0.1, min_sigma: 0.6 });
+    expect(a).toMatchObject({ method: "add", degrain: "none", rounds: 2, samples: 3, tolerance: 0.05, min_sigma: 0.6 });
     expect(AePatchGrainSchema.safeParse({ ...base, method: "match" }).success).toBe(false);
     expect(AePatchGrainSchema.safeParse({ ...base, method: "match", plate_layer: { index: 2 } }).success).toBe(true);
     expect(AePatchGrainSchema.safeParse({ ...base, rounds: 4 }).success).toBe(false);

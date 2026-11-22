@@ -635,9 +635,19 @@ function alongCurve(x: number, xs: number[], ys: number[]): number {
   return ys[ys.length - 1];
 }
 
-/** Add Grain Intensity for a target noise sigma (gray levels) at a Size, through the measured curve. */
-export function grainIntensityFor(sigma: number, size = 1): number {
-  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity));
+/**
+ * Add Grain puts more grain in the shadows: at Size 0.25 and Intensity 0.3, gray 0.25 gave sigma
+ * 3.86, gray 0.5 gave 2.58 and gray 0.75 gave 1.32 (AE 26.2, qa/calibrate-compositing.mjs), a
+ * straight line in the gray level. The response to Intensity itself is a straight line (Size 0.25:
+ * 0.90, 1.73, 2.58, 3.85, 5.13, 6.85 at 0.1-0.8).
+ */
+export function grainToneFactor(gray: number): number {
+  return clamp(1 + 1.98 * (0.5 - clamp(gray, 0, 1)), 0.1, 2);
+}
+
+/** Add Grain Intensity for a target noise sigma (gray levels) at a Size and the area's mean gray (0..1), through the measured curve. */
+export function grainIntensityFor(sigma: number, size = 1, gray = 0.5): number {
+  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity)) * grainToneFactor(gray);
   return r4(clamp(sigma / per, 0.02, 10));
 }
 
@@ -1159,7 +1169,7 @@ export const AePatchGrainSchema = z
     viewing_mode_index: z.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in the grain effect's Viewing Mode (built-in guess: Add Grain 3, Match Grain 5), when it is wrong for this AE. Checked against the menu's range before it is set."),
     degrain_viewing_mode_index: z.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in Remove Grain's Viewing Mode (built-in guess 4), when degrain is 'remove_grain' and the guess is wrong for this AE."),
     rounds: z.number().int().min(0).max(3).default(2).describe("Tuning rounds after the first write (each: render, measure, scale Intensity by the ratio, its own undo step). Default 2, at most 3."),
-    tolerance: z.number().min(0.02).max(0.5).default(0.1).describe("Stop tuning when the patch's grain (its spatial sigma, or its temporal sigma when degrain is 'none' and the plate has temporal grain) is within this share of the plate's. Default 0.1."),
+    tolerance: z.number().min(0.02).max(0.5).default(0.05).describe("Stop tuning when the patch's grain (its spatial sigma, or its temporal sigma when degrain is 'none' and the plate has temporal grain) is within this share of the plate's. Default 0.05: the first Intensity now starts close (it allows for Size and for the area's gray), so a round or two get within it."),
     min_sigma: z.number().min(0.1).max(10).default(0.6).describe("A plate whose grain sigma is under this (gray levels of 255) counts as clean and gets no grain. Default 0.6."),
     replace_existing: z.boolean().default(false).describe(`Replace an earlier "<patch> GRAIN" layer and "Chroma degrain" effect made by this tool.`),
     dry_run: z.boolean().default(false).describe("Measure and report; add nothing. The temporary plate comp is still made and removed (needs `expect`)."),
@@ -2028,7 +2038,15 @@ async function grainHandler(args: AePatchGrainArgs, ctx: ToolContext): Promise<R
   const sizeFrom = args.grain_size !== undefined ? "given" : measuredSize !== null ? "measured" : "default";
   if (sizeFrom === "default") notes.push("The plate's grain texture could not be measured (no temporal grain in the ring), so Size is Add Grain's default 1; give grain_size if the grain looks too coarse or too fine.");
   // Match Grain samples the plate's own noise, so Intensity 1 already reproduces it; only Add Grain goes through the calibration curve.
-  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize));
+  // The area's mean gray: Add Grain is stronger in the shadows.
+  let areaGray = 0.5;
+  if (body.plateCrop) {
+    const d = body.plateCrop.data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    areaGray = d.length ? sum / (d.length / 4) / 255 : 0.5;
+  }
+  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize, areaGray));
   const preview = (compImg: RgbaImage | null): string | null => {
     if (!body.plateCrop || !compImg) return null;
     try {

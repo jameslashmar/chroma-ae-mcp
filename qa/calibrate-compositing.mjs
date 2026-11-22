@@ -537,7 +537,7 @@ async function stageGrain(ids, expect) {
   };
   const before = await measure();
   const t0 = Date.now();
-  const r = await call("ae_patch_grain", { comp_id: compId, layer: { name: "Patch" }, region, ref_time: 0, start: 0, end: END, samples: 3, rounds: 2, expect });
+  const r = await call("ae_patch_grain", { comp_id: compId, layer: { name: "Patch" }, region, ref_time: 0, start: 0, end: END, samples: 3, rounds: 2, ...(process.env.CAL_GRAIN_TOL ? { tolerance: Number(process.env.CAL_GRAIN_TOL) } : {}), expect });
   const out = { ok: r.ok !== false, ms: Date.now() - t0, tool: { sigma_before: r.sigma_before, start_intensity: r.start_intensity, final_intensity: r.final_intensity, size: r.size, size_from: r.size_from, grain_texture: r.grain_texture, converged: r.converged }, message: r.message };
   if (!out.ok) return { ...out, raw: brief(r) };
   const after = await measure();
@@ -549,23 +549,28 @@ async function stageGrain(ids, expect) {
 // What Add Grain's Size and Intensity give, on a flat 50% gray: temporal sigma and how much neighbouring
 // pixels' grain agrees (lag-1 correlation along x; 0 for per-pixel noise, near 1 for big soft grain).
 const GRAIN_SIZES = [0.25, 0.5, 0.75, 1, 1.5, 2];
-const GRAIN_INTENSITIES = [0.1, 0.3, 0.6];
+// Intensity steps at three Sizes (the response is not linear), and the effect of the gray level at Size 0.25.
+const GRAIN_INTENSITY_SIZES = [0.25, 0.5, 1];
+const GRAIN_INTENSITIES = [0.1, 0.2, 0.3, 0.45, 0.6, 0.8];
+const GRAIN_GRAYS = [0.25, 0.75];
 function grainCurveJsx() {
   const lines = [
     "function findParam(g, name) { for (var i = 1; i <= g.numProperties; i++) { var p = g.property(i); if (p.name === name) return p; if (p.numProperties > 0) { var r = findParam(p, name); if (r) return r; } } return null; }",
     "ids.grain_curve = [];",
-    "function grainComp(size, intensity) {",
-    '  var c = mk("Cal add grain " + size + " " + intensity); var l = c.layers.addSolid([0.5, 0.5, 0.5], "Gray", ' + W + ", " + H + ", 1);",
+    "function grainComp(size, intensity, gray) {",
+    '  if (gray === undefined) gray = 0.5;',
+    '  var c = mk("Cal add grain " + size + " " + intensity + " " + gray); var l = c.layers.addSolid([gray, gray, gray], "Gray", ' + W + ", " + H + ", 1);",
     '  var fx = l.property("ADBE Effect Parade").addProperty("VISINF Grain Implant");',
     '  var vm = findParam(fx, "Viewing Mode"); if (vm) vm.setValue(3);',
     '  var it = findParam(fx, "Intensity"); if (it) it.setValue(intensity);',
     '  var sz = findParam(fx, "Size"); if (sz) sz.setValue(size);',
     '  var sp = findParam(fx, "Animation Speed"); if (sp) sp.setValue(1);',
-    "  ids.grain_curve.push({ id: c.id, size: size, intensity: intensity });",
+    "  ids.grain_curve.push({ id: c.id, size: size, intensity: intensity, gray: gray });",
     "}",
   ];
   for (const sz of GRAIN_SIZES) lines.push(`grainComp(${sz}, 0.3);`);
-  for (const it of GRAIN_INTENSITIES) if (it !== 0.3) lines.push(`grainComp(1, ${it});`);
+  for (const sz of GRAIN_INTENSITY_SIZES) for (const it of GRAIN_INTENSITIES) if (it !== 0.3) lines.push(`grainComp(${sz}, ${it});`);
+  for (const g of GRAIN_GRAYS) lines.push(`grainComp(0.25, 0.3, ${g});`);
   return lines.join("\n");
 }
 
@@ -576,7 +581,7 @@ async function stageGrainCurve(ids) {
     const frames = [];
     for (let k = 0; k < 6; k++) frames.push(await frame(g.id, 0.4 + k / FPS));
     const m = temporalGrain(frames, pixels(frames[0], box));
-    rows.push({ size: g.size, intensity: g.intensity, sigma: m.sigma, lag1_corr: m.lag1_corr });
+    rows.push({ size: g.size, intensity: g.intensity, gray: g.gray, sigma: m.sigma, lag1_corr: m.lag1_corr });
   }
   return rows;
 }
@@ -1306,7 +1311,7 @@ async function main() {
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);
-    for (const g of report.grain_curve) console.log(`add grain     size ${String(g.size).padEnd(5)} intensity ${String(g.intensity).padEnd(4)} sigma ${g.sigma}  lag1 ${g.lag1_corr}`);
+    for (const g of report.grain_curve) console.log(`add grain     size ${String(g.size).padEnd(5)} intensity ${String(g.intensity).padEnd(4)} gray ${String(g.gray).padEnd(4)} sigma ${g.sigma}  lag1 ${g.lag1_corr}`);
   }
   if (want("inpaint")) {
     report.inpaint = await stageInpaint(ids, expect);

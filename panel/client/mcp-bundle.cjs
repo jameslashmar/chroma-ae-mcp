@@ -56600,8 +56600,11 @@ function alongCurve(x, xs, ys) {
   }
   return ys[ys.length - 1];
 }
-function grainIntensityFor(sigma, size = 1) {
-  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity));
+function grainToneFactor(gray) {
+  return clamp3(1 + 1.98 * (0.5 - clamp3(gray, 0, 1)), 0.1, 2);
+}
+function grainIntensityFor(sigma, size = 1, gray = 0.5) {
+  const per = alongCurve(size, ADD_GRAIN_CURVE.map((c) => c.size), ADD_GRAIN_CURVE.map((c) => c.sigmaPerIntensity)) * grainToneFactor(gray);
   return r48(clamp3(sigma / per, 0.02, 10));
 }
 function grainSizeFor(lag1) {
@@ -57521,7 +57524,14 @@ async function grainHandler(args, ctx) {
   const grainSize = args.grain_size ?? measuredSize ?? 1;
   const sizeFrom = args.grain_size !== void 0 ? "given" : measuredSize !== null ? "measured" : "default";
   if (sizeFrom === "default") notes.push("The plate's grain texture could not be measured (no temporal grain in the ring), so Size is Add Grain's default 1; give grain_size if the grain looks too coarse or too fine.");
-  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize));
+  let areaGray = 0.5;
+  if (body.plateCrop) {
+    const d = body.plateCrop.data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    areaGray = d.length ? sum / (d.length / 4) / 255 : 0.5;
+  }
+  const startIntensity = args.intensity ?? (args.method === "match" ? 1 : grainIntensityFor(tuneTarget, grainSize, areaGray));
   const preview = (compImg) => {
     if (!body.plateCrop || !compImg) return null;
     try {
@@ -58124,7 +58134,7 @@ var init_patchfit = __esm({
       viewing_mode_index: external_exports.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in the grain effect's Viewing Mode (built-in guess: Add Grain 3, Match Grain 5), when it is wrong for this AE. Checked against the menu's range before it is set."),
       degrain_viewing_mode_index: external_exports.number().int().min(1).max(10).optional().describe("The menu item of 'Final Output' in Remove Grain's Viewing Mode (built-in guess 4), when degrain is 'remove_grain' and the guess is wrong for this AE."),
       rounds: external_exports.number().int().min(0).max(3).default(2).describe("Tuning rounds after the first write (each: render, measure, scale Intensity by the ratio, its own undo step). Default 2, at most 3."),
-      tolerance: external_exports.number().min(0.02).max(0.5).default(0.1).describe("Stop tuning when the patch's grain (its spatial sigma, or its temporal sigma when degrain is 'none' and the plate has temporal grain) is within this share of the plate's. Default 0.1."),
+      tolerance: external_exports.number().min(0.02).max(0.5).default(0.05).describe("Stop tuning when the patch's grain (its spatial sigma, or its temporal sigma when degrain is 'none' and the plate has temporal grain) is within this share of the plate's. Default 0.05: the first Intensity now starts close (it allows for Size and for the area's gray), so a round or two get within it."),
       min_sigma: external_exports.number().min(0.1).max(10).default(0.6).describe("A plate whose grain sigma is under this (gray levels of 255) counts as clean and gets no grain. Default 0.6."),
       replace_existing: external_exports.boolean().default(false).describe(`Replace an earlier "<patch> GRAIN" layer and "Chroma degrain" effect made by this tool.`),
       dry_run: external_exports.boolean().default(false).describe("Measure and report; add nothing. The temporary plate comp is still made and removed (needs `expect`)."),
