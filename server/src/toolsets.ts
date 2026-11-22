@@ -1,4 +1,5 @@
 import { annotationsFor, type ToolAnnotations } from "./tool-annotations.js";
+import { ENVELOPE_OUTPUT_SCHEMA, structuredResultsOn } from "./tool-call.js";
 import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolDefinition } from "./tools/common.js";
@@ -370,10 +371,12 @@ export interface ListedTool {
   inputSchema: unknown;
   /** MCP tool annotations (tool-annotations.ts): read-only, destructive, idempotent, open world. */
   annotations?: ToolAnnotations;
+  /** The result envelope (tool-call.ts), only with CHROMA_AE_MCP_STRUCTURED=1 and only in the full list. */
+  outputSchema?: unknown;
 }
 
 export function fullListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name), ...(structuredResultsOn() ? { outputSchema: ENVELOPE_OUTPUT_SCHEMA } : {}) };
 }
 
 export function trimmedListEntry(t: ToolDefinition<any>): ListedTool {

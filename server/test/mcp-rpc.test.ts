@@ -242,6 +242,7 @@ describe("mcp-rpc and panel-entry", () => {
     };
     expect(callResult.isError).toBeUndefined();
     expect(JSON.parse(callResult.content[0].text)).toEqual({
+      ok: true,
       id: 10,
       name: "Hero Comp",
       width: 1920,

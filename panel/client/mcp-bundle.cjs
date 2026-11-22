@@ -69861,9 +69861,10 @@ function convertFieldSchema(schema) {
 init_receipts2();
 init_registry();
 var writeSet = null;
-var mappedCount = -1;
+var mappedKey = "";
 function writeToolNames() {
-  if (writeSet && mappedCount === ALL_TOOLS.length) return writeSet;
+  const key = `${ALL_TOOLS.length}:${ALL_TOOLS[ALL_TOOLS.length - 1]?.name ?? ""}`;
+  if (writeSet && mappedKey === key) return writeSet;
   const auto = new Set(AUTO_CHECKPOINT_TOOLS);
   const out = /* @__PURE__ */ new Set();
   for (const t of ALL_TOOLS) {
@@ -69871,7 +69872,7 @@ function writeToolNames() {
     if (auto.has(t.name) || Object.prototype.hasOwnProperty.call(props, "expect")) out.add(t.name);
   }
   writeSet = out;
-  mappedCount = ALL_TOOLS.length;
+  mappedKey = key;
   return out;
 }
 function isWriteTool(name) {
@@ -70008,6 +70009,365 @@ function annotationsFor(name) {
   }
   if (!OPEN_WORLD.has(name)) out.openWorldHint = false;
   return out;
+}
+
+// src/tool-call.ts
+init_common();
+init_idempotency();
+init_registry();
+
+// src/usage-log.ts
+var fs61 = __toESM(require("node:fs"), 1);
+var fsp = __toESM(require("node:fs/promises"), 1);
+var path61 = __toESM(require("node:path"), 1);
+init_common();
+var USAGE_DIR_NAME = "usage";
+var RETENTION_MONTHS = 3;
+var MAX_ERROR = 160;
+var MAX_LABEL = 120;
+var MAX_QUERY = 80;
+var MAX_TOOL = 80;
+var MAX_QUEUED = 1e3;
+function usageLogEnabled() {
+  const v = process.env.CHROMA_AE_MCP_USAGE_LOG;
+  if (v === void 0) return true;
+  return v.trim().toLowerCase() !== "off";
+}
+function clip5(text, max) {
+  return String(text ?? "").replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ").trim().slice(0, max);
+}
+function pad(n) {
+  return n < 10 ? "0" + n : String(n);
+}
+function monthOf(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+function dayOf(d) {
+  return `${monthOf(d)}-${pad(d.getDate())}`;
+}
+function errorKindOf(err) {
+  if (err && typeof err === "object") {
+    const e = err;
+    if (typeof e.kind === "string" && e.kind) return clip5(e.kind, 40);
+    if (typeof e.code === "string" && e.code) return clip5(e.code, 40);
+  }
+  return "error";
+}
+function errorTextOf(err) {
+  return clip5(err instanceof Error ? err.message : String(err), MAX_ERROR);
+}
+function sanitizeError(text) {
+  let t = String(text ?? "");
+  t = t.replace(/(^|[^\w])"[^"\n]*"/g, '$1"\u2026"');
+  t = t.replace(/(^|[^\w])“[^”\n]*”/g, '$1"\u2026"');
+  t = t.replace(/(^|[^\w])'[^'\n]*'(?!\w)/g, '$1"\u2026"');
+  t = t.replace(/(^|[^\w])‘[^’\n]*’/g, '$1"\u2026"');
+  t = t.replace(/[A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n]+[\\/])*(?:[^\\/:*?"<>|\r\n,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\\/:*?"<>|\s,;]*)/g, "<path>");
+  t = t.replace(/\\\\[^\s\\/]+(?:[\\/][^\\/:*?"<>|\r\n]+[\\/])*(?:[\\/]?(?:[^\\/:*?"<>|\r\n,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\\/:*?"<>|\s,;]*))/g, "<path>");
+  t = t.replace(/(^|[\s(\[=,;:])~?\/(?:[^\/\r\n"'`<>|,;]+\/)*(?:[^\/\r\n"'`<>|,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\s\/"'`<>|,;)\]]*)/g, "$1<path>");
+  t = t.replace(/\d{5,}/g, "#");
+  return clip5(t, MAX_ERROR);
+}
+function resultCharsOf(result) {
+  try {
+    const content = result?.content;
+    if (!Array.isArray(content)) return 0;
+    let n = 0;
+    for (const part2 of content) {
+      const text = part2?.text;
+      if (typeof text === "string") n += text.length;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+function runJsxFields(args) {
+  const out = {};
+  if (!args || typeof args !== "object") return out;
+  const a = args;
+  if (typeof a.label === "string") out.label = clip5(a.label, MAX_LABEL);
+  if (typeof a.mutates === "boolean") out.mutates = a.mutates;
+  if (typeof a.code === "string") out.codeChars = a.code.length;
+  return out;
+}
+function resultFailureOf(output) {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return void 0;
+  const o = output;
+  if (o.ok !== false) return void 0;
+  let kind;
+  const first = Array.isArray(o.refused) ? o.refused[0] : void 0;
+  const refusedCode = first && typeof first === "object" ? first.code : void 0;
+  for (const c of [o.code, o.kind, refusedCode]) {
+    if (typeof c === "string" && c) {
+      kind = clip5(c, 40);
+      break;
+    }
+  }
+  let error;
+  if (typeof o.error === "string") error = o.error;
+  else if (o.error && typeof o.error === "object" && typeof o.error.message === "string") {
+    error = o.error.message;
+  }
+  return { kind, error };
+}
+var prunedDirs = /* @__PURE__ */ new Set();
+var madeDirs = /* @__PURE__ */ new Set();
+var queue = [];
+var draining = null;
+var droppedLines = 0;
+function pruneOld(dir, now) {
+  if (prunedDirs.has(dir)) return;
+  prunedDirs.add(dir);
+  try {
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1);
+    const keepFrom = monthOf(cutoff);
+    for (const name of fs61.readdirSync(dir)) {
+      const m = /^usage-(\d{4}-\d{2})\.jsonl$/.exec(name);
+      if (m && m[1] < keepFrom) {
+        try {
+          fs61.unlinkSync(path61.join(dir, name));
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
+}
+function startDrain() {
+  if (draining) return;
+  draining = (async () => {
+    try {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        try {
+          if (!madeDirs.has(item.dir)) {
+            await fsp.mkdir(item.dir, { recursive: true });
+            madeDirs.add(item.dir);
+            pruneOld(item.dir, item.now);
+          }
+          await fsp.appendFile(path61.join(item.dir, item.file), item.text);
+        } catch {
+          madeDirs.delete(item.dir);
+        }
+      }
+    } finally {
+      draining = null;
+    }
+  })();
+}
+function recordUsage(ctx, entry, now = /* @__PURE__ */ new Date()) {
+  try {
+    if (!usageLogEnabled()) return;
+    const line = {
+      ts: now.toISOString(),
+      day: dayOf(now),
+      tool: clip5(entry.tool, MAX_TOOL),
+      ms: Math.max(0, Math.round(Number.isFinite(entry.ms) ? entry.ms : 0)),
+      ok: entry.ok
+    };
+    if (!entry.ok) {
+      line.error_kind = clip5(entry.errorKind || "error", 40);
+      line.error = sanitizeError(entry.error ?? "");
+    }
+    if (entry.resultOk === false) {
+      line.result_ok = false;
+      if (entry.resultKind) line.result_kind = clip5(entry.resultKind, 40);
+      if (entry.resultError) line.result_error = sanitizeError(entry.resultError);
+    }
+    if (entry.waitedMs !== void 0 && Number.isFinite(entry.waitedMs) && entry.waitedMs > 0) line.waited_ms = Math.round(entry.waitedMs);
+    if (entry.resultChars !== void 0 && Number.isFinite(entry.resultChars)) line.result_chars = Math.max(0, Math.round(entry.resultChars));
+    if (entry.toolset) line.toolset = clip5(entry.toolset, 10);
+    if (entry.client) line.client = clip5(entry.client, 40);
+    if (entry.via) line.via = entry.via;
+    if (entry.label !== void 0) line.label = clip5(entry.label, MAX_LABEL);
+    if (entry.mutates !== void 0) line.mutates = entry.mutates;
+    if (entry.codeChars !== void 0) line.code_chars = entry.codeChars;
+    if (entry.query !== void 0) line.query = clip5(entry.query, MAX_QUERY);
+    if (entry.group !== void 0) line.group = clip5(entry.group, 40);
+    if (entry.hits !== void 0) line.hits = entry.hits;
+    if (entry.top !== void 0) line.top = clip5(entry.top, MAX_TOOL);
+    if (entry.topScore !== void 0 && Number.isFinite(entry.topScore)) {
+      line.top_score = Math.round(entry.topScore * 100) / 100;
+    }
+    if (queue.length >= MAX_QUEUED) {
+      droppedLines++;
+      return;
+    }
+    queue.push({
+      dir: path61.join(dataDirOf(ctx), USAGE_DIR_NAME),
+      file: `usage-${monthOf(now)}.jsonl`,
+      text: JSON.stringify(line) + "\n",
+      now
+    });
+    startDrain();
+  } catch {
+  }
+}
+
+// src/tool-call.ts
+function oneLine2(text) {
+  return text.replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 80);
+}
+var toolMap = /* @__PURE__ */ new Map();
+var mappedKey2 = "";
+function registryKey() {
+  return `${ALL_TOOLS.length}:${ALL_TOOLS[ALL_TOOLS.length - 1]?.name ?? ""}`;
+}
+function findTool(name) {
+  if (mappedKey2 !== registryKey()) {
+    toolMap = new Map(ALL_TOOLS.map((t) => [t.name, t]));
+    mappedKey2 = registryKey();
+  }
+  return toolMap.get(name);
+}
+function waitedMsOf(output) {
+  if (!output || typeof output !== "object") return void 0;
+  const w = output.waited_ms;
+  return typeof w === "number" && Number.isFinite(w) && w > 0 ? w : void 0;
+}
+async function callTool(toolName, rawArgs, ctx, opts = {}) {
+  if (!isWriteTool(toolName)) return callToolOnce(toolName, rawArgs, ctx, opts);
+  const started = Date.now();
+  const { idempotency_key: key, ...args } = rawArgs ?? {};
+  let response;
+  let replayed = false;
+  if (key === void 0) {
+    response = await callToolOnce(toolName, args, ctx, opts);
+  } else {
+    const bad4 = badIdempotencyKey(key);
+    if (bad4) {
+      response = formatToolError(new Error(`Invalid arguments for ${toolName}: ${bad4}`));
+    } else {
+      const r = await withIdempotency(toolName, key, args, () => callToolOnce(toolName, args, ctx, opts), Date.now, opts.client ?? "");
+      response = r.response;
+      replayed = r.replayed;
+    }
+  }
+  response = withSuccessOutcome(response);
+  recordRecentOp({
+    at: new Date(started).toISOString(),
+    tool: toolName,
+    ms: Date.now() - started,
+    ...summariseWrite(response),
+    ...typeof key === "string" ? { idempotency_key: key.slice(0, 128) } : {},
+    ...replayed ? { idempotent_replay: true } : {},
+    ...opts.via && opts.via !== "direct" ? { via: opts.via } : {}
+  });
+  return response;
+}
+function withSuccessOutcome(response) {
+  if (response.isError === true) return response;
+  const text = response.content?.[0]?.text;
+  if (typeof text !== "string" || !text.startsWith("{")) return response;
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return response;
+  }
+  if (body.outcome !== void 0 || body.applied !== true) return response;
+  const outcome = body.no_op === true ? "no_op" : "applied";
+  return { ...response, content: [{ type: "text", text: JSON.stringify({ ...body, outcome }) }, ...response.content.slice(1)] };
+}
+function structuredResultsOn() {
+  return process.env.CHROMA_AE_MCP_STRUCTURED === "1";
+}
+var ENVELOPE_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    ok: { type: "boolean", description: "The call did what was asked." },
+    outcome: { type: "string", enum: ["applied", "no_op", "partial", "not_applied", "unknown"], description: "Writes: what happened to the project." },
+    code: { type: "string", description: "Why it failed, machine-readable (invalid_args, guard, not_found, ...)." },
+    message: { type: "string" },
+    next_steps: { type: "array", items: { type: "string" } }
+  },
+  required: ["ok"],
+  additionalProperties: true
+};
+var NOT_APPLIED_CODES = /* @__PURE__ */ new Set(["invalid_args", "unknown_tool", "quarantined", "queued", "guard"]);
+function envelope(response, toolName) {
+  const text = response.content?.[0]?.text;
+  let body = null;
+  if (typeof text === "string" && text.startsWith("{")) {
+    try {
+      const v = JSON.parse(text);
+      if (v && typeof v === "object" && !Array.isArray(v)) body = v;
+    } catch {
+      body = null;
+    }
+  }
+  if (!body) {
+    if (!structuredResultsOn() || typeof text !== "string") return response;
+    let value = text;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      value = text;
+    }
+    return { ...response, structuredContent: { ok: response.isError !== true, result: value } };
+  }
+  const isError = response.isError === true;
+  const message = typeof body.message === "string" ? body.message : "";
+  let ok;
+  if (isError) ok = false;
+  else if (typeof body.ok === "boolean") ok = body.ok;
+  else ok = !(typeof body.error === "string" && body.error.length > 0);
+  const extra = {};
+  if (!ok && typeof body.code !== "string") {
+    if (/^Invalid arguments for /.test(message)) extra.code = "invalid_args";
+    else if (/^Unknown tool: /.test(message)) extra.code = "unknown_tool";
+    else if (typeof body.error === "string" && body.error) extra.code = body.error;
+    else if (typeof body.kind === "string" && body.kind) extra.code = body.kind;
+    else extra.code = "error";
+  }
+  const code = extra.code ?? body.code;
+  if (!ok && body.outcome === void 0 && isWriteTool(toolName)) {
+    if (code && NOT_APPLIED_CODES.has(code)) extra.outcome = "not_applied";
+    else if (code === "timeout" || body.kind === "timeout") extra.outcome = "unknown";
+  }
+  const out = { ok, ...extra, ...body, ...body.ok === void 0 ? {} : { ok } };
+  const next = { ...response, content: [{ type: "text", text: JSON.stringify(out) }, ...response.content.slice(1)] };
+  if (structuredResultsOn()) next.structuredContent = out;
+  return next;
+}
+async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
+  const via = opts.via ?? "direct";
+  const usage = (e, extra2, response) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra2, ...e, resultChars: resultCharsOf(response) });
+  const tool = findTool(toolName);
+  if (!tool) {
+    const response = envelope(formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`)), toolName);
+    usage({ ms: 0, ok: false, errorKind: "unknown_tool", error: "Unknown tool" }, void 0, response);
+    return response;
+  }
+  const parsed = tool.schema.safeParse(rawArgs ?? {});
+  const extra = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : void 0;
+  if (!parsed.success) {
+    const why = `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`;
+    const response = envelope(formatToolError(new Error(why)), toolName);
+    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra, response);
+    return response;
+  }
+  const started = Date.now();
+  try {
+    const output = await tool.handler(parsed.data, ctx);
+    ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
+    const failure2 = resultFailureOf(output);
+    const waitedMs = waitedMsOf(output);
+    const response = envelope(formatToolResponse(output), toolName);
+    usage(
+      failure2 ? { ms: Date.now() - started, ok: true, resultOk: false, resultKind: failure2.kind, resultError: failure2.error, waitedMs } : { ms: Date.now() - started, ok: true, waitedMs },
+      extra,
+      response
+    );
+    return response;
+  } catch (err) {
+    const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
+    ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
+    const response = envelope(formatToolError(err), toolName);
+    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra, response);
+    return response;
+  }
 }
 
 // src/toolsets.ts
@@ -70435,7 +70795,7 @@ function trimSchema(node, path63 = "") {
   return out;
 }
 function fullListEntry(t) {
-  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)), annotations: annotationsFor(t.name), ...structuredResultsOn() ? { outputSchema: ENVELOPE_OUTPUT_SCHEMA } : {} };
 }
 function trimmedListEntry(t) {
   return { name: t.name, description: trimToolDescription(t), inputSchema: withIdempotencyKey(t.name, trimSchema(zodToJsonSchema(t.schema), t.name), true), annotations: annotationsFor(t.name) };
@@ -70604,301 +70964,6 @@ function closestToolNames(name, count = 5) {
   });
   scored.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   return scored.slice(0, count).map((s) => s.name);
-}
-
-// src/tool-call.ts
-init_common();
-init_idempotency();
-init_registry();
-
-// src/usage-log.ts
-var fs61 = __toESM(require("node:fs"), 1);
-var fsp = __toESM(require("node:fs/promises"), 1);
-var path61 = __toESM(require("node:path"), 1);
-init_common();
-var USAGE_DIR_NAME = "usage";
-var RETENTION_MONTHS = 3;
-var MAX_ERROR = 160;
-var MAX_LABEL = 120;
-var MAX_QUERY = 80;
-var MAX_TOOL = 80;
-var MAX_QUEUED = 1e3;
-function usageLogEnabled() {
-  const v = process.env.CHROMA_AE_MCP_USAGE_LOG;
-  if (v === void 0) return true;
-  return v.trim().toLowerCase() !== "off";
-}
-function clip5(text, max) {
-  return String(text ?? "").replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ").trim().slice(0, max);
-}
-function pad(n) {
-  return n < 10 ? "0" + n : String(n);
-}
-function monthOf(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-}
-function dayOf(d) {
-  return `${monthOf(d)}-${pad(d.getDate())}`;
-}
-function errorKindOf(err) {
-  if (err && typeof err === "object") {
-    const e = err;
-    if (typeof e.kind === "string" && e.kind) return clip5(e.kind, 40);
-    if (typeof e.code === "string" && e.code) return clip5(e.code, 40);
-  }
-  return "error";
-}
-function errorTextOf(err) {
-  return clip5(err instanceof Error ? err.message : String(err), MAX_ERROR);
-}
-function sanitizeError(text) {
-  let t = String(text ?? "");
-  t = t.replace(/(^|[^\w])"[^"\n]*"/g, '$1"\u2026"');
-  t = t.replace(/(^|[^\w])“[^”\n]*”/g, '$1"\u2026"');
-  t = t.replace(/(^|[^\w])'[^'\n]*'(?!\w)/g, '$1"\u2026"');
-  t = t.replace(/(^|[^\w])‘[^’\n]*’/g, '$1"\u2026"');
-  t = t.replace(/[A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n]+[\\/])*(?:[^\\/:*?"<>|\r\n,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\\/:*?"<>|\s,;]*)/g, "<path>");
-  t = t.replace(/\\\\[^\s\\/]+(?:[\\/][^\\/:*?"<>|\r\n]+[\\/])*(?:[\\/]?(?:[^\\/:*?"<>|\r\n,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\\/:*?"<>|\s,;]*))/g, "<path>");
-  t = t.replace(/(^|[\s(\[=,;:])~?\/(?:[^\/\r\n"'`<>|,;]+\/)*(?:[^\/\r\n"'`<>|,;]{0,60}?\.[A-Za-z0-9]{1,5}\b|[^\s\/"'`<>|,;)\]]*)/g, "$1<path>");
-  t = t.replace(/\d{5,}/g, "#");
-  return clip5(t, MAX_ERROR);
-}
-function resultCharsOf(result) {
-  try {
-    const content = result?.content;
-    if (!Array.isArray(content)) return 0;
-    let n = 0;
-    for (const part2 of content) {
-      const text = part2?.text;
-      if (typeof text === "string") n += text.length;
-    }
-    return n;
-  } catch {
-    return 0;
-  }
-}
-function runJsxFields(args) {
-  const out = {};
-  if (!args || typeof args !== "object") return out;
-  const a = args;
-  if (typeof a.label === "string") out.label = clip5(a.label, MAX_LABEL);
-  if (typeof a.mutates === "boolean") out.mutates = a.mutates;
-  if (typeof a.code === "string") out.codeChars = a.code.length;
-  return out;
-}
-function resultFailureOf(output) {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return void 0;
-  const o = output;
-  if (o.ok !== false) return void 0;
-  let kind;
-  const first = Array.isArray(o.refused) ? o.refused[0] : void 0;
-  const refusedCode = first && typeof first === "object" ? first.code : void 0;
-  for (const c of [o.code, o.kind, refusedCode]) {
-    if (typeof c === "string" && c) {
-      kind = clip5(c, 40);
-      break;
-    }
-  }
-  let error;
-  if (typeof o.error === "string") error = o.error;
-  else if (o.error && typeof o.error === "object" && typeof o.error.message === "string") {
-    error = o.error.message;
-  }
-  return { kind, error };
-}
-var prunedDirs = /* @__PURE__ */ new Set();
-var madeDirs = /* @__PURE__ */ new Set();
-var queue = [];
-var draining = null;
-var droppedLines = 0;
-function pruneOld(dir, now) {
-  if (prunedDirs.has(dir)) return;
-  prunedDirs.add(dir);
-  try {
-    const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1);
-    const keepFrom = monthOf(cutoff);
-    for (const name of fs61.readdirSync(dir)) {
-      const m = /^usage-(\d{4}-\d{2})\.jsonl$/.exec(name);
-      if (m && m[1] < keepFrom) {
-        try {
-          fs61.unlinkSync(path61.join(dir, name));
-        } catch {
-        }
-      }
-    }
-  } catch {
-  }
-}
-function startDrain() {
-  if (draining) return;
-  draining = (async () => {
-    try {
-      while (queue.length > 0) {
-        const item = queue.shift();
-        try {
-          if (!madeDirs.has(item.dir)) {
-            await fsp.mkdir(item.dir, { recursive: true });
-            madeDirs.add(item.dir);
-            pruneOld(item.dir, item.now);
-          }
-          await fsp.appendFile(path61.join(item.dir, item.file), item.text);
-        } catch {
-          madeDirs.delete(item.dir);
-        }
-      }
-    } finally {
-      draining = null;
-    }
-  })();
-}
-function recordUsage(ctx, entry, now = /* @__PURE__ */ new Date()) {
-  try {
-    if (!usageLogEnabled()) return;
-    const line = {
-      ts: now.toISOString(),
-      day: dayOf(now),
-      tool: clip5(entry.tool, MAX_TOOL),
-      ms: Math.max(0, Math.round(Number.isFinite(entry.ms) ? entry.ms : 0)),
-      ok: entry.ok
-    };
-    if (!entry.ok) {
-      line.error_kind = clip5(entry.errorKind || "error", 40);
-      line.error = sanitizeError(entry.error ?? "");
-    }
-    if (entry.resultOk === false) {
-      line.result_ok = false;
-      if (entry.resultKind) line.result_kind = clip5(entry.resultKind, 40);
-      if (entry.resultError) line.result_error = sanitizeError(entry.resultError);
-    }
-    if (entry.waitedMs !== void 0 && Number.isFinite(entry.waitedMs) && entry.waitedMs > 0) line.waited_ms = Math.round(entry.waitedMs);
-    if (entry.resultChars !== void 0 && Number.isFinite(entry.resultChars)) line.result_chars = Math.max(0, Math.round(entry.resultChars));
-    if (entry.toolset) line.toolset = clip5(entry.toolset, 10);
-    if (entry.client) line.client = clip5(entry.client, 40);
-    if (entry.via) line.via = entry.via;
-    if (entry.label !== void 0) line.label = clip5(entry.label, MAX_LABEL);
-    if (entry.mutates !== void 0) line.mutates = entry.mutates;
-    if (entry.codeChars !== void 0) line.code_chars = entry.codeChars;
-    if (entry.query !== void 0) line.query = clip5(entry.query, MAX_QUERY);
-    if (entry.group !== void 0) line.group = clip5(entry.group, 40);
-    if (entry.hits !== void 0) line.hits = entry.hits;
-    if (entry.top !== void 0) line.top = clip5(entry.top, MAX_TOOL);
-    if (entry.topScore !== void 0 && Number.isFinite(entry.topScore)) {
-      line.top_score = Math.round(entry.topScore * 100) / 100;
-    }
-    if (queue.length >= MAX_QUEUED) {
-      droppedLines++;
-      return;
-    }
-    queue.push({
-      dir: path61.join(dataDirOf(ctx), USAGE_DIR_NAME),
-      file: `usage-${monthOf(now)}.jsonl`,
-      text: JSON.stringify(line) + "\n",
-      now
-    });
-    startDrain();
-  } catch {
-  }
-}
-
-// src/tool-call.ts
-function oneLine2(text) {
-  return text.replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 80);
-}
-var toolMap = /* @__PURE__ */ new Map();
-var mappedCount2 = -1;
-function findTool(name) {
-  if (mappedCount2 !== ALL_TOOLS.length) {
-    toolMap = new Map(ALL_TOOLS.map((t) => [t.name, t]));
-    mappedCount2 = ALL_TOOLS.length;
-  }
-  return toolMap.get(name);
-}
-function waitedMsOf(output) {
-  if (!output || typeof output !== "object") return void 0;
-  const w = output.waited_ms;
-  return typeof w === "number" && Number.isFinite(w) && w > 0 ? w : void 0;
-}
-async function callTool(toolName, rawArgs, ctx, opts = {}) {
-  if (!isWriteTool(toolName)) return callToolOnce(toolName, rawArgs, ctx, opts);
-  const started = Date.now();
-  const { idempotency_key: key, ...args } = rawArgs ?? {};
-  let response;
-  let replayed = false;
-  if (key === void 0) {
-    response = await callToolOnce(toolName, args, ctx, opts);
-  } else {
-    const bad4 = badIdempotencyKey(key);
-    if (bad4) {
-      response = formatToolError(new Error(`Invalid arguments for ${toolName}: ${bad4}`));
-    } else {
-      const r = await withIdempotency(toolName, key, args, () => callToolOnce(toolName, args, ctx, opts), Date.now, opts.client ?? "");
-      response = r.response;
-      replayed = r.replayed;
-    }
-  }
-  response = withSuccessOutcome(response);
-  recordRecentOp({
-    at: new Date(started).toISOString(),
-    tool: toolName,
-    ms: Date.now() - started,
-    ...summariseWrite(response),
-    ...typeof key === "string" ? { idempotency_key: key.slice(0, 128) } : {},
-    ...replayed ? { idempotent_replay: true } : {},
-    ...opts.via && opts.via !== "direct" ? { via: opts.via } : {}
-  });
-  return response;
-}
-function withSuccessOutcome(response) {
-  if (response.isError === true) return response;
-  const text = response.content?.[0]?.text;
-  if (typeof text !== "string" || !text.startsWith("{")) return response;
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return response;
-  }
-  if (body.outcome !== void 0 || body.applied !== true) return response;
-  const outcome = body.no_op === true ? "no_op" : "applied";
-  return { ...response, content: [{ type: "text", text: JSON.stringify({ ...body, outcome }) }, ...response.content.slice(1)] };
-}
-async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
-  const via = opts.via ?? "direct";
-  const usage = (e, extra2, response) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra2, ...e, resultChars: resultCharsOf(response) });
-  const tool = findTool(toolName);
-  if (!tool) {
-    const response = formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`));
-    usage({ ms: 0, ok: false, errorKind: "unknown_tool", error: "Unknown tool" }, void 0, response);
-    return response;
-  }
-  const parsed = tool.schema.safeParse(rawArgs ?? {});
-  const extra = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : void 0;
-  if (!parsed.success) {
-    const why = `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`;
-    const response = formatToolError(new Error(why));
-    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra, response);
-    return response;
-  }
-  const started = Date.now();
-  try {
-    const output = await tool.handler(parsed.data, ctx);
-    ctx.log?.("ok", `tool ${toolName} ok (${Date.now() - started}ms)`);
-    const failure2 = resultFailureOf(output);
-    const waitedMs = waitedMsOf(output);
-    const response = formatToolResponse(output);
-    usage(
-      failure2 ? { ms: Date.now() - started, ok: true, resultOk: false, resultKind: failure2.kind, resultError: failure2.error, waitedMs } : { ms: Date.now() - started, ok: true, waitedMs },
-      extra,
-      response
-    );
-    return response;
-  } catch (err) {
-    const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
-    ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
-    const response = formatToolError(err);
-    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra, response);
-    return response;
-  }
 }
 
 // src/meta-tools.ts

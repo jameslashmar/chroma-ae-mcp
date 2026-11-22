@@ -12,11 +12,12 @@ import { AUTO_CHECKPOINT_TOOLS } from "./tools/ext/receipts.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 
 let writeSet: Set<string> | null = null;
-let mappedCount = -1;
+let mappedKey = "";
 
 export function writeToolNames(): Set<string> {
-  // Rebuilt when the registry changes length (tests add a fake tool to ALL_TOOLS).
-  if (writeSet && mappedCount === ALL_TOOLS.length) return writeSet;
+  // Rebuilt when the registry changes (tests add and remove fake tools): its length and last name.
+  const key = `${ALL_TOOLS.length}:${ALL_TOOLS[ALL_TOOLS.length - 1]?.name ?? ""}`;
+  if (writeSet && mappedKey === key) return writeSet;
   const auto = new Set<string>(AUTO_CHECKPOINT_TOOLS);
   const out = new Set<string>();
   for (const t of ALL_TOOLS) {
@@ -24,7 +25,7 @@ export function writeToolNames(): Set<string> {
     if (auto.has(t.name) || Object.prototype.hasOwnProperty.call(props, "expect")) out.add(t.name);
   }
   writeSet = out;
-  mappedCount = ALL_TOOLS.length;
+  mappedKey = key;
   return out;
 }
 

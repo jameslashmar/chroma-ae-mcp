@@ -118,3 +118,18 @@ CEP extensions open directly. AE's own Window-menu panels open through `app.exec
 - Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/` (and `renders/batches/<id>/` for `ae_render_batch`), `session-state.json` and `inflight-ops.json` (`ae_session_changes`), `learn-taste.json` (`ae_learn_taste`), `variants/` and `variant-picks.jsonl` (`ae_variants`), `tracks/` (the planar track store: `<track_id>.json`, newest 200 kept; re-basing never overwrites a stored track, a re-based copy gets its own id; `continue_track_id` adds frames to its own file), `patchfit/` (the state of a chunked `ae_patch_color_match`, newest 50 kept).
 - Next to a project: `<name> chroma plates/` (the stills `ae_cleanplate_setup` and `ae_inpaint_plate` write, never over an existing file; needs a saved project), `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `<name>.jobs.json` (`ae_multi_comp_apply`'s jobs), `<name>.deliver.json` (`ae_deliver_step`'s runs), `_collect/` (`ae_collect_files`: the .aep copy, `_Footage/`, `manifest.json` and the report), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
 - Audio renders for `ae_audio_analyze` go to `renders/audio/` in the data dir.
+
+## Result envelope
+
+Every tool result is a JSON object (in the text content) that carries these fields on top of the tool's own (server/src/tool-call.ts `envelope`):
+
+| Field | When | Meaning |
+|---|---|---|
+| `ok` | always | The call did what was asked. `false` for an MCP error, a typed refusal (`ok: false` or an `error` field) and invalid arguments. |
+| `code` | when `ok` is false | Machine-readable reason: the host's code (`not_found`, `bad_args`, ...), `invalid_args`, `unknown_tool`, `guard`, `queued`, `quarantined`, `timeout`, or the tool's `error`. |
+| `outcome` | writes | `applied`, `no_op`, `partial`, `not_applied` (nothing in the project changed) or `unknown` (may be part-way in: read the state before anything else). |
+| `message`, `next_steps` | failures | What happened and what to do next. |
+
+Write tools also take an optional `idempotency_key` (a resend with the same key and arguments returns the first answer) and are listed by `ae_recent_ops`. Every tool carries MCP annotations (read-only, destructive, idempotent, open world; server/src/tool-annotations.ts).
+
+With `CHROMA_AE_MCP_STRUCTURED=1` the same object is also sent as `structuredContent`, and the full tool list declares this envelope as each tool's `outputSchema`. It is off by default until Claude Desktop and Claude Code are measured with it (a client that passes both the text and the structure to the model would pay for the result twice).

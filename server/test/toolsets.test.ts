@@ -715,7 +715,7 @@ describe("ae_invoke_tool", () => {
     const ctx = noAeCtx();
     const ok = await both("ae_test_ok", { n: 21 }, ctx);
     expect(ok.viaInvoke).toEqual(ok.direct);
-    expect(JSON.parse(callResultText(ok.viaInvoke))).toEqual({ doubled: 42 });
+    expect(JSON.parse(callResultText(ok.viaInvoke))).toEqual({ ok: true, doubled: 42 });
 
     const invalid = await both("ae_test_ok", { n: "x" }, ctx);
     expect(invalid.viaInvoke).toEqual(invalid.direct);
@@ -759,7 +759,7 @@ describe("ae_invoke_tool", () => {
     };
 
     const res = await rpc("tools/call", { name: "ae_invoke_tool", arguments: { name: "ae_get_comp", arguments: { comp_id: 10 } } }, ctx, "core");
-    expect(JSON.parse(callResultText(res))).toEqual({ id: 10, name: "Hero" });
+    expect(JSON.parse(callResultText(res))).toEqual({ ok: true, id: 10, name: "Hero" });
     expect(seen).toEqual([{ fn: "getComp", toolName: "ae_get_comp", label: "ae_get_comp(10)" }]);
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatch(/^ok tool ae_get_comp ok \(\d+ms\)$/);
