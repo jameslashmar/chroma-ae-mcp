@@ -17,4 +17,13 @@ describe("version", () => {
     expect(lock.version).toBe(version);
     expect(lock.packages[""].version).toBe(version);
   });
+
+  it("matches VERSION in the panel manifest, so a dev install reports the real version", () => {
+    // package.ps1 stamps the ZXP's copy too; the checked-in one is what a dev junction or link loads.
+    const manifest = fs.readFileSync(path.join(repo, "panel/CSXS/manifest.xml"), "utf8");
+    expect(manifest).toContain(`ExtensionBundleVersion="${version}"`);
+    const ids = [...manifest.matchAll(/<Extension Id="([^"]+)" Version="([^"]+)"/g)];
+    expect(ids.length).toBeGreaterThan(0);
+    for (const m of ids) expect(m[2], m[1]).toBe(version);
+  });
 });

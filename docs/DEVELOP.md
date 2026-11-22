@@ -16,7 +16,7 @@ node qa/smoke-mcp.mjs --dir <a fresh /_work/qa/ folder>           # live: most t
 
 ## Releasing
 
-1. Bump `VERSION`, and to the same number `version` in `server/package.json` and `server/package-lock.json` and `SERVER_VERSION` in `server/src/mcp-rpc.ts` (`test/version.test.ts` fails until they match).
+1. Bump `VERSION`, and to the same number `version` in `server/package.json` and `server/package-lock.json`, `SERVER_VERSION` in `server/src/mcp-rpc.ts` and the versions in `panel/CSXS/manifest.xml` (`test/version.test.ts` fails until they match; a dev install reads the checked-in manifest).
 2. Put `ZXPSignCmd.exe` in `build/` (gitignored). Copies live in `AFX-VoxMark/build/` and `AFX_Gulp/builds/signing/win/`.
 3. Run `op-sa op run --env-file scripts/release.env -- pwsh -NoProfile -File scripts/package.ps1`. It stages the panel, stamps the version, signs, verifies and prints the SHA256. The certificate passphrase is in 1Password: Release Signing / "Chroma AE MCP ZXP cert".
 4. Tag `vX.Y.Z` on the build commit, then create the GitHub release with the `.zxp` and its SHA256.
