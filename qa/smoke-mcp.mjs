@@ -169,6 +169,16 @@ const why = (r) =>
   String(r.message ?? r.__error ?? r.__text ?? ((r.receipt?.mismatches ?? []).slice(0, 2).map((m) => m.message).join("; ") || r.error || ""));
 /** A refusal of an unknown font names it and lists near matches (core.jsx checkTextFont, findFont, captions.jsx). */
 const FONT_REFUSAL = /No installed font|not available|candidates|Near matches/i;
+/** The code a refusal carries, for comparing a family's refusal with its member's. */
+const refusalCode = (x) => String(x.code ?? x.error ?? x.kind ?? (x.__isError || x.__error ? "error" : ""));
+/**
+ * A tool family answered like its member: both refused with the same code, or both answered and `pick(answer)` is the same.
+ * (The caller also checks that the answer is the one it expects, so two matching refusals never pass by accident.)
+ */
+const sameAnswer = (fam, mem, pick) => {
+  if (refused(fam) || refused(mem)) return refused(fam) && refused(mem) && refusalCode(fam) === refusalCode(mem);
+  return JSON.stringify(pick(fam)) === JSON.stringify(pick(mem));
+};
 
 // ---- helpers for the waves 4-5 steps ----
 /**
@@ -1606,9 +1616,72 @@ async function main() {
       // Tool families: an action runs its member; the old name still answers.
       r = await call("ae_track", { action: "read", comp_id: WS.planar, source: { transform: { layer: { name: "Plate" } } }, preview: false });
       const old = await call("ae_track_read", { comp_id: WS.planar, source: { transform: { layer: { name: "Plate" } } }, preview: false });
-      check("tool family ae_track { action: read } = ae_track_read", r.ok === true && old.ok === true && r.frames === old.frames, `${r.frames} frames vs ${old.frames}`);
+      check("ae_track (family: action read = ae_track_read)", r.ok === true && old.ok === true && r.frames === old.frames, `${r.frames} frames vs ${old.frames}`);
       r = await call("ae_render_queue", { action: "status" });
-      check("tool family ae_render_queue { action: status }", r.ok !== false && typeof r.numItems === "number", `${r.numItems} items`);
+      check("ae_render_queue (family: action status)", r.ok !== false && typeof r.numItems === "number", `${r.numItems} items`);
+
+      // The other families, each with one cheap action, against the member under its old name: the same answer or the same refusal.
+      // (ae_deliver and ae_collect are checked further down, where the render queue item and the collect folder exist.)
+      {
+        // ae_aerender: no job is started; a job id that does not exist gives the same refusal from both.
+        let fam = await call("ae_aerender", { action: "status", job_id: "qa-no-such-job" });
+        let mem = await call("ae_aerender_status", { job_id: "qa-no-such-job" });
+        check("ae_aerender (family: action status = ae_aerender_status, no such job)", refused(fam) && refused(mem) && /No aerender job/i.test(why(fam)) && sameAnswer(fam, mem, () => 0), `family: ${why(fam).slice(0, 60)}; member: ${why(mem).slice(0, 60)}`);
+
+        fam = await call("ae_rig", { action: "list", comp_id: W.work });
+        mem = await call("ae_rig_list", { comp_id: W.work });
+        check("ae_rig (family: action list = ae_rig_list)", !refused(fam) && Array.isArray(fam.controls) && sameAnswer(fam, mem, (x) => x.controls?.length), `${fam.controls?.length} controls vs ${mem.controls?.length}; ${why(fam)}`);
+
+        const pathTarget = { layer: { name: "PathTest" }, shape: { group: { index: 1 }, path: { index: 1 } } };
+        fam = await call("ae_path", { action: "read", comp_id: W.work, target: pathTarget });
+        mem = await call("ae_path_read", { comp_id: W.work, target: pathTarget });
+        check("ae_path (family: action read = ae_path_read)", !refused(fam) && typeof fam.path?.vertexCount === "number" && sameAnswer(fam, mem, (x) => [x.path?.vertexCount, x.path?.closed]), `${fam.path?.vertexCount} vertices vs ${mem.path?.vertexCount}; ${why(fam)}`);
+
+        // ae_patch: the check on the slip comp's insert (a temporary copy of the comp, removed again).
+        const patchArgs = { comp_id: W6.slip, patch_layers: [{ name: "Insert" }], region: { kind: "rect", rect: [158, 118, 278, 208] }, times: [0, 0.2], grain_probes: 0, max_renders: 6, expect };
+        fam = await call("ae_patch", { action: "check", ...patchArgs });
+        mem = await call("ae_patch_check", patchArgs);
+        check("ae_patch (family: action check = ae_patch_check)", fam.applied === true && Array.isArray(fam.checks) && fam.temp_comp?.copy_removed === true && sameAnswer(fam, mem, (x) => [x.applied, x.verdict, x.checks?.length, x.temp_comp?.copy_removed]), `family ${fam.verdict}, ${fam.checks?.length} checks; member ${mem.verdict}, ${mem.checks?.length} checks; ${why(fam)}`);
+
+        fam = await call("ae_checkpoint", { action: "list", expect });
+        mem = await call("ae_checkpoint_list", { expect });
+        check("ae_checkpoint (family: action list = ae_checkpoint_list)", !refused(fam) && Array.isArray(fam.checkpoints) && sameAnswer(fam, mem, (x) => x.checkpoints?.length), `${fam.checkpoints?.length} checkpoints vs ${mem.checkpoints?.length}; ${why(fam)}`);
+
+        fam = await call("ae_skill", { action: "list" });
+        mem = await call("ae_skill_list", {});
+        check("ae_skill (family: action list = ae_skill_list)", !refused(fam) && (fam.skills ?? []).some((x) => x.name === "smoke-null") && sameAnswer(fam, mem, (x) => (x.skills ?? []).map((s) => s.name).sort()), `${fam.count} skill(s) vs ${mem.count}; ${why(fam)}`);
+
+        fam = await call("ae_dialog", { action: "list", screenshots: false });
+        mem = await call("ae_dialogs", { screenshots: false });
+        check("ae_dialog (family: action list = ae_dialogs)", !refused(fam) && sameAnswer(fam, mem, (x) => (x.dialogs ?? []).length), `${(fam.dialogs ?? []).length} dialog(s) vs ${(mem.dialogs ?? []).length}; ${why(fam)}`);
+
+        // ae_loudness: the measure of the WAV file (no After Effects render), not the level change.
+        fam = await call("ae_loudness", { action: "check", audio_path: CLICKS_WAV, standard: "streaming" });
+        mem = await call("ae_loudness_check", { audio_path: CLICKS_WAV, standard: "streaming" });
+        check("ae_loudness (family: action check = ae_loudness_check)", fam.ok === true && fam.source?.sample_rate === 48000 && sameAnswer(fam, mem, (x) => [x.measurement?.integrated_lufs, x.verdict?.gain_needed_db]), `${fam.measurement?.integrated_lufs} LUFS vs ${mem.measurement?.integrated_lufs}; ${why(fam)}`);
+
+        // ae_cleanplate: the reference-frame pick (reads frames, changes nothing, no contact sheet).
+        const pickArgs = { comp_id: WS.clean, region: { rect: [160, 90, 80, 60] }, mode: "static", start: 0, end: 0.4, every_n: 4, max_renders: 12, contact_sheet: false };
+        fam = await call("ae_cleanplate", { action: "pick", ...pickArgs });
+        mem = await call("ae_cleanplate_pick", pickArgs);
+        check("ae_cleanplate (family: action pick = ae_cleanplate_pick)", !refused(fam) && typeof fam.recommended_ref_time === "number" && sameAnswer(fam, mem, (x) => [x.recommended_ref_time, x.sampled]), `ref ${fam.recommended_ref_time} vs ${mem.recommended_ref_time}, ${fam.sampled}; ${why(fam)}`);
+
+        // ae_screen: the corner snap (reads one frame, changes nothing, no preview image).
+        const cornerArgs = { comp_id: WS.screen, ref_time: 0, corners: [[164, 86], [324, 93], [322, 184], [157, 177]], search_px: 14, preview: false };
+        fam = await call("ae_screen", { action: "corners", ...cornerArgs });
+        mem = await call("ae_screen_corners", cornerArgs);
+        check("ae_screen (family: action corners = ae_screen_corners)", !refused(fam) && Array.isArray(fam.corners_snapped) && sameAnswer(fam, mem, (x) => x.corners_snapped), `snapped ${js(fam.corners_snapped, 80)}; ${why(fam)}`);
+
+        // ae_recent_ops: the writes above and in the waves before it, newest first, each with its tool and outcome.
+        r = await call("ae_recent_ops", { limit: 50 });
+        const ops = r.ops ?? [];
+        const sets = await call("ae_recent_ops", { tool: "ae_set_property", limit: 5 });
+        check(
+          "ae_recent_ops (lists the writes with their outcomes)",
+          !refused(r) && ops.length > 0 && r.count === ops.length && ops.every((o) => typeof o.tool === "string" && o.tool.length > 0) && ops.some((o) => typeof o.outcome === "string") && (sets.ops ?? []).length > 0 && (sets.ops ?? []).every((o) => o.tool === "ae_set_property"),
+          `${ops.length} write(s), newest ${ops[0]?.tool} ${ops[0]?.outcome}; outcomes ${[...new Set(ops.map((o) => o.outcome))].join(", ")}; ae_set_property filter ${(sets.ops ?? []).length}; ${why(r)}`
+        );
+      }
 
       // 3D projection: ae_scene_3d_report's screen positions against AE's toComp (the rotation order was wrong before).
       r = await call("ae_scene_3d_report", { comp_id: W6.proj, time: 0.5 });
@@ -2311,6 +2384,10 @@ async function main() {
       Array.isArray(specs.specs) && specs.specs.length >= 12 && specs.specs.find((s) => s.id === "gif")?.feasible === false,
       `${specs.specs?.length} specs; this AE can do: ${(specs.specs ?? []).filter((s) => s.feasible).map((s) => s.id).join(", ")}`
     );
+    {
+      const fam = await call("ae_deliver", { action: "specs", item_index: 1 });
+      check("ae_deliver (family: action specs = ae_delivery_specs)", !refused(fam) && Array.isArray(fam.specs) && fam.specs.length >= 12 && sameAnswer(fam, specs, (x) => (x.specs ?? []).map((s) => `${s.id}:${s.feasible}`)), `${fam.specs?.length} specs vs ${specs.specs?.length}; ${why(fam)}`);
+    }
     r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "rqedit_a.mov"), expect });
     const rqIdx = r.index;
     check("ae_render_queue_add (item for the edit steps)", r.applied && typeof rqIdx === "number" && rqIdx >= 2, `index ${rqIdx}`);
@@ -2594,6 +2671,10 @@ async function main() {
     check("ae_collect_files (resume copies nothing again)", r.complete === true && r.copied_files === 0, `${r.copied_files} copied`);
     r = await call("ae_collect_report", { dest, format: "json", write: false });
     check("ae_collect_report (json)", Array.isArray(r.report?.comps) && r.report.comps.length > 0 && Boolean(r.report?.ae), `${r.report?.comps?.length} comps`);
+    {
+      const fam = await call("ae_collect", { action: "report", dest, format: "json", write: false });
+      check("ae_collect (family: action report = ae_collect_report)", !refused(fam) && Array.isArray(fam.report?.comps) && fam.report.comps.length > 0 && sameAnswer(fam, r, (x) => x.report?.comps?.length), `${fam.report?.comps?.length} comps vs ${r.report?.comps?.length}; ${why(fam)}`);
+    }
     r = await call("ae_collect_report", { dest });
     check("ae_collect_report (markdown, written)", r.format === "markdown" && typeof r.markdown === "string" && r.markdown.length > 0, `written ${JSON.stringify(r.written)}`);
     r = await call("ae_collect_relink", { dest, confirm_close_project: true, expect });
