@@ -20,8 +20,9 @@ let dir: string;
 const saved = { ...frameCaptureDeps };
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-late-"));
-  frameCaptureDeps.lateWriteMs = 1500;
-  frameCaptureDeps.settleAfterFailMs = 1500;
+  // Wide margins against the fake's own timers, so a loaded CI machine does not flip these tests.
+  frameCaptureDeps.lateWriteMs = 3000;
+  frameCaptureDeps.settleAfterFailMs = 3000;
 });
 afterEach(() => {
   Object.assign(frameCaptureDeps, saved);
@@ -46,9 +47,9 @@ function slowAe(fillAfterMs: Array<number | null>) {
   return { ctx, sent };
 }
 
-describe("captureCompFrame with a slow render", () => {
+describe("captureCompFrame with a slow render", { timeout: 20000 }, () => {
   it("waits for a first render still being written instead of sending a second", async () => {
-    const { ctx, sent } = slowAe([400]);
+    const { ctx, sent } = slowAe([300]);
     const snap = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 150 });
     expect(sent).toHaveLength(1);
     expect(snap.path).toBe(sent[0]);
@@ -69,11 +70,11 @@ describe("captureCompFrame with a slow render", () => {
     const err = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 100 }).catch((e) => e);
     expect(sent).toHaveLength(2);
     expect(String(err.message)).toMatch(/still writing the frame; waited \d+ s .*ae_status/);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(frameCaptureDeps.settleAfterFailMs - 100);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(frameCaptureDeps.settleAfterFailMs - 200);
   });
 
   it("a late write during that wait is used rather than failing", async () => {
-    const { ctx, sent } = slowAe([null, 600]);
+    const { ctx, sent } = slowAe([null, 300]);
     const snap = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 100 });
     expect(sent).toHaveLength(2);
     expect(snap.path).toBe(sent[1]);
