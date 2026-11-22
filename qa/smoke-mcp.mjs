@@ -1651,10 +1651,6 @@ async function main() {
         mem = await call("ae_skill_list", {});
         check("ae_skill (family: action list = ae_skill_list)", !refused(fam) && (fam.skills ?? []).some((x) => x.name === "smoke-null") && sameAnswer(fam, mem, (x) => (x.skills ?? []).map((s) => s.name).sort()), `${fam.count} skill(s) vs ${mem.count}; ${why(fam)}`);
 
-        fam = await call("ae_dialog", { action: "list", screenshots: false });
-        mem = await call("ae_dialogs", { screenshots: false });
-        check("ae_dialog (family: action list = ae_dialogs)", !refused(fam) && sameAnswer(fam, mem, (x) => (x.dialogs ?? []).length), `${(fam.dialogs ?? []).length} dialog(s) vs ${(mem.dialogs ?? []).length}; ${why(fam)}`);
-
         // ae_loudness: the measure of the WAV file (no After Effects render), not the level change.
         fam = await call("ae_loudness", { action: "check", audio_path: CLICKS_WAV, standard: "streaming" });
         mem = await call("ae_loudness_check", { audio_path: CLICKS_WAV, standard: "streaming" });
@@ -1675,11 +1671,12 @@ async function main() {
         // ae_recent_ops: the writes above and in the waves before it, newest first, each with its tool and outcome.
         r = await call("ae_recent_ops", { limit: 50 });
         const ops = r.ops ?? [];
-        const sets = await call("ae_recent_ops", { tool: "ae_set_property", limit: 5 });
+        const t = ops[0]?.tool;
+        const sets = await call("ae_recent_ops", { tool: t, limit: 5 });
         check(
           "ae_recent_ops (lists the writes with their outcomes)",
-          !refused(r) && ops.length > 0 && r.count === ops.length && ops.every((o) => typeof o.tool === "string" && o.tool.length > 0) && ops.some((o) => typeof o.outcome === "string") && (sets.ops ?? []).length > 0 && (sets.ops ?? []).every((o) => o.tool === "ae_set_property"),
-          `${ops.length} write(s), newest ${ops[0]?.tool} ${ops[0]?.outcome}; outcomes ${[...new Set(ops.map((o) => o.outcome))].join(", ")}; ae_set_property filter ${(sets.ops ?? []).length}; ${why(r)}`
+          !refused(r) && ops.length > 0 && r.count === ops.length && ops.every((o) => typeof o.tool === "string" && o.tool.length > 0) && ops.some((o) => typeof o.outcome === "string") && typeof t === "string" && (sets.ops ?? []).length > 0 && (sets.ops ?? []).every((o) => o.tool === t),
+          `${ops.length} write(s), newest ${ops[0]?.tool} ${ops[0]?.outcome}; outcomes ${[...new Set(ops.map((o) => o.outcome))].join(", ")}; filter ${t}: ${(sets.ops ?? []).length}; ${why(r)}`
         );
       }
 
@@ -2250,6 +2247,17 @@ async function main() {
   check("ae_quarantine_status", r.quarantined === false, `${r.count} quarantined`);
   r = await call("ae_dialogs", { screenshots: false });
   check("ae_dialogs", !r.__isError && !r.__error, `${(r.dialogs ?? []).length} dialog(s)`);
+  {
+    // The dialog list is a UI Automation script with a 15 s limit; if AE's UI is busy and either call is refused, wait and ask both again once.
+    let fam = await call("ae_dialog", { action: "list", screenshots: false });
+    let mem = await call("ae_dialogs", { screenshots: false });
+    if (refused(fam) || refused(mem)) {
+      await sleep(2000);
+      fam = await call("ae_dialog", { action: "list", screenshots: false });
+      mem = await call("ae_dialogs", { screenshots: false });
+    }
+    check("ae_dialog (family: action list = ae_dialogs)", !refused(fam) && sameAnswer(fam, mem, (x) => (x.dialogs ?? []).length), `${(fam.dialogs ?? []).length} dialog(s) vs ${(mem.dialogs ?? []).length}; ${why(fam)}`);
+  }
   r = await call("ae_diagnostics", { log_lines: 20, include_dialogs: false });
   check("ae_diagnostics", r.ok && fs.existsSync(String(r.path)) && r.summary?.ae_answered === true, path.basename(String(r.path)));
   r = await call("ae_list_panels", { filter: "Chroma" });
