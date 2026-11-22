@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
 import {
   CORE_TOOL_NAMES,
@@ -229,7 +230,7 @@ async function runGetSchema(args: z.infer<typeof SchemaArgs>): Promise<ToolCallR
       call: CORE_SET.has(t.name) ? "direct" : "ae_invoke_tool",
       // Verbatim, including the safety text for tools that carry it.
       description: t.description,
-      inputSchema: zodToJsonSchema(t.schema),
+      inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)),
     };
     total += JSON.stringify(entry).length;
     tools.push(entry);

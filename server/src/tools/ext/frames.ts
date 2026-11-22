@@ -11,7 +11,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, stillWriting, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -399,6 +399,8 @@ export function compareDecodedFrames(
  * +0.001s time nudge if the first write is stale. Callers must already hold
  * the queue (it uses `evalRaw`, never `callHost`).
  */
+export { frameCaptureDeps } from "../render.js";
+
 export async function captureCompFrame(params: {
   ctx: ToolContext;
   opId: string;
@@ -436,6 +438,11 @@ export async function captureCompFrame(params: {
   if (check1.fresh) {
     return { path: pngPath1, time };
   }
+  // Never start a second render while the first is still being written.
+  if (stillWriting(pngPath1, check1)) {
+    const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
+    if (late1.fresh) return { path: pngPath1, time };
+  }
 
   // Retry once with a slight +0.001s time nudge
   const nudgedTime = Math.max(0, time + 0.001);
@@ -465,8 +472,25 @@ export async function captureCompFrame(params: {
     return { path: pngPath2, time: nudgedTime };
   }
 
+  // Both failed. If AE is still writing either file, let it finish before anything else is sent.
+  let settled = "";
+  const pending = [
+    { p: pngPath2, start: reqStart2, last: check2, t: nudgedTime },
+    { p: pngPath1, start: reqStart1, last: isFreshPngFile(pngPath1, reqStart1), t: time },
+  ].filter((x) => stillWriting(x.p, x.last));
+  if (pending.length > 0) {
+    const t0 = Date.now();
+    for (const x of pending) {
+      const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - t0);
+      if (left <= 0) break;
+      const late = await waitForFreshPng(x.p, x.start, left);
+      if (late.fresh) return { path: x.p, time: x.t };
+    }
+    settled = ` After Effects was still writing the frame; waited ${Math.round((Date.now() - t0) / 1000)} s for it to finish before returning. Call ae_status before the next call.`;
+  }
+
   throw new Error(
-    `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.`
+    `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.${settled}`
   );
 }
 

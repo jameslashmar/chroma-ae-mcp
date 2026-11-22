@@ -767,6 +767,7 @@
     out.comp_id = comp ? comp.id : null;
 
     // ----- apply (UI state only: no undo group) -----
+    if (A.touch) A.touch();
     var opened = false;
     var openedViewer = null;
 

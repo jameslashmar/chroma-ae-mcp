@@ -12,8 +12,9 @@
  * each time, so a new tool can't skip a step.
  */
 
-import { BridgeError } from "../../host.js";
+import { BridgeError, withOutcome } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
+import { QuarantineBlockedError } from "../../quarantine.js";
 import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import type { ExpectGuard, ToolContext } from "../common.js";
@@ -72,12 +73,17 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
     return res.result ?? null;
   };
 
+  // Where the write is: until the write's evalScript is sent nothing in the project has changed,
+  // so any failure is "not_applied"; a failure of the write itself is whatever the host reports.
+  let sent = false;
+  let checkpointPath: string | null = null;
   try {
     return await ctx.queue.run(spec.label, async () => {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
-      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
+      checkpointPath = checkpoint?.path ?? null;
+      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpointPath };
       const sessionFields = await noteBeforeWrite(ctx, note);
       const before = await read("before");
       // The record lives while the evalScript runs; if AE dies mid-write it is
@@ -85,6 +91,7 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       beginInflight(note);
       let write;
       try {
+        sent = true;
         write = await ctx.bridge.evalRaw<W>({
           id: opId,
           script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
@@ -129,6 +136,7 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       return {
         op_id: opId,
         applied: true as const,
+        outcome: written.no_op === true ? ("no_op" as const) : ("applied" as const),
         ...shown,
         checkpoint,
         receipt,
@@ -137,9 +145,13 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
     });
   } catch (err) {
     if (err instanceof QueueWaitError) {
-      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+      throw withOutcome(new BridgeError({ kind: "queued", op_id: opId, message: err.message }), "not_applied", spec.label);
     }
-    throw err;
+    if (err instanceof QuarantineBlockedError) throw err;
+    if (err instanceof BridgeError) throw withOutcome(err, sent ? "unknown" : "not_applied", spec.label, checkpointPath);
+    // Not a bridge error (a bug in a read or check before the write, or a host transport fault).
+    const message = err instanceof Error ? err.message : String(err);
+    throw withOutcome(new BridgeError({ kind: "evalscript_error", op_id: opId, message }), sent ? "unknown" : "not_applied", spec.label, checkpointPath);
   }
 }
 

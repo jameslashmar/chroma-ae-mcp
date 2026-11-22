@@ -290,6 +290,7 @@
     // Not wrapped in an undo group for any target: a purge is not a project
     // change, so there is nothing for a group to record, and for undo, ram and
     // all the purge may empty the history the group would be closed around.
+    if (A.touch) A.touch();
     app.purge(value);
     // The result says "unknown" for ram and all instead of claiming undo is intact.
     var undoCleared = false;

@@ -116,6 +116,18 @@
   // Wrap user/server script inside:
   // (function(){ try { return JSON-encoded {ok,result} } catch(e) { return JSON-encoded {ok:false,error} } })()
   // using __chromaAe.stringify from core.jsx (never native JSON).
+  var extensionDirCache = null;
+  function extensionDirReal() {
+    if (extensionDirCache !== null) return extensionDirCache;
+    try {
+      // The same folder resolveMcpBundlePath loads the bundle from, through any link.
+      extensionDirCache = fs.realpathSync(common.resolveExtensionDir(host));
+    } catch (e) {
+      extensionDirCache = "";
+    }
+    return extensionDirCache;
+  }
+
   function wrapScriptForEval(script) {
     var trimmed = String(script || "").trim();
     while (trimmed.length > 0 && trimmed.charAt(trimmed.length - 1) === ";") {
@@ -129,12 +141,17 @@
     } else {
       expr = "(\n" + trimmed + "\n)";
     }
+    // beginCall resets core.jsx's "touched the project" flag, which formatError reports, so the server
+    // can tell a write that changed nothing (not_applied) from one that may be part-way in (unknown).
     return (
       "(function(){" +
       "try{" +
+      "if(typeof __chromaAe!=='undefined'&&__chromaAe.beginCall)__chromaAe.beginCall();" +
       "var __r=" + expr + ";" +
       "if(__r&&typeof __r==='object'&&__r.__chromaError===true){" +
-      "return __chromaAe.stringify({ok:false,error:__r.error});" +
+      "var __e=__r.error&&typeof __r.error==='object'?__r.error:{message:String(__r.error)};" +
+      "if(__e.touched===undefined&&__chromaAe.wasTouched)__e.touched=__chromaAe.wasTouched();" +
+      "return __chromaAe.stringify({ok:false,error:__e});" +
       "}" +
       "return __chromaAe.stringify({ok:true,result:__r});" +
       "}catch(e){" +
@@ -530,6 +547,15 @@
   function handleRequest(req, res) {
     var headers = req.headers || {};
 
+    // One request per connection. On macOS this page's event loop stops while After Effects runs a long
+    // ExtendScript (measured on AE 26.2.1: an 8 s eval held /health for 8.2 s, a 22 s render for 21.7 s).
+    // When it resumes, Node's 5 s keep-alive timer has fired and closes the idle socket a client (Node 19+
+    // keeps sockets alive by default) has just reused, so that request dies with ECONNRESET. A closed
+    // connection after each reply makes every request open its own socket.
+    try {
+      res.setHeader("Connection", "close");
+    } catch (eConn) {}
+
     // 1. Reject any request carrying an Origin header (browser).
     if (headers.origin !== undefined) {
       log("warn", "Rejected request with Origin header: " + String(headers.origin));
@@ -573,6 +599,9 @@
         aeVersion: aeVersion,
         extLoadFailures: extLoadFailures,
         panelVersion: PANEL_VERSION,
+        // The folder this service was loaded from, through any link: qa/ci-live.mjs checks it is the
+        // checkout under test (CEP loads any folder in extensions/ with this id, a backup copy too).
+        extensionDir: extensionDirReal(),
         instance: currentInstance(),
         inFlight: inFlight
           ? { id: inFlight.id, label: inFlight.label, startedAt: inFlight.startedAt }

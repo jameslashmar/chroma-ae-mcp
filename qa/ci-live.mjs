@@ -2,7 +2,7 @@
 // qa/ci-live.mjs — the live job for a self-hosted runner with After Effects
 // (see docs/CI-RUNNER.md and .github/workflows/ae-live.yml).
 //
-//   node qa/ci-live.mjs [--start-ae <AfterFX path>] [--wait <seconds>]
+//   node qa/ci-live.mjs [--start-ae <AfterFX path | After Effects .app>] [--wait <seconds>]
 //
 // 1. Waits for the panel service's /health (starting AE first if asked and
 //    it isn't running).
@@ -96,8 +96,40 @@ async function waitForListening(offset, seconds) {
   return false;
 }
 
+// When the service cannot be reloaded through its debug port (no port: a copy without the .debug
+// file was loaded, or PlayerDebugMode is off; or a Node without the global WebSocket), restart
+// AE on macOS instead, which also loads core.jsx changes a reload would not. Only with a clean
+// project: quitting over unsaved changes would open AE's save prompt.
+async function restartAeMac() {
+  const client = createClient();
+  const dirty = await client.eval("app.project ? app.project.dirty : false", { label: "ci-live: dirty check" });
+  if (dirty === true) throw new Error("The open project has unsaved changes; not quitting After Effects over them. Save or close it, then run again.");
+  const app = aeExe ?? "Adobe After Effects 2026";
+  console.log("macOS: the service cannot be reloaded through its debug port here, so restarting After Effects to load this checkout.");
+  spawnSync("osascript", ["-e", `tell application ${JSON.stringify(path.basename(app, ".app"))} to quit`], { stdio: "inherit" });
+  const until = Date.now() + 180_000;
+  while (Date.now() < until && (await healthy())) await sleep(2000);
+  await sleep(3000);
+  spawn("open", ["-a", app], { detached: true, stdio: "ignore" }).unref();
+}
+
+async function debugPortOpen() {
+  try {
+    await fetch("http://127.0.0.1:8097/json", { signal: AbortSignal.timeout(3000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function reloadService() {
-  const targets = await (await fetch("http://localhost:8097/json")).json();
+  const canReload = typeof WebSocket === "function" && (await debugPortOpen());
+  if (!canReload) {
+    if (process.platform === "darwin") return restartAeMac();
+    if (typeof WebSocket !== "function") throw new Error(`Node ${process.version} has no global WebSocket; run this with Node 22.`);
+    throw new Error("The service has no debug port 8097 (PlayerDebugMode off, or the panel's .debug file missing?)");
+  }
+  const targets = await (await fetch("http://127.0.0.1:8097/json")).json();
   const target = targets.find((t) => t.webSocketDebuggerUrl);
   if (!target) throw new Error("The service has no debug target on port 8097 (PlayerDebugMode off?)");
   const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -113,7 +145,9 @@ async function reloadService() {
 let health = await healthy();
 if (!health && aeExe) {
   console.log(`Starting After Effects: ${aeExe}`);
-  spawn(aeExe, [], { detached: true, stdio: "ignore" }).unref();
+  // macOS: AE_EXE is the app bundle ("/Applications/Adobe After Effects 2026/Adobe After Effects 2026.app"), opened as an app.
+  if (process.platform === "darwin") spawn("open", ["-a", aeExe], { detached: true, stdio: "ignore" }).unref();
+  else spawn(aeExe, [], { detached: true, stdio: "ignore" }).unref();
 }
 health = health ?? (await waitForHealth(waitSeconds));
 if (!health) {
@@ -130,20 +164,54 @@ try {
 }
 const panelDir = fs.realpathSync(path.join(repo, "panel"));
 if (path.normalize(linked).toLowerCase() !== path.normalize(panelDir).toLowerCase()) {
-  console.error(`The CEP extension (${extensionDir()} -> ${linked || "missing"}) does not point at this checkout's panel (${panelDir}). Run scripts/install-dev.ps1 from this checkout once, then restart AE.`);
+  const installer = process.platform === "darwin" ? "scripts/install-dev-mac.sh" : "scripts/install-dev.ps1";
+  console.error(`The CEP extension (${extensionDir()} -> ${linked || "missing"}) does not point at this checkout's panel (${panelDir}). Run ${installer} from this checkout once, then restart AE.`);
+  process.exit(2);
+}
+
+// CEP loads every folder in extensions/ whose manifest carries this extension id, so a second copy
+// (a ZXP moved aside, an old dev folder) can be loaded instead of the link (seen on macOS).
+const extBase = path.dirname(extensionDir());
+const others = [];
+try {
+  for (const name of fs.readdirSync(extBase)) {
+    const dir = path.join(extBase, name);
+    if (dir === extensionDir()) continue;
+    try {
+      const manifest = fs.readFileSync(path.join(dir, "CSXS", "manifest.xml"), "utf8");
+      if (/ExtensionBundleId="london\.chroma\.aemcp"/.test(manifest)) others.push(dir);
+    } catch {
+      // not an extension folder
+    }
+  }
+} catch {
+  // no extensions folder to scan
+}
+if (others.length) {
+  console.error(`Other copies of london.chroma.aemcp sit in ${extBase}: ${others.join(", ")}. CEP may load one of them instead of this checkout; move them out of that folder and run again.`);
   process.exit(2);
 }
 
 const logOffset = logSize();
 await reloadService();
-if (!(await waitForListening(logOffset, 60))) {
-  console.error(`The service did not log "Listening on http://127.0.0.1:" within 60 s of the reload (${serviceLogPath()}), so the new bundle is not confirmed to be running.`);
+const reloadWait = process.platform === "darwin" ? 300 : 60;
+if (!(await waitForListening(logOffset, reloadWait))) {
+  console.error(`The service did not log "Listening on http://127.0.0.1:" within ${reloadWait} s of the reload (${serviceLogPath()}), so the new bundle is not confirmed to be running.`);
   process.exit(2);
 }
-if (!(await waitForHealth(60))) {
+const after = await waitForHealth(reloadWait);
+if (!after) {
   console.error("The service did not come back after the reload.");
   process.exit(2);
 }
+// The link can be right while AE loads another folder with the same extension id (CEP scans every
+// folder in extensions/, a backup copy included): the service says where it was loaded from.
+const sameDir = (a, b) => path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
+if (typeof after.extensionDir === "string" && after.extensionDir && !sameDir(after.extensionDir, panelDir)) {
+  console.error(`After Effects loaded the panel from ${after.extensionDir}, not this checkout (${panelDir}). Another folder in ${path.dirname(extensionDir())} carries the same extension id; move it out of that folder and run again.`);
+  process.exit(2);
+}
+if (!after.extensionDir) console.log("The panel does not report its folder (an older service.js); the link check above is the only check.");
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 const workDir = path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "_work", "qa", "ci", stamp);

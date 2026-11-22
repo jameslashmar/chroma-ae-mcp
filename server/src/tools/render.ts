@@ -147,6 +147,28 @@ export async function waitForFreshPng(
 }
 
 /**
+ * How long a frame grab waits for a render AE has started but not finished. saveFrameToPng returns
+ * before the PNG is written: the file is there at 0 bytes and fills in later (measured on AE 26.0).
+ * On a heavy 3D comp that can take longer than the normal wait, and a second saveFrameToPng sent
+ * while the first is still rendering, then the next call on top of both, is the likeliest cause of
+ * the AE 26.3 crash seen after "no fresh PNG after retry" on a 3D comp (ROADMAP). So: while the
+ * file is still empty or growing, wait for it before retrying; and after a final failure, give a
+ * render still in progress time to end before returning, so the next call does not land on it.
+ */
+export const frameCaptureDeps = { lateWriteMs: 20_000, settleAfterFailMs: 20_000 };
+
+/** The PNG is on disk but empty or still changing: AE is most likely still writing it. */
+export function stillWriting(filePath: string, before: { size: number; mtimeMs: number }): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const st = fs.statSync(filePath);
+    return st.size === 0 || st.size !== before.size || st.mtimeMs !== before.mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Shrinks a fresh full-resolution snapshot on the server (never in AE) and
  * describes the file the agent should look at.
  */
@@ -321,6 +343,24 @@ export const renderTools: ToolDefinition<any>[] = [
               };
             }
 
+            // A render still being written is waited for, never overlapped with a second one.
+            if (stillWriting(pngPath1, check1)) {
+              const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
+              if (late1.fresh) {
+                return {
+                  ok: true,
+                  ...snapshotOutput(pngPath1, late1, scale, args.max_size),
+                  comp_id: args.comp_id,
+                  time: (resp1.result?.time as number | undefined) ?? time,
+                  scale,
+                  ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
+                  retried: false,
+                  comp_width: resp1.result?.width,
+                  comp_height: resp1.result?.height,
+                };
+              }
+            }
+
             // Retry once with a small time nudge
             const nudgedTime = Math.max(0, time + 0.001);
             const uniqueSuffix2 = `${Date.now()}_${crypto
@@ -361,6 +401,30 @@ export const renderTools: ToolDefinition<any>[] = [
               };
             }
 
+            // Let a render still in progress end before the next call reaches AE; if either file fills in meanwhile, use it.
+            const pending = [
+              { p: pngPath2, start: reqStart2, last: check2, resp: resp2, t: nudgedTime, retried: true },
+              { p: pngPath1, start: reqStart1, last: check1, resp: resp1, t: time, retried: false },
+            ].filter((x) => stillWriting(x.p, x.last));
+            const settleStart = Date.now();
+            for (const x of pending) {
+              const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - settleStart);
+              if (left <= 0) break;
+              const late = await waitForFreshPng(x.p, x.start, left);
+              if (late.fresh) {
+                return {
+                  ok: true,
+                  ...snapshotOutput(x.p, late, scale, args.max_size),
+                  comp_id: args.comp_id,
+                  time: (x.resp.result?.time as number | undefined) ?? x.t,
+                  scale,
+                  ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
+                  retried: x.retried,
+                  comp_width: x.resp.result?.width,
+                  comp_height: x.resp.result?.height,
+                };
+              }
+            }
             return {
               ok: false,
               error: "stale_frame",

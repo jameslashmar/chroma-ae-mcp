@@ -603,9 +603,11 @@
     }
 
     if (app.project) {
+      if (A.touch) A.touch();
       app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
     }
 
+    if (A.touch) A.touch();
     app.open(targetFile);
 
     var newDirty = false;

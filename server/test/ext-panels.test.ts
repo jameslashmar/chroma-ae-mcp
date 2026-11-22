@@ -60,5 +60,36 @@ describe("ext/panels", () => {
       const res = await tool("ae_ui_screenshot").handler({}, baseCtx);
       expect(res).toEqual({ ok: true, path: "C:/ui/ae_main_1.png", width: 1920, height: 1040 });
     });
+
+    it("macOS: passes a window capture through", async () => {
+      setPanelsTestOverrides({
+        platform: "darwin",
+        uiDir: os.tmpdir(),
+        macCapture: async () => ({ ok: true, path: "/ui/ae_main_1.png", width: 3456, height: 2158 }),
+      });
+      expect(await tool("ae_ui_screenshot").handler({}, baseCtx)).toEqual({ ok: true, path: "/ui/ae_main_1.png", width: 3456, height: 2158 });
+    });
+
+    it("macOS: a minimized window and a missing Screen Recording permission say what to do", async () => {
+      setPanelsTestOverrides({ platform: "darwin", uiDir: os.tmpdir(), macCapture: async () => ({ ok: false, error: "ae_minimized" }) });
+      const min = (await tool("ae_ui_screenshot").handler({}, baseCtx)) as Record<string, unknown>;
+      expect(min).toMatchObject({ ok: false, error: "ae_minimized" });
+      expect(String(min.message)).toMatch(/minimized or on another desktop/);
+      setPanelsTestOverrides({ platform: "darwin", uiDir: os.tmpdir(), macCapture: async () => ({ ok: false, error: "screen_recording_permission_needed" }) });
+      const perm = (await tool("ae_ui_screenshot").handler({}, baseCtx)) as Record<string, unknown>;
+      expect(String(perm.message)).toMatch(/Screen Recording/);
+    });
+
+    it("macOS: a locked screen or a sleeping display is named, not reported as a failed capture", async () => {
+      setPanelsTestOverrides({ platform: "darwin", uiDir: os.tmpdir(), macCapture: async () => ({ ok: false, error: "screen_locked_or_asleep" }) });
+      const r = (await tool("ae_ui_screenshot").handler({}, baseCtx)) as Record<string, unknown>;
+      expect(r).toMatchObject({ ok: false, error: "screen_locked_or_asleep" });
+      expect(String(r.message)).toMatch(/locked or its display is asleep/);
+    });
+
+    it("still says not_implemented_on_this_os on Linux", async () => {
+      setPanelsTestOverrides({ platform: "linux", uiDir: os.tmpdir() });
+      expect(await tool("ae_ui_screenshot").handler({}, baseCtx)).toEqual({ ok: false, error: "not_implemented_on_this_os" });
+    });
   });
 });

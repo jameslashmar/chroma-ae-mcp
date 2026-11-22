@@ -211,6 +211,7 @@
   function closeProject(mode) {
     var r = true;
     try {
+      if (A.touch) A.touch();
       r = app.project.close(mode);
     } catch (e) {
       return { ok: false, error: bound(e.message || String(e)) };
@@ -263,6 +264,7 @@
     var proj = null;
     var err = null;
     try {
+      if (A.touch) A.touch();
       proj = app.open(target);
     } catch (e) {
       err = bound(e.message || String(e));
@@ -311,6 +313,7 @@
     var proj = null;
     var err = null;
     try {
+      if (A.touch) A.touch();
       proj = app.newProject();
     } catch (e) {
       err = bound(e.message || String(e));
@@ -419,6 +422,7 @@
   }
 
   function prefSave(kind, section, key, value, t) {
+    if (A.touch) A.touch();
     var p = app.preferences;
     if (kind === "bool") {
       if (t === undefined) p.savePrefAsBool(section, key, value);

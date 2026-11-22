@@ -554,7 +554,7 @@ type Written = Record<string, unknown>;
 const detectTool: ToolDefinition<any> = {
   name: "ae_detect_cuts",
   description:
-    "Run After Effects' Scene Edit Detection on a footage or pre-comp layer to find the cuts in a flattened edit or reference reel. " +
+    "Run After Effects' Scene Edit Detection on a footage layer to find the cuts in a flattened edit or reference reel (AE refuses pre-comp layers; use the footage layer, or render the pre-comp first). " +
     "mode 'list' (default) only reports the cut times (read-only; no expect needed); 'markers' adds a layer marker at each cut; 'split' splits the layer at each cut; 'split_precomp' also pre-composes every shot (many new project items, one big undo step). " +
     "Works only on a video AV layer with a footage or pre-comp source and time remapping off (checked before anything runs); needs AE 22.3+. " +
     LONG_CLIP_NOTE +

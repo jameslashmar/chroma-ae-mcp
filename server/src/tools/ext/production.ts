@@ -14,7 +14,9 @@
  */
 
 import { z } from "zod";
+import { BridgeError } from "../../host.js";
 import { normalizeGuardPath } from "../../jsx.js";
+import { QuarantineBlockedError } from "../../quarantine.js";
 import type { ReceiptMismatch } from "../../receipts.js";
 import { compareValues } from "../../receipts.js";
 import { appendVersionLog, planVersion, versionToken, type VersionLogEntry } from "../../versions.js";
@@ -618,13 +620,15 @@ export const productionTools: ToolDefinition<any>[] = [
           )
         ).result;
         if (check && check.ok === false) {
-          return { ok: false, error: "bad_args", applied: false, done: 0, message: `${check.error ?? "An op is invalid"}. Nothing was written.` };
+          return { ok: false, error: "bad_args", applied: false, outcome: "not_applied" as const, done: 0, message: `${check.error ?? "An op is invalid"}. Nothing was written.` };
         }
       }
       for (let start = 0; start < args.ops.length; start += size) {
         const ops = args.ops.slice(start, start + size);
         if (start > 0) await sleep(250);
-        const res = (await runGuardedWrite(ctx, {
+        let res;
+        try {
+          res = (await runGuardedWrite(ctx, {
           toolName: "ae_batch_set",
           label: `ae_batch_set(${start + 1}-${start + ops.length} of ${args.ops.length})`,
           expect: args.expect,
@@ -633,6 +637,26 @@ export const productionTools: ToolDefinition<any>[] = [
           write: { host: "batchSet", args: { comp_id: args.comp_id, ops, base: start, allow_substitute: args.allow_substitute, label: `Batch set ${start + 1}-${start + ops.length}` } },
           check: (_before, after, w) => (w.failed_at ? [] : batchMismatches(ops, after, start)),
         })) as unknown as { done?: number; failed_at?: number; error?: string; receipt: { matches: boolean; mismatches: ReceiptMismatch[] }; checkpoint: unknown };
+        } catch (err) {
+          // The first chunk's error is the whole answer (it carries its own outcome). A later chunk's
+          // must not hide the chunks that were written before it.
+          const quarantined = err instanceof QuarantineBlockedError;
+          if (chunks.length === 0 || !(err instanceof BridgeError || quarantined)) throw err;
+          // A quarantine refusal (another write timed out while this batch waited between chunks) stops the chunk before it is sent.
+          const chunkOutcome = quarantined ? "not_applied" : (err as BridgeError).outcome ?? "unknown";
+          return {
+            ok: false,
+            error: quarantined ? "quarantined" : (err as BridgeError).kind,
+            ...(!quarantined && (err as BridgeError).code ? { code: (err as BridgeError).code } : {}),
+            outcome: "partial" as const,
+            failed_chunk: `${start + 1}-${start + ops.length}`,
+            failed_chunk_outcome: chunkOutcome,
+            message: `Ops 1-${start} were applied (${chunks.length} undo step(s)); ops ${start + 1}-${start + ops.length} failed (${chunkOutcome}): ${(err as Error).message} Later chunks were not run.`,
+            done,
+            chunks,
+            ...(quarantined ? {} : { next_steps: (err as BridgeError).next_steps }),
+          };
+        }
         // runGuardedWrite spreads the write's own result at the top level, also when the read-back failed.
         const chunkDone = typeof res.done === "number" ? res.done : 0;
         done += chunkDone;
@@ -642,6 +666,9 @@ export const productionTools: ToolDefinition<any>[] = [
           return {
             ok: false,
             error: "op_failed",
+            // The failing op may have written part of itself (some keys, a value before its expression) inside the
+            // chunk's undo group, so with nothing else applied the outcome is unknown, not not_applied.
+            outcome: done > 0 ? ("partial" as const) : ("unknown" as const),
             failed_op: start + res.failed_at,
             message: `Op ${start + res.failed_at} failed: ${res.error}. Ops before it in this chunk were applied (one undo step); later chunks were not run.`,
             done,
@@ -654,6 +681,7 @@ export const productionTools: ToolDefinition<any>[] = [
             ok: false,
             error: "read_back_failed",
             applied: true,
+            outcome: "unknown" as const,
             done,
             chunks,
             mismatches: res.receipt.mismatches.filter((m) => m.path === "read_back"),
@@ -661,7 +689,7 @@ export const productionTools: ToolDefinition<any>[] = [
           };
         }
       }
-      return { ok: true, applied: true, done, chunks, matches: mismatches.length === 0, mismatches: mismatches.slice(0, 50), mismatches_truncated: mismatches.length > 50 };
+      return { ok: true, applied: true, outcome: "applied" as const, done, chunks, matches: mismatches.length === 0, mismatches: mismatches.slice(0, 50), mismatches_truncated: mismatches.length > 50 };
     },
   },
 ];

@@ -514,6 +514,7 @@
       fail("bad_args", "A " + (args.kind === "output_module" ? "output module" : "render settings") + " template named \"" + all[hit] + "\" already exists. Pick another name, or pass allow_replace to overwrite it (templates cannot be deleted or restored by script).");
     }
     // A machine-wide preference, not a project change: no undo group (it would be empty and Ctrl+Z cannot reach the template).
+    if (A.touch) A.touch();
     t.target.saveAsTemplate(name);
     return { saved: name, kind: args.kind, replaced: hit !== -1, item_index: args.item_index, comp_id: t.comp_id };
   };

@@ -5,7 +5,9 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "./tools/common.js";
+import { badIdempotencyKey, recordRecentOp, summariseWrite, withIdempotency } from "./idempotency.js";
 import { ALL_TOOLS } from "./tools/registry.js";
+import { isWriteTool } from "./write-tools.js";
 import { errorKindOf, errorTextOf, recordUsage, resultCharsOf, resultFailureOf, runJsxFields, type UsageEntry } from "./usage-log.js";
 
 /** Where a call came from, for the usage log only. */
@@ -51,6 +53,64 @@ function waitedMsOf(output: unknown): number | undefined {
  * line (parseToolLine in panel/client/common.js) are the same, under the real tool's name.
  */
 export async function callTool(
+  toolName: string,
+  rawArgs: Record<string, unknown> | undefined,
+  ctx: ToolContext,
+  opts: CallOptions = {}
+): Promise<ToolCallResult> {
+  if (!isWriteTool(toolName)) return callToolOnce(toolName, rawArgs, ctx, opts);
+  // A write: an idempotency_key (taken off before validation, so no schema has to declare it)
+  // makes a resent call return the first answer; every write is listed for ae_recent_ops.
+  const started = Date.now();
+  const { idempotency_key: key, ...args } = rawArgs ?? {};
+  let response: ToolCallResult;
+  let replayed = false;
+  if (key === undefined) {
+    response = await callToolOnce(toolName, args, ctx, opts);
+  } else {
+    const bad = badIdempotencyKey(key);
+    if (bad) {
+      response = formatToolError(new Error(`Invalid arguments for ${toolName}: ${bad}`));
+    } else {
+      const r = await withIdempotency(toolName, key as string, args, () => callToolOnce(toolName, args, ctx, opts), Date.now, opts.client ?? "");
+      response = r.response as ToolCallResult;
+      replayed = r.replayed;
+    }
+  }
+  response = withSuccessOutcome(response);
+  recordRecentOp({
+    at: new Date(started).toISOString(),
+    tool: toolName,
+    ms: Date.now() - started,
+    ...summariseWrite(response),
+    ...(typeof key === "string" ? { idempotency_key: key.slice(0, 128) } : {}),
+    ...(replayed ? { idempotent_replay: true as const } : {}),
+    ...(opts.via && opts.via !== "direct" ? { via: opts.via } : {}),
+  });
+  return response;
+}
+
+/**
+ * Every write that succeeded says so the same way: a result with `applied: true` and no `outcome`
+ * of its own (tools that do not go through runGuardedWrite) gets `outcome: "applied"`, or "no_op"
+ * when it changed nothing. A result that already has an outcome is left as it is.
+ */
+function withSuccessOutcome(response: ToolCallResult): ToolCallResult {
+  if ((response as { isError?: boolean }).isError === true) return response;
+  const text = response.content?.[0]?.text;
+  if (typeof text !== "string" || !text.startsWith("{")) return response;
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return response;
+  }
+  if (body.outcome !== undefined || body.applied !== true) return response;
+  const outcome = body.no_op === true ? "no_op" : "applied";
+  return { ...response, content: [{ type: "text", text: JSON.stringify({ ...body, outcome }) }, ...response.content.slice(1)] };
+}
+
+async function callToolOnce(
   toolName: string,
   rawArgs: Record<string, unknown> | undefined,
   ctx: ToolContext,

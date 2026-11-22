@@ -1112,6 +1112,7 @@
     } catch (eF) {
       if (eF.__kind) throw eF;
     }
+    if (A.touch) A.touch();
     item.mainSource.reload();
     return { no_op: true, reloaded: true, footage: { id: item.id, name: item.name, path: path } };
   };

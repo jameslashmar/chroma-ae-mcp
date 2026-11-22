@@ -1868,6 +1868,7 @@
       fail("guard", "Expected " + args.expected_queued + " QUEUED Render Queue item(s) but " + queued + " are QUEUED, so nothing was rendered. The queue changed after the others were held back.");
     }
     var started = new Date().getTime();
+    if (A.touch) A.touch();
     rq.render();
     return { returned: true, queued_items: queued, elapsed_ms: new Date().getTime() - started };
   };
@@ -1924,6 +1925,7 @@
       fail("guard", "Expected " + args.expected_queued + " QUEUED Render Queue item(s) but " + queued + " are QUEUED, so nothing was handed over. The queue changed after the others were held back.");
     }
     var started = new Date().getTime();
+    if (A.touch) A.touch();
     rq.queueInAME(args.start_now === true);
     return { called: true, start_now: args.start_now === true, queued_items: queued, elapsed_ms: new Date().getTime() - started };
   };

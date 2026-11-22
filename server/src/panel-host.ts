@@ -3,6 +3,7 @@ import { noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
 import {
   BridgeError,
   DEFAULT_TIMEOUT_MS,
+  bridgeErrorFromHost,
   normalizeErrorKind,
   type CallHostOptions,
   type EvalSuccessResponse,
@@ -295,6 +296,7 @@ export class PanelHost implements HostTransport {
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,
+          ...(params.mutates && !isRender ? { outcome: "unknown" as const } : {}),
           actual: blocking.length > 0 ? { blocking_dialogs: blocking } : undefined,
           message:
             `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
@@ -337,15 +339,7 @@ export class PanelHost implements HostTransport {
         message: "Unknown ExtendScript error",
         kind: "evalscript_error",
       };
-      const mappedKind = normalizeErrorKind(errObj.kind);
-      throw new BridgeError({
-        kind: mappedKind,
-        op_id: params.id,
-        message: errObj.message || "Unknown ExtendScript error",
-        line: errObj.line,
-        actual: errObj.actual,
-        expected: errObj.expected,
-      });
+      throw bridgeErrorFromHost(errObj, params.id, { mutates: params.mutates === true && !isRender, label: params.label });
     }
 
     return {

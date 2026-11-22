@@ -12,6 +12,7 @@ import {
 import { createPanelMcp } from "../src/panel-entry.js";
 import { lintJsxSafety } from "../src/jsx-safety-lint.js";
 import { zodToJsonSchema } from "../src/schema.js";
+import { withIdempotencyKey } from "../src/write-tools.js";
 import { META_TOOLS, NAME_MAX, SCHEMA_OUTPUT_SOFT_MAX, SEARCH_OUTPUT_MAX, nameMatcher } from "../src/meta-tools.js";
 import {
   CORE_DESCRIPTION_OVERRIDES,
@@ -108,7 +109,7 @@ describe("toolset choice", () => {
 
 describe("full toolset", () => {
   it("is exactly ALL_TOOLS: same names, order and text, no meta-tools, no instructions", async () => {
-    const expected = ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: zodToJsonSchema(t.schema) }));
+    const expected = ALL_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)) }));
     for (const toolset of [undefined, "full", "bogus", ""]) {
       const result = await rpc("tools/list", undefined, noAeCtx(), toolset);
       expect(result.tools).toEqual(expected);
@@ -265,7 +266,7 @@ describe("ae_get_tool_schema", () => {
       const real = ALL_TOOLS.find((x) => x.name === t.name)!;
       expect(t.description).toBe(real.description);
       expect(t.description).toContain(AGENT_SAFETY_GUIDANCE);
-      expect(t.inputSchema).toEqual(zodToJsonSchema(real.schema));
+      expect(t.inputSchema).toEqual(withIdempotencyKey(real.name, zodToJsonSchema(real.schema)));
       expect(t.group).toBe(groupOf(t.name));
     }
   });
@@ -300,7 +301,7 @@ describe("ae_get_tool_schema size and name limits", () => {
     const res = await rpc("tools/call", { name: "ae_get_tool_schema", arguments: { names: big } }, noAeCtx());
     const body = JSON.parse(callResultText(res));
     expect(body.tools[0].name).toBe("ae_set_text");
-    expect(body.tools[0].inputSchema).toEqual(zodToJsonSchema(ALL_TOOLS.find((t) => t.name === "ae_set_text")!.schema));
+    expect(body.tools[0].inputSchema).toEqual(withIdempotencyKey("ae_set_text", zodToJsonSchema(ALL_TOOLS.find((t) => t.name === "ae_set_text")!.schema)));
     expect(body.omitted.length).toBeGreaterThan(0);
     expect([...body.tools.map((t: any) => t.name), ...body.omitted].sort()).toEqual([...big].sort());
     expect(body.omitted_note).toContain(String(SCHEMA_OUTPUT_SOFT_MAX));

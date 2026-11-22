@@ -973,7 +973,16 @@
     } catch (e3) {
       solid = false;
     }
-    if (solid) fail("bad_args", "Layer \"" + layer.name + "\" is a solid or placeholder, not footage or a pre-comp");
+    if (solid) fail("bad_args", "Layer \"" + layer.name + "\" is a solid or placeholder, not footage");
+    // AE refuses a pre-comp layer ("Unable to call doSceneEditDetection because the layer ... is not
+    // video layer", measured on AE 26.2.1): only footage layers are scanned.
+    var precomp = false;
+    try {
+      precomp = typeof CompItem !== "undefined" && src instanceof CompItem;
+    } catch (e5) {
+      precomp = false;
+    }
+    if (precomp) fail("bad_args", "Layer \"" + layer.name + "\" is a pre-comp: After Effects runs Scene Edit Detection on footage layers only. Use the layer of the footage itself, or render the pre-comp and import the render");
     var remap = false;
     try {
       remap = layer.timeRemapEnabled === true;

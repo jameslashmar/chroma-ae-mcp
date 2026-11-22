@@ -11,6 +11,7 @@
 // guard on the next run. Writes qa/out/smoke.json and exits 1 on any failure.
 // Plain Node 20, no dependencies.
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as os from "node:os";
@@ -123,6 +124,41 @@ function skip(tool, why) {
   console.log(`SKIP  ${tool.padEnd(30)} ${why}`);
 }
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+// ---- video fixtures (made with ffmpeg when it is on PATH; without it the video steps are skipped) ----
+const FFMPEG = (() => {
+  try {
+    return spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+})();
+/**
+ * Three short ProRes clips in MEDIA: `alpha` (4444, 60% alpha, three 1 s shots), `opaque` (the same three
+ * shots without alpha: AE's Scene Edit Detection misses the cut after a semi-transparent shot, measured on
+ * AE 26.2.1, so the cut steps use this one) and `interlaced` (29.97 fps, for fields and pulldown). Null without ffmpeg.
+ */
+function makeVideoFixtures() {
+  if (!FFMPEG) return null;
+  const out = { alpha: path.join(MEDIA, "shots_alpha.mov"), opaque: path.join(MEDIA, "shots_opaque.mov"), interlaced: path.join(MEDIA, "clip_2997.mov") };
+  const run = (args) => spawnSync("ffmpeg", ["-y", "-loglevel", "error", ...args], { stdio: "ignore" }).status === 0;
+  const three = (alpha) => {
+    const fmt = alpha ? ",format=yuva444p10le" : "";
+    const a = alpha ? "@0.6" : "";
+    return ["-f", "lavfi", "-i", `color=c=red${a}:s=320x180:r=25:d=1${fmt}`, "-f", "lavfi", "-i", `testsrc2=s=320x180:r=25:d=1${fmt}`, "-f", "lavfi", "-i", `color=c=blue${a}:s=320x180:r=25:d=1${fmt}`, "-filter_complex", `[0][1][2]concat=n=3:v=1:a=0${fmt}`];
+  };
+  const ok =
+    run([...three(true), "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", out.alpha]) &&
+    run([...three(false), "-c:v", "prores_ks", "-profile:v", "2", "-pix_fmt", "yuv422p10le", out.opaque]) &&
+    run(["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30000/1001:d=2", "-c:v", "prores_ks", "-profile:v", "2", "-pix_fmt", "yuv422p10le", out.interlaced]);
+  return ok ? out : null;
+}
+/** Item ids of the imported video fixtures, set by the footage interpretation steps. */
+let VIDEO = null;
+/** A comp's id by its exact name. */
+async function compIdByName(name) {
+  return ((await call("ae_get_project", { type: "comp", name_contains: name })).items ?? []).find((i) => i.name === name)?.id;
+}
 const brief = (r) => String(JSON.stringify(r) ?? "none").slice(0, 220);
 /** A guarded write that was applied and read back clean. */
 const okWrite = (r) => r.applied === true && r.receipt?.matches === true;
@@ -1011,7 +1047,31 @@ async function main() {
     check("ae_set_footage_interpretation (put back)", okWrite(r), why(r));
     r = await call("ae_set_footage_interpretation", { item_id: FOOT, loop: 2, expect });
     check("ae_set_footage_interpretation (loop on a still is refused)", refused(r), why(r).slice(0, 120));
-    skip("ae_set_footage_interpretation (alpha, fields, pulldown, conform, and loop on video)", "the scratch project has stills and a WAV only: no video, no alpha channel to change");
+    const clips = makeVideoFixtures();
+    if (!clips) {
+      skip("ae_set_footage_interpretation (alpha, fields, pulldown, conform, and loop on video)", "ffmpeg is not on PATH, so there is no video fixture: the scratch project has stills and a WAV only");
+    } else {
+      r = await call("ae_import_footage", { paths: [clips.alpha, clips.opaque, clips.interlaced], expect });
+      const [VA, VO, VI] = r.item_ids ?? [];
+      check("ae_import_footage (three video fixtures made with ffmpeg)", r.applied === true && [VA, VO, VI].every((n) => typeof n === "number"), `items ${js(r.item_ids)}`);
+      if ([VA, VO, VI].every((n) => typeof n === "number")) {
+        VIDEO = { alpha: VA, opaque: VO, interlaced: VI };
+        for (const alpha of [{ mode: "straight" }, { mode: "premultiplied", premul_color: [0, 0, 0] }, { mode: "ignore" }, { mode: "guess" }]) {
+          r = await call("ae_set_footage_interpretation", { item_id: VA, alpha, expect });
+          check(`ae_set_footage_interpretation (alpha ${alpha.mode}, on a clip with alpha)`, okWrite(r), why(r));
+        }
+        r = await call("ae_set_footage_interpretation", { item_id: VI, field_separation: "upper_field_first", high_quality_field_separation: true, expect });
+        check("ae_set_footage_interpretation (fields: upper first, high quality)", okWrite(r), why(r));
+        r = await call("ae_set_footage_interpretation", { item_id: VI, pulldown: "wssww", expect });
+        check("ae_set_footage_interpretation (pulldown on 29.97 fps)", okWrite(r), why(r));
+        r = await call("ae_set_footage_interpretation", { item_id: VI, pulldown: "off", conform_frame_rate: 25, expect });
+        check("ae_set_footage_interpretation (pulldown off, conform to 25 fps)", okWrite(r), why(r));
+        r = await call("ae_set_footage_interpretation", { item_id: VA, loop: 3, expect });
+        check("ae_set_footage_interpretation (loop on video)", okWrite(r), why(r));
+        r = await call("ae_set_footage_interpretation", { item_id: VA, loop: 1, expect });
+        check("ae_set_footage_interpretation (loop back to 1)", okWrite(r), why(r));
+      }
+    }
     r = await call("ae_get_footage_interpretation", { only_findings: true });
     check("ae_get_footage_interpretation (project audit)", Array.isArray(r.items) && typeof r.warnings === "number", `${r.items?.length} item(s) with findings, ${r.warnings} warning(s)`);
     r = await call("ae_footage_proxy", { item_ids: [FOOT], action: "set_solid", solid: { color: [0.5, 0.5, 0.5], width: 480, height: 270 }, use_proxy: true, expect });
@@ -1279,6 +1339,22 @@ async function main() {
     check("ae_track_apply (transform, a time range)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.frames_written <= 4, `${r.frames_written} frames; ${why(r)}`);
     r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin" }, expect });
     check("ae_track_apply (keys already on the layer refuse the write without replace_keys)", refused(r), why(r).slice(0, 120));
+    // The host's refusals, on layers built for them: a 3D layer and a layer with separated Position dimensions.
+    for (const nm of ["W4 Pin 3D", "W4 Pin Sep"]) await call("ae_create_layer", { comp_id: PL, type: "solid", name: nm, color: [0, 1, 0], width: 100, height: 60, expect });
+    await call("ae_run_jsx", {
+      mutates: true,
+      label: "qa smoke: a 3D layer and separated Position",
+      expect: { ...expect, comp_id: PL },
+      code: `var c = app.project.itemByID(${PL}); c.layer("W4 Pin 3D").threeDLayer = true; c.layer("W4 Pin Sep").property("ADBE Transform Group").property("ADBE Position").dimensionsSeparated = true; return 1;`,
+    });
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin 3D" }, expect });
+    check("ae_track_apply (a 3D layer is refused before anything changes)", refused(r) && /3D layer; planar tracks work in 2D only/.test(why(r)), why(r).slice(0, 120));
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin Sep" }, expect });
+    check("ae_track_apply (separated Position dimensions are refused before anything changes)", refused(r) && /separated Position dimensions/.test(why(r)), why(r).slice(0, 120));
+    await call("ae_create_comp", { mode: "new", name: "W4 Anamorphic", width: 160, height: 90, pixel_aspect: 2, fps: 25, duration: 1, expect });
+    const ana = await compIdByName("W4 Anamorphic");
+    r = await call("ae_track_multi", { comp_id: ana, auto_points: { region: { rect: [0, 0, 160, 90] }, count: 4 }, ref_time: 0, start: 0, end: 0.2, preview: false });
+    check("ae_track_multi (a comp with non-square pixels is refused)", refused(r) && /not 1\. Planar tracking works on square pixels only/.test(why(r)), why(r).slice(0, 120));
     await call("ae_run_jsx", {
       mutates: true,
       label: "qa smoke: remove planar layers",
@@ -1286,7 +1362,6 @@ async function main() {
       code: `var c = app.project.itemByID(${PL}); for (var i = c.numLayers; i >= 1; i--) { var n = c.layer(i).name; if (n.indexOf("W4 Plate ") === 0 || n.indexOf("W4 Pin") === 0) c.layer(i).remove(); } return c.numLayers;`,
     });
     skip("ae_track_read (tracker: AE Tracker points)", "the scratch project has no AE Tracker data, and a script cannot make any");
-    skip("ae_track_apply / ae_track_multi on a 3D layer, a separated Position or non-square pixels", "these are refusals of the host; the scratch scene has none of them");
   }
 
   // ---------- wave 4: stabilize (ae_stabilize, ae_stabilize_roundtrip) ----------
@@ -1353,7 +1428,6 @@ async function main() {
     check("ae_cleanplate_setup (clone_offset: no fix needed, expansion raised to half the feather)", clone.ok === true && clone.applied === true && clone.needs_fix === false && clone.mask?.expansion_px === 5, `needs_fix ${clone.needs_fix}, expansion ${clone.mask?.expansion_px}; ${why(clone)}`);
     r = await call("ae_cleanplate_setup", { comp_id: WS.locked, plate: { name: "Plate" }, source: "freeze", ref_time: 0, region: hole, expect });
     check("ae_cleanplate_setup (a locked plate is refused before anything changes)", r.ok === false, why(r).slice(0, 120));
-    skip("ae_cleanplate_setup (source still, action reload)", "they need a painted PNG of the cleaned frame, which the scratch project cannot make");
 
     // patch_check and region_stats on the freeze patch, few frames (neighbours 0.04 s apart, so pops are measurable).
     if (typeof patchId === "number") {
@@ -1401,6 +1475,14 @@ async function main() {
     check("ae_inpaint_plate (a second still does not overwrite the first)", Boolean(inp2.fill?.png_path) && inp2.fill?.png_path !== inp.fill?.png_path, String(inp2.fill?.png_path).slice(-40));
     r = await call("ae_inpaint_plate", { comp_id: IP, plate_layer: { name: "Plate" }, regions: [{ rect: [0, 0, 100000, 100000] }], expect });
     check("ae_inpaint_plate (a hole over 25% of the frame is refused)", r.ok === false && r.error === "refused", `${r.error}: ${String(r.message ?? "").slice(0, 100)}`);
+
+    // source still renders the frame to a PNG beside the saved project (no painted file needed), and reload reads it again.
+    const still = await call("ae_cleanplate_setup", { comp_id: CL, plate: { name: "Plate" }, source: "still", ref_time: 0, region: hole, name: "W4 Still", expect });
+    check("ae_cleanplate_setup (still: the frame rendered to a PNG beside the project)", still.ok === true && still.applied === true && typeof still.patch_comp?.id === "number", why(still));
+    if (typeof still.patch_comp?.id === "number") {
+      r = await call("ae_cleanplate_setup", { comp_id: CL, action: "reload", patch_comp_id: still.patch_comp.id, expect });
+      check("ae_cleanplate_setup (reload: the still is read again, no dialog)", r.ok === true && r.applied !== false, why(r));
+    }
   }
 
   // ---------- wave 4: mattes (ae_mask_follow, ae_garbage_matte, ae_caf_prep) ----------
@@ -1704,10 +1786,22 @@ async function main() {
 
     // Scene Edit Detection needs footage with cuts. A pre-comp layer is an AV layer with video and no cuts; a text layer is not one.
     r = await call("ae_detect_cuts", { comp_id: W.remap, layer: { name: "Clip" } });
-    gated("ae_detect_cuts (list, on a pre-comp layer: no cuts)", r, (x) => x.ok === true && Array.isArray(x.cuts) && x.cut_count === 0, /doSceneEditDetection|SceneEditDetectionMode|AE 22\.3/i, `${r.cut_count} cuts in ${r.clip_duration}s`);
+    check("ae_detect_cuts (a pre-comp layer is refused before AE is asked: AE scans footage layers only)", refused(r) && /pre-comp: After Effects runs Scene Edit Detection on footage layers only/.test(why(r)), why(r).slice(0, 140));
     r = await call("ae_detect_cuts", { comp_id: COMP, layer: { name: "Title" } });
     check("ae_detect_cuts (a text layer is refused: not an AV layer)", refused(r), why(r).slice(0, 120));
-    skip("ae_detect_cuts (markers, split, split_precomp)", "the scratch project has no video footage with cuts, so these modes would find nothing to write");
+    if (!VIDEO) {
+      skip("ae_detect_cuts (markers, split, split_precomp)", "no video fixture (ffmpeg is not on PATH), so these modes would find nothing to write");
+    } else {
+      for (const mode of ["list", "markers", "split", "split_precomp"]) {
+        const name = `Cuts ${mode}`;
+        await call("ae_create_comp", { mode: "from_footage", item_id: VIDEO.opaque, name, expect });
+        const cid = await compIdByName(name);
+        r = await call("ae_detect_cuts", { comp_id: cid, layer: { index: 1 }, mode, ...(mode === "list" ? {} : { expect: { ...expect, comp_id: cid } }) });
+        const two = r.cut_count === 2;
+        if (mode === "list") check("ae_detect_cuts (list: the two cuts of the three-shot fixture)", r.ok === true && two && js(r.cuts) === "[1,2]", `${r.cut_count} cut(s) ${js(r.cuts)}; ${why(r)}`);
+        else check(`ae_detect_cuts (${mode})`, r.applied === true && two && r.receipt?.matches !== false, `${r.cut_count} cut(s); ${why(r)}`);
+      }
+    }
 
     // Markers: edit, move, and the 16.0 fields (on the Layers comp, after its earlier marker checks).
     r = await call("ae_add_markers", { comp_id: LC, markers: [{ time: 2, comment: "edit me", duration: 0.5, label: 4, chapter: "Ch", url: "https://example.com" }], expect });
@@ -1746,8 +1840,28 @@ async function main() {
     check("ae_text_animator (smoothness with a round shape is refused before anything changes)", refused(r) && /smoothness applies only to the square shape/i.test(why(r)), why(r).slice(0, 140));
     r = await call("ae_text_animator", { comp_id: T, layer: tl, properties: { opacity: 100 }, grouping: { anchor_point_grouping: "word", grouping_alignment: [0, 0] }, expect });
     check("ae_text_animator (More Options: grouping)", r.applied === true && r.receipt?.matches === true, JSON.stringify(r.grouping));
+    // A variable font on this machine (macOS: Skia; Windows: Bahnschrift), on its own layer, with a weight from its own axis range.
+    let vf = null;
+    for (const q of ["Skia", "Bahnschrift", "Segoe UI Variable", "SF Pro"]) {
+      const f = await call("ae_fonts", { action: "search", query: q, page_size: 25 });
+      vf = (f.fonts ?? []).find((x) => x.has_design_axes && (x.axes ?? []).some((a) => a.tag === "wght"));
+      if (vf) break;
+    }
+    if (vf) {
+      const ax = vf.axes.find((a) => a.tag === "wght");
+      const vl = { name: "W5 Variable" };
+      await call("ae_create_layer", { comp_id: T, type: "text", name: vl.name, text: "Variable", expect: { ...expect, comp_id: T } });
+      r = await call("ae_set_text", { comp_id: T, layer: vl, style: { font: vf.postscript }, expect: { ...expect, comp_id: T } });
+      check(`ae_set_text (a variable font: ${vf.postscript})`, r.applied === true, why(r));
+      r = await call("ae_text_animator", { comp_id: T, layer: vl, variable_axes: [{ tag: "wght", value: ax.max + 1000 }], expect });
+      check("ae_text_animator (a weight past the font's own axis range is refused before anything changes)", refused(r) && /can't go above/i.test(why(r)), why(r).slice(0, 140));
+      const mid = Math.round(((ax.min + ax.max) / 2) * 100) / 100;
+      r = await call("ae_text_animator", { comp_id: T, layer: vl, variable_axes: [{ tag: "wght", value: mid }], expect });
+      gated(`ae_text_animator (variable font axis wght ${mid} on ${vf.postscript}, AE 26)`, r, (x) => x.applied === true && x.receipt?.matches === true, /After Effects 26\.0|addVariableFontAxis/i, js(r.variable_axes, 120));
+    }
     r = await call("ae_text_animator", { comp_id: T, layer: tl, variable_axes: [{ tag: "wght", value: 700 }], expect });
-    gated("ae_text_animator (a variable font axis, AE 26)", r, (x) => x.applied === true && x.receipt?.matches === true, /After Effects 26\.0|addVariableFontAxis|not a variable font/i, js(r.variable_axes ?? r.message ?? r.error));
+    // The layer's font decides: a variable one (Space Grotesk on the Windows rig) takes the axis, any other is refused by name.
+    gated("ae_text_animator (wght on the layer's own font: applied if it is variable, else refused before anything changes)", r, (x) => (x.applied === true && x.receipt?.matches === true) || (refused(x) && /not a variable font|has no axis/i.test(why(x))), /After Effects 26\.0|addVariableFontAxis/i, why(r).slice(0, 140));
 
     // Masks: a second mask, its attributes, a duplicate and a move in one call.
     r = await call("ae_mask", { comp_id: OPS, layer: { name: "OpA" }, add: [{ name: "First", shape: "ellipse", box: [0, 0, 80, 80] }, { name: "Edge", shape: "rect", box: [0, 0, 60, 60] }], expect });
@@ -1924,7 +2038,9 @@ async function main() {
   if (r.ok && r.file?.size > 0 && r.file?.fresh === true) {
     check("ae_export_mogrt", true, `${r.controllers} controller(s), ${r.file?.size} bytes`);
   } else if (/not from Adobe Fonts/i.test(why(r))) {
-    check("ae_export_mogrt", /Space Grotesk|SpaceGrotesk/i.test(why(r)) && /allow_font_dialog/.test(why(r)), `refused before the export, as designed: ${why(r).slice(0, 160)}`);
+    // The font is whatever the text layers got on this machine (Space Grotesk on the Windows rig, Myriad Pro on macOS AE):
+    // the refusal must name one and the way past the dialog.
+    check("ae_export_mogrt", /not from Adobe Fonts: [^(]+\(/i.test(why(r)) && /allow_font_dialog/.test(why(r)), `refused before the export, as designed: ${why(r).slice(0, 160)}`);
   } else {
     check("ae_export_mogrt", false, `${r.controllers ?? "?"} controller(s), ${r.file?.size ?? "no file"} ${why(r)}`);
   }
@@ -1987,11 +2103,14 @@ async function main() {
   r = await call("ae_list_panels", { filter: "Chroma" });
   check("ae_list_panels", JSON.stringify(r).includes("london.chroma.aemcp"));
   r = await call("ae_ui_screenshot");
-  check(
-    "ae_ui_screenshot",
-    (r.ok && r.width > 300 && fs.existsSync(String(r.path))) || r.error === "ae_minimized",
-    r.ok ? `${r.width}x${r.height}` : `${r.error} (AE is minimized)`
-  );
+  if (r.error === "not_implemented_on_this_os") skip("ae_ui_screenshot", `not built for ${process.platform} yet`);
+  else if (r.error === "screen_locked_or_asleep") skip("ae_ui_screenshot", "the Mac's screen was locked or asleep during the run, so there was nothing to capture");
+  else
+    check(
+      "ae_ui_screenshot",
+      (r.ok && r.width > 300 && fs.existsSync(String(r.path))) || r.error === "ae_minimized",
+      r.ok ? `${r.width}x${r.height}` : r.error === "ae_minimized" ? "ae_minimized (AE is minimized)" : String(r.error)
+    );
 
   // ---------- wave 3: loudness (the Audio comp holds the 120 BPM click track) ----------
   // The comp measure renders audio with aerender, so the project must be saved and clean first.
@@ -2030,11 +2149,15 @@ async function main() {
     label: "qa smoke: output module templates",
     code: "var t = app.project.renderQueue.item(1).outputModule(1).templates; var out = []; for (var i = 0; i < t.length; i++) out.push(t[i]); return out;",
   });
-  const pngTemplate = (om.result ?? []).find((t) => /png/i.test(t));
+  // A still-sequence module keeps the render to a few frames. Windows AE has a PNG one; macOS AE has none, but has
+  // "TIFF Sequence with Alpha" (seen on AE 26.2.1).
+  const seqTemplates = om.result ?? [];
+  const pngTemplate = seqTemplates.find((t) => /png/i.test(t)) ?? seqTemplates.find((t) => /tiff sequence/i.test(t));
+  const seqExt = pngTemplate && !/png/i.test(pngTemplate) ? "tif" : "png";
   r = await call("ae_aerender_start", {
     expect,
     comp_name: "Smoke",
-    output_path: path.join(RENDER, pngTemplate ? "smoke_[#####].png" : "smoke.avi"),
+    output_path: path.join(RENDER, pngTemplate ? `smoke_[#####].${seqExt}` : "smoke.avi"),
     start_frame: 0,
     end_frame: 4,
     ...(pngTemplate ? { output_module_template: pngTemplate } : {}),
@@ -2168,10 +2291,10 @@ async function main() {
       item_index: idx,
       comp_id: qComp,
       time_span: { start: 0, duration: 0.2 },
-      ...(pngTemplate ? { output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, "w5rq_[#####].png") }] } : {}),
+      ...(pngTemplate ? { output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, `w5rq_[#####].${seqExt}`) }] } : {}),
       expect,
     });
-    check("ae_render_queue_edit (a short time span" + (pngTemplate ? ", PNG sequence output" : "") + ")", okWrite(r), why(r));
+    check("ae_render_queue_edit (a short time span" + (pngTemplate ? `, ${seqExt.toUpperCase()} sequence output` : "") + ")", okWrite(r), why(r));
     r = await call("ae_render_queue_edit", { item_index: idx, comp_id: qComp, queued: false, expect });
     q = await call("ae_render_queue_inspect", { item_index: idx });
     check("ae_render_queue_edit (queued false: the Render checkbox is off)", okWrite(r) && q.items?.[0]?.render === false, `${q.items?.[0]?.status}; ${why(r)}`);
@@ -2204,7 +2327,7 @@ async function main() {
         check("ae_verify_render (a Render Queue job: every output is checked, the import is removed)", r.ok === true && (r.job_outputs ?? []).length >= 1 && r.imported_item_state === "removed", brief(r).slice(0, 200));
       }
     } else {
-      skip("ae_aerender_start (rq_index) / ae_aerender_status / ae_verify_render (rq job)", "no PNG output module template to keep the render to a few frames");
+      skip("ae_aerender_start (rq_index) / ae_aerender_status / ae_verify_render (rq job)", "no PNG or TIFF sequence output module template to keep the render to a few frames");
     }
 
     // Removal: a dry run (a plan), then the item itself, then a row that names the wrong comp.
@@ -2226,7 +2349,7 @@ async function main() {
   if (process.env.CHROMA_SMOKE_RENDER_IN_AE !== "1") {
     skip("ae_render_queue_render / ae_render_queue_render_status", "opt-in: set CHROMA_SMOKE_RENDER_IN_AE=1 (After Effects is busy for the render)");
   } else if (!pngTemplate) {
-    skip("ae_render_queue_render / ae_render_queue_render_status", "no PNG output module template to keep the render to a few frames");
+    skip("ae_render_queue_render / ae_render_queue_render_status", "no PNG or TIFF sequence output module template to keep the render to a few frames");
   } else {
     r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "rqrender_a.mov"), expect });
     const rIdx = r.index;
@@ -2237,7 +2360,7 @@ async function main() {
       item_index: rIdx,
       comp_id: rComp,
       time_span: { start: 0, duration: 0.2 },
-      output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, "rqrender_[#####].png") }],
+      output_modules: [{ index: 1, template: pngTemplate, file: path.join(RENDER, `rqrender_[#####].${seqExt}`) }],
       queued: true,
       expect,
     });
@@ -2253,7 +2376,13 @@ async function main() {
       r = await call("ae_get_project", {});
       check("ae_get_project (during the render: refused at once, not sent to AE)", refused(r) && /rendering/i.test(why(r) + JSON.stringify(r)) && Date.now() - t0 < 5000, `${Date.now() - t0} ms; ${why(r).slice(0, 100)}`);
       r = await call("ae_status", {});
-      check("ae_status (during the render: answers with the render state)", Boolean(r.rendering) || /rendering/i.test(JSON.stringify(r)), js(r.rendering ?? r, 120));
+      if (Boolean(r.rendering) || /rendering/i.test(JSON.stringify(r))) check("ae_status (during the render: answers with the render state)", true, js(r.rendering ?? r, 120));
+      else {
+        // A 0.2 s item can finish before this call is answered (seen on macOS: the render took 1.6 s); then there is no render state to show.
+        const done = await call("ae_render_queue_render_status", { job_id: rJob });
+        if (done.state && done.state !== "running") skip("ae_status (during the render: answers with the render state)", `the render had already ended (${done.state}) when ae_status was answered`);
+        else check("ae_status (during the render: answers with the render state)", false, js(r, 120));
+      }
       let st = await call("ae_render_queue_render_status", { job_id: rJob });
       for (let i = 0; i < 150 && st.state === "running"; i++) {
         await sleep(2000);
@@ -2265,8 +2394,15 @@ async function main() {
       check("ae_get_project (after the render: AE answers again)", !r.__isError && Array.isArray(r.items ?? r.tree ?? r.children ?? [r]), brief(r).slice(0, 120));
       r = await call("ae_status", {});
       check("ae_status (after the render: no quarantine)", !r.rendering && (r.quarantine ?? []).length === 0, js(r.quarantine ?? [], 120));
-      r = await call("ae_verify_render", { path: path.join(RENDER, "rqrender_00000.png"), sequence: true, expect: { ...expect, comp_id: COMP } });
-      check("ae_verify_render (a frame from ae_render_queue_render)", r.ok === true, brief(r).slice(0, 160));
+      r = await call("ae_verify_render", { path: path.join(RENDER, `rqrender_00000.${seqExt}`), sequence: true, comp_id: rComp, expect: { ...expect, comp_id: rComp } });
+      // The item rendered 0.2 s (5 frames) of the comp; a path says nothing about the range, so the frame count
+      // is compared with the whole comp and must differ, while fps and size match.
+      const vc = Object.fromEntries((r.checks ?? []).map((c) => [c.what, c]));
+      check(
+        "ae_verify_render (a frame from ae_render_queue_render: fps and size match, the 5 rendered frames are reported)",
+        r.ok === true && vc.fps?.ok === true && vc.size?.ok === true && vc.frames?.actual === 5,
+        (r.checks ?? []).map((c) => `${c.what} ${JSON.stringify(c.actual)}${c.ok ? "" : " (comp " + JSON.stringify(c.expected) + ")"}`).join(", ") || why(r)
+      );
     }
     // Remove the DONE item again so the later steps see the queue they expect.
     const rq1 = await call("ae_render_queue_inspect", {});
@@ -2278,7 +2414,7 @@ async function main() {
   // ---------- wave 3: render batch (a frozen copy of the saved project, aerender in the background) ----------
   const rbOut = path.join(ROOT, "batch_out");
   let batchSpec = null;
-  if (pngTemplate) batchSpec = { name: "png", output_module_template: pngTemplate, extension: "png", sequence: true };
+  if (pngTemplate) batchSpec = { name: seqExt, output_module_template: pngTemplate, extension: seqExt, sequence: true };
   else {
     const lossless = (om.result ?? []).find((t) => /lossless/i.test(t));
     if (lossless) batchSpec = { name: "lossless", output_module_template: lossless, extension: "mov" };

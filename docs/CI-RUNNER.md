@@ -17,6 +17,19 @@ GitHub's hosted runners have no After Effects, so the live checks (`qa/smoke-mcp
 2. **Run it in the logged-on user's session (`run.cmd`), not as a Windows service.** A service runs in session 0, where After Effects can't open its UI or CEP panels. Use auto-logon and a logon task that starts `run.cmd`, so it comes back after a reboot.
 3. Keep After Effects open, or give the job the path to start it: set `AE_EXE` for the runner (for example `C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\AfterFX.exe`). `qa/ci-live.mjs` waits up to 5 minutes for the panel service.
 
+## A macOS runner
+The same job runs on a Mac (`live-mac` in the workflow, picked with the `os: macos` input when you start it).
+1. After Effects 2026 installed and licensed for the runner's user, Node 22, Git.
+2. Register the runner: Settings > Actions > Runners > New self-hosted runner (macOS, ARM64 or x64), follow GitHub's download and `./config.sh` steps, and add the label `after-effects`. Registering needs admin rights on the repo.
+3. **Run it in the logged-in user's session** (`./run.sh`, or `./svc.sh install` which installs a LaunchAgent for that user), not as a system LaunchDaemon: After Effects and its CEP panels need the user's window session. Keep the user logged in (auto-login) and the screen unlocked enough for AE to start.
+4. After the first checkout, link the panel from the runner's checkout: `scripts/install-dev-mac.sh --replace` (it moves an installed ZXP copy to `CEP/london.chroma.aemcp.zxp-backup-<date>`, outside `extensions/` (CEP would load a copy left in there), and never deletes it; `--uninstall --restore` puts it back). Restart AE.
+5. Set `AE_EXE` for the runner to the app (`/Applications/Adobe After Effects 2026/Adobe After Effects 2026.app`) if AE may be closed when a job starts.
+
+A Mac someone also works on is a poor runner: a job closes and creates projects (QA ones only, it refuses otherwise) and takes AE for several minutes. Start jobs by hand there, and only when AE is free.
+
+## Pull requests
+The repo is public. Never trigger this workflow on `pull_request`: a fork's pull request could change the workflow and run its own code on the runner. Run it on `push` to `main` and by hand.
+
 ## What a run does
 1. `npm ci`, build, unit tests, bundle, and the ES3 lint, as in CI.
 2. `qa/ci-live.mjs`:

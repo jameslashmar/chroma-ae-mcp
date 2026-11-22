@@ -1,3 +1,4 @@
+import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolDefinition } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
@@ -140,7 +141,7 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
     tools: [
       "ae_quarantine_status", "ae_acknowledge", "ae_checkpoint_create", "ae_checkpoint_list",
       "ae_auto_checkpoint", "ae_checkpoint_revert", "ae_variants", "ae_variants_pick", "ae_variants_discard",
-      "ae_session_changes", "ae_project_session",
+      "ae_session_changes", "ae_project_session", "ae_recent_ops",
     ],
   },
   app: {
@@ -365,7 +366,7 @@ export interface ListedTool {
 }
 
 export function fullListEntry(t: ToolDefinition<any>): ListedTool {
-  return { name: t.name, description: t.description, inputSchema: zodToJsonSchema(t.schema) };
+  return { name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, zodToJsonSchema(t.schema)) };
 }
 
 export function trimmedListEntry(t: ToolDefinition<any>): ListedTool {
@@ -397,7 +398,7 @@ export function coreInstructions(): string {
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
-    "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status.",
+    "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. It also takes an optional `idempotency_key` (a new unique string per write): a resend with the same key and arguments returns the first answer instead of running twice.",
     "",
     "Tool groups:",
     ...lines,

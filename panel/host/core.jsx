@@ -21,6 +21,38 @@
 
   // ---------- errors ----------
 
+  // Whether the current evalScript has touched the project: an undo group
+  // opened (A.withUndo) or a write that has no undo group (save, open, close,
+  // purge, replaceFont, preferences) called A.touch() first. The panel's eval
+  // wrapper calls A.beginCall() before each script, and A.formatError reports
+  // the flag, so the server can tell "nothing was changed" (not_applied) from
+  // "a change may be part-way in" (unknown).
+  var touchedThisCall = false;
+  A.beginCall = function () {
+    touchedThisCall = false;
+  };
+  A.touch = function () {
+    touchedThisCall = true;
+  };
+  A.wasTouched = function () {
+    return touchedThisCall;
+  };
+
+  // A refusal made before anything is touched: the server reports it as
+  // outcome "not_applied" with this code, even when it is thrown later than a
+  // check would normally run (the caller asserts nothing was changed).
+  A.refuse = function (code, message, extra) {
+    var e = new Error(message);
+    e.__kind = "evalscript_error";
+    e.__code = String(code || "refused");
+    e.__refused = true;
+    if (extra) {
+      if (extra.actual !== undefined) e.__actual = extra.actual;
+      if (extra.expected !== undefined) e.__expected = extra.expected;
+    }
+    throw e;
+  };
+
   function fail(kind, message, extra) {
     var e = new Error(message);
     e.__kind = kind;
@@ -53,6 +85,9 @@
     try { if (e && e.__actual !== undefined) out.actual = e.__actual; } catch (e4) {}
     try { if (e && e.__expected !== undefined) out.expected = e.__expected; } catch (e5) {}
     try { if (e && e.__sourceText !== undefined) out.sourceText = e.__sourceText; } catch (e6) {}
+    try { if (e && e.__code !== undefined) out.code = String(e.__code); } catch (e7) {}
+    try { if (e && e.__refused === true) out.refused = true; } catch (e8) {}
+    out.touched = touchedThisCall;
     return out;
   };
 
@@ -140,6 +175,7 @@
       undoDepth++;
       try { return fn(); } finally { undoDepth--; }
     }
+    touchedThisCall = true;
     app.beginUndoGroup(label || "Chroma AE MCP");
     undoDepth = 1;
     try {
@@ -1904,6 +1940,8 @@
     assertGuard(args.expect);
     var c = requireComp(args.comp_id);
     var rq = app.project.renderQueue;
+    // Outside an undo group: say the project is being touched, so a failing template is not reported as not_applied.
+    A.touch();
     var item = rq.items.add(c);
     if (args.render_settings_template) item.applyTemplate(args.render_settings_template);
     var om = item.outputModule(1);
@@ -1922,10 +1960,12 @@
       var folder = null;
       try { folder = target.parent; } catch (eParent) { folder = null; }
       if (folder && folder.exists === false) fail("bad_args", "The folder for " + args.save_as_path + " does not exist.");
+      A.touch();
       app.project.save(target);
       return { project_path: projectPath(), dirty: app.project.dirty, saved_as: args.save_as_path };
     }
     if (!app.project.file) fail("guard", "Project is unsaved; use ae_save with save_as: { path } to give it a name.");
+    A.touch();
     app.project.save();
     return { project_path: projectPath(), dirty: app.project.dirty };
   };

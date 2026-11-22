@@ -316,7 +316,9 @@ export function classifyError(err: unknown): { outcome: Outcome; fatal: boolean 
     const reason = err.message.slice(0, 500);
     if (err.kind === "guard") return { outcome: { status: "failed", error: "guard", reason, applied: false }, fatal: true };
     if (err.kind === "queued") return { outcome: { status: "failed", error: "queued", reason, applied: false }, fatal: true };
-    if (err.kind === "evalscript_error") return { outcome: { status: "failed", error: "evalscript_error", reason, applied: "unknown" }, fatal: false };
+    // The host says whether it touched the project (write outcomes): a not_applied error left this comp as it was.
+    const error = err.code ?? "evalscript_error";
+    if (err.kind === "evalscript_error") return { outcome: { status: "failed", error, reason, applied: err.outcome === "not_applied" ? false : "unknown" }, fatal: false };
     // A timeout or an unreachable AE: the script may still be running or a popup may be open.
     return { outcome: { status: "failed", error: err.kind, reason, applied: "unknown" }, fatal: true };
   }
