@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,painted,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -99,6 +99,17 @@ A known matte: an ellipse with a 6 px mask feather, two holes cut in it (Subtrac
 | chattering | 2 | 3 | 12,812 px | 0.33 of edge pixels | 9.4 px |
 
 The soft edge is measured where alpha is between 0.05 and 0.95: a 6 px feather gives 9.4 px of it. The temporary copy was removed every time.
+
+### Painted still reload (`ae_cleanplate_setup` action `reload`, `painted_check`)
+
+A still patch is made (the tool keeps a hidden copy of the PNG as rendered, `.chroma-original-<name>`), then the PNG is saved over four ways and reloaded:
+
+| Saved | `painted_check` |
+|---|---|
+| paint in the hole only | ok; the changed area [410, 210, 510, 290] is exactly the painted rect |
+| red +6 everywhere (a colour profile) | check; colour shift 6, 0, 0 levels |
+| the whole picture moved 3 px | check; offset 3, 0 px |
+| cropped to 940 px wide | check; 940 x 540 against 960 x 540 |
 
 ### Inpaint (`ae_inpaint_plate`)
 

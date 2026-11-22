@@ -1597,6 +1597,12 @@ async function setupBuild(ctx: ToolContext, args: AeCleanplateSetupArgs): Promis
           fs.rmSync(stillPath, { force: true });
           throw new PlanarError("refused", `The rendered still is ${png.width}x${png.height} and the comp is ${c.width}x${c.height}: the comp's resolution is not Full. Nothing was imported.`);
         }
+        // A copy as rendered, so the reload can tell paint from a shift, a resize or a colour-profile change.
+        try {
+          fs.copyFileSync(stillPath, originalCopyPath(stillPath));
+        } catch {
+          // Without it the reload only skips that check.
+        }
       } catch (err) {
         const temp = (err as { plateTemp?: { copy_id: number; removed: boolean; error?: string } }).plateTemp ?? isolate;
         // No copy was made: nothing was written to the project, so the error goes up as it is.
@@ -1809,6 +1815,115 @@ async function setupBuild(ctx: ToolContext, args: AeCleanplateSetupArgs): Promis
   };
 }
 
+/** Where the still's copy as rendered is kept, next to it. */
+export function originalCopyPath(stillPath: string): string {
+  return path.join(path.dirname(stillPath), `.chroma-original-${path.basename(stillPath)}`);
+}
+
+export interface PaintedCheck {
+  verdict: "ok" | "check" | "not_checked";
+  size?: { original: [number, number]; painted: [number, number] };
+  colour_shift_levels?: [number, number, number];
+  offset_px?: [number, number] | null;
+  changed_share?: number;
+  changed_bbox?: [number, number, number, number] | null;
+  findings: string[];
+}
+
+/**
+ * The painted still against the still as it was rendered: paint should change one compact area and
+ * leave the rest identical. A different size, a colour shift everywhere (a colour profile or a
+ * Levels in the save), or the whole picture moved (a crop, a canvas change) gives the patch away:
+ * it then differs from the plate outside the hole.
+ */
+export function checkPaintedStill(orig: { width: number; height: number; data: Uint8Array | Buffer }, painted: { width: number; height: number; data: Uint8Array | Buffer }): PaintedCheck {
+  const findings: string[] = [];
+  if (orig.width !== painted.width || orig.height !== painted.height) {
+    return {
+      verdict: "check",
+      size: { original: [orig.width, orig.height], painted: [painted.width, painted.height] },
+      findings: [`The painted still is ${painted.width}x${painted.height}, the rendered one was ${orig.width}x${orig.height}: it was resized or its canvas changed, so it no longer lines up with the plate. Save it at the original size.`],
+    };
+  }
+  const w = orig.width;
+  const h = orig.height;
+  const lum = (d: Uint8Array | Buffer, k: number) => (d[k * 4] + d[k * 4 + 1] + d[k * 4 + 2]) / 3;
+  // Colour: the median per-channel difference, which paint in one area does not move.
+  const med = (xs: number[]) => {
+    const v = xs.slice().sort((a, b) => a - b);
+    return v[Math.floor(v.length / 2)];
+  };
+  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 60000)));
+  const diffs: number[][] = [[], [], []];
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
+    const k = (y * w + x) * 4;
+    for (let c = 0; c < 3; c++) diffs[c].push(painted.data[k + c] - orig.data[k + c]);
+  }
+  const shift = diffs.map((d) => Math.round(med(d) * 100) / 100) as [number, number, number];
+  // Alignment: the whole-pixel offset (up to 6 px) that best matches the picture away from the paint.
+  const err = (dx: number, dy: number) => {
+    let s = 0;
+    let n = 0;
+    const vals: number[] = [];
+    const st = Math.max(2, step * 2);
+    for (let y = 8; y < h - 8; y += st) for (let x = 8; x < w - 8; x += st) {
+      const a = lum(painted.data, y * w + x);
+      const b = lum(orig.data, (y - dy) * w + (x - dx));
+      vals.push(Math.abs(a - b - (shift[0] + shift[1] + shift[2]) / 3));
+    }
+    // The paint is a minority of the pixels: judge by the best 80%.
+    vals.sort((p, q) => p - q);
+    for (let i = 0; i < Math.floor(vals.length * 0.8); i++) {
+      s += vals[i];
+      n++;
+    }
+    return n ? s / n : 0;
+  };
+  const e0 = err(0, 0);
+  let best: [number, number] = [0, 0];
+  let bestE = e0;
+  for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
+    if (!dx && !dy) continue;
+    const e = err(dx, dy);
+    if (e < bestE) {
+      bestE = e;
+      best = [dx, dy];
+    }
+  }
+  const moved = (best[0] !== 0 || best[1] !== 0) && bestE < e0 * 0.6 && e0 > 1;
+  // Where the paint is: pixels that differ by more than 8 levels once the colour shift is taken out.
+  let changed = 0;
+  let total = 0;
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  const mean = (shift[0] + shift[1] + shift[2]) / 3;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    total++;
+    if (Math.abs(lum(painted.data, y * w + x) - lum(orig.data, y * w + x) - mean) > 8) {
+      changed++;
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (shift.some((v) => Math.abs(v) >= 1.5)) findings.push(`The whole still shifted in colour by ${shift.join(", ")} levels (R, G, B) outside the paint: a colour profile, a mode change or an adjustment in the save. Save without colour management (or assign the original profile), or the patch shows a different colour than the plate.`);
+  if (moved) findings.push(`The whole still moved by ${best[0]}, ${best[1]} px against the rendered one (a crop, a canvas change, or the layer nudged in Photoshop): the patch will not line up with the plate.`);
+  const share = Math.round((changed / total) * 1000) / 1000;
+  if (!moved && share > 0.5) findings.push(`More than half of the still changed (${Math.round(share * 100)}%): more than paint in the hole; check it was saved from the right file.`);
+  if (changed === 0) findings.push("Nothing changed in the still: was the painted file saved over this path?");
+  return {
+    verdict: findings.length ? "check" : "ok",
+    colour_shift_levels: shift,
+    offset_px: moved ? best : null,
+    changed_share: share,
+    changed_bbox: x1 >= 0 ? [x0, y0, x1 + 1, y1 + 1] : null,
+    findings,
+  };
+}
+
 async function setupReload(ctx: ToolContext, args: AeCleanplateSetupArgs): Promise<Record<string, unknown>> {
   const toolName = "ae_cleanplate_setup";
   const opId = ctx.bridge.newOpId();
@@ -1864,6 +1979,18 @@ async function setupReload(ctx: ToolContext, args: AeCleanplateSetupArgs): Promi
     sheetError = errMessage(e);
   }
   const w = result as Record<string, unknown>;
+  // The painted still against the still as rendered.
+  let painted: PaintedCheck = { verdict: "not_checked", findings: [] };
+  const stillFile = (w.footage as { path?: string } | undefined)?.path;
+  if (stillFile && fs.existsSync(originalCopyPath(stillFile)) && fs.existsSync(stillFile)) {
+    try {
+      painted = checkPaintedStill(decodePngFile(originalCopyPath(stillFile)), decodePngFile(stillFile));
+    } catch (e) {
+      painted = { verdict: "not_checked", findings: [`The painted still could not be compared: ${errMessage(e)}`] };
+    }
+  } else {
+    painted.findings.push("There is no copy of the still as rendered (it was made before this check existed, or placed with still_footage_id), so the painted file was not compared.");
+  }
   return {
     ok: true,
     op_id: w.op_id,
@@ -1871,6 +1998,7 @@ async function setupReload(ctx: ToolContext, args: AeCleanplateSetupArgs): Promi
     action: "reload",
     reloaded: w.reloaded,
     footage: w.footage,
+    painted_check: painted,
     ...(sheetPath ? { before_after_sheet: sheetPath } : {}),
     ...(sheetError ? { sheet_error: sheetError } : {}),
     notes: ["Reloading is not an undo step, and the earlier pixels are gone unless you kept a copy of the PNG: the file on disk was already saved over.", "If the sheet looks unchanged, check that the PNG was saved over the path in the original result."],
@@ -1916,7 +2044,7 @@ export const cleanplateTools: ToolDefinition<any>[] = [
       "A freeze or still shows the object unless the frame is clean in the hole: the result has needs_fix: true with the fixes in order (ae_inpaint_plate into the PATCH precomp, Clone Stamp in the PATCH precomp, paint the PNG and `action: 'reload'`, or clone_offset); never report the removal done while needs_fix is true. Say `clean_frame: true` when the frozen frame is clean. " +
       "ref_time is snapped to the frame grid and must be inside the plate's in/out. A freeze bakes the plate copy's keyed or expression-driven effect parameters (Corner Pin, CC Power Pin, Transform ...) and Opacity to their value at ref_time (a stabilize rig's Corner Pin and 'Show Stabilized Plate' switch would otherwise warp or hide the frozen frame); a clone keeps its effects. Where the track (or range) does not cover the plate's in/out, the patch layer is trimmed to the keyed span and the uncovered ranges are returned (AE would otherwise hold the last key): continue the track or re-track. What is NOT measured: whether the frozen or cloned pixels are clean (needs_fix says so; a clone_offset whose spatial offset does not clear the hole plus the mask rim is flagged unless clean_frame: true), and rotation, zoom or perspective of a tracked clone. next_steps are ready-to-call argument blocks for the patch tools, with your track source as you gave it (ae_patch_check gets no region: it reads the footprint from the patch layer's masks, which includes the expansion and half the feather). The patch layer's trim is reported as confirmed only when a separate read-back shows its in/out points at the keyed span (patch_trimmed, trim_confirmed). " +
       "Renders the reference, first and last frame before the write and again after it (a separate evalScript) and returns a before/after contact sheet. Locked and 3D plates, a locked holdout, plates with separated X/Y Position (freeze, clone), parented plates (freeze, clone), a ref_time past the comp's end and an unsaved project (still) are refused. A still is an 8-bit sRGB PNG: in 16/32 bpc or linear projects prefer freeze. " +
-      "action 'reload' reloads a painted still (FootageItem.mainSource.reload(), no dialog; not an undo step) and re-renders the sheet. For a steady shot pass the work comp from ae_stabilize_roundtrip as comp_id and omit `track`; its plate copy must be visible (not a hidden or guide layer), or the still and the before/after sheets render empty. " +
+      "action 'reload' reloads a painted still (FootageItem.mainSource.reload(), no dialog; not an undo step), re-renders the sheet, and compares the painted file with the still as it was rendered (`painted_check`: a different size, a colour shift everywhere from a colour profile, the whole picture moved, and where the paint is), because any of those makes the patch differ from the plate outside the hole. For a steady shot pass the work comp from ae_stabilize_roundtrip as comp_id and omit `track`; its plate copy must be visible (not a hidden or guide layer), or the still and the before/after sheets render empty. " +
       CHAIN_NOTE +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCleanplateSetupSchema,

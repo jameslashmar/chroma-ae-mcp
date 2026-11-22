@@ -933,6 +933,60 @@ async function stageMatte(ids, expect) {
   return out;
 }
 
+// ---------- painted still reload (item 9) ----------
+
+// A still patch is made, then its PNG is "painted" four ways and reloaded: the hole only (fine), a
+// colour shift everywhere, the whole picture moved 3 px, and a resized file.
+function paintedJsx() {
+  return 'var pc9 = mk("Cal painted"); pc9.layers.add(src).name = "Plate"; ids.painted = pc9.id;';
+}
+
+async function stagePainted(ids, expect) {
+  const setup = await call("ae_cleanplate_setup", { comp_id: ids.painted, plate: { name: "Plate" }, source: "still", ref_time: 0, region: { rect: [400, 200, 120, 100] }, name: "Cal Paint", expect });
+  if (setup.ok === false || !setup.still_path) return { ok: false, message: setup.message ?? brief(setup) };
+  const stillPath = setup.still_path;
+  const orig = PNG.sync.read(fs.readFileSync(stillPath));
+  const write = (img) => fs.writeFileSync(stillPath, PNG.sync.write(img));
+  const clone = () => {
+    const p = new PNG({ width: orig.width, height: orig.height });
+    orig.data.copy(p.data);
+    return p;
+  };
+  const cases = {
+    hole_only: () => {
+      const p = clone();
+      for (let y = 210; y < 290; y++) for (let x = 410; x < 510; x++) for (let c = 0; c < 3; c++) p.data[(y * p.width + x) * 4 + c] = 90;
+      return p;
+    },
+    colour_shift: () => {
+      const p = clone();
+      for (let k = 0; k < p.data.length; k += 4) p.data[k] = Math.min(255, p.data[k] + 6);
+      return p;
+    },
+    moved_3px: () => {
+      const p = clone();
+      for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
+        const sx = Math.max(0, x - 3);
+        orig.data.copy(p.data, (y * p.width + x) * 4, (y * p.width + sx) * 4, (y * p.width + sx) * 4 + 4);
+      }
+      return p;
+    },
+    resized: () => {
+      const p = new PNG({ width: orig.width - 20, height: orig.height });
+      for (let y = 0; y < p.height; y++) orig.data.copy(p.data, y * p.width * 4, y * orig.width * 4, y * orig.width * 4 + p.width * 4);
+      return p;
+    },
+  };
+  const out = {};
+  for (const [name, make] of Object.entries(cases)) {
+    write(make());
+    const r = await call("ae_cleanplate_setup", { action: "reload", comp_id: ids.painted, patch_comp_id: setup.patch_comp.id, expect });
+    out[name] = { verdict: r.painted_check?.verdict ?? null, colour_shift: r.painted_check?.colour_shift_levels ?? null, offset: r.painted_check?.offset_px ?? null, bbox: r.painted_check?.changed_bbox ?? null, findings: (r.painted_check?.findings ?? []).map((f) => f.slice(0, 70)), message: r.ok === false ? r.message : undefined };
+  }
+  write(orig);
+  return { ok: true, cases: out };
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -1040,6 +1094,7 @@ async function main() {
       elementJsx(),
       lightJsx(),
       matteJsx(),
+      paintedJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -1138,6 +1193,11 @@ async function main() {
   if (want("matte")) {
     report.matte = await stageMatte(ids, expect);
     for (const [k, v] of Object.entries(report.matte)) console.log(`matte         ${k.padEnd(8)} ${v.ok ? `${v.verdict}; holes ${v.holes} (truth 2), garbage ${v.garbage} (3), veil ${v.veil_px} px (12800), edge ${JSON.stringify(v.edge_width_px)} px (feather 6), chatter ${v.chatter} (${k === "chatter" ? "high" : "0"}); copy removed ${v.removed}` : v.message}`);
+  }
+  if (want("painted")) {
+    report.painted = await stagePainted(ids, expect);
+    if (!report.painted.ok) console.log(`painted       ${report.painted.message}`);
+    else for (const [k, v] of Object.entries(report.painted.cases)) console.log(`painted       ${k.padEnd(13)} ${v.verdict}; colour ${JSON.stringify(v.colour_shift)} offset ${JSON.stringify(v.offset)} bbox ${JSON.stringify(v.bbox)}${v.findings.length ? `; ${v.findings[0]}` : ""}${v.message ? `; ${v.message}` : ""}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);
