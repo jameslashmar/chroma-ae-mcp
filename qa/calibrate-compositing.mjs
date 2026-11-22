@@ -889,6 +889,50 @@ async function stageLight(ids, expect) {
   return { ok: true, rows, worst_left_levels: worst("left"), worst_uncorrected_levels: worst("uncorrected") };
 }
 
+// ---------- matte check (item 8) ----------
+
+// A known matte: an ellipse with a 6 px feather, two holes cut in it, three specks of garbage and a
+// 10% veil; a second copy whose edge jumps 3 px in and out every frame (chatter).
+function matteJsx() {
+  const lines = [];
+  for (const [name, chatter] of [["steady", false], ["chatter", true]]) {
+    lines.push(`var ms_${name} = mk("Cal matte src ${name}"); var mo_${name} = ms_${name}.layers.addSolid([1, 1, 1], "Subject", ${W}, ${H}, 1);`);
+    lines.push(`function ell(layer, cx, cy, rx, ry, mode, feather) { var m = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var s = new Shape(); var k = 0.5523; s.vertices = [[cx, cy - ry], [cx + rx, cy], [cx, cy + ry], [cx - rx, cy]]; s.inTangents = [[-rx * k, 0], [0, -ry * k], [rx * k, 0], [0, ry * k]]; s.outTangents = [[rx * k, 0], [0, ry * k], [-rx * k, 0], [0, -ry * k]]; s.closed = true; m.property("ADBE Mask Shape").setValue(s); m.maskMode = mode; m.property("ADBE Mask Feather").setValue([feather, feather]); return m; }`);
+    lines.push(`var main_${name} = ell(mo_${name}, 480, 270, 170, 130, MaskMode.ADD, 6);`);
+    lines.push(`ell(mo_${name}, 430, 240, 6, 6, MaskMode.SUBTRACT, 0); ell(mo_${name}, 540, 300, 10, 8, MaskMode.SUBTRACT, 0);`);
+    if (chatter) {
+      // The edge in and out by 3 px every frame (hold keys).
+      // Adding the hole masks made the first mask's object invalid: fetch it again by index.
+      lines.push(`var ex_${name} = mo_${name}.property("ADBE Mask Parade").property(1).property("ADBE Mask Offset"); var et = []; var ev = []; for (var f = 0; f < ${FRAMES}; f++) { et.push(f / ${FPS}); ev.push(f % 2 ? 3 : 0); } ex_${name}.setValuesAtTimes(et, ev); for (var q = 1; q <= ex_${name}.numKeys; q++) ex_${name}.setInterpolationTypeAtKey(q, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);`);
+    }
+    lines.push(`var gs = [[80, 60], [880, 90], [120, 470]]; for (var g = 0; g < gs.length; g++) { var sp = ms_${name}.layers.addSolid([1, 1, 1], "Speck " + g, 5, 5, 1); sp.property("ADBE Transform Group").property("ADBE Position").setValue(gs[g]); }`);
+    lines.push(`var veil = ms_${name}.layers.addSolid([1, 1, 1], "Veil", 160, 80, 1); veil.property("ADBE Transform Group").property("ADBE Position").setValue([820, 460]); veil.property("ADBE Transform Group").property("ADBE Opacity").setValue(10);`);
+    lines.push(`var mc_${name} = mk("Cal matte ${name}"); mc_${name}.layers.add(src).name = "Plate"; var ml_${name} = mc_${name}.layers.add(ms_${name}); ml_${name}.name = "Matte"; ids.matte_${name} = mc_${name}.id;`);
+  }
+  return lines.join("\n");
+}
+
+async function stageMatte(ids, expect) {
+  const out = {};
+  for (const name of ["steady", "chatter"]) {
+    const r = await call("ae_matte_check", { comp_id: ids[`matte_${name}`], layer: { name: "Matte" }, samples: 3, expect });
+    out[name] = r.ok === false
+      ? { ok: false, message: r.message ?? brief(r) }
+      : {
+          ok: true,
+          verdict: r.verdict,
+          holes: r.frames.map((f) => f.holes.length),
+          garbage: r.frames.map((f) => f.garbage.length),
+          veil_px: r.frames.map((f) => f.veil_px),
+          edge_width_px: r.edge_width_px,
+          chatter: r.frames.map((f) => f.edge_chatter),
+          removed: r.temp_comp?.copy_removed ?? null,
+          // Truth: 2 holes, 3 specks, a 160 x 80 veil at 10%, a 6 px feather; chatter only in the second.
+        };
+  }
+  return out;
+}
+
 // ---------- inpaint (stage C) ----------
 
 // An 80 px dark object that crosses the region; at the reference frame it sits over OBJECT_HOLE.
@@ -995,6 +1039,7 @@ async function main() {
       slipJsx(),
       elementJsx(),
       lightJsx(),
+      matteJsx(),
       stageCJsx(),
       "return ids;",
     ].join("\n"),
@@ -1089,6 +1134,10 @@ async function main() {
     report.light = await stageLight(ids, expect);
     const l = report.light;
     console.log(`light         ${l.ok ? `element follows the plate's light within ${l.worst_left_levels} levels (uncorrected ${l.worst_uncorrected_levels})` : l.message}`);
+  }
+  if (want("matte")) {
+    report.matte = await stageMatte(ids, expect);
+    for (const [k, v] of Object.entries(report.matte)) console.log(`matte         ${k.padEnd(8)} ${v.ok ? `${v.verdict}; holes ${v.holes} (truth 2), garbage ${v.garbage} (3), veil ${v.veil_px} px (12800), edge ${JSON.stringify(v.edge_width_px)} px (feather 6), chatter ${v.chatter} (${k === "chatter" ? "high" : "0"}); copy removed ${v.removed}` : v.message}`);
   }
   if (want("grain_curve")) {
     report.grain_curve = await stageGrainCurve(ids);

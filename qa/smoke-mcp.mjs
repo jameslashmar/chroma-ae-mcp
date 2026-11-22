@@ -1457,6 +1457,7 @@ async function main() {
       check("ae_patch_grain (dry_run: measure only)", r.ok !== false && r.sigma_before?.plate_ring?.spatial?.length === 3, `ring ${JSON.stringify(r.sigma_before?.plate_ring?.spatial)}, patch ${JSON.stringify(r.sigma_before?.patch?.spatial)}, frozen ${r.sigma_before?.frozen_grain}; ${r.message ?? ""}`);
       r = await call("ae_patch_grain", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 2, rounds: 1, expect });
       check("ae_patch_grain (add and tune)", r.ok !== false && (r.grain_added === false || (r.write?.applied === true && r.write?.receipt?.matches === true)), `intensity ${r.start_intensity} -> ${r.final_intensity}; mode index ${r.write?.grain?.viewing_mode_index}; converged ${r.converged}; ${r.message ?? ""}`);
+      if (r.grain_added === true) check("ae_patch_grain (Size from the plate's grain texture)", typeof r.size === "number" && ["measured", "default"].includes(r.size_from) && "plate_lag1" in (r.grain_texture ?? {}), `size ${r.size} (${r.size_from}); plate texture ${r.grain_texture?.plate_lag1}, patch ${r.grain_texture?.patch_lag1}`);
       r = await call("ae_patch_finish", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 3, dry_run: true, expect });
       check("ae_patch_finish (dry_run: the plan)", r.ok !== false && r.applied === false && typeof r.measured === "object", `plan ${JSON.stringify(Object.keys(r.plan ?? {}))}; ${r.message ?? ""}`);
       r = await call("ae_patch_finish", { comp_id: CL, layer: { id: patchId }, region: holeBox, ref_time: 0, start: 0, end: 0.2, samples: 3, expect });
@@ -1556,6 +1557,79 @@ async function main() {
       check("ae_screen_replace (an insert that is the target comp is refused)", refused(r), why(r).slice(0, 120));
     } else {
       skip("ae_screen_replace", "ae_screen_corners or ae_track_read gave no corners or track to use");
+    }
+  }
+
+  // ---------- wave 6: tool families, 3D projection, camera solve check, element colour match, slip along a track ----------
+  {
+    const w6 = await call("ae_run_jsx", {
+      mutates: true,
+      label: "qa smoke: wave 6 scene",
+      expect,
+      code: [
+        "function mk(n, w, h, d) { return app.project.items.addComp(n, w, h, 1, d, 25); }",
+        `var src = app.project.itemByID(${WS.src});`,
+        "var ids = {};",
+        // 3D projection: a rotated one-node camera, four 3D nulls, AE's own toComp as the answer.
+        'var pc = mk("W6 Proj", 480, 270, 1);',
+        "var pts = [[150, 80, 100], [330, 60, -80], [240, 200, 0], [90, 230, 250]];",
+        'for (var i = 0; i < pts.length; i++) { var n = pc.layers.addNull(); n.threeDLayer = true; n.name = "P" + i; n.property("ADBE Transform Group").property("ADBE Position").setValue(pts[i]); }',
+        'var cam = pc.layers.addCamera("Cam", [240, 135]); cam.autoOrient = AutoOrientType.NO_AUTO_ORIENT; var cg = cam.property("ADBE Transform Group");',
+        'cg.property("ADBE Position").setValue([300, 100, -700]); cg.property("ADBE Orientation").setValue([10, 25, 5]); cg.property("ADBE Rotate X").setValue(-8); cg.property("ADBE Rotate Y").setValue(12); cg.property("ADBE Rotate Z").setValue(4);',
+        'cam.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValue(600);',
+        'var probe = pc.layers.addNull(); var pp = probe.property("ADBE Transform Group").property("ADBE Position"); ids.proj_truth = [];',
+        'for (var j = 0; j < pts.length; j++) { pp.expression = \'var L = thisComp.layer("P\' + j + \'"); L.toComp(L.anchorPoint);\'; var v = pp.valueAtTime(0.5, false); ids.proj_truth.push([v[0], v[1]]); }',
+        "probe.remove(); ids.proj = pc.id;",
+        // Camera solve check: the noise plate as a 3D plane under a moving camera, four nulls on it.
+        'var sc = mk("W6 Solve", 480, 270, 1); var pl = sc.layers.add(src); pl.threeDLayer = true; pl.property("ADBE Transform Group").property("ADBE Position").setValue([240, 135, 0]);',
+        'var sp = [[160, 85], [320, 85], [160, 185], [320, 185]]; for (var k = 0; k < sp.length; k++) { var sn = sc.layers.addNull(); sn.threeDLayer = true; sn.name = "Track " + k; sn.property("ADBE Transform Group").property("ADBE Position").setValue([sp[k][0], sp[k][1], 0]); }',
+        'var sca = sc.layers.addCamera("Solve Cam", [240, 135]); sca.autoOrient = AutoOrientType.NO_AUTO_ORIENT; var sg = sca.property("ADBE Transform Group");',
+        'sg.property("ADBE Position").setValuesAtTimes([0, 0.96], [[240, 135, -600], [290, 115, -520]]); sg.property("ADBE Rotate Y").setValuesAtTimes([0, 0.96], [0, -5]); sca.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValue(600);',
+        "ids.solve = sc.id;",
+        // Element colour match: the plate shifted 150 px right as the element, masked (layer x 150-310 is comp x 220-380), red output white 0.85.
+        'var ec = mk("W6 Element", 480, 270, 1); ec.layers.add(src).name = "Plate"; var el = ec.layers.add(src); el.name = "Element"; el.property("ADBE Transform Group").property("ADBE Position").setValue([390, 135]);',
+        'var em = el.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var es = new Shape(); es.vertices = [[150, 40], [310, 40], [310, 230], [150, 230]]; es.closed = true; em.property("ADBE Mask Shape").setValue(es);',
+        'var lv = el.property("ADBE Effect Parade").addProperty("ADBE Pro Levels2"); lv.name = "Mismatch"; var unit = 1; for (var q = 1; q <= lv.numProperties; q++) { if (lv.property(q).name === "Red Input White" && lv.property(q).value > 1.5) unit = lv.property(q).value; } for (var q2 = 1; q2 <= lv.numProperties; q2++) { if (lv.property(q2).name === "Red Output White") lv.property(q2).setValue(0.85 * unit); }',
+        "ids.element = ec.id;",
+        // Slip: an insert of other content parented to a moving plate (it sticks), checked along the plate's track.
+        'var lc = mk("W6 Slip", 480, 270, 1); var lp = lc.layers.add(src); lp.name = "Plate"; var lpos = lp.property("ADBE Transform Group").property("ADBE Position"); lpos.setValuesAtTimes([0, 0.96], [[240, 135], [270, 150]]);',
+        'var li = lc.layers.add(src); li.name = "Insert"; li.property("ADBE Transform Group").property("ADBE Scale").setValue([60, 60]); li.property("ADBE Transform Group").property("ADBE Position").setValue([200, 160]);',
+        'var lm = li.property("ADBE Mask Parade").addProperty("ADBE Mask Atom"); var ls = new Shape(); ls.vertices = [[250, 110], [450, 110], [450, 260], [250, 260]]; ls.closed = true; lm.property("ADBE Mask Shape").setValue(ls); li.parent = lp;',
+        "ids.slip = lc.id;",
+        "return ids;",
+      ].join("\n"),
+    });
+    const W6 = w6.result ?? {};
+    if (typeof W6.proj !== "number") {
+      skip("wave 6 (families, projection, solve check, element match, slip)", `the scene could not be built: ${brief(w6)}`);
+    } else {
+      // Tool families: an action runs its member; the old name still answers.
+      r = await call("ae_track", { action: "read", comp_id: WS.planar, source: { transform: { layer: { name: "Plate" } } }, preview: false });
+      const old = await call("ae_track_read", { comp_id: WS.planar, source: { transform: { layer: { name: "Plate" } } }, preview: false });
+      check("tool family ae_track { action: read } = ae_track_read", r.ok === true && old.ok === true && r.frames === old.frames, `${r.frames} frames vs ${old.frames}`);
+      r = await call("ae_render_queue", { action: "status" });
+      check("tool family ae_render_queue { action: status }", r.ok !== false && typeof r.numItems === "number", `${r.numItems} items`);
+
+      // 3D projection: ae_scene_3d_report's screen positions against AE's toComp (the rotation order was wrong before).
+      r = await call("ae_scene_3d_report", { comp_id: W6.proj, time: 0.5 });
+      const off = (W6.proj_truth ?? []).map((t, i) => {
+        const e = (r.layers_by_depth ?? []).find((x) => x.name === `P${i}`);
+        return e?.screen ? Math.hypot(e.screen[0] - t[0], e.screen[1] - t[1]) : Infinity;
+      });
+      check("ae_scene_3d_report (a rotated camera lands where AE's toComp does)", off.length === 4 && Math.max(...off) < 0.05, `largest miss ${Math.max(...off).toFixed(4)} px`);
+
+      // Camera solve check through the true camera: every null sticks.
+      r = await call("ae_camera_solve_check", { comp_id: W6.solve, max_frames: 6 });
+      check("ae_camera_solve_check (a true camera sticks)", r.ok === true && r.verdict === "the solve sticks" && (r.error_px?.max ?? 99) < 0.6, `${r.verdict}; error ${JSON.stringify(r.error_px)}; ${r.message ?? ""}`);
+
+      // Element colour match: one pair (the same picture on element and plate), red was darkened to 0.85.
+      r = await call("ae_color_match_element", { comp_id: W6.element, layer: { name: "Element" }, pairs: [{ name: "same area", element: { kind: "rect", rect: [240, 80, 360, 190] }, plate: { kind: "rect", rect: [90, 80, 210, 190] } }], time: 0, expect });
+      check("ae_color_match_element (undoes a known red gain)", r.applied === true && (r.worst_left_levels ?? 99) < 2 && Math.abs((r.levels?.red?.in_white ?? 1) - 0.85) < 0.03, `left ${r.worst_left_levels} levels; red ${JSON.stringify(r.levels?.red)}; ${r.message ?? ""}`);
+
+      // Slip along the plate's track: an insert parented to the plate does not slide.
+      r = await call("ae_patch_check", { comp_id: W6.slip, patch_layers: [{ name: "Insert" }], region: { kind: "rect", rect: [158, 118, 278, 208] }, region_track: { transform: { layer: { name: "Plate" } } }, times: [0, 0.2, 0.4, 0.6, 0.8], grain_probes: 0, max_renders: 30, expect });
+      const slip = (r.checks ?? []).find((c) => c.check === "slip");
+      check("ae_patch_check (slip along region_track: a parented insert sticks)", slip?.verdict === "ok" && (slip?.numbers?.max_slip_px ?? 99) < 0.5, `${slip?.summary ?? why(r)}`);
     }
   }
 

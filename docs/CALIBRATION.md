@@ -3,7 +3,7 @@
 `qa/calibrate-compositing.mjs` measures the compositing tools against answers After Effects itself knows. A real photograph is moved by keyframed Corner Pin or Transform values, darkened and tinted by solids at known opacities, covered by a known patch or object, or given a known grain. The tools never see those values; the harness compares what they report with them.
 
 ```bash
-node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,inpaint]
+node qa/calibrate-compositing.mjs --plate <image or video> [--plate-time 4] [--dir <work dir>] [--only track,colour,grain,grain_curve,projection,solve,slip,element,light,matte,inpaint]
 ```
 
 Use real footage or a photograph with texture: synthetic noise flatters a tracker. On macOS the aerial screensaver clips in `/Library/Application Support/com.apple.idleassetsd/Customer` work (pick one with buildings or trees, not open water). The same isolation rules as `qa/smoke-mcp.mjs` apply. It writes `qa/out/calibration.json`, prints a table and never fails on a number.
@@ -87,6 +87,18 @@ AE's Levels gamma lifts the mids above 1 (out = in^(1/gamma)), as the tool assum
 ### Light tracking on an element (`ae_patch_color_match` on any layer)
 
 The colour shot's light change (the plate darkened by a black solid to 25% and tinted by a warm Multiply solid to 60% over the shot), with an element of other content on top (the photo at 60% and shifted, masked to 220 x 180): run on the element, the colour match makes it follow the plate's light. Its colour at every checked frame was its colour at 0 times the shot's gain within **0.19 levels** (15.1 levels uncorrected). The fit works on ratios against `ref_time`, so the element's own content does not matter; light direction and shadows are not matched.
+
+### Matte check (`ae_matte_check`)
+
+A known matte: an ellipse with a 6 px mask feather, two holes cut in it (Subtract masks), three 5 px specks and a 160 x 80 solid at 10% (a veil); a second copy whose mask expansion jumps 3 px in and out every frame.
+
+| | Holes | Garbage | Veil | Edge chatter | Soft edge |
+|---|---|---|---|---|---|
+| truth | 2 | 3 | 12,800 px | none / every frame | 6 px feather |
+| steady | 2 | 3 | 12,812 px | 0 | 9.4 px |
+| chattering | 2 | 3 | 12,812 px | 0.33 of edge pixels | 9.4 px |
+
+The soft edge is measured where alpha is between 0.05 and 0.95: a 6 px feather gives 9.4 px of it. The temporary copy was removed every time.
 
 ### Inpaint (`ae_inpaint_plate`)
 
