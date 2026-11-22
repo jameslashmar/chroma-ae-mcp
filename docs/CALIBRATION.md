@@ -138,3 +138,21 @@ A 100 x 100 hole over an 80 px object that crosses the frame; the truth is the p
 | locked-off, temporal (`auto`) | 0.07 levels | 60 dB |
 | moving camera, temporal along an `ae_track_multi` track | 0.6 levels | 47 dB |
 | spatial only (no other frames) | 11.2 levels | 24 dB |
+
+## Results on Windows (AE 26.2.1, 2026-11-22)
+
+Emre's Windows PC. The plate is a textured photograph of a rock surface (a scanned rock, the Windows wallpapers are smooth renders), not the Mac's London aerial, so tracking numbers are not like for like. The run took 15.5 minutes; `--only grain,grain_curve` was run again after `b3a9b2a`.
+
+- **Projection:** one-node and two-node cameras, mean 0 px, max 0.001 px over 32 points (macOS 0.000).
+- **Add Grain curve:** the same as macOS to two decimals, so no per-platform `ADD_GRAIN_CURVE` or tone factor is needed. At Intensity 0.3 and gray 0.5, Size 0.25 / 0.5 / 0.75 / 1 / 1.5 / 2 gave sigma 2.576 / 1.667 / 1.01 / 0.773 / 1.125 / 1.483 and neighbour correlation 0.001 / 0.254 / 0.585 / 0.681 / 0.841 / 0.907. Size 0.25 at Intensity 0.1 / 0.2 / 0.45 / 0.6 / 0.8 gave 0.896 / 1.729 / 3.853 / 5.134 / 6.846. Gray 0.25 / 0.5 / 0.75 at Size 0.25, Intensity 0.3 gave 3.862 / 2.576 / 1.32.
+- **`ae_patch_grain`** (AE Noise on the photograph): Size 0.253 measured; first Intensity 0.666 before `b3a9b2a` and 0.527 after (the tone factor); final Intensity 0.559; the patch ends at 0.865 of the plate by the per-pixel measure.
+- **Tracking** (true mean error / `expected_error_px`, px): clean 0.066 / 0.072, fast 0.116 / 0.082, defocus 0.056 / 0.035, grain 0.115 / 0.134, low contrast 0.074 / 0.064, motion blur 0.539 / 0.153 (3.5x; macOS 1.6x), parallax 0.197 / 0.188 with one sliding point and no frame flagged. All 49 of 49 frames solved.
+- **Colour** (`ae_patch_color_match`): worst residual 1.27 levels (33.0 uncorrected); light tracking 1.19 (34.0). macOS: 0.2 (8.9) and 0.19 (15.1). On a second, brighter plate: 1.78 (90.5) and 1.49 (84.1). The residual is 2-4% of the uncorrected error on both platforms, so it follows the plate (8-bit rounding of a darkened bright plate is the likely part). Running one plate on both platforms would settle it.
+- **Solve check:** true camera, plane nulls 0.07-0.17 px (macOS 0.04-0.28); off camera, tool 2.46-4.03 against true 3.14-4.95 px.
+- **Slip:** locked insert max 0.061 px; drifting 0.62 / 1.24 / 1.83 / 2.48 / 3.02 against true 0.61 / 1.22 / 1.84 / 2.45 / 3.00.
+- **Element colour match:** 18.6 to 0.19 levels; red input white 0.852 (truth 0.85), green gamma 0.758 (0.769), blue input black 0.061 (0.06).
+- **Matte:** holes 2, garbage 3, veil 12,812 px (12,800), soft edge 9.37 px for a 6 px feather, chatter 0 steady and 0.326 chattering. Same as macOS.
+- **Painted check:** the four cases as on macOS.
+- **Clone offset:** the hole is 0.56-1.37 levels from the truth; a shift-only clone would be 5.4-6.0 px off.
+- **Lens:** straight 0.052 to 0.052 px; field of view 40: k -0.074, corner 40.5 px, 0.232 to 0.045 px; field of view 80: k -0.268, corner 147.8 px, 0.754 to 0.378 px. Verdicts as on macOS.
+- **Inpaint:** static temporal 0.00 levels (99 dB), moving temporal 0.40 (50.1 dB), spatial only 3.48 (34.3 dB).

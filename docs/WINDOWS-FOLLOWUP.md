@@ -56,3 +56,20 @@ When all of this is green, commit, and produce the evidence on the commit: `node
 { "tool": "stdio-relay", "check": "full and core tools/list over 64 KB arrive whole on macOS against the live panel", "result": "pass",
   "notes": "panel/tools/stdio-relay.cjs from b68236d, Node 20.20.2, AE 26.2.1. 5 cases x 3 runs, all exit 0 and valid JSON: claude-code -> 180 tools, 806,881 chars; claude-ai and local-agent-mode-chroma-ae -> 36 tools, 80,744 chars; CHROMA_AE_MCP_TOOLSET=full with claude-ai -> 180; =core with claude-code -> 36. Windows reference: core 80,570, full 805,359." }
 ```
+
+## Results on Windows, 2026-11-22
+
+Emre's Windows PC, AE 26.2.1, Node 22.23.2, branch `mac/live-fixes-2026-11-22` (first run on `1159b80`, then rebased onto `b3a9b2a`). Two bugs were found and fixed on the way (`5b903d1`, `a4d01e1`); see `docs/HANDOVER.md`. Build, 5976 unit tests and the ES3 lint (0 issues) pass; `qa/live-reliability.mjs` 10/10.
+
+1. **Pre-comp scene edit detection:** AE 26.2.1 on Windows refuses it too ("... is not video layer"). The up-front refusal in `timeline.jsx` is right on both; no change.
+2. **Cut after a semi-transparent shot:** same as macOS. `shots_alpha.mov` (ProRes 4444, 60% alpha) gives 1 cut, `shots_opaque.mov` gives 2.
+3. **aerender output under another extension:** not run. aerender is refused up front with `too_many_cep_extensions` (six other auto-starting CEP extensions on this PC; at least two must be turned off). Still unverified on Windows.
+4. **`ae_annotate_frame` on a 3D comp, AE 26.3:** not run, AE 26.3 is not installed here. On 26.2.1 the smoke step passes.
+5. **CEP freeze:** Windows keeps answering. RESULT: "the service keeps answering while AE runs ExtendScript." A 7 s eval (7.7 s) and a 12 s eval (13.3 s): `/health` in 3 ms on a new connection, 2 ms on a reused one, no reset. The busy refusals hold on Windows; macOS needs its own answer.
+6. **`Connection: close`:** `stdio-relay.test.ts` passes. Dev relay as an MCP client: `claude-ai` 36 tools, 81,087 characters, 67 ms; `claude-code` 134 tools, 796,505 characters, 84 ms; inside the Claude Desktop Microsoft Store package 36 tools, 72 ms. Claude Code's HTTP connection made every call of the session without a reset. The Desktop app itself was not opened for a call.
+7. **Smoke:** 578 checks (526 in the last Windows evidence). ffmpeg video fixtures, Bahnschrift variable font and the W5Text step pass. Failures are only the 12 aerender-family checks (item 3's cause).
+8. **Second copy of the extension:** the system-wide folder held the released 0.7.4 panel, which CEP loaded in place of the dev link. It was moved out for the run and back afterwards. `qa/ci-live.mjs` scans only the user folder and does not see it; the `/health` `extensionDir` check does.
+9. **Calibration:** projection 0.001 px max (Mac 0.000); the Add Grain curve is the same as the Mac's to two decimals, so no per-platform `ADD_GRAIN_CURVE`. Plate and other numbers in `docs/CALIBRATION.md`.
+10. **New tools:** all ran in smoke wave 6 and the calibration and passed. Wave 6: projection 0.0006 px, solve check mean 0.028 px, element colour match left 1.17 levels, slip along `region_track` 0.029 px, matte check clean and the copy removed.
+
+**Then (evidence):** `6a3637e`, `qa/live-evidence.mjs` on `de8388a`: 566/578 passed, 13 skipped, the 12 aerender failures explained in the notes, the in-AE render passed (2 items DONE, 5 frames, fps and size match).
