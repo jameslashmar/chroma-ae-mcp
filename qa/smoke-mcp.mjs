@@ -2430,6 +2430,8 @@ async function main() {
   } else if (!pngTemplate) {
     skip("ae_render_queue_render / ae_render_queue_render_status", "no PNG or TIFF sequence output module template to keep the render to a few frames");
   } else {
+    // The aerender step makes this folder; it is refused on a machine with too many CEP extensions, and AE then fails with "Directory does not exist".
+    fs.mkdirSync(RENDER, { recursive: true });
     r = await call("ae_render_queue_add", { comp_id: COMP, output_path: path.join(RENDER, "rqrender_a.mov"), expect });
     const rIdx = r.index;
     check("ae_render_queue_add (item for ae_render_queue_render)", r.applied && typeof rIdx === "number", `index ${rIdx}`);
