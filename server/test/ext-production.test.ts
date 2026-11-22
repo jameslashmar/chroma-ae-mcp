@@ -114,11 +114,20 @@ describe("ae_render_templates", () => {
         looked = true;
         return { source: "none", needs_item: true, render_settings: [], output_modules: [] };
       }
-      return { source: "temporary_item", render_settings: ["Best Settings"], output_modules: ["Lossless"] };
+      return {
+        ae_version: "test-1",
+        render_settings: ["Best Settings"],
+        templates: [
+          { name: "Lossless", format: "QuickTime", extension: "mov", video: true, alpha: false, sequence: false },
+          { name: "H.264 - 15 Mbps", format: "H.264", extension: "mp4", video: true, alpha: false, sequence: false, bitrate_mbps: 15 },
+          { name: "TIFF Sequence with Alpha", format: "TIFF Sequence", extension: "tif", video: true, alpha: true, sequence: true },
+        ],
+      };
     });
-    const out = await tool("ae_render_templates").handler({ allow_temp: true, expect: expectArg }, ctx);
-    expect(calls.map((c) => c.fn)).toEqual(["renderTemplates", "checkGuard", "rqStatus", "renderTemplates", "rqStatus"]);
-    expect(out).toMatchObject({ source: "temporary_item", audio_template_found: false });
+    const out = await tool("ae_render_templates").handler({ allow_temp: true, expect: expectArg }, { ...ctx, dataDir: tempDir("chroma-formats-") });
+    expect(calls.map((c) => c.fn)).toEqual(["renderTemplates", "checkGuard", "rqStatus", "renderFormatCatalog", "rqStatus"]);
+    expect(out).toMatchObject({ source: "temporary_item", audio_template_found: false, output_modules: ["Lossless", "H.264 - 15 Mbps", "TIFF Sequence with Alpha"] });
+    expect(out.intents).toMatchObject({ quicktime: ["Lossless"], h264: [{ name: "H.264 - 15 Mbps", bitrate_mbps: 15 }], image_sequence: [{ name: "TIFF Sequence with Alpha", extension: "tif", alpha: true }] });
     expect(out.receipt.matches).toBe(true);
   });
 });

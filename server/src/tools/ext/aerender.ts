@@ -4,6 +4,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
+import { adjustOutputPath, catalogFor, entryFor } from "./render-formats.js";
 import { BridgeError } from "../../host.js";
 import { buildJsxCall, pathsMatchForGuard } from "../../jsx.js";
 import { defaultDataDir } from "../../quarantine.js";
@@ -2488,6 +2489,9 @@ export function createAerenderTools(
         const cepRefusal = cepAutostartRefusal("ae_aerender_start", args.allow_many_cep_extensions);
         if (cepRefusal) return cepRefusal;
         const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
+        // AE names the file after the template's format (render-formats.ts): fit the path to it when the template was measured.
+        const adjusted = !fromQueue && args.output_path ? adjustOutputPath(args.output_path, entryFor(catalogFor(ctx), args.output_module_template)) : null;
+        if (adjusted) args = { ...args, output_path: adjusted.to };
         const compName = args.comp_name ?? "";
         const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;
         // Before the lease: the probe takes about a second and must not hold the queue.
@@ -2684,6 +2688,7 @@ export function createAerenderTools(
                 project_path: initialRecord.project_path,
                 comp_name: initialRecord.comp_name,
                 output_path: initialRecord.output_path,
+                ...(adjusted ? { output_path_adjusted: adjusted } : {}),
                 aerender_path: initialRecord.aerender_path,
                 args: initialRecord.args,
                 log_path: initialRecord.log_path,

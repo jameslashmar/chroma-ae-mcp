@@ -411,6 +411,80 @@
     });
   };
 
+  // ---------- what each output module template writes ----------
+
+  // A script cannot read or set an output module's codec (Format is read-only and no setting names
+  // the codec, measured on AE 26.2.1), so each template is measured as it is: applied to the output
+  // module of a temporary render-queue item and read back with getSettings. The item (and a temporary
+  // comp when the project has none) is removed again in the same undo group.
+  var FORMAT_EXT = [
+    [/^QuickTime$/i, "mov"], [/^H\.264$/i, "mp4"], [/^H\.265|HEVC/i, "mp4"], [/^AVI$/i, "avi"],
+    [/TIFF/i, "tif"], [/Photoshop/i, "psd"], [/PNG/i, "png"], [/JPEG/i, "jpg"], [/OpenEXR|EXR/i, "exr"],
+    [/DPX|Cineon/i, "dpx"], [/Targa/i, "tga"], [/IFF/i, "iff"], [/AIFF/i, "aif"], [/WAV/i, "wav"], [/MP3/i, "mp3"]
+  ];
+  function formatExtension(format) {
+    for (var i = 0; i < FORMAT_EXT.length; i++) {
+      if (FORMAT_EXT[i][0].test(format)) return FORMAT_EXT[i][1];
+    }
+    return null;
+  }
+
+  A.renderFormatCatalog = function (args) {
+    assertGuard(args.expect);
+    var rq = app.project.renderQueue;
+    var comp = null;
+    if (args.comp_id !== undefined && args.comp_id !== null) comp = requireComp(args.comp_id);
+    else {
+      for (var i = 1; i <= app.project.numItems && !comp; i++) {
+        if (app.project.item(i) instanceof CompItem) comp = app.project.item(i);
+      }
+    }
+    return A.withUndo(args.label || "Read render formats", function () {
+      var madeComp = null;
+      if (!comp) {
+        madeComp = app.project.items.addComp("chroma format probe", 64, 64, 1, 1, 25);
+        comp = madeComp;
+      }
+      var item = rq.items.add(comp);
+      var om = item.outputModule(1);
+      var names = [];
+      try { names = om.templates; } catch (eT) { names = []; }
+      var out = [];
+      for (var t = 0; t < names.length && out.length < 200; t++) {
+        var name = String(names[t]);
+        if (name.indexOf("_HIDDEN") === 0) continue;
+        var row = { name: name };
+        try {
+          om.applyTemplate(name);
+          var s = om.getSettings(GetSettingsFormat.STRING);
+          var format = String(s["Format"] || "");
+          var channels = String(s["Channels"] || "");
+          row.format = format;
+          row.extension = formatExtension(format);
+          row.video = String(s["Video Output"]) !== "false";
+          row.alpha = /Alpha/i.test(channels);
+          row.alpha_only = /^Alpha$/i.test(channels);
+          row.sequence = /Sequence/i.test(format);
+          row.audio = String(s["Output Audio"] || "");
+          row.depth = String(s["Depth"] || "");
+          var mbps = /(\d+(?:\.\d+)?)\s*Mbps/i.exec(name);
+          if (mbps) row.bitrate_mbps = Number(mbps[1]);
+        } catch (eA) {
+          row.error = String(eA && eA.message ? eA.message : eA);
+        }
+        out.push(row);
+      }
+      var rs = [];
+      try {
+        var rsl = item.templates;
+        for (var r = 0; r < rsl.length; r++) if (String(rsl[r]).indexOf("_HIDDEN") !== 0) rs.push(String(rsl[r]));
+      } catch (eR) {}
+      item.remove();
+      if (madeComp) madeComp.remove();
+      return { ae_version: String(app.version), templates: out, count: out.length, render_settings: rs };
+    });
+  };
+
   // ---------- saving render templates ----------
 
   function rqTarget(args) {

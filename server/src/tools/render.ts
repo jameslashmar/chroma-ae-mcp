@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
+import { adjustOutputPath, catalogFor, entryFor } from "./ext/render-formats.js";
 import { BridgeError, SLOW_TIMEOUT_MS } from "../host.js";
 import { buildJsxCall } from "../jsx.js";
 import { defaultDataDir } from "../quarantine.js";
@@ -463,6 +464,9 @@ export const renderTools: ToolDefinition<any>[] = [
     handler: async (args, ctx) => {
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
+      // AE names the file after the template's format (render-formats.ts): fit the path to it when the template was measured.
+      const adjusted = adjustOutputPath(args.output_path, entryFor(catalogFor(ctx), args.output_module_template));
+      const outputPath = adjusted ? adjusted.to : args.output_path;
       const effectiveExpect = {
         project_path: args.expect.project_path,
         comp_id: args.expect.comp_id ?? args.comp_id,
@@ -479,7 +483,7 @@ export const renderTools: ToolDefinition<any>[] = [
             // Read-only, before the checkpoint: a refusal leaves no trace.
             let preflight: Awaited<ReturnType<typeof runPreflightGate>>["summary"] | undefined;
             if (args.preflight) {
-              const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId, comp_ids: [args.comp_id], planned_output: args.output_path });
+              const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId, comp_ids: [args.comp_id], planned_output: outputPath });
               if (gate.blocked) return preflightRefusal("ae_render_queue_add", gate.summary);
               preflight = gate.summary;
             }
@@ -498,7 +502,7 @@ export const renderTools: ToolDefinition<any>[] = [
               id: opId,
               script: buildJsxCall("rqAdd", {
                 comp_id: args.comp_id,
-                output_path: args.output_path,
+                output_path: outputPath,
                 output_module_template: args.output_module_template,
                 render_settings_template: args.render_settings_template,
                 expect: effectiveExpect,
@@ -559,6 +563,7 @@ export const renderTools: ToolDefinition<any>[] = [
               result: addResp.result,
               checkpoint,
               ...(preflight ? { preflight } : {}),
+              ...(adjusted ? { output_path_adjusted: adjusted } : {}),
               receipt,
             };
           }

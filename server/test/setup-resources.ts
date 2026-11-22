@@ -1,7 +1,11 @@
 import { beforeEach } from "vitest";
 import { resetHungFsCalls } from "../src/seqscan.js";
 import { resourceDeps } from "../src/system-resources.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { resetCepAutostartCache } from "../src/tools/ext/aerender.js";
+import { forgetCatalogs, renderFormatsDeps } from "../src/tools/ext/render-formats.js";
 import { pngWaitDeps } from "../src/tools/render.js";
 
 // No test starts PowerShell: every test file gets a probe that finds nothing. A test that wants a reading sets resourceDeps.run itself.
@@ -19,3 +23,7 @@ pngWaitDeps.timeoutMs = 1_000;
 
 // No test reads this machine's CEP extension folders: aerender tools would refuse on a PC with many auto-start extensions. A test that wants a list sets it itself.
 beforeEach(() => resetCepAutostartCache([]));
+
+// No test reads or writes this machine's measured render formats (render-formats.json in the real data dir).
+renderFormatsDeps.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-formats-test-"));
+beforeEach(() => forgetCatalogs());
