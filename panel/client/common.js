@@ -781,7 +781,122 @@
     return { start: true, kind: "unknown", reason: "the render-engine check was inconclusive (" + raw.slice(0, 60) + ")" };
   }
 
+  // ---------- Dynamic Link guard ----------
+  // Premiere Pro and Media Encoder render linked comps in a hidden After Effects that their
+  // dynamiclinkmanager starts ("AfterFX.exe -m" on Windows, no window). It loads CEP extensions
+  // like any After Effects and its app.isRenderEngine is false, so the render-engine guard lets it
+  // through. Started before the real After Effects, it took port 7790 and agents drove an After
+  // Effects nobody could see (seen 2026-11-24). The parent of its After Effects process gives it away.
+  var DL_CHECK_TIMEOUT_MS = 15 * 1000;
+  var DL_MAX_HOPS = 8;
+
+  function processBaseName(name) {
+    var s = String(name || "").trim();
+    var cut = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+    return cut >= 0 ? s.slice(cut + 1) : s;
+  }
+
+  function isAeProcessName(name) {
+    return /^(afterfx(\.exe)?|after effects)$/i.test(processBaseName(name));
+  }
+
+  function isDynamicLinkParentName(name) {
+    return /^dynamiclinkmanager(\.exe)?$/i.test(processBaseName(name));
+  }
+
+  // Lines "pid ppid name" (the name may hold spaces, and is a full path from macOS ps).
+  function parseProcessRows(text) {
+    var rows = [];
+    String(text || "").split(/\r?\n/).forEach(function (line) {
+      var m = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
+      if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), name: m[3] });
+    });
+    return rows;
+  }
+
+  // Walks up from startPid to the nearest After Effects process. Pure.
+  // Returns { dynamicLink, reason } where reason names the processes; no After Effects above us
+  // (or a table that says nothing) is not Dynamic Link.
+  function decideDynamicLink(rows, startPid) {
+    var byPid = {};
+    for (var i = 0; i < rows.length; i++) byPid[rows[i].pid] = rows[i];
+    var pid = startPid;
+    for (var hop = 0; hop < DL_MAX_HOPS; hop++) {
+      var row = byPid[pid];
+      if (!row) break;
+      if (isAeProcessName(row.name)) {
+        var parent = byPid[row.ppid];
+        var parentName = parent ? processBaseName(parent.name) : "";
+        var who = processBaseName(row.name) + " pid " + row.pid + " was started by " +
+          (parentName || "an exited process") + " pid " + row.ppid;
+        if (parent && isDynamicLinkParentName(parent.name)) {
+          return { dynamicLink: true, reason: who + ", the Dynamic Link of Premiere Pro or Media Encoder" };
+        }
+        return { dynamicLink: false, reason: who };
+      }
+      if (row.ppid === pid) break;
+      pid = row.ppid;
+    }
+    return { dynamicLink: false, reason: "no After Effects process found above pid " + startPid };
+  }
+
+  // The rows decideDynamicLink needs, from the OS: cb(err, text). Windows walks the parent chain
+  // with CIM (Windows PowerShell 5.1 is always there); macOS reads ps. Other platforms: no rows.
+  function readProcessChain(startPid, cb) {
+    var done = false;
+    function finish(err, text) {
+      if (done) return;
+      done = true;
+      cb(err, text);
+    }
+    try {
+      var cp = childProcess;
+      if (process.platform === "win32") {
+        var script =
+          "$ProgressPreference='SilentlyContinue'; $p=" + Number(startPid) + "; " +
+          "for($i=0;$i -lt " + DL_MAX_HOPS + " -and $p -gt 0;$i++){ " +
+          "$x=Get-CimInstance Win32_Process -Filter \"ProcessId=$p\" -Property ProcessId,ParentProcessId,Name; " +
+          "if(-not $x){break}; \"$($x.ProcessId) $($x.ParentProcessId) $($x.Name)\"; $p=$x.ParentProcessId }";
+        var encoded = Buffer.from(script, "utf16le").toString("base64");
+        var ps = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        cp.execFile(
+          ps,
+          ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+          { timeout: DL_CHECK_TIMEOUT_MS, windowsHide: true },
+          function (err, stdout) { finish(err || null, String(stdout || "")); }
+        );
+        return;
+      }
+      if (process.platform === "darwin") {
+        cp.execFile("/bin/ps", ["-A", "-o", "pid=,ppid=,comm="], { timeout: DL_CHECK_TIMEOUT_MS }, function (err, stdout) {
+          finish(err || null, String(stdout || ""));
+        });
+        return;
+      }
+      finish(null, "");
+    } catch (e) {
+      finish(e, "");
+    }
+  }
+
+  // cb({ dynamicLink, reason, error? }). Fails open: an error or an unreadable table is not Dynamic Link.
+  function checkDynamicLinkLaunch(startPid, cb, reader) {
+    (reader || readProcessChain)(startPid, function (err, text) {
+      var rows = parseProcessRows(text);
+      var verdict = decideDynamicLink(rows, startPid);
+      if (err && !verdict.dynamicLink) verdict.error = err && err.message ? err.message : String(err);
+      cb(verdict);
+    });
+  }
+
   var api = {
+    DL_CHECK_TIMEOUT_MS: DL_CHECK_TIMEOUT_MS,
+    isAeProcessName: isAeProcessName,
+    isDynamicLinkParentName: isDynamicLinkParentName,
+    parseProcessRows: parseProcessRows,
+    decideDynamicLink: decideDynamicLink,
+    readProcessChain: readProcessChain,
+    checkDynamicLinkLaunch: checkDynamicLinkLaunch,
     GUARD_PROBE_SCRIPT: GUARD_PROBE_SCRIPT,
     GUARD_TIMEOUT_MS: GUARD_TIMEOUT_MS,
     GUARD_FORCE_ENV: GUARD_FORCE_ENV,
