@@ -80,6 +80,10 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
 
+**Done in 0.7.5** (live-checked on AE 26.3 on Windows):
+- a Stop / Start pill left of the panel's status badge: stopped, every eval is refused before it reaches After Effects and the agent is told the user pressed Stop; the call in flight finishes, the port stays held, and each launch starts with the MCP on;
+- the service no longer starts in the hidden After Effects that Premiere Pro or Media Encoder starts for Dynamic Link (its parent is `dynamiclinkmanager`), so it can't take port 7790 from the After Effects on screen. The macOS side of the check hasn't been seen live.
+
 **Done in 0.7.4** (#18 and follow-ups, live-checked on AE 26.2.1 on Windows):
 - the Microsoft Store build of Claude Desktop no longer gets 401s from a stale token copy in its package's private AppData: the service updates that copy, the relay retries once and names it, and `relay-diagnose` reports `store_app_token_copy`;
 - Media Encoder: the preset read is dated when the prefs are old, HEVC maps to `mp4`, and a finished render no longer leaves an empty `follow` block;
