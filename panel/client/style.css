@@ -142,6 +142,47 @@ input:focus-visible {
 .badge.err { background: var(--err-bg); color: var(--err-text); }
 .badge.err .badge-dot { background: var(--err-dot); }
 
+.badge.off { background: #2e2e2e; color: var(--text-muted); }
+.badge.off .badge-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted); }
+
+/* Start / Stop, left of the badge: a pill shaped like the badge. Stop is red, Start green. */
+.serve-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: #333;
+  color: #ccc;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+.serve-btn[data-state="serving"] { background: var(--err-bg); color: var(--err-text); }
+.serve-btn[data-state="serving"] .serve-icon { color: var(--err-dot); }
+.serve-btn[data-state="stopped"] { background: var(--ok-bg); color: var(--ok-text); }
+.serve-btn[data-state="stopped"] .serve-icon { color: var(--ok-dot); }
+.serve-btn:hover:not(:disabled) { filter: brightness(1.25); }
+.serve-btn:disabled { opacity: 0.55; cursor: default; }
+.serve-btn[data-state="serving"] .serve-icon-start,
+.serve-btn[data-state="stopped"] .serve-icon-stop { display: none; }
+.serve-icon { width: 7px; height: 7px; flex-shrink: 0; }
+
+/* The button takes the push to the right; the badge sits straight after it. */
+.header .serve-btn:not([hidden]) + .badge { margin-left: 0; }
+
+/* Narrow panels keep the icon only (the button's aria-label and tooltip still name it). */
+@media (max-width: 379px) {
+  .serve-label { display: none; }
+  .serve-btn { padding: 3px 7px; }
+}
+
 .badge-host:not(:empty)::before {
   content: " \00B7  ";
 }
@@ -1200,7 +1241,7 @@ body.no-chart .chart-card { display: none; }
   .chart-card { display: none; }
   .icon-btn { width: 22px; height: 22px; }
   .icon-btn svg { width: 14px; height: 14px; }
-  .badge { padding: 2px 8px; }
+  .badge, .serve-btn { padding: 2px 8px; }
   .tiles { gap: 0 10px; }
   .tile-label, .tile-unit { font-size: 10px; }
   .tile-value { font-size: 11px; line-height: 1.2; }

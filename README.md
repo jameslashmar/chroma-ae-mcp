@@ -88,6 +88,12 @@ Several items come from [premiere-pro-mcp](https://github.com/leancoderkavy/prem
 
 **The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** lists each tool call and checkpoint, and the service's own events (started, token loaded, warnings), newest first, with the raw service log inside it. From 600 px wide the panel has two columns with the Log always open on the right. In one column the Log sits below the tiles and opens by itself when there is room; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. When space runs out the chart is hidden first.
 
+**Stop / Start**, left of the status badge, switches this After Effects' MCP off and on.
+- **Stopped**, the badge reads Stopped. Every tool call that would touch AE is refused before it runs, and the agent is told you stopped it and to wait for Start.
+- A call already running finishes first; calls waiting behind it are refused.
+- The port stays with this AE, so agents get that message rather than "can't connect".
+- Each AE launch starts with the MCP on.
+
 **The gear** in the panel's header opens **New token**, **Save diagnostics**, **Check for updates** and the version. It works with the arrow keys and Escape. Actions that change something (New token, Clear render lock) ask first in a dialog inside the panel, with Cancel selected.
 
 ### Updates

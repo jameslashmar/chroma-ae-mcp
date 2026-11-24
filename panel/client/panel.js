@@ -37,6 +37,8 @@
   var $writeDesktopBtn = typeof document !== "undefined" ? document.getElementById("write-desktop-btn") : null;
   var $regenTokenBtn = typeof document !== "undefined" ? document.getElementById("regen-token-btn") : null;
   var $log = typeof document !== "undefined" ? document.getElementById("log") : null;
+  var $serveBtn = typeof document !== "undefined" ? document.getElementById("serve-btn") : null;
+  var $serveLabel = typeof document !== "undefined" ? document.getElementById("serve-label") : null;
 
   var host = common.createHostAdapter();
   var paths = common.getPaths();
@@ -665,6 +667,51 @@
     return samePath(inst.host_path, mine) ? null : inst;
   }
 
+  // ---------- Start / Stop button (left of the badge) ----------
+  // serveState: "serving", "stopped", or null (hidden: service offline, another After Effects holds
+  // the port, or a service too old to have POST /admin/serving).
+  var serveState = null;
+  var serveBusy = false;
+
+  function renderServe(state) {
+    serveState = state;
+    if (!$serveBtn) return;
+    if (state === null) {
+      $serveBtn.hidden = true;
+      return;
+    }
+    var stopped = state === "stopped";
+    $serveBtn.hidden = false;
+    $serveBtn.disabled = serveBusy;
+    $serveBtn.setAttribute("data-state", state);
+    if ($serveLabel) $serveLabel.textContent = stopped ? "Start" : "Stop";
+    $serveBtn.setAttribute("aria-label", stopped ? "Start the MCP" : "Stop the MCP");
+    $serveBtn.title = stopped
+      ? "Start the MCP: agents can use After Effects again."
+      : "Stop the MCP: agents' tool calls are refused until you press Start. A call already running finishes first.";
+  }
+
+  function bindServe() {
+    if (!$serveBtn) return;
+    $serveBtn.addEventListener("click", function () {
+      if (serveBusy || serveState === null) return;
+      var want = serveState === "stopped";
+      serveBusy = true;
+      renderServe(serveState);
+      requestService("POST", "/admin/serving", { serving: want }, function (err, statusCode, body) {
+        serveBusy = false;
+        if (err || statusCode !== 200 || !body || body.ok !== true) {
+          var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
+          logUi("err", (want ? "Starting" : "Stopping") + " the MCP failed: " + why);
+          renderServe(serveState);
+          return;
+        }
+        renderServe(body.serving === false ? "stopped" : "serving");
+        pollHealth();
+      });
+    });
+  }
+
   function pollHealth() {
     if (healthInFlight) return;
     healthInFlight = true;
@@ -673,6 +720,7 @@
       healthInFlight = false;
 
       if (err || statusCode !== 200 || !body || body.ok !== true) {
+        renderServe(null);
         setBadge("Offline", "err");
         if ($inflight) $inflight.textContent = "";
         if ($queueDepth) $queueDepth.textContent = "0";
@@ -680,8 +728,10 @@
       }
 
       // Another After Effects holds the port: say so instead of showing its version as this one's.
+      // No Start/Stop then: it would switch that After Effects, not this one.
       var otherAe = otherAeInstance(body);
       if (otherAe) {
+        renderServe(null);
         var otherLabel = otherAe.ae_label || shortVersion(otherAe.ae_version || body.aeVersion);
         if ($ae) $ae.textContent = "AE " + otherLabel + " (not this AE)";
         if ($inflight) $inflight.textContent = "";
@@ -691,6 +741,9 @@
         if ($badge) $badge.title = "The MCP service on 127.0.0.1:" + boundPort + " belongs to After Effects " + otherLabel + ". This After Effects is not serving MCP; close one of them.";
         return;
       }
+
+      var hasSwitch = typeof body.serving === "boolean";
+      if (!serveBusy) renderServe(hasSwitch ? (body.serving ? "serving" : "stopped") : null);
 
       if (body.aeVersion && body.aeVersion !== "unknown" && $ae) {
         $ae.textContent = "AE " + shortVersion(body.aeVersion);
@@ -721,7 +774,19 @@
         if (!locked) $clearLockBtn.textContent = "Clear render lock";
       }
 
-      if (body.busy || body.inFlight) {
+      var working = !!(body.busy || body.inFlight);
+      if (hasSwitch && body.serving === false) {
+        if (working) {
+          setBadge("Stopping", "busy");
+          if ($badge) $badge.title = "Stopped: the call already running finishes, then nothing else runs until you press Start.";
+        } else {
+          setBadge("Stopped", "off");
+          if ($badge) $badge.title = "The MCP is stopped: agents' tool calls are refused. Press Start to let them use After Effects again.";
+        }
+        return;
+      }
+      if ($badge) $badge.title = "Listening on 127.0.0.1:" + boundPort;
+      if (working) {
         setBadge("Working", "busy");
       } else {
         setBadge("Connected", "ok");
@@ -1707,6 +1772,7 @@
     bindLogView();
     bindSettings();
     bindConfirm();
+    bindServe();
 
     refreshTokenFromDisk();
     updateSetupUi();

@@ -9,6 +9,11 @@
   <div class="head-stack">
     <header class="header">
       <h1 class="title">This session</h1>
+      <button id="serve-btn" class="serve-btn" type="button" data-state="serving" aria-label="Stop the MCP" hidden>
+        <svg class="serve-icon serve-icon-stop" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"></rect></svg>
+        <svg class="serve-icon serve-icon-start" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.2 1.3v7.4a.6.6 0 0 0 .9.5l6-3.7a.6.6 0 0 0 0-1l-6-3.7a.6.6 0 0 0-.9.5z" fill="currentColor"></path></svg>
+        <span id="serve-label" class="serve-label">Stop</span>
+      </button>
       <span id="status-badge" class="badge" title="">
         <span class="badge-dot" aria-hidden="true"></span><span id="status-text">Starting</span><span id="ae-version" class="badge-host"></span>
       </span>
