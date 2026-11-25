@@ -80,3 +80,46 @@ describe("captureCompFrame with a slow render", { timeout: 20000 }, () => {
     expect(snap.path).toBe(sent[1]);
   });
 });
+
+/** A bridge whose snapshotFrame creates no file at all until the render ends `fillAfterMs` later (never when null), as seen on AE 26.3. */
+function unwrittenAe(fillAfterMs: Array<number | null>) {
+  const sent: string[] = [];
+  const ctx = {
+    bridge: {
+      evalRaw: async ({ script }: { script: string }) => {
+        const args = JSON.parse(script.slice(script.indexOf("(") + 1, -1));
+        const n = sent.push(args.output_path) - 1;
+        const wait = fillAfterMs[n] ?? null;
+        if (wait !== null) setTimeout(() => fs.writeFileSync(args.output_path, PNG_BYTES), wait);
+        return { result: {} };
+      },
+    },
+  } as unknown as ToolContext;
+  return { ctx, sent };
+}
+
+describe("captureCompFrame when the render has not created its file yet (AE 26.3)", { timeout: 20000 }, () => {
+  it("waits for the first render instead of sending a second over it", async () => {
+    const { ctx, sent } = unwrittenAe([300]);
+    const snap = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 150 });
+    expect(sent).toHaveLength(1);
+    expect(snap.path).toBe(sent[0]);
+    expect(snap.time).toBe(1);
+  });
+
+  it("retries only after the late wait when no file ever appears, and uses the retry", async () => {
+    const { ctx, sent } = unwrittenAe([null, 50]);
+    const t0 = Date.now();
+    const snap = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 150 });
+    expect(sent).toHaveLength(2);
+    expect(snap.path).toBe(sent[1]);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(frameCaptureDeps.lateWriteMs - 200);
+  });
+
+  it("after a final failure with no file it still waits before returning, and sends nothing more", async () => {
+    const { ctx, sent } = unwrittenAe([null, null]);
+    const err = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 100 }).catch((e) => e);
+    expect(sent).toHaveLength(2);
+    expect(String(err.message)).toMatch(/still writing the frame; waited \d+ s/);
+  });
+});

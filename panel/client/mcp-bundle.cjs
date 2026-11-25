@@ -28369,7 +28369,7 @@ async function captureCompFrame(params) {
   if (check1.fresh) {
     return { path: pngPath1, time };
   }
-  if (stillWriting(pngPath1, check1)) {
+  if (mayStillBeRendering(pngPath1, check1)) {
     const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
     if (late1.fresh) return { path: pngPath1, time };
   }
@@ -28401,7 +28401,7 @@ async function captureCompFrame(params) {
   const pending = [
     { p: pngPath2, start: reqStart2, last: check2, t: nudgedTime },
     { p: pngPath1, start: reqStart1, last: isFreshPngFile(pngPath1, reqStart1), t: time }
-  ].filter((x) => stillWriting(x.p, x.last));
+  ].filter((x) => mayStillBeRendering(x.p, x.last));
   if (pending.length > 0) {
     const t0 = Date.now();
     for (const x of pending) {
@@ -28755,6 +28755,14 @@ function stillWriting(filePath, before) {
     return false;
   }
 }
+function mayStillBeRendering(filePath, before) {
+  try {
+    if (!fs27.existsSync(filePath)) return true;
+  } catch {
+    return true;
+  }
+  return stillWriting(filePath, before);
+}
 function snapshotOutput(fullPath, check, scale, maxSize) {
   const copy = writeScaledCopy(fullPath, fullPath.replace(/\.png$/i, "_small.png"), {
     scale,
@@ -28946,7 +28954,7 @@ var init_render = __esm({
                     comp_height: resp1.result?.height
                   };
                 }
-                if (stillWriting(pngPath1, check1)) {
+                if (mayStillBeRendering(pngPath1, check1)) {
                   const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
                   if (late1.fresh) {
                     return {
@@ -28999,7 +29007,7 @@ var init_render = __esm({
                 const pending = [
                   { p: pngPath2, start: reqStart2, last: check2, resp: resp2, t: nudgedTime, retried: true },
                   { p: pngPath1, start: reqStart1, last: check1, resp: resp1, t: time, retried: false }
-                ].filter((x) => stillWriting(x.p, x.last));
+                ].filter((x) => mayStillBeRendering(x.p, x.last));
                 const settleStart = Date.now();
                 for (const x of pending) {
                   const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - settleStart);

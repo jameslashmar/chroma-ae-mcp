@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resetCepAutostartCache } from "../src/tools/ext/aerender.js";
 import { forgetCatalogs, renderFormatsDeps } from "../src/tools/ext/render-formats.js";
-import { pngWaitDeps } from "../src/tools/render.js";
+import { frameCaptureDeps, pngWaitDeps } from "../src/tools/render.js";
 
 // No test starts PowerShell: every test file gets a probe that finds nothing. A test that wants a reading sets resourceDeps.run itself.
 resourceDeps.run = async () => null;
@@ -20,6 +20,10 @@ process.env.CHROMA_AE_MCP_USAGE_LOG = "off";
 // saveFrameToPng writes late in AE, so production polls the PNG every 100 ms; a test writes it at once. A frame that never appears ends at 1 s, not 10 s.
 pngWaitDeps.intervalMs = 1;
 pngWaitDeps.timeoutMs = 1_000;
+// A frame grab waits for a render still in progress, a missing file included (no fake AE writes one for a refused or
+// stale grab), before retrying and again after a final failure; production gives AE 20 s each. Tests: 1 s.
+frameCaptureDeps.lateWriteMs = 1_000;
+frameCaptureDeps.settleAfterFailMs = 1_000;
 
 // No test reads this machine's CEP extension folders: aerender tools would refuse on a PC with many auto-start extensions. A test that wants a list sets it itself.
 beforeEach(() => resetCepAutostartCache([]));

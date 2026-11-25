@@ -197,6 +197,22 @@ export function stillWriting(filePath: string, before: { size: number; mtimeMs: 
 }
 
 /**
+ * AE may still be rendering a frame whose file it has not created yet, so a missing PNG counts as a
+ * render in progress too, not only an empty or growing one. Seen on AE 26.3 (2026-11-25, live smoke on
+ * Windows): saveFrameToPng returned at once, no file appeared within the normal wait, and the retry's
+ * second saveFrameToPng crashed AE in the Advanced 3D renderer. Waiting costs a stale frame (one AE
+ * never writes) lateWriteMs more before its retry; overlapping a render costs the session.
+ */
+export function mayStillBeRendering(filePath: string, before: { size: number; mtimeMs: number }): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return true;
+  } catch {
+    return true;
+  }
+  return stillWriting(filePath, before);
+}
+
+/**
  * Shrinks a fresh full-resolution snapshot on the server (never in AE) and
  * describes the file the agent should look at.
  */
@@ -371,8 +387,8 @@ export const renderTools: ToolDefinition<any>[] = [
               };
             }
 
-            // A render still being written is waited for, never overlapped with a second one.
-            if (stillWriting(pngPath1, check1)) {
+            // A render still in progress (file missing, empty or growing) is waited for, never overlapped with a second one.
+            if (mayStillBeRendering(pngPath1, check1)) {
               const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
               if (late1.fresh) {
                 return {
@@ -433,7 +449,7 @@ export const renderTools: ToolDefinition<any>[] = [
             const pending = [
               { p: pngPath2, start: reqStart2, last: check2, resp: resp2, t: nudgedTime, retried: true },
               { p: pngPath1, start: reqStart1, last: check1, resp: resp1, t: time, retried: false },
-            ].filter((x) => stillWriting(x.p, x.last));
+            ].filter((x) => mayStillBeRendering(x.p, x.last));
             const settleStart = Date.now();
             for (const x of pending) {
               const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - settleStart);

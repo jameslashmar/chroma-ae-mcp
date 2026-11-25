@@ -12,7 +12,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, stillWriting, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -450,8 +450,8 @@ export async function captureCompFrame(params: {
   if (check1.fresh) {
     return { path: pngPath1, time };
   }
-  // Never start a second render while the first is still being written.
-  if (stillWriting(pngPath1, check1)) {
+  // Never start a second render while the first may still be rendering (no file yet) or writing.
+  if (mayStillBeRendering(pngPath1, check1)) {
     const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
     if (late1.fresh) return { path: pngPath1, time };
   }
@@ -489,7 +489,7 @@ export async function captureCompFrame(params: {
   const pending = [
     { p: pngPath2, start: reqStart2, last: check2, t: nudgedTime },
     { p: pngPath1, start: reqStart1, last: isFreshPngFile(pngPath1, reqStart1), t: time },
-  ].filter((x) => stillWriting(x.p, x.last));
+  ].filter((x) => mayStillBeRendering(x.p, x.last));
   if (pending.length > 0) {
     const t0 = Date.now();
     for (const x of pending) {
