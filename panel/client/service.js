@@ -35,6 +35,20 @@
   var conflictProbeReq = null;
   var ownerWrittenPid = null;
 
+  // The panel's Start/Stop button (POST /admin/serving). While stopped, every eval is refused before
+  // it reaches After Effects, with kind "queued" like the render lock, so tools report "nothing ran".
+  // The port stays held: agents get this message instead of "cannot connect", and the panel's own
+  // routes keep working. Not saved anywhere: each After Effects launch starts serving.
+  var serving = true;
+  var stoppedAt = null;
+  var STOPPED_MESSAGE =
+    "The user stopped the MCP in After Effects (the Stop button at the top of the Chroma AE MCP panel). " +
+    "Nothing ran. Ask them to press Start when they want you to carry on, and don't retry until they have.";
+
+  function stoppedError(id) {
+    return { id: id, ok: false, error: { kind: "queued", message: STOPPED_MESSAGE } };
+  }
+
   function currentInstance() {
     return common.buildInstanceInfo(
       hostEnvCache || { appVersion: aeVersion === "unknown" ? "" : aeVersion },
@@ -162,6 +176,14 @@
   }
 
   function enqueueEval(id, script, label, sendResponse, raw) {
+    if (!serving) {
+      // Background polls ("quiet:" labels) are refused without a log line each time.
+      if (String(label || "").indexOf("quiet:") !== 0) {
+        log("warn", "Refused " + (label || "eval") + " [" + id + "]: the MCP is stopped in the panel");
+      }
+      sendResponse(200, stoppedError(id));
+      return;
+    }
     var item = {
       id: id,
       script: script,
@@ -206,6 +228,36 @@
       dispatchItem(next);
       return;
     }
+  }
+
+  // Stop refuses the calls still waiting their turn (they never reached After Effects). The one in
+  // flight is never aborted: it finishes and its caller gets its result.
+  function setServing(on) {
+    if (on === serving) return;
+    serving = on;
+    if (on) {
+      stoppedAt = null;
+      log("ok", "MCP started from the panel");
+      return;
+    }
+    stoppedAt = new Date().toISOString();
+    var waiting = queue.splice(0, queue.length);
+    for (var i = 0; i < waiting.length; i++) {
+      var item = waiting[i];
+      if (item.timer !== null) {
+        clearTimeout(item.timer);
+        item.timer = null;
+      }
+      if (item.expired) continue;
+      item.expired = true;
+      item.sendResponse(200, stoppedError(item.id));
+    }
+    log(
+      "warn",
+      "MCP stopped from the panel: tool calls are refused until it is started again" +
+        (waiting.length ? "; " + waiting.length + " waiting call(s) refused" : "") +
+        (inFlight ? "; " + inFlight.label + " is finishing" : "")
+    );
   }
 
   // Never times out or aborts an in-flight evalScript.
@@ -444,6 +496,7 @@
             instance: currentInstance(),
             hostPath: hostPathCache,
             port: boundPort,
+            serving: serving,
             evalQueueDepth: queue.length,
             inFlight: inFlight
               ? { id: inFlight.id, label: inFlight.label, runningMs: Date.now() - inFlight.startedAt }
@@ -594,6 +647,8 @@
       sendJson(res, 200, {
         ok: true,
         startedBy: "service",
+        serving: serving,
+        stoppedAt: stoppedAt,
         busy: inFlight !== null,
         queueDepth: queue.length,
         aeVersion: aeVersion,
@@ -610,6 +665,28 @@
           var lock = currentRenderLock();
           return lock ? { job_id: lock.info.job_id, state: lock.info.state } : null;
         })()
+      });
+      return;
+    }
+
+    // The panel's Start/Stop button. Body: { serving: true | false }. Answers the state after the change.
+    if (req.method === "POST" && reqUrl === "/admin/serving") {
+      readRequestBody(req, res, function (rawBody) {
+        var wanted = null;
+        try {
+          wanted = JSON.parse(rawBody);
+        } catch (e) {
+          wanted = null;
+        }
+        if (!wanted || typeof wanted !== "object" || typeof wanted.serving !== "boolean") {
+          sendJson(res, 400, {
+            ok: false,
+            error: { kind: "invalid_request", message: "POST /admin/serving requires JSON {serving: true|false}" }
+          });
+          return;
+        }
+        setServing(wanted.serving);
+        sendJson(res, 200, { ok: true, serving: serving, stoppedAt: stoppedAt });
       });
       return;
     }
@@ -1071,7 +1148,44 @@
       return;
     }
     if (verdict.kind !== "interactive") log("ok", "Render-engine check: " + verdict.reason + "; starting");
-    startService();
+    afterDynamicLinkCheck(startService);
+  }
+
+  // Dynamic Link guard (see common.js): the hidden After Effects that Premiere Pro or Media Encoder
+  // starts to render linked comps must not serve MCP, or it can take the port before the After
+  // Effects on screen. Runs alongside the render-engine probe, only inside CEP, and fails open.
+  var dlCheck = null; // null: not run (forced start, no CEP). Else { result, waiters }.
+
+  function startDynamicLinkCheck() {
+    dlCheck = { result: null, waiters: [] };
+    try {
+      common.checkDynamicLinkLaunch(process.pid, function (res) {
+        dlCheck.result = res || { dynamicLink: false, reason: "no answer" };
+        var waiters = dlCheck.waiters.splice(0);
+        for (var i = 0; i < waiters.length; i++) waiters[i](dlCheck.result);
+      });
+    } catch (e) {
+      dlCheck.result = { dynamicLink: false, reason: "check failed", error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  function afterDynamicLinkCheck(next) {
+    if (!dlCheck) {
+      next();
+      return;
+    }
+    function decide(res) {
+      if (isShuttingDown) return;
+      if (res.dynamicLink) {
+        log("warn", "Dynamic Link copy of After Effects (" + res.reason + "): Chroma AE MCP service not started");
+        shutdown();
+        return;
+      }
+      if (res.error) log("warn", "Dynamic Link check could not run (" + res.error + "); starting");
+      next();
+    }
+    if (dlCheck.result) decide(dlCheck.result);
+    else dlCheck.waiters.push(decide);
   }
 
   function boot() {
@@ -1081,6 +1195,9 @@
     if (!host || common.isGuardOverridden(process.env)) {
       settleGuard(null, false);
       return;
+    }
+    if (typeof window !== "undefined" && window.__adobe_cep__ && typeof common.checkDynamicLinkLaunch === "function") {
+      startDynamicLinkCheck();
     }
     guardTimer = setTimeout(function () {
       guardTimer = null;

@@ -88,6 +88,12 @@ Several items come from [premiere-pro-mcp](https://github.com/leancoderkavy/prem
 
 **The panel** shows this session's tool calls, queue, errors, median reply time and checkpoints, and a chart of the last 20 reply times. The **Log** lists each tool call and checkpoint, and the service's own events (started, token loaded, warnings), newest first, with the raw service log inside it. From 600 px wide the panel has two columns with the Log always open on the right. In one column the Log sits below the tiles and opens by itself when there is room; the corner-arrows button makes it fill the panel, and clicking it again puts the tiles back. When space runs out the chart is hidden first.
 
+**Stop / Start**, left of the status badge, switches this After Effects' MCP off and on.
+- **Stopped**, the badge reads Stopped. Every tool call that would touch AE is refused before it runs, and the agent is told you stopped it and to wait for Start.
+- A call already running finishes first; calls waiting behind it are refused.
+- The port stays with this AE, so agents get that message rather than "can't connect".
+- Each AE launch starts with the MCP on.
+
 **The gear** in the panel's header opens **New token**, **Save diagnostics**, **Check for updates** and the version. It works with the arrow keys and Escape. Actions that change something (New token, Clear render lock) ask first in a dialog inside the panel, with Cancel selected.
 
 ### Updates
@@ -189,6 +195,7 @@ Building, the dev install, releasing and QA are in [docs/DEVELOP.md](docs/DEVELO
 - **Something is stuck:** click **Save diagnostics** in the gear menu (or ask for `ae_diagnostics`) and read the file it names: it says which eval is in flight, for how long, and which popup is open.
 - **A call is refused with 'After Effects is busy':** a popup, a script or a render holds AE. Call `ae_status` (answers within 10 s, names the popup), answer the popup under the dialog rules, don't retry in a loop. Nothing was sent and nothing is quarantined.
 - **'Not reachable':** run `node panel/tools/relay-diagnose.cjs` (exit 0 fine, 2 wrong, `--json` available). Codes: `no_token`, `panel_not_installed`, `ae_not_running`, `only_unsupported_ae`, `debug_mode_off` (development install only), `service_down`, `port_other_program`, `token_rejected`, `store_app_token_copy`, `other_ae_holds_port`, `service_busy`.
+- **Premiere Pro or Media Encoder with linked comps:** their Dynamic Link starts a hidden After Effects (no window) to render the comps. The service doesn't start in it, so it can't take port 7790 from the After Effects on screen. `service.log` says "Dynamic Link copy of After Effects (...): Chroma AE MCP service not started". On Windows it is spotted by its parent process, `dynamiclinkmanager.exe`; the macOS check works the same way but hasn't been seen live yet.
 - **Two After Effects versions running:** the first to start keeps port 7790. The other panel shows 'Other AE has the connection (2025)' and `service.log` names the owner.
 - **`CHROMA_AE_MCP_DIAGNOSE=off`** (old one-line relay text) or `quick` (no process probes).
 - **Port 7790 is busy:** the service retries every 5 s and never starts a second server. Check that an old AE instance isn't still running.
