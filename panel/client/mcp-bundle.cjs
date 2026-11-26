@@ -28345,6 +28345,8 @@ function compareDecodedFrames(pngA, pngB, options = {}) {
 async function captureCompFrame(params) {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
+  const hold = unwrittenFrameHold();
+  if (hold) throw new Error(hold.message);
   const suffix1 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
   const pngPath1 = path27.join(
     framesDir,
@@ -28372,6 +28374,10 @@ async function captureCompFrame(params) {
   if (mayStillBeRendering(pngPath1, check1)) {
     const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
     if (late1.fresh) return { path: pngPath1, time };
+  }
+  if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+    noteUnwrittenFrame(pngPath1, compId, time, `${toolName}(${compId} @ ${time}s)`);
+    throw new Error(unwrittenFrameMessage(compId, time, Date.now() - reqStart1));
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
@@ -28412,6 +28418,7 @@ async function captureCompFrame(params) {
     }
     settled = ` After Effects was still writing the frame; waited ${Math.round((Date.now() - t0) / 1e3)} s for it to finish before returning. Call ae_status before the next call.`;
   }
+  if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, compId, nudgedTime, `${toolName}(${compId} @ ${nudgedTime}s retry)`);
   throw new Error(
     `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.${settled}`
   );
@@ -28763,6 +28770,44 @@ function mayStillBeRendering(filePath, before) {
   }
   return stillWriting(filePath, before);
 }
+function staleFrameOnDisk(filePath, requestStartMs) {
+  try {
+    if (!fs27.existsSync(filePath)) return false;
+    const st = fs27.statSync(filePath);
+    return st.size > 0 && st.mtimeMs < requestStartMs - 50 && pngComplete(filePath);
+  } catch {
+    return false;
+  }
+}
+function noteUnwrittenFrame(filePath, compId, time, label) {
+  unwrittenFrame = { path: filePath, since: Date.now(), compId, time, label };
+}
+function unwrittenFrameHold() {
+  const u = unwrittenFrame;
+  if (!u) return null;
+  let landed = false;
+  try {
+    landed = fs27.existsSync(u.path) && fs27.statSync(u.path).size > 0;
+  } catch {
+    landed = false;
+  }
+  const age = Date.now() - u.since;
+  if (landed || age >= unwrittenFrameDeps.holdMs) {
+    unwrittenFrame = null;
+    return null;
+  }
+  const left = Math.max(1, Math.ceil((unwrittenFrameDeps.holdMs - age) / 1e3));
+  return {
+    error: "frame_render_pending",
+    comp_id: u.compId,
+    time: u.time,
+    seconds_left: left,
+    message: `Nothing was rendered: After Effects has not written the last frame it was asked for (${u.label}, ${Math.round(age / 1e3)} s ago) and may still be rendering it. A second frame render on top of it crashed After Effects 26.3 on an Advanced 3D comp, so frame renders wait up to ${left} s more. Call ae_status, then try again; for frames of an Advanced 3D comp on AE 26.3, render through the render queue (ae_render_queue_add) or try the comp on Classic 3D.`
+  };
+}
+function unwrittenFrameMessage(compId, time, waitedMs) {
+  return `After Effects did not write the frame of comp ${compId} at ${time}s (no complete PNG after ${Math.round(waitedMs / 1e3)} s). It was not asked again: a second saveFrameToPng while AE may still be rendering crashed After Effects 26.3 on an Advanced 3D comp. Frame renders now wait up to ${Math.round(unwrittenFrameDeps.holdMs / 1e3)} s for it. Call ae_status before the next call; for an Advanced 3D comp on AE 26.3, render the frame through the render queue (ae_render_queue_add) or try the comp on Classic 3D.`;
+}
 function snapshotOutput(fullPath, check, scale, maxSize) {
   const copy = writeScaledCopy(fullPath, fullPath.replace(/\.png$/i, "_small.png"), {
     scale,
@@ -28845,7 +28890,7 @@ async function saveChosenFrames(args, ctx, framesDir, opId) {
     throw err;
   }
 }
-var crypto7, fs27, path29, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, PNG_SIGNATURE, PNG_IEND, pngWaitDeps, frameCaptureDeps, renderTools;
+var crypto7, fs27, path29, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, PNG_SIGNATURE, PNG_IEND, pngWaitDeps, frameCaptureDeps, unwrittenFrameDeps, unwrittenFrame, renderTools;
 var init_render = __esm({
   "src/tools/render.ts"() {
     "use strict";
@@ -28898,10 +28943,12 @@ var init_render = __esm({
     PNG_IEND = Buffer.from([73, 69, 78, 68, 174, 66, 96, 130]);
     pngWaitDeps = { intervalMs: 100, timeoutMs: 1e4 };
     frameCaptureDeps = { lateWriteMs: 2e4, settleAfterFailMs: 2e4 };
+    unwrittenFrameDeps = { holdMs: 12e4 };
+    unwrittenFrame = null;
     renderTools = [
       {
         name: "ae_snapshot_frame",
-        description: "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
+        description: "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). saveFrameToPng writes asynchronously, so the server waits (up to 10 s, then 20 s more while a render may be in progress) for the file to be non-empty and stable, and checks its mtime is newer than the request; a stale frame (a whole PNG older than the request) is retried once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. A frame AE never wrote is not retried (that second render crashed AE 26.3 on an Advanced 3D comp): it reports `frame_not_written`, and frame renders are refused with `frame_render_pending` for up to 2 minutes or until that file appears. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
         schema: AeSnapshotFrameSchema,
         handler: async (args, ctx) => {
           const scale = args.scale ?? 0.5;
@@ -28919,6 +28966,8 @@ var init_render = __esm({
             return await ctx.queue.run(
               `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
               async () => {
+                const hold = unwrittenFrameHold();
+                if (hold) return { ok: false, kind: hold.error, ...hold, requested: { comp_id: args.comp_id, time } };
                 const uniqueSuffix1 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
                 const pngPath1 = path29.join(
                   framesDir,
@@ -28969,6 +29018,21 @@ var init_render = __esm({
                       comp_height: resp1.result?.height
                     };
                   }
+                }
+                if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+                  noteUnwrittenFrame(pngPath1, args.comp_id, time, `ae_snapshot_frame(${args.comp_id} @ ${time}s)`);
+                  const st = isFreshPngFile(pngPath1, reqStart1);
+                  return {
+                    ok: false,
+                    error: "frame_not_written",
+                    kind: "frame_not_written",
+                    message: unwrittenFrameMessage(args.comp_id, time, Date.now() - reqStart1),
+                    comp_id: args.comp_id,
+                    time,
+                    scale,
+                    retried: false,
+                    attempts: [{ path: pngPath1, exists: fs27.existsSync(pngPath1), size: st.size, mtimeMs: st.mtimeMs }]
+                  };
                 }
                 const nudgedTime = Math.max(0, time + 1e-3);
                 const uniqueSuffix2 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
@@ -29027,6 +29091,7 @@ var init_render = __esm({
                     };
                   }
                 }
+                if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, args.comp_id, nudgedTime, `ae_snapshot_frame(${args.comp_id} @ ${nudgedTime}s retry)`);
                 return {
                   ok: false,
                   error: "stale_frame",
@@ -29959,7 +30024,7 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
     aperture: "aperture",
     blur_level: "blur_level",
     focus_area_width: "focus_area_width",
-    near_far_blur_multiplier: "near_far_blur_multiplier"
+    near_far_blur_level: "near_far_blur_level"
   };
   const valueOf = {
     zoom: cam.zoom,
@@ -29967,7 +30032,12 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
     aperture: cam.aperture,
     blur_level: cam.blur_level,
     focus_area_width: cam.focus_area_width,
-    near_far_blur_multiplier: cam.near_far_blur_multiplier
+    near_far_blur_level: cam.near_far_blur_level
+  };
+  const close2 = (got, want) => near3(typeof got === "number" ? got : null, want, Math.max(0.01, Math.abs(want) * 1e-4));
+  const sameValue2 = (got, want) => {
+    if (Array.isArray(want)) return Array.isArray(got) && got.length === want.length && want.every((w2, i) => typeof w2 === "number" && close2(got[i], w2));
+    return typeof want === "number" && close2(got, want);
   };
   for (const c of w.changes) {
     const path63 = `camera.${c.key}`;
@@ -29985,15 +30055,13 @@ function cameraRetuneMismatches(beforeRaw, afterRaw, w) {
         const want = wasKeys + (c.replaced_key ? 0 : 1);
         expectThat(m, nowKeys === want, `${path63}.num_keys`, want, nowKeys, "The new keyframe is not there");
       }
-      const wantV = c.value;
       const keyedV = field ? cam.values_at?.[field] : void 0;
-      if (typeof wantV === "number") {
-        expectThat(m, near3(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path63}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
+      if (typeof c.value === "number" || Array.isArray(c.value)) {
+        expectThat(m, sameValue2(keyedV, c.value), `${path63}.value_at_key`, c.value, keyedV, `${c.key} at the keyed time differs from what was asked`);
       }
     } else {
       const got = valueOf[c.key];
-      const want = c.value;
-      expectThat(m, near3(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path63, want, got, `${c.key} differs from what was asked`);
+      expectThat(m, sameValue2(got, c.value), path63, c.value, got, `${c.key} differs from what was asked`);
     }
     if (c.key === "focus_distance" && !c.keyed) {
       expectThat(m, cam.expressions.focus_distance === void 0, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
@@ -30189,11 +30257,14 @@ var init_camera = __esm({
       distance: external_exports.number().min(0).optional().describe("A fixed focus distance in pixels instead of a layer."),
       aperture: external_exports.number().min(0).optional().describe("Camera Aperture in pixels (smaller is deeper focus)."),
       blur_level: external_exports.number().min(0).max(1e3).optional().describe("Camera Blur Level in percent."),
-      focus_area_width: external_exports.number().min(0).max(1e6).optional().describe("Retune only (`camera` given): the Advanced 3D focus area width (AE 26.3). Its match name is unconfirmed, so the host probes the camera's options and says in `warnings` when it finds none."),
-      near_far_blur_multiplier: external_exports.number().min(0).max(1e6).optional().describe("Retune only (`camera` given): the Advanced 3D near/far blur multiplier (AE 26.3). Probed like focus_area_width.")
+      focus_area_width: external_exports.number().min(0).max(1e6).optional().describe("Retune only (`camera` given): the Advanced 3D Focus Area Width (AE 26.3, ADBE Camera Focus Area Width). A camera without it is reported in `warnings`."),
+      near_far_blur_level: external_exports.union([external_exports.number().min(0).max(1e6), external_exports.tuple([external_exports.number().min(0).max(1e6), external_exports.number().min(0).max(1e6)])]).optional().describe("Retune only (`camera` given): the Advanced 3D Near, Far Blur Level (AE 26.3, ADBE Camera Split Blur Level) in percent: one number for both sides, or [near, far]. AE's default is [100, 100]. A camera without it is reported in `warnings`."),
+      near_far_blur_multiplier: external_exports.number().optional().describe("Not an After Effects property: refused. Use near_far_blur_level ([near, far] in percent).")
+    }).refine((f) => f.near_far_blur_multiplier === void 0, {
+      message: "near_far_blur_multiplier does not exist in After Effects (26.3 has Near, Far Blur Level, two values in percent): use near_far_blur_level, one number for both or [near, far]."
     }).refine((f) => !(f.layer !== void 0 && f.distance !== void 0), { message: "Give a focus layer or a distance, not both." }).refine(
-      (f) => f.layer !== void 0 || f.distance !== void 0 || f.aperture !== void 0 || f.blur_level !== void 0 || f.focus_area_width !== void 0 || f.near_far_blur_multiplier !== void 0,
-      { message: "focus needs at least one of layer, distance, aperture, blur_level, focus_area_width, near_far_blur_multiplier." }
+      (f) => f.layer !== void 0 || f.distance !== void 0 || f.aperture !== void 0 || f.blur_level !== void 0 || f.focus_area_width !== void 0 || f.near_far_blur_level !== void 0 || f.near_far_blur_multiplier !== void 0,
+      { message: "focus needs at least one of layer, distance, aperture, blur_level, focus_area_width, near_far_blur_level." }
     ).describe("Turns depth of field on. Iris and highlight options differ per renderer and are left alone.");
     SpreadSchema = external_exports.object({
       layers: external_exports.array(LayerSelectorSchema).min(1).max(200).describe("Picture layers to make 3D, nearest first."),
@@ -30228,8 +30299,8 @@ var init_camera = __esm({
     }).refine((v) => v.camera === void 0 || !(v.depth_of_field === false && v.focus !== void 0), {
       message: "focus turns depth of field on; it can't be combined with depth_of_field false."
     }).refine(
-      (v) => v.camera !== void 0 || v.depth_of_field === void 0 && v.at_time === void 0 && v.focus?.focus_area_width === void 0 && v.focus?.near_far_blur_multiplier === void 0,
-      { message: "depth_of_field, at_time, focus.focus_area_width and focus.near_far_blur_multiplier apply with camera (retune) only." }
+      (v) => v.camera !== void 0 || v.depth_of_field === void 0 && v.at_time === void 0 && v.focus?.focus_area_width === void 0 && v.focus?.near_far_blur_level === void 0,
+      { message: "depth_of_field, at_time, focus.focus_area_width and focus.near_far_blur_level apply with camera (retune) only." }
     );
     AeScene3dReportSchema = external_exports.object({
       comp_id: external_exports.number().int(),
@@ -30252,7 +30323,7 @@ var init_camera = __esm({
     cameraTools = [
       {
         name: "ae_camera_rig",
-        description: "Build a camera in one undo group, guarded by `expect`: a one- or two-node camera with a lens (focal length, angle of view or zoom), and for push_in, dolly, orbit or parallax a controller null whose sliders (Distance, Push or Truck, Orbit Angle and Tilt) drive the camera's Position by expression, so the move can be tweaked from one place. `motion` keyframes the main slider. `focus` turns depth of field on and ties Focus Distance to a layer's depth in camera space. `spread` makes layers 3D at different depths, scaled to keep their size, for parallax. If a later step fails, everything this call made is taken back. The new camera goes on top, so it becomes the active one. The read-back (a separate evalScript) checks the camera, its lens, node type, depth of field, expression errors, the controller's sliders and keyframes, and the spread layers' depth. Use ae_scene_3d_report to see the result by depth. RETUNE: pass `camera` (an existing camera layer) to change it instead: `lens` (focal length, angle of view or zoom), `depth_of_field` on or off, `focus` (a layer to keep sharp, a fixed distance, aperture, blur level, and on AE 26.3 the Advanced 3D focus_area_width and near_far_blur_multiplier, whose match names are probed and reported in `warnings` when absent), and `nodes` one or two. A keyframed Zoom, Focus Distance, Aperture or Blur Level is refused unless `at_time` keys the new value there; an expression-driven Zoom is refused. Everything is checked before the undo group; a failure part-way puts the camera back. Nothing to change returns no_op with no undo step. The same separate read-back checks each change. " + AGENT_SAFETY_GUIDANCE,
+        description: "Build a camera in one undo group, guarded by `expect`: a one- or two-node camera with a lens (focal length, angle of view or zoom), and for push_in, dolly, orbit or parallax a controller null whose sliders (Distance, Push or Truck, Orbit Angle and Tilt) drive the camera's Position by expression, so the move can be tweaked from one place. `motion` keyframes the main slider. `focus` turns depth of field on and ties Focus Distance to a layer's depth in camera space. `spread` makes layers 3D at different depths, scaled to keep their size, for parallax. If a later step fails, everything this call made is taken back. The new camera goes on top, so it becomes the active one. The read-back (a separate evalScript) checks the camera, its lens, node type, depth of field, expression errors, the controller's sliders and keyframes, and the spread layers' depth. Use ae_scene_3d_report to see the result by depth. RETUNE: pass `camera` (an existing camera layer) to change it instead: `lens` (focal length, angle of view or zoom), `depth_of_field` on or off, `focus` (a layer to keep sharp, a fixed distance, aperture, blur level, and on AE 26.3 the Advanced 3D focus_area_width and near_far_blur_level ([near, far] in percent), reported in `warnings` when the camera has none), and `nodes` one or two. A keyframed Zoom, Focus Distance, Aperture or Blur Level is refused unless `at_time` keys the new value there; an expression-driven Zoom is refused. Everything is checked before the undo group; a failure part-way puts the camera back. Nothing to change returns no_op with no undo step. The same separate read-back checks each change. " + AGENT_SAFETY_GUIDANCE,
         schema: AeCameraRigSchema,
         handler: (args, ctx) => {
           if (args.camera !== void 0) return retuneCamera(args, ctx);
@@ -64146,7 +64217,78 @@ async function replaceFonts(args, ctx) {
   const shown = res;
   return { action: "replace", dry_run: false, ...shown, glyphs: plan2.glyphs, notes: REPLACE_NOTES };
 }
-var AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm2, REPLACE_NOTES, inventoryTools;
+async function searchFonts(args, ctx, budgetMs = FONT_SEARCH_BUDGET_MS) {
+  const pageSize = Math.min(100, Math.max(1, Math.floor(args.page_size ?? 25)));
+  const page = Math.max(1, Math.floor(args.page ?? 1));
+  const skip = (page - 1) * pageSize;
+  const base = {
+    query: args.query,
+    family: args.family,
+    style: args.style,
+    writing_script: args.writing_script,
+    variable_only: args.variable_only,
+    adobe_only: args.adobe_only,
+    page,
+    page_size: pageSize
+  };
+  const started = Date.now();
+  const fonts = [];
+  let matches = 0;
+  let scanned = 0;
+  let chunks = 0;
+  let startFamily = 0;
+  let startFont = 0;
+  let first = null;
+  let truncated = false;
+  for (; ; ) {
+    const res = await ctx.bridge.callHost(
+      "inventorySearchFonts",
+      { ...base, start_family: startFamily, start_font: startFont, skip: Math.max(0, skip - matches), take: pageSize - fonts.length },
+      { label: "ae_fonts(search)", mutates: false, toolName: "ae_fonts" }
+    );
+    const r = res.result;
+    chunks++;
+    if (first === null) first = r;
+    if (r.available === false) return r;
+    fonts.push(...r.fonts ?? []);
+    matches += r.total_matches ?? 0;
+    scanned += r.scanned ?? 0;
+    const nextFamily = typeof r.next_family === "number" ? r.next_family : null;
+    const nextFont = typeof r.next_font === "number" ? r.next_font : 0;
+    const moved = nextFamily !== null && (nextFamily > startFamily || nextFamily === startFamily && nextFont > startFont);
+    if (r.scan_truncated !== true || !moved) {
+      truncated = r.scan_truncated === true;
+      break;
+    }
+    if (Date.now() - started >= budgetMs || chunks >= FONT_SEARCH_MAX_CHUNKS) {
+      truncated = true;
+      break;
+    }
+    startFamily = nextFamily;
+    startFont = nextFont;
+  }
+  const out = {
+    ...first ?? {},
+    available: true,
+    fonts,
+    page,
+    page_size: pageSize,
+    total_matches: matches,
+    has_more: matches > skip + fonts.length,
+    scanned,
+    scan_truncated: truncated,
+    scan_calls: chunks,
+    font_ids_session_only: true
+  };
+  delete out.next_family;
+  delete out.next_font;
+  delete out.note;
+  if (truncated) {
+    out.note = `The font list was only partly scanned (${scanned} fonts in ${Math.round((Date.now() - started) / 1e3)} s); a font not listed may still be installed: narrow the search (family, or an exact PostScript name with action check) for a sure answer.`;
+  }
+  return out;
+}
+var AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm2, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, inventoryTools;
 var init_inventory = __esm({
   "src/tools/ext/inventory.ts"() {
     "use strict";
@@ -64200,6 +64342,8 @@ var init_inventory = __esm({
       "Replacing a font is not undoable: Edit > Undo (Ctrl+Z) does not restore it; ae_checkpoint_revert with the checkpoint does.",
       "With no_font_locking, missing glyphs cannot be detected. A substituted from-font with identical properties ignores noFontLocking. In a document with mixed fonts only the ranges that used the old font change."
     ];
+    FONT_SEARCH_BUDGET_MS = 6e4;
+    FONT_SEARCH_MAX_CHUNKS = 200;
     inventoryTools = [
       {
         name: "ae_comp_tree",
@@ -64216,27 +64360,11 @@ var init_inventory = __esm({
       },
       {
         name: "ae_fonts",
-        description: "Fonts. action in_use (the default): list the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). skipped_layers counts text layers that could not be fully read (each counted once). Check them against the brief's fonts (ae_brief) before a delivery. action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the scan is bounded and says when it was cut short): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. A font's fontID is stable only within one AE session. action check: for each of `fonts` (PostScript names or { family, style }) say whether it exists, whether AE would substitute it, duplicates, variable axes and, with `text`, which characters it lacks (AE 25.1+; Turkish s-cedilla, g-breve, dotless i, dotted I), with AE's default font for the script of what is missing; fonts that do not exist come with near matches. It also lists the project's missing or substituted fonts. action replace: swap `from` for `to` in every text layer (Project.replaceFont, AE 24.5). It is NOT undoable, so: dry_run (the default) lists the layers it would change and the glyphs the new font lacks for their text; dry_run false needs `expect`, makes a checkpoint first and REFUSES if none can be made or the project has unsaved changes (ae_save first, or turn automatic checkpoints on), then reads the project's used fonts back (old font gone, new font used and not substituted). Restore from the checkpoint to undo. With no_font_locking missing glyphs cannot be detected; mixed-font text changes only the ranges that used the old font. in_use, search, check and dry-run replace are read-only. " + AGENT_SAFETY_GUIDANCE,
+        description: "Fonts. action in_use (the default): list the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). skipped_layers counts text layers that could not be fully read (each counted once). Check them against the brief's fonts (ae_brief) before a delivery. action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the whole font list is scanned in short steps, up to a minute, and scan_truncated says if it was cut short, in which case a font not listed may still be installed): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. A font's fontID is stable only within one AE session. action check: for each of `fonts` (PostScript names or { family, style }) say whether it exists, whether AE would substitute it, duplicates, variable axes and, with `text`, which characters it lacks (AE 25.1+; Turkish s-cedilla, g-breve, dotless i, dotted I), with AE's default font for the script of what is missing; fonts that do not exist come with near matches. It also lists the project's missing or substituted fonts. action replace: swap `from` for `to` in every text layer (Project.replaceFont, AE 24.5). It is NOT undoable, so: dry_run (the default) lists the layers it would change and the glyphs the new font lacks for their text; dry_run false needs `expect`, makes a checkpoint first and REFUSES if none can be made or the project has unsaved changes (ae_save first, or turn automatic checkpoints on), then reads the project's used fonts back (old font gone, new font used and not substituted). Restore from the checkpoint to undo. With no_font_locking missing glyphs cannot be detected; mixed-font text changes only the ranges that used the old font. in_use, search, check and dry-run replace are read-only. " + AGENT_SAFETY_GUIDANCE,
         schema: AeFontsSchema,
         handler: async (args, ctx) => {
           const action = args.action ?? "in_use";
-          if (action === "search") {
-            const res2 = await ctx.bridge.callHost(
-              "inventorySearchFonts",
-              {
-                query: args.query,
-                family: args.family,
-                style: args.style,
-                writing_script: args.writing_script,
-                variable_only: args.variable_only,
-                adobe_only: args.adobe_only,
-                page: args.page,
-                page_size: args.page_size
-              },
-              { label: "ae_fonts(search)", mutates: false, toolName: "ae_fonts" }
-            );
-            return res2.result;
-          }
+          if (action === "search") return searchFonts(args, ctx);
           if (action === "check") {
             const res2 = await ctx.bridge.callHost(
               "inventoryCheckFonts",
