@@ -227,6 +227,103 @@ async function replaceFonts(args: z.infer<typeof AeFontsSchema>, ctx: ToolContex
   return { action: "replace", dry_run: false, ...shown, glyphs: plan.glyphs, notes: REPLACE_NOTES };
 }
 
+/** Each host call scans for about 2.5 s; the server goes on from where it stopped, up to this long in all. */
+export const FONT_SEARCH_BUDGET_MS = 60_000;
+const FONT_SEARCH_MAX_CHUNKS = 200;
+
+interface FontSearchChunk {
+  available?: boolean;
+  fonts?: unknown[];
+  total_matches?: number;
+  scanned?: number;
+  scan_truncated?: boolean;
+  next_family?: number | null;
+  next_font?: number | null;
+  family_count?: number;
+  [k: string]: unknown;
+}
+
+/**
+ * ae_fonts search over the whole font list. The host stops after about 2.5 s so AE stays responsive
+ * and other calls can run in between; this goes on from `next_family` until the list is done.
+ * (Before, the search stopped at the first cut: on a PC with many fonts that was about 100 fonts,
+ * and a font further down, such as Arial, was reported as not installed. PR #19.)
+ */
+export async function searchFonts(args: z.infer<typeof AeFontsSchema>, ctx: ToolContext, budgetMs = FONT_SEARCH_BUDGET_MS) {
+  const pageSize = Math.min(100, Math.max(1, Math.floor(args.page_size ?? 25)));
+  const page = Math.max(1, Math.floor(args.page ?? 1));
+  const skip = (page - 1) * pageSize;
+  const base = {
+    query: args.query,
+    family: args.family,
+    style: args.style,
+    writing_script: args.writing_script,
+    variable_only: args.variable_only,
+    adobe_only: args.adobe_only,
+    page,
+    page_size: pageSize,
+  };
+  const started = Date.now();
+  const fonts: unknown[] = [];
+  let matches = 0;
+  let scanned = 0;
+  let chunks = 0;
+  let startFamily = 0;
+  let startFont = 0;
+  let first: FontSearchChunk | null = null;
+  let truncated = false;
+  for (;;) {
+    const res = await ctx.bridge.callHost<FontSearchChunk>(
+      "inventorySearchFonts",
+      { ...base, start_family: startFamily, start_font: startFont, skip: Math.max(0, skip - matches), take: pageSize - fonts.length },
+      { label: "ae_fonts(search)", mutates: false, toolName: "ae_fonts" }
+    );
+    const r = res.result;
+    chunks++;
+    if (first === null) first = r;
+    if (r.available === false) return r;
+    fonts.push(...(r.fonts ?? []));
+    matches += r.total_matches ?? 0;
+    scanned += r.scanned ?? 0;
+    const nextFamily = typeof r.next_family === "number" ? r.next_family : null;
+    const nextFont = typeof r.next_font === "number" ? r.next_font : 0;
+    // Only go on when the host moved forward: an older host has no next_family.
+    const moved = nextFamily !== null && (nextFamily > startFamily || (nextFamily === startFamily && nextFont > startFont));
+    if (r.scan_truncated !== true || !moved) {
+      truncated = r.scan_truncated === true;
+      break;
+    }
+    if (Date.now() - started >= budgetMs || chunks >= FONT_SEARCH_MAX_CHUNKS) {
+      truncated = true;
+      break;
+    }
+    startFamily = nextFamily as number;
+    startFont = nextFont;
+  }
+  const out: Record<string, unknown> = {
+    ...(first ?? {}),
+    available: true,
+    fonts,
+    page,
+    page_size: pageSize,
+    total_matches: matches,
+    has_more: matches > skip + fonts.length,
+    scanned,
+    scan_truncated: truncated,
+    scan_calls: chunks,
+    font_ids_session_only: true,
+  };
+  delete out.next_family;
+  delete out.next_font;
+  delete out.note;
+  if (truncated) {
+    out.note =
+      `The font list was only partly scanned (${scanned} fonts in ${Math.round((Date.now() - started) / 1000)} s); ` +
+      "a font not listed may still be installed: narrow the search (family, or an exact PostScript name with action check) for a sure answer.";
+  }
+  return out;
+}
+
 // ---------- tools ----------
 
 export const inventoryTools: ToolDefinition<any>[] = [
@@ -253,7 +350,7 @@ export const inventoryTools: ToolDefinition<any>[] = [
       "Fonts. action in_use (the default): list the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, " +
       "and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). " +
       "skipped_layers counts text layers that could not be fully read (each counted once). Check them against the brief's fonts (ae_brief) before a delivery. " +
-      "action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the scan is bounded and says when it was cut short): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. " +
+      "action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the whole font list is scanned in short steps, up to a minute, and scan_truncated says if it was cut short, in which case a font not listed may still be installed): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. " +
       "A font's fontID is stable only within one AE session. " +
       "action check: for each of `fonts` (PostScript names or { family, style }) say whether it exists, whether AE would substitute it, duplicates, variable axes and, with `text`, which characters it lacks (AE 25.1+; Turkish s-cedilla, g-breve, dotless i, dotted I), " +
       "with AE's default font for the script of what is missing; fonts that do not exist come with near matches. It also lists the project's missing or substituted fonts. " +
@@ -265,23 +362,7 @@ export const inventoryTools: ToolDefinition<any>[] = [
     schema: AeFontsSchema,
     handler: async (args: z.infer<typeof AeFontsSchema>, ctx) => {
       const action = args.action ?? "in_use";
-      if (action === "search") {
-        const res = await ctx.bridge.callHost(
-          "inventorySearchFonts",
-          {
-            query: args.query,
-            family: args.family,
-            style: args.style,
-            writing_script: args.writing_script,
-            variable_only: args.variable_only,
-            adobe_only: args.adobe_only,
-            page: args.page,
-            page_size: args.page_size,
-          },
-          { label: "ae_fonts(search)", mutates: false, toolName: "ae_fonts" }
-        );
-        return res.result;
-      }
+      if (action === "search") return searchFonts(args, ctx);
       if (action === "check") {
         const res = await ctx.bridge.callHost<{ checked?: Array<{ exists: boolean | null; is_substitute: boolean | null; glyphs?: { supported: boolean | null } }> }>(
           "inventoryCheckFonts",

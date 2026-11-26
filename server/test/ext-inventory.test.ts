@@ -6,7 +6,7 @@ import { PanelHost } from "../src/panel-host.js";
 import { QuarantineStore } from "../src/quarantine.js";
 import { SingleWriterQueue } from "../src/queue.js";
 import { AGENT_SAFETY_GUIDANCE, type ToolContext } from "../src/tools/common.js";
-import { AeFontsSchema, checkpointRefusal, fontMatches, inventoryTools, replaceMismatches, type UsedFont } from "../src/tools/ext/inventory.js";
+import { AeFontsSchema, checkpointRefusal, fontMatches, inventoryTools, replaceMismatches, searchFonts, type UsedFont } from "../src/tools/ext/inventory.js";
 import { AeGetCompSchema, AeGetProjectSchema, readTools } from "../src/tools/read.js";
 import { ALL_TOOLS } from "../src/tools/registry.js";
 import { FakeProject, GUARD, loadHost } from "./support/fake-ae.js";
@@ -264,6 +264,12 @@ describe("inventory.jsx: font search and check", () => {
     expect(r.scan_truncated).toBe(true);
     expect(r.scanned).toBeLessThanOrEqual(8000);
     expect(r.note).toMatch(/partly scanned/);
+    // A family bigger than one step: the next call goes on inside it, without counting a font twice.
+    expect(r.next_family).toBe(0);
+    const r2 = A.inventorySearchFonts({ page_size: 10, start_family: 0, start_font: r.next_font, skip: 0, take: 0 });
+    expect(r.scanned + r2.scanned).toBe(9000);
+    expect(r.total_matches + r2.total_matches).toBe(9000);
+    expect(r2.scan_truncated).toBe(false);
   });
 
   it("checks existence, glyphs for the real text, variable axes and a fallback for a missing font", () => {
@@ -531,7 +537,7 @@ describe("ae_fonts tool flow", () => {
       inventoryCheckFonts: [{ available: true, checked: [{ exists: true, is_substitute: false, glyphs: { supported: false } }, { exists: true, is_substitute: false }] }],
     });
     await tool.handler(AeFontsSchema.parse({ action: "search", query: "arial", variable_only: true, page: 2 }), ctx);
-    expect(calls[0].script).toContain('inventorySearchFonts({"query":"arial","variable_only":true,"page":2})');
+    expect(calls[0].script).toContain('inventorySearchFonts({"query":"arial","variable_only":true,"page":2,"page_size":25,"start_family":0,"start_font":0,"skip":25,"take":25})');
     const out = await tool.handler(AeFontsSchema.parse({ action: "check", fonts: ["Impact", { family: "A", style: "B" }], text: "\u015e\u011f" }), ctx);
     expect(calls[1].script).toContain('"fonts":["Impact",{"family":"A","style":"B"}]');
     expect(calls[1].script).toContain('"text":"\\u015e\\u011f"');
@@ -652,5 +658,85 @@ describe("ae_fonts tool flow", () => {
     expect(out.applied).toBe(true);
     expect(out.receipt.matches).toBe(false);
     expect(out.receipt.mismatches.map((m: { path: string }) => m.path)).toContain("from");
+  });
+});
+
+describe("ae_fonts search: the whole font list, in steps (PR #19)", () => {
+  /** A clock that moves 3 s each time the host reads it, so every host call scans one family and stops. */
+  function slowClock(G: Record<string, any>) {
+    let t = 0;
+    G.Date = class {
+      getTime() {
+        t += 3000;
+        return t;
+      }
+    };
+  }
+  function hostCtx(A: any) {
+    const calls: Array<Record<string, unknown>> = [];
+    const bridge = {
+      callHost: async (fn: string, args: Record<string, unknown>) => {
+        calls.push(args);
+        return { result: JSON.parse(JSON.stringify(A[fn](args))) };
+      },
+    };
+    return { ctx: { bridge } as unknown as ToolContext, calls };
+  }
+
+  it("the host stops between families when time runs out and says where to go on", () => {
+    const { A, G } = fontScene();
+    slowClock(G);
+    const r1 = A.inventorySearchFonts({ query: "impact" });
+    expect(r1).toMatchObject({ scan_truncated: true, next_family: 1, next_font: 0, total_matches: 0, scanned: 2, family_count: 3 });
+    const r2 = A.inventorySearchFonts({ query: "impact", start_family: 1 });
+    expect(r2).toMatchObject({ scan_truncated: true, next_family: 2 });
+    const r3 = A.inventorySearchFonts({ query: "impact", start_family: 2 });
+    expect(r3).toMatchObject({ scan_truncated: false, next_family: null, total_matches: 1 });
+    expect(r3.fonts.map((f: any) => f.postscript)).toEqual(["Impact"]);
+  });
+
+  it("the server goes on until the list is done: a font past the first cut is found", async () => {
+    const { A, G } = fontScene();
+    slowClock(G);
+    const { ctx, calls } = hostCtx(A);
+    const out: any = await searchFonts(AeFontsSchema.parse({ action: "search", query: "impact" }), ctx);
+    expect(out).toMatchObject({ total_matches: 1, scan_truncated: false, scan_calls: 3, scanned: 4, has_more: false });
+    expect(out.fonts.map((f: any) => f.postscript)).toEqual(["Impact"]);
+    expect(out.note).toBeUndefined();
+    expect(calls.map((c) => c.start_family)).toEqual([0, 1, 2]);
+  });
+
+  it("pages across steps: skip and take carry over from one host call to the next", async () => {
+    const { A, G } = fontScene();
+    slowClock(G);
+    const { ctx } = hostCtx(A);
+    const p2: any = await searchFonts(AeFontsSchema.parse({ action: "search", page: 2, page_size: 2 }), ctx);
+    expect(p2.fonts.map((f: any) => f.postscript)).toEqual(["Inter-Variable", "Impact"]);
+    expect(p2).toMatchObject({ total_matches: 4, has_more: false, page: 2, page_size: 2 });
+    const p1: any = await searchFonts(AeFontsSchema.parse({ action: "search", page: 1, page_size: 3 }), ctx);
+    expect(p1.fonts.map((f: any) => f.postscript)).toEqual(["ArialMT", "Arial-BoldMT", "Inter-Variable"]);
+    expect(p1.has_more).toBe(true);
+  });
+
+  it("says a font not listed may still be installed when the time budget runs out", async () => {
+    const { A, G } = fontScene();
+    slowClock(G);
+    const { ctx } = hostCtx(A);
+    const out: any = await searchFonts(AeFontsSchema.parse({ action: "search", query: "impact" }), ctx, 0);
+    expect(out).toMatchObject({ scan_truncated: true, total_matches: 0, scan_calls: 1 });
+    expect(out.note).toMatch(/may still be installed/);
+  });
+
+  it("filters on names only: a font that does not match is never asked for its file or other details", () => {
+    const { A, flat } = fontScene();
+    let reads = 0;
+    const impact = flat.find((f: any) => f.postScriptName === "Impact")!;
+    for (const m of ["location", "isSubstitute", "hasDesignAxes", "isFromAdobeFonts", "fontID", "writingScripts"]) {
+      const v = (impact as any)[m];
+      Object.defineProperty(impact, m, { get: () => (reads++, v) });
+    }
+    expect(A.inventorySearchFonts({ query: "arial" }).total_matches).toBe(2);
+    expect(A.inventorySearchFonts({ family: "inter" }).total_matches).toBe(1);
+    expect(reads).toBe(0);
   });
 });

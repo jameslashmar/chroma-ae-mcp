@@ -590,10 +590,23 @@
 
   // ----- search -----
 
-  function matchesQuery(info, q) {
-    var names = [info.postscript, info.family, info.style, info.full_name, info.native_family, info.native_style, info.native_full_name];
-    for (var i = 0; i < names.length; i++) {
-      if (names[i] !== undefined && normF(names[i]).indexOf(q) >= 0) return true;
+  // Only the names are read to filter: they come from AE's font list. Members such as location,
+  // isSubstitute or hasDesignAxes may make AE open the font file, which is slow on a PC with many
+  // fonts and is where AE 26.3 raised "Unknown BIB Error. cannot access font" (PR #19).
+  var QUERY_NAME_MEMBERS = ["postScriptName", "familyName", "fullName", "styleName", "nativeFamilyName", "nativeFullName", "nativeStyleName"];
+
+  function matchesQuery(f, q) {
+    for (var i = 0; i < QUERY_NAME_MEMBERS.length; i++) {
+      var v = readMember(f, QUERY_NAME_MEMBERS[i]);
+      if (v !== undefined && normF(v).indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+
+  function nameMatches(f, members, want) {
+    for (var i = 0; i < members.length; i++) {
+      var v = readMember(f, members[i]);
+      if (v !== undefined && normF(v).indexOf(want) >= 0) return true;
     }
     return false;
   }
@@ -619,6 +632,13 @@
     if (typeof args.page === "number" && isFinite(args.page)) page = Math.floor(args.page);
     if (page < 1) page = 1;
     var skip = (page - 1) * pageSize;
+    // The server continues a scan that ran out of time: start_family is where to go on, skip and take
+    // are what is still to skip and to collect in this chunk (the server keeps the totals).
+    var startFamily = 0;
+    if (typeof args.start_family === "number" && isFinite(args.start_family) && args.start_family > 0) startFamily = Math.floor(args.start_family);
+    var take = pageSize;
+    if (typeof args.skip === "number" && isFinite(args.skip) && args.skip >= 0) skip = Math.floor(args.skip);
+    if (typeof args.take === "number" && isFinite(args.take) && args.take >= 0) take = Math.min(Math.floor(args.take), MAX_PAGE);
     var wantScript;
     var scriptGiven = typeof args.writing_script === "string" && args.writing_script.length > 0;
     if (scriptGiven) {
@@ -631,36 +651,41 @@
     var scanned = 0;
     var matches = 0;
     var out = [];
+    var startFont = 0;
+    if (typeof args.start_font === "number" && isFinite(args.start_font) && args.start_font > 0) startFont = Math.floor(args.start_font);
     var truncated = false;
+    var nextFamily = null;
+    var nextFont = null;
     var stop = false;
-    for (var i = 0; i < all.length && !stop; i++) {
+    var familyCount = 0;
+    try { familyCount = all.length; } catch (eLen) { familyCount = 0; }
+    for (var i = startFamily; i < familyCount && !stop; i++) {
       var fam = all[i];
       var famLen = 0;
       try { famLen = fam.length; } catch (e1) { famLen = 0; }
-      for (var j = 0; j < famLen; j++) {
-        if (scanned >= MAX_FONT_SCAN || (scanned % 50 === 0 && scanned > 0 && new Date().getTime() - started > FONT_SCAN_MS)) {
+      var j0 = 0;
+      if (i === startFamily) j0 = startFont;
+      // A family filter rejects the whole family on its first font's names.
+      if (wantFamily !== "" && famLen > j0 && !nameMatches(fam[0], ["familyName", "nativeFamilyName"], wantFamily)) {
+        scanned += famLen - j0;
+        continue;
+      }
+      for (var j = j0; j < famLen; j++) {
+        // Time is checked at each family and every 50 fonts; the server goes on from next_family / next_font.
+        if (scanned > 0 && (scanned >= MAX_FONT_SCAN || ((j === j0 || scanned % 50 === 0) && new Date().getTime() - started > FONT_SCAN_MS))) {
           truncated = true;
           stop = true;
+          nextFamily = i;
+          nextFont = j;
           break;
         }
         scanned++;
         var f = fam[j];
-        var info = fontSummary(f, false);
-        if (q !== "" && !matchesQuery(info, q)) continue;
-        if (wantFamily !== "") {
-          var fam1 = "";
-          if (info.family !== undefined) fam1 = normF(info.family);
-          var fam2 = "";
-          if (info.native_family !== undefined) fam2 = normF(info.native_family);
-          if (fam1.indexOf(wantFamily) < 0 && fam2.indexOf(wantFamily) < 0) continue;
-        }
-        if (wantStyle !== "") {
-          var sty = "";
-          if (info.style !== undefined) sty = normF(info.style);
-          if (sty.indexOf(wantStyle) < 0) continue;
-        }
-        if (variableOnly && info.has_design_axes !== true) continue;
-        if (adobeOnly && info.is_from_adobe_fonts !== true) continue;
+        if (q !== "" && !matchesQuery(f, q)) continue;
+        if (wantFamily !== "" && !nameMatches(f, ["familyName", "nativeFamilyName"], wantFamily)) continue;
+        if (wantStyle !== "" && !nameMatches(f, ["styleName"], wantStyle)) continue;
+        if (variableOnly && readMember(f, "hasDesignAxes") !== true) continue;
+        if (adobeOnly && readMember(f, "isFromAdobeFonts") !== true) continue;
         if (scriptGiven) {
           var has = false;
           try {
@@ -672,7 +697,7 @@
           if (!has) continue;
         }
         matches++;
-        if (matches > skip && out.length < pageSize) out.push(fontSummary(f, true));
+        if (matches > skip && out.length < take) out.push(fontSummary(f, true));
       }
     }
     var result = {
@@ -684,6 +709,9 @@
       has_more: matches > skip + out.length,
       scanned: scanned,
       scan_truncated: truncated,
+      next_family: nextFamily,
+      next_font: nextFont,
+      family_count: familyCount,
       font_ids_session_only: true
     };
     if (truncated) result.note = "The font list was only partly scanned (" + scanned + " fonts); narrow the search for a complete answer.";

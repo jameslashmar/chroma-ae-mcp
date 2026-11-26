@@ -232,6 +232,55 @@ function aseFile(colors) {
   return Buffer.concat(parts);
 }
 
+const FONT_WARNING_RE = /BIB Error|cannot access font/i;
+
+/** AE's font warnings that are open now, answered with OK. Only these: any other popup is left to the step that caused it. */
+async function answerFontWarnings() {
+  const d = await call("ae_dialogs", {});
+  const out = { answered: 0, open: 0, texts: [] };
+  for (const x of d.dialogs ?? []) {
+    const text = `${x.title ?? ""} ${x.text ?? ""}`;
+    if (!FONT_WARNING_RE.test(text)) continue;
+    out.open++;
+    if (out.texts.length < 2) out.texts.push(text.replace(/\s+/g, " ").trim().slice(0, 120));
+    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK" });
+    if (!refused(r)) out.answered++;
+  }
+  return out;
+}
+
+/** ae_fonts with AE's font warnings answered while the scan runs and for a few quiet seconds after it. */
+async function fontSearchAnsweringWarnings(args) {
+  const started = Date.now();
+  let done = false;
+  const pending = call("ae_fonts", args).finally(() => {
+    done = true;
+  });
+  let answered = 0;
+  const texts = [];
+  const sweep = async () => {
+    const s = await answerFontWarnings();
+    answered += s.answered;
+    for (const t of s.texts) if (texts.length < 2 && !texts.includes(t)) texts.push(t);
+    return s;
+  };
+  while (!done && Date.now() - started < 5 * 60_000) {
+    await sleep(1500);
+    if (!done) await sweep();
+  }
+  // Warnings can still come after the scan's last call returns: wait for 6 quiet seconds (at most 2 more minutes).
+  let quietSince = Date.now();
+  const tailUntil = Date.now() + 2 * 60_000;
+  while (Date.now() - quietSince < 6000 && Date.now() < tailUntil) {
+    await sleep(1500);
+    const s = await sweep();
+    if (s.open > 0) quietSince = Date.now();
+  }
+  const last = await answerFontWarnings();
+  answered += last.answered;
+  return { result: await pending, answered, leftOpen: last.open - last.answered, texts, seconds: Math.round((Date.now() - started) / 1000) };
+}
+
 async function main() {
   const client = createClient();
   await assertSafeInitialProject(client);
@@ -253,6 +302,21 @@ async function main() {
   check("ae_auto_checkpoint", settings.applies_to?.length > 0, JSON.stringify(settings.auto_checkpoint));
   // With auto checkpoints off (the user's choice), every write must report "skipped".
   const want = (status) => (autoOn ? status : "skipped");
+
+  // ---------- font warm-up ----------
+  // AE 26.3 on a PC with many fonts (PR #19, Windows) opens "Unknown BIB Error. cannot access font" warnings,
+  // several times over about 2 minutes, on the first scan of the font list in a session; every later check then
+  // failed as "a popup is open". The scan is ours, so the smoke answers those warnings (OK, their only button)
+  // while it runs, once, here, instead of letting them land in the middle of other steps.
+  {
+    const warm = await fontSearchAnsweringWarnings({ action: "search", query: "zz-chroma-no-such-font", page_size: 1 });
+    const w = warm.result;
+    check(
+      "ae_fonts (warm-up: the whole font list is scanned; AE's font warnings are answered)",
+      w.available === false || (w.available === true && w.scan_truncated === false && w.total_matches === 0 && warm.leftOpen === 0),
+      `${w.scanned ?? 0} fonts in ${w.scan_calls ?? "?"} call(s), ${warm.seconds} s; ${warm.answered} warning(s) answered, ${warm.leftOpen} left open${warm.texts.length ? `: ${warm.texts.join(" | ").slice(0, 160)}` : ""}${w.available === false ? `; ${w.reason}` : ""}`
+    );
+  }
 
   // ---------- scene ----------
   const scene = await call("ae_run_jsx", {
@@ -2082,7 +2146,7 @@ async function main() {
     check("ae_camera_rig (retune an existing camera: lens, depth of field, aperture)", okWrite(r), why(r));
     r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, lens: { focal_length: 35 }, expect });
     check("ae_camera_rig (the same retune again is a no-op)", r.no_op === true, brief(r).slice(0, 100));
-    r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, focus: { focus_area_width: 40, near_far_blur_multiplier: 2 }, expect });
+    r = await call("ae_camera_rig", { comp_id: D, camera: { name: "W5 Cam" }, focus: { focus_area_width: 40, near_far_blur_level: [150, 80] }, expect });
     gated("ae_camera_rig (26.3 focus options, or reported absent in the warnings)", r, (x) => x.applied === true && (x.probe?.focus_area_width !== undefined || /focus_area_width property/.test(JSON.stringify(x.warnings))), /26\.3|focus_area_width/i, JSON.stringify({ probe: r.probe, warnings: r.warnings }).slice(0, 160));
     r = await call("ae_scene_3d_report", { comp_id: D });
     check("ae_scene_3d_report (lights and models are listed)", Array.isArray(r.lights) && r.lights.some((l) => l.name === "W5 Spot") && Array.isArray(r.models), `${(r.lights ?? []).length} light(s), ${(r.models ?? []).length} model(s); ${JSON.stringify(r.warnings)?.slice(0, 80)}`);
