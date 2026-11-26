@@ -192,6 +192,13 @@
     return null;
   }
 
+  // Two finite numbers ([near, far]), or null.
+  function pair(v) {
+    if (v === null || v === undefined || typeof v !== "object" || typeof v.length !== "number" || v.length !== 2) return null;
+    if (typeof v[0] !== "number" || !isFinite(v[0]) || typeof v[1] !== "number" || !isFinite(v[1])) return null;
+    return [v[0], v[1]];
+  }
+
   function clip(s) {
     if (s.length > MAX_EXPR) return s.substring(0, MAX_EXPR) + " ...[truncated]";
     return s;
@@ -254,19 +261,45 @@
     return null;
   }
 
-  // The 26.3 Advanced 3D camera options have no documented match names. Try the
-  // likely ones, then look through the options group by display name; the
-  // result says which match name answered, or null when the camera has none.
+  // The 26.3 Advanced 3D camera options, measured on AE 26.3x87 (Windows, 2026-11-26):
+  // "Focus Area Width" (ADBE Camera Focus Area Width) is one number, and "Near, Far Blur Level"
+  // (ADBE Camera Split Blur Level) is TWO, [near, far] in percent, default [100, 100]. There is no
+  // near/far blur "multiplier": writing one number into the 2D property is what failed with
+  // "Unable to call setValue because of parameter 1. Value is not an array" (PR #19).
+  // Match names first, then display names; dims is how many values the property must hold, so a
+  // display-name match of another shape is never written.
   var PROBE = {
     focus_area_width: {
-      names: ["ADBE Camera Focus Area Width", "ADBE Camera Focus Area"],
-      words: [["focus", "area"]]
+      names: ["ADBE Camera Focus Area Width"],
+      words: [["focus", "area"]],
+      dims: 1
     },
-    near_far_blur_multiplier: {
-      names: ["ADBE Camera Near Far Blur Multiplier", "ADBE Camera Near-Far Blur Multiplier"],
-      words: [["blur", "multiplier"], ["near", "far"]]
+    near_far_blur_level: {
+      names: ["ADBE Camera Split Blur Level"],
+      words: [["near", "far", "blur"]],
+      dims: 2
     }
   };
+
+  var NO_MULTIPLIER = "focus.near_far_blur_multiplier does not exist in After Effects (26.3 has Near, Far Blur Level, two values in percent): use focus.near_far_blur_level, one number for both or [near, far]";
+
+  // focus.near_far_blur_level: one number for both sides, or [near, far]; percent, 0 or more.
+  function nearFarPair(v) {
+    var out = null;
+    if (isNum(v)) out = [v, v];
+    else if (v !== null && typeof v === "object" && typeof v.length === "number" && v.length === 2 && isNum(v[0]) && isNum(v[1])) out = [v[0], v[1]];
+    if (out === null || out[0] < 0 || out[1] < 0) fail("bad_args", "focus.near_far_blur_level must be a number for both sides, or [near, far], in percent, 0 or more");
+    return out;
+  }
+
+  // How many values a property holds now: 1 for a number, n for an array of n.
+  function dimsOf(prop) {
+    var v = null;
+    try { v = prop.value; } catch (e) { return 0; }
+    if (typeof v === "number") return 1;
+    if (v !== null && typeof v === "object" && typeof v.length === "number") return v.length;
+    return 0;
+  }
 
   function probeCameraOption(opts, key) {
     var spec = PROBE[key];
@@ -274,7 +307,7 @@
     var i;
     for (i = 0; i < spec.names.length; i++) {
       var p = child(opts, spec.names[i]);
-      if (p) return { prop: p, match_name: spec.names[i] };
+      if (p && dimsOf(p) === spec.dims) return { prop: p, match_name: spec.names[i] };
     }
     var n = 0;
     try {
@@ -297,7 +330,7 @@
         for (var w = 0; w < spec.words[g].length; w++) {
           if (label.indexOf(spec.words[g][w]) < 0) all = false;
         }
-        if (all) return { prop: c, match_name: mn };
+        if (all && dimsOf(c) === spec.dims) return { prop: c, match_name: mn };
       }
     }
     return null;
@@ -404,15 +437,15 @@
       blur_level: numKeysOf(blurP)
     };
     var faw = probeCameraOption(opts, "focus_area_width");
-    var nfb = probeCameraOption(opts, "near_far_blur_multiplier");
+    var nfb = probeCameraOption(opts, "near_far_blur_level");
     info.focus_area_width = null;
-    info.near_far_blur_multiplier = null;
+    info.near_far_blur_level = null;
     if (faw) info.focus_area_width = scalar(valueAt(faw.prop, t));
-    if (nfb) info.near_far_blur_multiplier = scalar(valueAt(nfb.prop, t));
+    if (nfb) info.near_far_blur_level = pair(valueAt(nfb.prop, t));
     info.num_keys.focus_area_width = null;
-    info.num_keys.near_far_blur_multiplier = null;
+    info.num_keys.near_far_blur_level = null;
     if (faw) info.num_keys.focus_area_width = numKeysOf(faw.prop);
-    if (nfb) info.num_keys.near_far_blur_multiplier = numKeysOf(nfb.prop);
+    if (nfb) info.num_keys.near_far_blur_level = numKeysOf(nfb.prop);
     if (isNum(atTime)) {
       // The stored values at the time a retune keyed, so a receipt can check the key's value.
       info.values_at = {
@@ -422,10 +455,10 @@
         aperture: scalar(rawAt(apertureP, atTime)),
         blur_level: scalar(rawAt(blurP, atTime)),
         focus_area_width: null,
-        near_far_blur_multiplier: null
+        near_far_blur_level: null
       };
       if (faw) info.values_at.focus_area_width = scalar(rawAt(faw.prop, atTime));
-      if (nfb) info.values_at.near_far_blur_multiplier = scalar(rawAt(nfb.prop, atTime));
+      if (nfb) info.values_at.near_far_blur_level = pair(rawAt(nfb.prop, atTime));
     }
     var watched = [
       ["position", pos],
@@ -1055,6 +1088,24 @@
       changes.push(valueChange(key, prop, want, keyedAt, allowClearExpr && ex !== null));
     }
 
+    // The same for a two-value property ([near, far]), compared value by value.
+    function planPair(key, prop, label, want) {
+      var keys = numKeysOf(prop);
+      var keyedAt = null;
+      if (keys !== null && keys > 0) {
+        if (atTime === null) fail("bad_args", label + " is keyframed (" + keys + " keys); give at_time to key a new value there, or remove the keys first");
+        keyedAt = atTime;
+      }
+      if (expressionOf(prop) !== null) fail("bad_args", label + " is driven by an expression; remove the expression first");
+      checkLimits(prop, want[0], label + " (near)");
+      checkLimits(prop, want[1], label + " (far)");
+      var current = null;
+      if (keyedAt !== null) current = pair(valueAt(prop, keyedAt));
+      else current = pair(valueAt(prop, 0));
+      if (current !== null && sameNum(current[0], want[0]) && sameNum(current[1], want[1])) return;
+      changes.push(valueChange(key, prop, [want[0], want[1]], keyedAt, false));
+    }
+
     if (has(args.lens)) {
       if (!zoomP) fail("unsupported", "The camera has no Zoom property");
       var newZoom = lensZoom(comp, args.lens);
@@ -1071,12 +1122,13 @@
     if (f) {
       if (wantDof === false) fail("bad_args", "focus turns depth of field on; it can't be combined with depth_of_field false");
       if (has(f.layer) && has(f.distance)) fail("bad_args", "focus takes a layer or a distance, not both");
-      if (!has(f.layer) && !has(f.distance) && !has(f.aperture) && !has(f.blur_level) && !has(f.focus_area_width) && !has(f.near_far_blur_multiplier)) {
+      if (has(f.near_far_blur_multiplier)) fail("bad_args", NO_MULTIPLIER);
+      if (!has(f.layer) && !has(f.distance) && !has(f.aperture) && !has(f.blur_level) && !has(f.focus_area_width) && !has(f.near_far_blur_level)) {
         fail("bad_args", "focus needs at least one option");
       }
       wantDof = true;
     }
-    var probes = { focus_area_width: null, near_far_blur_multiplier: null };
+    var probes = { focus_area_width: null, near_far_blur_level: null };
     if (wantDof !== null) {
       if (!dofP) fail("unsupported", "The camera has no Depth of Field property");
       var dofNow = oneOf(valueAt(dofP, 0));
@@ -1119,18 +1171,25 @@
         if (blurP) plan("blur_level", blurP, "focus.blur_level", f.blur_level, false);
         else warnings.push("This camera has no Blur Level property; focus.blur_level was not applied");
       }
-      var probeKeys = ["focus_area_width", "near_far_blur_multiplier"];
-      for (var pk = 0; pk < probeKeys.length; pk++) {
-        var pkey = probeKeys[pk];
-        if (!has(f[pkey])) continue;
-        if (!isNum(f[pkey]) || f[pkey] < 0) fail("bad_args", "focus." + pkey + " must be a number, 0 or more");
-        var pr = probeCameraOption(opts, pkey);
-        if (!pr) {
-          warnings.push("This camera has no " + pkey + " property (the Advanced 3D focus options need After Effects 26.3); it was not applied");
-          continue;
+      if (has(f.focus_area_width)) {
+        if (!isNum(f.focus_area_width) || f.focus_area_width < 0) fail("bad_args", "focus.focus_area_width must be a number, 0 or more");
+        var prW = probeCameraOption(opts, "focus_area_width");
+        if (!prW) {
+          warnings.push("This camera has no focus_area_width property (the Advanced 3D focus options need After Effects 26.3); it was not applied");
+        } else {
+          probes.focus_area_width = prW.match_name;
+          plan("focus_area_width", prW.prop, "focus.focus_area_width", f.focus_area_width, false);
         }
-        probes[pkey] = pr.match_name;
-        plan(pkey, pr.prop, "focus." + pkey, f[pkey], false);
+      }
+      if (has(f.near_far_blur_level)) {
+        var nf = nearFarPair(f.near_far_blur_level);
+        var prN = probeCameraOption(opts, "near_far_blur_level");
+        if (!prN) {
+          warnings.push("This camera has no near_far_blur_level property (Near, Far Blur Level: the Advanced 3D focus options need After Effects 26.3); it was not applied");
+        } else {
+          probes.near_far_blur_level = prN.match_name;
+          planPair("near_far_blur_level", prN.prop, "focus.near_far_blur_level", nf);
+        }
       }
     }
 
@@ -1195,8 +1254,9 @@
     var comp = requireComp(args.comp_id);
     if (has(args.camera)) return retuneCamera(args, comp);
     if (has(args.depth_of_field) || has(args.at_time)) fail("bad_args", "depth_of_field and at_time apply with camera (retune) only");
-    if (has(args.focus) && (has(args.focus.focus_area_width) || has(args.focus.near_far_blur_multiplier))) {
-      fail("bad_args", "focus_area_width and near_far_blur_multiplier apply with camera (retune) only");
+    if (has(args.focus) && has(args.focus.near_far_blur_multiplier)) fail("bad_args", NO_MULTIPLIER);
+    if (has(args.focus) && (has(args.focus.focus_area_width) || has(args.focus.near_far_blur_level))) {
+      fail("bad_args", "focus_area_width and near_far_blur_level apply with camera (retune) only");
     }
 
     var presets = { "static": 1, push_in: 1, dolly: 1, orbit: 1, parallax: 1 };

@@ -115,13 +115,18 @@ const FocusSchema = z
       .min(0)
       .max(1e6)
       .optional()
-      .describe("Retune only (`camera` given): the Advanced 3D focus area width (AE 26.3). Its match name is unconfirmed, so the host probes the camera's options and says in `warnings` when it finds none."),
+      .describe("Retune only (`camera` given): the Advanced 3D Focus Area Width (AE 26.3, ADBE Camera Focus Area Width). A camera without it is reported in `warnings`."),
+    near_far_blur_level: z
+      .union([z.number().min(0).max(1e6), z.tuple([z.number().min(0).max(1e6), z.number().min(0).max(1e6)])])
+      .optional()
+      .describe("Retune only (`camera` given): the Advanced 3D Near, Far Blur Level (AE 26.3, ADBE Camera Split Blur Level) in percent: one number for both sides, or [near, far]. AE's default is [100, 100]. A camera without it is reported in `warnings`."),
     near_far_blur_multiplier: z
       .number()
-      .min(0)
-      .max(1e6)
       .optional()
-      .describe("Retune only (`camera` given): the Advanced 3D near/far blur multiplier (AE 26.3). Probed like focus_area_width."),
+      .describe("Not an After Effects property: refused. Use near_far_blur_level ([near, far] in percent)."),
+  })
+  .refine((f) => f.near_far_blur_multiplier === undefined, {
+    message: "near_far_blur_multiplier does not exist in After Effects (26.3 has Near, Far Blur Level, two values in percent): use near_far_blur_level, one number for both or [near, far].",
   })
   .refine((f) => !(f.layer !== undefined && f.distance !== undefined), { message: "Give a focus layer or a distance, not both." })
   .refine(
@@ -131,8 +136,9 @@ const FocusSchema = z
       f.aperture !== undefined ||
       f.blur_level !== undefined ||
       f.focus_area_width !== undefined ||
+      f.near_far_blur_level !== undefined ||
       f.near_far_blur_multiplier !== undefined,
-    { message: "focus needs at least one of layer, distance, aperture, blur_level, focus_area_width, near_far_blur_multiplier." }
+    { message: "focus needs at least one of layer, distance, aperture, blur_level, focus_area_width, near_far_blur_level." }
   )
   .describe("Turns depth of field on. Iris and highlight options differ per renderer and are left alone.");
 
@@ -194,8 +200,8 @@ export const AeCameraRigSchema = z
   .refine(
     (v) =>
       v.camera !== undefined ||
-      (v.depth_of_field === undefined && v.at_time === undefined && v.focus?.focus_area_width === undefined && v.focus?.near_far_blur_multiplier === undefined),
-    { message: "depth_of_field, at_time, focus.focus_area_width and focus.near_far_blur_multiplier apply with camera (retune) only." }
+      (v.depth_of_field === undefined && v.at_time === undefined && v.focus?.focus_area_width === undefined && v.focus?.near_far_blur_level === undefined),
+    { message: "depth_of_field, at_time, focus.focus_area_width and focus.near_far_blur_level apply with camera (retune) only." }
   );
 
 export const AeScene3dReportSchema = z.object({
@@ -229,7 +235,7 @@ export interface CameraInfo {
     aperture: number | null;
     blur_level: number | null;
     focus_area_width?: number | null;
-    near_far_blur_multiplier?: number | null;
+    near_far_blur_level?: number | null;
   };
   /** Stored (pre-expression) values at the time a retune keyed; only read when cameraRead got at_time. */
   values_at?: {
@@ -239,11 +245,12 @@ export interface CameraInfo {
     aperture: number | null;
     blur_level: number | null;
     focus_area_width: number | null;
-    near_far_blur_multiplier: number | null;
+    near_far_blur_level: [number, number] | null;
   };
   /** The 26.3 Advanced 3D focus options (null when the camera has none). */
   focus_area_width?: number | null;
-  near_far_blur_multiplier?: number | null;
+  /** [near, far] in percent. */
+  near_far_blur_level?: [number, number] | null;
   expressions: Record<string, string>;
   expression_errors: Array<{ property: string; error: string }>;
 }
@@ -294,7 +301,7 @@ export interface RigWritten extends Record<string, unknown> {
 
 /** What the host's cameraRig returns in retune mode. */
 export interface RetuneChange {
-  key: "zoom" | "depth_of_field" | "focus_expression" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_multiplier" | "nodes";
+  key: "zoom" | "depth_of_field" | "focus_expression" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_level" | "nodes";
   value: unknown;
   keyed: boolean;
   replaced_key: boolean;
@@ -307,7 +314,7 @@ export interface RetuneWritten extends Record<string, unknown> {
   controller: null;
   changes: RetuneChange[];
   keyed_at: number | null;
-  probe: { focus_area_width: string | null; near_far_blur_multiplier: string | null };
+  probe: { focus_area_width: string | null; near_far_blur_level: string | null };
   warnings: string[];
 }
 
@@ -399,22 +406,28 @@ export function cameraRetuneMismatches(beforeRaw: unknown, afterRaw: unknown, w:
     return m;
   }
   const was = before?.cameras.find((c) => c.id === w.camera.id);
-  type KeyField = "zoom" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_multiplier";
+  type KeyField = "zoom" | "focus_distance" | "aperture" | "blur_level" | "focus_area_width" | "near_far_blur_level";
   const keyField: Record<string, KeyField | undefined> = {
     zoom: "zoom",
     focus_distance: "focus_distance",
     aperture: "aperture",
     blur_level: "blur_level",
     focus_area_width: "focus_area_width",
-    near_far_blur_multiplier: "near_far_blur_multiplier",
+    near_far_blur_level: "near_far_blur_level",
   };
-  const valueOf: Record<string, number | null | undefined> = {
+  const valueOf: Record<string, number | number[] | null | undefined> = {
     zoom: cam.zoom,
     focus_distance: cam.focus_distance,
     aperture: cam.aperture,
     blur_level: cam.blur_level,
     focus_area_width: cam.focus_area_width,
-    near_far_blur_multiplier: cam.near_far_blur_multiplier,
+    near_far_blur_level: cam.near_far_blur_level,
+  };
+  const close = (got: unknown, want: number) => near(typeof got === "number" ? got : null, want, Math.max(0.01, Math.abs(want) * 1e-4));
+  /** A number, or [near, far] value by value. */
+  const sameValue = (got: unknown, want: unknown): boolean => {
+    if (Array.isArray(want)) return Array.isArray(got) && got.length === want.length && want.every((w, i) => typeof w === "number" && close(got[i], w));
+    return typeof want === "number" && close(got, want);
   };
   for (const c of w.changes) {
     const path = `camera.${c.key}`;
@@ -432,15 +445,13 @@ export function cameraRetuneMismatches(beforeRaw: unknown, afterRaw: unknown, w:
         const want = wasKeys + (c.replaced_key ? 0 : 1);
         expectThat(m, nowKeys === want, `${path}.num_keys`, want, nowKeys, "The new keyframe is not there");
       }
-      const wantV = c.value as number;
       const keyedV = field ? cam.values_at?.[field] : undefined;
-      if (typeof wantV === "number") {
-        expectThat(m, near(keyedV, wantV, Math.max(0.01, Math.abs(wantV) * 1e-4)), `${path}.value_at_key`, wantV, keyedV, `${c.key} at the keyed time differs from what was asked`);
+      if (typeof c.value === "number" || Array.isArray(c.value)) {
+        expectThat(m, sameValue(keyedV, c.value), `${path}.value_at_key`, c.value, keyedV, `${c.key} at the keyed time differs from what was asked`);
       }
     } else {
       const got = valueOf[c.key];
-      const want = c.value as number;
-      expectThat(m, near(got, want, Math.max(0.01, Math.abs(want) * 1e-4)), path, want, got, `${c.key} differs from what was asked`);
+      expectThat(m, sameValue(got, c.value), path, c.value, got, `${c.key} differs from what was asked`);
     }
     if (c.key === "focus_distance" && !c.keyed) {
       expectThat(m, cam.expressions.focus_distance === undefined, "camera.expressions.focus_distance", "no expression", cam.expressions.focus_distance, "Focus Distance still has an expression");
@@ -702,7 +713,7 @@ export const cameraTools: ToolDefinition<any>[] = [
       "If a later step fails, everything this call made is taken back. The new camera goes on top, so it becomes the active one. " +
       "The read-back (a separate evalScript) checks the camera, its lens, node type, depth of field, expression errors, the controller's sliders and keyframes, and the spread layers' depth. " +
       "Use ae_scene_3d_report to see the result by depth. " +
-      "RETUNE: pass `camera` (an existing camera layer) to change it instead: `lens` (focal length, angle of view or zoom), `depth_of_field` on or off, `focus` (a layer to keep sharp, a fixed distance, aperture, blur level, and on AE 26.3 the Advanced 3D focus_area_width and near_far_blur_multiplier, whose match names are probed and reported in `warnings` when absent), and `nodes` one or two. " +
+      "RETUNE: pass `camera` (an existing camera layer) to change it instead: `lens` (focal length, angle of view or zoom), `depth_of_field` on or off, `focus` (a layer to keep sharp, a fixed distance, aperture, blur level, and on AE 26.3 the Advanced 3D focus_area_width and near_far_blur_level ([near, far] in percent), reported in `warnings` when the camera has none), and `nodes` one or two. " +
       "A keyframed Zoom, Focus Distance, Aperture or Blur Level is refused unless `at_time` keys the new value there; an expression-driven Zoom is refused. Everything is checked before the undo group; a failure part-way puts the camera back. Nothing to change returns no_op with no undo step. The same separate read-back checks each change. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCameraRigSchema,

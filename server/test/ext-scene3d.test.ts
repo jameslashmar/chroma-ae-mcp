@@ -153,7 +153,13 @@ describe("ae_camera_rig schema: retune", () => {
     expect(AeCameraRigSchema.safeParse({ ...base, camera: { name: "Camera 1" }, lens: { focal_length: 35 } }).success).toBe(true);
     expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, depth_of_field: false }).success).toBe(true);
     expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, nodes: "one", at_time: 2 }).success).toBe(true);
-    expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, focus: { layer: { name: "Logo" }, aperture: 20, focus_area_width: 40, near_far_blur_multiplier: 2 } }).success).toBe(true);
+    expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, focus: { layer: { name: "Logo" }, aperture: 20, focus_area_width: 40, near_far_blur_level: [120, 80] } }).success).toBe(true);
+    expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, focus: { near_far_blur_level: 60 } }).success).toBe(true);
+    // AE 26.3 has no near/far blur multiplier: the old field is refused, naming the one to use.
+    const old = AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, focus: { near_far_blur_multiplier: 2 } });
+    expect(old.success).toBe(false);
+    expect(JSON.stringify(old.error?.issues)).toMatch(/near_far_blur_level/);
+    expect(AeCameraRigSchema.safeParse({ ...base, camera: { index: 1 }, focus: { near_far_blur_level: [1, 2, 3] } }).success).toBe(false);
   });
 
   it("refuses create-only arguments with camera, an empty retune, and a contradictory focus", () => {
@@ -276,7 +282,7 @@ const written = (changes: RetuneWritten["changes"], extra: Partial<RetuneWritten
   controller: null,
   changes,
   keyed_at: null,
-  probe: { focus_area_width: null, near_far_blur_multiplier: null },
+  probe: { focus_area_width: null, near_far_blur_level: null },
   warnings: [],
   ...extra,
 });
@@ -306,7 +312,7 @@ describe("cameraRetuneMismatches", () => {
   it("checks a keyed change by its key count, and a fixed distance for a leftover expression", () => {
     const before = camRead([camInfo({ num_keys: { zoom: 2, focus_distance: 0, aperture: 0, blur_level: 0 } })]);
     const newKey = [{ key: "zoom" as const, value: 1000, keyed: true, replaced_key: false }];
-    const at = (zoom: number) => ({ time: 2, zoom, focus_distance: 1000, aperture: 0, blur_level: 100, focus_area_width: null, near_far_blur_multiplier: null });
+    const at = (zoom: number) => ({ time: 2, zoom, focus_distance: 1000, aperture: 0, blur_level: 100, focus_area_width: null, near_far_blur_level: null });
     const added = camRead([camInfo({ num_keys: { zoom: 3, focus_distance: 0, aperture: 0, blur_level: 0 }, values_at: at(1000) })]);
     expect(cameraRetuneMismatches(before, added, written(newKey, { keyed_at: 2 }))).toEqual([]);
     expect(cameraRetuneMismatches(before, before, written(newKey, { keyed_at: 2 })).map((x) => x.path)).toEqual(["camera.zoom.num_keys", "camera.zoom.value_at_key"]);
@@ -494,7 +500,7 @@ describe("ae_camera_rig retune through a fake bridge", () => {
   });
 
   it("reads the keyed time back only in the after-read, and checks the value at that key", async () => {
-    const vals = (zoom: number, time: number) => ({ time, zoom, focus_distance: 1000, aperture: 0, blur_level: 100, focus_area_width: null, near_far_blur_multiplier: null });
+    const vals = (zoom: number, time: number) => ({ time, zoom, focus_distance: 1000, aperture: 0, blur_level: 100, focus_area_width: null, near_far_blur_level: null });
     const keys = (n: number) => ({ zoom: n, focus_distance: 0, aperture: 0, blur_level: 0 });
     const run = async (keyedAt: number, afterZoom: number) => {
       const { ctx, calls } = fakeAe({
@@ -824,6 +830,69 @@ describe("layers.jsx createLayer: parametric meshes", () => {
     expect(entry.mesh).toMatchObject({ type: "cube", options: { width: 300, height: 100, depth: 40 }, bevel: { radius: 6, sides: 3 } });
   });
 
+  /**
+   * AE 26.3 as shipped (26.3x87, measured 2026-11-26): parametricMeshOptions and parametricBevelOptions are
+   * read-only PropertyGroups of the current type, fields are OneD properties ("ADBE CubeWidthStrm"), booleans 0/1.
+   */
+  function meshAs263(comp: FakeComp) {
+    const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+    const stem = (f: string) => ({ sliceStart: "StartAngle", sliceEnd: "EndAngle" })[f] ?? cap(f);
+    const groupOf = (type: string, label: string, mid: string, fields: Record<string, number>, limits: Record<string, [number, number]> = {}) => {
+      const props = Object.entries(fields).map(([f, v]) => {
+        const p = new FakeProperty(f.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()), `ADBE ${cap(type)}${mid}${stem(f)}Strm`, PropertyValueType.OneD, v);
+        if (limits[f]) Object.assign(p, { hasMin: true, minValue: limits[f][0], hasMax: true, maxValue: limits[f][1] });
+        return p;
+      });
+      return new FakeGroup(label, `ADBE ${cap(type)}${mid}OptionsSGrp`, props);
+    };
+    comp.layers.addParametricMesh = (name: string, type: number) => {
+      const l = new FakeLayer(comp, name, "ParametricMeshLayer");
+      const typeName = ({ 1: "cube", 6: "cylinder" } as Record<number, string>)[type] ?? "sphere";
+      const fields: Record<string, Record<string, number>> = {
+        cube: { width: 200, height: 200, depth: 200, smoothingAngle: 40 },
+        cylinder: { radius: 100, height: 200, sides: 48, topCap: 1, bottomCap: 1, sliceCaps: 1, sliceStart: 0, sliceEnd: 360, smoothingAngle: 40 },
+        sphere: { radius: 100, sides: 48, sliceCaps: 1, sliceStart: 0, sliceEnd: 360, smoothingAngle: 40 },
+      };
+      const opts = groupOf(typeName, "Mesh Options", "", fields[typeName], { sides: [3, 100], smoothingAngle: [0, 180] });
+      const bevel = typeName === "sphere" ? null : groupOf(typeName, "Bevel Options", "Bevel", { radius: 0, sides: 20 }, { sides: [1, 100] });
+      for (const g of [opts, bevel]) if (g) (g as any).parentProperty = l.group;
+      const ro = (what: string) => () => {
+        throw new Error(`After Effects error: Unable to set "${what}". It is a readOnly attribute.`);
+      };
+      Object.defineProperty(l, "parametricMeshOptions", { get: () => opts, set: ro("parametricMeshOptions") });
+      Object.defineProperty(l, "parametricBevelOptions", { get: () => bevel, set: ro("parametricBevelOptions") });
+      (l as any).parametricMeshType = type;
+      comp.stack.unshift(l);
+      return l;
+    };
+  }
+
+  it("AE 26.3: sets each field on the options PropertyGroup and reads it back (width and height were missing, PR #19)", () => {
+    const { comp, A, undo } = layerScene();
+    meshAs263(comp);
+    const r = A.createLayer({ comp_id: comp.id, type: "mesh", mesh_type: "cube", mesh_options: { width: 300, height: 200, depth: 100 }, bevel_options: { radius: 5, sides: 3 }, expect: GUARD });
+    expect(undo).toEqual({ begun: 1, ended: 1 });
+    expect(r.warnings ?? []).toEqual([]);
+    const l = comp.stack[0] as any;
+    expect((l.parametricMeshOptions as FakeGroup).property("ADBE CubeWidthStrm")!.value).toBe(300);
+    expect((l.parametricBevelOptions as FakeGroup).property("ADBE CubeBevelSidesStrm")!.value).toBe(3);
+    const entry = stackOfComp(A, comp).layers[0];
+    expect(entry.mesh).toEqual({ type: "cube", options: { width: 300, height: 200, depth: 100, smoothingAngle: 40 }, bevel: { radius: 5, sides: 3 } });
+  });
+
+  it("AE 26.3: booleans go in as 0/1 and come back as true/false; Slice Start is StartAngle; limits refuse before AE does", () => {
+    const { comp, A } = layerScene();
+    meshAs263(comp);
+    A.createLayer({ comp_id: comp.id, type: "mesh", mesh_type: "cylinder", mesh_options: { topCap: false, sliceStart: 90 }, expect: GUARD });
+    const l = comp.stack[0] as any;
+    expect((l.parametricMeshOptions as FakeGroup).property("ADBE CylinderTopCapStrm")!.value).toBe(0);
+    expect((l.parametricMeshOptions as FakeGroup).property("ADBE CylinderStartAngleStrm")!.value).toBe(90);
+    expect(stackOfComp(A, comp).layers[0].mesh?.options).toMatchObject({ topCap: false, bottomCap: true, sliceStart: 90, sliceEnd: 360 });
+    const before = comp.numLayers;
+    expect(() => A.createLayer({ comp_id: comp.id, type: "mesh", mesh_type: "cylinder", mesh_options: { sides: 500 }, expect: GUARD })).toThrow(/mesh_options\.sides 500 is above AE's maximum 100/);
+    expect(comp.numLayers).toBe(before);
+  });
+
   it("builds a sphere that is named and made 3D without throwing", () => {
     const { comp, A } = layerScene();
     A.createLayer({ comp_id: comp.id, type: "mesh", mesh_type: "sphere", name: "Ball", mesh_options: { radius: 120 }, three_d: true, expect: GUARD });
@@ -1000,7 +1069,8 @@ describe("model_3d / parametric_mesh kinds", () => {
 const AutoOrientType = { ALONG_PATH: 1, CAMERA_OR_POINT_OF_INTEREST: 2, CHARACTERS_TOWARD_CAMERA: 3, NO_AUTO_ORIENT: 4 };
 
 interface CamOpts {
-  extraOptions?: Array<[string, string, number]>;
+  /** [display name, match name, value]; an array value makes a 2D property that, like AE 26.3, refuses a single number. */
+  extraOptions?: Array<[string, string, number | number[]]>;
   lateFocusKeys?: boolean;
 }
 
@@ -1015,7 +1085,20 @@ function cameraScene(o: CamOpts = {}) {
     new FakeProperty("Aperture", "ADBE Camera Aperture", PropertyValueType.OneD, 0),
     new FakeProperty("Blur Level", "ADBE Camera Blur Level", PropertyValueType.OneD, 100),
   ];
-  for (const [name, match, value] of o.extraOptions ?? []) options.push(new FakeProperty(name, match, PropertyValueType.OneD, value));
+  for (const [name, match, value] of o.extraOptions ?? []) {
+    if (!Array.isArray(value)) {
+      options.push(new FakeProperty(name, match, PropertyValueType.OneD, value));
+      continue;
+    }
+    const p = new FakeProperty(name, match, PropertyValueType.TwoD, value);
+    const set = p.setValue.bind(p);
+    // AE 26.3's words for a number written into Near, Far Blur Level (PR #19).
+    p.setValue = (v: unknown) => {
+      if (!Array.isArray(v)) throw new Error('Unable to call "setValue" because of parameter 1. Value is not an array.');
+      set(v);
+    };
+    options.push(p);
+  }
   const group = new FakeGroup("Camera Options", "ADBE Camera Options Group", options);
   group.parentProperty = cam.group;
   cam.group.props.push(group);
@@ -1156,19 +1239,33 @@ describe("camera.jsx cameraRig: retune", () => {
     expect(opt("ADBE Camera Focus Distance").value).toBe(1000);
   });
 
-  it("probes the 26.3 focus options: sets them when found, warns when the camera has none", () => {
+  it("sets the 26.3 focus options as AE 26.3 has them, warns when the camera has none", () => {
+    // Measured on AE 26.3x87: Focus Area Width is one number, Near, Far Blur Level is [near, far] in percent.
     const withOpts = cameraScene({
       extraOptions: [
-        ["Focus Area Width", "ADBE Camera Focus Area Width", 10],
-        ["Near/Far Blur Multiplier", "ADBE Camera Near Far Blur Multiplier", 1],
+        ["Focus Area Width", "ADBE Camera Focus Area Width", 0],
+        ["Near, Far Blur Level", "ADBE Camera Split Blur Level", [100, 100]],
       ],
     });
     const r = plain(
-      withOpts.A.cameraRig({ comp_id: withOpts.comp.id, camera: { index: 1 }, focus: { focus_area_width: 40, near_far_blur_multiplier: 2.5 }, expect: GUARD })
+      withOpts.A.cameraRig({ comp_id: withOpts.comp.id, camera: { index: 1 }, focus: { focus_area_width: 40, near_far_blur_level: [150, 80] }, expect: GUARD })
     );
     expect(withOpts.opt("ADBE Camera Focus Area Width").value).toBe(40);
-    expect(withOpts.opt("ADBE Camera Near Far Blur Multiplier").value).toBe(2.5);
-    expect(r.probe).toEqual({ focus_area_width: "ADBE Camera Focus Area Width", near_far_blur_multiplier: "ADBE Camera Near Far Blur Multiplier" });
+    expect(withOpts.opt("ADBE Camera Split Blur Level").value).toEqual([150, 80]);
+    expect(r.probe).toEqual({ focus_area_width: "ADBE Camera Focus Area Width", near_far_blur_level: "ADBE Camera Split Blur Level" });
+    expect(r.changes.find((c: any) => c.key === "near_far_blur_level").value).toEqual([150, 80]);
+    // One number sets both sides; the same pair again changes nothing.
+    withOpts.A.cameraRig({ comp_id: withOpts.comp.id, camera: { index: 1 }, focus: { near_far_blur_level: 60 }, expect: GUARD });
+    expect(withOpts.opt("ADBE Camera Split Blur Level").value).toEqual([60, 60]);
+    const again = plain(withOpts.A.cameraRig({ comp_id: withOpts.comp.id, camera: { index: 1 }, focus: { near_far_blur_level: [60, 60] }, expect: GUARD }));
+    expect(again.no_op).toBe(true);
+    // The old field never reaches AE.
+    expect(() => withOpts.A.cameraRig({ comp_id: withOpts.comp.id, camera: { index: 1 }, focus: { near_far_blur_multiplier: 2 }, expect: GUARD })).toThrow(/near_far_blur_level/);
+    // A property of another shape whose name matches is never written.
+    const shape = cameraScene({ extraOptions: [["Near Far Blur Amount", "ADBE Other Blur", 1]] });
+    const r2 = plain(shape.A.cameraRig({ comp_id: shape.comp.id, camera: { index: 1 }, focus: { near_far_blur_level: 50 }, expect: GUARD }));
+    expect(shape.opt("ADBE Other Blur").value).toBe(1);
+    expect(r2.warnings.join(" ")).toMatch(/near_far_blur_level property/);
     // Unknown match names are found by their display names.
     const odd = cameraScene({ extraOptions: [["Focus Area Width", "ADBE Weird Name", 10]] });
     odd.A.cameraRig({ comp_id: odd.comp.id, camera: { index: 1 }, focus: { focus_area_width: 33 }, expect: GUARD });
@@ -1182,7 +1279,10 @@ describe("camera.jsx cameraRig: retune", () => {
   it("reads the retuned camera's key counts and 26.3 options back for the receipt", () => {
     const { comp, A } = cameraScene({ extraOptions: [["Focus Area Width", "ADBE Camera Focus Area Width", 12]] });
     const res = plain(A.cameraRead({ comp_id: comp.id, ids: [] })) as CameraReadBack;
-    expect(res.cameras[0]).toMatchObject({ focus_area_width: 12, near_far_blur_multiplier: null, num_keys: { zoom: 0, focus_distance: 0, aperture: 0, blur_level: 0 } });
+    expect(res.cameras[0]).toMatchObject({ focus_area_width: 12, near_far_blur_level: null, num_keys: { zoom: 0, focus_distance: 0, aperture: 0, blur_level: 0 } });
+    const both = cameraScene({ extraOptions: [["Near, Far Blur Level", "ADBE Camera Split Blur Level", [120, 90]]] });
+    const res2 = plain(both.A.cameraRead({ comp_id: both.comp.id, ids: [] })) as CameraReadBack;
+    expect(res2.cameras[0]).toMatchObject({ near_far_blur_level: [120, 90], num_keys: { near_far_blur_level: 0 } });
   });
 
   it("reads the stored values at the keyed time, and counts keys on the 26.3 options", () => {
@@ -1194,8 +1294,8 @@ describe("camera.jsx cameraRig: retune", () => {
     const none = plain(A.cameraRead({ comp_id: comp.id, ids: [] })) as CameraReadBack;
     expect(none.cameras[0].values_at).toBeUndefined();
     const res = plain(A.cameraRead({ comp_id: comp.id, ids: [], at_time: 2 })) as CameraReadBack;
-    expect(res.cameras[0].num_keys).toMatchObject({ zoom: 2, focus_area_width: 2, near_far_blur_multiplier: null });
-    expect(res.cameras[0].values_at).toMatchObject({ time: 2, focus_area_width: 16, near_far_blur_multiplier: null });
+    expect(res.cameras[0].num_keys).toMatchObject({ zoom: 2, focus_area_width: 2, near_far_blur_level: null });
+    expect(res.cameras[0].values_at).toMatchObject({ time: 2, focus_area_width: 16, near_far_blur_level: null });
     expect(res.cameras[0].values_at?.zoom).toBeCloseTo(2833.3335, 3);
   });
 
