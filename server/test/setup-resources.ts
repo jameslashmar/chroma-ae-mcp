@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resetCepAutostartCache } from "../src/tools/ext/aerender.js";
 import { forgetCatalogs, renderFormatsDeps } from "../src/tools/ext/render-formats.js";
-import { frameCaptureDeps, pngWaitDeps } from "../src/tools/render.js";
+import { frameCaptureDeps, pngWaitDeps, resetUnwrittenFrame } from "../src/tools/render.js";
 
 // No test starts PowerShell: every test file gets a probe that finds nothing. A test that wants a reading sets resourceDeps.run itself.
 resourceDeps.run = async () => null;
@@ -31,3 +31,6 @@ beforeEach(() => resetCepAutostartCache([]));
 // No test reads or writes this machine's measured render formats (render-formats.json in the real data dir).
 renderFormatsDeps.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "chroma-formats-test-"));
 beforeEach(() => forgetCatalogs());
+
+// A frame one test left unwritten must not hold the frame renders of the next (production holds them 2 minutes).
+beforeEach(() => resetUnwrittenFrame());

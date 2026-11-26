@@ -213,6 +213,87 @@ export function mayStillBeRendering(filePath: string, before: { size: number; mt
 }
 
 /**
+ * The stale-frame retry is for the case it was made for: AE wrote a whole PNG, but an older one (its
+ * cached frame; the file's mtime is before the request). Only then is a second saveFrameToPng sent.
+ *
+ * A frame AE never wrote (no file, or one still empty or cut off after every wait) is NOT retried.
+ * AE 26.3 (26.3x87, Windows, PR #19): on an Advanced 3D comp saveFrameToPng returned at once and wrote
+ * nothing in 30 s, and the retry's second saveFrameToPng crashed AE ("Set Artisan Task: Advanced 3D"),
+ * twice. Waiting longer before the retry (9c52623) did not help.
+ */
+export function staleFrameOnDisk(filePath: string, requestStartMs: number): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const st = fs.statSync(filePath);
+    return st.size > 0 && st.mtimeMs < requestStartMs - 50 && pngComplete(filePath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * After a frame AE never wrote, no other frame is asked of AE for `holdMs` (or until that file
+ * appears): AE may still be rendering it, and a saveFrameToPng on top of it is what crashed AE 26.3.
+ */
+export const unwrittenFrameDeps = { holdMs: 120_000 };
+let unwrittenFrame: { path: string; since: number; compId: number; time: number; label: string } | null = null;
+
+export function noteUnwrittenFrame(filePath: string, compId: number, time: number, label: string): void {
+  unwrittenFrame = { path: filePath, since: Date.now(), compId, time, label };
+}
+
+/** For tests: forget a frame left unwritten by an earlier test. */
+export function resetUnwrittenFrame(): void {
+  unwrittenFrame = null;
+}
+
+export interface UnwrittenFrameHold {
+  error: "frame_render_pending";
+  message: string;
+  comp_id: number;
+  time: number;
+  seconds_left: number;
+}
+
+/** Null when a new saveFrameToPng may go to AE; otherwise why not, and for how long. */
+export function unwrittenFrameHold(): UnwrittenFrameHold | null {
+  const u = unwrittenFrame;
+  if (!u) return null;
+  let landed = false;
+  try {
+    landed = fs.existsSync(u.path) && fs.statSync(u.path).size > 0;
+  } catch {
+    landed = false;
+  }
+  const age = Date.now() - u.since;
+  if (landed || age >= unwrittenFrameDeps.holdMs) {
+    unwrittenFrame = null;
+    return null;
+  }
+  const left = Math.max(1, Math.ceil((unwrittenFrameDeps.holdMs - age) / 1000));
+  return {
+    error: "frame_render_pending",
+    comp_id: u.compId,
+    time: u.time,
+    seconds_left: left,
+    message:
+      `Nothing was rendered: After Effects has not written the last frame it was asked for (${u.label}, ${Math.round(age / 1000)} s ago) and may still be rendering it. ` +
+      `A second frame render on top of it crashed After Effects 26.3 on an Advanced 3D comp, so frame renders wait up to ${left} s more. ` +
+      "Call ae_status, then try again; for frames of an Advanced 3D comp on AE 26.3, render through the render queue (ae_render_queue_add) or try the comp on Classic 3D.",
+  };
+}
+
+/** The message for a frame AE did not write, sent no second time. */
+export function unwrittenFrameMessage(compId: number, time: number, waitedMs: number): string {
+  return (
+    `After Effects did not write the frame of comp ${compId} at ${time}s (no complete PNG after ${Math.round(waitedMs / 1000)} s). ` +
+    "It was not asked again: a second saveFrameToPng while AE may still be rendering crashed After Effects 26.3 on an Advanced 3D comp. " +
+    `Frame renders now wait up to ${Math.round(unwrittenFrameDeps.holdMs / 1000)} s for it. Call ae_status before the next call; ` +
+    "for an Advanced 3D comp on AE 26.3, render the frame through the render queue (ae_render_queue_add) or try the comp on Classic 3D."
+  );
+}
+
+/**
  * Shrinks a fresh full-resolution snapshot on the server (never in AE) and
  * describes the file the agent should look at.
  */
@@ -324,7 +405,8 @@ export const renderTools: ToolDefinition<any>[] = [
     name: "ae_snapshot_frame",
     description:
       "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). " +
-      "saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
+      "saveFrameToPng writes asynchronously, so the server waits (up to 10 s, then 20 s more while a render may be in progress) for the file to be non-empty and stable, and checks its mtime is newer than the request; a stale frame (a whole PNG older than the request) is retried once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
+      "A frame AE never wrote is not retried (that second render crashed AE 26.3 on an Advanced 3D comp): it reports `frame_not_written`, and frame renders are refused with `frame_render_pending` for up to 2 minutes or until that file appears. " +
       "`path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. " +
       "To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " +
       AGENT_SAFETY_GUIDANCE,
@@ -347,6 +429,9 @@ export const renderTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
           async () => {
+            // A frame AE has not written yet may still be rendering: nothing more is sent on top of it.
+            const hold = unwrittenFrameHold();
+            if (hold) return { ok: false, kind: hold.error, ...hold, requested: { comp_id: args.comp_id, time } };
             const uniqueSuffix1 = `${Date.now()}_${crypto
               .randomBytes(4)
               .toString("hex")}`;
@@ -405,7 +490,23 @@ export const renderTools: ToolDefinition<any>[] = [
               }
             }
 
-            // Retry once with a small time nudge
+            // Retry once with a small time nudge, only for a stale frame (a whole PNG older than the request).
+            // A frame AE never wrote is not asked for again: that second saveFrameToPng crashed AE 26.3.
+            if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+              noteUnwrittenFrame(pngPath1, args.comp_id, time, `ae_snapshot_frame(${args.comp_id} @ ${time}s)`);
+              const st = isFreshPngFile(pngPath1, reqStart1);
+              return {
+                ok: false,
+                error: "frame_not_written",
+                kind: "frame_not_written",
+                message: unwrittenFrameMessage(args.comp_id, time, Date.now() - reqStart1),
+                comp_id: args.comp_id,
+                time,
+                scale,
+                retried: false,
+                attempts: [{ path: pngPath1, exists: fs.existsSync(pngPath1), size: st.size, mtimeMs: st.mtimeMs }],
+              };
+            }
             const nudgedTime = Math.max(0, time + 0.001);
             const uniqueSuffix2 = `${Date.now()}_${crypto
               .randomBytes(4)
@@ -469,6 +570,8 @@ export const renderTools: ToolDefinition<any>[] = [
                 };
               }
             }
+            // The retry itself was never written: hold later frames as for a first frame never written.
+            if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, args.comp_id, nudgedTime, `ae_snapshot_frame(${args.comp_id} @ ${nudgedTime}s retry)`);
             return {
               ok: false,
               error: "stale_frame",

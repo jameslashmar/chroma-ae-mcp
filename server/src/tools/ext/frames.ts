@@ -12,7 +12,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, noteUnwrittenFrame, staleFrameOnDisk, unwrittenFrameHold, unwrittenFrameMessage, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -423,6 +423,9 @@ export async function captureCompFrame(params: {
 }): Promise<{ path: string; time: number }> {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
+  // A frame AE has not written yet may still be rendering: nothing more is sent on top of it (AE 26.3 crashed).
+  const hold = unwrittenFrameHold();
+  if (hold) throw new Error(hold.message);
   const suffix1 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const pngPath1 = path.join(
     framesDir,
@@ -456,7 +459,12 @@ export async function captureCompFrame(params: {
     if (late1.fresh) return { path: pngPath1, time };
   }
 
-  // Retry once with a slight +0.001s time nudge
+  // Retry once with a slight +0.001s time nudge, only for a stale frame (a whole PNG older than the request).
+  // A frame AE never wrote is not asked for again: that second saveFrameToPng crashed AE 26.3 (PR #19).
+  if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+    noteUnwrittenFrame(pngPath1, compId, time, `${toolName}(${compId} @ ${time}s)`);
+    throw new Error(unwrittenFrameMessage(compId, time, Date.now() - reqStart1));
+  }
   const nudgedTime = Math.max(0, time + 0.001);
   const suffix2 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const pngPath2 = path.join(
@@ -500,6 +508,7 @@ export async function captureCompFrame(params: {
     }
     settled = ` After Effects was still writing the frame; waited ${Math.round((Date.now() - t0) / 1000)} s for it to finish before returning. Call ae_status before the next call.`;
   }
+  if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, compId, nudgedTime, `${toolName}(${compId} @ ${nudgedTime}s retry)`);
 
   throw new Error(
     `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.${settled}`
