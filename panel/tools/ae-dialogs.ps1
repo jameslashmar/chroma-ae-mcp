@@ -249,14 +249,16 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
     # A long-running, cheap look at AE's top-level windows (Win32 only: no UI Automation, no screenshot, no
     # OCR). One JSON line whenever the set of candidate popup windows changes; the server then runs a full
     # list. AE's main window, its floating panel frames (DroverLord), tooltips, menus and shadows are never
-    # popups. Exits when the parent (the panel service's Node) is gone.
+    # popups. Exits when the parent (the panel service's Node) is gone, or when nobody reads its output any
+    # more (a reloaded service page): a line every 10 s finds that out, since writing to a closed pipe fails.
     if ($Mode -eq "watch") {
         $interval = [Math]::Max(250, $IntervalMs)
         $skip = @("tooltips_class32", "#32768", "SysShadow", "IME", "MSCTFIME UI")
         $last = $null
         $aePids = @()
         $pidCheckedAt = [DateTime]::MinValue
-        Write-JsonOut @{ ok = $true; event = "ready" }
+        $aliveAt = Get-Date
+        try { Write-JsonOut @{ ok = $true; event = "ready" } } catch { exit 0 }
         while ($true) {
             if ($ParentPid -gt 0 -and $null -eq (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit 0 }
             if (((Get-Date) - $pidCheckedAt).TotalSeconds -ge 5) {
@@ -272,10 +274,16 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
                 }
             }
             $key = (@($found) | Sort-Object) -join ","
-            if ($key -ne $last) {
-                $last = $key
-                Write-JsonOut @{ ok = $true; event = "windows"; handles = @($found) }
-            }
+            try {
+                if ($key -ne $last) {
+                    $last = $key
+                    Write-JsonOut @{ ok = $true; event = "windows"; handles = @($found) }
+                    $aliveAt = Get-Date
+                } elseif (((Get-Date) - $aliveAt).TotalSeconds -ge 10) {
+                    Write-JsonOut @{ ok = $true; event = "alive" }
+                    $aliveAt = Get-Date
+                }
+            } catch { exit 0 }
             Start-Sleep -Milliseconds $interval
         }
     }
