@@ -488,6 +488,7 @@
         dataDir: paths.stateDir,
         log: log,
         cep: cepAdapter,
+        watchPopups: true,
         serviceInfo: function () {
           return {
             panelVersion: PANEL_VERSION,

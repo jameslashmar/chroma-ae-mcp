@@ -4328,9 +4328,9 @@ async function checkSequences(inputs, io, opts = {}) {
   let futureIgnored = 0;
   let unmatchedNames = 0;
   const notes = [];
-  const skip = (label) => {
+  const skip = (label2) => {
     uncheckedCount++;
-    if (unchecked.length < MAX_UNCHECKED_NAMED) unchecked.push(label);
+    if (unchecked.length < MAX_UNCHECKED_NAMED) unchecked.push(label2);
   };
   const byDir = /* @__PURE__ */ new Map();
   for (const inp of inputs) {
@@ -4932,9 +4932,9 @@ var init_assets = __esm({
 });
 
 // src/host.ts
-function nextStepsUnknown(label, checkpoint) {
+function nextStepsUnknown(label2, checkpoint) {
   return [
-    `Part of "${label}" may already be in the project. Do not resend it: read the state first (ae_comp_diff, or the read tools for what it touches).`,
+    `Part of "${label2}" may already be in the project. Do not resend it: read the state first (ae_comp_diff, or the read tools for what it touches).`,
     "If it is wrong, one Edit > Undo in After Effects (Ctrl+Z, Cmd+Z on macOS) removes this call's whole undo group; a save, a project open or close, a render and a font replacement have none. Tell the user before doing anything else.",
     checkpoint ? `The checkpoint taken just before it holds the project as it was: ${checkpoint}` : "The automatic checkpoint taken before the write (ae_status lists it) holds the project as it was."
   ];
@@ -4955,9 +4955,9 @@ function bridgeErrorFromHost(errObj, opId, opts = {}) {
     ...outcome ? { outcome, next_steps: outcome === "not_applied" ? NEXT_STEPS_NOT_APPLIED : nextStepsUnknown(opts.label ?? "this write") } : {}
   });
 }
-function withOutcome(err, outcome, label, checkpoint) {
+function withOutcome(err, outcome, label2, checkpoint) {
   if (outcome === "unknown" && err.outcome === "not_applied") return err;
-  const steps = outcome === "not_applied" ? NEXT_STEPS_NOT_APPLIED : nextStepsUnknown(label, checkpoint);
+  const steps = outcome === "not_applied" ? NEXT_STEPS_NOT_APPLIED : nextStepsUnknown(label2, checkpoint);
   return new BridgeError({ ...err.toJSON(), outcome, next_steps: steps });
 }
 function normalizeErrorKind(kind) {
@@ -5105,6 +5105,11 @@ function runInCall(state, fn) {
 function currentCall() {
   return storage.getStore();
 }
+function clientRequestChannel() {
+  let found = null;
+  for (const s of running.values()) if (s.request && !s.cancelled) found = s.request;
+  return found;
+}
 function cancelCall(client, requestId, reason) {
   if (typeof requestId !== "string" && typeof requestId !== "number") return false;
   const state = running.get(keyOf(client, requestId));
@@ -5117,12 +5122,12 @@ function checkCancelled(where) {
   const s = storage.getStore();
   if (s?.cancelled) throw new CancelledError(where, s.reason);
 }
-function noteProgress(label) {
+function noteProgress(label2) {
   const s = storage.getStore();
   if (!s || s.progressToken === void 0 || !s.notify) return;
   s.progress += 1;
   try {
-    s.notify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: s.progressToken, progress: s.progress, message: label.slice(0, 200) } });
+    s.notify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: s.progressToken, progress: s.progress, message: label2.slice(0, 200) } });
   } catch {
   }
 }
@@ -10617,8 +10622,8 @@ function diffComp(prev, live) {
   return base;
 }
 function describeComp(c) {
-  const label = `comp ${c.id}${c.name ? ` "${c.name}"` : ""}`;
-  if (c.status === "removed") return `${label} is gone`;
+  const label2 = `comp ${c.id}${c.name ? ` "${c.name}"` : ""}`;
+  if (c.status === "removed") return `${label2} is gone`;
   if (c.status !== "changed") return null;
   const parts = [];
   if (c.layers.before !== c.layers.now && c.layers.before !== null && c.layers.now !== null) {
@@ -10628,7 +10633,7 @@ function describeComp(c) {
   }
   if (c.selection_changed) parts.push("selection changed");
   if (c.work_area_changed) parts.push("work area changed");
-  return `${label}: ${parts.join(", ")}`;
+  return `${label2}: ${parts.join(", ")}`;
 }
 function diffSnapshots(prev, live, serviceId) {
   const bothUnsaved = prev.project_path === UNSAVED && live.project_path === UNSAVED;
@@ -11720,8 +11725,8 @@ async function saveElsewhere(ctx, args, opId, oldPath, saveAs, increment, doBack
     fs12.copyFileSync(target, backupPath);
     backupSize = fs12.statSync(backupPath).size;
   }
-  const label = increment ? "ae_save (increment)" : "ae_save (save as)";
-  const note = { opId, toolName: "ae_save", label, expect: args.expect, checkpoint: null };
+  const label2 = increment ? "ae_save (increment)" : "ae_save (save as)";
+  const note = { opId, toolName: "ae_save", label: label2, expect: args.expect, checkpoint: null };
   const sessionFields = await noteBeforeWrite(ctx, note);
   const requestedAt = Date.now();
   beginInflight(note);
@@ -11730,7 +11735,7 @@ async function saveElsewhere(ctx, args, opId, oldPath, saveAs, increment, doBack
     saveResp = await ctx.bridge.evalRaw({
       id: opId,
       script: buildJsxCall("save", { expect: args.expect, save_as_path: target }),
-      label,
+      label: label2,
       timeoutMs: SLOW_TIMEOUT_MS,
       mutates: true,
       toolName: "ae_save"
@@ -11743,7 +11748,7 @@ async function saveElsewhere(ctx, args, opId, oldPath, saveAs, increment, doBack
     () => ctx.bridge.evalRaw({
       id: `${opId}_after`,
       script: buildJsxCall("status", {}),
-      label: `${label} (after status)`,
+      label: `${label2} (after status)`,
       mutates: false,
       toolName: "ae_save"
     })
@@ -12017,17 +12022,17 @@ var init_mutate = __esm({
         handler: async (args, ctx) => {
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
-          const label = `ae_set_property(${args.path.join(".")})`;
+          const label2 = `ae_set_property(${args.path.join(".")})`;
           const effectiveExpect = {
             project_path: args.expect.project_path,
             comp_id: args.expect.comp_id ?? args.comp_id
           };
           try {
-            return await ctx.queue.run(label, async () => {
+            return await ctx.queue.run(label2, async () => {
               ctx.quarantine.assertClear();
               const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
               const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_property");
-              const note = { opId, toolName: "ae_set_property", label, expect: effectiveExpect, checkpoint: checkpoint?.path ?? null };
+              const note = { opId, toolName: "ae_set_property", label: label2, expect: effectiveExpect, checkpoint: checkpoint?.path ?? null };
               const sessionFields = await noteBeforeWrite(ctx, note);
               const beforeSnap = await ctx.bridge.evalRaw({
                 id: `${opId}_before`,
@@ -12040,7 +12045,7 @@ var init_mutate = __esm({
                   text_full: true,
                   value_only: true
                 }),
-                label: `${label} (before)`,
+                label: `${label2} (before)`,
                 mutates: false,
                 toolName: "ae_set_property"
               });
@@ -12061,7 +12066,7 @@ var init_mutate = __esm({
                     allow_substitute: args.allow_substitute,
                     expect: effectiveExpect
                   }),
-                  label,
+                  label: label2,
                   mutates: true,
                   toolName: "ae_set_property"
                 });
@@ -12082,7 +12087,7 @@ var init_mutate = __esm({
                     value_only: true,
                     expression_error: wroteExpression
                   }),
-                  label: `${label} (after)`,
+                  label: `${label2} (after)`,
                   mutates: false,
                   toolName: "ae_set_property"
                 })
@@ -12504,13 +12509,13 @@ function renderQueueFindings2(read3) {
   if (!anyOn) return out;
   for (const q of rq.items) {
     if (!rendersWithProxies(q.proxy_use) || q.status !== void 0 && !WILL_RENDER.has(q.status.toLowerCase())) continue;
-    const label = `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}"`;
+    const label2 = `Render queue item ${q.index}${q.comp ? ` ("${q.comp}")` : ""} has Proxy Use "${q.proxy_use}"`;
     const used = new Set(q.reach ?? []);
     const hit = read3.items.some((i) => i.use_proxy === true && i.proxy && used.has(i.id) && (!compsOnly(q.proxy_use) || i.kind === "comp"));
     if (hit) {
-      out.push({ code: "queue_uses_proxies", severity: "warn", message: `${label} and its comp uses an item with its proxy on: it would render from proxies.` });
+      out.push({ code: "queue_uses_proxies", severity: "warn", message: `${label2} and its comp uses an item with its proxy on: it would render from proxies.` });
     } else if ((!q.reach || q.reach_complete !== true) && (!compsOnly(q.proxy_use) || anyCompOn)) {
-      out.push({ code: "queue_uses_proxies", severity: "info", message: `${label} while footage has its proxy on: it may render from proxies (what the comp uses could not be fully read).` });
+      out.push({ code: "queue_uses_proxies", severity: "info", message: `${label2} while footage has its proxy on: it may render from proxies (what the comp uses could not be fully read).` });
     }
   }
   return out;
@@ -12933,11 +12938,11 @@ var init_interpret = __esm({
 });
 
 // src/tools/ext/assets.ts
-async function readFootagePaths(ctx, label, toolName) {
+async function readFootagePaths(ctx, label2, toolName) {
   const res = await ctx.bridge.evalRaw({
     id: `${ctx.bridge.newOpId()}_footage`,
     script: buildJsxCall("footagePaths", {}),
-    label,
+    label: label2,
     mutates: false,
     toolName
   });
@@ -15512,13 +15517,22 @@ function stripHasEdge(png, xa, xb, y) {
   }
   return max - min >= OUTLINE_MIN_CONTRAST;
 }
-function hasPillBorders(png, label, wordHeight) {
-  const y = (label.y1 + label.y2) / 2;
+function hasPillBorders(png, label2, wordHeight, farFactor = OUTLINE_FAR_FACTOR) {
+  const y = (label2.y1 + label2.y2) / 2;
   const near10 = OUTLINE_NEAR_FACTOR * wordHeight;
-  const far = OUTLINE_FAR_FACTOR * wordHeight;
-  const left = stripHasEdge(png, label.x1 - far, label.x1 - near10, y);
-  const right = stripHasEdge(png, label.x2 + near10, label.x2 + far, y);
+  const far = farFactor * wordHeight;
+  const left = stripHasEdge(png, label2.x1 - far, label2.x1 - near10, y);
+  const right = stripHasEdge(png, label2.x2 + near10, label2.x2 + far, y);
   return left && right;
+}
+function messageBoxBand(png, rowY, bodyY) {
+  const x = Math.min(png.width - 1, Math.max(12, Math.round(png.width * 0.04)));
+  const yr = Math.round(rowY);
+  const yb = Math.round(bodyY);
+  if (yr < 0 || yr >= png.height || yb < 0 || yb >= png.height) return false;
+  const row = lum(png, x, yr);
+  const body = lum(png, x, yb);
+  return row >= MESSAGE_BOX_MIN_LUM && body >= MESSAGE_BOX_MIN_LUM && body - row >= MESSAGE_BOX_BAND_STEP;
 }
 function nearRing(r, g, b) {
   return Math.abs(r - RING_RGB[0]) <= RING_TOLERANCE && Math.abs(g - RING_RGB[1]) <= RING_TOLERANCE && Math.abs(b - RING_RGB[2]) <= RING_TOLERANCE;
@@ -15574,8 +15588,8 @@ function findRings(png, scale = 1) {
   }
   return found;
 }
-function otherPillOnRow(png, label, wordHeight, scale = 1) {
-  const y = Math.round((label.y1 + label.y2) / 2);
+function otherPillOnRow(png, label2, wordHeight, scale = 1, farFactor = OUTLINE_FAR_FACTOR) {
+  const y = Math.round((label2.y1 + label2.y2) / 2);
   if (y < 0 || y >= png.height) return true;
   const values = [];
   const hist = /* @__PURE__ */ new Map();
@@ -15592,9 +15606,9 @@ function otherPillOnRow(png, label, wordHeight, scale = 1) {
       bg = l;
     }
   });
-  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK * scale;
-  const from = label.x1 - reach;
-  const to = label.x2 + reach;
+  const reach = farFactor * wordHeight + OWN_PILL_SLACK * scale;
+  const from = label2.x1 - reach;
+  const to = label2.x2 + reach;
   const edgeMax = Math.max(2, Math.round(0.05 * png.width));
   let left = 2;
   while (left < edgeMax && Math.abs(values[left] - bg) >= OUTLINE_MIN_CONTRAST) left++;
@@ -15607,7 +15621,7 @@ function otherPillOnRow(png, label, wordHeight, scale = 1) {
   return false;
 }
 function noButtons(infos) {
-  const body = infos.slice().sort((a, b) => a.cy - b.cy).map((i) => i.line.text.trim()).filter((t) => t.length > 0).join("\n");
+  const body = infos.slice().sort((a, b) => a.cy - b.cy).map((i) => i.line.text.trim()).filter((t) => t.length > 0 && !CLOSE_GLYPH.test(t)).join("\n");
   return { buttons: [], default_index: null, default_source: null, body_text: body };
 }
 function analysePaintedDialog(lines, png, size) {
@@ -15654,9 +15668,12 @@ function analysePaintedDialog(lines, png, size) {
     const margin = median(bodyInfos.map((i) => Math.min(...i.words.map((w) => w.x))));
     if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE * scale) return noButtons(infos);
   }
+  let band = false;
   if (png) {
+    const lowestBody = bodyInfos.length > 0 ? bodyInfos.reduce((a, b) => b.cy > a.cy ? b : a) : null;
+    band = lowestBody !== null && messageBoxBand(png, ref3.cy, lowestBody.cy);
     for (const c of candidates) {
-      if (!hasPillBorders(png, c.box, wordHeight)) return noButtons(infos);
+      if (!hasPillBorders(png, c.box, wordHeight) && !(band && hasPillBorders(png, c.box, wordHeight, MESSAGE_BOX_FAR_FACTOR))) return noButtons(infos);
     }
   }
   const buttons = candidates.map((c) => ({
@@ -15686,7 +15703,7 @@ function analysePaintedDialog(lines, png, size) {
       }
     }
   }
-  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale) : void 0;
+  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale, band ? MESSAGE_BOX_FAR_FACTOR : OUTLINE_FAR_FACTOR) : void 0;
   if (defaultIndex === null && buttons.length === 1 && png && ringCount === 0) {
     const c = candidates[0];
     if (!otherPill) {
@@ -15696,10 +15713,10 @@ function analysePaintedDialog(lines, png, size) {
   }
   if (defaultIndex !== null) buttons[defaultIndex].default = true;
   else if (buttons.length === 1) buttons[0].default = false;
-  const body = bodyInfos.slice().sort((a, b) => a.cy - b.cy).map((i) => i.line.text.trim()).filter((t) => t.length > 0).join("\n");
+  const body = bodyInfos.slice().sort((a, b) => a.cy - b.cy).map((i) => i.line.text.trim()).filter((t) => t.length > 0 && !CLOSE_GLYPH.test(t)).join("\n");
   return { buttons, default_index: defaultIndex, default_source: source, body_text: body, ...otherPill !== void 0 ? { other_pill_unread: otherPill } : {} };
 }
-var ROW_TOLERANCE, BUTTON_GAP_FACTOR, ROW_MIN_CENTER_FRACTION, MAX_LABEL_WORDS, MAX_LABEL_CHARS, BODY_MARGIN_TOLERANCE, OUTLINE_NEAR_FACTOR, OUTLINE_FAR_FACTOR, OUTLINE_MIN_CONTRAST, RING_RGB, RING_TOLERANCE, RING_MIN_PIXELS, OWN_PILL_SLACK, RING_MIN_ASPECT, RING_MAX_ASPECT, RING_MIN_HEIGHT, RING_MAX_HEIGHT;
+var ROW_TOLERANCE, BUTTON_GAP_FACTOR, ROW_MIN_CENTER_FRACTION, MAX_LABEL_WORDS, MAX_LABEL_CHARS, BODY_MARGIN_TOLERANCE, OUTLINE_NEAR_FACTOR, OUTLINE_FAR_FACTOR, MESSAGE_BOX_FAR_FACTOR, MESSAGE_BOX_BAND_STEP, MESSAGE_BOX_MIN_LUM, OUTLINE_MIN_CONTRAST, RING_RGB, RING_TOLERANCE, RING_MIN_PIXELS, OWN_PILL_SLACK, RING_MIN_ASPECT, RING_MAX_ASPECT, RING_MIN_HEIGHT, RING_MAX_HEIGHT, CLOSE_GLYPH;
 var init_dialog_geometry = __esm({
   "src/tools/ext/dialog-geometry.ts"() {
     "use strict";
@@ -15711,6 +15728,9 @@ var init_dialog_geometry = __esm({
     BODY_MARGIN_TOLERANCE = 8;
     OUTLINE_NEAR_FACTOR = 0.8;
     OUTLINE_FAR_FACTOR = 2.2;
+    MESSAGE_BOX_FAR_FACTOR = 4.5;
+    MESSAGE_BOX_BAND_STEP = 6;
+    MESSAGE_BOX_MIN_LUM = 200;
     OUTLINE_MIN_CONTRAST = 15;
     RING_RGB = [64, 150, 243];
     RING_TOLERANCE = 14;
@@ -15720,6 +15740,7 @@ var init_dialog_geometry = __esm({
     RING_MAX_ASPECT = 6;
     RING_MIN_HEIGHT = 22;
     RING_MAX_HEIGHT = 70;
+    CLOSE_GLYPH = /^[xX×]$/;
   }
 });
 
@@ -16194,6 +16215,72 @@ async function listDialogsInternal(opts) {
     dialogs: enriched
   };
 }
+function markShown(dialogs) {
+  for (const d of dialogs) {
+    const m = seenDialogs.get(d.handle);
+    if (m) {
+      m.shown = {
+        title: d.title,
+        text: d.text,
+        buttons: d.buttons.map((b) => b.name).join("|"),
+        default_button: d.default_button ?? null,
+        rect: d.window_rect ?? "",
+        painted: d.unattended !== void 0
+      };
+    }
+  }
+}
+function listDialogsForWatcher() {
+  return listDialogsInternal({ screenshots: true });
+}
+function startDialogWatch(onChange, log) {
+  if (!dialogsSupported()) return null;
+  if (currentPlatform() === "darwin") {
+    const timer = setInterval(onChange, MAC_WATCH_INTERVAL_MS);
+    return { stop: () => clearInterval(timer) };
+  }
+  const scriptPath = locateDialogsPs1Script();
+  if (!scriptPath) return null;
+  let stopped = false;
+  let child = null;
+  let restartTimer = null;
+  const launch = () => {
+    if (stopped) return;
+    const c = (0, import_node_child_process2.spawn)(
+      powershellExe(),
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Mode", "watch", "-ParentPid", String(process.pid), "-IntervalMs", String(WATCH_INTERVAL_MS)],
+      { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    child = c;
+    let buf = "";
+    c.stdout?.setEncoding("utf8");
+    c.stdout?.on("data", (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line.includes('"windows"')) onChange();
+      }
+    });
+    c.on("error", (err) => log?.("warn", `Popup watch could not start: ${err.message}`));
+    c.on("exit", () => {
+      child = null;
+      if (!stopped) restartTimer = setTimeout(launch, WATCH_RESTART_MS);
+    });
+  };
+  launch();
+  return {
+    stop: () => {
+      stopped = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      try {
+        child?.kill();
+      } catch {
+      }
+    }
+  };
+}
 async function listBlockingDialogs(opts) {
   try {
     const res = await listDialogsInternal(opts);
@@ -16259,7 +16346,167 @@ function decidePaintedKey(buttons, want) {
     message: `"${found.name}" was NOT pressed. ` + unattendedAnswers(buttons).note
   };
 }
-var import_node_child_process2, fs14, path16, url, import_pngjs, import_meta2, JAY_DIALOG_RULES, DESTRUCTIVE_BUTTON_PATTERN, DIALOG_EXEC_TIMEOUT_MS, MAX_DIALOG_TEXT_CHARS, inFlightOps, seenDialogs, runtimeOverrides, CANCEL_LIKE, OK_LIKE, DESTRUCTIVE_BODY_PATTERN, MAX_PNG_BYTES, AeDialogsSchema, AeDialogRespondSchema, RESULT_TEXT_CHARS, dialogsTools;
+async function respondToDialog(args) {
+  if (!dialogsSupported()) {
+    return {
+      ok: false,
+      error: "not_implemented_on_this_os"
+    };
+  }
+  let meta = seenDialogs.get(args.handle);
+  if (!meta) {
+    await listDialogsInternal({ screenshots: false });
+    meta = seenDialogs.get(args.handle);
+  }
+  if (!meta && currentPlatform() !== "darwin") {
+    return { ok: false, error: "dialog_gone", message: `"${args.button}" was NOT pressed: no open After Effects dialog has this handle.`, handle: args.handle, button: args.button };
+  }
+  const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
+  const policy = evaluateRespondPolicy({
+    button: args.button,
+    caused_by_op: causedByOp,
+    allow_destructive: args.allow_destructive ?? false,
+    user_instruction: args.user_instruction
+  });
+  if (!policy.allowed) {
+    return {
+      ok: false,
+      error: policy.error ?? "refused_by_policy",
+      message: policy.message,
+      handle: args.handle,
+      button: args.button,
+      caused_by_op: causedByOp
+    };
+  }
+  if (!(meta?.painted || meta?.shown?.painted)) {
+    const buttonCount = meta?.buttons ? meta.buttons.split("|").length : 0;
+    if (buttonCount > 1 && OK_LIKE.test(psLabel(args.button)) && DESTRUCTIVE_BODY_PATTERN.test(meta?.text ?? "") && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
+      return {
+        ok: false,
+        error: "refused_destructive_dialog",
+        message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
+        handle: args.handle,
+        button: args.button
+      };
+    }
+  }
+  let parsed;
+  let shown = null;
+  if (currentPlatform() === "darwin") {
+    const rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
+    parsed = parsePs1JsonOutput(rawStdout);
+  } else {
+    const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
+    let early = null;
+    const refuse2 = (error, message, extra2 = {}) => {
+      early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra2 };
+    };
+    if (meta?.painted || meta?.shown?.painted) {
+      const seen = meta.shown;
+      if (!seen) {
+        refuse2("dialog_not_listed", "ae_dialogs has not shown this dialog yet. Call ae_dialogs, read it, then answer.");
+      } else {
+        const fresh = await listDialogsInternal({ screenshots: true });
+        if (!fresh.ok) {
+          early = { ok: false, error: fresh.error, handle: args.handle, button: args.button };
+        } else {
+          const d = fresh.dialogs.find((x) => x.handle === args.handle);
+          if (!d) {
+            early = { ok: false, error: "dialog_gone", handle: args.handle, button: args.button };
+          } else if (d.unattended === void 0) {
+            refuse2("dialog_changed", "this window is no longer an AE-painted dialog the way ae_dialogs showed it. List the dialogs again.");
+          } else {
+            shown = d;
+            const cancelOnly = psLabel(args.button) === "cancel";
+            const sameText2 = textKey(d.text, cancelOnly) === textKey(seen.text, cancelOnly);
+            if (d.title !== seen.title || !sameText2 || d.buttons.map((b) => b.name).join("|") !== seen.buttons || (d.default_button ?? null) !== seen.default_button || (d.window_rect ?? "") !== seen.rect) {
+              refuse2("dialog_changed", "this dialog is not the one ae_dialogs showed (its title, text, buttons, default button or position differ now). List the dialogs again.");
+            } else if (fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle) {
+              refuse2("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+            } else {
+              const decision = decidePaintedKey(d.buttons, args.button);
+              if (decision.action === "refuse") {
+                early = {
+                  ok: false,
+                  error: decision.error,
+                  message: decision.message,
+                  handle: args.handle,
+                  button: args.button,
+                  ocr_buttons: d.buttons.map((b) => b.name),
+                  default_button: d.default_button ?? null,
+                  ...d.unattended ? { unattended: d.unattended } : {}
+                };
+              } else if (args.check) {
+                refuse2("checkbox_not_found", "an AE-painted dialog has no checkbox that can be toggled without focusing AE.");
+              } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
+                refuse2(
+                  "refused_destructive_dialog",
+                  `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
+                );
+              } else {
+                psArgs.push("-Key", decision.action);
+                if (d.title === "") psArgs.push("-ExpectEmptyTitle");
+                else psArgs.push("-ExpectTitle", d.title);
+                if (d.window_rect) psArgs.push("-ExpectRect", d.window_rect);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      const fresh = await listDialogsInternal({ screenshots: false });
+      if (fresh.ok && fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle && fresh.dialogs.some((x) => x.handle === args.handle)) {
+        refuse2("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
+      } else if (args.check) {
+        psArgs.push("-Check", args.check);
+      }
+    }
+    parsed = early ?? parsePs1JsonOutput(await runPowerShellScript(psArgs));
+  }
+  const logTime = currentNowIso();
+  const title = shown?.title ?? meta?.title ?? "";
+  const textExcerpt = (shown?.text ?? meta?.text ?? "").slice(0, RESULT_TEXT_CHARS);
+  appendResponseLog({
+    time: logTime,
+    handle: args.handle,
+    title,
+    text_excerpt: textExcerpt,
+    button: args.button,
+    check: args.check,
+    reason: args.reason,
+    op: causedByOp,
+    allow_destructive: Boolean(args.allow_destructive),
+    user_instruction: args.user_instruction,
+    result: parsed
+  });
+  const res = parsed;
+  const ok = res.ok === true;
+  const closed = res.closed === true;
+  if (ok && closed) {
+    seenDialogs.delete(args.handle);
+  }
+  if (!ok && res.error === "button_not_answerable" && !res.message) {
+    const ocr = res.ocr_buttons;
+    const names = Array.isArray(ocr) ? ocr.filter((n) => typeof n === "string").map(normalizeOcrLabel) : [];
+    const fixed = names.map((n) => ({ name: n, automationId: "", enabled: true }));
+    const un = fixed.length > 0 ? unattendedAnswers(fixed) : void 0;
+    const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
+    return { ...parsed, ocr_buttons: names, ...un ? { unattended: un } : {}, message: `"${args.button}" was NOT pressed. ${why}` };
+  }
+  if (ok && shown && res.method) {
+    const said = shown.text.slice(0, RESULT_TEXT_CHARS);
+    const pressed = res.pressed ?? args.button;
+    const message = closed ? `Pressed "${pressed}" (${res.method}) on the AE dialog "${shown.title}". It said: ${said} Tell the user what it said.` : `Sent the key (${res.method}) for "${pressed}" but the dialog "${shown.title}" did not close within 3 s. Nothing else was tried: ask the user. It said: ${said}`;
+    return {
+      ...parsed,
+      dialog: { title: shown.title, text: said },
+      default_button: shown.default_button ?? null,
+      message
+    };
+  }
+  return parsed;
+}
+var import_node_child_process2, fs14, path16, url, import_pngjs, import_meta2, JAY_DIALOG_RULES, DESTRUCTIVE_BUTTON_PATTERN, DIALOG_EXEC_TIMEOUT_MS, MAX_DIALOG_TEXT_CHARS, inFlightOps, seenDialogs, runtimeOverrides, CANCEL_LIKE, OK_LIKE, DESTRUCTIVE_BODY_PATTERN, MAX_PNG_BYTES, WATCH_INTERVAL_MS, MAC_WATCH_INTERVAL_MS, WATCH_RESTART_MS, AeDialogsSchema, AeDialogRespondSchema, RESULT_TEXT_CHARS, dialogsTools;
 var init_dialogs = __esm({
   "src/tools/ext/dialogs.ts"() {
     "use strict";
@@ -16285,6 +16532,9 @@ var init_dialogs = __esm({
     OK_LIKE = /^(ok|yes|continue)$/;
     DESTRUCTIVE_BODY_PATTERN = /\b(replac|overwrit|delet|discard|revert|remov|eras|lose\b|losing\b|lost\b)/i;
     MAX_PNG_BYTES = 4 * 1024 * 1024;
+    WATCH_INTERVAL_MS = 1e3;
+    MAC_WATCH_INTERVAL_MS = 4e3;
+    WATCH_RESTART_MS = 5e3;
     AeDialogsSchema = external_exports.object({
       screenshots: external_exports.boolean().default(true).optional().describe(
         "Whether to capture a PNG screenshot of each open dialog into dialogs/ in the data folder (ae_status: state_dir) (default: true). One file per dialog handle, overwritten on each call."
@@ -16323,21 +16573,7 @@ var init_dialogs = __esm({
           }
           const screenshots = args.screenshots ?? true;
           const res = await listDialogsInternal({ screenshots });
-          if (res.ok) {
-            for (const d of res.dialogs) {
-              const m = seenDialogs.get(d.handle);
-              if (m) {
-                m.shown = {
-                  title: d.title,
-                  text: d.text,
-                  buttons: d.buttons.map((b) => b.name).join("|"),
-                  default_button: d.default_button ?? null,
-                  rect: d.window_rect ?? "",
-                  painted: d.unattended !== void 0
-                };
-              }
-            }
-          }
+          if (res.ok) markShown(res.dialogs);
           return res;
         }
       },
@@ -16345,165 +16581,11 @@ var init_dialogs = __esm({
         name: "ae_dialog_respond",
         description: "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask the user to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell the user what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask the user. Logs every response to dialogs/responses.jsonl in the data folder (ae_status: state_dir). " + JAY_DIALOG_RULES + " " + AGENT_SAFETY_GUIDANCE,
         schema: AeDialogRespondSchema,
-        handler: async (args) => {
-          if (!dialogsSupported()) {
-            return {
-              ok: false,
-              error: "not_implemented_on_this_os"
-            };
-          }
-          let meta = seenDialogs.get(args.handle);
-          if (!meta) {
-            await listDialogsInternal({ screenshots: false });
-            meta = seenDialogs.get(args.handle);
-          }
-          if (!meta && currentPlatform() !== "darwin") {
-            return { ok: false, error: "dialog_gone", message: `"${args.button}" was NOT pressed: no open After Effects dialog has this handle.`, handle: args.handle, button: args.button };
-          }
-          const causedByOp = meta ? meta.caused_by_op : getCurrentInFlightOp();
-          const policy = evaluateRespondPolicy({
-            button: args.button,
-            caused_by_op: causedByOp,
-            allow_destructive: args.allow_destructive ?? false,
-            user_instruction: args.user_instruction
-          });
-          if (!policy.allowed) {
-            return {
-              ok: false,
-              error: policy.error ?? "refused_by_policy",
-              message: policy.message,
-              handle: args.handle,
-              button: args.button,
-              caused_by_op: causedByOp
-            };
-          }
-          if (!(meta?.painted || meta?.shown?.painted)) {
-            const buttonCount = meta?.buttons ? meta.buttons.split("|").length : 0;
-            if (buttonCount > 1 && OK_LIKE.test(psLabel(args.button)) && DESTRUCTIVE_BODY_PATTERN.test(meta?.text ?? "") && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
-              return {
-                ok: false,
-                error: "refused_destructive_dialog",
-                message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
-                handle: args.handle,
-                button: args.button
-              };
-            }
-          }
-          let parsed;
-          let shown = null;
-          if (currentPlatform() === "darwin") {
-            const rawStdout = await runMacScript(["respond", String(args.handle), args.button, args.check ?? "", meta?.title ?? "", (meta?.text ?? "").slice(0, 200)]);
-            parsed = parsePs1JsonOutput(rawStdout);
-          } else {
-            const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
-            let early = null;
-            const refuse2 = (error, message, extra2 = {}) => {
-              early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra2 };
-            };
-            if (meta?.painted || meta?.shown?.painted) {
-              const seen = meta.shown;
-              if (!seen) {
-                refuse2("dialog_not_listed", "ae_dialogs has not shown this dialog yet. Call ae_dialogs, read it, then answer.");
-              } else {
-                const fresh = await listDialogsInternal({ screenshots: true });
-                if (!fresh.ok) {
-                  early = { ok: false, error: fresh.error, handle: args.handle, button: args.button };
-                } else {
-                  const d = fresh.dialogs.find((x) => x.handle === args.handle);
-                  if (!d) {
-                    early = { ok: false, error: "dialog_gone", handle: args.handle, button: args.button };
-                  } else if (d.unattended === void 0) {
-                    refuse2("dialog_changed", "this window is no longer an AE-painted dialog the way ae_dialogs showed it. List the dialogs again.");
-                  } else {
-                    shown = d;
-                    const cancelOnly = psLabel(args.button) === "cancel";
-                    const sameText2 = textKey(d.text, cancelOnly) === textKey(seen.text, cancelOnly);
-                    if (d.title !== seen.title || !sameText2 || d.buttons.map((b) => b.name).join("|") !== seen.buttons || (d.default_button ?? null) !== seen.default_button || (d.window_rect ?? "") !== seen.rect) {
-                      refuse2("dialog_changed", "this dialog is not the one ae_dialogs showed (its title, text, buttons, default button or position differ now). List the dialogs again.");
-                    } else if (fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle) {
-                      refuse2("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
-                    } else {
-                      const decision = decidePaintedKey(d.buttons, args.button);
-                      if (decision.action === "refuse") {
-                        early = {
-                          ok: false,
-                          error: decision.error,
-                          message: decision.message,
-                          handle: args.handle,
-                          button: args.button,
-                          ocr_buttons: d.buttons.map((b) => b.name),
-                          default_button: d.default_button ?? null,
-                          ...d.unattended ? { unattended: d.unattended } : {}
-                        };
-                      } else if (args.check) {
-                        refuse2("checkbox_not_found", "an AE-painted dialog has no checkbox that can be toggled without focusing AE.");
-                      } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
-                        refuse2(
-                          "refused_destructive_dialog",
-                          `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
-                        );
-                      } else {
-                        psArgs.push("-Key", decision.action);
-                        if (d.title === "") psArgs.push("-ExpectEmptyTitle");
-                        else psArgs.push("-ExpectTitle", d.title);
-                        if (d.window_rect) psArgs.push("-ExpectRect", d.window_rect);
-                      }
-                    }
-                  }
-                }
-              }
-            } else {
-              const fresh = await listDialogsInternal({ screenshots: false });
-              if (fresh.ok && fresh.dialogs.length > 1 && fresh.dialogs[0].handle !== args.handle && fresh.dialogs.some((x) => x.handle === args.handle)) {
-                refuse2("dialog_not_topmost", `another dialog is open above this one ("${fresh.dialogs[0].title}"). Answer the topmost dialog first, or ask the user.`);
-              } else if (args.check) {
-                psArgs.push("-Check", args.check);
-              }
-            }
-            parsed = early ?? parsePs1JsonOutput(await runPowerShellScript(psArgs));
-          }
-          const logTime = currentNowIso();
-          const title = shown?.title ?? meta?.title ?? "";
-          const textExcerpt = (shown?.text ?? meta?.text ?? "").slice(0, RESULT_TEXT_CHARS);
-          appendResponseLog({
-            time: logTime,
-            handle: args.handle,
-            title,
-            text_excerpt: textExcerpt,
-            button: args.button,
-            check: args.check,
-            reason: args.reason,
-            op: causedByOp,
-            allow_destructive: Boolean(args.allow_destructive),
-            user_instruction: args.user_instruction,
-            result: parsed
-          });
-          const res = parsed;
-          const ok = res.ok === true;
-          const closed = res.closed === true;
-          if (ok && closed) {
-            seenDialogs.delete(args.handle);
-          }
-          if (!ok && res.error === "button_not_answerable" && !res.message) {
-            const ocr = res.ocr_buttons;
-            const names = Array.isArray(ocr) ? ocr.filter((n) => typeof n === "string").map(normalizeOcrLabel) : [];
-            const fixed = names.map((n) => ({ name: n, automationId: "", enabled: true }));
-            const un = fixed.length > 0 ? unattendedAnswers(fixed) : void 0;
-            const why = un ? un.note : "AE painted this dialog itself and it cannot be answered without focusing AE: ask the user to answer it.";
-            return { ...parsed, ocr_buttons: names, ...un ? { unattended: un } : {}, message: `"${args.button}" was NOT pressed. ${why}` };
-          }
-          if (ok && shown && res.method) {
-            const said = shown.text.slice(0, RESULT_TEXT_CHARS);
-            const pressed = res.pressed ?? args.button;
-            const message = closed ? `Pressed "${pressed}" (${res.method}) on the AE dialog "${shown.title}". It said: ${said} Tell the user what it said.` : `Sent the key (${res.method}) for "${pressed}" but the dialog "${shown.title}" did not close within 3 s. Nothing else was tried: ask the user. It said: ${said}`;
-            return {
-              ...parsed,
-              dialog: { title: shown.title, text: said },
-              default_button: shown.default_button ?? null,
-              message
-            };
-          }
-          return parsed;
+        handler: async (args, ctx) => {
+          const out = await respondToDialog(args);
+          const res = out;
+          if (res.ok === true && res.closed === true) ctx.popups?.noteAnswered(args.handle, res.pressed ?? args.button, "agent");
+          return out;
         }
       }
     ];
@@ -16730,6 +16812,1650 @@ var init_diagnostics = __esm({
   }
 });
 
+// src/tools/ext/animate.ts
+function pickKeyExtras(args) {
+  const out = {};
+  for (const k of KEY_EXTRA_FIELDS) if (args[k] !== void 0) out[k] = args[k];
+  return Object.keys(out).length > 0 ? out : void 0;
+}
+function rovingMismatches(roving, afterSnapshot) {
+  const want = Array.isArray(roving) ? roving : [];
+  const keys = afterSnapshot?.keyframes ?? [];
+  return want.filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true).map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
+}
+function rovingSkipKeys(result) {
+  const r = result ?? {};
+  const nums = (v) => Array.isArray(v) ? v.filter((n) => typeof n === "number") : [];
+  return [.../* @__PURE__ */ new Set([...nums(r.roving), ...nums(r.extras?.roving)])];
+}
+function clampInfluenceValue(influence2) {
+  if (influence2 < 0.1) return 0.1;
+  if (influence2 > 100) return 100;
+  return influence2;
+}
+function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot, skipKeys) {
+  if (ease === void 0 || !afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
+    return null;
+  }
+  const afterObj = afterSnapshot;
+  if (!Array.isArray(afterObj.keyframes)) {
+    return null;
+  }
+  const rawKeys = afterObj.keyframes;
+  const keySet = requestedKeys && requestedKeys.length > 0 ? new Set(requestedKeys) : null;
+  const skip = new Set(Array.isArray(skipKeys) ? skipKeys : []);
+  const targeted = (keySet ? rawKeys.filter(
+    (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
+  ) : rawKeys).filter((kf) => !(typeof kf.keyIndex === "number" && skip.has(kf.keyIndex)));
+  if (targeted.length === 0) {
+    return null;
+  }
+  if (ease === "hold" || ease === "linear") {
+    const expectedInterp = ease;
+    return {
+      expected: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: expectedInterp,
+          outInterp: expectedInterp
+        }))
+      },
+      actual: {
+        keyframes: targeted.map((kf) => ({
+          keyIndex: kf.keyIndex,
+          inInterp: kf.inInterp,
+          outInterp: kf.outInterp
+        }))
+      }
+    };
+  }
+  const targetIn = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.in.speed,
+    influence: clampInfluenceValue(ease.in.influence)
+  };
+  const targetOut = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
+    speed: ease.out.speed,
+    influence: clampInfluenceValue(ease.out.influence)
+  };
+  return {
+    expected: {
+      keyframes: targeted.map((kf) => {
+        const dims = Array.isArray(kf.easeIn) && kf.easeIn.length > 0 ? kf.easeIn.length : 1;
+        return {
+          keyIndex: kf.keyIndex,
+          inInterp: "bezier",
+          outInterp: "bezier",
+          easeIn: Array.from({ length: dims }, () => ({ ...targetIn })),
+          easeOut: Array.from({ length: dims }, () => ({ ...targetOut }))
+        };
+      })
+    },
+    actual: {
+      keyframes: targeted.map((kf) => ({
+        keyIndex: kf.keyIndex,
+        inInterp: kf.inInterp,
+        outInterp: kf.outInterp,
+        easeIn: kf.easeIn,
+        easeOut: kf.easeOut
+      }))
+    }
+  };
+}
+function easeInterpolationName(ease) {
+  if (ease === "linear") return "linear";
+  if (ease === "hold") return "hold";
+  return "bezier";
+}
+function keyExtrasConflict(ease, extras, roveBetween) {
+  if (!extras) return null;
+  if (roveBetween && extras.roving !== void 0) return "rove_between and roving both set roving; give one of them.";
+  if (ease !== void 0) {
+    const name = easeInterpolationName(ease);
+    for (const side of ["in_interp", "out_interp"]) {
+      const v = extras[side];
+      if (v !== void 0 && v !== name) {
+        return `${side} "${v}" differs from the interpolation \`ease\` sets (${name}); for a mixed in / out interpolation leave \`ease\` out.`;
+      }
+    }
+  }
+  if (extras.spatial_auto_bezier === true && (extras.in_tangent !== void 0 || extras.out_tangent !== void 0)) {
+    return "Tangents can't be set while spatial_auto_bezier is true (auto bezier recomputes them).";
+  }
+  if (extras.spatial_auto_bezier === true && extras.spatial_continuous === false) return "spatial_auto_bezier true implies spatial_continuous true.";
+  if (extras.temporal_auto_bezier === true && extras.temporal_continuous === false) return "temporal_auto_bezier true implies temporal_continuous true.";
+  return null;
+}
+function extrasRecomputeEase(extras) {
+  return !!extras && (extras.temporal_continuous === true || extras.temporal_auto_bezier === true);
+}
+function sameVector(a, b) {
+  if (!Array.isArray(a)) return void 0;
+  if (a.length !== b.length) return false;
+  return b.every((n, i) => typeof a[i] === "number" && Math.abs(a[i] - n) <= Math.max(1e-3, Math.abs(n) * 1e-3));
+}
+function keyExtrasMismatches(extras, keys, afterSnapshot) {
+  const mismatches = [];
+  const unverified = [];
+  if (!extras) return { mismatches, unverified };
+  const kfs = afterSnapshot?.keyframes ?? [];
+  const truncated = afterSnapshot?.truncated === true;
+  const compare = (key, field, want, got, same) => {
+    const path63 = `keyframes[${key}].${field}`;
+    if (same === void 0 || got === void 0) {
+      unverified.push(path63);
+      return;
+    }
+    if (!same) mismatches.push({ path: path63, expected: want, actual: got, message: `Expected ${path63} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
+  };
+  const flags = [
+    ["spatial_continuous", "spatialContinuous"],
+    ["spatial_auto_bezier", "spatialAutoBezier"],
+    ["temporal_continuous", "temporalContinuous"],
+    ["temporal_auto_bezier", "temporalAutoBezier"],
+    ["roving", "roving"]
+  ];
+  for (const key of keys) {
+    const kf = kfs.find((k) => k.keyIndex === key);
+    if (!kf) {
+      if (truncated) {
+        unverified.push(`keyframes[${key}]`);
+        continue;
+      }
+      mismatches.push({ path: `keyframes[${key}]`, expected: "present", actual: void 0, message: `Key ${key} was not in the read-back` });
+      continue;
+    }
+    if (extras.in_interp !== void 0) {
+      compare(key, "inInterp", extras.in_interp, kf.inInterp, typeof kf.inInterp === "string" ? kf.inInterp === extras.in_interp : void 0);
+    }
+    if (extras.out_interp !== void 0) {
+      compare(key, "outInterp", extras.out_interp, kf.outInterp, typeof kf.outInterp === "string" ? kf.outInterp === extras.out_interp : void 0);
+    }
+    if (extras.in_tangent !== void 0) compare(key, "inTangent", extras.in_tangent, kf.inTangent, sameVector(kf.inTangent, extras.in_tangent));
+    if (extras.out_tangent !== void 0) compare(key, "outTangent", extras.out_tangent, kf.outTangent, sameVector(kf.outTangent, extras.out_tangent));
+    for (const [arg, field] of flags) {
+      const want = extras[arg];
+      if (want === void 0) continue;
+      const got = kf[field];
+      compare(key, field, want, got, typeof got === "boolean" ? got === want : void 0);
+    }
+    if (extras.label !== void 0) {
+      const got = kf.label;
+      compare(key, "label", extras.label, got, typeof got === "number" ? got === extras.label : void 0);
+    }
+  }
+  return { mismatches, unverified };
+}
+function resolveTargetKeys(keys, snapshot) {
+  if (keys !== "selected") return { keys };
+  const kfs = snapshot?.keyframes ?? [];
+  if (!kfs.some((k) => typeof k.selected === "boolean")) {
+    return { error: "This After Effects did not report which keys are selected (Property.selectedKeys); give the key numbers in `keys`." };
+  }
+  const picked = kfs.filter((k) => k.selected === true).map((k) => k.keyIndex);
+  if (picked.length === 0) {
+    return { error: "No keys are selected on that property in the timeline; select them in After Effects or give the key numbers in `keys`." };
+  }
+  return { keys: picked };
+}
+function isCurveEase(ease) {
+  return typeof ease === "object" && ease !== null && "curve" in ease;
+}
+function asVector(v) {
+  if (typeof v === "number") return [v];
+  if (Array.isArray(v) && v.every((n) => typeof n === "number")) return v;
+  return null;
+}
+function pathLength(from, outTangent, inTangent, to) {
+  const dims = Math.min(from.length, to.length);
+  const p1 = from.slice(0, dims).map((v, d) => v + (outTangent?.[d] ?? 0));
+  const p2 = to.slice(0, dims).map((v, d) => v + (inTangent?.[d] ?? 0));
+  const steps = 200;
+  let length = 0;
+  let prev = from.slice(0, dims);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const point = from.slice(0, dims).map(
+      (v, d) => u * u * u * v + 3 * u * u * t * p1[d] + 3 * u * t * t * p2[d] + t * t * t * to[d]
+    );
+    length += Math.hypot(...point.map((v, d) => v - prev[d]));
+    prev = point;
+  }
+  return length;
+}
+function curveToSides(snapshot, keys, curve) {
+  const snap = snapshot;
+  if (!snap || !Array.isArray(snap.keyframes)) {
+    throw new Error("Could not read the property's keyframes");
+  }
+  const byIndex = new Map(snap.keyframes.map((k) => [k.keyIndex, k]));
+  const selected = (keys && keys.length > 0 ? [...new Set(keys)] : snap.keyframes.map((k) => k.keyIndex)).sort(
+    (a, b) => a - b
+  );
+  const segments = [];
+  for (let i = 0; i + 1 < selected.length; i++) {
+    if (selected[i + 1] === selected[i] + 1) segments.push([selected[i], selected[i + 1]]);
+  }
+  if (segments.length === 0) {
+    throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
+  }
+  const x1 = Math.min(1, Math.max(MIN_HANDLE2, curve[0]));
+  const x2 = Math.min(1 - MIN_HANDLE2, Math.max(0, curve[2]));
+  const y1 = curve[1];
+  const y2 = curve[3];
+  const warnings = [];
+  const sides = /* @__PURE__ */ new Map();
+  const sideFor = (key) => {
+    let s = sides.get(key);
+    if (!s) {
+      s = { key };
+      sides.set(key, s);
+    }
+    return s;
+  };
+  for (const [ai, bi] of segments) {
+    const a = byIndex.get(ai);
+    const b = byIndex.get(bi);
+    if (!a || !b) {
+      throw new Error(`Keyframe ${a ? bi : ai} was not read (the property has too many keys)`);
+    }
+    const duration = b.time - a.time;
+    if (!(duration > 0)) throw new Error(`Keys ${ai} and ${bi} share a time`);
+    const from = asVector(a.value);
+    const to = asVector(b.value);
+    if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
+    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
+    let distances;
+    if (snap.isSpatial) {
+      distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
+    } else if (dims === 1) {
+      distances = [to[0] - from[0]];
+    } else {
+      distances = Array.from({ length: dims }, (_, d) => (to[d] ?? 0) - (from[d] ?? 0));
+    }
+    const speeds = (factor) => distances.map((dist) => {
+      const speed = factor * dist / duration;
+      if (snap.isSpatial && speed < 0) {
+        warnings.push(`Keys ${ai}-${bi}: a spatial speed can't go negative, so the anticipation was dropped.`);
+        return 0;
+      }
+      return speed === 0 ? 0 : speed;
+    });
+    const outSpeeds = speeds(y1 / x1);
+    const inSpeeds = speeds((1 - y2) / (1 - x2));
+    sideFor(ai).out = outSpeeds.map((speed) => ({ speed, influence: x1 * 100 }));
+    sideFor(bi).in = inSpeeds.map((speed) => ({ speed, influence: (1 - x2) * 100 }));
+  }
+  return {
+    sides: [...sides.values()].sort((p, q) => p.key - q.key),
+    segments,
+    warnings: [...new Set(warnings)]
+  };
+}
+function easeMatches(expected, actual) {
+  if (!actual) return false;
+  const speedTol = Math.max(1e-3, Math.abs(expected.speed) * 1e-3);
+  return Math.abs(expected.speed - actual.speed) <= speedTol && Math.abs(clampInfluenceValue(expected.influence) - actual.influence) <= 0.01;
+}
+function curveEaseMismatches(sides, afterSnapshot) {
+  const snap = afterSnapshot;
+  const mismatches = [];
+  const byIndex = new Map((snap?.keyframes ?? []).map((k) => [k.keyIndex, k]));
+  for (const side of sides) {
+    const kf = byIndex.get(side.key);
+    for (const which of ["in", "out"]) {
+      const expected = side[which];
+      if (!expected) continue;
+      const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
+      const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
+      const path63 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
+      const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
+      if (!ok) {
+        mismatches.push({
+          path: path63,
+          expected: { interp: "bezier", ease: expected },
+          actual: { interp, ease: actualList },
+          message: `Expected ${path63} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
+        });
+      }
+    }
+  }
+  return mismatches;
+}
+function hasAnyStyleField(style) {
+  if (!style) return false;
+  return Object.values(style).some((v) => v !== void 0);
+}
+function usesTypedText(args) {
+  if (args.paragraph !== void 0 || args.box !== void 0 || args.paragraphs !== void 0) return true;
+  const st = args.style ?? {};
+  return TYPED_STYLE_KEYS.some((k) => st[k] !== void 0);
+}
+function typedTextChecks(set2, justify, afterObj, coveredPaths = []) {
+  const expected = {};
+  const actual = {};
+  const unverified = [];
+  const mixed = Array.isArray(afterObj.mixed) ? afterObj.mixed : [];
+  const wanted = set2 ?? {};
+  const want = {
+    typography: { ...wanted.typography ?? {} },
+    paragraph: { ...wanted.paragraph ?? {} },
+    box: { ...wanted.box ?? {} }
+  };
+  if (justify !== void 0) want.paragraph.justify = justify;
+  for (const group of ["typography", "paragraph", "box"]) {
+    const got = afterObj[group] ?? {};
+    for (const [key, value] of Object.entries(want[group])) {
+      const path63 = `${group}.${key}`;
+      if (coveredPaths.includes(path63) || mixed.includes(path63) || got[key] === void 0) {
+        unverified.push(path63);
+        continue;
+      }
+      expected[path63] = value;
+      actual[path63] = got[key];
+    }
+  }
+  return { expected, actual, unverified };
+}
+function layoutChanged(before, after) {
+  const b = before;
+  const a = after;
+  if (!b || !a) return null;
+  if (typeof b.composed_line_count === "number" && typeof a.composed_line_count === "number" && b.composed_line_count !== a.composed_line_count) return true;
+  if (b.source_rect && a.source_rect) {
+    return ["top", "left", "width", "height"].some((k) => Math.abs((b.source_rect[k] ?? 0) - (a.source_rect[k] ?? 0)) > 0.5);
+  }
+  return null;
+}
+function resolvedRanges(result) {
+  const list2 = result?.ranges;
+  if (!Array.isArray(list2)) return [];
+  return list2.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
+}
+function coveredByFirstRange(key, ranges) {
+  let group = [key];
+  if (FILL_GROUP.includes(key)) group = FILL_GROUP;
+  else if (STROKE_GROUP.includes(key)) group = STROKE_GROUP;
+  return ranges.some((r) => r.start === 0 && group.some((g) => r.style[g] !== void 0));
+}
+function rangeExpectations(ranges) {
+  const out = {};
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = r.style[k];
+  });
+  return out;
+}
+function rangeActuals(ranges, afterRanges) {
+  const out = {};
+  const list2 = Array.isArray(afterRanges) ? afterRanges : [];
+  ranges.forEach((r, i) => {
+    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = list2[i]?.style?.[k];
+  });
+  return out;
+}
+function reloadChanges(beforeItems, afterItems, ids) {
+  const list2 = (v) => Array.isArray(v) ? v : [];
+  const before = new Map(list2(beforeItems).map((i) => [i.item_id, i]));
+  const after = new Map(list2(afterItems).map((i) => [i.item_id, i]));
+  const changed = [];
+  for (const id of ids) {
+    const b = before.get(id);
+    const a = after.get(id);
+    if (!b || !a) continue;
+    const fields = [];
+    if (b.width !== a.width) fields.push("width");
+    if (b.height !== a.height) fields.push("height");
+    if (typeof b.duration === "number" && typeof a.duration === "number" && Math.abs(b.duration - a.duration) > 1e-6) fields.push("duration");
+    if (typeof b.frameRate === "number" && typeof a.frameRate === "number" && Math.abs(b.frameRate - a.frameRate) > 1e-4) fields.push("frameRate");
+    if (fields.length > 0) {
+      changed.push({
+        item_id: id,
+        name: a.name,
+        changed: fields,
+        before: { width: b.width, height: b.height, duration: b.duration, frameRate: b.frameRate },
+        after: { width: a.width, height: a.height, duration: a.duration, frameRate: a.frameRate }
+      });
+    }
+  }
+  return changed;
+}
+async function reloadFootage(args, ctx) {
+  ctx.quarantine.assertClear();
+  const opId = ctx.bridge.newOpId();
+  const targets = {};
+  if (args.item_ids !== void 0) targets.item_ids = args.item_ids;
+  else if (args.folder_id !== void 0) targets.folder_id = args.folder_id;
+  else targets.item_ids = [args.item_id];
+  const label2 = `ae_replace_footage(reload ${args.folder_id !== void 0 ? `folder ${args.folder_id}` : `${targets.item_ids.length} item(s)`})`;
+  try {
+    return await ctx.queue.run(label2, async () => {
+      ctx.quarantine.assertClear();
+      const guard = await verifyTargetGuard(ctx, args.expect, opId);
+      const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
+      const beforeSnap = await ctx.bridge.evalRaw({
+        id: `${opId}_before`,
+        script: buildJsxCall("animateReloadTargets", { ...targets, reloadable_only: true }),
+        label: `${label2} (before)`,
+        mutates: false,
+        toolName: "ae_replace_footage"
+      });
+      const writeResp = await ctx.bridge.evalRaw({
+        id: opId,
+        script: buildJsxCall("animateReloadFootage", { ...targets, expect: args.expect }),
+        label: label2,
+        timeoutMs: SLOW_TIMEOUT_MS,
+        mutates: true,
+        toolName: "ae_replace_footage"
+      });
+      const written = writeResp.result ?? {};
+      const ids = Array.isArray(written.item_ids) ? written.item_ids : [];
+      const reloaded = Array.isArray(written.reloaded) ? written.reloaded : [];
+      const base = {
+        action: "reload",
+        reloaded,
+        skipped: Array.isArray(written.skipped) ? written.skipped : [],
+        ...Array.isArray(written.failed) ? { failed: written.failed } : {},
+        ...written.truncated ? { truncated: true } : {}
+      };
+      if (written.no_op === true || ids.length === 0) {
+        return {
+          op_id: opId,
+          applied: true,
+          no_op: true,
+          ...base,
+          changed_items: [],
+          result: writeResp.result,
+          checkpoint,
+          receipt: buildReceipt({ before: beforeSnap.result, after: beforeSnap.result })
+        };
+      }
+      const afterRead = await readAfterWrite(
+        opId,
+        () => ctx.bridge.evalRaw({
+          id: `${opId}_after`,
+          script: buildJsxCall("animateReloadTargets", { item_ids: ids }),
+          label: `${label2} (after)`,
+          mutates: false,
+          toolName: "ae_replace_footage"
+        })
+      );
+      if (afterRead.failure) {
+        return {
+          op_id: opId,
+          applied: true,
+          ...base,
+          result: writeResp.result,
+          checkpoint,
+          receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+        };
+      }
+      const afterSnap = afterRead.value;
+      const beforeItems = beforeSnap.result?.items;
+      const beforePartial = beforeSnap.result?.truncated === true;
+      const afterItems = afterSnap.result?.items;
+      const outcome = checkAfterWrite(
+        opId,
+        () => {
+          const mismatches = [];
+          for (const item of Array.isArray(afterItems) ? afterItems : []) {
+            if (reloaded.includes(item.item_id) && item.footageMissing === true) {
+              mismatches.push({
+                path: `items[${item.item_id}].footageMissing`,
+                expected: false,
+                actual: true,
+                message: `Item ${item.item_id} (${item.name ?? "?"}) is still missing after the reload`
+              });
+            }
+          }
+          for (const failure2 of Array.isArray(written.failed) ? written.failed : []) {
+            mismatches.push({
+              path: `items[${failure2.item_id}].reload`,
+              expected: "reloaded",
+              actual: failure2.error ?? "failed",
+              message: `Item ${failure2.item_id} (${failure2.name ?? "?"}) did not reload: ${failure2.error ?? "unknown error"}`
+            });
+          }
+          return { mismatches, changed: reloadChanges(beforeItems, afterItems, reloaded) };
+        },
+        (failure2) => ({ mismatches: [failure2], changed: [] })
+      );
+      return {
+        op_id: opId,
+        applied: true,
+        ...base,
+        changed_items: outcome.changed,
+        ...beforePartial ? { changed_partial: true } : { unchanged_count: Math.max(0, reloaded.length - outcome.changed.length) },
+        result: writeResp.result,
+        checkpoint,
+        receipt: buildReceipt({ before: beforeSnap.result, after: afterSnap.result, customMismatches: outcome.mismatches })
+      };
+    });
+  } catch (err) {
+    if (err instanceof QueueWaitError) {
+      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+    }
+    throw err;
+  }
+}
+function createdItemIds(result) {
+  const r = result ?? {};
+  const ids = (key) => Array.isArray(r[key]) ? r[key].filter((n) => typeof n === "number") : [];
+  const comps = ids("new_comp_ids");
+  const folders = ids("new_folder_ids");
+  if (comps.length === 0 && folders.length === 0) return [];
+  return [.../* @__PURE__ */ new Set([...ids("item_ids"), ...comps, ...folders])].slice(0, 500);
+}
+function importCreatedFields(result) {
+  const r = result ?? {};
+  const out = {};
+  for (const k of ["new_comp_ids", "new_folder_ids", "main_comp_id", "created_folder_id", "created_item_count", "new_comp_count", "new_folder_count", "created_truncated", "placeholder_ids", "notes"]) {
+    if (r[k] !== void 0) out[k] = r[k];
+  }
+  return out;
+}
+var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, KeyInterpolationSchema, KeyTangentSchema, KEY_EXTRA_FIELDS, KeyExtrasShape, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, FontInputSchema, TextCapsSchema, TextBaselineSchema, TextKerningSchema, TextLineJoinSchema, TextLineOrientationSchema, TextJustifyFullSchema, TextStyleSchema, TextParagraphSchema, TextBoxSchema, RANGE_STYLE_KEYS, RangeStyleSchema, TextRangeSchema, TextParagraphStyleSchema, AeSetTextSchema, TYPED_STYLE_KEYS, FILL_GROUP, STROKE_GROUP, ImportAsSchema, ImportPlaceholderSchema, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
+var init_animate = __esm({
+  "src/tools/ext/animate.ts"() {
+    "use strict";
+    init_zod();
+    init_host();
+    init_jsx();
+    init_queue();
+    init_receipts();
+    init_common();
+    init_mutate();
+    init_read_back();
+    KeyframeEaseEndSchema = external_exports.object({
+      speed: external_exports.number().describe(
+        "Temporal ease speed (units per second; typically 0 for smooth ease)."
+      ),
+      influence: external_exports.number().min(0).max(100).describe(
+        "Temporal ease influence percentage (0.1 to 100; values below 0.1 are clamped to 0.1 in After Effects)."
+      )
+    });
+    KeyframeEasePairSchema = external_exports.object({
+      in: KeyframeEaseEndSchema.describe(
+        "Incoming temporal ease {speed, influence}."
+      ),
+      out: KeyframeEaseEndSchema.describe(
+        "Outgoing temporal ease {speed, influence}."
+      )
+    });
+    KeyframeEasePresetSchema = external_exports.enum([
+      "easy_ease",
+      "linear",
+      "hold"
+    ]);
+    MIN_HANDLE2 = 1e-3;
+    EASE_CURVE_ARRAY_SCHEMA = external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= MIN_HANDLE2 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE2, {
+      message: `curve x1 must be within ${MIN_HANDLE2}..1 and x2 within 0..${1 - MIN_HANDLE2}`
+    }).describe(
+      "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
+    );
+    KeyframeEaseCurveSchema = external_exports.object({
+      curve: EASE_CURVE_ARRAY_SCHEMA
+    });
+    KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema]).describe(
+      'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment\'s first key and the in ease of its last, from that segment\'s duration and distance, and leaves every other side alone.'
+    );
+    KeyInterpolationSchema = external_exports.enum(["linear", "bezier", "hold"]);
+    KeyTangentSchema = external_exports.array(external_exports.number()).min(2).max(3);
+    KEY_EXTRA_FIELDS = [
+      "in_interp",
+      "out_interp",
+      "in_tangent",
+      "out_tangent",
+      "spatial_continuous",
+      "spatial_auto_bezier",
+      "temporal_continuous",
+      "temporal_auto_bezier",
+      "roving",
+      "label"
+    ];
+    KeyExtrasShape = {
+      in_interp: KeyInterpolationSchema.optional().describe(
+        "Interpolation going INTO each key ('linear', 'bezier' or 'hold'), different from the out side. Without `ease` it is set per side (setInterpolationTypeAtKey); with `ease` it can only repeat the interpolation the ease sets. Refused up front when the property does not accept it (hold-only properties such as Source Text and checkboxes)."
+      ),
+      out_interp: KeyInterpolationSchema.optional().describe("Interpolation going OUT of each key ('linear', 'bezier' or 'hold'); see in_interp."),
+      in_tangent: KeyTangentSchema.optional().describe(
+        "Spatial in tangent [x, y] or [x, y, z] (a motion-path handle, relative to the key's value), for Position and other spatial properties only; the array length must match the property (2D or 3D). Auto bezier is switched off first, then the tangent is set."
+      ),
+      out_tangent: KeyTangentSchema.optional().describe("Spatial out tangent [x, y] or [x, y, z]; see in_tangent."),
+      spatial_continuous: external_exports.boolean().optional().describe("Spatial continuous (the motion path stays smooth through the key). Spatial properties only."),
+      spatial_auto_bezier: external_exports.boolean().optional().describe("Spatial auto bezier (AE computes the path handles). true implies continuous; can't be combined with tangents. Spatial properties only."),
+      temporal_continuous: external_exports.boolean().optional().describe("Temporal continuous (in and out ease stay matched). Any keyframed property."),
+      temporal_auto_bezier: external_exports.boolean().optional().describe("Temporal auto bezier (AE computes the ease). true implies continuous. Any keyframed property."),
+      roving: external_exports.boolean().optional().describe(
+        "Make the listed keys roving (true) or fixed in time (false), applied last. Spatial properties only; the first and last keys of the property can't rove. Use rove_between to rove everything between two keys."
+      ),
+      label: external_exports.number().int().min(0).max(16).optional().describe("Key label colour 0 (none) to 16 (After Effects 22.6+; refused before the write on older AE).")
+    };
+    AeSetKeyframeEaseSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("Target CompItem ID."),
+      layer: LayerSelectorSchema,
+      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
+        "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
+      ),
+      keys: external_exports.union([external_exports.array(external_exports.number().int().positive()), external_exports.literal("selected")]).optional().describe(
+        'Optional 1-based keyframe indices to update, or "selected" for the keys currently selected in the timeline (read from Property.selectedKeys; refused when none are). Defaults to all keyframes on the property.'
+      ),
+      ease: KeyframeEaseInputSchema.optional().describe(
+        "The ease to set (preset, explicit `{in, out}` or `{curve}`). Optional when per-key settings (in_interp, out_interp, in_tangent, out_tangent, spatial_continuous, spatial_auto_bezier, temporal_continuous, temporal_auto_bezier, roving, label) are given instead; give at least one of the two."
+      ),
+      rove_between: external_exports.boolean().optional().describe(
+        "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. Spatial properties only (Position, Anchor Point); not with a curve or hold. Roving keys are left out of the ease check, since AE sets their ease."
+      ),
+      ...KeyExtrasShape,
+      expect: ExpectSchema
+    }).refine((v) => v.ease !== void 0 || pickKeyExtras(v) !== void 0, {
+      message: "ae_set_keyframe_ease needs `ease`, or at least one per-key setting (in_interp, out_interp, in_tangent, out_tangent, spatial_continuous, spatial_auto_bezier, temporal_continuous, temporal_auto_bezier, roving, label)."
+    });
+    TextJustificationSchema = external_exports.enum(["left", "center", "right"]);
+    RgbColorSchema = external_exports.array(external_exports.number().min(0).max(1)).length(3).describe("RGB color array [r, g, b] with components in 0..1.");
+    FontInputSchema = external_exports.union([
+      external_exports.string().min(1),
+      external_exports.object({ postscript: external_exports.string().min(1) }),
+      external_exports.object({ family: external_exports.string().min(1), style: external_exports.string().min(1) })
+    ]).describe(
+      "A PostScript name ('Inter-Bold', 'ArialMT'), `{ postscript }` or `{ family: 'Inter', style: 'Bold' }`. On AE 24+ the font is looked up in the installed fonts before anything is written: an unknown name is refused with the near matches (pass allow_substitute: true to write the name anyway), and a font After Effects would substitute is flagged on the receipt."
+    );
+    TextCapsSchema = external_exports.enum(["normal", "small", "all", "all_small"]);
+    TextBaselineSchema = external_exports.enum(["normal", "superscript", "subscript"]);
+    TextKerningSchema = external_exports.union([external_exports.enum(["metrics", "optical", "none"]), external_exports.number().min(-1e4).max(1e4)]);
+    TextLineJoinSchema = external_exports.enum(["miter", "round", "bevel"]);
+    TextLineOrientationSchema = external_exports.enum(["horizontal", "vertical_rtl", "vertical_ltr"]);
+    TextJustifyFullSchema = external_exports.enum(["left", "center", "right", "full_left", "full_center", "full_right", "full"]);
+    TextStyleSchema = external_exports.object({
+      font: FontInputSchema.optional(),
+      fontSize: external_exports.number().positive().optional().describe("Font size in pixels."),
+      tracking: external_exports.number().optional().describe("Character tracking value."),
+      leading: external_exports.number().optional().describe("Line leading in pixels. Setting it switches auto leading off."),
+      fillColor: RgbColorSchema.optional().describe(
+        "Fill color [r, g, b] in 0..1."
+      ),
+      strokeColor: RgbColorSchema.optional().describe(
+        "Stroke color [r, g, b] in 0..1."
+      ),
+      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels."),
+      applyFill: external_exports.boolean().optional().describe("Whether fill is enabled on the text layer."),
+      applyStroke: external_exports.boolean().optional().describe("Whether stroke is enabled on the text layer."),
+      justification: TextJustificationSchema.optional().describe(
+        "Paragraph justification: 'left', 'center', or 'right'. The full-justify variants are `paragraph.justify`."
+      ),
+      caps: TextCapsSchema.optional().describe("Capitalisation: 'normal', 'small' (small caps), 'all' (all caps) or 'all_small' (AE 24.0+, fontCapsOption)."),
+      baseline: TextBaselineSchema.optional().describe("Baseline position: 'normal', 'superscript' or 'subscript' (AE 24.0+, fontBaselineOption)."),
+      kerning: TextKerningSchema.optional().describe(
+        "Kerning: 'metrics', 'optical' or 'none' (the auto-kern mode), or a number in 1/1000 em. A number switches automatic kerning off (the result says so)."
+      ),
+      ligature: external_exports.boolean().optional().describe("Standard ligatures on or off."),
+      no_break: external_exports.boolean().optional().describe("No Break: keep the text together at line ends."),
+      horizontal_scale: external_exports.number().min(0).max(1e3).optional().describe("Horizontal glyph scale, sent as given (1 = 100% in After Effects' scripting; the read-back shows how this build reads it)."),
+      vertical_scale: external_exports.number().min(0).max(1e3).optional().describe("Vertical glyph scale; see horizontal_scale."),
+      tsume: external_exports.number().min(0).max(100).optional().describe("Tsume (CJK character tightening). The scripting guide gives both 0-1 and 0-100 for it; the value is sent as given and the read-back shows which one this build uses."),
+      stroke_over_fill: external_exports.boolean().optional().describe("Stroke draws over the fill (true) or under it (false). A layer-level 'All Fills/Strokes First' setting can override it."),
+      line_join: TextLineJoinSchema.optional().describe("Stroke corner style: 'miter', 'round' or 'bevel'."),
+      auto_leading: external_exports.boolean().optional().describe("Auto leading on or off. Can't be true together with `leading`."),
+      digit_set: external_exports.string().min(1).max(40).optional().describe("Digit set by name as After Effects spells it (for example 'default', 'hindi', 'arabic_digits'); an exact name wins, a partial name must match one member only, and a name this build lacks is refused with the ones it has."),
+      baseline_direction: external_exports.string().min(1).max(40).optional().describe("Baseline direction for vertical text, by name as After Effects spells it; a name this build lacks is refused with the ones it has."),
+      line_orientation: TextLineOrientationSchema.optional().describe("Line orientation: 'horizontal', 'vertical_rtl' or 'vertical_ltr' (AE 24.2+)."),
+      faux_bold: external_exports.boolean().optional().describe("Faux bold for the whole text (per word: ranges[].style.fauxBold)."),
+      faux_italic: external_exports.boolean().optional().describe("Faux italic for the whole text (per word: ranges[].style.fauxItalic).")
+    }).describe(
+      "Optional TextDocument styling properties to update. The character options from `caps` on are AE 24.0+ (24.2 for line_orientation); an AE without the member refuses before anything is written."
+    );
+    TextParagraphSchema = external_exports.object({
+      justify: TextJustifyFullSchema.optional().describe(
+        "Justification including the full-justify variants: 'left', 'center', 'right', 'full_left', 'full_center', 'full_right' (last line left, centred, right) and 'full' (last line justified too). Not together with style.justification."
+      ),
+      space_before: external_exports.number().min(-1e4).max(1e4).optional().describe("Space before each paragraph, in pixels."),
+      space_after: external_exports.number().min(-1e4).max(1e4).optional().describe("Space after each paragraph, in pixels."),
+      first_line_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("First line indent, in pixels (negative for a hanging indent)."),
+      start_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("Left (start) indent, in pixels."),
+      end_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("Right (end) indent, in pixels."),
+      every_line_composer: external_exports.boolean().optional().describe("Every-line composer (true) or single-line composer (false)."),
+      hanging_roman: external_exports.boolean().optional().describe("Roman hanging punctuation."),
+      auto_hyphenate: external_exports.boolean().optional().describe("Automatic hyphenation."),
+      leading_type: external_exports.enum(["roman", "japanese"]).optional().describe("Leading type: 'roman' or 'japanese'."),
+      direction: external_exports.enum(["ltr", "rtl"]).optional().describe("Paragraph direction: 'ltr' or 'rtl' (right-to-left titles)."),
+      composer: external_exports.enum(["universal"]).optional().describe("Composer engine. Only 'universal' is accepted by After Effects, and the change is one-way.")
+    }).describe(
+      "Paragraph options, applied to the whole text document (AE 24.0+). Whether these can be set for a single paragraph is undocumented, so they are not per paragraph; use `paragraphs` for per-paragraph character styles."
+    );
+    TextBoxSchema = external_exports.object({
+      size: external_exports.tuple([external_exports.number().int().min(1).max(1e5), external_exports.number().int().min(1).max(1e5)]).optional().describe('Box size [width, height] in pixels (whole numbers). Rewraps the text. Refused together with a height auto_fit, and also when the layer already has a height auto_fit (auto fit resets the height); give auto_fit "none" with the size.'),
+      position: external_exports.tuple([external_exports.number(), external_exports.number()]).optional().describe("Box position [x, y] in layer coordinates."),
+      vertical_align: external_exports.enum(["top", "center", "bottom", "justify"]).optional().describe("Vertical alignment of the text in the box."),
+      auto_fit: external_exports.enum(["none", "height_cursor", "height_precise", "height_baseline"]).optional().describe("Auto-fit the box height to the text. Only works with vertical_align 'top' (refused otherwise). A height policy (not none) can't be given together with box.size (the text sets the height)."),
+      inset: external_exports.union([external_exports.number(), external_exports.array(external_exports.number()).min(1).max(8)]).optional().describe("Inset spacing: one number for all sides, or the array in After Effects' own order (its length must match the current value; the read-back shows the current one as box.inset). An After Effects whose inset is a single number takes one number only and refuses every array."),
+      first_baseline: external_exports.string().min(1).max(40).optional().describe("First baseline alignment by name as After Effects spells it (for example 'ascent', 'cap_height', 'leading'); a name this build lacks is refused with the ones it has."),
+      first_baseline_min: external_exports.number().min(0).max(1e5).optional().describe("Minimum first-baseline offset. A non-zero minimum disables first_baseline, so they can't be given together.")
+    }).describe(
+      "Box text options (AE 24.6+). Refused on point text before anything is written: point <-> box conversion is not scriptable. The receipt measures the text again (layout), since a new box size rewraps it."
+    );
+    RANGE_STYLE_KEYS = [
+      "font",
+      "fontSize",
+      "tracking",
+      "baselineShift",
+      "fillColor",
+      "strokeColor",
+      "strokeWidth",
+      "applyFill",
+      "applyStroke",
+      "fauxBold",
+      "fauxItalic"
+    ];
+    RangeStyleSchema = external_exports.object({
+      font: FontInputSchema.optional(),
+      fontSize: external_exports.number().min(0.1).max(1296).optional().describe("Font size in pixels for the range."),
+      tracking: external_exports.number().optional().describe("Tracking for the range."),
+      baselineShift: external_exports.number().optional().describe("Baseline shift in pixels for the range (positive raises)."),
+      fillColor: RgbColorSchema.optional().describe("Fill colour [r, g, b] in 0..1 (also turns the fill on)."),
+      strokeColor: RgbColorSchema.optional().describe("Stroke colour [r, g, b] in 0..1 (also turns the stroke on)."),
+      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels for the range."),
+      applyFill: external_exports.boolean().optional().describe("Turn the fill on or off for the range."),
+      applyStroke: external_exports.boolean().optional().describe("Turn the stroke on or off for the range."),
+      fauxBold: external_exports.boolean().optional().describe("Faux bold for the range."),
+      fauxItalic: external_exports.boolean().optional().describe("Faux italic for the range.")
+    }).refine((s) => RANGE_STYLE_KEYS.some((k) => s[k] !== void 0), { message: "A range's style needs at least one field." });
+    TextRangeSchema = external_exports.object({
+      match: external_exports.string().min(1).max(200).optional().describe("Style this text wherever it occurs (case-sensitive), instead of start/end."),
+      occurrence: external_exports.enum(["first", "all"]).optional().describe("With match: the first occurrence or all of them (default all, at most 200)."),
+      start: external_exports.number().int().min(0).optional().describe("First character, 0-based."),
+      end: external_exports.number().int().min(1).optional().describe("One past the last character. Default: the end of the text."),
+      style: RangeStyleSchema
+    }).refine((r) => r.match !== void 0 !== (r.start !== void 0), { message: "A range takes `match`, or `start` (with `end`), not both." }).refine((r) => r.end === void 0 || r.start !== void 0, { message: "`end` goes with `start`." }).refine((r) => r.start === void 0 || r.end === void 0 || r.end > r.start, { message: "`end` must be above `start`." }).refine((r) => r.occurrence === void 0 || r.match !== void 0, { message: "`occurrence` goes with `match`." });
+    TextParagraphStyleSchema = external_exports.object({
+      index: external_exports.number().int().min(0).optional().describe("The paragraph, 0-based (paragraphs are separated by a line break)."),
+      match: external_exports.string().min(1).max(200).optional().describe("Every paragraph that contains this text (case-sensitive), instead of index."),
+      occurrence: external_exports.enum(["first", "all"]).optional().describe("With match: the first such paragraph or all of them (default all)."),
+      style: RangeStyleSchema
+    }).refine((p) => p.index !== void 0 !== (p.match !== void 0), { message: "A paragraph entry takes `index` or `match`, not both." }).refine((p) => p.occurrence === void 0 || p.match !== void 0, { message: "`occurrence` goes with `match`." });
+    AeSetTextSchema = external_exports.object({
+      comp_id: external_exports.number().int().describe("Target CompItem ID."),
+      layer: LayerSelectorSchema,
+      text: external_exports.string().optional().describe("New text string to set on the TextLayer's Source Text."),
+      style: TextStyleSchema.optional(),
+      paragraph: TextParagraphSchema.optional(),
+      box: TextBoxSchema.optional(),
+      ranges: external_exports.array(TextRangeSchema).min(1).max(50).optional().describe(
+        "Per-word or per-character styling, applied after `text` and `style`: each range is `match` (a word) or `start`/`end`, with a `style` of font, fontSize, tracking, baselineShift, fillColor, strokeColor, strokeWidth, applyFill, applyStroke, fauxBold, fauxItalic. Needs AE 24.3+ (TextDocument.characterRange); refused before anything is written on older AE. Ranges that overlap and set the same field are refused; values are checked before the write. Read back range by range; a range whose values read back as mixed is reported as a mismatch."
+      ),
+      paragraphs: external_exports.array(TextParagraphStyleSchema).min(1).max(50).optional().describe(
+        "Character styles for whole paragraphs ('the second paragraph in red', 'every paragraph that contains NOW in bold'): each entry is `index` (0-based) or `match`, with the same `style` fields as a range. The paragraph is turned into a character range on the final text, so it needs AE 24.3+ like `ranges` and follows the same overlap rules. Paragraph-wide attributes (spacing, indents) are not per paragraph: see `paragraph`."
+      ),
+      allow_substitute: external_exports.boolean().optional().describe("Write a PostScript font name even when it is not installed (After Effects then substitutes). Default false: an unknown font is refused with the near matches."),
+      expect: ExpectSchema
+    }).refine(
+      (val) => val.text !== void 0 || hasAnyStyleField(val.style) || val.ranges !== void 0 || hasAnyStyleField(val.paragraph) || hasAnyStyleField(val.box) || val.paragraphs !== void 0,
+      {
+        message: "ae_set_text requires at least `text`, one defined property in `style`, `paragraph` or `box`, `ranges` or `paragraphs`."
+      }
+    ).refine((val) => !(val.paragraph?.justify !== void 0 && val.style?.justification !== void 0), {
+      message: "paragraph.justify and style.justification both set the justification; give one of them."
+    }).refine((val) => !(val.style?.leading !== void 0 && val.style?.auto_leading === true), {
+      message: "style.leading and style.auto_leading true contradict each other (setting leading switches auto leading off)."
+    }).refine((val) => !(val.box?.first_baseline !== void 0 && val.box?.first_baseline_min !== void 0 && val.box.first_baseline_min !== 0), {
+      message: "A non-zero box.first_baseline_min disables box.first_baseline; give one of them."
+    });
+    TYPED_STYLE_KEYS = [
+      "caps",
+      "baseline",
+      "kerning",
+      "ligature",
+      "no_break",
+      "horizontal_scale",
+      "vertical_scale",
+      "tsume",
+      "stroke_over_fill",
+      "line_join",
+      "auto_leading",
+      "digit_set",
+      "baseline_direction",
+      "line_orientation",
+      "faux_bold",
+      "faux_italic"
+    ];
+    FILL_GROUP = ["fillColor", "applyFill"];
+    STROKE_GROUP = ["strokeColor", "strokeWidth", "applyStroke"];
+    ImportAsSchema = external_exports.enum(["footage", "comp", "comp_cropped_layers", "project"]);
+    ImportPlaceholderSchema = external_exports.object({
+      name: external_exports.string().min(1).max(255).describe("Placeholder name."),
+      width: external_exports.number().int().min(4).max(3e4).describe("Width in pixels, 4 to 30000."),
+      height: external_exports.number().int().min(4).max(3e4).describe("Height in pixels, 4 to 30000."),
+      fps: external_exports.number().min(1).max(99).describe("Frame rate, 1 to 99."),
+      duration: external_exports.number().min(0).max(10800).describe("Duration in seconds, 0 to 10800.")
+    });
+    AeImportFootageSchema = external_exports.object({
+      paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).optional().describe("Absolute file paths of footage files to import. Optional only when `placeholders` is given."),
+      sequence: external_exports.boolean().optional().describe(
+        "If true, import as an image sequence, numbered frames in order with placeholders for missing ones (Force alphabetical order off, AE's default)."
+      ),
+      fps: external_exports.number().positive().optional().describe(
+        "Optional frame rate (conformFrameRate) to assign to imported footage items."
+      ),
+      target_folder_id: external_exports.number().int().optional().describe(
+        "Optional FolderItem ID in the project to place the imported items into. With import_as 'comp' / 'comp_cropped_layers' / 'project' it receives the top created items (the comp and the folder AE makes for the layers)."
+      ),
+      import_as: ImportAsSchema.optional().describe(
+        "What to build from a layered file (PSD, AI) or project: 'footage' (default: one flattened footage item or the merged layers), 'comp' (a comp with one layer per file layer), 'comp_cropped_layers' (the same, layers cropped to their content) or 'project' (an After Effects project file, its whole tree). ImportOptions.canImportAs is asked first for every file; a file that cannot be imported that way is refused before anything is imported, listing the types it allows. The result lists new_comp_ids, new_folder_ids, main_comp_id and created_folder_id (found by diffing the project's items before and after). Importing a project or an older file can raise After Effects dialogs (missing fonts or footage, conversion): they are never suppressed; read them with ae_dialogs and answer with ae_dialog_respond. Not combined with `sequence`."
+      ),
+      range: external_exports.object({
+        start: external_exports.number().int().min(0).describe("First frame number of the sequence to import."),
+        end: external_exports.number().int().min(0).describe("Last frame number.")
+      }).refine((r) => r.end >= r.start, { message: "range.end must be at or above range.start." }).optional().describe(
+        "With sequence: true, import only frames start..end of a numbered sequence (ImportOptions.rangeStart / rangeEnd, undocumented: probed before the write). Can't be combined with force_alphabetical: true, which makes After Effects throw."
+      ),
+      force_alphabetical: external_exports.boolean().optional().describe("With sequence: true, import in alphabetical rather than numbered order. Default false (numbered order with placeholders for gaps)."),
+      placeholders: external_exports.array(ImportPlaceholderSchema).min(1).max(100).optional().describe("Placeholders to create for footage that is not there yet (Project.importPlaceholder), each {name, width, height, fps, duration}; their ids are in `placeholder_ids` and at the end of `item_ids`."),
+      expect: ExpectSchema
+    }).refine((v) => v.paths !== void 0 || v.placeholders !== void 0, {
+      message: "ae_import_footage needs `paths` or `placeholders`."
+    }).refine((v) => v.range === void 0 || v.sequence === true, { message: "`range` goes with sequence: true." }).refine((v) => v.force_alphabetical === void 0 || v.sequence === true, { message: "`force_alphabetical` goes with sequence: true." }).refine((v) => !(v.range !== void 0 && v.force_alphabetical === true), {
+      message: "`range` can't be combined with force_alphabetical: true (After Effects throws on rangeStart / rangeEnd then)."
+    }).refine((v) => v.import_as === void 0 || v.import_as === "footage" || v.sequence !== true, {
+      message: "import_as 'comp', 'comp_cropped_layers' and 'project' can't be combined with sequence: true."
+    });
+    AeReplaceFootageSchema = external_exports.object({
+      action: external_exports.enum(["replace", "reload"]).optional().describe("'replace' (default): relink a footage item to another file. 'reload': reload the main file source of footage items after the files changed on disk."),
+      item_id: external_exports.number().int().optional().describe("Project FootageItem ID to replace (or, with action 'reload', a single item to reload)."),
+      path: external_exports.string().min(1).optional().describe(
+        "Absolute file path to the replacement footage file (or first frame of a sequence). Required for 'replace'."
+      ),
+      sequence: external_exports.boolean().optional().describe(
+        "If true, use FootageItem.replaceWithSequence(file, false) (numbered order, gaps kept as placeholders); otherwise use FootageItem.replace(file)."
+      ),
+      item_ids: external_exports.array(external_exports.number().int()).min(1).max(500).optional().describe("With action 'reload': the FootageItem ids to reload. Any item that can't be reloaded (a proxy in use, a solid, a placeholder) refuses the whole call."),
+      folder_id: external_exports.number().int().optional().describe("With action 'reload': reload every file-based footage item under this folder (nested folders included, at most 500); solids, placeholders and proxy items are skipped and listed under `skipped`."),
+      expect: ExpectSchema
+    }).superRefine((v, ctx) => {
+      const action = v.action ?? "replace";
+      if (action === "replace") {
+        if (v.item_id === void 0 || v.path === void 0) {
+          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "action 'replace' needs item_id and path." });
+        }
+        if (v.item_ids !== void 0 || v.folder_id !== void 0) {
+          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "item_ids and folder_id go with action 'reload'." });
+        }
+        return;
+      }
+      const targets = [v.item_ids !== void 0, v.folder_id !== void 0, v.item_id !== void 0].filter(Boolean).length;
+      if (targets !== 1) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "action 'reload' needs exactly one of item_ids, folder_id or item_id." });
+      }
+      if (v.path !== void 0 || v.sequence !== void 0) {
+        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "path and sequence go with action 'replace'." });
+      }
+    });
+    animateTools = [
+      {
+        name: "ae_set_keyframe_ease",
+        description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. Per-key settings (`in_interp` / `out_interp` for a different interpolation in and out, `in_tangent` / `out_tangent` for motion-path handles, `spatial_continuous`, `spatial_auto_bezier`, `temporal_continuous`, `temporal_auto_bezier`, `roving`, `label` 0-16) go with an ease or on their own (leave `ease` out), use the same names as ae_get_keyframes, and are checked against what the property accepts before the undo group opens (hold-only properties, 2D/3D tangent length, first and last keys can't rove). They apply in the order interpolation, ease, tangents and continuity, roving last. `keys: \"selected\"` targets the keys selected in the timeline. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeSetKeyframeEaseSchema,
+        handler: async (args, ctx) => {
+          if (args.rove_between && isCurveEase(args.ease)) {
+            return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
+          }
+          if (args.rove_between && args.ease === "hold") {
+            return { ok: false, error: "bad_args", message: "rove_between can't be combined with hold: held keys have no speed for roving to even out." };
+          }
+          const extras = pickKeyExtras(args);
+          const extrasProblem = keyExtrasConflict(args.ease, extras, args.rove_between);
+          if (extrasProblem) {
+            return { ok: false, error: "bad_args", message: extrasProblem };
+          }
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label2 = `ae_set_keyframe_ease(${args.path.join(".")})`;
+          const effectiveExpect = {
+            project_path: args.expect.project_path,
+            comp_id: args.expect.comp_id ?? args.comp_id
+          };
+          try {
+            return await ctx.queue.run(label2, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getKeyframeEase", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path
+                }),
+                label: `${label2} (before)`,
+                mutates: false,
+                toolName: "ae_set_keyframe_ease"
+              });
+              const keyTarget = resolveTargetKeys(args.keys, beforeSnap.result);
+              if ("error" in keyTarget) {
+                return { ok: false, error: "bad_args", message: keyTarget.error };
+              }
+              const targetKeys = keyTarget.keys;
+              const curvePlan = args.ease !== void 0 && isCurveEase(args.ease) ? curveToSides(beforeSnap.result, targetKeys, args.ease.curve) : null;
+              let writeScript;
+              if (curvePlan) {
+                writeScript = buildJsxCall("setKeyframeEaseSides", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  sides: curvePlan.sides,
+                  ...extras ? { extras } : {},
+                  expect: effectiveExpect
+                });
+              } else if (args.ease === void 0) {
+                writeScript = buildJsxCall("animateKeyExtras", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  keys: targetKeys,
+                  extras,
+                  expect: effectiveExpect
+                });
+              } else {
+                writeScript = buildJsxCall("setKeyframeEase", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  path: args.path,
+                  keys: targetKeys,
+                  ease: args.ease,
+                  rove_between: args.rove_between,
+                  ...extras ? { extras } : {},
+                  expect: effectiveExpect
+                });
+              }
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: writeScript,
+                label: label2,
+                mutates: true,
+                toolName: "ae_set_keyframe_ease"
+              });
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getKeyframeEase", {
+                    comp_id: args.comp_id,
+                    layer: args.layer,
+                    path: args.path
+                  }),
+                  label: `${label2} (after)`,
+                  mutates: false,
+                  toolName: "ae_set_keyframe_ease"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  result: writeResp.result,
+                  ...curvePlan ? {
+                    curve: args.ease,
+                    segments: curvePlan.segments,
+                    ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
+                  } : {},
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const skipEaseCheck = extrasRecomputeEase(extras);
+              const easeCheck = skipEaseCheck ? null : extractKeyframeEaseCheck(args.ease, targetKeys, afterSnap.result, rovingSkipKeys(writeResp.result));
+              const keysUpdated = Array.isArray(writeResp.result?.keysUpdated) ? writeResp.result.keysUpdated : targetKeys ?? [];
+              const extrasCheck = checkAfterWrite(
+                opId,
+                () => keyExtrasMismatches(extras, keysUpdated, afterSnap.result),
+                (failure2) => ({ mismatches: [failure2], unverified: [] })
+              );
+              let baseMismatches;
+              if (curvePlan) {
+                baseMismatches = skipEaseCheck ? [] : curveEaseMismatches(
+                  curvePlan.sides.filter((s) => !rovingSkipKeys(writeResp.result).includes(s.key)),
+                  afterSnap.result
+                );
+              } else {
+                baseMismatches = rovingMismatches(writeResp.result?.roving, afterSnap.result);
+              }
+              const extrasResult = writeResp.result?.extras;
+              const rovingFailed = Array.isArray(extrasResult?.roving_failed) ? extrasResult.roving_failed : [];
+              const notes = [];
+              if (skipEaseCheck && args.ease !== void 0) {
+                notes.push("The ease was not checked on the read-back: temporal continuous / auto bezier recompute the other side of each key.");
+              }
+              if (rovingFailed.length > 0) notes.push(`After Effects would not rove key${rovingFailed.length === 1 ? "" : "s"} ${rovingFailed.join(", ")}.`);
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: easeCheck?.expected,
+                actualForExpected: easeCheck?.actual,
+                customMismatches: [...baseMismatches, ...extrasCheck.mismatches]
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                result: writeResp.result,
+                ...curvePlan ? {
+                  curve: args.ease,
+                  segments: curvePlan.segments,
+                  ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
+                } : {},
+                ...args.keys === "selected" ? { keys_resolved: targetKeys } : {},
+                ...extrasCheck.unverified.length > 0 ? { unverified: extrasCheck.unverified } : {},
+                ...notes.length > 0 ? { notes } : {},
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_set_text",
+        description: "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. `ranges` styles single words or characters ('make NOW bold and red': `{ match: 'NOW', style: { fauxBold: true, fillColor: [1, 0, 0] } }`) on AE 24.3+, each range read back separately; `paragraphs` does the same for whole paragraphs by index or by a word they contain. Typography in `style` (AE 24.0+): `caps` (normal, small, all, all_small), `baseline` (normal, superscript, subscript), `kerning` (metrics, optical, none, or a number that switches auto kerning off), ligature, no_break, horizontal_scale, vertical_scale, tsume, stroke_over_fill, line_join, auto_leading, digit_set, baseline_direction, line_orientation (24.2), faux_bold, faux_italic. `paragraph` (whole document): justify including the full-justify variants, space_before, space_after, first_line_indent, start_indent, end_indent, every_line_composer, hanging_roman, auto_hyphenate, leading_type, direction (ltr or rtl), composer. `box` (AE 24.6+, box text only; refused on point text): size, position, vertical_align, auto_fit (needs vertical_align top; a height auto_fit can't be combined with size, and a layer that already has a height auto_fit refuses size), inset, first_baseline, first_baseline_min; a new size rewraps the text, so the result's `layout` measures it before and after. Every option is checked against the document before the undo group opens, so an older After Effects refuses with the version it needs and nothing is written; the read-back compares each option by name and treats values AE reports as mixed as unknown (listed under `unverified`), never as a mismatch. Reads reflect the first character only. `font` takes a PostScript name, {postscript} or {family, style}: on AE 24+ it is looked up first, an unknown font is refused with the near matches (allow_substitute: true writes the name anyway) and a substituted font is a receipt mismatch; glyph coverage of the new text is checked and a missing glyph (Turkish \u015F \u011F \u0131 \u0130) is a warning. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeSetTextSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label2 = `ae_set_text(comp ${args.comp_id})`;
+          const rich = usesTypedText(args);
+          const effectiveExpect = {
+            project_path: args.expect.project_path,
+            comp_id: args.expect.comp_id ?? args.comp_id
+          };
+          try {
+            return await ctx.queue.run(label2, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getTextDocument", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  ...rich ? { typography: true, measure: true } : {}
+                }),
+                label: `${label2} (before)`,
+                mutates: false,
+                toolName: "ae_set_text"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("setText", {
+                  comp_id: args.comp_id,
+                  layer: args.layer,
+                  text: args.text,
+                  style: args.style,
+                  paragraph: args.paragraph,
+                  box: args.box,
+                  ranges: args.ranges,
+                  paragraphs: args.paragraphs,
+                  allow_substitute: args.allow_substitute,
+                  expect: effectiveExpect
+                }),
+                label: label2,
+                mutates: true,
+                toolName: "ae_set_text"
+              });
+              const appliedRanges = resolvedRanges(writeResp.result);
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getTextDocument", {
+                    comp_id: args.comp_id,
+                    layer: args.layer,
+                    ...rich ? { typography: true, measure: true } : {},
+                    ...appliedRanges.length > 0 ? { ranges: appliedRanges.map((r) => ({ start: r.start, end: r.end })) } : {}
+                  }),
+                  label: `${label2} (after)`,
+                  mutates: false,
+                  toolName: "ae_set_text"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const beforeObj = beforeSnap.result ?? {};
+              const beforeDoc = beforeObj.document && typeof beforeObj.document === "object" ? beforeObj.document : beforeObj;
+              const afterObj = afterSnap.result ?? {};
+              const afterDoc = afterObj.document && typeof afterObj.document === "object" ? afterObj.document : afterObj;
+              const expectedCheck = {};
+              const actualCheck = {};
+              if (args.text !== void 0) {
+                expectedCheck.text = args.text;
+                actualCheck.text = afterDoc.text;
+              }
+              if (args.style) {
+                const styleKeys = [
+                  "font",
+                  "fontSize",
+                  "tracking",
+                  "leading",
+                  "fillColor",
+                  "strokeColor",
+                  "strokeWidth",
+                  "applyFill",
+                  "applyStroke",
+                  "justification"
+                ];
+                for (const key of styleKeys) {
+                  if (args.style[key] !== void 0 && !coveredByFirstRange(key, appliedRanges)) {
+                    if (key === "font") {
+                      const resolvedFont = writeResp.result?.fonts?.document?.postscript;
+                      const given = typeof args.style.font === "string" ? args.style.font : void 0;
+                      const want = typeof resolvedFont === "string" ? resolvedFont : given;
+                      if (want !== void 0) {
+                        expectedCheck.font = want;
+                        actualCheck.font = afterDoc.font;
+                      }
+                    } else {
+                      expectedCheck[key] = args.style[key];
+                      actualCheck[key] = afterDoc[key];
+                    }
+                  }
+                }
+              }
+              const typed = checkAfterWrite(
+                opId,
+                () => typedTextChecks(writeResp.result?.set, args.paragraph?.justify, afterObj, [
+                  ...coveredByFirstRange("fauxBold", appliedRanges) ? ["typography.faux_bold"] : [],
+                  ...coveredByFirstRange("fauxItalic", appliedRanges) ? ["typography.faux_italic"] : []
+                ]),
+                (failure2) => ({ expected: {}, actual: {}, unverified: [], failure: failure2 })
+              );
+              Object.assign(expectedCheck, typed.expected);
+              Object.assign(actualCheck, typed.actual);
+              const extraMismatches = [];
+              if ("failure" in typed && typed.failure) extraMismatches.push(typed.failure);
+              const hostWarnings = writeResp.result?.warnings;
+              const warnings = Array.isArray(hostWarnings) ? hostWarnings.slice() : [];
+              const fontObject = afterDoc.fontObject;
+              if (args.style?.font !== void 0 && fontObject?.is_substitute === true) {
+                if (args.allow_substitute) {
+                  warnings.push(`After Effects substitutes the font (${String(fontObject.postscript ?? "unknown")} is not installed), as allow_substitute allowed.`);
+                } else {
+                  extraMismatches.push({
+                    path: "font",
+                    expected: "an installed font",
+                    actual: "substituted",
+                    message: "After Effects reports the font as a substitute (fontObject.isSubstitute): it is not installed, so the text renders in a fallback font."
+                  });
+                }
+              }
+              const readBackRanges = Array.isArray(afterObj.ranges) ? afterObj.ranges : [];
+              const verifiedRanges = appliedRanges.slice(0, readBackRanges.length);
+              const unverifiedRanges = appliedRanges.length - verifiedRanges.length;
+              Object.assign(expectedCheck, rangeExpectations(verifiedRanges));
+              Object.assign(actualCheck, rangeActuals(verifiedRanges, afterObj.ranges));
+              if (expectedCheck.justification === void 0 && args.paragraph?.justify === void 0 && typeof beforeDoc.justification === "string" && typeof afterDoc.justification === "string") {
+                expectedCheck.justification = beforeDoc.justification;
+                actualCheck.justification = afterDoc.justification;
+              }
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
+                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0,
+                // The host reads back every range or throws, so a short list is a wrong read-back.
+                customMismatches: [
+                  ...unverifiedRanges > 0 ? [
+                    {
+                      path: "ranges",
+                      expected: appliedRanges.length,
+                      actual: readBackRanges.length,
+                      message: "The read-back returned fewer ranges than were written; the rest were not checked"
+                    }
+                  ] : [],
+                  ...extraMismatches
+                ]
+              });
+              const layout = rich ? { before: beforeObj.measure ?? null, after: afterObj.measure ?? null, rewrapped: layoutChanged(beforeObj.measure, afterObj.measure) } : void 0;
+              return {
+                op_id: opId,
+                applied: true,
+                result: writeResp.result,
+                checkpoint,
+                receipt,
+                ...unverifiedRanges > 0 ? { unverified_ranges: unverifiedRanges } : {},
+                ...typed.unverified.length > 0 ? { unverified: typed.unverified } : {},
+                ...layout ? { layout } : {},
+                ...warnings.length > 0 ? { warnings } : {}
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_import_footage",
+        description: "Import one or more footage files (or an image sequence, in numbered order with placeholders for missing frames) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. `import_as` builds a comp from a layered file (PSD, AI): 'comp' or 'comp_cropped_layers', or a whole project ('project'); ImportOptions.canImportAs is checked first and a file that cannot be imported that way is refused, listing what it allows. The result returns new_comp_ids, new_folder_ids, main_comp_id and created_folder_id, and target_folder_id receives the top created items. `range` {start, end} imports part of a numbered sequence; `placeholders` [{name, width, height, fps, duration}] create placeholders for missing footage. Importing a project or an older file can raise dialogs (missing fonts or footage, conversion): they are never suppressed, so read them with ae_dialogs. ae_import_assets is a separate importer. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeImportFootageSchema,
+        handler: async (args, ctx) => {
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const fileCount = (args.paths?.length ?? 0) + (args.placeholders?.length ?? 0);
+          const label2 = `ae_import_footage(${fileCount} file${fileCount === 1 ? "" : "s"})`;
+          try {
+            return await ctx.queue.run(label2, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, args.expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getFootageItems", {}),
+                label: `${label2} (before)`,
+                mutates: false,
+                toolName: "ae_import_footage"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("importFootage", {
+                  paths: args.paths,
+                  sequence: Boolean(args.sequence),
+                  fps: args.fps,
+                  target_folder_id: args.target_folder_id,
+                  ...args.import_as !== void 0 ? { import_as: args.import_as } : {},
+                  ...args.range !== void 0 ? { range: args.range } : {},
+                  ...args.force_alphabetical !== void 0 ? { force_alphabetical: args.force_alphabetical } : {},
+                  ...args.placeholders !== void 0 ? { placeholders: args.placeholders } : {},
+                  expect: args.expect
+                }),
+                label: label2,
+                timeoutMs: SLOW_TIMEOUT_MS,
+                mutates: true,
+                toolName: "ae_import_footage"
+              });
+              const itemIds = Array.isArray(writeResp.result?.item_ids) ? writeResp.result.item_ids : [];
+              const createdIds = createdItemIds(writeResp.result);
+              const readIds = createdIds.length > 0 ? createdIds : itemIds;
+              const createdExtras = importCreatedFields(writeResp.result);
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getFootageItems", {
+                    item_ids: readIds
+                  }),
+                  label: `${label2} (after)`,
+                  mutates: false,
+                  toolName: "ae_import_footage"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  item_ids: itemIds,
+                  items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+                  ...createdExtras,
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const afterIds = Array.isArray(afterSnap.result?.item_ids) ? afterSnap.result.item_ids : [];
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: {
+                  count: createdIds.length > 0 ? readIds.length : fileCount,
+                  item_ids: readIds
+                },
+                actualForExpected: {
+                  count: afterIds.length,
+                  item_ids: afterIds
+                }
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                item_ids: itemIds,
+                items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
+                ...createdExtras,
+                result: writeResp.result,
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      },
+      {
+        name: "ae_replace_footage",
+        description: "Replace or relink an existing FootageItem using `FootageItem.replace` or `FootageItem.replaceWithSequence` within one undo group, guarded by `expect`, returning the before and after file paths, `footageMissing`, and a separate read-back receipt. With `action: 'reload'` (and item_ids, item_id or folder_id) it reloads the main file source of footage items after the files changed on disk (FileSource.reload; proxies in use and non-file sources are refused or skipped) and a separate read-back lists the items whose size, duration or frame rate changed, since content in comps may move. Solid colour, size and name changes are ae_layer_ops solid_settings, not this tool. " + AGENT_SAFETY_GUIDANCE,
+        schema: AeReplaceFootageSchema,
+        handler: async (args, ctx) => {
+          if (args.action === "reload") return reloadFootage(args, ctx);
+          ctx.quarantine.assertClear();
+          const opId = ctx.bridge.newOpId();
+          const label2 = `ae_replace_footage(${args.item_id})`;
+          try {
+            return await ctx.queue.run(label2, async () => {
+              ctx.quarantine.assertClear();
+              const guard = await verifyTargetGuard(ctx, args.expect, opId);
+              const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
+              const beforeSnap = await ctx.bridge.evalRaw({
+                id: `${opId}_before`,
+                script: buildJsxCall("getFootageItem", {
+                  item_id: args.item_id
+                }),
+                label: `${label2} (before)`,
+                mutates: false,
+                toolName: "ae_replace_footage"
+              });
+              const writeResp = await ctx.bridge.evalRaw({
+                id: opId,
+                script: buildJsxCall("replaceFootage", {
+                  item_id: args.item_id,
+                  path: args.path,
+                  sequence: Boolean(args.sequence),
+                  expect: args.expect
+                }),
+                label: label2,
+                timeoutMs: SLOW_TIMEOUT_MS,
+                mutates: true,
+                toolName: "ae_replace_footage"
+              });
+              const afterRead = await readAfterWrite(
+                opId,
+                () => ctx.bridge.evalRaw({
+                  id: `${opId}_after`,
+                  script: buildJsxCall("getFootageItem", {
+                    item_id: args.item_id
+                  }),
+                  label: `${label2} (after)`,
+                  mutates: false,
+                  toolName: "ae_replace_footage"
+                })
+              );
+              if (afterRead.failure) {
+                return {
+                  op_id: opId,
+                  applied: true,
+                  item_id: args.item_id,
+                  result: writeResp.result,
+                  checkpoint,
+                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
+                };
+              }
+              const afterSnap = afterRead.value;
+              const beforeObj = beforeSnap.result ?? {};
+              const writeObj = writeResp.result ?? {};
+              const afterObj = afterSnap.result ?? {};
+              const beforeFile = typeof beforeObj.file === "string" ? beforeObj.file : typeof writeObj.before_file === "string" ? writeObj.before_file : null;
+              const beforeMissing = typeof beforeObj.footageMissing === "boolean" ? beforeObj.footageMissing : typeof writeObj.before_footage_missing === "boolean" ? writeObj.before_footage_missing : false;
+              const afterFile = typeof afterObj.file === "string" ? afterObj.file : typeof writeObj.requested_path === "string" ? writeObj.requested_path : null;
+              const afterMissing = typeof afterObj.footageMissing === "boolean" ? afterObj.footageMissing : false;
+              const receipt = buildReceipt({
+                before: beforeSnap.result,
+                after: afterSnap.result,
+                expected: {
+                  file: normalizeGuardPath(args.path),
+                  footageMissing: false
+                },
+                actualForExpected: {
+                  file: typeof afterFile === "string" ? normalizeGuardPath(afterFile) : null,
+                  footageMissing: afterMissing
+                }
+              });
+              return {
+                op_id: opId,
+                applied: true,
+                item_id: args.item_id,
+                before_path: beforeFile,
+                after_path: afterFile,
+                before_file: beforeFile,
+                after_file: afterFile,
+                before_footage_missing: beforeMissing,
+                footageMissing: afterMissing,
+                result: writeResp.result,
+                checkpoint,
+                receipt
+              };
+            });
+          } catch (err) {
+            if (err instanceof QueueWaitError) {
+              throw new BridgeError({
+                kind: "queued",
+                op_id: opId,
+                message: err.message
+              });
+            }
+            throw err;
+          }
+        }
+      }
+    ];
+  }
+});
+
+// src/tools/ext/ask.ts
+function checkImagePath(p) {
+  if (!path18.isAbsolute(p)) return `image_path must be absolute: ${p}`;
+  if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
+  try {
+    const st = fs16.statSync(p);
+    if (!st.isFile()) return `image_path is not a file: ${p}`;
+    if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
+  } catch {
+    return `image_path does not exist: ${p}`;
+  }
+  return null;
+}
+async function askByElicitation(request2, args, timeoutMs) {
+  const allowOther = args.allow_other ?? true;
+  const ids = args.options.map((o) => o.id);
+  const lines = [args.question, ...args.context ? [args.context] : [], ...args.options.filter((o) => o.description).map((o) => `${o.label}: ${o.description}`)];
+  const requestedSchema = {
+    type: "object",
+    properties: {
+      choice: { type: "string", title: "Answer", enum: ids, enumNames: args.options.map((o) => o.label) },
+      ...allowOther ? { other: { type: "string", title: "Or your own answer" } } : {}
+    },
+    required: allowOther ? [] : ["choice"]
+  };
+  const res = await request2("elicitation/create", { message: lines.join("\n"), requestedSchema }, timeoutMs);
+  if (!res) {
+    return {
+      status: "no_answer",
+      via: "elicitation",
+      question: args.question,
+      message: "The user did not answer in the client in time. Ask again later, or go on with a sensible default and say which."
+    };
+  }
+  if (res.error) return null;
+  const result = res.result ?? {};
+  const q = {
+    id: `elicit_${Date.now()}`,
+    question: args.question,
+    kind: "choice",
+    options: args.options,
+    multi_select: false,
+    allow_other: allowOther,
+    ...args.context ? { context: args.context } : {},
+    asked_at: Date.now()
+  };
+  const choice = typeof result.content?.choice === "string" && ids.includes(result.content.choice) ? [result.content.choice] : [];
+  const other = typeof result.content?.other === "string" && result.content.other.trim() ? result.content.other.trim().slice(0, 2e3) : void 0;
+  if (result.action === "accept" && (choice.length || other)) {
+    return { ...presentAnswer(q, { status: "answered", choice_ids: choice, ...other ? { other } : {}, answered_at: Date.now() }), via: "elicitation" };
+  }
+  return { ...presentAnswer(q, { status: "dismissed", choice_ids: [], answered_at: Date.now() }), via: "elicitation" };
+}
+function presentAnswer(q, a) {
+  if (!a) {
+    return {
+      status: "waiting",
+      ask_id: q.id,
+      question: q.question,
+      message: "No answer yet; the question stays in the panel. Call ae_ask_user with this ask_id to keep waiting, or carry on and check back later."
+    };
+  }
+  if (a.status === "dismissed") {
+    return {
+      status: "dismissed",
+      ask_id: q.id,
+      question: q.question,
+      message: "The user dismissed the question. Don't ask it again unprompted; go on with a sensible default and say which."
+    };
+  }
+  const byId3 = new Map(q.options.map((o) => [o.id, o]));
+  return {
+    status: "answered",
+    ask_id: q.id,
+    question: q.question,
+    chosen: a.choice_ids.map((id) => ({ id, label: byId3.get(id)?.label ?? id })),
+    ...a.other ? { other: a.other } : {},
+    ...a.curve ? {
+      curve: a.curve,
+      edited: !a.choice_ids.some((id) => sameCurve(byId3.get(id)?.curve, a.curve)),
+      next: "Apply it with ae_set_keyframe_ease { ease: { curve } }. Ask whether it should become the user's default; if so, save it with ae_taste."
+    } : {},
+    answered_after_s: Math.round((a.answered_at - q.asked_at) / 100) / 10
+  };
+}
+function sameCurve(a, b) {
+  return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
+}
+var fs16, path18, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
+var init_ask = __esm({
+  "src/tools/ext/ask.ts"() {
+    "use strict";
+    init_call_context();
+    fs16 = __toESM(require("node:fs"), 1);
+    path18 = __toESM(require("node:path"), 1);
+    init_zod();
+    init_render_gate();
+    init_animate();
+    PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
+    DEFAULT_WAIT_SECONDS = 120;
+    MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+    AskOptionSchema = external_exports.object({
+      id: external_exports.string().min(1).max(40).describe("Short id returned when the user picks this option."),
+      label: external_exports.string().min(1).max(120),
+      description: external_exports.string().max(400).optional(),
+      curve: EASE_CURVE_ARRAY_SCHEMA.optional().describe(
+        "cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."
+      ),
+      image_path: external_exports.string().min(1).optional().describe(
+        "Absolute path of a PNG or JPEG shown with the option, such as an ae_contact_sheet or ae_snapshot_frame of that variant."
+      )
+    });
+    AeAskUserSchema = external_exports.object({
+      ask_id: external_exports.string().min(1).optional().describe("Keep waiting for a question asked earlier (its ask_id) instead of asking a new one."),
+      question: external_exports.string().min(1).max(500).optional(),
+      kind: external_exports.enum(["choice", "ease"]).optional().describe(
+        "'choice' (default) shows buttons. 'ease' draws each option's curve with a moving preview and lets the user drag the handles; the answer then carries the final curve."
+      ),
+      options: external_exports.array(AskOptionSchema).min(2).max(8).optional(),
+      multi_select: external_exports.boolean().optional().describe("Allow several options. Default false."),
+      allow_other: external_exports.boolean().optional().describe("Let the user type their own answer. Default true."),
+      context: external_exports.string().max(300).optional().describe("One line under the question, such as which layer and keys it is about."),
+      wait_seconds: external_exports.number().int().min(0).max(600).optional().describe(
+        `How long to wait for the answer (default ${DEFAULT_WAIT_SECONDS}). If it runs out, the result is status 'waiting' with the ask_id; the question stays in the panel.`
+      )
+    }).refine((v) => v.ask_id !== void 0 || v.question !== void 0 && v.options !== void 0, {
+      message: "Give a question and options, or the ask_id of an earlier question."
+    }).refine((v) => v.kind !== "ease" || (v.options ?? []).every((o) => o.curve !== void 0), {
+      message: "Every option of an ease question needs a curve."
+    }).refine((v) => new Set((v.options ?? []).map((o) => o.id)).size === (v.options ?? []).length, {
+      message: "Option ids must be unique."
+    });
+    askTools = [
+      {
+        name: "ae_ask_user",
+        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project. When the client handles MCP elicitation, a plain single choice without pictures is asked in the client's own UI instead (via: 'elicitation'; 'no_answer' when it was not answered in time); ease curves, several answers and pictures always use the panel.",
+        schema: AeAskUserSchema,
+        handler: async (args, ctx) => {
+          const call2 = currentCall();
+          if (!args.ask_id && call2?.request && args.question && args.options && (args.kind ?? "choice") === "choice" && !args.multi_select && !args.options.some((o) => o.image_path)) {
+            const viaClient = await askByElicitation(call2.request, { ...args, question: args.question, options: args.options }, (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1e3);
+            if (viaClient) return viaClient;
+          }
+          const asks = ctx.asks;
+          if (!asks) {
+            return {
+              ok: false,
+              error: "panel_unavailable",
+              message: "ae_ask_user needs the MCP that runs inside the After Effects panel; ask in the chat instead."
+            };
+          }
+          const waitMs = (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1e3;
+          if (args.ask_id) {
+            const found = asks.get(args.ask_id);
+            if (!found) {
+              return {
+                ok: false,
+                error: "unknown_ask_id",
+                message: "No such question. Answered questions are kept for an hour, and restarting AE clears them."
+              };
+            }
+            const answer2 = found.answer ?? await asks.wait(args.ask_id, waitMs);
+            return presentAnswer(found.question, answer2);
+          }
+          for (const o of args.options) {
+            if (o.image_path) {
+              const problem = checkImagePath(o.image_path);
+              if (problem) return { ok: false, error: "bad_image", message: problem };
+            }
+          }
+          const question = asks.ask({
+            question: args.question,
+            kind: args.kind ?? "choice",
+            options: args.options,
+            multi_select: args.multi_select ?? false,
+            allow_other: args.allow_other ?? true,
+            ...args.context ? { context: args.context } : {}
+          });
+          if (ctx.cep && !renderGate.active()) {
+            try {
+              await ctx.cep.openExtension(PANEL_EXTENSION_ID);
+            } catch {
+            }
+          }
+          const answer = await asks.wait(question.id, waitMs);
+          return presentAnswer(question, answer);
+        }
+      }
+    ];
+  }
+});
+
 // src/caption-standards.ts
 function bareWord(w) {
   return w.toLowerCase().replace(/[‘’]/g, "'").replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, "");
@@ -16780,15 +18506,15 @@ function captionsFolderFor(projectPath) {
   if (!projectPath || projectPath === "<unsaved>") {
     throw new Error("The project has not been saved, so there is no folder to put caption files next to. Save it first, or give an absolute path.");
   }
-  const dir = path18.dirname(projectPath);
-  const name = path18.basename(projectPath, path18.extname(projectPath));
-  return path18.join(dir, `${name} chroma captions`) + path18.sep;
+  const dir = path19.dirname(projectPath);
+  const name = path19.basename(projectPath, path19.extname(projectPath));
+  return path19.join(dir, `${name} chroma captions`) + path19.sep;
 }
-var path18, CAPTION_STANDARD_IDS, CAPTION_STANDARDS, set, ARTICLES, PREPOSITIONS, CONJUNCTIONS, AUXILIARIES, SUBJECT_PRONOUNS, POSSESSIVES, capitalised, endsClause, UNITS, SPEAKER_COLORS;
+var path19, CAPTION_STANDARD_IDS, CAPTION_STANDARDS, set, ARTICLES, PREPOSITIONS, CONJUNCTIONS, AUXILIARIES, SUBJECT_PRONOUNS, POSSESSIVES, capitalised, endsClause, UNITS, SPEAKER_COLORS;
 var init_caption_standards = __esm({
   "src/caption-standards.ts"() {
     "use strict";
-    path18 = __toESM(require("node:path"), 1);
+    path19 = __toESM(require("node:path"), 1);
     CAPTION_STANDARD_IDS = ["netflix_adult", "netflix_kids", "bbc", "dcmp", "social_9x16"];
     CAPTION_STANDARDS = {
       netflix_adult: {
@@ -17912,13 +19638,13 @@ function buildCaptions(segments, opts = {}) {
   };
   const isSentEnd = (w) => w.sentence_end ?? SENTENCE_END.test(w.text);
   const gramOf = (w) => w.gram ?? w.text;
-  const tokensOf = (texts, label, kind) => {
+  const tokensOf = (texts, label2, kind) => {
     const t = texts.slice();
     if (kind === "lyric" && t.length) {
       t[0] = `${MUSIC} ${t[0]}`;
       t[t.length - 1] = `${t[t.length - 1]} ${MUSIC}`;
     }
-    if (label && t.length) t[0] = `${label} ${t[0]}`;
+    if (label2 && t.length) t[0] = `${label2} ${t[0]}`;
     return t;
   };
   const bottomHeavy = std ? std.bottom_heavy : true;
@@ -17946,7 +19672,7 @@ function buildCaptions(segments, opts = {}) {
       groups.push({ words: [{ text: soundText(ev.text), start: ev.start, end: ev.end }], kind: "sound", notes: [] });
     }
   };
-  const tokenLens = (ws, label, kind) => tokensOf(ws.map((x) => x.text), label, kind).map((t) => t.length);
+  const tokenLens = (ws, label2, kind) => tokensOf(ws.map((x) => x.text), label2, kind).map((t) => t.length);
   const overflows = (ws) => ws[ws.length - 1].end - ws[0].start > maxDur || greedyLineCount(tokenLens(ws, curLabel, curKind), maxChars) > maxLines;
   const chars = (ws) => ws.reduce((n, w) => n + w.text.length, 0) + Math.max(0, ws.length - 1);
   const bestSplit = (ws, next) => {
@@ -18696,15 +20422,15 @@ var init_reframe = __esm({
 function segmentsFromTranscript(t) {
   let text = t.text;
   if (t.path !== void 0) {
-    if (!path19.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
+    if (!path20.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs16.statSync(t.path);
+      stat = fs17.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs16.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs17.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segs = parseCaptionTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   const from = t.from_s ?? 0;
@@ -19018,10 +20744,10 @@ async function fitCaptions(ctx, args, f) {
   let latest = null;
   let passes2 = 0;
   let receiptsOk = true;
-  const write = async (items, label) => {
+  const write = async (items, label2) => {
     const res = await runGuardedWrite(ctx, {
       toolName: "ae_captions",
-      label: `ae_captions(fit ${label}, ${items.length})`,
+      label: `ae_captions(fit ${label2}, ${items.length})`,
       expect: args.expect,
       compId: args.comp_id,
       read: (phase) => phase === "after" ? { host: "captionsRead", args: readFit(compId) } : null,
@@ -19036,7 +20762,7 @@ async function fitCaptions(ctx, args, f) {
           default_margins: CAPTION_DEFAULT_MARGINS,
           ...args.platform ? { platform_margins: platformMargins(args.platform) } : {},
           ...boxPad > 0 ? { box_padding: boxPad } : {},
-          label: `Fit captions (${label})`
+          label: `Fit captions (${label2})`
         }
       },
       check: (_b, after, w) => fitMismatches(mode, items, after, w.skipped),
@@ -19115,7 +20841,7 @@ async function fitTemplateCaptions(ctx, args, captions, prefix, first) {
   const tpl = args.template;
   if (!tpl || !captions.length) return null;
   const out = { refit: [], template_overflow: [], warnings: [] };
-  const measure = async (lines, label) => (await ctx.bridge.callHost("captionsTemplateMeasure", { comp_id: tpl.comp_id, texts: lines, label }, { label: `ae_captions(measure template, ${lines.length})`, mutates: true, toolName: "ae_captions" })).result;
+  const measure = async (lines, label2) => (await ctx.bridge.callHost("captionsTemplateMeasure", { comp_id: tpl.comp_id, texts: lines, label: label2 }, { label: `ae_captions(measure template, ${lines.length})`, mutates: true, toolName: "ae_captions" })).result;
   let m;
   try {
     m = await measure(captions.map((c) => c.lines), "Measure template captions");
@@ -19213,12 +20939,12 @@ async function makeTemplate(args, ctx) {
   });
   return res;
 }
-var fs16, path19, MAX_TRANSCRIPT_BYTES, MAX_CAPTIONS, Color2, CaptionTranscriptSchema, BreakFields, MarginsSchema2, StyleSchema, LayoutSchema, HighlightSchema, BoxSchema, LookSchema, LookOptionsSchema, MakeTemplateSchema, NameFields, AeCaptionsPlanSchema, PlatformField, TemplateSchema, MatchSchema, AeCaptionsSchema, AeCaptionsReadSchema, previewOf, PLAN_LIST_MAX, platformMargins, CAPTION_DEFAULT_MARGINS, RAIL_PRESETS, railFor, readOf2, norm, hexToRgb, nearColor, speakerLabel, readArgsFor, badTranscript, showAt, captionsTools;
+var fs17, path20, MAX_TRANSCRIPT_BYTES, MAX_CAPTIONS, Color2, CaptionTranscriptSchema, BreakFields, MarginsSchema2, StyleSchema, LayoutSchema, HighlightSchema, BoxSchema, LookSchema, LookOptionsSchema, MakeTemplateSchema, NameFields, AeCaptionsPlanSchema, PlatformField, TemplateSchema, MatchSchema, AeCaptionsSchema, AeCaptionsReadSchema, previewOf, PLAN_LIST_MAX, platformMargins, CAPTION_DEFAULT_MARGINS, RAIL_PRESETS, railFor, readOf2, norm, hexToRgb, nearColor, speakerLabel, readArgsFor, badTranscript, showAt, captionsTools;
 var init_captions = __esm({
   "src/tools/ext/captions.ts"() {
     "use strict";
-    fs16 = __toESM(require("node:fs"), 1);
-    path19 = __toESM(require("node:path"), 1);
+    fs17 = __toESM(require("node:fs"), 1);
+    path20 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
     init_caption_plan_options();
@@ -19619,7 +21345,7 @@ async function lookupElevenLabsKey(deps = {}) {
     } catch {
     }
   } else if (platform === "darwin") {
-    const text = (deps.readFile ?? defaultReadFile)(path20.join(deps.home ?? os3.homedir(), ".zprofile"));
+    const text = (deps.readFile ?? defaultReadFile)(path21.join(deps.home ?? os3.homedir(), ".zprofile"));
     if (text) {
       const re = new RegExp(`^\\s*export\\s+${ELEVENLABS_KEY_VAR}=(.*)$`, "gm");
       let last;
@@ -19703,7 +21429,7 @@ function createElevenLabsEngine(options = {}) {
     id: "elevenlabs",
     async transcribe(file, opts, signalLike) {
       const key = await getKey();
-      const stat = fs17.statSync(file);
+      const stat = fs18.statSync(file);
       const boundary = `----chromaAe${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
       const fields = [["model_id", opts.model]];
       if (opts.language) fields.push(["language_code", opts.language]);
@@ -19715,8 +21441,8 @@ Content-Disposition: form-data; name="${k}"\r
 \r
 ${v}\r
 `).join("");
-      const ext2 = path20.extname(file).toLowerCase();
-      const filename = path20.basename(file).replace(/["\r\n\\]/g, "_");
+      const ext2 = path21.extname(file).toLowerCase();
+      const filename = path21.basename(file).replace(/["\r\n\\]/g, "_");
       const head3 = Buffer.from(
         `${text}--${boundary}\r
 Content-Disposition: form-data; name="file"; filename="${filename}"\r
@@ -19762,7 +21488,7 @@ Content-Type: ${CONTENT_TYPES[ext2] ?? "application/octet-stream"}\r
         req.setTimeout(idleMs, () => req.destroy(new Error(`no data for ${Math.round(idleMs / 6e4)} minutes`)));
         req.on("error", fail6);
         req.write(head3);
-        const stream = fs17.createReadStream(file);
+        const stream = fs18.createReadStream(file);
         stream.on("error", (e) => {
           fail6(e);
           req.destroy();
@@ -19794,15 +21520,15 @@ Content-Type: ${CONTENT_TYPES[ext2] ?? "application/octet-stream"}\r
     }
   };
 }
-var childProcess2, fs17, https, os3, path20, MAX_UPLOAD_BYTES, ELEVENLABS_KEY_VAR, IDLE_TIMEOUT_MS, SOURCE_EXTENSIONS, TranscribeError, defaultExecFile, defaultReadFile, CONTENT_TYPES;
+var childProcess2, fs18, https, os3, path21, MAX_UPLOAD_BYTES, ELEVENLABS_KEY_VAR, IDLE_TIMEOUT_MS, SOURCE_EXTENSIONS, TranscribeError, defaultExecFile, defaultReadFile, CONTENT_TYPES;
 var init_transcribe = __esm({
   "src/transcribe.ts"() {
     "use strict";
     childProcess2 = __toESM(require("node:child_process"), 1);
-    fs17 = __toESM(require("node:fs"), 1);
+    fs18 = __toESM(require("node:fs"), 1);
     https = __toESM(require("node:https"), 1);
     os3 = __toESM(require("node:os"), 1);
-    path20 = __toESM(require("node:path"), 1);
+    path21 = __toESM(require("node:path"), 1);
     MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
     ELEVENLABS_KEY_VAR = "ELEVENLABS_API_KEY";
     IDLE_TIMEOUT_MS = 10 * 60 * 1e3;
@@ -19821,7 +21547,7 @@ var init_transcribe = __esm({
     });
     defaultReadFile = (p) => {
       try {
-        return fs17.readFileSync(p, "utf8");
+        return fs18.readFileSync(p, "utf8");
       } catch {
         return void 0;
       }
@@ -20368,20 +22094,20 @@ function stamp() {
   return (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
 }
 function findRenderedAudio(outputPath) {
-  if (fs18.existsSync(outputPath)) return outputPath;
-  const dir = path21.dirname(outputPath);
-  const stem2 = path21.basename(outputPath, path21.extname(outputPath));
+  if (fs19.existsSync(outputPath)) return outputPath;
+  const dir = path22.dirname(outputPath);
+  const stem2 = path22.basename(outputPath, path22.extname(outputPath));
   try {
-    const hit = fs18.readdirSync(dir).find((n) => n.startsWith(stem2) && /\.(aif|aiff|aifc|wav)$/i.test(n));
-    return hit ? path21.join(dir, hit) : null;
+    const hit = fs19.readdirSync(dir).find((n) => n.startsWith(stem2) && /\.(aif|aiff|aifc|wav)$/i.test(n));
+    return hit ? path22.join(dir, hit) : null;
   } catch {
     return null;
   }
 }
 async function analyzeFile(file, offset, opts, maxSeconds = MAX_ANALYSIS_SECONDS) {
-  const stat = fs18.statSync(file);
+  const stat = fs19.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES) throw new AudioDecodeError(`Audio file is over ${MAX_AUDIO_BYTES / 1048576} MB`);
-  const decoded = decodeAudio(await fs18.promises.readFile(file), { maxSeconds });
+  const decoded = decodeAudio(await fs19.promises.readFile(file), { maxSeconds });
   const analysis = offsetAnalysis(await analyzeAudio(decoded.mono, decoded.sampleRate, opts), offset);
   const boundList = (list2) => ({ list: list2.slice(0, MAX_LIST), truncated: list2.length > MAX_LIST });
   const beats = boundList(analysis.beats);
@@ -20414,7 +22140,7 @@ function createAudioTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs18.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs19.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -20465,7 +22191,7 @@ function createAudioTools(options = {}) {
         };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path21.isAbsolute(args.audio_path) || !fs18.existsSync(args.audio_path)) {
+          if (!path22.isAbsolute(args.audio_path) || !fs19.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -20501,9 +22227,9 @@ function createAudioTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; analyse at most ${MAX_ANALYSIS_SECONDS / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path21.join(rendersDir(), "audio");
-        fs18.mkdirSync(dir, { recursive: true });
-        const outputPath = path21.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
+        const dir = path22.join(rendersDir(), "audio");
+        fs19.mkdirSync(dir, { recursive: true });
+        const outputPath = path22.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -20520,7 +22246,7 @@ function createAudioTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs18.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs19.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, opts);
@@ -20584,12 +22310,12 @@ function createAudioTools(options = {}) {
     }
   ];
 }
-var fs18, path21, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
+var fs19, path22, DEFAULT_AUDIO_TEMPLATE, MAX_ANALYSIS_SECONDS, MAX_AUDIO_BYTES, MAX_LIST, MAX_SNAPSHOT_KEYS, AnalysisOptionFields, AeAudioAnalyzeSchema, ValueSchema, AeCueKeysSchema, round4, audioTools;
 var init_audio2 = __esm({
   "src/tools/ext/audio.ts"() {
     "use strict";
-    fs18 = __toESM(require("node:fs"), 1);
-    path21 = __toESM(require("node:path"), 1);
+    fs19 = __toESM(require("node:fs"), 1);
+    path22 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_receipts();
@@ -20648,14 +22374,14 @@ function fileStem(name) {
   return name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "_").trim().slice(0, 100) || "transcript";
 }
 function writeUnique(wanted, data) {
-  fs19.mkdirSync(path22.dirname(wanted), { recursive: true });
+  fs20.mkdirSync(path23.dirname(wanted), { recursive: true });
   const m = /^(.*?)(\.elevenlabs\.json|\.[^.\\/]*)?$/.exec(wanted);
   const base = m[1];
   const suffix = m[2] ?? "";
   for (let n = 1; n < 1e3; n++) {
     const candidate = n === 1 ? wanted : `${base} ${n}${suffix}`;
     try {
-      fs19.writeFileSync(candidate, data, { flag: "wx" });
+      fs20.writeFileSync(candidate, data, { flag: "wx" });
       return candidate;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
@@ -20672,11 +22398,11 @@ async function footageShortcut(ctx, args, info, base, maxBytes) {
   }
   if (!s.eligible || !s.file || !s.layer) return { reasons: s.reasons?.length ? s.reasons : ["the comp's sound is not one footage file"] };
   const file = s.file.path;
-  const ext2 = path22.extname(file).toLowerCase();
+  const ext2 = path23.extname(file).toLowerCase();
   if (!SOURCE_EXTENSIONS.includes(ext2)) return { reasons: [`${ext2 || "(no extension)"} is not a format ElevenLabs takes (${SOURCE_EXTENSIONS.join(" ")})`] };
   let size;
   try {
-    const st = fs19.statSync(file);
+    const st = fs20.statSync(file);
     if (!st.isFile()) throw new Error("not a file");
     size = st.size;
   } catch {
@@ -20691,9 +22417,9 @@ async function footageShortcut(ctx, args, info, base, maxBytes) {
   const r313 = (x) => Math.round(x * 1e3) / 1e3;
   let defaultDir;
   try {
-    defaultDir = args.out_path ? path22.dirname(args.out_path) : captionsFolderFor(info.project_path);
+    defaultDir = args.out_path ? path23.dirname(args.out_path) : captionsFolderFor(info.project_path);
   } catch {
-    defaultDir = path22.dirname(file);
+    defaultDir = path23.dirname(file);
   }
   return {
     reasons: [],
@@ -20747,7 +22473,7 @@ function createTranscribeTools(options = {}) {
     return job;
   }
   async function upload(job, file, args) {
-    const size = fs19.statSync(file).size;
+    const size = fs20.statSync(file).size;
     if (size > maxBytes) return fail("too_large", `${file} is ${Math.round(size / 1048576)} MB; the limit is ${Math.round(maxBytes / 1048576)} MB`);
     job.state = "uploading";
     const engine = engines[job.engine];
@@ -20758,7 +22484,7 @@ function createTranscribeTools(options = {}) {
       num_speakers: args.num_speakers,
       tag_audio_events: args.tag_audio_events ?? true
     });
-    const wanted = job.outPath ?? path22.join(job.defaultDir, `${job.stem}.elevenlabs.json`);
+    const wanted = job.outPath ?? path23.join(job.defaultDir, `${job.stem}.elevenlabs.json`);
     const written = writeUnique(wanted, JSON.stringify(res.raw, null, 2));
     const s = res.summary;
     return {
@@ -20822,11 +22548,11 @@ function createTranscribeTools(options = {}) {
         const base = { engine: engineId, model };
         if (args.path !== void 0) {
           const file = args.path;
-          const ext2 = path22.extname(file).toLowerCase();
+          const ext2 = path23.extname(file).toLowerCase();
           let size;
           try {
-            if (!path22.isAbsolute(file)) throw new Error("not absolute");
-            const st = fs19.statSync(file);
+            if (!path23.isAbsolute(file)) throw new Error("not absolute");
+            const st = fs20.statSync(file);
             if (!st.isFile()) throw new Error("not a file");
             size = st.size;
           } catch {
@@ -20836,7 +22562,7 @@ function createTranscribeTools(options = {}) {
           if (size > maxBytes) return fail("too_large", `${file} is ${Math.round(size / 1048576)} MB; the limit is ${Math.round(maxBytes / 1048576)} MB`);
           const folder = args.out_path ? void 0 : await projectFolderFor(ctx);
           const job2 = newJob(
-            { ...base, offset: 0, stem: fileStem(path22.basename(file, path22.extname(file))), defaultDir: folder ?? path22.dirname(file), outPath: args.out_path, source: "file" },
+            { ...base, offset: 0, stem: fileStem(path23.basename(file, path23.extname(file))), defaultDir: folder ?? path23.dirname(file), outPath: args.out_path, source: "file" },
             (j) => upload(j, file, args)
           );
           return respond(job2, wait);
@@ -20858,15 +22584,15 @@ function createTranscribeTools(options = {}) {
         if (info.duration > MAX_RENDER_SECONDS) return fail("too_long", `${Math.round(info.duration)} s of audio; at most ${MAX_RENDER_SECONDS / 3600} hours`);
         let defaultDir;
         try {
-          defaultDir = args.out_path ? path22.dirname(args.out_path) : captionsFolderFor(info.project_path);
+          defaultDir = args.out_path ? path23.dirname(args.out_path) : captionsFolderFor(info.project_path);
         } catch (err) {
           return fail("render_failed", err.message);
         }
         const firstFrame = Math.round((info.display_start_time ?? 0) * info.fps);
         const endFrame = firstFrame + Math.max(0, Math.ceil(info.duration * info.fps) - 1);
-        const dir = path22.join(rendersDir(), "audio");
-        fs19.mkdirSync(dir, { recursive: true });
-        const outputPath = path22.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
+        const dir = path23.join(rendersDir(), "audio");
+        fs20.mkdirSync(dir, { recursive: true });
+        const outputPath = path23.join(dir, `${sanitize(info.name)}_${stamp()}.aif`);
         const started = await startRender(
           {
             expect: { project_path: info.project_path },
@@ -20903,12 +22629,12 @@ function createTranscribeTools(options = {}) {
     }
   ];
 }
-var fs19, path22, MAX_RENDER_SECONDS, MAX_JOBS, AeTranscribeSchema, fail, transcribeTools;
+var fs20, path23, MAX_RENDER_SECONDS, MAX_JOBS, AeTranscribeSchema, fail, transcribeTools;
 var init_transcribe2 = __esm({
   "src/tools/ext/transcribe.ts"() {
     "use strict";
-    fs19 = __toESM(require("node:fs"), 1);
-    path22 = __toESM(require("node:path"), 1);
+    fs20 = __toESM(require("node:fs"), 1);
+    path23 = __toESM(require("node:path"), 1);
     init_zod();
     init_caption_standards();
     init_transcribe();
@@ -20934,7 +22660,7 @@ var init_transcribe2 = __esm({
       wait_s: external_exports.number().min(0).max(120).optional().describe("Seconds this call waits for the render and upload before returning the job_id. Default 20.")
     }).refine((v) => [v.comp_id, v.path, v.job_id].filter((x) => x !== void 0).length === 1, {
       message: "Give exactly one of comp_id, path or job_id."
-    }).refine((v) => v.out_path === void 0 || path22.isAbsolute(v.out_path) && /\.json$/i.test(v.out_path), {
+    }).refine((v) => v.out_path === void 0 || path23.isAbsolute(v.out_path) && /\.json$/i.test(v.out_path), {
       message: "out_path must be an absolute path ending in .json."
     }).refine((v) => v.job_id === void 0 || v.output_module_template === void 0, { message: "output_module_template goes with comp_id." });
     fail = (error, message, extra2 = {}) => ({ ok: false, error, message, ...extra2 });
@@ -21339,11 +23065,11 @@ function withPosition(cues, override) {
   });
 }
 function writeNew(dir, stem2, ext2, data) {
-  fs20.mkdirSync(dir, { recursive: true });
+  fs21.mkdirSync(dir, { recursive: true });
   for (let n = 1; n < 1e3; n++) {
-    const target = path23.join(dir, n === 1 ? `${stem2}${ext2}` : `${stem2} ${n}${ext2}`);
+    const target = path24.join(dir, n === 1 ? `${stem2}${ext2}` : `${stem2} ${n}${ext2}`);
     try {
-      fs20.writeFileSync(target, data, { encoding: "utf8", flag: "wx" });
+      fs21.writeFileSync(target, data, { encoding: "utf8", flag: "wx" });
       return target;
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
@@ -21355,12 +23081,12 @@ async function statusOf(ctx, toolName) {
   const res = await ctx.bridge.callHost("status", {}, { label: `${toolName} (project path)`, mutates: false, toolName });
   return res.result ?? {};
 }
-var fs20, path23, MAX_FILE_BYTES, MAX_PREVIEW, FromLayersSchema, PositionSchema, planShape, ExportBase, AeCaptionsExportSchema, QaBase, AeCaptionsQaSchema, ALIGN, lineSplit, r22, badTranscript2, EXTENSIONS, fileSafe, previewOf2, captionsioTools;
+var fs21, path24, MAX_FILE_BYTES, MAX_PREVIEW, FromLayersSchema, PositionSchema, planShape, ExportBase, AeCaptionsExportSchema, QaBase, AeCaptionsQaSchema, ALIGN, lineSplit, r22, badTranscript2, EXTENSIONS, fileSafe, previewOf2, captionsioTools;
 var init_captionsio = __esm({
   "src/tools/ext/captionsio.ts"() {
     "use strict";
-    fs20 = __toESM(require("node:fs"), 1);
-    path23 = __toESM(require("node:path"), 1);
+    fs21 = __toESM(require("node:fs"), 1);
+    path24 = __toESM(require("node:path"), 1);
     init_zod();
     init_caption_formats();
     init_caption_qa();
@@ -21430,11 +23156,11 @@ var init_captionsio = __esm({
           let truncated = false;
           let compName;
           if (args.path !== void 0) {
-            const ext3 = path23.extname(args.path).toLowerCase();
-            if (!path23.isAbsolute(args.path) || !EXTENSIONS[args.format].includes(ext3)) {
+            const ext3 = path24.extname(args.path).toLowerCase();
+            if (!path24.isAbsolute(args.path) || !EXTENSIONS[args.format].includes(ext3)) {
               return { ok: false, error: "bad_path", message: `Give an absolute path ending ${EXTENSIONS[args.format].join(" or ")} for ${args.format}: ${args.path}` };
             }
-            if (fs20.existsSync(args.path) && !args.overwrite) {
+            if (fs21.existsSync(args.path) && !args.overwrite) {
               return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it, or leave path out to get a numbered name.` };
             }
           }
@@ -21465,9 +23191,9 @@ var init_captionsio = __esm({
           const ext2 = EXTENSIONS[args.format][0];
           let target;
           if (args.path !== void 0) {
-            fs20.mkdirSync(path23.dirname(args.path), { recursive: true });
+            fs21.mkdirSync(path24.dirname(args.path), { recursive: true });
             try {
-              fs20.writeFileSync(args.path, written.text, { encoding: "utf8", flag: args.overwrite ? "w" : "wx" });
+              fs21.writeFileSync(args.path, written.text, { encoding: "utf8", flag: args.overwrite ? "w" : "wx" });
             } catch (err) {
               if (err.code === "EEXIST") return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
               throw err;
@@ -21491,7 +23217,7 @@ var init_captionsio = __esm({
           }
           let bytes = 0;
           try {
-            bytes = fs20.statSync(target).size;
+            bytes = fs21.statSync(target).size;
           } catch {
             bytes = 0;
           }
@@ -21500,7 +23226,7 @@ var init_captionsio = __esm({
             ok = false;
             warnings.push("The file is empty on disk.");
           } else {
-            const text = fs20.readFileSync(target, "utf8");
+            const text = fs21.readFileSync(target, "utf8");
             const back = args.format === "ttml" ? countTtmlCues(text) : parseSubtitles(text, args.format).cues.length;
             if (back !== cues.length) {
               ok = false;
@@ -21532,16 +23258,16 @@ var init_captionsio = __esm({
           if (args.file !== void 0) {
             source = "file";
             const p = args.file.path;
-            const ext2 = path23.extname(p).toLowerCase();
-            if (!path23.isAbsolute(p) || ext2 !== ".srt" && ext2 !== ".vtt") return { ok: false, error: "bad_path", message: `Give an absolute .srt or .vtt path: ${p}` };
+            const ext2 = path24.extname(p).toLowerCase();
+            if (!path24.isAbsolute(p) || ext2 !== ".srt" && ext2 !== ".vtt") return { ok: false, error: "bad_path", message: `Give an absolute .srt or .vtt path: ${p}` };
             let size;
             try {
-              size = fs20.statSync(p).size;
+              size = fs21.statSync(p).size;
             } catch {
               return { ok: false, error: "not_found", message: `No file at ${p}` };
             }
             if (size > MAX_FILE_BYTES) return { ok: false, error: "too_big", message: `${p} is over 5 MB.` };
-            const parsed = parseSubtitles(fs20.readFileSync(p, "utf8"), ext2 === ".vtt" ? "vtt" : "srt");
+            const parsed = parseSubtitles(fs21.readFileSync(p, "utf8"), ext2 === ".vtt" ? "vtt" : "srt");
             warnings.push(...parsed.warnings);
             qaCues = parsed.cues.map((c) => ({ n: c.n, start: c.start, end: c.end, lines: c.lines }));
           } else if (args.text !== void 0) {
@@ -21651,33 +23377,33 @@ function valuesMatch(expected, actual) {
   if (typeof actual === "boolean") return close(expected, actual ? 1 : 0);
   return typeof actual === "number" && close(expected, actual);
 }
-function expressionMismatches(m, label, expected, state, afterCapped = false) {
+function expressionMismatches(m, label2, expected, state, afterCapped = false) {
   if (!state || !state.found) {
-    if (!afterCapped) m.push({ path: `${label}`, expected, actual: void 0, message: state?.message ?? "The property is not in the read-back" });
+    if (!afterCapped) m.push({ path: `${label2}`, expected, actual: void 0, message: state?.message ?? "The property is not in the read-back" });
     return;
   }
-  expectThat(m, typeof state.expression === "string" && sameText(state.expression, expected), `${label}.expression`, expected, state.expression, "The expression read back differs from the one set");
-  expectThat(m, state.enabled !== false, `${label}.expressionEnabled`, true, state.enabled, "The expression is switched off");
-  if (state.error) m.push({ path: `${label}.expressionError`, expected: null, actual: state.error, message: `AE reports an expression error: ${state.error}` });
+  expectThat(m, typeof state.expression === "string" && sameText(state.expression, expected), `${label2}.expression`, expected, state.expression, "The expression read back differs from the one set");
+  expectThat(m, state.enabled !== false, `${label2}.expressionEnabled`, true, state.enabled, "The expression is switched off");
+  if (state.error) m.push({ path: `${label2}.expressionError`, expected: null, actual: state.error, message: `AE reports an expression error: ${state.error}` });
 }
-function controlMismatches(m, label, spec, state, checkValue = true, targetLayerId) {
+function controlMismatches(m, label2, spec, state, checkValue = true, targetLayerId) {
   if (!state || !state.found) {
-    m.push({ path: label, expected: spec.name, actual: void 0, message: state?.message ?? `Control "${spec.name}" is not in the read-back` });
+    m.push({ path: label2, expected: spec.name, actual: void 0, message: state?.message ?? `Control "${spec.name}" is not in the read-back` });
     return;
   }
-  expectThat(m, state.kind === spec.kind, `${label}.kind`, spec.kind, state.kind, "The control is of another kind");
-  expectThat(m, matchNameFits(spec.kind, state.match_name), `${label}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
+  expectThat(m, state.kind === spec.kind, `${label2}.kind`, spec.kind, state.kind, "The control is of another kind");
+  expectThat(m, matchNameFits(spec.kind, state.match_name), `${label2}.match_name`, CONTROL_MATCH_NAMES[spec.kind], state.match_name, "The control's effect differs");
   if (!checkValue) return;
   const want = expectedControlValue(spec);
-  if (want !== void 0) expectThat(m, valuesMatch(want, state.value), `${label}.value`, want, state.value, "The control's value differs");
+  if (want !== void 0) expectThat(m, valuesMatch(want, state.value), `${label2}.value`, want, state.value, "The control's value differs");
   if (spec.kind === "dropdown" && spec.items && Array.isArray(state.items)) {
     const want2 = state.items_truncated ? spec.items.slice(0, state.items.length) : spec.items;
-    expectThat(m, JSON.stringify(state.items) === JSON.stringify(want2), `${label}.items`, want2, state.items, "The dropdown items differ");
+    expectThat(m, JSON.stringify(state.items) === JSON.stringify(want2), `${label2}.items`, want2, state.items, "The dropdown items differ");
   }
   if (spec.kind === "layer" && spec.layer) {
     const wantId = targetLayerId ?? spec.layer.id;
     if (wantId !== void 0 && wantId !== null) {
-      expectThat(m, state.layer_target?.id === wantId, `${label}.layer`, wantId, state.layer_target?.id, "The Layer Control points at another layer than the one asked for");
+      expectThat(m, state.layer_target?.id === wantId, `${label2}.layer`, wantId, state.layer_target?.id, "The Layer Control points at another layer than the one asked for");
     }
   }
 }
@@ -21754,8 +23480,8 @@ function renameMismatches(args, beforeRaw, afterRaw) {
   }
   return m;
 }
-function recipeControlName(prefix, label) {
-  return label ? `${prefix} ${label}` : prefix;
+function recipeControlName(prefix, label2) {
+  return label2 ? `${prefix} ${label2}` : prefix;
 }
 function resolveRecipeParams(recipe2, given) {
   const g = given ?? {};
@@ -21908,7 +23634,7 @@ var init_rig = __esm({
       layer: LayerSelectorSchema.optional().describe("Only this layer's controls. Default: every layer (the first 500)."),
       include_references: external_exports.boolean().optional().describe("Default true: for each control, the expressions that name it (a text search, with their expressionError).")
     });
-    slider = (key, label, value, describe) => ({ key, label, kind: "slider", value, describe });
+    slider = (key, label2, value, describe) => ({ key, label: label2, kind: "slider", value, describe });
     RECIPES = [
       {
         name: "wiggle",
@@ -22351,8 +24077,8 @@ function liveMismatches(remove, afterRaw, ids) {
   }
   return m;
 }
-function readHost(ctx, host, args, toolName, label) {
-  return ctx.bridge.callHost(host, args, { label, mutates: false, toolName }).then((r) => r.result);
+function readHost(ctx, host, args, toolName, label2) {
+  return ctx.bridge.callHost(host, args, { label: label2, mutates: false, toolName }).then((r) => r.result);
 }
 function liveExpressionText(maxW, maxH) {
   const lines = ["// chroma-fit-text live", "var r = thisLayer.sourceRectAtTime(time, false);", "var s = 1;"];
@@ -22378,11 +24104,11 @@ function backdropMismatches(args, afterRaw) {
   if (b.expression_error) m.push({ path: "backdrop.expression_error", expected: null, actual: b.expression_error, message: "The size expression has an error" });
   const pad2 = args.padding ?? [24, 12];
   const t = after.text;
-  const plain = (t.rotation === void 0 || Math.abs(t.rotation) < 1e-4) && t.parented !== true && t.three_d !== true;
+  const plain2 = (t.rotation === void 0 || Math.abs(t.rotation) < 1e-4) && t.parented !== true && t.three_d !== true;
   const sx = Math.abs(t.scale?.[0] ?? 100) / 100;
   const sy = Math.abs(t.scale?.[1] ?? 100) / 100;
   const want = [t.bounds.width * sx + 2 * pad2[0], t.bounds.height * sy + 2 * pad2[1]];
-  if (b.size && !b.expression_error && plain) {
+  if (b.size && !b.expression_error && plain2) {
     expectThat(m, near2(b.size[0], want[0], 1) && near2(b.size[1], want[1], 1), "backdrop.size", want, b.size, "The box is not the text's size (at its Scale) plus padding");
   }
   return m;
@@ -22959,8 +24685,8 @@ function layoutMismatches(entries2, afterRaw) {
   }
   return m;
 }
-async function planRead(ctx, host, args, toolName, label) {
-  const res = await ctx.bridge.callHost(host, args, { label, mutates: false, toolName });
+async function planRead(ctx, host, args, toolName, label2) {
+  const res = await ctx.bridge.callHost(host, args, { label: label2, mutates: false, toolName });
   return res.result;
 }
 function summarise(plan2, mode) {
@@ -23991,7 +25717,7 @@ function encodePng(img) {
   return import_pngjs2.PNG.sync.write(img);
 }
 function writeScaledCopy(srcPath, dstPath, opts) {
-  const src = import_pngjs2.PNG.sync.read(fs21.readFileSync(srcPath));
+  const src = import_pngjs2.PNG.sync.read(fs22.readFileSync(srcPath));
   let target = { width: src.width, height: src.height };
   if (opts.maxSize !== void 0) {
     target = fitWithin(src.width, src.height, opts.maxSize);
@@ -24005,7 +25731,7 @@ function writeScaledCopy(srcPath, dstPath, opts) {
     return { path: srcPath, width: src.width, height: src.height, scaled: false };
   }
   const out = resizeArea(src, target.width, target.height);
-  fs21.writeFileSync(dstPath, encodePng(out));
+  fs22.writeFileSync(dstPath, encodePng(out));
   return { path: dstPath, width: out.width, height: out.height, scaled: true };
 }
 function cropImage(src, x, y, w, h) {
@@ -24095,11 +25821,11 @@ function drawLabel(dst, text, x, y, scale, fg, bg, pad2 = 2) {
   drawText(dst, text, x + pad2, y + pad2, scale, fg);
   return { x, y, w, h };
 }
-var fs21, import_pngjs2, GLYPHS, GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_ADVANCE;
+var fs22, import_pngjs2, GLYPHS, GLYPH_WIDTH, GLYPH_HEIGHT, GLYPH_ADVANCE;
 var init_png_utils = __esm({
   "src/tools/ext/png-utils.ts"() {
     "use strict";
-    fs21 = __toESM(require("node:fs"), 1);
+    fs22 = __toESM(require("node:fs"), 1);
     import_pngjs2 = __toESM(require_png(), 1);
     GLYPHS = {
       "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
@@ -24190,7 +25916,7 @@ function sanitizeFileToken(s) {
   return cleaned.length > 0 ? cleaned : "_";
 }
 function isSequencePath(p) {
-  return /\[#+\]/.test(path24.basename(p.replace(/\\/g, "/")));
+  return /\[#+\]/.test(path25.basename(p.replace(/\\/g, "/")));
 }
 function joinOutput(dir, name) {
   const sep6 = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
@@ -24451,12 +26177,12 @@ function sequenceRegex(base) {
 function outputFiles(outputPath) {
   try {
     if (isSequencePath(outputPath)) {
-      const norm4 = path24.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
-      const dir = path24.dirname(norm4);
-      const re = sequenceRegex(path24.basename(norm4));
-      return fs22.readdirSync(dir).filter((n) => re.test(n)).map((n) => path24.join(dir, n));
+      const norm4 = path25.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
+      const dir = path25.dirname(norm4);
+      const re = sequenceRegex(path25.basename(norm4));
+      return fs23.readdirSync(dir).filter((n) => re.test(n)).map((n) => path25.join(dir, n));
     }
-    return fs22.existsSync(outputPath) ? [outputPath] : [];
+    return fs23.existsSync(outputPath) ? [outputPath] : [];
   } catch {
     return [];
   }
@@ -24468,7 +26194,7 @@ function inspectOutput(outputPath) {
   const files = [];
   for (const f of outputFiles(outputPath)) {
     try {
-      const st = fs22.statSync(f);
+      const st = fs23.statSync(f);
       if (!st.isFile()) continue;
       count++;
       files.push({ mtime_ms: st.mtimeMs, size: st.size });
@@ -24573,7 +26299,7 @@ async function getFreeBytes(dir, platform = process.platform, run = defaultRunFi
       return Number.isFinite(n) && n >= 0 ? n : null;
     }
     let probe = dir;
-    while (probe && !fs22.existsSync(probe) && path24.dirname(probe) !== probe) probe = path24.dirname(probe);
+    while (probe && !fs23.existsSync(probe) && path25.dirname(probe) !== probe) probe = path25.dirname(probe);
     return parseDfAvailableBytes(await run("df", ["-Pk", probe]));
   } catch {
     return null;
@@ -24637,7 +26363,7 @@ function refreshRunning(item, job, now, stallMs) {
   let outBytes = 0;
   for (const out of outputsOf(item)) {
     try {
-      outBytes += fs22.existsSync(out) && !isSequencePath(out) ? fs22.statSync(out).size : 0;
+      outBytes += fs23.existsSync(out) && !isSequencePath(out) ? fs23.statSync(out).size : 0;
     } catch {
     }
   }
@@ -24698,7 +26424,7 @@ function readArgs(job) {
 }
 function fileSig(p) {
   try {
-    const st = fs22.statSync(p);
+    const st = fs23.statSync(p);
     return `${st.mtimeMs}|${st.size}`;
   } catch {
     return "";
@@ -24711,7 +26437,7 @@ function createRenderbatch(options = {}) {
   let storeInstance = options.store ?? null;
   let runnerInstance = null;
   const getStore = () => {
-    if (!storeInstance) storeInstance = new BatchStore(path24.join(getRegistry().rendersDir, "batches"));
+    if (!storeInstance) storeInstance = new BatchStore(path25.join(getRegistry().rendersDir, "batches"));
     return storeInstance;
   };
   const pidAlive2 = options.isPidAlive ?? ((pid, jobId) => defaultIsPidAlive(pid, getRegistry(), jobId));
@@ -24895,19 +26621,19 @@ function createRenderbatch(options = {}) {
         const store = getStore();
         const batchId = store.newId();
         const batchDir = store.batchDir(batchId);
-        const ext2 = path24.extname(ready.project_path) || ".aep";
+        const ext2 = path25.extname(ready.project_path) || ".aep";
         const beside = args.freeze_location === "project_folder";
-        const frozenDir = beside ? path24.dirname(ready.project_path) : batchDir;
-        const frozen = path24.join(frozenDir, beside ? `${path24.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path24.basename(ready.project_path, ext2)}${ext2}`);
+        const frozenDir = beside ? path25.dirname(ready.project_path) : batchDir;
+        const frozen = path25.join(frozenDir, beside ? `${path25.basename(ready.project_path, ext2)}.mcp_${batchId}${ext2}` : `${path25.basename(ready.project_path, ext2)}${ext2}`);
         try {
-          fs22.mkdirSync(frozenDir, { recursive: true });
-          fs22.copyFileSync(ready.project_path, frozen);
+          fs23.mkdirSync(frozenDir, { recursive: true });
+          fs23.copyFileSync(ready.project_path, frozen);
         } catch (err) {
           return { ok: false, error: "freeze_failed", applied: false, message: `Could not copy the project to ${frozen}: ${errText(err)}. Nothing was started.` };
         }
         if (ready.project_sig !== null && fileSig(ready.project_path) !== ready.project_sig) {
           try {
-            if (beside) fs22.rmSync(frozen, { force: true });
+            if (beside) fs23.rmSync(frozen, { force: true });
           } catch {
           }
           store.forget(batchId);
@@ -24934,7 +26660,7 @@ function createRenderbatch(options = {}) {
           store.save(batch);
         } catch (err) {
           try {
-            if (beside) fs22.rmSync(frozen, { force: true });
+            if (beside) fs23.rmSync(frozen, { force: true });
           } catch {
           }
           store.forget(batchId);
@@ -25051,7 +26777,7 @@ function createRenderbatch(options = {}) {
         } catch (err) {
           return queued10(err, opId);
         }
-        if (!fs22.existsSync(batch.frozen_project)) {
+        if (!fs23.existsSync(batch.frozen_project)) {
           return { ok: false, error: "frozen_project_missing", applied: false, message: `The frozen project copy ${batch.frozen_project} is gone; start a new batch.` };
         }
         const runner = getRunner();
@@ -25114,15 +26840,15 @@ function createRenderbatch(options = {}) {
 function createRenderbatchTools(options = {}) {
   return createRenderbatch(options).tools;
 }
-var childProcess3, crypto4, fs22, path24, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
+var childProcess3, crypto4, fs23, path25, MAX_ITEMS, MAX_STRING, GIB, MTIME_SLOP_MS, TOKENS, WIN_OR_POSIX_ABSOLUTE, BatchSpecSchema, BatchQueueItemSchema, jobFields, policyFields, runFields, AeRenderBatchPlanSchema, AeRenderBatchStartSchema, BATCH_ID_RE, BatchIdSchema, AeRenderBatchStatusSchema, AeRenderBatchResumeSchema, AeRenderBatchCancelSchema, clip, errText, defaultRunFile, BatchStore, BatchRunner, defaultIsPidAlive, renderbatchTools;
 var init_renderbatch = __esm({
   "src/tools/ext/renderbatch.ts"() {
     "use strict";
     init_win_exe();
     childProcess3 = __toESM(require("node:child_process"), 1);
     crypto4 = __toESM(require("node:crypto"), 1);
-    fs22 = __toESM(require("node:fs"), 1);
-    path24 = __toESM(require("node:path"), 1);
+    fs23 = __toESM(require("node:fs"), 1);
+    path25 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -25236,24 +26962,24 @@ var init_renderbatch = __esm({
         return `batch_${Date.now()}_${crypto4.randomBytes(3).toString("hex")}`;
       }
       batchDir(id) {
-        return path24.join(this.dir, id);
+        return path25.join(this.dir, id);
       }
       jsonPath(id) {
-        return path24.join(this.batchDir(id), "batch.json");
+        return path25.join(this.batchDir(id), "batch.json");
       }
       save(b) {
         this.cache.set(b.batch_id, b);
         const file = this.jsonPath(b.batch_id);
-        fs22.mkdirSync(path24.dirname(file), { recursive: true });
+        fs23.mkdirSync(path25.dirname(file), { recursive: true });
         const tmp = `${file}.tmp-${process.pid}-${crypto4.randomBytes(3).toString("hex")}`;
         const payload = JSON.stringify(b, null, 2);
         try {
-          fs22.writeFileSync(tmp, payload, "utf8");
-          fs22.renameSync(tmp, file);
+          fs23.writeFileSync(tmp, payload, "utf8");
+          fs23.renameSync(tmp, file);
         } catch {
-          fs22.writeFileSync(file, payload, "utf8");
+          fs23.writeFileSync(file, payload, "utf8");
           try {
-            fs22.unlinkSync(tmp);
+            fs23.unlinkSync(tmp);
           } catch {
           }
         }
@@ -25263,7 +26989,7 @@ var init_renderbatch = __esm({
         this.cache.delete(id);
         if (!BATCH_ID_RE.test(id)) return;
         try {
-          fs22.rmSync(this.batchDir(id), { recursive: true, force: true });
+          fs23.rmSync(this.batchDir(id), { recursive: true, force: true });
         } catch {
         }
       }
@@ -25272,7 +26998,7 @@ var init_renderbatch = __esm({
         const cached2 = this.cache.get(id);
         if (cached2) return cached2;
         try {
-          const b = JSON.parse(fs22.readFileSync(this.jsonPath(id), "utf8"));
+          const b = JSON.parse(fs23.readFileSync(this.jsonPath(id), "utf8"));
           if (b && typeof b.batch_id === "string") {
             this.cache.set(id, b);
             return b;
@@ -25285,7 +27011,7 @@ var init_renderbatch = __esm({
       list(limit = 20) {
         let ids = [];
         try {
-          ids = fs22.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
+          ids = fs23.readdirSync(this.dir).filter((n) => n.startsWith("batch_"));
         } catch {
           ids = [];
         }
@@ -25353,7 +27079,7 @@ var init_renderbatch = __esm({
           if (b.state === "succeeded" && b.frozen_temporary) {
             b.frozen_temporary = false;
             try {
-              fs22.rmSync(b.frozen_project, { force: true });
+              fs23.rmSync(b.frozen_project, { force: true });
               b.notices.push(`Every item finished; the frozen project copy ${b.frozen_project} was deleted.`);
             } catch (err) {
               b.notices.push(`Every item finished, but the frozen project copy ${b.frozen_project} could not be deleted (${errText(err)}).`);
@@ -25840,7 +27566,7 @@ function checkDeliveryFile(spec, filePath) {
   let size = 0;
   let exists = false;
   try {
-    const st = fs23.statSync(filePath);
+    const st = fs24.statSync(filePath);
     exists = st.isFile();
     size = st.size;
   } catch {
@@ -25850,7 +27576,7 @@ function checkDeliveryFile(spec, filePath) {
     issues.push("The file does not exist.");
   } else {
     if (size === 0) issues.push("The file is empty.");
-    const ext2 = path25.extname(filePath).replace(/^\./, "").toLowerCase();
+    const ext2 = path26.extname(filePath).replace(/^\./, "").toLowerCase();
     if (ext2 !== spec.ext) issues.push(`The extension is .${ext2}, the spec's is .${spec.ext}.`);
     if (spec.max_size_mb !== void 0 && size > spec.max_size_mb * 1024 * 1024) {
       issues.push(`The file is ${(size / 1048576).toFixed(1)} MB, over the spec's approximate ${spec.max_size_mb} MB limit.`);
@@ -25880,12 +27606,12 @@ function removeMismatches(beforeRaw, afterRaw, written) {
   }
   return m;
 }
-var fs23, path25, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
+var fs24, path26, queueOf, itemOf2, H264, SOCIAL_NOTE, SPEC_LIBRARY, SPEC_IDS, specById, NAME_TOKENS, isAbsolutePath, pathKey, toBool, numbersIn, toNum, TIME_TOL2, ItemIndexSchema, ItemCompSchema, SettingValueSchema, SettingsMapSchema, FileSchema, POST_ACTIONS, LOG_TYPES, PostActionSchema, TimeSpanSchema, ModuleBase, hasModuleChange, ModuleEditSchema, ModuleAddSchema, REMOVE_STATUSES, RemoveRowSchema, RemoveFilterSchema, AeRenderQueueInspectSchema, AeRenderQueueEditSchema, CopySchema, AeRenderQueueDuplicateSchema, AeDeliverySpecsSchema, AeApplySpecSchema, AeCheckDeliveryFileSchema, readCall2, asArray, afterCopiesRead, editHostArgs, rqeditTools;
 var init_rqedit = __esm({
   "src/tools/ext/rqedit.ts"() {
     "use strict";
-    fs23 = __toESM(require("node:fs"), 1);
-    path25 = __toESM(require("node:path"), 1);
+    fs24 = __toESM(require("node:fs"), 1);
+    path26 = __toESM(require("node:path"), 1);
     init_zod();
     init_common();
     init_write_runner();
@@ -26437,7 +28163,7 @@ function renderTimeoutMs(maxHours) {
   return Math.min(Math.round(maxHours * 36e5), MAX_TIMEOUT_MS);
 }
 function jobsFileFor(ctx) {
-  return path26.join(dataDirOf(ctx), "renders", RQ_RENDER_JOBS_FILE);
+  return path27.join(dataDirOf(ctx), "renders", RQ_RENDER_JOBS_FILE);
 }
 function storeFor(ctx) {
   const file = jobsFileFor(ctx);
@@ -26452,7 +28178,7 @@ function ameRootCandidates(platform = process.platform, env = process.env) {
   const roots2 = [];
   if (platform === "win32") {
     for (const v of [env["ProgramFiles"], env["ProgramW6432"], "C:\\Program Files"]) {
-      if (v) roots2.push(path26.win32.join(v, "Adobe"));
+      if (v) roots2.push(path27.win32.join(v, "Adobe"));
     }
   } else if (platform === "darwin") {
     roots2.push("/Applications");
@@ -26461,7 +28187,7 @@ function ameRootCandidates(platform = process.platform, env = process.env) {
 }
 function hasAmeFolder(dir) {
   try {
-    return fs24.readdirSync(dir).some((n) => /^adobe media encoder/i.test(n));
+    return fs25.readdirSync(dir).some((n) => /^adobe media encoder/i.test(n));
   } catch {
     return false;
   }
@@ -26474,7 +28200,7 @@ function ameNearApp(appPath) {
   try {
     let cur = appPath;
     for (let i = 0; i < 4; i++) {
-      const parent = path26.dirname(cur);
+      const parent = path27.dirname(cur);
       if (parent === cur) break;
       if (hasAmeFolder(parent)) return true;
       cur = parent;
@@ -26487,11 +28213,11 @@ function otherExtensionFiles(file, sinceMs) {
   const out = [];
   try {
     if (isSequencePath2(file)) return out;
-    const dir = path26.dirname(file);
-    const base = path26.basename(file);
+    const dir = path27.dirname(file);
+    const base = path27.basename(file);
     const stem2 = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
     let scanned = 0;
-    for (const name of fs24.readdirSync(dir)) {
+    for (const name of fs25.readdirSync(dir)) {
       if (++scanned > 2e4 || out.length >= 10) break;
       if (name.toLowerCase() === base.toLowerCase()) continue;
       const dot = name.lastIndexOf(".");
@@ -26501,8 +28227,8 @@ function otherExtensionFiles(file, sinceMs) {
       const suffixed = nameStem.startsWith(want + "_") && /^\d+$/.test(nameStem.slice(want.length + 1));
       if (nameStem !== want && !suffixed) continue;
       try {
-        const st = fs24.statSync(path26.join(dir, name));
-        if (st.isFile() && st.mtimeMs >= sinceMs) out.push({ file: path26.join(dir, name), bytes: st.size, mtime: st.mtime.toISOString() });
+        const st = fs25.statSync(path27.join(dir, name));
+        if (st.isFile() && st.mtimeMs >= sinceMs) out.push({ file: path27.join(dir, name), bytes: st.size, mtime: st.mtime.toISOString() });
       } catch {
       }
     }
@@ -26511,7 +28237,7 @@ function otherExtensionFiles(file, sinceMs) {
   return out;
 }
 function isSequencePath2(p) {
-  return SEQ_TOKEN.test(path26.basename(p));
+  return SEQ_TOKEN.test(path27.basename(p));
 }
 function escapeRe2(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -26524,7 +28250,7 @@ function sequenceRegex2(fileName) {
   return new RegExp(`^${escapeRe2(before)}\\d{${m[1].length},}${escapeRe2(after)}$`, "i");
 }
 function statOutput(o) {
-  const dir = path26.dirname(o.file);
+  const dir = path27.dirname(o.file);
   const sequence = o.sequence ?? isSequencePath2(o.file);
   const out = {
     item_index: o.item_index,
@@ -26537,13 +28263,13 @@ function statOutput(o) {
     mtime: null
   };
   try {
-    out.folder_exists = fs24.statSync(dir).isDirectory();
+    out.folder_exists = fs25.statSync(dir).isDirectory();
   } catch {
     return out;
   }
   try {
     if (!sequence) {
-      const st = fs24.statSync(o.file);
+      const st = fs25.statSync(o.file);
       if (st.isFile()) {
         out.exists = true;
         out.bytes = st.size;
@@ -26551,12 +28277,12 @@ function statOutput(o) {
       }
       return out;
     }
-    const re = sequenceRegex2(path26.basename(o.file));
+    const re = sequenceRegex2(path27.basename(o.file));
     let frames = 0;
     let bytes = 0;
     let newest = 0;
     let statted = 0;
-    for (const name of fs24.readdirSync(dir)) {
+    for (const name of fs25.readdirSync(dir)) {
       if (!re.test(name)) continue;
       frames++;
       if (statted >= MAX_OUTPUT_FILES_STAT) {
@@ -26565,7 +28291,7 @@ function statOutput(o) {
       }
       statted++;
       try {
-        const st = fs24.statSync(path26.join(dir, name));
+        const st = fs25.statSync(path27.join(dir, name));
         if (!st.isFile()) continue;
         bytes += st.size;
         if (st.mtimeMs > newest) newest = st.mtimeMs;
@@ -26595,7 +28321,7 @@ function liveOutputsFrom(registry) {
   } catch {
   }
   try {
-    const store = new BatchStore(path26.join(registry.rendersDir, "batches"));
+    const store = new BatchStore(path27.join(registry.rendersDir, "batches"));
     for (const b of store.list(20)) {
       if (b.state !== "running") continue;
       for (const it of b.items) {
@@ -26736,10 +28462,10 @@ function planStart(queue2, overwrite, live = [], only) {
       const sequence = isSequencePath2(m.file);
       const stat = statOutput({ item_index: it.index, module: m.index, file: m.file, sequence });
       if (!stat.folder_exists) {
-        const dir = path26.dirname(m.file);
+        const dir = path27.dirname(m.file);
         let parentExists = false;
         try {
-          parentExists = fs24.statSync(path26.dirname(dir)).isDirectory();
+          parentExists = fs25.statSync(path27.dirname(dir)).isDirectory();
         } catch {
           parentExists = false;
         }
@@ -27168,9 +28894,9 @@ function fourCC(n) {
   return /^[\x20-\x7e]{4}$/.test(s) ? s : void 0;
 }
 function amePrefDirs(home) {
-  const base = path26.join(home, "Documents", "Adobe", "Adobe Media Encoder");
+  const base = path27.join(home, "Documents", "Adobe", "Adobe Media Encoder");
   try {
-    return fs24.readdirSync(base).filter((n) => /^\d+(\.\d+)*$/.test(n)).sort((a, b) => b.localeCompare(a, void 0, { numeric: true })).map((n) => path26.join(base, n));
+    return fs25.readdirSync(base).filter((n) => /^\d+(\.\d+)*$/.test(n)).sort((a, b) => b.localeCompare(a, void 0, { numeric: true })).map((n) => path27.join(base, n));
   } catch {
     return [];
   }
@@ -27179,13 +28905,13 @@ function readAmePreset(home = process.env["USERPROFILE"] ?? process.env["HOME"] 
   try {
     if (!home) return null;
     for (const dir of amePrefDirs(home)) {
-      const prefs = path26.join(dir, "AMEPrefs.xml");
+      const prefs = path27.join(dir, "AMEPrefs.xml");
       let xml;
       let mtime;
       try {
-        const st = fs24.statSync(prefs);
+        const st = fs25.statSync(prefs);
         if (!st.isFile() || st.size > 2e6) continue;
-        xml = fs24.readFileSync(prefs, "utf8");
+        xml = fs25.readFileSync(prefs, "utf8");
         mtime = st.mtime.toISOString();
       } catch {
         continue;
@@ -27195,9 +28921,9 @@ function readAmePreset(home = process.env["USERPROFILE"] ?? process.env["HOME"] 
       for (const cacheName of ["PresetUserCache.xml", "PresetCache.xml"]) {
         let cache;
         try {
-          const cp = path26.join(dir, cacheName);
-          if (fs24.statSync(cp).size > 2e7) continue;
-          cache = fs24.readFileSync(cp, "utf8");
+          const cp = path27.join(dir, cacheName);
+          if (fs25.statSync(cp).size > 2e7) continue;
+          cache = fs25.readFileSync(cp, "utf8");
         } catch {
           continue;
         }
@@ -27216,7 +28942,7 @@ function readAmePreset(home = process.env["USERPROFILE"] ?? process.env["HOME"] 
         const exts = code ? FORMAT_EXTENSIONS[code] : void 0;
         let logMtime;
         try {
-          const ls = fs24.statSync(path26.join(dir, "AMEEncodingLog.txt"));
+          const ls = fs25.statSync(path27.join(dir, "AMEEncodingLog.txt"));
           if (ls.isFile()) logMtime = ls.mtime.toISOString();
         } catch {
         }
@@ -27243,7 +28969,7 @@ function ameHandOverNotes(plan2) {
   const asked = [];
   for (const it of plan2.items) {
     for (const o of it.outputs) {
-      const ext2 = path26.extname(o.file).replace(/^\./, "").toLowerCase();
+      const ext2 = path27.extname(o.file).replace(/^\./, "").toLowerCase();
       asked.push({ item_index: o.item_index, module: o.module, extension: ext2 || (o.sequence ? "(image sequence)" : "") });
     }
   }
@@ -27539,13 +29265,13 @@ async function describeJob(ctx, store, rec, includeDialogs, now = Date.now) {
   }
   return out;
 }
-var crypto5, fs24, path26, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, FORMAT_EXTENSIONS, AME_PRESET_WARNING, AME_PRESET_SOFT_WARNING, DAY_MS, WAITABLE_STATES, rqrenderTools;
+var crypto5, fs25, path27, MAX_JOBS_KEPT, MAX_OUTPUT_FILES_STAT, MAX_ITEMS2, STILL_RENDERING_MAX_MS, STILL_RENDERING_POLL_MS, MAX_TIMEOUT_MS, READ_BACK_TIMEOUT_MS, MAX_TEXT, RQ_RENDER_JOBS_FILE, STOP_TEXT, RenderJobStore, stores, rqrenderDeps, SEQ_TOKEN, AeRenderQueueRenderSchema, AeRenderQueueRenderStatusSchema, stripHeld, RESTORE_HOW, pendingRestoresOut, AME_CALL_TIMEOUT_MS, AME_REFUSAL_ASK, FORMAT_EXTENSIONS, AME_PRESET_WARNING, AME_PRESET_SOFT_WARNING, DAY_MS, WAITABLE_STATES, rqrenderTools;
 var init_rqrender = __esm({
   "src/tools/ext/rqrender.ts"() {
     "use strict";
     crypto5 = __toESM(require("node:crypto"), 1);
-    fs24 = __toESM(require("node:fs"), 1);
-    path26 = __toESM(require("node:path"), 1);
+    fs25 = __toESM(require("node:fs"), 1);
+    path27 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -27612,8 +29338,8 @@ var init_rqrender = __esm({
       }
       load() {
         try {
-          if (!fs24.existsSync(this.filePath)) return;
-          const parsed = JSON.parse(fs24.readFileSync(this.filePath, "utf8"));
+          if (!fs25.existsSync(this.filePath)) return;
+          const parsed = JSON.parse(fs25.readFileSync(this.filePath, "utf8"));
           const list2 = Array.isArray(parsed.jobs) ? parsed.jobs : [];
           let changed = false;
           for (const raw of list2) {
@@ -27640,19 +29366,19 @@ var init_rqrender = __esm({
       }
       save() {
         try {
-          fs24.mkdirSync(path26.dirname(this.filePath), { recursive: true });
+          fs25.mkdirSync(path27.dirname(this.filePath), { recursive: true });
           const all = this.list();
           const recent2 = new Set(all.slice(-MAX_JOBS_KEPT).map((j) => j.job_id));
           const keep = all.filter((j) => recent2.has(j.job_id) || restoreUnfinished(j));
           const payload = JSON.stringify({ jobs: keep }, null, 2);
           const tmp = `${this.filePath}.tmp-${process.pid}-${crypto5.randomBytes(3).toString("hex")}`;
           try {
-            fs24.writeFileSync(tmp, payload, "utf8");
-            fs24.renameSync(tmp, this.filePath);
+            fs25.writeFileSync(tmp, payload, "utf8");
+            fs25.renameSync(tmp, this.filePath);
           } catch {
-            fs24.writeFileSync(this.filePath, payload, "utf8");
+            fs25.writeFileSync(this.filePath, payload, "utf8");
             try {
-              fs24.rmSync(tmp, { force: true });
+              fs25.rmSync(tmp, { force: true });
             } catch {
             }
           }
@@ -28176,14 +29902,14 @@ var init_rqfollow = __esm({
 
 // src/tools/ext/frames.ts
 function decodePngFile(filePath) {
-  if (!fs25.existsSync(filePath)) {
+  if (!fs26.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
   const deadline = Date.now() + 3e3;
   while (!pngComplete(filePath) && Date.now() < deadline) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
-  const buf = fs25.readFileSync(filePath);
+  const buf = fs26.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
@@ -28360,7 +30086,7 @@ async function captureCompFrame(params) {
   const hold = unwrittenFrameHold();
   if (hold) throw new Error(hold.message);
   const suffix1 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
-  const pngPath1 = path27.join(
+  const pngPath1 = path28.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix1}.png`
   );
@@ -28395,7 +30121,7 @@ async function captureCompFrame(params) {
   }
   const nudgedTime = Math.max(0, time + 1e-3);
   const suffix2 = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
-  const pngPath2 = path27.join(
+  const pngPath2 = path28.join(
     framesDir,
     `frame_c${compId}_f${frameIndex}_${suffix2}.png`
   );
@@ -28437,14 +30163,14 @@ async function captureCompFrame(params) {
     `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.${settled}`
   );
 }
-var crypto6, fs25, path27, import_pngjs3, AeCompareFramesSchema, framesTools;
+var crypto6, fs26, path28, import_pngjs3, AeCompareFramesSchema, framesTools;
 var init_frames = __esm({
   "src/tools/ext/frames.ts"() {
     "use strict";
     init_call_context();
     crypto6 = __toESM(require("node:crypto"), 1);
-    fs25 = __toESM(require("node:fs"), 1);
-    path27 = __toESM(require("node:path"), 1);
+    fs26 = __toESM(require("node:fs"), 1);
+    path28 = __toESM(require("node:path"), 1);
     import_pngjs3 = __toESM(require_png(), 1);
     init_zod();
     init_host();
@@ -28525,7 +30251,7 @@ var init_frames = __esm({
           const framesDir = defaultFramesDir();
           const capturedItems = [];
           if (args.comp_id !== void 0 && args.times !== void 0) {
-            fs25.mkdirSync(framesDir, { recursive: true });
+            fs26.mkdirSync(framesDir, { recursive: true });
             const opId = ctx.bridge.newOpId();
             const compId = args.comp_id;
             const times = args.times;
@@ -28564,7 +30290,7 @@ var init_frames = __esm({
             );
           }
           if (shouldWriteDiff) {
-            fs25.mkdirSync(framesDir, { recursive: true });
+            fs26.mkdirSync(framesDir, { recursive: true });
           }
           const decodedPngs = [];
           const frameAnalyses = [];
@@ -28592,9 +30318,9 @@ var init_frames = __esm({
             let diffPngPath;
             if (shouldWriteDiff && cmp2.diffPng) {
               const suffix = `${Date.now()}_${crypto6.randomBytes(4).toString("hex")}`;
-              diffPngPath = path27.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
+              diffPngPath = path28.join(framesDir, `diff_${i}_${i + 1}_${suffix}.png`);
               const outBuf = import_pngjs3.PNG.sync.write(cmp2.diffPng);
-              fs25.writeFileSync(diffPngPath, outBuf);
+              fs26.writeFileSync(diffPngPath, outBuf);
               diffPngPaths.push(diffPngPath);
             }
             pairs2.push({
@@ -28662,12 +30388,12 @@ function savedFrameName(compName, frame, lastFrame) {
   return `${sanitizeCompName(compName)}_${String(frame).padStart(width, "0")}.png`;
 }
 function checkSaveFolder(folder) {
-  if (!path28.isAbsolute(folder)) {
+  if (!path29.isAbsolute(folder)) {
     return { code: "folder_not_absolute", message: `save_to.folder must be an absolute path, got "${folder}". Nothing was rendered.` };
   }
   let st = null;
   try {
-    st = fs26.statSync(folder);
+    st = fs27.statSync(folder);
   } catch {
     st = null;
   }
@@ -28704,20 +30430,20 @@ function planFrames(input, fps, duration) {
   return { picks };
 }
 function moveRenderedFrame(src, dest, overwrite) {
-  fs26.copyFileSync(src, dest, overwrite ? 0 : fs26.constants.COPYFILE_EXCL);
-  const bytes = fs26.statSync(dest).size;
+  fs27.copyFileSync(src, dest, overwrite ? 0 : fs27.constants.COPYFILE_EXCL);
+  const bytes = fs27.statSync(dest).size;
   try {
-    fs26.unlinkSync(src);
+    fs27.unlinkSync(src);
   } catch {
   }
   return bytes;
 }
-var fs26, path28, MAX_SAVE_FRAMES, RESERVED;
+var fs27, path29, MAX_SAVE_FRAMES, RESERVED;
 var init_frame_save = __esm({
   "src/tools/ext/frame-save.ts"() {
     "use strict";
-    fs26 = __toESM(require("node:fs"), 1);
-    path28 = __toESM(require("node:path"), 1);
+    fs27 = __toESM(require("node:fs"), 1);
+    path29 = __toESM(require("node:path"), 1);
     MAX_SAVE_FRAMES = 50;
     RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
   }
@@ -28725,14 +30451,14 @@ var init_frame_save = __esm({
 
 // src/tools/render.ts
 function defaultFramesDir() {
-  return path29.join(defaultDataDir(), "frames");
+  return path30.join(defaultDataDir(), "frames");
 }
 function isFreshPngFile(filePath, requestStartMs) {
   try {
-    if (!fs27.existsSync(filePath)) {
+    if (!fs28.existsSync(filePath)) {
       return { fresh: false, size: 0, mtimeMs: 0 };
     }
-    const stat = fs27.statSync(filePath);
+    const stat = fs28.statSync(filePath);
     const fresh = stat.size > 0 && stat.mtimeMs >= requestStartMs - 50;
     return { fresh, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch {
@@ -28742,18 +30468,18 @@ function isFreshPngFile(filePath, requestStartMs) {
 function pngComplete(filePath) {
   let fd = null;
   try {
-    fd = fs27.openSync(filePath, "r");
-    const size = fs27.fstatSync(fd).size;
+    fd = fs28.openSync(filePath, "r");
+    const size = fs28.fstatSync(fd).size;
     const head3 = Buffer.alloc(8);
-    if (fs27.readSync(fd, head3, 0, 8, 0) < 8 || !head3.equals(PNG_SIGNATURE)) return true;
+    if (fs28.readSync(fd, head3, 0, 8, 0) < 8 || !head3.equals(PNG_SIGNATURE)) return true;
     if (size < 20) return false;
     const tail = Buffer.alloc(8);
-    fs27.readSync(fd, tail, 0, 8, size - 8);
+    fs28.readSync(fd, tail, 0, 8, size - 8);
     return tail.equals(PNG_IEND);
   } catch {
     return false;
   } finally {
-    if (fd !== null) fs27.closeSync(fd);
+    if (fd !== null) fs28.closeSync(fd);
   }
 }
 async function waitForFreshPng(filePath, requestStartMs, timeoutMs = pngWaitDeps.timeoutMs, intervalMs = pngWaitDeps.intervalMs) {
@@ -28769,8 +30495,8 @@ async function waitForFreshPng(filePath, requestStartMs, timeoutMs = pngWaitDeps
 }
 function stillWriting(filePath, before) {
   try {
-    if (!fs27.existsSync(filePath)) return false;
-    const st = fs27.statSync(filePath);
+    if (!fs28.existsSync(filePath)) return false;
+    const st = fs28.statSync(filePath);
     return st.size === 0 || st.size !== before.size || st.mtimeMs !== before.mtimeMs;
   } catch {
     return false;
@@ -28778,7 +30504,7 @@ function stillWriting(filePath, before) {
 }
 function mayStillBeRendering(filePath, before) {
   try {
-    if (!fs27.existsSync(filePath)) return true;
+    if (!fs28.existsSync(filePath)) return true;
   } catch {
     return true;
   }
@@ -28786,22 +30512,22 @@ function mayStillBeRendering(filePath, before) {
 }
 function staleFrameOnDisk(filePath, requestStartMs) {
   try {
-    if (!fs27.existsSync(filePath)) return false;
-    const st = fs27.statSync(filePath);
+    if (!fs28.existsSync(filePath)) return false;
+    const st = fs28.statSync(filePath);
     return st.size > 0 && st.mtimeMs < requestStartMs - 50 && pngComplete(filePath);
   } catch {
     return false;
   }
 }
-function noteUnwrittenFrame(filePath, compId, time, label) {
-  unwrittenFrame = { path: filePath, since: Date.now(), compId, time, label };
+function noteUnwrittenFrame(filePath, compId, time, label2) {
+  unwrittenFrame = { path: filePath, since: Date.now(), compId, time, label: label2 };
 }
 function unwrittenFrameHold() {
   const u = unwrittenFrame;
   if (!u) return null;
   let landed = false;
   try {
-    landed = fs27.existsSync(u.path) && fs27.statSync(u.path).size > 0;
+    landed = fs28.existsSync(u.path) && fs28.statSync(u.path).size > 0;
   } catch {
     landed = false;
   }
@@ -28838,7 +30564,7 @@ function snapshotOutput(fullPath, check, scale, maxSize) {
   return {
     path: copy.path,
     full_path: fullPath,
-    size: copy.scaled ? fs27.statSync(copy.path).size : check.size,
+    size: copy.scaled ? fs28.statSync(copy.path).size : check.size,
     mtimeMs: check.mtimeMs,
     width: copy.width,
     height: copy.height
@@ -28853,7 +30579,7 @@ async function saveChosenFrames(args, ctx, framesDir, opId) {
   const overwrite = args.save_to.overwrite === true;
   const folderProblem = checkSaveFolder(folder);
   if (folderProblem) return refuse2(folderProblem.code, folderProblem.message);
-  fs27.mkdirSync(framesDir, { recursive: true });
+  fs28.mkdirSync(framesDir, { recursive: true });
   try {
     return await ctx.queue.run(`ae_snapshot_frame(${args.comp_id} save_to)`, async () => {
       const info = await ctx.bridge.evalRaw({
@@ -28871,9 +30597,9 @@ async function saveChosenFrames(args, ctx, framesDir, opId) {
       const plan2 = planFrames({ frames: args.frames, times: args.times }, fps, duration);
       if (plan2.problem) return refuse2(plan2.problem.code, plan2.problem.message);
       const lastFrame = Math.max(0, Math.round(duration * fps) - 1);
-      const targets = plan2.picks.map((p) => ({ ...p, dest: path29.join(folder, savedFrameName(compName, p.frame, lastFrame)) }));
+      const targets = plan2.picks.map((p) => ({ ...p, dest: path30.join(folder, savedFrameName(compName, p.frame, lastFrame)) }));
       if (!overwrite) {
-        const taken = targets.filter((t) => fs27.existsSync(t.dest)).map((t) => t.dest);
+        const taken = targets.filter((t) => fs28.existsSync(t.dest)).map((t) => t.dest);
         if (taken.length > 0) {
           return {
             ...refuse2("file_exists", `${taken.length} file(s) already exist and overwrite is not set; nothing was rendered or written: ${taken.slice(0, 10).join(", ")}${taken.length > 10 ? ", ..." : ""}.`),
@@ -28912,13 +30638,13 @@ async function saveChosenFrames(args, ctx, framesDir, opId) {
     throw err;
   }
 }
-var crypto7, fs27, path29, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, PNG_SIGNATURE, PNG_IEND, pngWaitDeps, frameCaptureDeps, unwrittenFrameDeps, unwrittenFrame, renderTools;
+var crypto7, fs28, path30, AeSnapshotFrameSchema, AeRenderQueueAddSchema, AeRenderQueueStatusSchema, PNG_SIGNATURE, PNG_IEND, pngWaitDeps, frameCaptureDeps, unwrittenFrameDeps, unwrittenFrame, renderTools;
 var init_render = __esm({
   "src/tools/render.ts"() {
     "use strict";
     crypto7 = __toESM(require("node:crypto"), 1);
-    fs27 = __toESM(require("node:fs"), 1);
-    path29 = __toESM(require("node:path"), 1);
+    fs28 = __toESM(require("node:fs"), 1);
+    path30 = __toESM(require("node:path"), 1);
     init_zod();
     init_render_formats();
     init_host();
@@ -28983,7 +30709,7 @@ var init_render = __esm({
             return { ok: false, error: "time_required", message: "Pass `time` for one snapshot, or `save_to` with `frames` or `times` to save chosen frames. Nothing was rendered." };
           }
           const time = args.time;
-          fs27.mkdirSync(framesDir, { recursive: true });
+          fs28.mkdirSync(framesDir, { recursive: true });
           try {
             return await ctx.queue.run(
               `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
@@ -28991,7 +30717,7 @@ var init_render = __esm({
                 const hold = unwrittenFrameHold();
                 if (hold) return { ok: false, kind: hold.error, ...hold, requested: { comp_id: args.comp_id, time } };
                 const uniqueSuffix1 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
-                const pngPath1 = path29.join(
+                const pngPath1 = path30.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix1}.png`
                 );
@@ -29057,12 +30783,12 @@ var init_render = __esm({
                     time,
                     scale,
                     retried: false,
-                    attempts: [{ path: pngPath1, exists: fs27.existsSync(pngPath1), size: st.size, mtimeMs: st.mtimeMs }]
+                    attempts: [{ path: pngPath1, exists: fs28.existsSync(pngPath1), size: st.size, mtimeMs: st.mtimeMs }]
                   };
                 }
                 const nudgedTime = Math.max(0, time + 1e-3);
                 const uniqueSuffix2 = `${Date.now()}_${crypto7.randomBytes(4).toString("hex")}`;
-                const pngPath2 = path29.join(
+                const pngPath2 = path30.join(
                   framesDir,
                   `frame_c${args.comp_id}_${uniqueSuffix2}.png`
                 );
@@ -29607,9 +31333,9 @@ function drawGrid(dst, view, spacing, rulers, scale) {
   let nextLabelY = 0;
   for (let gx = Math.ceil(x0 / spacing) * spacing; gx <= x1; gx += spacing) {
     const ox = Math.round(toOutput(view, gx, 0)[0]);
-    const label = rulers && ox >= nextLabelX;
-    fillRect(dst, ox, 0, 1, dst.height, label ? strong : line);
-    if (label) {
+    const label2 = rulers && ox >= nextLabelX;
+    fillRect(dst, ox, 0, 1, dst.height, label2 ? strong : line);
+    if (label2) {
       const text = String(gx);
       const box = drawLabel(dst, text, ox + 2, 2, scale, WHITE, SHADE, 2);
       nextLabelX = box.x + box.w + labelGap;
@@ -29617,9 +31343,9 @@ function drawGrid(dst, view, spacing, rulers, scale) {
   }
   for (let gy = Math.ceil(y0 / spacing) * spacing; gy <= y1; gy += spacing) {
     const oy = Math.round(toOutput(view, 0, gy)[1]);
-    const label = rulers && oy >= nextLabelY;
-    fillRect(dst, 0, oy, dst.width, 1, label ? strong : line);
-    if (label) {
+    const label2 = rulers && oy >= nextLabelY;
+    fillRect(dst, 0, oy, dst.width, 1, label2 ? strong : line);
+    if (label2) {
       const text = String(gy);
       const box = drawLabel(dst, text, 2, oy + 2, scale, WHITE, SHADE, 2);
       nextLabelY = box.y + box.h + labelGap;
@@ -29720,9 +31446,9 @@ function composePair(a, b, labelA, labelB) {
   drawLabel(out, labelB, w + PAIR_GAP + 4, 2, scale, WHITE, [24, 24, 24, 255], 2);
   return out;
 }
-async function runQueued(ctx, label, opId, fn) {
+async function runQueued(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) {
       throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
@@ -29730,13 +31456,13 @@ async function runQueued(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto8, fs28, path30, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num4, MAX_PARENT_DEPTH, NO_3D_REASON, r23, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
+var crypto8, fs29, path31, TOOL, AeAnnotateFrameSchema, ROT_SIGN, num4, MAX_PARENT_DEPTH, NO_3D_REASON, r23, LAYER_COLORS, colorFor, hex, MAX_ZOOM, WHITE, INK, SHADE, MAX_TAG_NAME, overlaps, PAIR_GAP, timeLabel, ANNOTATE_NOTES, NOTE_3D, annotateTools;
 var init_annotate = __esm({
   "src/tools/ext/annotate.ts"() {
     "use strict";
     crypto8 = __toESM(require("node:crypto"), 1);
-    fs28 = __toESM(require("node:fs"), 1);
-    path30 = __toESM(require("node:path"), 1);
+    fs29 = __toESM(require("node:fs"), 1);
+    path31 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -29826,11 +31552,11 @@ var init_annotate = __esm({
         schema: AeAnnotateFrameSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs28.mkdirSync(framesDir, { recursive: true });
+          fs29.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const times = args.time_b === void 0 ? [args.time] : [args.time, args.time_b];
-          const label = `${TOOL}(${args.comp_id} @ ${times.join("s, ")}s)`;
-          const shots = await runQueued(ctx, label, opId, async () => {
+          const label2 = `${TOOL}(${args.comp_id} @ ${times.join("s, ")}s)`;
+          const shots = await runQueued(ctx, label2, opId, async () => {
             const got = [];
             for (let i = 0; i < times.length; i++) {
               const res = await ctx.bridge.evalRaw({
@@ -29840,7 +31566,7 @@ var init_annotate = __esm({
                   time: times[i],
                   include_extents: args.include_extents
                 }),
-                label: `${label} read`,
+                label: `${label2} read`,
                 timeoutMs: SLOW_TIMEOUT_MS,
                 mutates: false,
                 toolName: TOOL
@@ -29919,11 +31645,11 @@ var init_annotate = __esm({
             });
           });
           const final = pair ? composePair(images[0], images[1], timeLabel("A", shots[0].read.time), timeLabel("B", shots[1].read.time)) : images[0];
-          const outPath = path30.join(
+          const outPath = path31.join(
             framesDir,
             `annotated_c${args.comp_id}_${Date.now()}_${crypto8.randomBytes(4).toString("hex")}.png`
           );
-          fs28.writeFileSync(outPath, encodePng(final));
+          fs29.writeFileSync(outPath, encodePng(final));
           const notes = [...ANNOTATE_NOTES];
           if (frames.some((f) => f.layers.some((e) => e.box?.projection === "3d-estimated"))) notes.push(NOTE_3D);
           return {
@@ -30499,11 +32225,11 @@ function proofMismatches(before, after, cleanupError, copyId) {
   }
   return m;
 }
-var fs29, SUSPECTS, AeExplainLayerSchema, AeExplainLayerProofSchema, SEVERITY_RANK2, FIX_HINTS, BOX_SUSPECTS, errMessage2, explainTools;
+var fs30, SUSPECTS, AeExplainLayerSchema, AeExplainLayerProofSchema, SEVERITY_RANK2, FIX_HINTS, BOX_SUSPECTS, errMessage2, explainTools;
 var init_explain = __esm({
   "src/tools/ext/explain.ts"() {
     "use strict";
-    fs29 = __toESM(require("node:fs"), 1);
+    fs30 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -30598,7 +32324,7 @@ var init_explain = __esm({
         handler: async (args, ctx) => {
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
-          const label = `ae_explain_layer_proof(${args.suspect})`;
+          const label2 = `ae_explain_layer_proof(${args.suspect})`;
           const toolName = "ae_explain_layer_proof";
           const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
           const framesDir = defaultFramesDir();
@@ -30606,28 +32332,28 @@ var init_explain = __esm({
             const res = await ctx.bridge.evalRaw({
               id: `${opId}_${phase}`,
               script: buildJsxCall("explainProofState", {}),
-              label: `${label} (${phase})`,
+              label: `${label2} (${phase})`,
               mutates: false,
               toolName
             });
             return res.result ?? null;
           };
           try {
-            return await ctx.queue.run(label, async () => {
+            return await ctx.queue.run(label2, async () => {
               ctx.quarantine.assertClear();
               const guard = await verifyTargetGuard(ctx, expect, opId);
               await ctx.bridge.evalRaw({
                 id: `${opId}_plan`,
                 script: buildJsxCall("explainProofPlan", { comp_id: args.comp_id, layer: args.layer, suspect: args.suspect, time: args.time }),
-                label: `${label} (plan)`,
+                label: `${label2} (plan)`,
                 mutates: false,
                 toolName
               });
               const checkpoint = await autoCheckpoint(ctx, guard, toolName);
-              const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+              const note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
               const sessionFields = await noteBeforeWrite(ctx, note);
               const before = await read3("before");
-              fs29.mkdirSync(framesDir, { recursive: true });
+              fs30.mkdirSync(framesDir, { recursive: true });
               beginInflight(note);
               let begun;
               try {
@@ -30640,7 +32366,7 @@ var init_explain = __esm({
                     time: args.time,
                     expect
                   }),
-                  label,
+                  label: label2,
                   mutates: true,
                   toolName
                 });
@@ -30698,7 +32424,7 @@ var init_explain = __esm({
                 const end = await ctx.bridge.evalRaw({
                   id: `${opId}_remove`,
                   script: buildJsxCall("explainProofEnd", { copy_id: copyId, expect }),
-                  label: `${label} (remove copy)`,
+                  label: `${label2} (remove copy)`,
                   mutates: true,
                   mustSend: true,
                   toolName
@@ -30849,11 +32575,11 @@ function mergeBrandColors(existing, incoming, max = 12) {
   return { merged, added, already_present, not_added };
 }
 function checkSwatchPath(file) {
-  if (!path31.isAbsolute(file)) return "The swatch path must be absolute.";
-  if (path31.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
+  if (!path32.isAbsolute(file)) return "The swatch path must be absolute.";
+  if (path32.extname(file).toLowerCase() !== ".ase") return "The swatch file must be an Adobe Swatch Exchange file (.ase).";
   let st;
   try {
-    st = fs30.statSync(file);
+    st = fs31.statSync(file);
   } catch {
     return "No file at that path.";
   }
@@ -30863,7 +32589,7 @@ function checkSwatchPath(file) {
   return null;
 }
 function briefPath(projectPath) {
-  return path31.join(path31.dirname(projectPath), `${path31.basename(projectPath, path31.extname(projectPath))}.brief.json`);
+  return path32.join(path32.dirname(projectPath), `${path32.basename(projectPath, path32.extname(projectPath))}.brief.json`);
 }
 function isEmpty(v) {
   if (v === void 0 || v === null || v === "") return true;
@@ -30873,7 +32599,7 @@ function isEmpty(v) {
 }
 function readBrief(file) {
   try {
-    const parsed = JSON.parse(fs30.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs31.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
@@ -30981,12 +32707,12 @@ async function parseSwatches(file, ctx) {
 function isLinear(c) {
   return c[0] === 0 && c[1] === 0 && c[2] === 1 && c[3] === 1;
 }
-var fs30, path31, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
+var fs31, path32, clamp01, isNum, toHex, encodeSrgb, MAX_SWATCH_FILE_BYTES, BriefFieldsSchema, AeBriefSchema, BRIEF_FIELDS, BRIEF_QUESTIONS, AeTasteSchema, briefTools;
 var init_brief = __esm({
   "src/tools/ext/brief.ts"() {
     "use strict";
-    fs30 = __toESM(require("node:fs"), 1);
-    path31 = __toESM(require("node:path"), 1);
+    fs31 = __toESM(require("node:fs"), 1);
+    path32 = __toESM(require("node:path"), 1);
     init_zod();
     init_jsx();
     init_motion_spec();
@@ -31122,8 +32848,8 @@ var init_brief = __esm({
           }
           if (writes && file && brief) {
             const tmp = `${file}.tmp-${process.pid}`;
-            fs30.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
-            fs30.renameSync(tmp, file);
+            fs31.writeFileSync(tmp, JSON.stringify(brief, null, 2), { encoding: "utf8", mode: 384 });
+            fs31.renameSync(tmp, file);
             saved = true;
           }
           const missing = missingFields(brief);
@@ -31874,11 +33600,11 @@ function renderMotionGraph(s, speeds, width, height) {
   for (const k of keysInRange) {
     const x = xOf(k.time);
     fillRect(img, x, valueTop, 1, speedTop + plotH - valueTop, KEY_LINE);
-    const label = `#${k.index}`;
-    const w = textWidth(label, scale);
+    const label2 = `#${k.index}`;
+    const w = textWidth(label2, scale);
     const lx = Math.min(Math.max(0, x - Math.floor(w / 2)), width - w);
     if (lx > labelRight + 2 * scale) {
-      drawText(img, label, lx, top - glyphH - 4, scale, KEY_COLOUR);
+      drawText(img, label2, lx, top - glyphH - 4, scale, KEY_COLOUR);
       labelRight = lx + w;
     }
   }
@@ -32225,9 +33951,9 @@ function reviewBounds(b, comp, safe) {
   const more = (f, n) => f && n > 1 ? { ...f, message: `${f.message} Seen at ${n} rest points.` } : f;
   return [more(cut, cutTimes), more(outside, outsideTimes)].filter((f) => f !== null);
 }
-async function runQueued2(ctx, label, opId, fn) {
+async function runQueued2(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) {
       throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
@@ -32235,14 +33961,14 @@ async function runQueued2(ctx, label, opId, fn) {
     throw err;
   }
 }
-var crypto9, fs31, path32, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r34, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, OVERSHOOT_SETTLE_TOLERANCE_PCT, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
+var crypto9, fs32, path33, MAX_SHEET_FRAMES, MAX_SHEET_EDGE, SHEET_GAP, SHEET_BG, FLAG_COLOUR, AeContactSheetSchema, DIM_COLOURS, SPEED_COLOUR, KEY_COLOUR, KEY_LINE, PANEL_BG, GRID_COLOUR, AXIS_LABEL, AeMotionGraphSchema, r34, MOTION_MATCH_NAMES, SEVERITY_ORDER, isMoving, OVERSHOOT_SETTLE_TOLERANCE_PCT, TRANSFORM_MATCH_NAMES, r12, AeMotionReviewSchema, motionTools;
 var init_motion = __esm({
   "src/tools/ext/motion.ts"() {
     "use strict";
     init_segment_profile();
     crypto9 = __toESM(require("node:crypto"), 1);
-    fs31 = __toESM(require("node:fs"), 1);
-    path32 = __toESM(require("node:path"), 1);
+    fs32 = __toESM(require("node:fs"), 1);
+    path33 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -32364,7 +34090,7 @@ var init_motion = __esm({
         schema: AeContactSheetSchema,
         handler: async (args, ctx) => {
           const framesDir = defaultFramesDir();
-          fs31.mkdirSync(framesDir, { recursive: true });
+          fs32.mkdirSync(framesDir, { recursive: true });
           const opId = ctx.bridge.newOpId();
           const captured = await runQueued2(ctx, `ae_contact_sheet(${args.comp_id})`, opId, async () => {
             const compResp = await ctx.bridge.evalRaw({
@@ -32422,11 +34148,11 @@ var init_motion = __esm({
             frames.push({ index, frame: shot.frame, time: shot.time, path: shot.path, flags: analysis.flags });
           });
           const sheet = buildContactSheet(tiles, layout);
-          const sheetPath = path32.join(
+          const sheetPath = path33.join(
             framesDir,
             `contact_c${args.comp_id}_${Date.now()}_${crypto9.randomBytes(4).toString("hex")}.png`
           );
-          fs31.writeFileSync(sheetPath, encodePng(sheet));
+          fs32.writeFileSync(sheetPath, encodePng(sheet));
           return {
             ok: true,
             path: sheetPath,
@@ -32472,12 +34198,12 @@ var init_motion = __esm({
           const width = args.width ?? 960;
           const height = args.height ?? 540;
           const framesDir = defaultFramesDir();
-          fs31.mkdirSync(framesDir, { recursive: true });
-          const graphPath = path32.join(
+          fs32.mkdirSync(framesDir, { recursive: true });
+          const graphPath = path33.join(
             framesDir,
             `graph_c${args.comp_id}_${Date.now()}_${crypto9.randomBytes(4).toString("hex")}.png`
           );
-          fs31.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
+          fs32.writeFileSync(graphPath, encodePng(renderMotionGraph(samples, speeds, width, height)));
           return {
             ok: true,
             path: graphPath,
@@ -32513,12 +34239,12 @@ var init_motion = __esm({
         schema: AeMotionReviewSchema,
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
-          const label = `ae_motion_review(${args.comp_id})`;
-          const scanned = await runQueued2(ctx, label, opId, async () => {
+          const label2 = `ae_motion_review(${args.comp_id})`;
+          const scanned = await runQueued2(ctx, label2, opId, async () => {
             const listResp = await ctx.bridge.evalRaw({
               id: `${opId}_list`,
               script: buildJsxCall("listAnimatedProperties", { comp_id: args.comp_id, layers: args.layers }),
-              label: `${label} list`,
+              label: `${label2} list`,
               mutates: false,
               toolName: "ae_motion_review"
             });
@@ -32531,7 +34257,7 @@ var init_motion = __esm({
               const resp = await ctx.bridge.evalRaw({
                 id: `${opId}_p${i}`,
                 script: buildJsxCall("sampleProperty", { comp_id: args.comp_id, layer: { id: p.layer.id }, path: p.path, end }),
-                label: `${label} ${p.layer.name} > ${p.name}`,
+                label: `${label2} ${p.layer.name} > ${p.name}`,
                 mutates: false,
                 toolName: "ae_motion_review"
               });
@@ -32555,7 +34281,7 @@ var init_motion = __esm({
                 const resp = await ctx.bridge.evalRaw({
                   id: `${opId}_b${layerId}`,
                   script: buildJsxCall("layerBoundsAt", { comp_id: args.comp_id, layer: { id: layerId }, times }),
-                  label: `${label} bounds ${props[0].samples.layer.name}`,
+                  label: `${label2} bounds ${props[0].samples.layer.name}`,
                   mutates: false,
                   toolName: "ae_motion_review"
                 });
@@ -33018,8 +34744,8 @@ function drawGantt(raw) {
   for (let t = 0; t <= dur + 1e-6; t += step3) {
     const x = xOf(t);
     fillRect(png, x, headerH - 8, 1, 8 + layers.length * rowH + 4, [60, 60, 68, 255]);
-    const label = String(Math.round(t * 100) / 100);
-    drawText(png, label, x + 3, 14, 1, ink);
+    const label2 = String(Math.round(t * 100) / 100);
+    drawText(png, label2, x + 3, 14, 1, ink);
   }
   const segByLayer = /* @__PURE__ */ new Map();
   for (const s of raw.segments) {
@@ -33068,13 +34794,13 @@ function layoutFields(l) {
     ...lay.camera ? { camera: lay.camera } : {}
   };
 }
-var crypto10, fs32, path33, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
+var crypto10, fs33, path34, AeDescribeCompSchema, r13, fmtTime, plural, ROLE_ORDER, VISIBLE_ROLES, BEAT_JOIN_GAP, MAX_BEAT_SPAN, LONG_ACTION_MIN, LONG_ACTION_SHARE, MERGE_GAP, MATCH_KIND, NAME_CLIP, clipName, MAX_SUMMARY, BEAT_TEXT_BUDGET, quoteList, ref, MAX_STACK_RUNS, MAX_BEATS, MAX_THROUGHOUT, ROLE_COLORS, MAX_GANTT_ROWS, TICK_STEPS, describeTools;
 var init_describe = __esm({
   "src/tools/ext/describe.ts"() {
     "use strict";
     crypto10 = __toESM(require("node:crypto"), 1);
-    fs32 = __toESM(require("node:fs"), 1);
-    path33 = __toESM(require("node:path"), 1);
+    fs33 = __toESM(require("node:fs"), 1);
+    path34 = __toESM(require("node:path"), 1);
     init_zod();
     init_render();
     init_motion();
@@ -33196,9 +34922,9 @@ var init_describe = __esm({
             try {
               const { png, info } = drawGantt(raw);
               const dir = defaultFramesDir();
-              fs32.mkdirSync(dir, { recursive: true });
-              const file = path33.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto10.randomBytes(4).toString("hex")}.png`);
-              fs32.writeFileSync(file, encodePng(png));
+              fs33.mkdirSync(dir, { recursive: true });
+              const file = path34.join(dir, `describe_c${raw.comp.id}_${Date.now()}_${crypto10.randomBytes(4).toString("hex")}.png`);
+              fs33.writeFileSync(file, encodePng(png));
               out.gantt = { path: file, ...info };
               if (info.rows_truncated) out.truncated = true;
             } catch (e) {
@@ -33215,29 +34941,29 @@ var init_describe = __esm({
 // src/tools/ext/verify.ts
 function looksLikeSequence(file) {
   if (!STILL.test(file)) return false;
-  const base = path34.basename(file);
+  const base = path35.basename(file);
   if (!/[._-]\d{3,}\.[^.]+$/.test(base)) return false;
   const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(base);
   if (!m) return false;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}\\d{${m[2].length}}${esc(m[3])}$`, "i");
   try {
-    return fs33.readdirSync(path34.dirname(file)).some((n) => n !== base && re.test(n));
+    return fs34.readdirSync(path35.dirname(file)).some((n) => n !== base && re.test(n));
   } catch {
     return false;
   }
 }
 function firstFrameOf(output) {
-  if (!/\[#+\]/.test(output)) return fs33.existsSync(output) ? output : null;
-  const dir = path34.dirname(output);
-  const base = path34.basename(output);
+  if (!/\[#+\]/.test(output)) return fs34.existsSync(output) ? output : null;
+  const dir = path35.dirname(output);
+  const base = path35.basename(output);
   const m = /^(.*)\[(#+)\](.*)$/.exec(base);
   if (!m) return null;
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`^${esc(m[1])}(\\d{${m[2].length},})${esc(m[3])}$`, "i");
   try {
-    const frames = fs33.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
-    return frames.length ? path34.join(dir, frames[0]) : null;
+    const frames = fs34.readdirSync(dir).filter((n) => re.test(n)).sort((a, b) => a.localeCompare(b, void 0, { numeric: true }));
+    return frames.length ? path35.join(dir, frames[0]) : null;
   } catch {
     return null;
   }
@@ -33279,7 +35005,7 @@ function checkJobOutputs(paths, startedAt) {
     let size = 0;
     let mtime = 0;
     try {
-      const st = fs33.statSync(file);
+      const st = fs34.statSync(file);
       size = st.size;
       mtime = st.mtimeMs;
     } catch {
@@ -33334,8 +35060,8 @@ function createVerifyTools(options = {}) {
           jobIsSequence = /\[#+\]/.test(outputPath);
           if (job.start_frame !== void 0 && job.end_frame !== void 0) jobFrames = job.end_frame - job.start_frame + 1;
         }
-        if (!file || !path34.isAbsolute(file) || !fs33.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-        const stat = fs33.statSync(file);
+        if (!file || !path35.isAbsolute(file) || !fs34.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+        const stat = fs34.statSync(file);
         if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
         if (args.comp_id === void 0 && jobCompId === void 0 && !compName) {
           return {
@@ -33427,12 +35153,12 @@ function createVerifyTools(options = {}) {
     }
   ];
 }
-var fs33, path34, AeVerifyRenderSchema, STILL, verifyTools;
+var fs34, path35, AeVerifyRenderSchema, STILL, verifyTools;
 var init_verify = __esm({
   "src/tools/ext/verify.ts"() {
     "use strict";
-    fs33 = __toESM(require("node:fs"), 1);
-    path34 = __toESM(require("node:path"), 1);
+    fs34 = __toESM(require("node:fs"), 1);
+    path35 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -33847,9 +35573,9 @@ function drawScrubChart(points, range, cuts, badTimes, width = 960, height = 320
     [(range.start + range.end) / 2, 0.5],
     [range.end, 1]
   ]) {
-    const label = `${t.toFixed(2)}s`;
-    const lx = Math.round(x(t) - anchor * textWidth(label, 1));
-    drawText(img, label, Math.max(2, Math.min(width - textWidth(label, 1) - 2, lx)), height - 14, 1, CHART_DIFF);
+    const label2 = `${t.toFixed(2)}s`;
+    const lx = Math.round(x(t) - anchor * textWidth(label2, 1));
+    drawText(img, label2, Math.max(2, Math.min(width - textWidth(label2, 1) - 2, lx)), height - 14, 1, CHART_DIFF);
   }
   return img;
 }
@@ -33863,9 +35589,9 @@ function buildSuspectSheet(captured, findings, maxSuspects, frameSize) {
     const ca = captured[pa];
     const cb = captured[pb];
     if (!ca || !cb) continue;
-    const label = labelText(f.kind);
+    const label2 = labelText(f.kind);
     for (const [tileCap, text, flagged] of [
-      [ca, `${label} ${ca.frame_time.toFixed(2)}s`, true],
+      [ca, `${label2} ${ca.frame_time.toFixed(2)}s`, true],
       [cb, `${pb === pa ? "SAME" : "NEXT"} ${cb.frame_time.toFixed(2)}s`, false]
     ]) {
       const full = decodePngFile(tileCap.path);
@@ -33876,9 +35602,9 @@ function buildSuspectSheet(captured, findings, maxSuspects, frameSize) {
   if (tiles.length === 0) return null;
   return { png: buildContactSheet(tiles, layout), shown };
 }
-async function runQueued3(ctx, label, opId, fn) {
+async function runQueued3(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -33937,7 +35663,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   const verdict = verdictOf(findings);
   const curve = measured.pairs.map((p) => ({ time: p.a_time, diff: p.mean_abs_diff, luma: p.a.mean_luma }));
   const bad4 = findings.filter((f) => f.severity !== "info" && f.time !== void 0).map((f) => f.time);
-  fs34.mkdirSync(framesDir, { recursive: true });
+  fs35.mkdirSync(framesDir, { recursive: true });
   const stamp3 = `${Date.now()}_${crypto11.randomBytes(4).toString("hex")}`;
   const frameSize = measured.pairs[0] ? { width: measured.pairs[0].a.width, height: measured.pairs[0].a.height } : { width: prep.size.width, height: prep.size.height };
   let chart = null;
@@ -33948,8 +35674,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     if (curve.length > 0) {
       const png = drawScrubChart(curve, { start: prep.start, end: prep.end }, prep.cuts.slice(0, MAX_LIST2), bad4);
-      const chartPath = path35.join(framesDir, `scrub_chart_${stamp3}.png`);
-      fs34.writeFileSync(chartPath, encodePng(png));
+      const chartPath = path36.join(framesDir, `scrub_chart_${stamp3}.png`);
+      fs35.writeFileSync(chartPath, encodePng(png));
       chart = { path: chartPath, width: png.width, height: png.height };
     }
   } catch (err) {
@@ -33958,8 +35684,8 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
   try {
     const built2 = buildSuspectSheet(cap2.captured, findings, args.max_suspects ?? 6, frameSize);
     if (built2) {
-      const sheetPath = path35.join(framesDir, `scrub_suspects_${stamp3}.png`);
-      fs34.writeFileSync(sheetPath, encodePng(built2.png));
+      const sheetPath = path36.join(framesDir, `scrub_suspects_${stamp3}.png`);
+      fs35.writeFileSync(sheetPath, encodePng(built2.png));
       sheet = { path: sheetPath, width: built2.png.width, height: built2.png.height, suspects: built2.shown.length };
       shown = built2.shown;
       for (const s of built2.shown) for (const p of s.paths) kept.add(p);
@@ -33971,7 +35697,7 @@ function finish(args, prep, plan2, cap2, extraFindings, framesDir) {
     for (const c of cap2.captured) {
       if (c && !kept.has(c.path)) {
         try {
-          fs34.unlinkSync(c.path);
+          fs35.unlinkSync(c.path);
         } catch {
         }
       }
@@ -34011,7 +35737,7 @@ function resolveRange(args, base) {
 async function scrubComp(args, ctx) {
   const compId = args.comp_id;
   const framesDir = defaultFramesDir();
-  fs34.mkdirSync(framesDir, { recursive: true });
+  fs35.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const run = await runQueued3(ctx, `ae_scrub_check(${compId})`, opId, async () => {
     const infoResp = await ctx.bridge.evalRaw({
@@ -34053,8 +35779,8 @@ async function scrubComp(args, ctx) {
 }
 async function scrubFile(args, ctx) {
   const file = args.path;
-  if (!path35.isAbsolute(file) || !fs34.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
-  const stat = fs34.statSync(file);
+  if (!path36.isAbsolute(file) || !fs35.existsSync(file)) return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${file}` };
+  const stat = fs35.statSync(file);
   if (!stat.isFile() || stat.size === 0) return { ok: false, error: "empty", message: `${file} is not a file with content.` };
   const sequence = STILL_FILE.test(file) && (args.sequence ?? looksLikeSequence(file));
   const jsxPath = file.replace(/\\/g, "/");
@@ -34062,7 +35788,7 @@ async function scrubFile(args, ctx) {
   let sequenceInfo = null;
   if (sequence) {
     try {
-      sequenceInfo = sequenceGaps2(fs34.readdirSync(path35.dirname(file)), path35.basename(file));
+      sequenceInfo = sequenceGaps2(fs35.readdirSync(path36.dirname(file)), path36.basename(file));
     } catch {
       sequenceInfo = null;
     }
@@ -34077,7 +35803,7 @@ async function scrubFile(args, ctx) {
     }
   }
   const framesDir = defaultFramesDir();
-  fs34.mkdirSync(framesDir, { recursive: true });
+  fs35.mkdirSync(framesDir, { recursive: true });
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
   const expect = { project_path: args.expect.project_path, comp_id: args.expect?.comp_id };
@@ -34204,13 +35930,13 @@ async function scrubFile(args, ctx) {
   const result = finish(args, prep, plan2, cap2, [...extra2, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
   return { ...result, ...project2 };
 }
-var crypto11, fs34, path35, SCRUB_MAX_SAMPLES, MAX_LIST2, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs2, median2, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
+var crypto11, fs35, path36, SCRUB_MAX_SAMPLES, MAX_LIST2, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs2, median2, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
 var init_scrub = __esm({
   "src/tools/ext/scrub.ts"() {
     "use strict";
     crypto11 = __toESM(require("node:crypto"), 1);
-    fs34 = __toESM(require("node:fs"), 1);
-    path35 = __toESM(require("node:path"), 1);
+    fs35 = __toESM(require("node:fs"), 1);
+    path36 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -34935,7 +36661,7 @@ var init_paths = __esm({
       rotation: ["rotation"]
     };
     badArgs = (message) => ({ ok: false, error: "bad_args", message });
-    readOpts = (toolName, label) => ({ label, mutates: false, toolName });
+    readOpts = (toolName, label2) => ({ label: label2, mutates: false, toolName });
     toData = (r) => ({ vertices: r.path.vertices, inTangents: r.path.inTangents, outTangents: r.path.outTangents, closed: r.path.closed });
     pathsTools = [
       {
@@ -35136,7 +36862,7 @@ function noteUndoPurged(w) {
   } catch {
   }
 }
-async function moveBaseline(ctx, opId, toolName, label, expect, readBackOk) {
+async function moveBaseline(ctx, opId, toolName, label2, expect, readBackOk) {
   try {
     const t = getSessionTracker();
     if (!t) return;
@@ -35145,7 +36871,7 @@ async function moveBaseline(ctx, opId, toolName, label, expect, readBackOk) {
     const res = await ctx.bridge.evalRaw({
       id: `${opId}_session`,
       script: buildJsxCall("sessionSnapshot", { comp_ids: t.compsToRead(expect.project_path, [expect.comp_id]) }),
-      label: `${label} (session after)`,
+      label: `${label2} (session after)`,
       mutates: false,
       toolName,
       timeoutMs: SNAPSHOT_TIMEOUT_MS
@@ -35174,24 +36900,24 @@ async function runPurge(args, ctx) {
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
   const toolName = "ae_memory_purge";
-  const label = `ae_memory_purge(${args.target})`;
+  const label2 = `ae_memory_purge(${args.target})`;
   const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id };
   const readOnce = async (phase) => {
     const res = await ctx.bridge.evalRaw({
       id: `${opId}_${phase}`,
       script: buildJsxCall("memoryRead", {}),
-      label: `${label} (${phase})`,
+      label: `${label2} (${phase})`,
       mutates: false,
       toolName
     });
     return res.result ?? null;
   };
   try {
-    return await ctx.queue.run(label, async () => {
+    return await ctx.queue.run(label2, async () => {
       ctx.quarantine.assertClear();
       await verifyTargetGuard(ctx, expect, opId);
       const checkpoint = { status: "skipped", reason: "A cache purge changes no project data, so it takes no checkpoint." };
-      const note = { opId, toolName, label, expect, checkpoint: null };
+      const note = { opId, toolName, label: label2, expect, checkpoint: null };
       const sessionFields = await noteBeforeWrite(ctx, note);
       const before = await readOnce("before");
       beginInflight(note);
@@ -35206,7 +36932,7 @@ async function runPurge(args, ctx) {
             confirm_disk_cache_wipe: args.confirm_disk_cache_wipe,
             expect
           }),
-          label,
+          label: label2,
           mutates: true,
           toolName
         });
@@ -35228,7 +36954,7 @@ async function runPurge(args, ctx) {
       } catch (err) {
         failure2 = readBackMismatch(opId, "the read-back failed", err);
       }
-      await moveBaseline(ctx, opId, toolName, label, expect, failure2 === null);
+      await moveBaseline(ctx, opId, toolName, label2, expect, failure2 === null);
       let custom2;
       let shown;
       if (failure2) {
@@ -35362,7 +37088,7 @@ function pathKey2(p, caseInsensitive = WIN_OR_MAC) {
 function safeSegment(name, max = 120) {
   let s = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "");
   if (!s || s === "." || s === "..") s = "_";
-  const ext2 = path36.extname(s);
+  const ext2 = path37.extname(s);
   const stem2 = ext2 ? s.slice(0, -ext2.length) : s;
   const room = Math.max(1, max - ext2.length);
   let out = (stem2.length > room ? stem2.slice(0, room) : stem2) + ext2;
@@ -35390,20 +37116,20 @@ function matchFrames(names, base, caseInsensitive = WIN_OR_MAC) {
 }
 async function resolveSource(file, sequence) {
   let warning;
-  if (sequence && splitFrameName(path36.basename(file))) {
-    const dir = path36.dirname(file);
+  if (sequence && splitFrameName(path37.basename(file))) {
+    const dir = path37.dirname(file);
     let names = [];
     try {
-      names = await fs35.promises.readdir(dir);
+      names = await fs36.promises.readdir(dir);
     } catch {
       names = [];
     }
-    const frames = matchFrames(names, path36.basename(file));
+    const frames = matchFrames(names, path37.basename(file));
     if (frames.length > 0) {
       const files = [];
       try {
         for (let i = 0; i < frames.length; i += 64) {
-          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile2(path36.join(dir, f.name)))));
+          files.push(...await Promise.all(frames.slice(i, i + 64).map((f) => statFile2(path37.join(dir, f.name)))));
         }
       } catch (err) {
         return { files: [], error: `a frame could not be read: ${err instanceof Error ? err.message : String(err)}` };
@@ -35413,18 +37139,18 @@ async function resolveSource(file, sequence) {
       const distinct = new Set(frames.map((f) => f.number)).size;
       const numbers2 = [...new Set(frames.map((f) => f.number))];
       const where = missingRanges(numbers2, MAX_GAP_RANGES);
-      const own = splitFrameName(path36.basename(file));
+      const own = splitFrameName(path37.basename(file));
       const digits = own && own.digits.length > 1 && own.digits.startsWith("0") ? own.digits.length : 0;
       const res = {
         files,
         frames: { count: frames.length, first, last, gaps: Math.max(0, last - first + 1 - distinct), missing_ranges: where.ranges, ranges_truncated: where.truncated, digits }
       };
-      if (files.length === 1) res.warning = `${path36.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
+      if (files.length === 1) res.warning = `${path37.basename(file)} is an image sequence in AE but only one frame was found next to it: one file is collected`;
       return res;
     }
-    warning = `the frames next to ${path36.basename(file)} could not be listed: only this file is collected`;
+    warning = `the frames next to ${path37.basename(file)} could not be listed: only this file is collected`;
   } else if (sequence) {
-    warning = `${path36.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
+    warning = `${path37.basename(file)} is an image sequence in AE but its name has no frame number: only this file is collected`;
   }
   try {
     const one = { files: [await statFile2(file)] };
@@ -35436,9 +37162,9 @@ async function resolveSource(file, sequence) {
   }
 }
 function sourceKey(file, sequence) {
-  const f = sequence ? splitFrameName(path36.basename(file)) : null;
+  const f = sequence ? splitFrameName(path37.basename(file)) : null;
   if (!f) return pathKey2(file);
-  return `${pathKey2(path36.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
+  return `${pathKey2(path37.dirname(file))}/${pathKey2(f.prefix)}#${pathKey2(f.suffix)}`;
 }
 function planCollect(entries2, resolved, opts = {}) {
   const refs = [];
@@ -35486,17 +37212,17 @@ function planCollect(entries2, resolved, opts = {}) {
         let destDir = base;
         let destFirst = "";
         if (res.files.length > 0) {
-          if (ref3.sequence && res.files.length >= 1 && splitFrameName(path36.basename(ref3.file))) {
-            const folder = unique(takenDirs, `${base}/${safeSegment(path36.basename(path36.dirname(ref3.file)) || "sequence")}`, (r) => [r, ""]);
+          if (ref3.sequence && res.files.length >= 1 && splitFrameName(path37.basename(ref3.file))) {
+            const folder = unique(takenDirs, `${base}/${safeSegment(path37.basename(path37.dirname(ref3.file)) || "sequence")}`, (r) => [r, ""]);
             destDir = folder;
-            destFirst = `${folder}/${safeSegment(path36.basename(res.files[0].path))}`;
+            destFirst = `${folder}/${safeSegment(path37.basename(res.files[0].path))}`;
           } else {
-            const rel = unique(takenFiles, `${base}/${safeSegment(path36.basename(ref3.file))}`, (r) => {
-              const ext2 = path36.extname(r);
+            const rel = unique(takenFiles, `${base}/${safeSegment(path37.basename(ref3.file))}`, (r) => {
+              const ext2 = path37.extname(r);
               return [ext2 ? r.slice(0, -ext2.length) : r, ext2];
             });
             destFirst = rel;
-            destDir = path36.posix.dirname(rel);
+            destDir = path37.posix.dirname(rel);
           }
         }
         phys = { dest_dir: destDir, dest_first: destFirst };
@@ -35551,7 +37277,7 @@ function planCollect(entries2, resolved, opts = {}) {
     const roleOf = plan2.sources.some((o) => o.key === g.key && o.role === "main") ? "main" : "proxy";
     for (let i = 0; i < res.files.length; i++) {
       const f = res.files[i];
-      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path36.basename(f.path))}`;
+      const rel = res.files.length === 1 ? g.dest_first : `${dir}/${safeSegment(path37.basename(f.path))}`;
       plan2.files.push({ source: f.path, path: rel, bytes: f.bytes, mtime_ms: f.mtimeMs, role: roleOf, item_ids: [...ids] });
       plan2.bytes += f.bytes;
     }
@@ -35574,9 +37300,9 @@ async function writeZip(zipPath, inputs, opts = {}) {
     for (const input of inputs) {
       const name = Buffer.from(input.name, "utf8");
       if (name.length > 65535) throw new Error(`zip name too long: ${input.name.slice(0, 80)}`);
-      const size = input.data ? input.data.length : (await fs35.promises.stat(input.file)).size;
+      const size = input.data ? input.data.length : (await fs36.promises.stat(input.file)).size;
       const zip64 = opts.forceZip64 === true || size >= ZIP64_AT;
-      const ext2 = path36.extname(input.name).toLowerCase();
+      const ext2 = path37.extname(input.name).toLowerCase();
       const method = STORED_EXT.has(ext2) || size === 0 ? 0 : 8;
       const { time, date } = dosDateTime(input.mtime);
       const offset = out.offset;
@@ -35615,7 +37341,7 @@ async function writeZip(zipPath, inputs, opts = {}) {
           out.write(chunk).then(() => cb(), cb);
         }
       });
-      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs35.createReadStream(input.file);
+      const source = input.data ? import_node_stream.Readable.from([input.data]) : fs36.createReadStream(input.file);
       if (method === 8) await (0, import_promises.pipeline)(source, counter, zlib.createDeflateRaw({ level: 6 }), sink);
       else await (0, import_promises.pipeline)(source, counter, sink);
       if (!zip64 && (usize >= U32_MAX || csize >= U32_MAX)) throw new Error(`${input.name} grew past 4 GB while it was zipped`);
@@ -35686,16 +37412,16 @@ async function writeZip(zipPath, inputs, opts = {}) {
     await out.write(e);
     const total2 = out.offset;
     await out.close();
-    await fs35.promises.rename(part2, zipPath);
+    await fs36.promises.rename(part2, zipPath);
     return { path: zipPath, entries: central.length, bytes: total2, zip64: needZip64 || central.some((r) => r.zip64) };
   } catch (err) {
     await out.close().catch(() => void 0);
-    await fs35.promises.rm(part2, { force: true }).catch(() => void 0);
+    await fs36.promises.rm(part2, { force: true }).catch(() => void 0);
     throw err;
   }
 }
 async function readZipDirectory(zipPath) {
-  const fh = await fs35.promises.open(zipPath, "r");
+  const fh = await fs36.promises.open(zipPath, "r");
   try {
     const size = (await fh.stat()).size;
     const tailLen = Math.min(size, 65557 + 20);
@@ -35778,7 +37504,7 @@ async function verifyZip(zipPath, expected) {
   } catch (err) {
     return { ok: false, entries: 0, zip64: false, errors: [`the central directory could not be read: ${err instanceof Error ? err.message : String(err)}`] };
   }
-  const fh = await fs35.promises.open(zipPath, "r");
+  const fh = await fs36.promises.open(zipPath, "r");
   const seen = /* @__PURE__ */ new Set();
   try {
     for (const e of dir.entries) {
@@ -35795,7 +37521,7 @@ async function verifyZip(zipPath, expected) {
       let n = 0;
       try {
         if (e.csize > 0) {
-          const raw = fs35.createReadStream(zipPath, { start, end: start + e.csize - 1 });
+          const raw = fs36.createReadStream(zipPath, { start, end: start + e.csize - 1 });
           const stream = e.method === 8 ? raw.pipe(zlib.createInflateRaw()) : e.method === 0 ? raw : null;
           if (!stream) {
             note(`${e.name}: unsupported method ${e.method}`);
@@ -35831,7 +37557,7 @@ async function verifyZip(zipPath, expected) {
 async function sha1File(p) {
   const h = crypto12.createHash("sha1");
   await (0, import_promises.pipeline)(
-    fs35.createReadStream(p),
+    fs36.createReadStream(p),
     new import_node_stream.Writable({
       write(chunk, _enc, cb) {
         h.update(chunk);
@@ -35842,7 +37568,7 @@ async function sha1File(p) {
   return h.digest("hex");
 }
 async function copyHashed(src, dest, mtimeMs) {
-  await fs35.promises.mkdir(path36.dirname(dest), { recursive: true });
+  await fs36.promises.mkdir(path37.dirname(dest), { recursive: true });
   const part2 = `${dest}.part`;
   const hash = crypto12.createHash("sha1");
   let bytes = 0;
@@ -35854,12 +37580,12 @@ async function copyHashed(src, dest, mtimeMs) {
     }
   });
   try {
-    await (0, import_promises.pipeline)(fs35.createReadStream(src), tap, fs35.createWriteStream(part2));
-    await fs35.promises.rename(part2, dest);
+    await (0, import_promises.pipeline)(fs36.createReadStream(src), tap, fs36.createWriteStream(part2));
+    await fs36.promises.rename(part2, dest);
     const when = new Date(mtimeMs);
-    await fs35.promises.utimes(dest, when, when).catch(() => void 0);
+    await fs36.promises.utimes(dest, when, when).catch(() => void 0);
   } catch (err) {
-    await fs35.promises.rm(part2, { force: true }).catch(() => void 0);
+    await fs36.promises.rm(part2, { force: true }).catch(() => void 0);
     throw err;
   }
   return { sha1: hash.digest("hex"), bytes };
@@ -35868,27 +37594,27 @@ function buildMappings(m, dest) {
   const out = [];
   for (const s of m.sources) {
     if (!s.dest_first) continue;
-    const to = path36.join(dest, ...s.dest_first.split("/"));
+    const to = path37.join(dest, ...s.dest_first.split("/"));
     for (const from of s.ae_files) out.push({ from, to, sequence: s.sequence, role: s.role, item_ids: s.item_ids });
   }
   return out;
 }
 function manifestPath(dest) {
-  return path36.join(dest, "manifest.json");
+  return path37.join(dest, "manifest.json");
 }
 async function readManifest(dest) {
   try {
-    const m = JSON.parse(await fs35.promises.readFile(manifestPath(dest), "utf8"));
+    const m = JSON.parse(await fs36.promises.readFile(manifestPath(dest), "utf8"));
     return m && m.version === 1 && Array.isArray(m.files) && Array.isArray(m.sources) ? m : null;
   } catch {
     return null;
   }
 }
 async function writeFileAtomic(p, text) {
-  await fs35.promises.mkdir(path36.dirname(p), { recursive: true });
+  await fs36.promises.mkdir(path37.dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  await fs35.promises.writeFile(tmp, text, "utf8");
-  await fs35.promises.rename(tmp, p);
+  await fs36.promises.writeFile(tmp, text, "utf8");
+  await fs36.promises.rename(tmp, p);
 }
 function diffManifests(prev, files) {
   if (!prev) return null;
@@ -35937,21 +37663,21 @@ async function resolveAll(entries2, opts) {
   return out;
 }
 function destFolder(project2, dest) {
-  return path36.resolve(dest ?? path36.join(path36.dirname(project2), "_collect"));
+  return path37.resolve(dest ?? path37.join(path37.dirname(project2), "_collect"));
 }
 function destProblem(dest) {
-  if (dest !== void 0 && !path36.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
+  if (dest !== void 0 && !path37.isAbsolute(dest)) return `dest must be an absolute path (got "${dest}"): a relative one would resolve against the panel's own working folder.`;
   return null;
 }
 async function inspectDest(dest) {
   let st;
   try {
-    st = await fs35.promises.stat(dest);
+    st = await fs36.promises.stat(dest);
   } catch {
     return { exists: false, isDir: false, empty: true, manifest: null };
   }
   if (!st.isDirectory()) return { exists: true, isDir: false, empty: false, manifest: null };
-  const names = await fs35.promises.readdir(dest).catch(() => []);
+  const names = await fs36.promises.readdir(dest).catch(() => []);
   const onlyOwnReports = names.length > 0 && names.every((n) => OWN_REPORT_FILES.has(n.toLowerCase()));
   return { exists: true, isDir: true, empty: names.length === 0 || onlyOwnReports, manifest: await readManifest(dest) };
 }
@@ -36009,11 +37735,11 @@ async function collectFilesBody(args, ctx, hold) {
   const problem = savedProblem(state);
   if (problem) return bad2(problem);
   const project2 = state.project_path;
-  if (!fs35.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
+  if (!fs36.existsSync(project2)) return bad2(`The project file is not on disk: ${project2}`);
   const badDest = destProblem(args.dest);
   if (badDest) return bad2(badDest);
   const dest = destFolder(project2, args.dest);
-  const aepDest = path36.join(dest, path36.basename(project2));
+  const aepDest = path37.join(dest, path37.basename(project2));
   if (pathKey2(aepDest) === pathKey2(project2)) return bad2("dest is the project's own folder: the copy would overwrite the .aep. Pick another folder.");
   const dry = args.dry_run !== false;
   const destInfo = await inspectDest(dest);
@@ -36054,11 +37780,11 @@ async function collectFilesBody(args, ctx, hold) {
   const plan2 = planCollect(foot.entries, resolved, args);
   const warnings = [];
   if (destIssue) warnings.push(destIssue);
-  const longest = plan2.files.reduce((n, f) => Math.max(n, path36.join(dest, f.path).length), 0);
+  const longest = plan2.files.reduce((n, f) => Math.max(n, path37.join(dest, f.path).length), 0);
   if (process.platform === "win32" && longest > 240) warnings.push(`Some collected paths are ${longest} characters long; Windows may refuse paths past 259. Pick a shorter dest.`);
-  const sameFolder = plan2.files.filter((f) => pathKey2(path36.join(dest, f.path)) === pathKey2(f.source));
+  const sameFolder = plan2.files.filter((f) => pathKey2(path37.join(dest, f.path)) === pathKey2(f.source));
   if (sameFolder.length) warnings.push(`${sameFolder.length} file(s) already sit at their collected path: they are left alone.`);
-  const projectBytes = fs35.statSync(project2).size;
+  const projectBytes = fs36.statSync(project2).size;
   const summary3 = summarisePlan(plan2, foot.noFile, warnings);
   if (dry) {
     return {
@@ -36079,8 +37805,8 @@ async function collectFilesBody(args, ctx, hold) {
   const keepAep = !!prev?.relinked && pathKey2(prev.project.path) === pathKey2(project2);
   const t0 = Date.now();
   const deadline = t0 + (args.max_seconds ?? 50) * 1e3;
-  await fs35.promises.mkdir(dest, { recursive: true });
-  const aepStat = fs35.statSync(project2);
+  await fs36.promises.mkdir(dest, { recursive: true });
+  const aepStat = fs36.statSync(project2);
   let aepNote;
   if (keepAep) {
     aepNote = "kept: the copy there is already relinked (restart: true copies the .aep again)";
@@ -36101,7 +37827,7 @@ async function collectFilesBody(args, ctx, hold) {
       created: prev?.created ?? (/* @__PURE__ */ new Date()).toISOString(),
       updated: (/* @__PURE__ */ new Date()).toISOString(),
       complete: complete2,
-      project: { path: project2, name: path36.basename(project2) },
+      project: { path: project2, name: path37.basename(project2) },
       ae: state.ae,
       options: { only_used: args.only_used === true, include_proxies: args.include_proxies !== false },
       relinked: keepAep,
@@ -36113,7 +37839,7 @@ async function collectFilesBody(args, ctx, hold) {
         dest_first: s.dest_first,
         frames: s.resolved.frames
       })),
-      files: [...files, { source: project2, path: path36.basename(project2), bytes: fs35.existsSync(aepDest) ? fs35.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
+      files: [...files, { source: project2, path: path37.basename(project2), bytes: fs36.existsSync(aepDest) ? fs36.statSync(aepDest).size : 0, mtime_ms: aepStat.mtimeMs, sha1: null, role: "project", item_ids: [] }],
       not_collected: NOT_COLLECTED
     };
     await writeFileAtomic(manifestPath(dest), JSON.stringify(m));
@@ -36125,13 +37851,13 @@ async function collectFilesBody(args, ctx, hold) {
       stoppedEarly = true;
       break;
     }
-    const target = path36.join(dest, ...f.path.split("/"));
+    const target = path37.join(dest, ...f.path.split("/"));
     try {
       if (pathKey2(target) === pathKey2(f.source)) {
         f.sha1 = await sha1File(f.source);
         continue;
       }
-      const st = await fs35.promises.stat(target).catch(() => null);
+      const st = await fs36.promises.stat(target).catch(() => null);
       if (st && st.size === f.bytes && Math.abs(st.mtimeMs - f.mtime_ms) < 2e3) {
         const was = prevSha.get(f.path);
         f.sha1 = was && was.bytes === f.bytes ? was.sha1 : await sha1File(target);
@@ -36159,21 +37885,21 @@ async function collectFilesBody(args, ctx, hold) {
   let zipInfo = null;
   if (complete) {
     const aepEntry = manifest.files.find((f) => f.role === "project");
-    if (aepEntry && fs35.existsSync(aepDest)) {
+    if (aepEntry && fs36.existsSync(aepDest)) {
       aepEntry.sha1 = await sha1File(aepDest);
-      aepEntry.bytes = fs35.statSync(aepDest).size;
+      aepEntry.bytes = fs36.statSync(aepDest).size;
       await writeFileAtomic(manifestPath(dest), JSON.stringify(manifest));
     }
     if (args.report !== "none") {
       try {
-        const file = path36.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
-        const lastStamp = await fs35.promises.readFile(path36.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
-        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs35.existsSync(file)) {
+        const file = path37.join(dest, args.report === "json" ? "collect-report.json" : "collect-report.md");
+        const lastStamp = await fs36.promises.readFile(path37.join(dest, "collect-report.json"), "utf8").then((t) => JSON.parse(t).collect_stamp ?? null).catch(() => null);
+        if (lastStamp !== null && lastStamp === zipStamp(manifest) && fs36.existsSync(file)) {
           reportInfo = { path: file, unchanged: true, note: "The collect has not changed since the last report: it was kept as the baseline for the next diff." };
         } else {
           const r = await buildReport2(ctx, { dest, hash_outputs: true, manifest, deadline }, tool);
           await writeFileAtomic(file, args.report === "json" ? JSON.stringify(r, null, 2) : renderReportMarkdown(r));
-          await writeFileAtomic(path36.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
+          await writeFileAtomic(path37.join(dest, "collect-report.json"), JSON.stringify(r, null, 2));
           reportInfo = { path: file };
         }
       } catch (err) {
@@ -36232,12 +37958,12 @@ async function zipStep(dest, manifest, deadline) {
     job = void 0;
   }
   if (!job) {
-    const stored = await fs35.promises.readFile(stampPath, "utf8").catch(() => null);
-    const st = stored !== null && stored.trim() === stamp3 ? await fs35.promises.stat(zipPath).catch(() => null) : null;
+    const stored = await fs36.promises.readFile(stampPath, "utf8").catch(() => null);
+    const st = stored !== null && stored.trim() === stamp3 ? await fs36.promises.stat(zipPath).catch(() => null) : null;
     if (st) {
       return { ok: true, path: zipPath, bytes: st.size, bytes_human: formatBytes(st.size), verified: true, verify_errors: [], up_to_date: true, note: "The zip already verified against this manifest: it was not written again." };
     }
-    if (stored === null && fs35.existsSync(zipPath)) {
+    if (stored === null && fs36.existsSync(zipPath)) {
       return { ok: false, status: "conflict", path: zipPath, error: "conflict", message: `${zipPath} already exists and was not written by this tool, so it was left alone. Move or rename it and call again.` };
     }
     const fresh = { stamp: stamp3, state: "running", promise: Promise.resolve(), result: null };
@@ -36264,20 +37990,20 @@ async function zipStep(dest, manifest, deadline) {
   return job.result ?? { ok: false, error: "The zip job ended without a result." };
 }
 async function zipCollect(dest, manifest, stamp3) {
-  const root = path36.basename(dest);
+  const root = path37.basename(dest);
   const zipPath = `${dest}.zip`;
   const inputs = [];
   const expected = /* @__PURE__ */ new Map();
   for (const f of manifest.files) {
-    const abs = path36.join(dest, ...f.path.split("/"));
-    const st = await fs35.promises.stat(abs);
+    const abs = path37.join(dest, ...f.path.split("/"));
+    const st = await fs36.promises.stat(abs);
     const name = `${root}/${f.path}`;
     inputs.push({ name, file: abs, mtime: st.mtime });
     expected.set(name, { bytes: st.size, sha1: f.sha1 });
   }
   for (const extra2 of ["manifest.json", "collect-report.md", "collect-report.json"]) {
-    const abs = path36.join(dest, extra2);
-    if (fs35.existsSync(abs)) inputs.push({ name: `${root}/${extra2}`, file: abs, mtime: fs35.statSync(abs).mtime });
+    const abs = path37.join(dest, extra2);
+    if (fs36.existsSync(abs)) inputs.push({ name: `${root}/${extra2}`, file: abs, mtime: fs36.statSync(abs).mtime });
   }
   await writeFileAtomic(`${zipPath}.stamp`, `pending ${stamp3}`);
   const written = await writeZip(zipPath, inputs);
@@ -36286,18 +38012,18 @@ async function zipCollect(dest, manifest, stamp3) {
   return { ok: check.ok, path: zipPath, entries: written.entries, bytes: written.bytes, bytes_human: formatBytes(written.bytes), zip64: written.zip64, verified: check.ok, verify_errors: check.errors };
 }
 async function statSequenceOutput(pattern) {
-  const dir = path36.dirname(pattern);
-  const base = path36.basename(pattern);
+  const dir = path37.dirname(pattern);
+  const base = path37.basename(pattern);
   const m = FRAME_TOKEN.exec(base);
   const re = new RegExp(`^${escapeRe3(base.slice(0, m.index))}\\d{${m[1].length},}${escapeRe3(base.slice(m.index + m[0].length))}$`, WIN_OR_MAC ? "i" : "");
-  const names = await fs35.promises.readdir(dir);
+  const names = await fs36.promises.readdir(dir);
   let frames = 0;
   let bytes = 0;
   let oldest = Infinity;
   let newest = 0;
   for (const n of names) {
     if (!re.test(n)) continue;
-    const st = await fs35.promises.stat(path36.join(dir, n)).catch(() => null);
+    const st = await fs36.promises.stat(path37.join(dir, n)).catch(() => null);
     if (!st || !st.isFile()) continue;
     frames++;
     bytes += st.size;
@@ -36332,7 +38058,7 @@ async function buildReport2(ctx, opts, toolName) {
   const project2 = info.project_path;
   let pStat = null;
   try {
-    pStat = project2 === "<unsaved>" ? null : fs35.statSync(project2);
+    pStat = project2 === "<unsaved>" ? null : fs36.statSync(project2);
   } catch {
     pStat = null;
   }
@@ -36365,7 +38091,7 @@ async function buildReport2(ctx, opts, toolName) {
   let notHashed = 0;
   for (const o of info.render_outputs.slice(0, MAX_LIST3)) {
     const row = { comp: o.comp, status: o.status, output_module: o.output_module, file: o.file, exists: false, bytes: null, mtime: null, newer_than_project: null, sha1: null };
-    if (o.file && FRAME_TOKEN.test(path36.basename(o.file))) {
+    if (o.file && FRAME_TOKEN.test(path37.basename(o.file))) {
       try {
         const seqInfo = await statSequenceOutput(o.file);
         row.frames = seqInfo.frames;
@@ -36379,7 +38105,7 @@ async function buildReport2(ctx, opts, toolName) {
       }
     } else if (o.file) {
       try {
-        const st = await fs35.promises.stat(o.file);
+        const st = await fs36.promises.stat(o.file);
         row.exists = st.isFile();
         row.bytes = st.size;
         row.mtime = st.mtime.toISOString();
@@ -36402,7 +38128,7 @@ async function buildReport2(ctx, opts, toolName) {
   if (project2 !== "<unsaved>") {
     const dir = checkpointDirFor(project2);
     try {
-      const names = (await fs35.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
+      const names = (await fs36.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".aep")).sort();
       checkpoints = { dir, count: names.length, latest: names.slice(-5).reverse() };
     } catch {
       checkpoints = { dir, count: 0, latest: [] };
@@ -36411,7 +38137,7 @@ async function buildReport2(ctx, opts, toolName) {
   const m = opts.manifest === void 0 ? await readManifest(opts.dest) : opts.manifest;
   const report = {
     generated: (/* @__PURE__ */ new Date()).toISOString(),
-    project: { path: project2, name: path36.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
+    project: { path: project2, name: path37.basename(project2), bytes: pStat?.size ?? null, mtime: pStat ? pStat.mtime.toISOString() : null },
     ae: info.ae,
     comps: info.comps,
     comps_truncated: info.comps_truncated,
@@ -36431,7 +38157,7 @@ async function buildReport2(ctx, opts, toolName) {
   };
   let prev = null;
   try {
-    prev = JSON.parse(await fs35.promises.readFile(path36.join(opts.dest, "collect-report.json"), "utf8"));
+    prev = JSON.parse(await fs36.promises.readFile(path37.join(opts.dest, "collect-report.json"), "utf8"));
   } catch {
     prev = null;
   }
@@ -36500,9 +38226,9 @@ async function reportHandler(args, ctx) {
   let writeError = null;
   if (args.write !== false) {
     try {
-      written = path36.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
+      written = path37.join(dest, format === "json" ? "collect-report.json" : "collect-report.md");
       await writeFileAtomic(written, format === "json" ? JSON.stringify(report, null, 2) : renderReportMarkdown(report));
-      await writeFileAtomic(path36.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
+      await writeFileAtomic(path37.join(dest, "collect-report.json"), JSON.stringify(report, null, 2));
     } catch (err) {
       writeError = `The report could not be written: ${err instanceof Error ? err.message : String(err)}`;
       written = null;
@@ -36569,19 +38295,19 @@ function verifyItemMismatches(relink, verify, trimmed, expected) {
   }
   for (const it of items) {
     const c = checks.get(it.item_id);
-    const label = `"${it.name}" (item ${it.item_id})`;
+    const label2 = `"${it.name}" (item ${it.item_id})`;
     if (!c) {
-      note(`items.${it.item_id}`, "read back", null, `${label} was not in the read-back`);
+      note(`items.${it.item_id}`, "read back", null, `${label2} was not in the read-back`);
       continue;
     }
     if (!c.found) {
-      if (!trimmed) note(`items.${it.item_id}`, "present in the copy", "gone", `${label} is gone from the copy`);
+      if (!trimmed) note(`items.${it.item_id}`, "present in the copy", "gone", `${label2} is gone from the copy`);
       continue;
     }
-    if (c.name !== it.name) note(`items.${it.item_id}.name`, it.name, c.name, `${label}: the name changed to "${c.name}"`);
-    if (it.to && !pointsAt(c.file, it.to, it.sequence)) note(`items.${it.item_id}.file`, it.to, c.file, `${label} does not point at its collected file`);
-    if (it.proxy_to && !pointsAt(c.proxy_file, it.proxy_to, it.proxy_sequence)) note(`items.${it.item_id}.proxy`, it.proxy_to, c.proxy_file, `${label}: the proxy does not point at its collected file`);
-    if (c.use_proxy !== null && c.use_proxy !== it.use_proxy) note(`items.${it.item_id}.use_proxy`, it.use_proxy, c.use_proxy, `${label}: the proxy switch changed (relinking switched it ${c.use_proxy ? "on" : "off"})`);
+    if (c.name !== it.name) note(`items.${it.item_id}.name`, it.name, c.name, `${label2}: the name changed to "${c.name}"`);
+    if (it.to && !pointsAt(c.file, it.to, it.sequence)) note(`items.${it.item_id}.file`, it.to, c.file, `${label2} does not point at its collected file`);
+    if (it.proxy_to && !pointsAt(c.proxy_file, it.proxy_to, it.proxy_sequence)) note(`items.${it.item_id}.proxy`, it.proxy_to, c.proxy_file, `${label2}: the proxy does not point at its collected file`);
+    if (c.use_proxy !== null && c.use_proxy !== it.use_proxy) note(`items.${it.item_id}.use_proxy`, it.use_proxy, c.use_proxy, `${label2}: the proxy switch changed (relinking switched it ${c.use_proxy ? "on" : "off"})`);
   }
   m.push(...found.slice(0, MAX_ITEM_MISMATCHES));
   if (found.length > MAX_ITEM_MISMATCHES) {
@@ -36617,12 +38343,12 @@ async function relinkHandler(args, ctx) {
   if (!manifest) return bad2(`No manifest in ${dest}. Run ae_collect_files with dry_run false first.`);
   if (!manifest.complete) return bad2("The collect is not complete. Call ae_collect_files again until it says complete.");
   if (pathKey2(manifest.project.path) !== pathKey2(original)) return bad2(`The collect in ${dest} is of ${manifest.project.path}, not the open project.`);
-  const copyPath = path36.join(dest, manifest.project.name);
-  if (!fs35.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
+  const copyPath = path37.join(dest, manifest.project.name);
+  if (!fs36.existsSync(copyPath)) return bad2(`The .aep copy is not at ${copyPath}.`);
   if (manifest.relinked) return bad2("The copy is already relinked. Run ae_collect_files with restart: true to copy the .aep again first.");
   const mappings = buildMappings(manifest, dest);
   if (mappings.length === 0) return bad2("The manifest has nothing to relink.");
-  const missing = mappings.filter((x) => !fs35.existsSync(x.to));
+  const missing = mappings.filter((x) => !fs36.existsSync(x.to));
   if (missing.length) return bad2(`${missing.length} collected file(s) are missing from ${dest}: ${missing[0].to}`, { missing: missing.slice(0, 20).map((x) => x.to) });
   let reduceTo;
   if (args.reduce_to_comp_ids?.length) {
@@ -36748,7 +38474,7 @@ async function relinkHandler(args, ctx) {
           const aep = m2.files.find((f) => f.role === "project");
           if (aep) {
             aep.sha1 = await sha1File(copyPath);
-            aep.bytes = fs35.statSync(copyPath).size;
+            aep.bytes = fs36.statSync(copyPath).size;
           }
           await writeFileAtomic(manifestPath(dest), JSON.stringify(m2));
         } catch (err) {
@@ -36784,13 +38510,13 @@ async function relinkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto12, fs35, path36, import_node_stream, import_promises, zlib, MAX_LIST3, MAX_GAP_RANGES, MAX_TEXT2, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED2, statFile2, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe3, MAX_ITEM_MISMATCHES, collectTools;
+var crypto12, fs36, path37, import_node_stream, import_promises, zlib, MAX_LIST3, MAX_GAP_RANGES, MAX_TEXT2, WIN_OR_MAC, DestSchema, AeCollectFilesSchema, AeCollectRelinkSchema, AeCollectReportSchema, RESERVED2, statFile2, CRC_TABLE, Crc32, STORED_EXT, U32_MAX, ZIP64_AT, ZipOut, NOT_COLLECTED, read, bad2, OWN_REPORT_FILES, sleep, collectLocks, zipJobs, HASH_LIMIT, FRAME_TOKEN, escapeRe3, MAX_ITEM_MISMATCHES, collectTools;
 var init_collect = __esm({
   "src/tools/ext/collect.ts"() {
     "use strict";
     crypto12 = __toESM(require("node:crypto"), 1);
-    fs35 = __toESM(require("node:fs"), 1);
-    path36 = __toESM(require("node:path"), 1);
+    fs36 = __toESM(require("node:fs"), 1);
+    path37 = __toESM(require("node:path"), 1);
     import_node_stream = require("node:stream");
     import_promises = require("node:stream/promises");
     zlib = __toESM(require("node:zlib"), 1);
@@ -36809,7 +38535,7 @@ var init_collect = __esm({
     MAX_GAP_RANGES = 20;
     MAX_TEXT2 = 2e4;
     WIN_OR_MAC = process.platform === "win32" || process.platform === "darwin";
-    DestSchema = external_exports.string().min(1).refine((p) => path36.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
+    DestSchema = external_exports.string().min(1).refine((p) => path37.isAbsolute(p), "dest must be an absolute path").optional().describe("The collect folder (absolute). Default: _collect next to the .aep. The .aep copy, _Footage/, manifest.json and the report go in it.");
     AeCollectFilesSchema = external_exports.object({
       dest: DestSchema,
       dry_run: external_exports.boolean().optional().describe("Default true: report total bytes, the files, duplicates and what can't be collected, and copy nothing. Pass false to copy."),
@@ -36837,7 +38563,7 @@ var init_collect = __esm({
     });
     RESERVED2 = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
     statFile2 = async (p) => {
-      const st = await fs35.promises.stat(p);
+      const st = await fs36.promises.stat(p);
       if (!st.isFile()) throw new Error("not a file");
       return { path: p, bytes: st.size, mtimeMs: st.mtimeMs };
     };
@@ -36897,7 +38623,7 @@ var init_collect = __esm({
       ws;
       failure = null;
       constructor(p) {
-        this.ws = fs35.createWriteStream(p);
+        this.ws = fs36.createWriteStream(p);
         this.ws.on("error", (e) => {
           this.failure = e;
         });
@@ -37362,7 +39088,7 @@ function schemaAcceptsKey(schema, key) {
   return true;
 }
 function deliverPath(projectPath) {
-  return path37.join(path37.dirname(projectPath), `${path37.basename(projectPath, path37.extname(projectPath))}.deliver.json`);
+  return path38.join(path38.dirname(projectPath), `${path38.basename(projectPath, path38.extname(projectPath))}.deliver.json`);
 }
 function unreadable(err) {
   if (err instanceof StoreUnreadableError) return { ok: false, error: err.kind, applied: false, message: err.message };
@@ -37371,7 +39097,7 @@ function unreadable(err) {
 function readStoreFile(file) {
   let raw;
   try {
-    raw = fs36.readFileSync(file, "utf8");
+    raw = fs37.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -37381,7 +39107,7 @@ function readStoreFile(file) {
     if (parsed && Array.isArray(parsed.recipes) && Array.isArray(parsed.runs)) return { version: 1, recipes: parsed.recipes, runs: parsed.runs };
   } catch {
   }
-  fs36.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs37.renameSync(file, `${file}.${Date.now()}.bak`);
   return null;
 }
 function loadStore(projectPath) {
@@ -37418,14 +39144,14 @@ function saveStore(projectPath, store) {
   const file = deliverPath(projectPath);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    fs36.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs36.renameSync(tmp, file);
+    fs37.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs37.renameSync(tmp, file);
     unsavedStores.delete(projectPath);
     return { file };
   } catch (e) {
     unsavedStores.add(projectPath);
     try {
-      fs36.unlinkSync(tmp);
+      fs37.unlinkSync(tmp);
     } catch {
     }
     return { file: null, error: e.message };
@@ -37547,7 +39273,7 @@ function expectOf(env) {
 }
 function fileStamp(file) {
   try {
-    const st = fs36.statSync(file);
+    const st = fs37.statSync(file);
     return `${st.size}:${st.mtimeMs}`;
   } catch {
     return null;
@@ -38312,13 +40038,13 @@ async function deliverStatus(args, ctx) {
     ...run.state === "done" && project2.dirty ? run.project_dirty_at_end === true ? { note: "The delivery ended with unsaved changes made by its own stages (a verify or scrub imports and removes a file). Save the project before relying on the file on disk." } : { note: "The project has unsaved changes made after this delivery ran; the delivered files may not match it." } : {}
   });
 }
-var crypto13, fs36, path37, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip3, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
+var crypto13, fs37, path38, DeliverExpectSchema, STAGE_KINDS, KIND_INFO, MAX_STAGES, MAX_OUTPUTS, MAX_SHOWN, KEPT_RUNS, MAX_FINDINGS2, MAX_PREFLIGHT_CALLS, MAX_COLLECT_CALLS, STRING_LIMIT, StageIdSchema, DeliverStageSchema, CHECKPOINT_MODES, RecipeNameSchema, AeDeliverRecipeSchema, AeDeliverStepSchema, AeDeliverStatusSchema, clip3, SEQUENCE_PATTERN, STATUS_RANK, REPEATABLE_KINDS, memoryStores, unsavedStores, activeRuns, emptyStore, StoreUnreadableError, registryLookup, lookupTool, lookupErrors, deliverTools;
 var init_deliver = __esm({
   "src/tools/ext/deliver.ts"() {
     "use strict";
     crypto13 = __toESM(require("node:crypto"), 1);
-    fs36 = __toESM(require("node:fs"), 1);
-    path37 = __toESM(require("node:path"), 1);
+    fs37 = __toESM(require("node:fs"), 1);
+    path38 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_quarantine();
@@ -38861,16 +40587,16 @@ function pruneOldRenders(dir, now = Date.now()) {
   let removed = 0;
   let names = [];
   try {
-    names = fs37.readdirSync(dir);
+    names = fs38.readdirSync(dir);
   } catch {
     return 0;
   }
   for (const n of names) {
     if (!/^loudness_.+\.(aif|aiff|aifc|wav)(\.json)?$/i.test(n)) continue;
-    const p = path38.join(dir, n);
+    const p = path39.join(dir, n);
     try {
-      if (now - fs37.statSync(p).mtimeMs > RENDER_KEEP_MS) {
-        fs37.unlinkSync(p);
+      if (now - fs38.statSync(p).mtimeMs > RENDER_KEEP_MS) {
+        fs38.unlinkSync(p);
         removed++;
       }
     } catch {
@@ -38915,7 +40641,7 @@ function applyHint(m, std, verdict) {
   };
 }
 async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECONDS2, wholeFile = false) {
-  const stat = fs37.statSync(file);
+  const stat = fs38.statSync(file);
   if (stat.size > MAX_AUDIO_BYTES2) {
     const mb = MAX_AUDIO_BYTES2 / 1048576;
     throw new AudioDecodeError(
@@ -38924,7 +40650,7 @@ async function measureFile(file, offset, choice, maxSeconds = MAX_ANALYSIS_SECON
   }
   let decoded;
   try {
-    decoded = decodeAudioChannels(await fs37.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
+    decoded = decodeAudioChannels(await fs38.promises.readFile(file), { maxSeconds, maxDecodedBytes: decodedBudget(stat.size) });
   } catch (err) {
     if (wholeFile && err instanceof AudioDecodeError && err.message.includes("use start/end")) {
       const cut = err.message.replace(" (use start/end)", "").replace(". Measure a shorter range", "").replace(/[.;]\s*$/, "");
@@ -38965,7 +40691,7 @@ function createLoudnessTools(options = {}) {
     const job = getJob(jobId);
     if (!job) return void 0;
     try {
-      return JSON.parse(fs37.readFileSync(`${job.output_path}.json`, "utf8"));
+      return JSON.parse(fs38.readFileSync(`${job.output_path}.json`, "utf8"));
     } catch {
       return void 0;
     }
@@ -39016,7 +40742,7 @@ function createLoudnessTools(options = {}) {
         const choice = { standard: args.standard, target_lufs: args.target_lufs, true_peak_max_db: args.true_peak_max_db, tolerance_lu: args.tolerance_lu };
         const wait = args.wait_seconds ?? 30;
         if (args.audio_path !== void 0) {
-          if (!path38.isAbsolute(args.audio_path) || !fs37.existsSync(args.audio_path)) {
+          if (!path39.isAbsolute(args.audio_path) || !fs38.existsSync(args.audio_path)) {
             return { ok: false, error: "bad_path", message: `Not an existing absolute path: ${args.audio_path}` };
           }
           try {
@@ -39053,10 +40779,10 @@ function createLoudnessTools(options = {}) {
             message: `${Math.round(renderedSeconds)} s of audio; measure at most ${MAX_ANALYSIS_SECONDS2 / 60} minutes at a time (use start/end)`
           };
         }
-        const dir = path38.join(rendersDir(), "audio");
-        fs37.mkdirSync(dir, { recursive: true });
+        const dir = path39.join(rendersDir(), "audio");
+        fs38.mkdirSync(dir, { recursive: true });
         pruneOldRenders(dir);
-        const outputPath = path38.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto14.randomBytes(3).toString("hex")}.aif`);
+        const outputPath = path39.join(dir, `loudness_${sanitize2(info.name)}_${stamp2()}_${crypto14.randomBytes(3).toString("hex")}.aif`);
         const started = await startRender(
           {
             expect: args.expect,
@@ -39073,7 +40799,7 @@ function createLoudnessTools(options = {}) {
         const meta = { comp_id: info.comp_id, comp_name: info.name, offset: renderStart, fps: info.fps, output_path: outputPath };
         jobs.set(started.job_id, meta);
         try {
-          fs37.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
+          fs38.writeFileSync(`${outputPath}.json`, JSON.stringify(meta));
         } catch {
         }
         return collect(started.job_id, wait, choice);
@@ -39098,11 +40824,11 @@ function createLoudnessTools(options = {}) {
           }
         }
         const fades = [args.fade_in ? `in ${args.fade_in}s` : "", args.fade_out ? `out ${args.fade_out}s` : ""].filter(Boolean).join(" ");
-        const label = `ae_loudness_apply(${gain >= 0 ? "+" : ""}${gain} dB${fades ? `, fade ${fades}` : ""})`;
+        const label2 = `ae_loudness_apply(${gain >= 0 ? "+" : ""}${gain} dB${fades ? `, fade ${fades}` : ""})`;
         const readCall3 = () => ({ host: "loudnessRead", args: { comp_id: args.comp_id }, timeoutMs: SLOW_TIMEOUT_MS });
         return runGuardedWrite(ctx, {
           toolName: "ae_loudness_apply",
-          label,
+          label: label2,
           expect: args.expect,
           compId: args.comp_id,
           read: readCall3,
@@ -39152,13 +40878,13 @@ function createLoudnessTools(options = {}) {
     }
   ];
 }
-var fs37, crypto14, path38, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
+var fs38, crypto14, path39, MAX_ANALYSIS_SECONDS2, MAX_AUDIO_BYTES2, MAX_DECODED_BYTES, TOTAL_AUDIO_BYTES, RENDER_KEEP_MS, TAPS_PER_PHASE, KAISER_BETA, FULL_SCALE, YIELD_SAMPLES, yieldToLoop2, LUFS_OFFSET, ABSOLUTE_GATE, lufsOf, round1, round33, finiteOrNull, dbOf, isFloatFormat, STANDARDS, StandardField, AeLoudnessCheckSchema, AeLoudnessApplySchema, VALUE_TOLERANCE, compOf, levelsSame, loudnessTools;
 var init_loudness = __esm({
   "src/tools/ext/loudness.ts"() {
     "use strict";
-    fs37 = __toESM(require("node:fs"), 1);
+    fs38 = __toESM(require("node:fs"), 1);
     crypto14 = __toESM(require("node:crypto"), 1);
-    path38 = __toESM(require("node:path"), 1);
+    path39 = __toESM(require("node:path"), 1);
     init_zod();
     init_audio();
     init_host();
@@ -39832,11 +41558,11 @@ function isAeBlocked(err) {
 function withExtra(sk, extra2) {
   return { skipped: [...sk.skipped, ...extra2].slice(0, SKIPPED_CAP), total: sk.total + extra2.length };
 }
-async function readText(ctx, opId, tool, label, args) {
+async function readText(ctx, opId, tool, label2, args) {
   const res = await ctx.bridge.evalRaw({
     id: `${opId}_read`,
     script: buildJsxCall("legibilityRead", { comp_id: args.comp_id, times: args.times, layers: args.layers }),
-    label: `${label} (read)`,
+    label: `${label2} (read)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
     toolName: tool
@@ -39853,8 +41579,8 @@ function summarise3(entries2) {
   return { verdict, checked: entries2.length, pass: count("pass"), fail: failed.length, inconclusive: count("inconclusive"), worst };
 }
 function writeOverlay(framesDir, compId, time, png) {
-  const file = path39.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto15.randomBytes(4).toString("hex")}.png`);
-  fs38.writeFileSync(file, encodePng(png));
+  const file = path40.join(framesDir, `legibility_c${compId}_${Math.round(time * 1e3)}_${crypto15.randomBytes(4).toString("hex")}.png`);
+  fs39.writeFileSync(file, encodePng(png));
   return file;
 }
 function overlapReport(read3, minShare) {
@@ -39876,12 +41602,12 @@ function overlapReport(read3, minShare) {
 async function estimateHandler(args, ctx) {
   const tool = "ae_estimate_legibility";
   const framesDir = defaultFramesDir();
-  fs38.mkdirSync(framesDir, { recursive: true });
+  fs39.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
-  const label = `${tool}(${args.comp_id})`;
+  const label2 = `${tool}(${args.comp_id})`;
   const judging = { required: { level: args.level, minRatio: args.min_ratio, largeTextPx: args.large_text_px }, tolerance: args.tolerance };
-  const got = await runQueued4(ctx, label, opId, async () => {
-    const read4 = await readText(ctx, opId, tool, label, args);
+  const got = await runQueued4(ctx, label2, opId, async () => {
+    const read4 = await readText(ctx, opId, tool, label2, args);
     const frames = [];
     let blocked = false;
     for (let ti = 0; ti < read4.times.length; ti++) {
@@ -40044,7 +41770,7 @@ function frameDiffers(a, b, sensitivity) {
 async function checkHandler(args, ctx) {
   ctx.quarantine.assertClear();
   const opId = ctx.bridge.newOpId();
-  const label = `ae_check_legibility(${args.comp_id})`;
+  const label2 = `ae_check_legibility(${args.comp_id})`;
   const toolName = "ae_check_legibility";
   const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const framesDir = defaultFramesDir();
@@ -40054,16 +41780,16 @@ async function checkHandler(args, ctx) {
     const res = await ctx.bridge.evalRaw({
       id: `${opId}_${phase}`,
       script: buildJsxCall("legibilityState", proofLayerIds.length > 0 ? { comp_id: args.comp_id, layer_ids: proofLayerIds } : {}),
-      label: `${label} (${phase})`,
+      label: `${label2} (${phase})`,
       mutates: false,
       toolName
     });
     return res.result ?? null;
   };
   try {
-    return await ctx.queue.run(label, async () => {
+    return await ctx.queue.run(label2, async () => {
       ctx.quarantine.assertClear();
-      const read3 = await readText(ctx, opId, toolName, label, args);
+      const read3 = await readText(ctx, opId, toolName, label2, args);
       const { tested, overflow } = testableLayers(read3);
       if (tested.length === 0) {
         const { skipped: skipped2, total: total3 } = skippedEntries(read3);
@@ -40078,18 +41804,18 @@ async function checkHandler(args, ctx) {
       }
       const guard = await verifyTargetGuard(ctx, expect, opId);
       const checkpoint = await autoCheckpoint(ctx, guard, toolName);
-      const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+      const note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
       const sessionFields = await noteBeforeWrite(ctx, note);
       proofLayerIds = tested.map((l) => l.id);
       const before = await state("before");
-      fs38.mkdirSync(framesDir, { recursive: true });
+      fs39.mkdirSync(framesDir, { recursive: true });
       beginInflight(note);
       let begun;
       try {
         const begin = await ctx.bridge.evalRaw({
           id: opId,
           script: buildJsxCall("legibilityBegin", { comp_id: args.comp_id, layers: tested.map(head), expect }),
-          label,
+          label: label2,
           mutates: true,
           toolName
         });
@@ -40192,7 +41918,7 @@ async function checkHandler(args, ctx) {
         const end = await ctx.bridge.evalRaw({
           id: removeId,
           script: buildJsxCall("legibilityEnd", { copy_id: copyId, expect }),
-          label: `${label} (remove copy)`,
+          label: `${label2} (remove copy)`,
           mutates: true,
           mustSend: true,
           toolName
@@ -40253,13 +41979,13 @@ async function checkHandler(args, ctx) {
     throw err;
   }
 }
-var crypto15, fs38, path39, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r25, r35, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage3, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
+var crypto15, fs39, path40, MAX_CHECK_TIMES, MAX_OVERLAP_TIMES, CompId, Layers, timesField, Level, MinRatio, LargeTextPx, Tolerance, Annotate, MaxSize, MinOverlap, AeCheckTextOverlapSchema, AeEstimateLegibilitySchema, AeCheckLegibilitySchema, LIN, hex2, r25, r35, boxArea, MAX_OVERLAPS, inAny, MIN_PIXELS, COLOUR_TOL, emptyAnalysis, mixRgb, head, FOREIGN_LIMIT, colourDistance, GREEN, RED, AMBER, INK2, MAGENTA, errMessage3, NOTES_COMMON, SKIPPED_CAP, BLOCKED_NOTE, OFF_FRAME, runQueued4, RING_SHARE, MAX_TEST_LAYERS, legibilityTools;
 var init_legibility = __esm({
   "src/tools/ext/legibility.ts"() {
     "use strict";
     crypto15 = __toESM(require("node:crypto"), 1);
-    fs38 = __toESM(require("node:fs"), 1);
-    path39 = __toESM(require("node:path"), 1);
+    fs39 = __toESM(require("node:fs"), 1);
+    path40 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
     init_jsx();
@@ -40374,9 +42100,9 @@ var init_legibility = __esm({
     SKIPPED_CAP = 100;
     BLOCKED_NOTE = "AE stopped responding during a render (often a modal dialog); the remaining times were not rendered. Check ae_dialogs, then run again.";
     OFF_FRAME = "its box is outside the frame at this time";
-    runQueued4 = async (ctx, label, opId, fn) => {
+    runQueued4 = async (ctx, label2, opId, fn) => {
       try {
-        return await ctx.queue.run(label, fn);
+        return await ctx.queue.run(label2, fn);
       } catch (err) {
         if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
         throw err;
@@ -40777,9 +42503,9 @@ function firstFrameFinding(a, time, fps) {
     detail: { flags: a.flags, mean_rgba: a.mean_rgba }
   });
 }
-async function runQueued5(ctx, label, opId, fn) {
+async function runQueued5(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -40844,7 +42570,7 @@ function analyzeTiming(host, spec, checks, range) {
 async function frameStage(ctx, compId, fps, range, wantFirst, confirm) {
   const stage = { confirmations: /* @__PURE__ */ new Map() };
   const framesDir = defaultFramesDir();
-  fs39.mkdirSync(framesDir, { recursive: true });
+  fs40.mkdirSync(framesDir, { recursive: true });
   const opId = ctx.bridge.newOpId();
   const tool = "ae_timing_check";
   let blocked = false;
@@ -40977,11 +42703,11 @@ async function timingCheckHandler(args, ctx) {
     notes
   };
 }
-var fs39, TIMING_CHECKS, MIN_VISIBLE_OPACITY, SILENT_AFTER_S, MAX_CONFIRM_STRETCHES, MAX_LINES_LISTED, EPS3, AeTimingCheckSchema, SEVERITY_RANK3, r36, ref2, total, CONTROLLERS, normText, NUM_RE, MONTHS, COMPOSITE_RES, PHONE_RE, NAME_WORD, LEAD_STOP, CONNECT, normName, COMMON_COPY_WORDS, nameWords, isMoneyOrPercent, errMessage4, timingTools;
+var fs40, TIMING_CHECKS, MIN_VISIBLE_OPACITY, SILENT_AFTER_S, MAX_CONFIRM_STRETCHES, MAX_LINES_LISTED, EPS3, AeTimingCheckSchema, SEVERITY_RANK3, r36, ref2, total, CONTROLLERS, normText, NUM_RE, MONTHS, COMPOSITE_RES, PHONE_RE, NAME_WORD, LEAD_STOP, CONNECT, normName, COMMON_COPY_WORDS, nameWords, isMoneyOrPercent, errMessage4, timingTools;
 var init_timing = __esm({
   "src/tools/ext/timing.ts"() {
     "use strict";
-    fs39 = __toESM(require("node:fs"), 1);
+    fs40 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_queue();
@@ -41140,1650 +42866,6 @@ var init_timing = __esm({
         description: "READ-ONLY timeline review against the project's motion spec (the brief's `motion` field; defaults come from its register). Checks: (1) unread_lines: each text line's on-screen time (in to out, narrowed where Opacity is under 5 %, one line per Source Text key) against reading time = base + per-word, the last line at least last_line_s (defaults 0.5 s + 0.3 s per word, 2 s); (2) dead_stretches: spans over dead_stretch_s (default 3 s) where no keyframe segment moves, no layer comes or goes, no video footage or animated precomp plays (stills and solids don't count), computed from layer data with no render (`confirm_with_frames` also diffs three rendered frames in each of the first three stretches); (3) first_frame: renders the first frame of the range (the work area start by default) and flags it when blank, black or transparent; (4) silent_film: only audio layers that overlap the range and are on and unmuted count; an audio-free stretch over 15 s inside a range over 15 s is flagged (P1) with its start and end; (5) facts: with `motion.facts` in the brief, numbers and Capitalised multi-word names in visible text that no fact covers; a price or percentage is P0, anything else P1; times, dates, phone numbers, ratios and ordinary call-to-action phrases (Learn More, Black Friday) are ignored. Known limits: any enabled expression marks its whole layer as changing (so a layer with a dead expression hides a dead stretch); layers or properties beyond the host's read caps are marked, and dead_stretches is skipped (P2) when layers were not read. Returns `spec` (register, which fields came from the brief, thresholds used) and `findings` sorted P0 first, each with start/end in seconds and frames, layers, a message and a one-line fix. Range: the work area, or start_s/end_s. Only the first-frame check (and confirm_with_frames) renders; the time indicator and project are not touched. Text in precomps is not read.",
         schema: AeTimingCheckSchema,
         handler: timingCheckHandler
-      }
-    ];
-  }
-});
-
-// src/tools/ext/animate.ts
-function pickKeyExtras(args) {
-  const out = {};
-  for (const k of KEY_EXTRA_FIELDS) if (args[k] !== void 0) out[k] = args[k];
-  return Object.keys(out).length > 0 ? out : void 0;
-}
-function rovingMismatches(roving, afterSnapshot) {
-  const want = Array.isArray(roving) ? roving : [];
-  const keys = afterSnapshot?.keyframes ?? [];
-  return want.filter((i) => keys.find((k) => k.keyIndex === i)?.roving !== true).map((i) => ({ path: `keyframes[${i}].roving`, expected: true, actual: keys.find((k) => k.keyIndex === i)?.roving, message: `Key ${i} is not roving` }));
-}
-function rovingSkipKeys(result) {
-  const r = result ?? {};
-  const nums = (v) => Array.isArray(v) ? v.filter((n) => typeof n === "number") : [];
-  return [.../* @__PURE__ */ new Set([...nums(r.roving), ...nums(r.extras?.roving)])];
-}
-function clampInfluenceValue(influence2) {
-  if (influence2 < 0.1) return 0.1;
-  if (influence2 > 100) return 100;
-  return influence2;
-}
-function extractKeyframeEaseCheck(ease, requestedKeys, afterSnapshot, skipKeys) {
-  if (ease === void 0 || !afterSnapshot || typeof afterSnapshot !== "object" || isCurveEase(ease)) {
-    return null;
-  }
-  const afterObj = afterSnapshot;
-  if (!Array.isArray(afterObj.keyframes)) {
-    return null;
-  }
-  const rawKeys = afterObj.keyframes;
-  const keySet = requestedKeys && requestedKeys.length > 0 ? new Set(requestedKeys) : null;
-  const skip = new Set(Array.isArray(skipKeys) ? skipKeys : []);
-  const targeted = (keySet ? rawKeys.filter(
-    (kf) => typeof kf.keyIndex === "number" && keySet.has(kf.keyIndex)
-  ) : rawKeys).filter((kf) => !(typeof kf.keyIndex === "number" && skip.has(kf.keyIndex)));
-  if (targeted.length === 0) {
-    return null;
-  }
-  if (ease === "hold" || ease === "linear") {
-    const expectedInterp = ease;
-    return {
-      expected: {
-        keyframes: targeted.map((kf) => ({
-          keyIndex: kf.keyIndex,
-          inInterp: expectedInterp,
-          outInterp: expectedInterp
-        }))
-      },
-      actual: {
-        keyframes: targeted.map((kf) => ({
-          keyIndex: kf.keyIndex,
-          inInterp: kf.inInterp,
-          outInterp: kf.outInterp
-        }))
-      }
-    };
-  }
-  const targetIn = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
-    speed: ease.in.speed,
-    influence: clampInfluenceValue(ease.in.influence)
-  };
-  const targetOut = ease === "easy_ease" ? { speed: 0, influence: 33.333333 } : {
-    speed: ease.out.speed,
-    influence: clampInfluenceValue(ease.out.influence)
-  };
-  return {
-    expected: {
-      keyframes: targeted.map((kf) => {
-        const dims = Array.isArray(kf.easeIn) && kf.easeIn.length > 0 ? kf.easeIn.length : 1;
-        return {
-          keyIndex: kf.keyIndex,
-          inInterp: "bezier",
-          outInterp: "bezier",
-          easeIn: Array.from({ length: dims }, () => ({ ...targetIn })),
-          easeOut: Array.from({ length: dims }, () => ({ ...targetOut }))
-        };
-      })
-    },
-    actual: {
-      keyframes: targeted.map((kf) => ({
-        keyIndex: kf.keyIndex,
-        inInterp: kf.inInterp,
-        outInterp: kf.outInterp,
-        easeIn: kf.easeIn,
-        easeOut: kf.easeOut
-      }))
-    }
-  };
-}
-function easeInterpolationName(ease) {
-  if (ease === "linear") return "linear";
-  if (ease === "hold") return "hold";
-  return "bezier";
-}
-function keyExtrasConflict(ease, extras, roveBetween) {
-  if (!extras) return null;
-  if (roveBetween && extras.roving !== void 0) return "rove_between and roving both set roving; give one of them.";
-  if (ease !== void 0) {
-    const name = easeInterpolationName(ease);
-    for (const side of ["in_interp", "out_interp"]) {
-      const v = extras[side];
-      if (v !== void 0 && v !== name) {
-        return `${side} "${v}" differs from the interpolation \`ease\` sets (${name}); for a mixed in / out interpolation leave \`ease\` out.`;
-      }
-    }
-  }
-  if (extras.spatial_auto_bezier === true && (extras.in_tangent !== void 0 || extras.out_tangent !== void 0)) {
-    return "Tangents can't be set while spatial_auto_bezier is true (auto bezier recomputes them).";
-  }
-  if (extras.spatial_auto_bezier === true && extras.spatial_continuous === false) return "spatial_auto_bezier true implies spatial_continuous true.";
-  if (extras.temporal_auto_bezier === true && extras.temporal_continuous === false) return "temporal_auto_bezier true implies temporal_continuous true.";
-  return null;
-}
-function extrasRecomputeEase(extras) {
-  return !!extras && (extras.temporal_continuous === true || extras.temporal_auto_bezier === true);
-}
-function sameVector(a, b) {
-  if (!Array.isArray(a)) return void 0;
-  if (a.length !== b.length) return false;
-  return b.every((n, i) => typeof a[i] === "number" && Math.abs(a[i] - n) <= Math.max(1e-3, Math.abs(n) * 1e-3));
-}
-function keyExtrasMismatches(extras, keys, afterSnapshot) {
-  const mismatches = [];
-  const unverified = [];
-  if (!extras) return { mismatches, unverified };
-  const kfs = afterSnapshot?.keyframes ?? [];
-  const truncated = afterSnapshot?.truncated === true;
-  const compare = (key, field, want, got, same) => {
-    const path63 = `keyframes[${key}].${field}`;
-    if (same === void 0 || got === void 0) {
-      unverified.push(path63);
-      return;
-    }
-    if (!same) mismatches.push({ path: path63, expected: want, actual: got, message: `Expected ${path63} to be ${JSON.stringify(want)}, got ${JSON.stringify(got)}` });
-  };
-  const flags = [
-    ["spatial_continuous", "spatialContinuous"],
-    ["spatial_auto_bezier", "spatialAutoBezier"],
-    ["temporal_continuous", "temporalContinuous"],
-    ["temporal_auto_bezier", "temporalAutoBezier"],
-    ["roving", "roving"]
-  ];
-  for (const key of keys) {
-    const kf = kfs.find((k) => k.keyIndex === key);
-    if (!kf) {
-      if (truncated) {
-        unverified.push(`keyframes[${key}]`);
-        continue;
-      }
-      mismatches.push({ path: `keyframes[${key}]`, expected: "present", actual: void 0, message: `Key ${key} was not in the read-back` });
-      continue;
-    }
-    if (extras.in_interp !== void 0) {
-      compare(key, "inInterp", extras.in_interp, kf.inInterp, typeof kf.inInterp === "string" ? kf.inInterp === extras.in_interp : void 0);
-    }
-    if (extras.out_interp !== void 0) {
-      compare(key, "outInterp", extras.out_interp, kf.outInterp, typeof kf.outInterp === "string" ? kf.outInterp === extras.out_interp : void 0);
-    }
-    if (extras.in_tangent !== void 0) compare(key, "inTangent", extras.in_tangent, kf.inTangent, sameVector(kf.inTangent, extras.in_tangent));
-    if (extras.out_tangent !== void 0) compare(key, "outTangent", extras.out_tangent, kf.outTangent, sameVector(kf.outTangent, extras.out_tangent));
-    for (const [arg, field] of flags) {
-      const want = extras[arg];
-      if (want === void 0) continue;
-      const got = kf[field];
-      compare(key, field, want, got, typeof got === "boolean" ? got === want : void 0);
-    }
-    if (extras.label !== void 0) {
-      const got = kf.label;
-      compare(key, "label", extras.label, got, typeof got === "number" ? got === extras.label : void 0);
-    }
-  }
-  return { mismatches, unverified };
-}
-function resolveTargetKeys(keys, snapshot) {
-  if (keys !== "selected") return { keys };
-  const kfs = snapshot?.keyframes ?? [];
-  if (!kfs.some((k) => typeof k.selected === "boolean")) {
-    return { error: "This After Effects did not report which keys are selected (Property.selectedKeys); give the key numbers in `keys`." };
-  }
-  const picked = kfs.filter((k) => k.selected === true).map((k) => k.keyIndex);
-  if (picked.length === 0) {
-    return { error: "No keys are selected on that property in the timeline; select them in After Effects or give the key numbers in `keys`." };
-  }
-  return { keys: picked };
-}
-function isCurveEase(ease) {
-  return typeof ease === "object" && ease !== null && "curve" in ease;
-}
-function asVector(v) {
-  if (typeof v === "number") return [v];
-  if (Array.isArray(v) && v.every((n) => typeof n === "number")) return v;
-  return null;
-}
-function pathLength(from, outTangent, inTangent, to) {
-  const dims = Math.min(from.length, to.length);
-  const p1 = from.slice(0, dims).map((v, d) => v + (outTangent?.[d] ?? 0));
-  const p2 = to.slice(0, dims).map((v, d) => v + (inTangent?.[d] ?? 0));
-  const steps = 200;
-  let length = 0;
-  let prev = from.slice(0, dims);
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const u = 1 - t;
-    const point = from.slice(0, dims).map(
-      (v, d) => u * u * u * v + 3 * u * u * t * p1[d] + 3 * u * t * t * p2[d] + t * t * t * to[d]
-    );
-    length += Math.hypot(...point.map((v, d) => v - prev[d]));
-    prev = point;
-  }
-  return length;
-}
-function curveToSides(snapshot, keys, curve) {
-  const snap = snapshot;
-  if (!snap || !Array.isArray(snap.keyframes)) {
-    throw new Error("Could not read the property's keyframes");
-  }
-  const byIndex = new Map(snap.keyframes.map((k) => [k.keyIndex, k]));
-  const selected = (keys && keys.length > 0 ? [...new Set(keys)] : snap.keyframes.map((k) => k.keyIndex)).sort(
-    (a, b) => a - b
-  );
-  const segments = [];
-  for (let i = 0; i + 1 < selected.length; i++) {
-    if (selected[i + 1] === selected[i] + 1) segments.push([selected[i], selected[i + 1]]);
-  }
-  if (segments.length === 0) {
-    throw new Error("A curve needs at least two neighbouring keys (for example keys [1, 2]).");
-  }
-  const x1 = Math.min(1, Math.max(MIN_HANDLE2, curve[0]));
-  const x2 = Math.min(1 - MIN_HANDLE2, Math.max(0, curve[2]));
-  const y1 = curve[1];
-  const y2 = curve[3];
-  const warnings = [];
-  const sides = /* @__PURE__ */ new Map();
-  const sideFor = (key) => {
-    let s = sides.get(key);
-    if (!s) {
-      s = { key };
-      sides.set(key, s);
-    }
-    return s;
-  };
-  for (const [ai, bi] of segments) {
-    const a = byIndex.get(ai);
-    const b = byIndex.get(bi);
-    if (!a || !b) {
-      throw new Error(`Keyframe ${a ? bi : ai} was not read (the property has too many keys)`);
-    }
-    const duration = b.time - a.time;
-    if (!(duration > 0)) throw new Error(`Keys ${ai} and ${bi} share a time`);
-    const from = asVector(a.value);
-    const to = asVector(b.value);
-    if (!from || !to) throw new Error(`Keys ${ai} and ${bi} do not hold numeric values`);
-    const dims = Math.max(1, from.length, to.length, a.easeOut?.length ?? 0, b.easeIn?.length ?? 0);
-    let distances;
-    if (snap.isSpatial) {
-      distances = [pathLength(from, asVector(a.outTangent), asVector(b.inTangent), to)];
-    } else if (dims === 1) {
-      distances = [to[0] - from[0]];
-    } else {
-      distances = Array.from({ length: dims }, (_, d) => (to[d] ?? 0) - (from[d] ?? 0));
-    }
-    const speeds = (factor) => distances.map((dist) => {
-      const speed = factor * dist / duration;
-      if (snap.isSpatial && speed < 0) {
-        warnings.push(`Keys ${ai}-${bi}: a spatial speed can't go negative, so the anticipation was dropped.`);
-        return 0;
-      }
-      return speed === 0 ? 0 : speed;
-    });
-    const outSpeeds = speeds(y1 / x1);
-    const inSpeeds = speeds((1 - y2) / (1 - x2));
-    sideFor(ai).out = outSpeeds.map((speed) => ({ speed, influence: x1 * 100 }));
-    sideFor(bi).in = inSpeeds.map((speed) => ({ speed, influence: (1 - x2) * 100 }));
-  }
-  return {
-    sides: [...sides.values()].sort((p, q) => p.key - q.key),
-    segments,
-    warnings: [...new Set(warnings)]
-  };
-}
-function easeMatches(expected, actual) {
-  if (!actual) return false;
-  const speedTol = Math.max(1e-3, Math.abs(expected.speed) * 1e-3);
-  return Math.abs(expected.speed - actual.speed) <= speedTol && Math.abs(clampInfluenceValue(expected.influence) - actual.influence) <= 0.01;
-}
-function curveEaseMismatches(sides, afterSnapshot) {
-  const snap = afterSnapshot;
-  const mismatches = [];
-  const byIndex = new Map((snap?.keyframes ?? []).map((k) => [k.keyIndex, k]));
-  for (const side of sides) {
-    const kf = byIndex.get(side.key);
-    for (const which of ["in", "out"]) {
-      const expected = side[which];
-      if (!expected) continue;
-      const actualList = which === "in" ? kf?.easeIn : kf?.easeOut;
-      const interp = which === "in" ? kf?.inInterp : kf?.outInterp;
-      const path63 = `keyframes[${side.key}].${which === "in" ? "easeIn" : "easeOut"}`;
-      const ok = interp === "bezier" && expected.every((e, d) => easeMatches(e, actualList?.[d]));
-      if (!ok) {
-        mismatches.push({
-          path: path63,
-          expected: { interp: "bezier", ease: expected },
-          actual: { interp, ease: actualList },
-          message: `Expected ${path63} to be bezier ${JSON.stringify(expected)}, got ${interp} ${JSON.stringify(actualList)}`
-        });
-      }
-    }
-  }
-  return mismatches;
-}
-function hasAnyStyleField(style) {
-  if (!style) return false;
-  return Object.values(style).some((v) => v !== void 0);
-}
-function usesTypedText(args) {
-  if (args.paragraph !== void 0 || args.box !== void 0 || args.paragraphs !== void 0) return true;
-  const st = args.style ?? {};
-  return TYPED_STYLE_KEYS.some((k) => st[k] !== void 0);
-}
-function typedTextChecks(set2, justify, afterObj, coveredPaths = []) {
-  const expected = {};
-  const actual = {};
-  const unverified = [];
-  const mixed = Array.isArray(afterObj.mixed) ? afterObj.mixed : [];
-  const wanted = set2 ?? {};
-  const want = {
-    typography: { ...wanted.typography ?? {} },
-    paragraph: { ...wanted.paragraph ?? {} },
-    box: { ...wanted.box ?? {} }
-  };
-  if (justify !== void 0) want.paragraph.justify = justify;
-  for (const group of ["typography", "paragraph", "box"]) {
-    const got = afterObj[group] ?? {};
-    for (const [key, value] of Object.entries(want[group])) {
-      const path63 = `${group}.${key}`;
-      if (coveredPaths.includes(path63) || mixed.includes(path63) || got[key] === void 0) {
-        unverified.push(path63);
-        continue;
-      }
-      expected[path63] = value;
-      actual[path63] = got[key];
-    }
-  }
-  return { expected, actual, unverified };
-}
-function layoutChanged(before, after) {
-  const b = before;
-  const a = after;
-  if (!b || !a) return null;
-  if (typeof b.composed_line_count === "number" && typeof a.composed_line_count === "number" && b.composed_line_count !== a.composed_line_count) return true;
-  if (b.source_rect && a.source_rect) {
-    return ["top", "left", "width", "height"].some((k) => Math.abs((b.source_rect[k] ?? 0) - (a.source_rect[k] ?? 0)) > 0.5);
-  }
-  return null;
-}
-function resolvedRanges(result) {
-  const list2 = result?.ranges;
-  if (!Array.isArray(list2)) return [];
-  return list2.filter((r) => !!r && typeof r.start === "number" && typeof r.end === "number" && !!r.style && typeof r.style === "object");
-}
-function coveredByFirstRange(key, ranges) {
-  let group = [key];
-  if (FILL_GROUP.includes(key)) group = FILL_GROUP;
-  else if (STROKE_GROUP.includes(key)) group = STROKE_GROUP;
-  return ranges.some((r) => r.start === 0 && group.some((g) => r.style[g] !== void 0));
-}
-function rangeExpectations(ranges) {
-  const out = {};
-  ranges.forEach((r, i) => {
-    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = r.style[k];
-  });
-  return out;
-}
-function rangeActuals(ranges, afterRanges) {
-  const out = {};
-  const list2 = Array.isArray(afterRanges) ? afterRanges : [];
-  ranges.forEach((r, i) => {
-    for (const k of RANGE_STYLE_KEYS) if (r.style[k] !== void 0) out[`ranges[${i}].${k}`] = list2[i]?.style?.[k];
-  });
-  return out;
-}
-function reloadChanges(beforeItems, afterItems, ids) {
-  const list2 = (v) => Array.isArray(v) ? v : [];
-  const before = new Map(list2(beforeItems).map((i) => [i.item_id, i]));
-  const after = new Map(list2(afterItems).map((i) => [i.item_id, i]));
-  const changed = [];
-  for (const id of ids) {
-    const b = before.get(id);
-    const a = after.get(id);
-    if (!b || !a) continue;
-    const fields = [];
-    if (b.width !== a.width) fields.push("width");
-    if (b.height !== a.height) fields.push("height");
-    if (typeof b.duration === "number" && typeof a.duration === "number" && Math.abs(b.duration - a.duration) > 1e-6) fields.push("duration");
-    if (typeof b.frameRate === "number" && typeof a.frameRate === "number" && Math.abs(b.frameRate - a.frameRate) > 1e-4) fields.push("frameRate");
-    if (fields.length > 0) {
-      changed.push({
-        item_id: id,
-        name: a.name,
-        changed: fields,
-        before: { width: b.width, height: b.height, duration: b.duration, frameRate: b.frameRate },
-        after: { width: a.width, height: a.height, duration: a.duration, frameRate: a.frameRate }
-      });
-    }
-  }
-  return changed;
-}
-async function reloadFootage(args, ctx) {
-  ctx.quarantine.assertClear();
-  const opId = ctx.bridge.newOpId();
-  const targets = {};
-  if (args.item_ids !== void 0) targets.item_ids = args.item_ids;
-  else if (args.folder_id !== void 0) targets.folder_id = args.folder_id;
-  else targets.item_ids = [args.item_id];
-  const label = `ae_replace_footage(reload ${args.folder_id !== void 0 ? `folder ${args.folder_id}` : `${targets.item_ids.length} item(s)`})`;
-  try {
-    return await ctx.queue.run(label, async () => {
-      ctx.quarantine.assertClear();
-      const guard = await verifyTargetGuard(ctx, args.expect, opId);
-      const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
-      const beforeSnap = await ctx.bridge.evalRaw({
-        id: `${opId}_before`,
-        script: buildJsxCall("animateReloadTargets", { ...targets, reloadable_only: true }),
-        label: `${label} (before)`,
-        mutates: false,
-        toolName: "ae_replace_footage"
-      });
-      const writeResp = await ctx.bridge.evalRaw({
-        id: opId,
-        script: buildJsxCall("animateReloadFootage", { ...targets, expect: args.expect }),
-        label,
-        timeoutMs: SLOW_TIMEOUT_MS,
-        mutates: true,
-        toolName: "ae_replace_footage"
-      });
-      const written = writeResp.result ?? {};
-      const ids = Array.isArray(written.item_ids) ? written.item_ids : [];
-      const reloaded = Array.isArray(written.reloaded) ? written.reloaded : [];
-      const base = {
-        action: "reload",
-        reloaded,
-        skipped: Array.isArray(written.skipped) ? written.skipped : [],
-        ...Array.isArray(written.failed) ? { failed: written.failed } : {},
-        ...written.truncated ? { truncated: true } : {}
-      };
-      if (written.no_op === true || ids.length === 0) {
-        return {
-          op_id: opId,
-          applied: true,
-          no_op: true,
-          ...base,
-          changed_items: [],
-          result: writeResp.result,
-          checkpoint,
-          receipt: buildReceipt({ before: beforeSnap.result, after: beforeSnap.result })
-        };
-      }
-      const afterRead = await readAfterWrite(
-        opId,
-        () => ctx.bridge.evalRaw({
-          id: `${opId}_after`,
-          script: buildJsxCall("animateReloadTargets", { item_ids: ids }),
-          label: `${label} (after)`,
-          mutates: false,
-          toolName: "ae_replace_footage"
-        })
-      );
-      if (afterRead.failure) {
-        return {
-          op_id: opId,
-          applied: true,
-          ...base,
-          result: writeResp.result,
-          checkpoint,
-          receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-        };
-      }
-      const afterSnap = afterRead.value;
-      const beforeItems = beforeSnap.result?.items;
-      const beforePartial = beforeSnap.result?.truncated === true;
-      const afterItems = afterSnap.result?.items;
-      const outcome = checkAfterWrite(
-        opId,
-        () => {
-          const mismatches = [];
-          for (const item of Array.isArray(afterItems) ? afterItems : []) {
-            if (reloaded.includes(item.item_id) && item.footageMissing === true) {
-              mismatches.push({
-                path: `items[${item.item_id}].footageMissing`,
-                expected: false,
-                actual: true,
-                message: `Item ${item.item_id} (${item.name ?? "?"}) is still missing after the reload`
-              });
-            }
-          }
-          for (const failure2 of Array.isArray(written.failed) ? written.failed : []) {
-            mismatches.push({
-              path: `items[${failure2.item_id}].reload`,
-              expected: "reloaded",
-              actual: failure2.error ?? "failed",
-              message: `Item ${failure2.item_id} (${failure2.name ?? "?"}) did not reload: ${failure2.error ?? "unknown error"}`
-            });
-          }
-          return { mismatches, changed: reloadChanges(beforeItems, afterItems, reloaded) };
-        },
-        (failure2) => ({ mismatches: [failure2], changed: [] })
-      );
-      return {
-        op_id: opId,
-        applied: true,
-        ...base,
-        changed_items: outcome.changed,
-        ...beforePartial ? { changed_partial: true } : { unchanged_count: Math.max(0, reloaded.length - outcome.changed.length) },
-        result: writeResp.result,
-        checkpoint,
-        receipt: buildReceipt({ before: beforeSnap.result, after: afterSnap.result, customMismatches: outcome.mismatches })
-      };
-    });
-  } catch (err) {
-    if (err instanceof QueueWaitError) {
-      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
-    }
-    throw err;
-  }
-}
-function createdItemIds(result) {
-  const r = result ?? {};
-  const ids = (key) => Array.isArray(r[key]) ? r[key].filter((n) => typeof n === "number") : [];
-  const comps = ids("new_comp_ids");
-  const folders = ids("new_folder_ids");
-  if (comps.length === 0 && folders.length === 0) return [];
-  return [.../* @__PURE__ */ new Set([...ids("item_ids"), ...comps, ...folders])].slice(0, 500);
-}
-function importCreatedFields(result) {
-  const r = result ?? {};
-  const out = {};
-  for (const k of ["new_comp_ids", "new_folder_ids", "main_comp_id", "created_folder_id", "created_item_count", "new_comp_count", "new_folder_count", "created_truncated", "placeholder_ids", "notes"]) {
-    if (r[k] !== void 0) out[k] = r[k];
-  }
-  return out;
-}
-var KeyframeEaseEndSchema, KeyframeEasePairSchema, KeyframeEasePresetSchema, MIN_HANDLE2, EASE_CURVE_ARRAY_SCHEMA, KeyframeEaseCurveSchema, KeyframeEaseInputSchema, KeyInterpolationSchema, KeyTangentSchema, KEY_EXTRA_FIELDS, KeyExtrasShape, AeSetKeyframeEaseSchema, TextJustificationSchema, RgbColorSchema, FontInputSchema, TextCapsSchema, TextBaselineSchema, TextKerningSchema, TextLineJoinSchema, TextLineOrientationSchema, TextJustifyFullSchema, TextStyleSchema, TextParagraphSchema, TextBoxSchema, RANGE_STYLE_KEYS, RangeStyleSchema, TextRangeSchema, TextParagraphStyleSchema, AeSetTextSchema, TYPED_STYLE_KEYS, FILL_GROUP, STROKE_GROUP, ImportAsSchema, ImportPlaceholderSchema, AeImportFootageSchema, AeReplaceFootageSchema, animateTools;
-var init_animate = __esm({
-  "src/tools/ext/animate.ts"() {
-    "use strict";
-    init_zod();
-    init_host();
-    init_jsx();
-    init_queue();
-    init_receipts();
-    init_common();
-    init_mutate();
-    init_read_back();
-    KeyframeEaseEndSchema = external_exports.object({
-      speed: external_exports.number().describe(
-        "Temporal ease speed (units per second; typically 0 for smooth ease)."
-      ),
-      influence: external_exports.number().min(0).max(100).describe(
-        "Temporal ease influence percentage (0.1 to 100; values below 0.1 are clamped to 0.1 in After Effects)."
-      )
-    });
-    KeyframeEasePairSchema = external_exports.object({
-      in: KeyframeEaseEndSchema.describe(
-        "Incoming temporal ease {speed, influence}."
-      ),
-      out: KeyframeEaseEndSchema.describe(
-        "Outgoing temporal ease {speed, influence}."
-      )
-    });
-    KeyframeEasePresetSchema = external_exports.enum([
-      "easy_ease",
-      "linear",
-      "hold"
-    ]);
-    MIN_HANDLE2 = 1e-3;
-    EASE_CURVE_ARRAY_SCHEMA = external_exports.array(external_exports.number()).length(4).refine((c) => c[0] >= MIN_HANDLE2 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1 - MIN_HANDLE2, {
-      message: `curve x1 must be within ${MIN_HANDLE2}..1 and x2 within 0..${1 - MIN_HANDLE2}`
-    }).describe(
-      "cubic-bezier [x1, y1, x2, y2] as in CSS: x is time and y is progress across one segment, both 0..1. y may leave 0..1 for anticipation or overshoot (not on spatial properties such as Position, whose speed cannot go negative)."
-    );
-    KeyframeEaseCurveSchema = external_exports.object({
-      curve: EASE_CURVE_ARRAY_SCHEMA
-    });
-    KeyframeEaseInputSchema = external_exports.union([KeyframeEasePresetSchema, KeyframeEasePairSchema, KeyframeEaseCurveSchema]).describe(
-      'A preset ("easy_ease", "linear", or "hold"), an explicit `{ in: { speed, influence }, out: { speed, influence } }` object, or `{ curve: [x1, y1, x2, y2] }`. A curve shapes each segment between neighbouring keys in `keys` (all keys by default): it sets the out ease of the segment\'s first key and the in ease of its last, from that segment\'s duration and distance, and leaves every other side alone.'
-    );
-    KeyInterpolationSchema = external_exports.enum(["linear", "bezier", "hold"]);
-    KeyTangentSchema = external_exports.array(external_exports.number()).min(2).max(3);
-    KEY_EXTRA_FIELDS = [
-      "in_interp",
-      "out_interp",
-      "in_tangent",
-      "out_tangent",
-      "spatial_continuous",
-      "spatial_auto_bezier",
-      "temporal_continuous",
-      "temporal_auto_bezier",
-      "roving",
-      "label"
-    ];
-    KeyExtrasShape = {
-      in_interp: KeyInterpolationSchema.optional().describe(
-        "Interpolation going INTO each key ('linear', 'bezier' or 'hold'), different from the out side. Without `ease` it is set per side (setInterpolationTypeAtKey); with `ease` it can only repeat the interpolation the ease sets. Refused up front when the property does not accept it (hold-only properties such as Source Text and checkboxes)."
-      ),
-      out_interp: KeyInterpolationSchema.optional().describe("Interpolation going OUT of each key ('linear', 'bezier' or 'hold'); see in_interp."),
-      in_tangent: KeyTangentSchema.optional().describe(
-        "Spatial in tangent [x, y] or [x, y, z] (a motion-path handle, relative to the key's value), for Position and other spatial properties only; the array length must match the property (2D or 3D). Auto bezier is switched off first, then the tangent is set."
-      ),
-      out_tangent: KeyTangentSchema.optional().describe("Spatial out tangent [x, y] or [x, y, z]; see in_tangent."),
-      spatial_continuous: external_exports.boolean().optional().describe("Spatial continuous (the motion path stays smooth through the key). Spatial properties only."),
-      spatial_auto_bezier: external_exports.boolean().optional().describe("Spatial auto bezier (AE computes the path handles). true implies continuous; can't be combined with tangents. Spatial properties only."),
-      temporal_continuous: external_exports.boolean().optional().describe("Temporal continuous (in and out ease stay matched). Any keyframed property."),
-      temporal_auto_bezier: external_exports.boolean().optional().describe("Temporal auto bezier (AE computes the ease). true implies continuous. Any keyframed property."),
-      roving: external_exports.boolean().optional().describe(
-        "Make the listed keys roving (true) or fixed in time (false), applied last. Spatial properties only; the first and last keys of the property can't rove. Use rove_between to rove everything between two keys."
-      ),
-      label: external_exports.number().int().min(0).max(16).optional().describe("Key label colour 0 (none) to 16 (After Effects 22.6+; refused before the write on older AE).")
-    };
-    AeSetKeyframeEaseSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("Target CompItem ID."),
-      layer: LayerSelectorSchema,
-      path: external_exports.array(external_exports.union([external_exports.string().min(1), external_exports.number().int().positive()])).min(1).describe(
-        "Property path from the layer root (e.g. ['ADBE Transform Group', 'ADBE Position'] or ['Transform', 'Opacity']). A step may be a 1-based positional index instead of a name for a sibling inside an indexed group (effects, masks, shape layer contents), where siblings can share a display name."
-      ),
-      keys: external_exports.union([external_exports.array(external_exports.number().int().positive()), external_exports.literal("selected")]).optional().describe(
-        'Optional 1-based keyframe indices to update, or "selected" for the keys currently selected in the timeline (read from Property.selectedKeys; refused when none are). Defaults to all keyframes on the property.'
-      ),
-      ease: KeyframeEaseInputSchema.optional().describe(
-        "The ease to set (preset, explicit `{in, out}` or `{curve}`). Optional when per-key settings (in_interp, out_interp, in_tangent, out_tangent, spatial_continuous, spatial_auto_bezier, temporal_continuous, temporal_auto_bezier, roving, label) are given instead; give at least one of the two."
-      ),
-      rove_between: external_exports.boolean().optional().describe(
-        "Make the keys strictly between the first and last of `keys` roving (Keyframe > Rove Across Time), so a move eased at its ends keeps one smooth speed through them. Spatial properties only (Position, Anchor Point); not with a curve or hold. Roving keys are left out of the ease check, since AE sets their ease."
-      ),
-      ...KeyExtrasShape,
-      expect: ExpectSchema
-    }).refine((v) => v.ease !== void 0 || pickKeyExtras(v) !== void 0, {
-      message: "ae_set_keyframe_ease needs `ease`, or at least one per-key setting (in_interp, out_interp, in_tangent, out_tangent, spatial_continuous, spatial_auto_bezier, temporal_continuous, temporal_auto_bezier, roving, label)."
-    });
-    TextJustificationSchema = external_exports.enum(["left", "center", "right"]);
-    RgbColorSchema = external_exports.array(external_exports.number().min(0).max(1)).length(3).describe("RGB color array [r, g, b] with components in 0..1.");
-    FontInputSchema = external_exports.union([
-      external_exports.string().min(1),
-      external_exports.object({ postscript: external_exports.string().min(1) }),
-      external_exports.object({ family: external_exports.string().min(1), style: external_exports.string().min(1) })
-    ]).describe(
-      "A PostScript name ('Inter-Bold', 'ArialMT'), `{ postscript }` or `{ family: 'Inter', style: 'Bold' }`. On AE 24+ the font is looked up in the installed fonts before anything is written: an unknown name is refused with the near matches (pass allow_substitute: true to write the name anyway), and a font After Effects would substitute is flagged on the receipt."
-    );
-    TextCapsSchema = external_exports.enum(["normal", "small", "all", "all_small"]);
-    TextBaselineSchema = external_exports.enum(["normal", "superscript", "subscript"]);
-    TextKerningSchema = external_exports.union([external_exports.enum(["metrics", "optical", "none"]), external_exports.number().min(-1e4).max(1e4)]);
-    TextLineJoinSchema = external_exports.enum(["miter", "round", "bevel"]);
-    TextLineOrientationSchema = external_exports.enum(["horizontal", "vertical_rtl", "vertical_ltr"]);
-    TextJustifyFullSchema = external_exports.enum(["left", "center", "right", "full_left", "full_center", "full_right", "full"]);
-    TextStyleSchema = external_exports.object({
-      font: FontInputSchema.optional(),
-      fontSize: external_exports.number().positive().optional().describe("Font size in pixels."),
-      tracking: external_exports.number().optional().describe("Character tracking value."),
-      leading: external_exports.number().optional().describe("Line leading in pixels. Setting it switches auto leading off."),
-      fillColor: RgbColorSchema.optional().describe(
-        "Fill color [r, g, b] in 0..1."
-      ),
-      strokeColor: RgbColorSchema.optional().describe(
-        "Stroke color [r, g, b] in 0..1."
-      ),
-      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels."),
-      applyFill: external_exports.boolean().optional().describe("Whether fill is enabled on the text layer."),
-      applyStroke: external_exports.boolean().optional().describe("Whether stroke is enabled on the text layer."),
-      justification: TextJustificationSchema.optional().describe(
-        "Paragraph justification: 'left', 'center', or 'right'. The full-justify variants are `paragraph.justify`."
-      ),
-      caps: TextCapsSchema.optional().describe("Capitalisation: 'normal', 'small' (small caps), 'all' (all caps) or 'all_small' (AE 24.0+, fontCapsOption)."),
-      baseline: TextBaselineSchema.optional().describe("Baseline position: 'normal', 'superscript' or 'subscript' (AE 24.0+, fontBaselineOption)."),
-      kerning: TextKerningSchema.optional().describe(
-        "Kerning: 'metrics', 'optical' or 'none' (the auto-kern mode), or a number in 1/1000 em. A number switches automatic kerning off (the result says so)."
-      ),
-      ligature: external_exports.boolean().optional().describe("Standard ligatures on or off."),
-      no_break: external_exports.boolean().optional().describe("No Break: keep the text together at line ends."),
-      horizontal_scale: external_exports.number().min(0).max(1e3).optional().describe("Horizontal glyph scale, sent as given (1 = 100% in After Effects' scripting; the read-back shows how this build reads it)."),
-      vertical_scale: external_exports.number().min(0).max(1e3).optional().describe("Vertical glyph scale; see horizontal_scale."),
-      tsume: external_exports.number().min(0).max(100).optional().describe("Tsume (CJK character tightening). The scripting guide gives both 0-1 and 0-100 for it; the value is sent as given and the read-back shows which one this build uses."),
-      stroke_over_fill: external_exports.boolean().optional().describe("Stroke draws over the fill (true) or under it (false). A layer-level 'All Fills/Strokes First' setting can override it."),
-      line_join: TextLineJoinSchema.optional().describe("Stroke corner style: 'miter', 'round' or 'bevel'."),
-      auto_leading: external_exports.boolean().optional().describe("Auto leading on or off. Can't be true together with `leading`."),
-      digit_set: external_exports.string().min(1).max(40).optional().describe("Digit set by name as After Effects spells it (for example 'default', 'hindi', 'arabic_digits'); an exact name wins, a partial name must match one member only, and a name this build lacks is refused with the ones it has."),
-      baseline_direction: external_exports.string().min(1).max(40).optional().describe("Baseline direction for vertical text, by name as After Effects spells it; a name this build lacks is refused with the ones it has."),
-      line_orientation: TextLineOrientationSchema.optional().describe("Line orientation: 'horizontal', 'vertical_rtl' or 'vertical_ltr' (AE 24.2+)."),
-      faux_bold: external_exports.boolean().optional().describe("Faux bold for the whole text (per word: ranges[].style.fauxBold)."),
-      faux_italic: external_exports.boolean().optional().describe("Faux italic for the whole text (per word: ranges[].style.fauxItalic).")
-    }).describe(
-      "Optional TextDocument styling properties to update. The character options from `caps` on are AE 24.0+ (24.2 for line_orientation); an AE without the member refuses before anything is written."
-    );
-    TextParagraphSchema = external_exports.object({
-      justify: TextJustifyFullSchema.optional().describe(
-        "Justification including the full-justify variants: 'left', 'center', 'right', 'full_left', 'full_center', 'full_right' (last line left, centred, right) and 'full' (last line justified too). Not together with style.justification."
-      ),
-      space_before: external_exports.number().min(-1e4).max(1e4).optional().describe("Space before each paragraph, in pixels."),
-      space_after: external_exports.number().min(-1e4).max(1e4).optional().describe("Space after each paragraph, in pixels."),
-      first_line_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("First line indent, in pixels (negative for a hanging indent)."),
-      start_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("Left (start) indent, in pixels."),
-      end_indent: external_exports.number().min(-1e4).max(1e4).optional().describe("Right (end) indent, in pixels."),
-      every_line_composer: external_exports.boolean().optional().describe("Every-line composer (true) or single-line composer (false)."),
-      hanging_roman: external_exports.boolean().optional().describe("Roman hanging punctuation."),
-      auto_hyphenate: external_exports.boolean().optional().describe("Automatic hyphenation."),
-      leading_type: external_exports.enum(["roman", "japanese"]).optional().describe("Leading type: 'roman' or 'japanese'."),
-      direction: external_exports.enum(["ltr", "rtl"]).optional().describe("Paragraph direction: 'ltr' or 'rtl' (right-to-left titles)."),
-      composer: external_exports.enum(["universal"]).optional().describe("Composer engine. Only 'universal' is accepted by After Effects, and the change is one-way.")
-    }).describe(
-      "Paragraph options, applied to the whole text document (AE 24.0+). Whether these can be set for a single paragraph is undocumented, so they are not per paragraph; use `paragraphs` for per-paragraph character styles."
-    );
-    TextBoxSchema = external_exports.object({
-      size: external_exports.tuple([external_exports.number().int().min(1).max(1e5), external_exports.number().int().min(1).max(1e5)]).optional().describe('Box size [width, height] in pixels (whole numbers). Rewraps the text. Refused together with a height auto_fit, and also when the layer already has a height auto_fit (auto fit resets the height); give auto_fit "none" with the size.'),
-      position: external_exports.tuple([external_exports.number(), external_exports.number()]).optional().describe("Box position [x, y] in layer coordinates."),
-      vertical_align: external_exports.enum(["top", "center", "bottom", "justify"]).optional().describe("Vertical alignment of the text in the box."),
-      auto_fit: external_exports.enum(["none", "height_cursor", "height_precise", "height_baseline"]).optional().describe("Auto-fit the box height to the text. Only works with vertical_align 'top' (refused otherwise). A height policy (not none) can't be given together with box.size (the text sets the height)."),
-      inset: external_exports.union([external_exports.number(), external_exports.array(external_exports.number()).min(1).max(8)]).optional().describe("Inset spacing: one number for all sides, or the array in After Effects' own order (its length must match the current value; the read-back shows the current one as box.inset). An After Effects whose inset is a single number takes one number only and refuses every array."),
-      first_baseline: external_exports.string().min(1).max(40).optional().describe("First baseline alignment by name as After Effects spells it (for example 'ascent', 'cap_height', 'leading'); a name this build lacks is refused with the ones it has."),
-      first_baseline_min: external_exports.number().min(0).max(1e5).optional().describe("Minimum first-baseline offset. A non-zero minimum disables first_baseline, so they can't be given together.")
-    }).describe(
-      "Box text options (AE 24.6+). Refused on point text before anything is written: point <-> box conversion is not scriptable. The receipt measures the text again (layout), since a new box size rewraps it."
-    );
-    RANGE_STYLE_KEYS = [
-      "font",
-      "fontSize",
-      "tracking",
-      "baselineShift",
-      "fillColor",
-      "strokeColor",
-      "strokeWidth",
-      "applyFill",
-      "applyStroke",
-      "fauxBold",
-      "fauxItalic"
-    ];
-    RangeStyleSchema = external_exports.object({
-      font: FontInputSchema.optional(),
-      fontSize: external_exports.number().min(0.1).max(1296).optional().describe("Font size in pixels for the range."),
-      tracking: external_exports.number().optional().describe("Tracking for the range."),
-      baselineShift: external_exports.number().optional().describe("Baseline shift in pixels for the range (positive raises)."),
-      fillColor: RgbColorSchema.optional().describe("Fill colour [r, g, b] in 0..1 (also turns the fill on)."),
-      strokeColor: RgbColorSchema.optional().describe("Stroke colour [r, g, b] in 0..1 (also turns the stroke on)."),
-      strokeWidth: external_exports.number().min(0).optional().describe("Stroke width in pixels for the range."),
-      applyFill: external_exports.boolean().optional().describe("Turn the fill on or off for the range."),
-      applyStroke: external_exports.boolean().optional().describe("Turn the stroke on or off for the range."),
-      fauxBold: external_exports.boolean().optional().describe("Faux bold for the range."),
-      fauxItalic: external_exports.boolean().optional().describe("Faux italic for the range.")
-    }).refine((s) => RANGE_STYLE_KEYS.some((k) => s[k] !== void 0), { message: "A range's style needs at least one field." });
-    TextRangeSchema = external_exports.object({
-      match: external_exports.string().min(1).max(200).optional().describe("Style this text wherever it occurs (case-sensitive), instead of start/end."),
-      occurrence: external_exports.enum(["first", "all"]).optional().describe("With match: the first occurrence or all of them (default all, at most 200)."),
-      start: external_exports.number().int().min(0).optional().describe("First character, 0-based."),
-      end: external_exports.number().int().min(1).optional().describe("One past the last character. Default: the end of the text."),
-      style: RangeStyleSchema
-    }).refine((r) => r.match !== void 0 !== (r.start !== void 0), { message: "A range takes `match`, or `start` (with `end`), not both." }).refine((r) => r.end === void 0 || r.start !== void 0, { message: "`end` goes with `start`." }).refine((r) => r.start === void 0 || r.end === void 0 || r.end > r.start, { message: "`end` must be above `start`." }).refine((r) => r.occurrence === void 0 || r.match !== void 0, { message: "`occurrence` goes with `match`." });
-    TextParagraphStyleSchema = external_exports.object({
-      index: external_exports.number().int().min(0).optional().describe("The paragraph, 0-based (paragraphs are separated by a line break)."),
-      match: external_exports.string().min(1).max(200).optional().describe("Every paragraph that contains this text (case-sensitive), instead of index."),
-      occurrence: external_exports.enum(["first", "all"]).optional().describe("With match: the first such paragraph or all of them (default all)."),
-      style: RangeStyleSchema
-    }).refine((p) => p.index !== void 0 !== (p.match !== void 0), { message: "A paragraph entry takes `index` or `match`, not both." }).refine((p) => p.occurrence === void 0 || p.match !== void 0, { message: "`occurrence` goes with `match`." });
-    AeSetTextSchema = external_exports.object({
-      comp_id: external_exports.number().int().describe("Target CompItem ID."),
-      layer: LayerSelectorSchema,
-      text: external_exports.string().optional().describe("New text string to set on the TextLayer's Source Text."),
-      style: TextStyleSchema.optional(),
-      paragraph: TextParagraphSchema.optional(),
-      box: TextBoxSchema.optional(),
-      ranges: external_exports.array(TextRangeSchema).min(1).max(50).optional().describe(
-        "Per-word or per-character styling, applied after `text` and `style`: each range is `match` (a word) or `start`/`end`, with a `style` of font, fontSize, tracking, baselineShift, fillColor, strokeColor, strokeWidth, applyFill, applyStroke, fauxBold, fauxItalic. Needs AE 24.3+ (TextDocument.characterRange); refused before anything is written on older AE. Ranges that overlap and set the same field are refused; values are checked before the write. Read back range by range; a range whose values read back as mixed is reported as a mismatch."
-      ),
-      paragraphs: external_exports.array(TextParagraphStyleSchema).min(1).max(50).optional().describe(
-        "Character styles for whole paragraphs ('the second paragraph in red', 'every paragraph that contains NOW in bold'): each entry is `index` (0-based) or `match`, with the same `style` fields as a range. The paragraph is turned into a character range on the final text, so it needs AE 24.3+ like `ranges` and follows the same overlap rules. Paragraph-wide attributes (spacing, indents) are not per paragraph: see `paragraph`."
-      ),
-      allow_substitute: external_exports.boolean().optional().describe("Write a PostScript font name even when it is not installed (After Effects then substitutes). Default false: an unknown font is refused with the near matches."),
-      expect: ExpectSchema
-    }).refine(
-      (val) => val.text !== void 0 || hasAnyStyleField(val.style) || val.ranges !== void 0 || hasAnyStyleField(val.paragraph) || hasAnyStyleField(val.box) || val.paragraphs !== void 0,
-      {
-        message: "ae_set_text requires at least `text`, one defined property in `style`, `paragraph` or `box`, `ranges` or `paragraphs`."
-      }
-    ).refine((val) => !(val.paragraph?.justify !== void 0 && val.style?.justification !== void 0), {
-      message: "paragraph.justify and style.justification both set the justification; give one of them."
-    }).refine((val) => !(val.style?.leading !== void 0 && val.style?.auto_leading === true), {
-      message: "style.leading and style.auto_leading true contradict each other (setting leading switches auto leading off)."
-    }).refine((val) => !(val.box?.first_baseline !== void 0 && val.box?.first_baseline_min !== void 0 && val.box.first_baseline_min !== 0), {
-      message: "A non-zero box.first_baseline_min disables box.first_baseline; give one of them."
-    });
-    TYPED_STYLE_KEYS = [
-      "caps",
-      "baseline",
-      "kerning",
-      "ligature",
-      "no_break",
-      "horizontal_scale",
-      "vertical_scale",
-      "tsume",
-      "stroke_over_fill",
-      "line_join",
-      "auto_leading",
-      "digit_set",
-      "baseline_direction",
-      "line_orientation",
-      "faux_bold",
-      "faux_italic"
-    ];
-    FILL_GROUP = ["fillColor", "applyFill"];
-    STROKE_GROUP = ["strokeColor", "strokeWidth", "applyStroke"];
-    ImportAsSchema = external_exports.enum(["footage", "comp", "comp_cropped_layers", "project"]);
-    ImportPlaceholderSchema = external_exports.object({
-      name: external_exports.string().min(1).max(255).describe("Placeholder name."),
-      width: external_exports.number().int().min(4).max(3e4).describe("Width in pixels, 4 to 30000."),
-      height: external_exports.number().int().min(4).max(3e4).describe("Height in pixels, 4 to 30000."),
-      fps: external_exports.number().min(1).max(99).describe("Frame rate, 1 to 99."),
-      duration: external_exports.number().min(0).max(10800).describe("Duration in seconds, 0 to 10800.")
-    });
-    AeImportFootageSchema = external_exports.object({
-      paths: external_exports.array(external_exports.string().min(1)).min(1).max(500).optional().describe("Absolute file paths of footage files to import. Optional only when `placeholders` is given."),
-      sequence: external_exports.boolean().optional().describe(
-        "If true, import as an image sequence, numbered frames in order with placeholders for missing ones (Force alphabetical order off, AE's default)."
-      ),
-      fps: external_exports.number().positive().optional().describe(
-        "Optional frame rate (conformFrameRate) to assign to imported footage items."
-      ),
-      target_folder_id: external_exports.number().int().optional().describe(
-        "Optional FolderItem ID in the project to place the imported items into. With import_as 'comp' / 'comp_cropped_layers' / 'project' it receives the top created items (the comp and the folder AE makes for the layers)."
-      ),
-      import_as: ImportAsSchema.optional().describe(
-        "What to build from a layered file (PSD, AI) or project: 'footage' (default: one flattened footage item or the merged layers), 'comp' (a comp with one layer per file layer), 'comp_cropped_layers' (the same, layers cropped to their content) or 'project' (an After Effects project file, its whole tree). ImportOptions.canImportAs is asked first for every file; a file that cannot be imported that way is refused before anything is imported, listing the types it allows. The result lists new_comp_ids, new_folder_ids, main_comp_id and created_folder_id (found by diffing the project's items before and after). Importing a project or an older file can raise After Effects dialogs (missing fonts or footage, conversion): they are never suppressed; read them with ae_dialogs and answer with ae_dialog_respond. Not combined with `sequence`."
-      ),
-      range: external_exports.object({
-        start: external_exports.number().int().min(0).describe("First frame number of the sequence to import."),
-        end: external_exports.number().int().min(0).describe("Last frame number.")
-      }).refine((r) => r.end >= r.start, { message: "range.end must be at or above range.start." }).optional().describe(
-        "With sequence: true, import only frames start..end of a numbered sequence (ImportOptions.rangeStart / rangeEnd, undocumented: probed before the write). Can't be combined with force_alphabetical: true, which makes After Effects throw."
-      ),
-      force_alphabetical: external_exports.boolean().optional().describe("With sequence: true, import in alphabetical rather than numbered order. Default false (numbered order with placeholders for gaps)."),
-      placeholders: external_exports.array(ImportPlaceholderSchema).min(1).max(100).optional().describe("Placeholders to create for footage that is not there yet (Project.importPlaceholder), each {name, width, height, fps, duration}; their ids are in `placeholder_ids` and at the end of `item_ids`."),
-      expect: ExpectSchema
-    }).refine((v) => v.paths !== void 0 || v.placeholders !== void 0, {
-      message: "ae_import_footage needs `paths` or `placeholders`."
-    }).refine((v) => v.range === void 0 || v.sequence === true, { message: "`range` goes with sequence: true." }).refine((v) => v.force_alphabetical === void 0 || v.sequence === true, { message: "`force_alphabetical` goes with sequence: true." }).refine((v) => !(v.range !== void 0 && v.force_alphabetical === true), {
-      message: "`range` can't be combined with force_alphabetical: true (After Effects throws on rangeStart / rangeEnd then)."
-    }).refine((v) => v.import_as === void 0 || v.import_as === "footage" || v.sequence !== true, {
-      message: "import_as 'comp', 'comp_cropped_layers' and 'project' can't be combined with sequence: true."
-    });
-    AeReplaceFootageSchema = external_exports.object({
-      action: external_exports.enum(["replace", "reload"]).optional().describe("'replace' (default): relink a footage item to another file. 'reload': reload the main file source of footage items after the files changed on disk."),
-      item_id: external_exports.number().int().optional().describe("Project FootageItem ID to replace (or, with action 'reload', a single item to reload)."),
-      path: external_exports.string().min(1).optional().describe(
-        "Absolute file path to the replacement footage file (or first frame of a sequence). Required for 'replace'."
-      ),
-      sequence: external_exports.boolean().optional().describe(
-        "If true, use FootageItem.replaceWithSequence(file, false) (numbered order, gaps kept as placeholders); otherwise use FootageItem.replace(file)."
-      ),
-      item_ids: external_exports.array(external_exports.number().int()).min(1).max(500).optional().describe("With action 'reload': the FootageItem ids to reload. Any item that can't be reloaded (a proxy in use, a solid, a placeholder) refuses the whole call."),
-      folder_id: external_exports.number().int().optional().describe("With action 'reload': reload every file-based footage item under this folder (nested folders included, at most 500); solids, placeholders and proxy items are skipped and listed under `skipped`."),
-      expect: ExpectSchema
-    }).superRefine((v, ctx) => {
-      const action = v.action ?? "replace";
-      if (action === "replace") {
-        if (v.item_id === void 0 || v.path === void 0) {
-          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "action 'replace' needs item_id and path." });
-        }
-        if (v.item_ids !== void 0 || v.folder_id !== void 0) {
-          ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "item_ids and folder_id go with action 'reload'." });
-        }
-        return;
-      }
-      const targets = [v.item_ids !== void 0, v.folder_id !== void 0, v.item_id !== void 0].filter(Boolean).length;
-      if (targets !== 1) {
-        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "action 'reload' needs exactly one of item_ids, folder_id or item_id." });
-      }
-      if (v.path !== void 0 || v.sequence !== void 0) {
-        ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "path and sequence go with action 'replace'." });
-      }
-    });
-    animateTools = [
-      {
-        name: "ae_set_keyframe_ease",
-        description: "Set temporal keyframe easing and interpolation on a keyframed layer property within a single undo group, guarded by `expect`, and verified by a separate read-back evalScript receipt. Supports presets ('easy_ease', 'linear', 'hold'), explicit `{ in: { speed, influence }, out: { speed, influence } }` (matched to the property's temporal ease dimension count), or `{ curve: [x1, y1, x2, y2] }`, a CSS-style cubic-bezier applied to each segment between neighbouring keys, such as one the user picked with ae_ask_user. Per-key settings (`in_interp` / `out_interp` for a different interpolation in and out, `in_tangent` / `out_tangent` for motion-path handles, `spatial_continuous`, `spatial_auto_bezier`, `temporal_continuous`, `temporal_auto_bezier`, `roving`, `label` 0-16) go with an ease or on their own (leave `ease` out), use the same names as ae_get_keyframes, and are checked against what the property accepts before the undo group opens (hold-only properties, 2D/3D tangent length, first and last keys can't rove). They apply in the order interpolation, ease, tangents and continuity, roving last. `keys: \"selected\"` targets the keys selected in the timeline. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeSetKeyframeEaseSchema,
-        handler: async (args, ctx) => {
-          if (args.rove_between && isCurveEase(args.ease)) {
-            return { ok: false, error: "bad_args", message: "rove_between can't be combined with a curve: the curve sets every key's ease, roving keys included." };
-          }
-          if (args.rove_between && args.ease === "hold") {
-            return { ok: false, error: "bad_args", message: "rove_between can't be combined with hold: held keys have no speed for roving to even out." };
-          }
-          const extras = pickKeyExtras(args);
-          const extrasProblem = keyExtrasConflict(args.ease, extras, args.rove_between);
-          if (extrasProblem) {
-            return { ok: false, error: "bad_args", message: extrasProblem };
-          }
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_set_keyframe_ease(${args.path.join(".")})`;
-          const effectiveExpect = {
-            project_path: args.expect.project_path,
-            comp_id: args.expect.comp_id ?? args.comp_id
-          };
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_keyframe_ease");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getKeyframeEase", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_set_keyframe_ease"
-              });
-              const keyTarget = resolveTargetKeys(args.keys, beforeSnap.result);
-              if ("error" in keyTarget) {
-                return { ok: false, error: "bad_args", message: keyTarget.error };
-              }
-              const targetKeys = keyTarget.keys;
-              const curvePlan = args.ease !== void 0 && isCurveEase(args.ease) ? curveToSides(beforeSnap.result, targetKeys, args.ease.curve) : null;
-              let writeScript;
-              if (curvePlan) {
-                writeScript = buildJsxCall("setKeyframeEaseSides", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path,
-                  sides: curvePlan.sides,
-                  ...extras ? { extras } : {},
-                  expect: effectiveExpect
-                });
-              } else if (args.ease === void 0) {
-                writeScript = buildJsxCall("animateKeyExtras", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path,
-                  keys: targetKeys,
-                  extras,
-                  expect: effectiveExpect
-                });
-              } else {
-                writeScript = buildJsxCall("setKeyframeEase", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  path: args.path,
-                  keys: targetKeys,
-                  ease: args.ease,
-                  rove_between: args.rove_between,
-                  ...extras ? { extras } : {},
-                  expect: effectiveExpect
-                });
-              }
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: writeScript,
-                label,
-                mutates: true,
-                toolName: "ae_set_keyframe_ease"
-              });
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getKeyframeEase", {
-                    comp_id: args.comp_id,
-                    layer: args.layer,
-                    path: args.path
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_set_keyframe_ease"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  result: writeResp.result,
-                  ...curvePlan ? {
-                    curve: args.ease,
-                    segments: curvePlan.segments,
-                    ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
-                  } : {},
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const skipEaseCheck = extrasRecomputeEase(extras);
-              const easeCheck = skipEaseCheck ? null : extractKeyframeEaseCheck(args.ease, targetKeys, afterSnap.result, rovingSkipKeys(writeResp.result));
-              const keysUpdated = Array.isArray(writeResp.result?.keysUpdated) ? writeResp.result.keysUpdated : targetKeys ?? [];
-              const extrasCheck = checkAfterWrite(
-                opId,
-                () => keyExtrasMismatches(extras, keysUpdated, afterSnap.result),
-                (failure2) => ({ mismatches: [failure2], unverified: [] })
-              );
-              let baseMismatches;
-              if (curvePlan) {
-                baseMismatches = skipEaseCheck ? [] : curveEaseMismatches(
-                  curvePlan.sides.filter((s) => !rovingSkipKeys(writeResp.result).includes(s.key)),
-                  afterSnap.result
-                );
-              } else {
-                baseMismatches = rovingMismatches(writeResp.result?.roving, afterSnap.result);
-              }
-              const extrasResult = writeResp.result?.extras;
-              const rovingFailed = Array.isArray(extrasResult?.roving_failed) ? extrasResult.roving_failed : [];
-              const notes = [];
-              if (skipEaseCheck && args.ease !== void 0) {
-                notes.push("The ease was not checked on the read-back: temporal continuous / auto bezier recompute the other side of each key.");
-              }
-              if (rovingFailed.length > 0) notes.push(`After Effects would not rove key${rovingFailed.length === 1 ? "" : "s"} ${rovingFailed.join(", ")}.`);
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: easeCheck?.expected,
-                actualForExpected: easeCheck?.actual,
-                customMismatches: [...baseMismatches, ...extrasCheck.mismatches]
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                result: writeResp.result,
-                ...curvePlan ? {
-                  curve: args.ease,
-                  segments: curvePlan.segments,
-                  ...curvePlan.warnings.length > 0 ? { warnings: curvePlan.warnings } : {}
-                } : {},
-                ...args.keys === "selected" ? { keys_resolved: targetKeys } : {},
-                ...extrasCheck.unverified.length > 0 ? { unverified: extrasCheck.unverified } : {},
-                ...notes.length > 0 ? { notes } : {},
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
-          }
-        }
-      },
-      {
-        name: "ae_set_text",
-        description: "Update a text layer's string and/or character/paragraph styling (`font`, `fontSize`, `tracking`, `leading`, `fillColor`, `strokeColor`, `strokeWidth`, `applyFill`, `applyStroke`, `justification`) via a guarded TextDocument round-trip in one undo group, re-asserting justification if AE's TextDocument round-trip drops it, and verifying via a separate read-back evalScript. `ranges` styles single words or characters ('make NOW bold and red': `{ match: 'NOW', style: { fauxBold: true, fillColor: [1, 0, 0] } }`) on AE 24.3+, each range read back separately; `paragraphs` does the same for whole paragraphs by index or by a word they contain. Typography in `style` (AE 24.0+): `caps` (normal, small, all, all_small), `baseline` (normal, superscript, subscript), `kerning` (metrics, optical, none, or a number that switches auto kerning off), ligature, no_break, horizontal_scale, vertical_scale, tsume, stroke_over_fill, line_join, auto_leading, digit_set, baseline_direction, line_orientation (24.2), faux_bold, faux_italic. `paragraph` (whole document): justify including the full-justify variants, space_before, space_after, first_line_indent, start_indent, end_indent, every_line_composer, hanging_roman, auto_hyphenate, leading_type, direction (ltr or rtl), composer. `box` (AE 24.6+, box text only; refused on point text): size, position, vertical_align, auto_fit (needs vertical_align top; a height auto_fit can't be combined with size, and a layer that already has a height auto_fit refuses size), inset, first_baseline, first_baseline_min; a new size rewraps the text, so the result's `layout` measures it before and after. Every option is checked against the document before the undo group opens, so an older After Effects refuses with the version it needs and nothing is written; the read-back compares each option by name and treats values AE reports as mixed as unknown (listed under `unverified`), never as a mismatch. Reads reflect the first character only. `font` takes a PostScript name, {postscript} or {family, style}: on AE 24+ it is looked up first, an unknown font is refused with the near matches (allow_substitute: true writes the name anyway) and a substituted font is a receipt mismatch; glyph coverage of the new text is checked and a missing glyph (Turkish \u015F \u011F \u0131 \u0130) is a warning. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeSetTextSchema,
-        handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_set_text(comp ${args.comp_id})`;
-          const rich = usesTypedText(args);
-          const effectiveExpect = {
-            project_path: args.expect.project_path,
-            comp_id: args.expect.comp_id ?? args.comp_id
-          };
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, effectiveExpect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_set_text");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getTextDocument", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  ...rich ? { typography: true, measure: true } : {}
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_set_text"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("setText", {
-                  comp_id: args.comp_id,
-                  layer: args.layer,
-                  text: args.text,
-                  style: args.style,
-                  paragraph: args.paragraph,
-                  box: args.box,
-                  ranges: args.ranges,
-                  paragraphs: args.paragraphs,
-                  allow_substitute: args.allow_substitute,
-                  expect: effectiveExpect
-                }),
-                label,
-                mutates: true,
-                toolName: "ae_set_text"
-              });
-              const appliedRanges = resolvedRanges(writeResp.result);
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getTextDocument", {
-                    comp_id: args.comp_id,
-                    layer: args.layer,
-                    ...rich ? { typography: true, measure: true } : {},
-                    ...appliedRanges.length > 0 ? { ranges: appliedRanges.map((r) => ({ start: r.start, end: r.end })) } : {}
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_set_text"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const beforeObj = beforeSnap.result ?? {};
-              const beforeDoc = beforeObj.document && typeof beforeObj.document === "object" ? beforeObj.document : beforeObj;
-              const afterObj = afterSnap.result ?? {};
-              const afterDoc = afterObj.document && typeof afterObj.document === "object" ? afterObj.document : afterObj;
-              const expectedCheck = {};
-              const actualCheck = {};
-              if (args.text !== void 0) {
-                expectedCheck.text = args.text;
-                actualCheck.text = afterDoc.text;
-              }
-              if (args.style) {
-                const styleKeys = [
-                  "font",
-                  "fontSize",
-                  "tracking",
-                  "leading",
-                  "fillColor",
-                  "strokeColor",
-                  "strokeWidth",
-                  "applyFill",
-                  "applyStroke",
-                  "justification"
-                ];
-                for (const key of styleKeys) {
-                  if (args.style[key] !== void 0 && !coveredByFirstRange(key, appliedRanges)) {
-                    if (key === "font") {
-                      const resolvedFont = writeResp.result?.fonts?.document?.postscript;
-                      const given = typeof args.style.font === "string" ? args.style.font : void 0;
-                      const want = typeof resolvedFont === "string" ? resolvedFont : given;
-                      if (want !== void 0) {
-                        expectedCheck.font = want;
-                        actualCheck.font = afterDoc.font;
-                      }
-                    } else {
-                      expectedCheck[key] = args.style[key];
-                      actualCheck[key] = afterDoc[key];
-                    }
-                  }
-                }
-              }
-              const typed = checkAfterWrite(
-                opId,
-                () => typedTextChecks(writeResp.result?.set, args.paragraph?.justify, afterObj, [
-                  ...coveredByFirstRange("fauxBold", appliedRanges) ? ["typography.faux_bold"] : [],
-                  ...coveredByFirstRange("fauxItalic", appliedRanges) ? ["typography.faux_italic"] : []
-                ]),
-                (failure2) => ({ expected: {}, actual: {}, unverified: [], failure: failure2 })
-              );
-              Object.assign(expectedCheck, typed.expected);
-              Object.assign(actualCheck, typed.actual);
-              const extraMismatches = [];
-              if ("failure" in typed && typed.failure) extraMismatches.push(typed.failure);
-              const hostWarnings = writeResp.result?.warnings;
-              const warnings = Array.isArray(hostWarnings) ? hostWarnings.slice() : [];
-              const fontObject = afterDoc.fontObject;
-              if (args.style?.font !== void 0 && fontObject?.is_substitute === true) {
-                if (args.allow_substitute) {
-                  warnings.push(`After Effects substitutes the font (${String(fontObject.postscript ?? "unknown")} is not installed), as allow_substitute allowed.`);
-                } else {
-                  extraMismatches.push({
-                    path: "font",
-                    expected: "an installed font",
-                    actual: "substituted",
-                    message: "After Effects reports the font as a substitute (fontObject.isSubstitute): it is not installed, so the text renders in a fallback font."
-                  });
-                }
-              }
-              const readBackRanges = Array.isArray(afterObj.ranges) ? afterObj.ranges : [];
-              const verifiedRanges = appliedRanges.slice(0, readBackRanges.length);
-              const unverifiedRanges = appliedRanges.length - verifiedRanges.length;
-              Object.assign(expectedCheck, rangeExpectations(verifiedRanges));
-              Object.assign(actualCheck, rangeActuals(verifiedRanges, afterObj.ranges));
-              if (expectedCheck.justification === void 0 && args.paragraph?.justify === void 0 && typeof beforeDoc.justification === "string" && typeof afterDoc.justification === "string") {
-                expectedCheck.justification = beforeDoc.justification;
-                actualCheck.justification = afterDoc.justification;
-              }
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: Object.keys(expectedCheck).length > 0 ? expectedCheck : void 0,
-                actualForExpected: Object.keys(expectedCheck).length > 0 ? actualCheck : void 0,
-                // The host reads back every range or throws, so a short list is a wrong read-back.
-                customMismatches: [
-                  ...unverifiedRanges > 0 ? [
-                    {
-                      path: "ranges",
-                      expected: appliedRanges.length,
-                      actual: readBackRanges.length,
-                      message: "The read-back returned fewer ranges than were written; the rest were not checked"
-                    }
-                  ] : [],
-                  ...extraMismatches
-                ]
-              });
-              const layout = rich ? { before: beforeObj.measure ?? null, after: afterObj.measure ?? null, rewrapped: layoutChanged(beforeObj.measure, afterObj.measure) } : void 0;
-              return {
-                op_id: opId,
-                applied: true,
-                result: writeResp.result,
-                checkpoint,
-                receipt,
-                ...unverifiedRanges > 0 ? { unverified_ranges: unverifiedRanges } : {},
-                ...typed.unverified.length > 0 ? { unverified: typed.unverified } : {},
-                ...layout ? { layout } : {},
-                ...warnings.length > 0 ? { warnings } : {}
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
-          }
-        }
-      },
-      {
-        name: "ae_import_footage",
-        description: "Import one or more footage files (or an image sequence, in numbered order with placeholders for missing frames) into the project and optional target folder, guarded by `expect`, within one undo group, returning the new project `item_ids` and a separate read-back receipt. `import_as` builds a comp from a layered file (PSD, AI): 'comp' or 'comp_cropped_layers', or a whole project ('project'); ImportOptions.canImportAs is checked first and a file that cannot be imported that way is refused, listing what it allows. The result returns new_comp_ids, new_folder_ids, main_comp_id and created_folder_id, and target_folder_id receives the top created items. `range` {start, end} imports part of a numbered sequence; `placeholders` [{name, width, height, fps, duration}] create placeholders for missing footage. Importing a project or an older file can raise dialogs (missing fonts or footage, conversion): they are never suppressed, so read them with ae_dialogs. ae_import_assets is a separate importer. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeImportFootageSchema,
-        handler: async (args, ctx) => {
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const fileCount = (args.paths?.length ?? 0) + (args.placeholders?.length ?? 0);
-          const label = `ae_import_footage(${fileCount} file${fileCount === 1 ? "" : "s"})`;
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, args.expect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_import_footage");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getFootageItems", {}),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_import_footage"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("importFootage", {
-                  paths: args.paths,
-                  sequence: Boolean(args.sequence),
-                  fps: args.fps,
-                  target_folder_id: args.target_folder_id,
-                  ...args.import_as !== void 0 ? { import_as: args.import_as } : {},
-                  ...args.range !== void 0 ? { range: args.range } : {},
-                  ...args.force_alphabetical !== void 0 ? { force_alphabetical: args.force_alphabetical } : {},
-                  ...args.placeholders !== void 0 ? { placeholders: args.placeholders } : {},
-                  expect: args.expect
-                }),
-                label,
-                timeoutMs: SLOW_TIMEOUT_MS,
-                mutates: true,
-                toolName: "ae_import_footage"
-              });
-              const itemIds = Array.isArray(writeResp.result?.item_ids) ? writeResp.result.item_ids : [];
-              const createdIds = createdItemIds(writeResp.result);
-              const readIds = createdIds.length > 0 ? createdIds : itemIds;
-              const createdExtras = importCreatedFields(writeResp.result);
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getFootageItems", {
-                    item_ids: readIds
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_import_footage"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  item_ids: itemIds,
-                  items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
-                  ...createdExtras,
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const afterIds = Array.isArray(afterSnap.result?.item_ids) ? afterSnap.result.item_ids : [];
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: {
-                  count: createdIds.length > 0 ? readIds.length : fileCount,
-                  item_ids: readIds
-                },
-                actualForExpected: {
-                  count: afterIds.length,
-                  item_ids: afterIds
-                }
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                item_ids: itemIds,
-                items: Array.isArray(writeResp.result?.items) ? writeResp.result.items : [],
-                ...createdExtras,
-                result: writeResp.result,
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
-          }
-        }
-      },
-      {
-        name: "ae_replace_footage",
-        description: "Replace or relink an existing FootageItem using `FootageItem.replace` or `FootageItem.replaceWithSequence` within one undo group, guarded by `expect`, returning the before and after file paths, `footageMissing`, and a separate read-back receipt. With `action: 'reload'` (and item_ids, item_id or folder_id) it reloads the main file source of footage items after the files changed on disk (FileSource.reload; proxies in use and non-file sources are refused or skipped) and a separate read-back lists the items whose size, duration or frame rate changed, since content in comps may move. Solid colour, size and name changes are ae_layer_ops solid_settings, not this tool. " + AGENT_SAFETY_GUIDANCE,
-        schema: AeReplaceFootageSchema,
-        handler: async (args, ctx) => {
-          if (args.action === "reload") return reloadFootage(args, ctx);
-          ctx.quarantine.assertClear();
-          const opId = ctx.bridge.newOpId();
-          const label = `ae_replace_footage(${args.item_id})`;
-          try {
-            return await ctx.queue.run(label, async () => {
-              ctx.quarantine.assertClear();
-              const guard = await verifyTargetGuard(ctx, args.expect, opId);
-              const checkpoint = await autoCheckpoint(ctx, guard, "ae_replace_footage");
-              const beforeSnap = await ctx.bridge.evalRaw({
-                id: `${opId}_before`,
-                script: buildJsxCall("getFootageItem", {
-                  item_id: args.item_id
-                }),
-                label: `${label} (before)`,
-                mutates: false,
-                toolName: "ae_replace_footage"
-              });
-              const writeResp = await ctx.bridge.evalRaw({
-                id: opId,
-                script: buildJsxCall("replaceFootage", {
-                  item_id: args.item_id,
-                  path: args.path,
-                  sequence: Boolean(args.sequence),
-                  expect: args.expect
-                }),
-                label,
-                timeoutMs: SLOW_TIMEOUT_MS,
-                mutates: true,
-                toolName: "ae_replace_footage"
-              });
-              const afterRead = await readAfterWrite(
-                opId,
-                () => ctx.bridge.evalRaw({
-                  id: `${opId}_after`,
-                  script: buildJsxCall("getFootageItem", {
-                    item_id: args.item_id
-                  }),
-                  label: `${label} (after)`,
-                  mutates: false,
-                  toolName: "ae_replace_footage"
-                })
-              );
-              if (afterRead.failure) {
-                return {
-                  op_id: opId,
-                  applied: true,
-                  item_id: args.item_id,
-                  result: writeResp.result,
-                  checkpoint,
-                  receipt: buildReceipt({ before: beforeSnap.result, after: null, customMismatches: [afterRead.failure] })
-                };
-              }
-              const afterSnap = afterRead.value;
-              const beforeObj = beforeSnap.result ?? {};
-              const writeObj = writeResp.result ?? {};
-              const afterObj = afterSnap.result ?? {};
-              const beforeFile = typeof beforeObj.file === "string" ? beforeObj.file : typeof writeObj.before_file === "string" ? writeObj.before_file : null;
-              const beforeMissing = typeof beforeObj.footageMissing === "boolean" ? beforeObj.footageMissing : typeof writeObj.before_footage_missing === "boolean" ? writeObj.before_footage_missing : false;
-              const afterFile = typeof afterObj.file === "string" ? afterObj.file : typeof writeObj.requested_path === "string" ? writeObj.requested_path : null;
-              const afterMissing = typeof afterObj.footageMissing === "boolean" ? afterObj.footageMissing : false;
-              const receipt = buildReceipt({
-                before: beforeSnap.result,
-                after: afterSnap.result,
-                expected: {
-                  file: normalizeGuardPath(args.path),
-                  footageMissing: false
-                },
-                actualForExpected: {
-                  file: typeof afterFile === "string" ? normalizeGuardPath(afterFile) : null,
-                  footageMissing: afterMissing
-                }
-              });
-              return {
-                op_id: opId,
-                applied: true,
-                item_id: args.item_id,
-                before_path: beforeFile,
-                after_path: afterFile,
-                before_file: beforeFile,
-                after_file: afterFile,
-                before_footage_missing: beforeMissing,
-                footageMissing: afterMissing,
-                result: writeResp.result,
-                checkpoint,
-                receipt
-              };
-            });
-          } catch (err) {
-            if (err instanceof QueueWaitError) {
-              throw new BridgeError({
-                kind: "queued",
-                op_id: opId,
-                message: err.message
-              });
-            }
-            throw err;
-          }
-        }
-      }
-    ];
-  }
-});
-
-// src/tools/ext/ask.ts
-function checkImagePath(p) {
-  if (!path40.isAbsolute(p)) return `image_path must be absolute: ${p}`;
-  if (!/\.(png|jpe?g)$/i.test(p)) return `image_path must be a PNG or JPEG: ${p}`;
-  try {
-    const st = fs40.statSync(p);
-    if (!st.isFile()) return `image_path is not a file: ${p}`;
-    if (st.size > MAX_IMAGE_BYTES) return `image_path is over 8 MB: ${p}`;
-  } catch {
-    return `image_path does not exist: ${p}`;
-  }
-  return null;
-}
-async function askByElicitation(request2, args, timeoutMs) {
-  const allowOther = args.allow_other ?? true;
-  const ids = args.options.map((o) => o.id);
-  const lines = [args.question, ...args.context ? [args.context] : [], ...args.options.filter((o) => o.description).map((o) => `${o.label}: ${o.description}`)];
-  const requestedSchema = {
-    type: "object",
-    properties: {
-      choice: { type: "string", title: "Answer", enum: ids, enumNames: args.options.map((o) => o.label) },
-      ...allowOther ? { other: { type: "string", title: "Or your own answer" } } : {}
-    },
-    required: allowOther ? [] : ["choice"]
-  };
-  const res = await request2("elicitation/create", { message: lines.join("\n"), requestedSchema }, timeoutMs);
-  if (!res) {
-    return {
-      status: "no_answer",
-      via: "elicitation",
-      question: args.question,
-      message: "The user did not answer in the client in time. Ask again later, or go on with a sensible default and say which."
-    };
-  }
-  if (res.error) return null;
-  const result = res.result ?? {};
-  const q = {
-    id: `elicit_${Date.now()}`,
-    question: args.question,
-    kind: "choice",
-    options: args.options,
-    multi_select: false,
-    allow_other: allowOther,
-    ...args.context ? { context: args.context } : {},
-    asked_at: Date.now()
-  };
-  const choice = typeof result.content?.choice === "string" && ids.includes(result.content.choice) ? [result.content.choice] : [];
-  const other = typeof result.content?.other === "string" && result.content.other.trim() ? result.content.other.trim().slice(0, 2e3) : void 0;
-  if (result.action === "accept" && (choice.length || other)) {
-    return { ...presentAnswer(q, { status: "answered", choice_ids: choice, ...other ? { other } : {}, answered_at: Date.now() }), via: "elicitation" };
-  }
-  return { ...presentAnswer(q, { status: "dismissed", choice_ids: [], answered_at: Date.now() }), via: "elicitation" };
-}
-function presentAnswer(q, a) {
-  if (!a) {
-    return {
-      status: "waiting",
-      ask_id: q.id,
-      question: q.question,
-      message: "No answer yet; the question stays in the panel. Call ae_ask_user with this ask_id to keep waiting, or carry on and check back later."
-    };
-  }
-  if (a.status === "dismissed") {
-    return {
-      status: "dismissed",
-      ask_id: q.id,
-      question: q.question,
-      message: "The user dismissed the question. Don't ask it again unprompted; go on with a sensible default and say which."
-    };
-  }
-  const byId3 = new Map(q.options.map((o) => [o.id, o]));
-  return {
-    status: "answered",
-    ask_id: q.id,
-    question: q.question,
-    chosen: a.choice_ids.map((id) => ({ id, label: byId3.get(id)?.label ?? id })),
-    ...a.other ? { other: a.other } : {},
-    ...a.curve ? {
-      curve: a.curve,
-      edited: !a.choice_ids.some((id) => sameCurve(byId3.get(id)?.curve, a.curve)),
-      next: "Apply it with ae_set_keyframe_ease { ease: { curve } }. Ask whether it should become the user's default; if so, save it with ae_taste."
-    } : {},
-    answered_after_s: Math.round((a.answered_at - q.asked_at) / 100) / 10
-  };
-}
-function sameCurve(a, b) {
-  return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-3);
-}
-var fs40, path40, PANEL_EXTENSION_ID, DEFAULT_WAIT_SECONDS, MAX_IMAGE_BYTES, AskOptionSchema, AeAskUserSchema, askTools;
-var init_ask = __esm({
-  "src/tools/ext/ask.ts"() {
-    "use strict";
-    init_call_context();
-    fs40 = __toESM(require("node:fs"), 1);
-    path40 = __toESM(require("node:path"), 1);
-    init_zod();
-    init_render_gate();
-    init_animate();
-    PANEL_EXTENSION_ID = "london.chroma.aemcp.panel";
-    DEFAULT_WAIT_SECONDS = 120;
-    MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-    AskOptionSchema = external_exports.object({
-      id: external_exports.string().min(1).max(40).describe("Short id returned when the user picks this option."),
-      label: external_exports.string().min(1).max(120),
-      description: external_exports.string().max(400).optional(),
-      curve: EASE_CURVE_ARRAY_SCHEMA.optional().describe(
-        "cubic-bezier [x1, y1, x2, y2] (CSS convention). Required on every option of an ease question."
-      ),
-      image_path: external_exports.string().min(1).optional().describe(
-        "Absolute path of a PNG or JPEG shown with the option, such as an ae_contact_sheet or ae_snapshot_frame of that variant."
-      )
-    });
-    AeAskUserSchema = external_exports.object({
-      ask_id: external_exports.string().min(1).optional().describe("Keep waiting for a question asked earlier (its ask_id) instead of asking a new one."),
-      question: external_exports.string().min(1).max(500).optional(),
-      kind: external_exports.enum(["choice", "ease"]).optional().describe(
-        "'choice' (default) shows buttons. 'ease' draws each option's curve with a moving preview and lets the user drag the handles; the answer then carries the final curve."
-      ),
-      options: external_exports.array(AskOptionSchema).min(2).max(8).optional(),
-      multi_select: external_exports.boolean().optional().describe("Allow several options. Default false."),
-      allow_other: external_exports.boolean().optional().describe("Let the user type their own answer. Default true."),
-      context: external_exports.string().max(300).optional().describe("One line under the question, such as which layer and keys it is about."),
-      wait_seconds: external_exports.number().int().min(0).max(600).optional().describe(
-        `How long to wait for the answer (default ${DEFAULT_WAIT_SECONDS}). If it runs out, the result is status 'waiting' with the ask_id; the question stays in the panel.`
-      )
-    }).refine((v) => v.ask_id !== void 0 || v.question !== void 0 && v.options !== void 0, {
-      message: "Give a question and options, or the ask_id of an earlier question."
-    }).refine((v) => v.kind !== "ease" || (v.options ?? []).every((o) => o.curve !== void 0), {
-      message: "Every option of an ease question needs a curve."
-    }).refine((v) => new Set((v.options ?? []).map((o) => o.id)).size === (v.options ?? []).length, {
-      message: "Option ids must be unique."
-    });
-    askTools = [
-      {
-        name: "ae_ask_user",
-        description: "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project. When the client handles MCP elicitation, a plain single choice without pictures is asked in the client's own UI instead (via: 'elicitation'; 'no_answer' when it was not answered in time); ease curves, several answers and pictures always use the panel.",
-        schema: AeAskUserSchema,
-        handler: async (args, ctx) => {
-          const call2 = currentCall();
-          if (!args.ask_id && call2?.request && args.question && args.options && (args.kind ?? "choice") === "choice" && !args.multi_select && !args.options.some((o) => o.image_path)) {
-            const viaClient = await askByElicitation(call2.request, { ...args, question: args.question, options: args.options }, (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1e3);
-            if (viaClient) return viaClient;
-          }
-          const asks = ctx.asks;
-          if (!asks) {
-            return {
-              ok: false,
-              error: "panel_unavailable",
-              message: "ae_ask_user needs the MCP that runs inside the After Effects panel; ask in the chat instead."
-            };
-          }
-          const waitMs = (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1e3;
-          if (args.ask_id) {
-            const found = asks.get(args.ask_id);
-            if (!found) {
-              return {
-                ok: false,
-                error: "unknown_ask_id",
-                message: "No such question. Answered questions are kept for an hour, and restarting AE clears them."
-              };
-            }
-            const answer2 = found.answer ?? await asks.wait(args.ask_id, waitMs);
-            return presentAnswer(found.question, answer2);
-          }
-          for (const o of args.options) {
-            if (o.image_path) {
-              const problem = checkImagePath(o.image_path);
-              if (problem) return { ok: false, error: "bad_image", message: problem };
-            }
-          }
-          const question = asks.ask({
-            question: args.question,
-            kind: args.kind ?? "choice",
-            options: args.options,
-            multi_select: args.multi_select ?? false,
-            allow_other: args.allow_other ?? true,
-            ...args.context ? { context: args.context } : {}
-          });
-          if (ctx.cep && !renderGate.active()) {
-            try {
-              await ctx.cep.openExtension(PANEL_EXTENSION_ID);
-            } catch {
-            }
-          }
-          const answer = await asks.wait(question.id, waitMs);
-          return presentAnswer(question, answer);
-        }
       }
     ];
   }
@@ -44600,8 +44682,8 @@ function policyStatus(deps = {}) {
     persists_across_restart: false
   };
 }
-async function readState(ctx, label) {
-  const res = await ctx.bridge.callHost("projectsessionRead", {}, { label, mutates: false, toolName: TOOL2 });
+async function readState(ctx, label2) {
+  const res = await ctx.bridge.callHost("projectsessionRead", {}, { label: label2, mutates: false, toolName: TOOL2 });
   return res.result;
 }
 function needsUserResult(state, reason) {
@@ -45855,9 +45937,9 @@ function drawTrackPreview(frame, points, patchSize, lost, maxSize = 960) {
   strokeRect(img, Math.round(end.x * k - mark / 2), Math.round(end.y * k - mark / 2), mark, mark, 2, lost ? [255, 60, 60, 255] : [80, 255, 120, 255]);
   return img;
 }
-async function queued(ctx, label, opId, fn) {
+async function queued(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -45985,12 +46067,12 @@ var init_track = __esm({
             minConfidence: args.min_confidence ?? 0.6,
             adaptBelow: 0.8
           };
-          const label = `ae_track_point(${args.comp_id})`;
-          const tracked = await queued(ctx, label, opId, async () => {
+          const label2 = `ae_track_point(${args.comp_id})`;
+          const tracked = await queued(ctx, label2, opId, async () => {
             const compResp = await ctx.bridge.evalRaw({
               id: `${opId}_comp`,
               script: buildJsxCall("getComp", { comp_id: args.comp_id }),
-              label: `${label} getComp`,
+              label: `${label2} getComp`,
               mutates: false,
               toolName: "ae_track_point"
             });
@@ -46068,13 +46150,13 @@ var init_track = __esm({
           const expect = { project_path: args.apply.expect.project_path, comp_id: args.apply.expect.comp_id ?? args.comp_id };
           const times = points.map((p) => p.time);
           const values = points.map((p) => [p.x, p.y]);
-          const write = await queued(ctx, `${label} apply`, opId, async () => {
+          const write = await queued(ctx, `${label2} apply`, opId, async () => {
             const guard = await verifyTargetGuard(ctx, expect, opId);
             const checkpoint = await autoCheckpoint(ctx, guard, "ae_track_point");
             const made = await ctx.bridge.evalRaw({
               id: `${opId}_null`,
               script: buildJsxCall("createTrackNull", { comp_id: args.comp_id, name: args.apply.null_name, times, values, expect }),
-              label: `${label} create null`,
+              label: `${label2} create null`,
               mutates: true,
               toolName: "ae_track_point"
             });
@@ -46087,7 +46169,7 @@ var init_track = __esm({
                   layer: { id: made.result.layer_id },
                   path: ["ADBE Transform Group", "ADBE Position"]
                 }),
-                label: `${label} (after)`,
+                label: `${label2} (after)`,
                 mutates: false,
                 toolName: "ae_track_point"
               })
@@ -46186,9 +46268,9 @@ function createRenderBudget(opts) {
     }
   };
 }
-async function queued2(ctx, label, opId, fn) {
+async function queued2(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -46383,7 +46465,7 @@ async function resolveTrackSourceWithInfo(ctx, opId, compId, src) {
     if (!t) throw new PlanarError("not_found", `No stored track "${src.track_id}" (the store keeps the newest ${KEEP_TRACKS}).`);
     return { track: src.ref_time !== void 0 ? relativeTo(t, src.ref_time) : t, info: null };
   }
-  const { source, label } = hostSourceOf(src);
+  const { source, label: label2 } = hostSourceOf(src);
   const got = await read2(ctx, opId, "trackread", "planarRead", { comp_id: compId, source }, "ae_track_read", true);
   const n = got.series[0]?.length ?? 0;
   const model = src.model ?? defaultModel(got.kind, n);
@@ -46396,7 +46478,7 @@ async function resolveTrackSourceWithInfo(ctx, opId, compId, src) {
     confidence: got.confidence,
     model,
     refTime: src.ref_time,
-    source: `read:${label}`
+    source: `read:${label2}`
   });
   return { track, info: readInfo(got) };
 }
@@ -46911,7 +46993,7 @@ function keyMismatches(expected, written, after) {
 async function applyTrackTo(ctx, a) {
   const { target } = a;
   const opId = a.opId ?? ctx.bridge.newOpId();
-  const label = `${a.toolName} apply(${a.compId})`;
+  const label2 = `${a.toolName} apply(${a.compId})`;
   const refTime = a.refTime ?? a.track.ref_time;
   const adjusted = adjustTrack(a.track, { refit_model: target.refit_model, smooth_frames: target.smooth_frames });
   const based = relativeTo(adjusted.track, refTime);
@@ -46930,7 +47012,7 @@ async function applyTrackTo(ctx, a) {
   let keys = null;
   let nullKeys = [];
   let size = [0, 0];
-  const prep = await queued2(ctx, label, opId, async () => {
+  const prep = await queued2(ctx, label2, opId, async () => {
     const comp = await readComp2(ctx, opId, a.compId, target.layer ? [target.layer] : void 0, a.toolName);
     if (comp.width !== based.comp_size[0] || comp.height !== based.comp_size[1]) {
       throw new PlanarError("refused", `The track was made in a ${based.comp_size[0]}x${based.comp_size[1]} comp and comp ${a.compId} is ${comp.width}x${comp.height}: the points are in comp pixels, so the sizes must match.`);
@@ -47027,7 +47109,7 @@ async function applyTrackTo(ctx, a) {
   const sampleTimes2 = (times) => sampleIdx(times.length).map((i) => times[i]);
   const result = await runGuardedWrite(ctx, {
     toolName: a.toolName,
-    label,
+    label: label2,
     expect,
     compId: a.compId,
     read: (phase, written) => {
@@ -47111,7 +47193,7 @@ async function trackMulti(ctx, args) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   fs45.mkdirSync(framesDir, { recursive: true });
-  const label = `ae_track_multi(${args.comp_id})`;
+  const label2 = `ae_track_multi(${args.comp_id})`;
   const budget = createRenderBudget({ maxRenders: args.max_frames, maxSeconds: args.max_seconds });
   let stored = null;
   if (args.continue_track_id) {
@@ -47124,7 +47206,7 @@ async function trackMulti(ctx, args) {
   if (isolate && !args.expect) throw new PlanarError("bad_args", "isolate_layers writes to the project (a temporary comp), so `expect` is required.");
   const expect = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
   if (isolate && expect) ctx.quarantine.assertClear();
-  const ran = await queued2(ctx, label, opId, async () => {
+  const ran = await queued2(ctx, label2, opId, async () => {
     const comp = await readComp2(ctx, opId, args.comp_id, isolate, toolName);
     const fps = comp.fps > 0 ? comp.fps : 25;
     const compSize = [comp.width, comp.height];
@@ -47174,7 +47256,7 @@ async function trackMulti(ctx, args) {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       checkpoint = await autoCheckpoint(ctx, guard, toolName);
-      note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+      note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
       sessionFields = await noteBeforeWrite(ctx, note);
     }
     let rebuildRenders = 0;
@@ -47997,9 +48079,9 @@ var init_solvecheck = __esm({
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
           fs46.mkdirSync(framesDir, { recursive: true });
-          const label = `ae_camera_solve_check(${args.comp_id})`;
-          return queued(ctx, label, opId, async () => {
-            const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label} getComp`, mutates: false, toolName: "ae_camera_solve_check" })).result;
+          const label2 = `ae_camera_solve_check(${args.comp_id})`;
+          return queued(ctx, label2, opId, async () => {
+            const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label2} getComp`, mutates: false, toolName: "ae_camera_solve_check" })).result;
             const fps = Number(comp.fps) > 0 ? Number(comp.fps) : 25;
             const start = args.start ?? Number(comp.workAreaStart);
             const end = args.end ?? Number(comp.workAreaStart) + Number(comp.workAreaDuration) - 1 / fps;
@@ -48007,7 +48089,7 @@ var init_solvecheck = __esm({
             const stepN = Math.max(1, Math.ceil(all.length / args.max_frames));
             const times = all.filter((_, i) => i % stepN === 0).slice(0, args.max_frames);
             if (times.length < 2) return { ok: false, error: "bad_args", message: "The range holds fewer than two frames." };
-            const readAt = async (t, i) => (await ctx.bridge.evalRaw({ id: `${opId}_read${i}`, script: buildJsxCall("cameraSceneRead", { comp_id: args.comp_id, time: t }), label: `${label} read @ ${t}s`, mutates: false, toolName: "ae_camera_solve_check" })).result;
+            const readAt = async (t, i) => (await ctx.bridge.evalRaw({ id: `${opId}_read${i}`, script: buildJsxCall("cameraSceneRead", { comp_id: args.comp_id, time: t }), label: `${label2} read @ ${t}s`, mutates: false, toolName: "ae_camera_solve_check" })).result;
             const first = await readAt(times[0], 0);
             let pointLayers;
             if (args.points) {
@@ -49731,11 +49813,11 @@ function drawSeriesGraph(series, o = {}) {
 function isAeBlocked2(err) {
   return err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued");
 }
-async function readHost2(ctx, opId, tool, label, tag, args) {
+async function readHost2(ctx, opId, tool, label2, tag, args) {
   const res = await ctx.bridge.evalRaw({
     id: `${opId}_${tag}`,
     script: buildJsxCall("patchcheckRead", args),
-    label: `${label} (read)`,
+    label: `${label2} (read)`,
     timeoutMs: SLOW_TIMEOUT_MS,
     mutates: false,
     toolName: tool
@@ -49905,7 +49987,7 @@ function probeIndexes(n, probes) {
 }
 async function patchCheckHandler(args, ctx) {
   const toolName = "ae_patch_check";
-  const label = `ae_patch_check(${args.comp_id})`;
+  const label2 = `ae_patch_check(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const thresholds = {
     seam_max: args.seam_max,
@@ -49922,12 +50004,12 @@ async function patchCheckHandler(args, ctx) {
   const fopts = { ringPx: args.ring_px, gapPx: args.ring_gap_px, leakThreshold: args.leak_threshold, leakMarginPx: 3, linear: args.luma_space === "linear" };
   const run = await runWithPlateCopy(ctx, {
     toolName,
-    label,
+    label: label2,
     compId: args.comp_id,
     expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id },
     framesDir,
     prepare: async (opId) => {
-      const first = await readHost2(ctx, opId, toolName, label, "info", { comp_id: args.comp_id, layers: args.patch_layers });
+      const first = await readHost2(ctx, opId, toolName, label2, "info", { comp_id: args.comp_id, layers: args.patch_layers });
       const c = first.comp;
       const plan2 = planSamples2({
         fps: c.frame_rate,
@@ -49941,7 +50023,7 @@ async function patchCheckHandler(args, ctx) {
         maxSamples: args.max_samples,
         refTime: args.ref_time
       });
-      const info = await readHost2(ctx, opId, toolName, label, "foot", { comp_id: args.comp_id, layers: args.patch_layers, times: plan2.times });
+      const info = await readHost2(ctx, opId, toolName, label2, "foot", { comp_id: args.comp_id, layers: args.patch_layers, times: plan2.times });
       const polys = [];
       const reasons = [];
       const feathers = [];
@@ -50431,7 +50513,7 @@ function summariseRegion(rows, fps, popFactor) {
 }
 async function regionStatsHandler(args, ctx) {
   const toolName = "ae_region_stats";
-  const label = `ae_region_stats(${args.comp_id})`;
+  const label2 = `ae_region_stats(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const regions = args.regions.map((r, i) => ({ name: r.name ?? `region ${i + 1}`, shape: r.shape, ring: r.ring }));
   const trackArgs = args.regions.map((r) => ({ track: r.track }));
@@ -50458,12 +50540,12 @@ async function regionStatsHandler(args, ctx) {
   if (args.hide_layers) {
     const run = await runWithPlateCopy(ctx, {
       toolName,
-      label,
+      label: label2,
       compId: args.comp_id,
       expect: { project_path: args.expect.project_path, comp_id: args.expect.comp_id },
       framesDir,
       prepare: async (id) => {
-        const first = await readHost2(ctx, id, toolName, label, "info", { comp_id: args.comp_id, layers: args.hide_layers });
+        const first = await readHost2(ctx, id, toolName, label2, "info", { comp_id: args.comp_id, layers: args.hide_layers });
         try {
           await resolveStatsTracks(ctx, id, first.comp, trackArgs, regions);
         } catch (err) {
@@ -50492,8 +50574,8 @@ async function regionStatsHandler(args, ctx) {
     copyTail = { temp_comp: { copy_removed: run.removed, switched_off: run.begun.switched_off }, checkpoint: run.checkpoint, receipt: run.receipt, ...run.sessionFields };
   } else {
     opId = ctx.bridge.newOpId();
-    const got = await runQueued6(ctx, label, opId, async () => {
-      const i = await readHost2(ctx, opId, toolName, label, "info", { comp_id: args.comp_id });
+    const got = await runQueued6(ctx, label2, opId, async () => {
+      const i = await readHost2(ctx, opId, toolName, label2, "info", { comp_id: args.comp_id });
       const pl = planFor(i.comp);
       try {
         await resolveStatsTracks(ctx, opId, i.comp, trackArgs, regions);
@@ -50730,9 +50812,9 @@ var init_patchcheck = __esm({
       [160, 160, 255, 255],
       [200, 200, 200, 255]
     ];
-    runQueued6 = async (ctx, label, opId, fn) => {
+    runQueued6 = async (ctx, label2, opId, fn) => {
       try {
-        return await ctx.queue.run(label, fn);
+        return await ctx.queue.run(label2, fn);
       } catch (err) {
         if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
         throw err;
@@ -50925,12 +51007,12 @@ var init_elementmatch = __esm({
           const framesDir = defaultFramesDir();
           fs48.mkdirSync(framesDir, { recursive: true });
           const toolName = "ae_color_match_element";
-          const label = `${toolName}(${args.comp_id})`;
-          const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label} getComp`, mutates: false, toolName })).result;
+          const label2 = `${toolName}(${args.comp_id})`;
+          const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label2} getComp`, mutates: false, toolName })).result;
           const compW = Number(comp.width);
           const time = args.time ?? Number(comp.time);
           const stateRead2 = () => ({ host: "patchfitEffectState", args: { comp_id: args.comp_id, layer: args.layer, name: ELEMENT_EFFECT_NAME, times: [time] } });
-          const measure = async (tag) => queued(ctx, `${label} ${tag}`, opId, async () => {
+          const measure = async (tag) => queued(ctx, `${label2} ${tag}`, opId, async () => {
             const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time, frameIndex: tag === "before" ? 0 : 1, framesDir, toolName });
             const img = decodePngFile(snap.path);
             fs48.rmSync(snap.path, { force: true });
@@ -50939,18 +51021,18 @@ var init_elementmatch = __esm({
           const before = await measure("before");
           const empty = before.flatMap((m, i) => [m.element.pixels === 0 ? `pairs[${i}].element` : null, m.plate.pixels === 0 ? `pairs[${i}].plate` : null]).filter(Boolean);
           if (empty.length) return { ok: false, error: "bad_args", message: `These regions hold no pixels of the frame: ${empty.join(", ")}.` };
-          const state = (await ctx.bridge.evalRaw({ id: `${opId}_state`, script: buildJsxCall(stateRead2().host, stateRead2().args), label: `${label} state`, mutates: false, toolName })).result;
+          const state = (await ctx.bridge.evalRaw({ id: `${opId}_state`, script: buildJsxCall(stateRead2().host, stateRead2().args), label: `${label2} state`, mutates: false, toolName })).result;
           let old = null;
           if (state.effect) {
             if (!args.replace_existing) return { ok: false, error: "bad_args", message: `The element already has "${ELEMENT_EFFECT_NAME}". Pass replace_existing to fit again from the raw element (the old one is undone on the measurement and replaced).` };
             const v = (n) => state.effect.params.find((p) => p.name === n)?.value ?? null;
             const unit = (v("Red Input White") ?? 1) > 1.5 ? v("Red Input White") : 1;
-            const ch = (label2) => ({
-              in_black: (v(`${label2} Input Black`) ?? 0) / unit,
-              in_white: (v(`${label2} Input White`) ?? unit) / unit,
-              gamma: v(`${label2} Gamma`) ?? 1,
-              out_black: (v(`${label2} Output Black`) ?? 0) / unit,
-              out_white: (v(`${label2} Output White`) ?? unit) / unit
+            const ch = (label3) => ({
+              in_black: (v(`${label3} Input Black`) ?? 0) / unit,
+              in_white: (v(`${label3} Input White`) ?? unit) / unit,
+              gamma: v(`${label3} Gamma`) ?? 1,
+              out_black: (v(`${label3} Output Black`) ?? 0) / unit,
+              out_white: (v(`${label3} Output White`) ?? unit) / unit
             });
             old = { red: ch("Red"), green: ch("Green"), blue: ch("Blue") };
           }
@@ -50968,7 +51050,7 @@ var init_elementmatch = __esm({
           const series = Object.fromEntries(CH.map((c) => [c, { in_black: [fit[c].in_black], in_white: [fit[c].in_white], gamma: [fit[c].gamma], out_black: [fit[c].out_black], out_white: [fit[c].out_white] }]));
           const wrote = await runGuardedWrite(ctx, {
             toolName,
-            label: `${label} write`,
+            label: `${label2} write`,
             expect: args.expect,
             compId: args.comp_id,
             read: () => stateRead2(),
@@ -51002,18 +51084,18 @@ var init_elementmatch = __esm({
 
 // src/tools/ext/mattecheck.ts
 function pieces(on, w, h, labelsOut) {
-  const label = labelsOut ?? new Int32Array(w * h);
-  label.fill(-1);
+  const label2 = labelsOut ?? new Int32Array(w * h);
+  label2.fill(-1);
   const out = [];
   const stack = [];
   for (let s = 0; s < w * h; s++) {
-    if (!on[s] || label[s] !== -1) continue;
+    if (!on[s] || label2[s] !== -1) continue;
     const id = out.length;
     let px = 0;
     let sx = 0;
     let sy = 0;
     let border = false;
-    label[s] = id;
+    label2[s] = id;
     stack.push(s);
     while (stack.length) {
       const k = stack.pop();
@@ -51025,8 +51107,8 @@ function pieces(on, w, h, labelsOut) {
       if (x === 0 || y === 0 || x === w - 1 || y === h - 1) border = true;
       const nb = [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, y > 0 ? k - w : -1, y < h - 1 ? k + w : -1];
       for (const n of nb) {
-        if (n >= 0 && on[n] && label[n] === -1) {
-          label[n] = id;
+        if (n >= 0 && on[n] && label2[n] === -1) {
+          label2[n] = id;
           stack.push(n);
         }
       }
@@ -51160,9 +51242,9 @@ var init_mattecheck = __esm({
           const framesDir = defaultFramesDir();
           fs49.mkdirSync(framesDir, { recursive: true });
           const toolName = "ae_matte_check";
-          const label = `${toolName}(${args.comp_id})`;
-          return queued(ctx, label, opId, async () => {
-            const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label} getComp`, mutates: false, toolName })).result;
+          const label2 = `${toolName}(${args.comp_id})`;
+          return queued(ctx, label2, opId, async () => {
+            const comp = (await ctx.bridge.evalRaw({ id: `${opId}_comp`, script: buildJsxCall("getComp", { comp_id: args.comp_id }), label: `${label2} getComp`, mutates: false, toolName })).result;
             const fps = Number(comp.fps) > 0 ? Number(comp.fps) : 25;
             const fd = 1 / fps;
             const start = args.start ?? Number(comp.workAreaStart);
@@ -51172,7 +51254,7 @@ var init_mattecheck = __esm({
             let show = null;
             let checkpoint = null;
             if (args.layer) {
-              const planar = (await ctx.bridge.evalRaw({ id: `${opId}_layers`, script: buildJsxCall("planarComp", { comp_id: args.comp_id, layers: [args.layer, ...args.with_layers ?? []] }), label: `${label} layers`, mutates: false, toolName })).result;
+              const planar = (await ctx.bridge.evalRaw({ id: `${opId}_layers`, script: buildJsxCall("planarComp", { comp_id: args.comp_id, layers: [args.layer, ...args.with_layers ?? []] }), label: `${label2} layers`, mutates: false, toolName })).result;
               const pick5 = (sel2) => planar.layers.find((l) => sel2.id !== void 0 ? l.id === sel2.id : sel2.index !== void 0 ? l.index === sel2.index : l.name === sel2.name);
               const wanted = [args.layer, ...args.with_layers ?? []].map(pick5);
               if (wanted.some((l) => !l)) return { ok: false, error: "not_found", message: "A layer in `layer` or `with_layers` was not found." };
@@ -51239,9 +51321,9 @@ var init_mattecheck = __esm({
 });
 
 // src/tools/ext/stabilize.ts
-async function queued3(ctx, label, opId, fn) {
+async function queued3(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -51784,11 +51866,11 @@ async function renderShot(ctx, opId, compId, time, index, framesDir, toolName) {
 async function stabilize(ctx, args) {
   const toolName = "ae_stabilize";
   const opId = ctx.bridge.newOpId();
-  const label = `ae_stabilize(${args.comp_id})`;
+  const label2 = `ae_stabilize(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const budget = createRenderBudget({ maxRenders: args.max_renders, maxSeconds: args.max_seconds });
   const wantImages = args.sheets || args.verify;
-  const prep = await queued3(ctx, label, opId, async () => {
+  const prep = await queued3(ctx, label2, opId, async () => {
     const { track: track2, info } = await resolveTrackSourceWithInfo(ctx, opId, args.comp_id, args.track);
     if (!args.track.track_id) saveTrack(track2);
     const refTime2 = args.ref_time ?? track2.ref_time;
@@ -51859,7 +51941,7 @@ async function stabilize(ctx, args) {
   const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const result = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect,
     compId: args.comp_id,
     read: (phase, written2) => {
@@ -51939,7 +52021,7 @@ async function stabilize(ctx, args) {
       const refShot = plan2.frames.reduce((best, f) => Math.abs(f.time - refTime) < Math.abs(best - refTime) ? f.time : best, plan2.frames[0].time);
       const wanted = uniqSorted([...sheetTimes2, ...verifyTimes, ...args.verify ? [refShot] : []]);
       wanted.sort((x, y) => Math.abs(x - refShot) - Math.abs(y - refShot));
-      const shots = await queued3(ctx, `${label} after`, afterOp, async () => {
+      const shots = await queued3(ctx, `${label2} after`, afterOp, async () => {
         const got = [];
         for (const t of wanted) {
           if (budget.exhausted()) break;
@@ -52223,10 +52305,10 @@ function rigMismatches(plan2, args, before, after, w) {
 async function roundtripBuild(ctx, args) {
   const toolName = "ae_stabilize_roundtrip";
   const opId = ctx.bridge.newOpId();
-  const label = `ae_stabilize_roundtrip(${args.comp_id})`;
+  const label2 = `ae_stabilize_roundtrip(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const budget = createRenderBudget({ maxRenders: args.max_renders, maxSeconds: args.max_seconds });
-  const prep = await queued3(ctx, label, opId, async () => {
+  const prep = await queued3(ctx, label2, opId, async () => {
     const { track: track2, info } = await resolveTrackSourceWithInfo(ctx, opId, args.comp_id, args.track);
     if (!args.track.track_id) saveTrack(track2);
     const refTime2 = args.ref_time ?? track2.ref_time;
@@ -52265,7 +52347,7 @@ async function roundtripBuild(ctx, args) {
   const plateRef = { index: ins.layer.index, id: ins.layer.id };
   const result = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect,
     compId: args.comp_id,
     read: (phase, written2) => {
@@ -52327,7 +52409,7 @@ async function roundtripBuild(ctx, args) {
   if (args.sheet && prep.before.length > 0) {
     try {
       const afterOp = ctx.bridge.newOpId();
-      const shots = await queued3(ctx, `${label} after`, afterOp, async () => {
+      const shots = await queued3(ctx, `${label2} after`, afterOp, async () => {
         const got = [];
         for (const b of prep.before) {
           if (budget.exhausted()) break;
@@ -52584,14 +52666,14 @@ function toSpec(r) {
   if ("ellipse" in r) return { kind: "ellipse", center: [r.ellipse[0], r.ellipse[1]], radius: [r.ellipse[2], r.ellipse[3]] };
   return { kind: "polygon", points: r.polygon.map((p) => [p[0], p[1]]) };
 }
-function checkRegion(r, label = "region") {
+function checkRegion(r, label2 = "region") {
   const finite2 = (a) => a.every((v) => Number.isFinite(v));
   if ("rect" in r) {
-    if (!finite2(r.rect) || !(r.rect[2] > 0) || !(r.rect[3] > 0)) throw badArgs2(`${label}: a rect needs a width and height above 0.`);
+    if (!finite2(r.rect) || !(r.rect[2] > 0) || !(r.rect[3] > 0)) throw badArgs2(`${label2}: a rect needs a width and height above 0.`);
   } else if ("ellipse" in r) {
-    if (!finite2(r.ellipse) || !(r.ellipse[2] > 0) || !(r.ellipse[3] > 0)) throw badArgs2(`${label}: an ellipse needs radii above 0.`);
+    if (!finite2(r.ellipse) || !(r.ellipse[2] > 0) || !(r.ellipse[3] > 0)) throw badArgs2(`${label2}: an ellipse needs radii above 0.`);
   } else if (!r.polygon.every((p) => finite2(p)) || polygonArea(r.polygon.map((p) => [p[0], p[1]])) < 1) {
-    throw badArgs2(`${label}: a polygon needs finite corners and an area of at least 1 px^2.`);
+    throw badArgs2(`${label2}: a polygon needs finite corners and an area of at least 1 px^2.`);
   }
 }
 function regionToShape(r) {
@@ -52949,9 +53031,9 @@ function writeSheetFile(dir, tag, sheet) {
   fs51.writeFileSync(file, encodePng(sheet));
   return file;
 }
-async function queued4(ctx, label, opId, fn) {
+async function queued4(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -53160,13 +53242,13 @@ async function pick2(ctx, args) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   fs51.mkdirSync(framesDir, { recursive: true });
-  const label = `${toolName}(${args.comp_id})`;
+  const label2 = `${toolName}(${args.comp_id})`;
   checkRegion(args.region);
   if (args.start !== void 0 && args.end !== void 0 && args.end < args.start) throw badArgs2("end is before start.");
   const expect = args.isolate && args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
   if (expect) ctx.quarantine.assertClear();
   const newBudget = () => createRenderBudget({ maxRenders: args.max_renders, maxSeconds: args.max_seconds });
-  const ran = await queued4(ctx, label, opId, async () => {
+  const ran = await queued4(ctx, label2, opId, async () => {
     const info = await readHost3(ctx, opId, "read", "cleanplateRead", { comp_id: args.comp_id, ...args.plate ? { plate: args.plate } : {} }, toolName);
     checkComp(info);
     const fps = info.comp.fps > 0 ? info.comp.fps : 25;
@@ -53191,7 +53273,7 @@ async function pick2(ctx, args) {
     ctx.quarantine.assertClear();
     const guard = await verifyTargetGuard(ctx, expect, opId);
     const checkpoint = await autoCheckpoint(ctx, guard, toolName);
-    const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+    const note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
     const sessionFields = await noteBeforeWrite(ctx, note);
     try {
       const budget = newBudget();
@@ -53445,7 +53527,7 @@ async function setupBuild(ctx, args) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   fs51.mkdirSync(framesDir, { recursive: true });
-  const label = `${toolName}(${args.comp_id})`;
+  const label2 = `${toolName}(${args.comp_id})`;
   const regionList = args.regions ?? (args.region ? [args.region] : []);
   regionList.forEach((r, i) => checkRegion(r, regionList.length > 1 ? `regions[${i}]` : "region"));
   let refTime = args.ref_time;
@@ -53460,7 +53542,7 @@ async function setupBuild(ctx, args) {
   const centre2 = [(ub[0] + ub[2]) / 2, (ub[1] + ub[3]) / 2];
   const notes = [];
   if (mp.raised) notes.push(`expansion_px was raised to ${mp.expansion} (half the feather): the object's edge must not show through the soft rim.`);
-  const prep = await queued4(ctx, `${label} prepare`, opId, async () => {
+  const prep = await queued4(ctx, `${label2} prepare`, opId, async () => {
     const info = await readHost3(ctx, opId, "read", "cleanplateRead", { comp_id: args.comp_id, plate: args.plate, ...args.holdout ? { holdout: args.holdout } : {}, ref_time: refTime }, toolName);
     checkComp(info);
     const plate = info.plate;
@@ -53592,7 +53674,7 @@ async function setupBuild(ctx, args) {
       const guard = await verifyTargetGuard(ctx, expectGuard, opId);
       const dir = platesFolderFor(guard.project_path ?? args.expect.project_path);
       checkpoint = await autoCheckpoint(ctx, guard, toolName);
-      const note = { opId, toolName, label, expect: expectGuard, checkpoint: checkpoint?.path ?? null };
+      const note = { opId, toolName, label: label2, expect: expectGuard, checkpoint: checkpoint?.path ?? null };
       sessionFields = await noteBeforeWrite(ctx, note);
       let made = "";
       try {
@@ -53661,7 +53743,7 @@ async function setupBuild(ctx, args) {
   const stackRead2 = (ids) => ({ host: "layerStack", args: { comp_id: args.comp_id, include_ids: ids } });
   const result = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect: expectGuard,
     compId: args.comp_id,
     read: (phase, written) => {
@@ -53729,7 +53811,7 @@ async function setupBuild(ctx, args) {
   let sheetPath;
   let sheetError = prep.beforeError;
   try {
-    const after = await queued4(ctx, `${label} after`, opId, () => renderTiles(ctx, opId, "after", args.comp_id, prep.times, framesDir, toolName));
+    const after = await queued4(ctx, `${label2} after`, opId, () => renderTiles(ctx, opId, "after", args.comp_id, prep.times, framesDir, toolName));
     const tiles = [];
     for (const b of prep.before) tiles.push({ image: b.image, poly: outlineAt(polys, prep.track, b.time), label: `BEFORE t=${r210(b.time)}` });
     for (const a of after) tiles.push({ image: a.image, poly: outlineAt(polys, prep.track, a.time), label: `AFTER t=${r210(a.time)}` });
@@ -53895,9 +53977,9 @@ async function setupReload(ctx, args) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   fs51.mkdirSync(framesDir, { recursive: true });
-  const label = `${toolName} reload(${args.comp_id})`;
+  const label2 = `${toolName} reload(${args.comp_id})`;
   const expectGuard = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
-  const prep = await queued4(ctx, `${label} prepare`, opId, async () => {
+  const prep = await queued4(ctx, `${label2} prepare`, opId, async () => {
     const info = await readHost3(ctx, opId, "read", "cleanplateRead", { comp_id: args.comp_id }, toolName);
     const fps = info.comp.fps > 0 ? info.comp.fps : 25;
     const times = sheetTimes({ ref: args.ref_time ?? info.comp.work_area_start, first: info.comp.work_area_start, last: info.comp.work_area_start + info.comp.work_area_duration - 1 / fps, fps });
@@ -53912,7 +53994,7 @@ async function setupReload(ctx, args) {
   });
   const result = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect: expectGuard,
     compId: args.comp_id,
     // A reload is not an undo step, so the read-back is the item itself: found, and its file there.
@@ -53932,7 +54014,7 @@ async function setupReload(ctx, args) {
   let sheetPath;
   let sheetError = prep.err;
   try {
-    const after = await queued4(ctx, `${label} after`, opId, () => renderTiles(ctx, opId, "after", args.comp_id, prep.times, framesDir, toolName));
+    const after = await queued4(ctx, `${label2} after`, opId, () => renderTiles(ctx, opId, "after", args.comp_id, prep.times, framesDir, toolName));
     if (prep.before.length === after.length && after.length > 0) {
       const size = [prep.info.comp.width, prep.info.comp.height];
       const tiles = [
@@ -54885,9 +54967,9 @@ async function readHost4(ctx, opId, tag, host, args, toolName) {
   const res = await ctx.bridge.evalRaw({ id: `${opId}_${tag}`, script: buildJsxCall(host, args), label: `${toolName} ${tag}`, mutates: false, toolName });
   return res.result;
 }
-async function queued5(ctx, label, opId, fn) {
+async function queued5(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -54977,7 +55059,7 @@ function planPlacement(p, place, polys, growPx, imageScale) {
     why
   };
 }
-async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state) {
+async function buildPlate(ctx, opId, args, expect, polys, toolName, label2, state) {
   const guard = await verifyTargetGuard(ctx, expect, opId);
   state.pastGuard = true;
   const projectPath = guard.project_path ?? "<unsaved>";
@@ -55124,7 +55206,7 @@ async function buildPlate(ctx, opId, args, expect, polys, toolName, label, state
   if (args.isolate_plate) {
     const checkpoint = await autoCheckpoint(ctx, guard, toolName);
     state.checkpoint = checkpoint?.path ?? null;
-    const note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+    const note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
     state.sessionFields = await noteBeforeWrite(ctx, note);
     let run;
     try {
@@ -55354,12 +55436,12 @@ var init_inpaint = __esm({
           }
           const toolName = "ae_inpaint_plate";
           const opId = ctx.bridge.newOpId();
-          const label = `ae_inpaint_plate(comp ${args.comp_id})`;
+          const label2 = `ae_inpaint_plate(comp ${args.comp_id})`;
           const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
           let built2;
           const state = { pastGuard: false, checkpoint: null, temp: null, sessionFields: {} };
           try {
-            const got = await queued5(ctx, label, opId, () => buildPlate(ctx, opId, args, expect, polys, toolName, label, state));
+            const got = await queued5(ctx, label2, opId, () => buildPlate(ctx, opId, args, expect, polys, toolName, label2, state));
             if (got.refused) return got.refused;
             built2 = await got.finish();
           } catch (err) {
@@ -55375,7 +55457,7 @@ var init_inpaint = __esm({
           try {
             const applied = await runGuardedWrite(ctx, {
               toolName,
-              label: `${label} import`,
+              label: `${label2} import`,
               expect: args.expect,
               compId: args.comp_id,
               read: () => ({ host: "inpaintState", args: { png_path: built2.pngPath, place_comp_id: place ? place.comp_id : null } }),
@@ -55439,9 +55521,9 @@ function checkWriteSize(keys, vertices, hint = "Key a shorter stretch with `rang
     );
   }
 }
-async function queued6(ctx, label, opId, fn) {
+async function queued6(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -55808,7 +55890,7 @@ async function planFollow(ctx, a) {
     return plan2;
   });
 }
-function followWriteArgs(a, plan2, label) {
+function followWriteArgs(a, plan2, label2) {
   return {
     comp_id: a.compId,
     layer: { index: plan2.layer.index, id: plan2.layer.id },
@@ -55830,7 +55912,7 @@ function followWriteArgs(a, plan2, label) {
     replace_keys: a.replaceKeys,
     key_range: plan2.keyRange ?? void 0,
     work_area: plan2.workArea ?? void 0,
-    label
+    label: label2
   };
 }
 function followMismatches(exp, afterRaw) {
@@ -55891,13 +55973,13 @@ function expectOf2(a, plan2) {
   if (plan2.workArea) exp.workArea = plan2.workArea;
   return exp;
 }
-async function writeFollow(ctx, a, plan2, expect, label) {
+async function writeFollow(ctx, a, plan2, expect, label2) {
   const exp = expectOf2(a, plan2);
   const layerRef = { index: plan2.layer.index, id: plan2.layer.id };
   const sampleTimes2 = exp.sampleTimes;
   const result = await runGuardedWrite(ctx, {
     toolName: a.toolName,
-    label,
+    label: label2,
     expect,
     compId: a.compId,
     read: (phase, written) => {
@@ -56867,9 +56949,9 @@ async function hostRead3(ctx, opId, tag, host, args, toolName, slow = false) {
   });
   return res.result;
 }
-async function queued7(ctx, label, opId, fn) {
+async function queued7(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -57000,10 +57082,10 @@ function plateTail(run) {
     ...run.sessionFields
   };
 }
-async function compLease(ctx, toolName, label, compId, budgetOpts, fn) {
+async function compLease(ctx, toolName, label2, compId, budgetOpts, fn) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  return queued7(ctx, label, opId, async () => {
+  return queued7(ctx, label2, opId, async () => {
     fs53.mkdirSync(framesDir, { recursive: true });
     const budget = createRenderBudget(budgetOpts);
     const snap = makeSnap(ctx, opId, toolName, framesDir, budget, () => compId);
@@ -57139,15 +57221,15 @@ function colorMismatches(mode, keys, before, after, written) {
   const wantKeys = keys.times.length > 1 ? keys.times.length : 0;
   if (mode === "exposure") {
     const sw = resolveEffectParams(fx.params, { channels: { names: ["Channels"] }, bypass: { names: ["Bypass Linear Light Conversion"] } });
-    const checkSwitch = (key, wrote, label) => {
+    const checkSwitch = (key, wrote, label2) => {
       if (typeof wrote !== "number") return;
       const idx = sw[key];
       const p = idx === null ? void 0 : fx.params.find((q) => q.index === idx);
       if (!p) {
-        m.push({ path: `effect.${key}`, expected: label, actual: void 0, message: `The "${label}" parameter is not on the effect` });
+        m.push({ path: `effect.${key}`, expected: label2, actual: void 0, message: `The "${label2}" parameter is not on the effect` });
         return;
       }
-      expectThat(m, p.value !== null && Math.abs(p.value - wrote) < 1e-6, `effect.${key}`, wrote, p.value, `"${label}" does not hold the value that was written`);
+      expectThat(m, p.value !== null && Math.abs(p.value - wrote) < 1e-6, `effect.${key}`, wrote, p.value, `"${label2}" does not hold the value that was written`);
     };
     checkSwitch("channels", written.channels_written, "Channels");
     checkSwitch("bypass", written.bypass_written, "Bypass Linear Light Conversion");
@@ -57177,7 +57259,7 @@ function colorMismatches(mode, keys, before, after, written) {
 }
 async function colorMatchHandler(args, ctx) {
   const toolName = "ae_patch_color_match";
-  const label = `ae_patch_color_match(${args.comp_id})`;
+  const label2 = `ae_patch_color_match(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   let resumed = null;
   if (args.continue_id) {
@@ -57190,7 +57272,7 @@ async function colorMatchHandler(args, ctx) {
   const effectMode = resumed?.effect ?? args.effect;
   const run = await plateRun(ctx, {
     toolName,
-    label,
+    label: label2,
     compId: args.comp_id,
     expect: args.expect,
     layer: layerSel,
@@ -57359,7 +57441,7 @@ async function colorMatchHandler(args, ctx) {
   const tail = plateTail(run);
   const body = run.value;
   if (!body) return { op_id: run.opId, applied: true, ok: false, error: "measure_failed", message: run.bodyError ?? "the measurement did not run", ...rebasedTrackField(run.prep.stored), ...tail };
-  return finishColor(ctx, args, run, body, tail, { toolName, label, framesDir, effectMode });
+  return finishColor(ctx, args, run, body, tail, { toolName, label: label2, framesDir, effectMode });
 }
 function rebasedTrackField(st) {
   if (!st.rebased_from || !st.track_id) return {};
@@ -57603,11 +57685,11 @@ function grainMismatches(args, patchId, before, after, written) {
 }
 async function grainHandler(args, ctx) {
   const toolName = "ae_patch_grain";
-  const label = `ae_patch_grain(${args.comp_id})`;
+  const label2 = `ae_patch_grain(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const run = await plateRun(ctx, {
     toolName,
-    label,
+    label: label2,
     compId: args.comp_id,
     expect: args.expect,
     layer: args.layer,
@@ -57754,7 +57836,7 @@ async function grainHandler(args, ctx) {
   try {
     first = await runGuardedWrite(ctx, {
       toolName,
-      label: `${label} write`,
+      label: `${label2} write`,
       expect: args.expect,
       compId: args.comp_id,
       read: () => stateRead2(),
@@ -57795,7 +57877,7 @@ async function grainHandler(args, ctx) {
     for (let round6 = 0; round6 <= args.rounds; round6++) {
       let measured = null;
       try {
-        measured = await compLease(ctx, toolName, `${label} round ${round6}`, args.comp_id, { maxRenders: samples.length * 2 + 2, maxSeconds: 60 }, async (snap) => {
+        measured = await compLease(ctx, toolName, `${label2} round ${round6}`, args.comp_id, { maxRenders: samples.length * 2 + 2, maxSeconds: 60 }, async (snap) => {
           const rows = [];
           let lastImg = null;
           for (const sample of samples) {
@@ -57836,7 +57918,7 @@ async function grainHandler(args, ctx) {
       try {
         tuned = await runGuardedWrite(ctx, {
           toolName,
-          label: `${label} tune ${round6 + 1}`,
+          label: `${label2} tune ${round6 + 1}`,
           expect: args.expect,
           compId: args.comp_id,
           read: () => tuneRead(),
@@ -57952,11 +58034,11 @@ function finishMismatches(plan2, before, after, written) {
 }
 async function finishHandler(args, ctx) {
   const toolName = "ae_patch_finish";
-  const label = `ae_patch_finish(${args.comp_id})`;
+  const label2 = `ae_patch_finish(${args.comp_id})`;
   const framesDir = defaultFramesDir();
   const run = await plateRun(ctx, {
     toolName,
-    label,
+    label: label2,
     compId: args.comp_id,
     expect: args.expect,
     layer: args.layer,
@@ -58187,7 +58269,7 @@ async function finishHandler(args, ctx) {
   try {
     wrote = await runGuardedWrite(ctx, {
       toolName,
-      label: `${label} write`,
+      label: `${label2} write`,
       expect: args.expect,
       compId: args.comp_id,
       read: () => ({ host: "patchfitFinishState", args: { comp_id: args.comp_id, layer: { id: info.layer.id }, times: evenly(times, 12).items } }),
@@ -58200,7 +58282,7 @@ async function finishHandler(args, ctx) {
   }
   const result = { ...header, applied: true, write: wrote, notes };
   try {
-    const afterImg = await compLease(ctx, toolName, `${label} crops`, args.comp_id, { maxRenders: 2, maxSeconds: 30 }, async (snap) => snap(run.prep.refTime));
+    const afterImg = await compLease(ctx, toolName, `${label2} crops`, args.comp_id, { maxRenders: 2, maxSeconds: 30 }, async (snap) => snap(run.prep.refTime));
     const s = afterImg.width / info.comp.width;
     const polyRef = scalePoly2(run.prep.poly, s);
     const cc = cropToBounds(afterImg, polygonBounds(polyRef), 8 * s + 6);
@@ -58689,7 +58771,7 @@ function estimateAspect(corners, principal) {
   const horizontal = (Math.hypot(ur[0] - ul[0], ur[1] - ul[1]) + Math.hypot(lr[0] - ll[0], lr[1] - ll[1])) / 2;
   const vertical = (Math.hypot(ll[0] - ul[0], ll[1] - ul[1]) + Math.hypot(lr[0] - ur[0], lr[1] - ur[1])) / 2;
   const edgeRatio = vertical > 0 ? horizontal / vertical : 1;
-  const plain = (method) => ({
+  const plain2 = (method) => ({
     aspect: edgeRatio,
     range: [edgeRatio, edgeRatio],
     method,
@@ -58699,7 +58781,7 @@ function estimateAspect(corners, principal) {
   });
   const k2 = dot3(cross3(m1, m4), m3) / dot3(cross3(m2, m4), m3);
   const k3 = dot3(cross3(m1, m4), m2) / dot3(cross3(m3, m4), m2);
-  if (!Number.isFinite(k2) || !Number.isFinite(k3)) return plain("edge_lengths");
+  if (!Number.isFinite(k2) || !Number.isFinite(k3)) return plain2("edge_lengths");
   const n2 = [k2 * m2[0] - m1[0], k2 * m2[1] - m1[1], k2 * m2[2] - m1[2]];
   const n3 = [k3 * m3[0] - m1[0], k3 * m3[1] - m1[1], k3 * m3[2] - m1[2]];
   const [u0, v0] = principal;
@@ -58711,7 +58793,7 @@ function estimateAspect(corners, principal) {
     const f0 = Math.max(1, 2 * u0);
     const est0 = aspectAt(f0);
     const ends0 = [est0, aspectAt(f0 * 0.5), aspectAt(f0 * 3)].filter((v) => Number.isFinite(v) && v > 0);
-    if (!Number.isFinite(est0) || !(est0 > 0)) return plain("edge_lengths");
+    if (!Number.isFinite(est0) || !(est0 > 0)) return plain2("edge_lengths");
     return {
       aspect: est0,
       range: [Math.min(...ends0), Math.max(...ends0)],
@@ -58721,7 +58803,7 @@ function estimateAspect(corners, principal) {
       common_ratio: nearestCommonRatio(est0)
     };
   };
-  if (Math.abs(n2[2]) < 1e-9 && Math.abs(n3[2]) < 1e-9) return plain("edge_lengths");
+  if (Math.abs(n2[2]) < 1e-9 && Math.abs(n3[2]) < 1e-9) return plain2("edge_lengths");
   if (Math.abs(denom) < 1e-9) return assumed();
   const minEdge = Math.min(...corners.map((p, i) => Math.hypot(corners[(i + 1) % 4][0] - p[0], corners[(i + 1) % 4][1] - p[1])));
   const nearZero = minEdge > 0 ? Math.max(3e-3, 2 / minEdge) : 3e-3;
@@ -59140,9 +59222,9 @@ function writePng2(framesDir, tag, png) {
   fs54.writeFileSync(file, encodePng(png));
   return file;
 }
-async function queued8(ctx, label, opId, fn) {
+async function queued8(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -59181,12 +59263,12 @@ async function screenCorners(ctx, args) {
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
   fs54.mkdirSync(framesDir, { recursive: true });
-  const label = `ae_screen_corners(${args.comp_id})`;
+  const label2 = `ae_screen_corners(${args.comp_id})`;
   const isolate = args.isolate_layers;
   const expect = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
   if (isolate && !expect) throw new PlanarError("bad_args", "isolate_layers writes to the project (a temporary comp), so `expect` is required.");
   if (isolate && expect) ctx.quarantine.assertClear();
-  const ran = await queued8(ctx, label, opId, async () => {
+  const ran = await queued8(ctx, label2, opId, async () => {
     const comp2 = await readComp3(ctx, opId, args.comp_id, isolate, toolName);
     const fps = comp2.fps > 0 ? comp2.fps : 25;
     const guessTime = args.ref_time ?? (comp2.time >= 0 && comp2.time <= comp2.duration ? comp2.time : comp2.work_area_start + comp2.work_area_duration / 2);
@@ -59211,7 +59293,7 @@ async function screenCorners(ctx, args) {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       checkpoint = await autoCheckpoint(ctx, guard, toolName);
-      note = { opId, toolName, label, expect, checkpoint: checkpoint?.path ?? null };
+      note = { opId, toolName, label: label2, expect, checkpoint: checkpoint?.path ?? null };
       sessionFields = await noteBeforeWrite(ctx, note);
     }
     const grab = async (renderCompId) => renderFrame(ctx, opId, renderCompId, refTime, 0, framesDir, toolName);
@@ -59620,10 +59702,10 @@ async function screenReplace(ctx, args) {
   const toolName = "ae_screen_replace";
   const opId = ctx.bridge.newOpId();
   const framesDir = defaultFramesDir();
-  const label = `ae_screen_replace(${args.comp_id})`;
+  const label2 = `ae_screen_replace(${args.comp_id})`;
   const notes = [];
   const corners = args.corners;
-  const prep = await queued8(ctx, label, opId, async () => {
+  const prep = await queued8(ctx, label2, opId, async () => {
     ctx.quarantine.assertClear();
     await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, `${opId}_pre`);
     const info2 = await readHost5(ctx, opId, "info", "screenrepInfo", {
@@ -59831,7 +59913,7 @@ async function screenReplace(ctx, args) {
   const expect = { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id };
   const result = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect,
     compId: args.comp_id,
     read: (phase, written) => {
@@ -59891,7 +59973,7 @@ async function screenReplace(ctx, args) {
   let sheetError;
   if (args.contact_sheet && sheet.length > 0 && result.receipt) {
     try {
-      const shots = await queued8(ctx, `${label} sheet`, opId, async () => {
+      const shots = await queued8(ctx, `${label2} sheet`, opId, async () => {
         const after = [];
         const beforeShots = [];
         let i = 0;
@@ -60312,13 +60394,13 @@ function createCompMismatches(plan2, beforeRaw, afterRaw, w) {
   });
   return m;
 }
-async function hostRead4(ctx, fn, args, toolName, label) {
-  const res = await ctx.bridge.callHost(fn, args, { label, mutates: false, toolName });
+async function hostRead4(ctx, fn, args, toolName, label2) {
+  const res = await ctx.bridge.callHost(fn, args, { label: label2, mutates: false, toolName });
   return res.result;
 }
-async function softRead(ctx, fn, args, toolName, label) {
+async function softRead(ctx, fn, args, toolName, label2) {
   try {
-    return await hostRead4(ctx, fn, args, toolName, label);
+    return await hostRead4(ctx, fn, args, toolName, label2);
   } catch {
     return null;
   }
@@ -60328,8 +60410,8 @@ async function createComp(args, ctx) {
   const dry = args.dry_run ?? (args.mode === "duplicate" && args.deep === true);
   if (!dry) ctx.quarantine.assertClear();
   const hostArgs2 = createHostArgs(args);
-  const label = `ae_create_comp(${args.mode}${dry ? ", dry run" : ""})`;
-  const plan2 = await hostRead4(ctx, "projectitemsCreateCompPlan", hostArgs2, toolName, label);
+  const label2 = `ae_create_comp(${args.mode}${dry ? ", dry run" : ""})`;
+  const plan2 = await hostRead4(ctx, "projectitemsCreateCompPlan", hostArgs2, toolName, label2);
   const originals = plan2.would_create.map((e) => e.source_name).filter((n) => typeof n === "string");
   const { expressions, expressions_truncated, ...planShown } = plan2;
   if (plan2.refusals.length > 0) {
@@ -60350,7 +60432,7 @@ async function createComp(args, ctx) {
   const sourceIds = plan2.would_create.map((e) => e.source_id);
   const out = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect: args.expect,
     compId: args.mode === "duplicate" ? args.comp_id : void 0,
     read: (phase, w) => {
@@ -60375,7 +60457,7 @@ async function createComp(args, ctx) {
   let scanTruncated;
   const createdIds = out.comps?.map((c) => c.id) ?? out.created_ids ?? [];
   if (args.mode === "duplicate" && createdIds.length > 0) {
-    const scan = await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true, expression_comp_ids: createdIds }, toolName, `${label} (references)`);
+    const scan = await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true, expression_comp_ids: createdIds }, toolName, `${label2} (references)`);
     if (scan?.expressions) {
       stale = copiedCompWarnings(scan.expressions, originals);
       scanTruncated = scan.expressions_truncated || void 0;
@@ -60540,11 +60622,11 @@ async function projectItems(args, ctx) {
   const ops = normaliseOps(args);
   const fixOn = args.fix_expressions !== false;
   const hostArgs2 = { ops, fix_expressions: fixOn };
-  const label = `ae_project_items(${ops.map((o) => o.action).join(", ")}${dry ? ", dry run" : ""})`;
-  const plan2 = await hostRead4(ctx, "projectitemsPlan", hostArgs2, toolName, label);
+  const label2 = `ae_project_items(${ops.map((o) => o.action).join(", ")}${dry ? ", dry run" : ""})`;
+  const plan2 = await hostRead4(ctx, "projectitemsPlan", hostArgs2, toolName, label2);
   const renames = plan2.renames ?? [];
   const wantScan = renames.length > 0;
-  const beforeScan = wantScan ? await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true }, toolName, `${label} (references)`) : null;
+  const beforeScan = wantScan ? await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true }, toolName, `${label2} (references)`) : null;
   const refsBefore = beforeScan?.expressions ? referencesToRenamed(beforeScan.expressions, renames) : [];
   const affectedComps = [...new Set(refsBefore.map((r) => r.ex.comp_id))];
   const referenceReport = wantScan ? {
@@ -60583,7 +60665,7 @@ async function projectItems(args, ctx) {
   const validateBefore = affectedComps.length > 0 ? await validateComps(ctx, affectedComps, toolName, "before") : [];
   const out = await runGuardedWrite(ctx, {
     toolName,
-    label,
+    label: label2,
     expect: args.expect,
     read: (phase, w) => phase === "before" ? readItems(idsOfOps(ops)) : readItems(touchedIds(w)),
     write: { host: "projectitemsApply", args: { ...hostArgs2, label: "Project items" } },
@@ -60623,7 +60705,7 @@ async function projectItems(args, ctx) {
   const renamedDone = out.renamed ?? [];
   const doneRenames = renames.filter((r) => renamedDone.some((x) => x.id === r.id));
   if (doneRenames.length > 0) {
-    const scan = await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true }, toolName, `${label} (references after)`);
+    const scan = await softRead(ctx, "projectitemsReadItems", { ids: [], scan_expressions: true }, toolName, `${label2} (references after)`);
     const unresolved = scan?.expressions ? renamedReferenceWarnings(scan.expressions, doneRenames, scan.item_names) : [];
     const validateAfter = affectedComps.length > 0 ? await validateComps(ctx, affectedComps, toolName, "after") : [];
     after = {
@@ -60842,9 +60924,9 @@ function newExpressionErrors2(before, after) {
   }
   return out;
 }
-async function softRead2(ctx, fn, args, label) {
+async function softRead2(ctx, fn, args, label2) {
   try {
-    const res = await ctx.bridge.callHost(fn, args, { label, mutates: false, toolName: "ae_project_settings" });
+    const res = await ctx.bridge.callHost(fn, args, { label: label2, mutates: false, toolName: "ae_project_settings" });
     return res.result;
   } catch {
     return null;
@@ -61880,11 +61962,11 @@ function hostArgs(args) {
   return rest;
 }
 async function dryRun(args, ctx) {
-  const label = `ae_layer_ops(${args.action}, dry run)`;
+  const label2 = `ae_layer_ops(${args.action}, dry run)`;
   const base = { mutates: false, toolName: "ae_layer_ops" };
   const read3 = opsRead(args);
-  const beforeRes = await ctx.bridge.callHost(read3.host, read3.args, { label: `${label} (read)`, ...base });
-  const planRes = await ctx.bridge.callHost("layeropsPlan", hostArgs(args), { label, ...base });
+  const beforeRes = await ctx.bridge.callHost(read3.host, read3.args, { label: `${label2} (read)`, ...base });
+  const planRes = await ctx.bridge.callHost("layeropsPlan", hostArgs(args), { label: label2, ...base });
   const plan2 = planRes.result;
   const before = stackOf(beforeRes.result);
   let would_break;
@@ -62398,11 +62480,11 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
   const source = w.targets.find((t) => t.role === "source");
   for (const t of w.targets) {
     if (t.role === "source") continue;
-    const label = `${t.layer_name}.${t.property}`;
+    const label2 = `${t.layer_name}.${t.property}`;
     const b = find(before, t);
     const a = find(after, t);
     if (!b || !a) {
-      push2(label, "property", void 0, `${label} could not be read back`);
+      push2(label2, "property", void 0, `${label2} could not be read back`);
       continue;
     }
     if (b.truncated || a.truncated) continue;
@@ -62415,7 +62497,7 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
       for (const mv of t.moves) {
         const sk = srcB?.keys[mv.from_index - 1];
         if (!sk) {
-          push2(`${label}.moves`, "a source key", void 0, `Source key ${mv.from_index} was not in the before read`);
+          push2(`${label2}.moves`, "a source key", void 0, `Source key ${mv.from_index} was not in the before read`);
           continue;
         }
         entries2.push({ time: mv.to, moved: true, move: mv, key: sk, srcKey: sk });
@@ -62428,17 +62510,17 @@ function transformMismatches(op, beforeRaw, afterRaw, written) {
       });
     }
     const wantCount = entries2.length;
-    expectThat(m, a.numKeys === wantCount, `${label}.numKeys`, wantCount, a.numKeys, "Key count is not what the operation gives");
+    expectThat(m, a.numKeys === wantCount, `${label2}.numKeys`, wantCount, a.numKeys, "Key count is not what the operation gives");
     if (a.numKeys !== wantCount) continue;
     for (const e of entries2) {
       if (!e.moved || !e.move) continue;
       const want = expectedTime(op, ctx, e.move.from);
-      if (Math.abs(want - e.move.to) > 1e-6) push2(`${label}.keys[${e.move.from_index}]`, want, e.move.to, `The host moved a key from ${e.move.from}s to ${e.move.to}s; the operation gives ${want}s`);
+      if (Math.abs(want - e.move.to) > 1e-6) push2(`${label2}.keys[${e.move.from_index}]`, want, e.move.to, `The host moved a key from ${e.move.from}s to ${e.move.to}s; the operation gives ${want}s`);
     }
     const order = entries2.map((e, i) => ({ e, i })).sort((x, y) => x.e.time - y.e.time);
     order.forEach(({ e }, rank) => {
       const got = a.keys[rank];
-      const at = `${label}.keys[${rank + 1}]`;
+      const at = `${label2}.keys[${rank + 1}]`;
       if (!got) return;
       if (e.move) expectThat(m, e.move.new_index === rank + 1, `${at}.index`, rank + 1, e.move.new_index, "The host's new key index is not the key's rank in time");
       const roving = e.key.roving === true;
@@ -63679,8 +63761,8 @@ function checkBuild(prepared, mapping, read3) {
         const values = got.key_values && got.key_values.length > 0 ? got.key_values : [got.value];
         values.forEach((gv, ki) => {
           const actual = Array.isArray(expected) && Array.isArray(gv) && gv.length > expected.length ? gv.slice(0, expected.length) : gv;
-          const label = values.length > 1 ? `${where}[key ${got.keys?.[ki] ?? ki + 1}]` : where;
-          compareValues(expected, actual, label, mismatches);
+          const label2 = values.length > 1 ? `${where}[key ${got.keys?.[ki] ?? ki + 1}]` : where;
+          compareValues(expected, actual, label2, mismatches);
         });
       }
     });
@@ -63692,29 +63774,29 @@ function validateAgainstTemplate(rows, prepared, mapping, inspected) {
   mapping.forEach((m, mi) => {
     const insp = inspected[mi];
     if (!insp) return;
-    const label = `mapping ${mi + 1} ("${m.column}")`;
+    const label2 = `mapping ${mi + 1} ("${m.column}")`;
     if (insp.error) {
-      problems.push(`${label}: ${insp.error}`);
+      problems.push(`${label2}: ${insp.error}`);
       return;
     }
     if (!prepared.some((p) => p.values[mi] !== null && p.values[mi] !== void 0)) return;
     if (m.target === "footage") {
-      if (!insp.can_take_footage) problems.push(`${label}: layer "${m.layer.name ?? m.layer.index ?? m.layer.id}" can't take footage (it needs a footage, solid or precomp layer)`);
+      if (!insp.can_take_footage) problems.push(`${label2}: layer "${m.layer.name ?? m.layer.index ?? m.layer.id}" can't take footage (it needs a footage, solid or precomp layer)`);
       return;
     }
     if (m.target === "text") return;
     const where = (m.path ?? []).join(" > ");
     const dims = insp.dims ?? 0;
     if (m.target === "color" && !insp.is_color) {
-      problems.push(`${label}: ${where} is not a colour property`);
+      problems.push(`${label2}: ${where} is not a colour property`);
       return;
     }
     if (dims === 0) {
-      problems.push(`${label}: ${where} doesn't take numbers`);
+      problems.push(`${label2}: ${where} doesn't take numbers`);
       return;
     }
     if (typeof m.keyframe === "number" && (insp.num_keys ?? 0) > 0 && m.keyframe > (insp.num_keys ?? 0)) {
-      problems.push(`${label}: keyframe ${m.keyframe} is past the last of ${insp.num_keys} keys on ${where}`);
+      problems.push(`${label2}: keyframe ${m.keyframe} is past the last of ${insp.num_keys} keys on ${where}`);
     }
     if (m.target === "color") return;
     prepared.forEach((p) => {
@@ -65168,9 +65250,9 @@ function keyTimes(info) {
   const snap = (t) => Math.round(t * fps) / fps;
   return [.../* @__PURE__ */ new Set([snap(start), snap((start + end) / 2), snap(end)])];
 }
-async function queued9(ctx, label, opId, fn) {
+async function queued9(ctx, label2, opId, fn) {
   try {
-    return await ctx.queue.run(label, fn);
+    return await ctx.queue.run(label2, fn);
   } catch (err) {
     if (err instanceof QueueWaitError) throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
     throw err;
@@ -65220,16 +65302,16 @@ var init_key = __esm({
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
           fs58.mkdirSync(framesDir, { recursive: true });
-          const label = `ae_key_greenscreen(${args.comp_id})`;
+          const label2 = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo2 = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
             script: buildJsxCall("keyLayerInfo", { comp_id: args.comp_id, layer: args.layer, times }),
-            label: `${label} ${suffix}`,
+            label: `${label2} ${suffix}`,
             mutates: false,
             toolName: "ae_key_greenscreen"
           })).result;
           const capture = async (t, i) => (await captureCompFrame({ ctx, opId, compId: args.comp_id, time: t, frameIndex: i, framesDir, toolName: "ae_key_greenscreen" })).path;
-          const run = await queued9(ctx, label, opId, async () => {
+          const run = await queued9(ctx, label2, opId, async () => {
             const first = await readInfo2(args.times, "info");
             const times = args.times ?? keyTimes(first);
             const info = args.times ? first : await readInfo2(times, "info2");
@@ -65272,7 +65354,7 @@ var init_key = __esm({
                   expect,
                   ...params
                 }),
-                label: `${label} key`,
+                label: `${label2} key`,
                 mutates: true,
                 toolName: "ae_key_greenscreen"
               });
@@ -65527,7 +65609,7 @@ var init_keyframes = __esm({
           const snapshot = { host: "keysSnapshotStatic", args: { comp_id: args.comp_id, layer: args.layer, path: args.path } };
           const rangeOnly = args.all !== true && !(args.keys?.length ?? 0);
           const selectionArgs = { ...snapshot.args, ...rangeOnly ? { start: args.start, end: args.end } : {} };
-          const readSelection = (label) => ctx.bridge.callHost("keysSnapshot", selectionArgs, { label, mutates: false, toolName: "ae_remove_keyframes" });
+          const readSelection = (label2) => ctx.bridge.callHost("keysSnapshot", selectionArgs, { label: label2, mutates: false, toolName: "ae_remove_keyframes" });
           const badIndex = (snap) => (args.keys ?? []).find((i) => i > snap.numKeys);
           if (args.dry_run) {
             const snap = (await readSelection("ae_remove_keyframes (dry run)")).result;
@@ -65643,11 +65725,11 @@ function checkThreeDExtras(m, args, made, written) {
       ["options", args.mesh_options, made.mesh?.options],
       ["bevel", args.bevel_options, made.mesh?.bevel]
     ];
-    for (const [label, want, got] of groups) {
+    for (const [label2, want, got] of groups) {
       for (const [key, w] of Object.entries(want ?? {})) {
         const g = got?.[key];
-        if (typeof w === "boolean") expectThat(m, g === w, `layer.mesh.${label}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back)`);
-        else expectThat(m, closeTo(g, w), `layer.mesh.${label}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back); units and ranges are not documented`);
+        if (typeof w === "boolean") expectThat(m, g === w, `layer.mesh.${label2}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back)`);
+        else expectThat(m, closeTo(g, w), `layer.mesh.${label2}.${key}`, w, g, `Mesh ${key} differs (or was not in the read-back); units and ranges are not documented`);
       }
     }
   }
@@ -66285,7 +66367,7 @@ function platformAspectWarning(preset, width, height) {
 function platformFindings(bounds, comp, preset, skipLayerIds = /* @__PURE__ */ new Set()) {
   const out = [];
   const box = safeRect(preset, comp.width, comp.height);
-  const label = PLATFORM_PRESETS[preset].label;
+  const label2 = PLATFORM_PRESETS[preset].label;
   const reels = preset === "reels_9_16" || preset === "tiktok_9_16" || preset === "instagram_reels_9_16" || preset === "youtube_shorts_9_16";
   for (const b of bounds) {
     if (!b.checkable || skipLayerIds.has(b.layer.id)) continue;
@@ -66304,14 +66386,14 @@ function platformFindings(bounds, comp, preset, skipLayerIds = /* @__PURE__ */ n
       const base = { layer: b.layer, time: Math.round(s.time * 1e3) / 1e3, preset, bounds: [px(l), px(t), px(r), px(bt)], safe_box: [px(box.left), px(box.top), px(box.right), px(box.bottom)] };
       const what = b.kind === "text" ? "Text" : "Logo";
       if (reels && bt > box.bottom + 0.5) {
-        out.push({ severity: "low", kind: "below_platform_ui", message: `${what} "${b.layer.name}" is below the platform UI line (y ${px(box.bottom)}) by ${px(bt - box.bottom)} px; captions, buttons and the account name cover it on ${label}.`, ...base });
+        out.push({ severity: "low", kind: "below_platform_ui", message: `${what} "${b.layer.name}" is below the platform UI line (y ${px(box.bottom)}) by ${px(bt - box.bottom)} px; captions, buttons and the account name cover it on ${label2}.`, ...base });
       }
       if (reels && r > box.right + 0.5) {
-        out.push({ severity: "low", kind: "in_action_rail", message: `${what} "${b.layer.name}" reaches into the right action rail (x ${px(box.right)}) by ${px(r - box.right)} px on ${label}.`, ...base });
+        out.push({ severity: "low", kind: "in_action_rail", message: `${what} "${b.layer.name}" reaches into the right action rail (x ${px(box.right)}) by ${px(r - box.right)} px on ${label2}.`, ...base });
       }
       const rest = reels ? generic.filter((g) => !g.startsWith("bottom") && !g.startsWith("right")) : generic;
       if (rest.length) {
-        out.push({ severity: "low", kind: "outside_platform_safe", message: `${what} "${b.layer.name}" is outside the ${label} safe box: past the ${rest.join(", ")}.`, ...base });
+        out.push({ severity: "low", kind: "outside_platform_safe", message: `${what} "${b.layer.name}" is outside the ${label2} safe box: past the ${rest.join(", ")}.`, ...base });
       }
       break;
     }
@@ -66590,12 +66672,12 @@ var init_layout = __esm({
         schema: AeHouseStyleCheckSchema,
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
-          const label = "ae_house_style_check";
+          const label2 = "ae_house_style_check";
           let gathered;
           try {
             gathered = await ctx.queue.run(`ae_house_style_check(${args.comp_id})`, async () => {
               let n = 0;
-              const read3 = (fn, hostArgs2, what) => ctx.bridge.evalRaw({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs2), label: `${label} (${what})`, mutates: false, toolName: label });
+              const read3 = (fn, hostArgs2, what) => ctx.bridge.evalRaw({ id: `${opId}_${n++}`, script: buildJsxCall(fn, hostArgs2), label: `${label2} (${what})`, mutates: false, toolName: label2 });
               const status = (await read3("status", {}, "status")).result;
               const brief2 = status.project_path && status.project_path !== "<unsaved>" ? readBrief(briefPath(status.project_path)) : null;
               const salvaged = salvageMotionSpec(brief2?.motion);
@@ -67168,35 +67250,35 @@ function selectorRules(sel2, ctx, where) {
     if (sel2.offset !== void 0 && (sel2.offset < -100 || sel2.offset > 100)) issue(`${where}: offset is -100 to 100 percent unless units is index.`);
   }
 }
-function checkMask(m, label, spec, got) {
+function checkMask(m, label2, spec, got) {
   if (!got) {
-    m.push({ path: label, expected: spec.name ?? "mask", actual: void 0, message: `${label} is not in the read-back` });
+    m.push({ path: label2, expected: spec.name ?? "mask", actual: void 0, message: `${label2} is not in the read-back` });
     return;
   }
-  if (spec.name) expectThat(m, got.name === spec.name, `${label}.name`, spec.name, got.name, "Mask name differs");
-  if (spec.mode) expectThat(m, got.mode === spec.mode, `${label}.mode`, spec.mode, got.mode, "Mask mode differs");
-  if (spec.inverted !== void 0) expectThat(m, got.inverted === spec.inverted, `${label}.inverted`, spec.inverted, got.inverted, "Inversion differs");
-  if (spec.feather) compareValues(spec.feather, got.feather, `${label}.feather`, m);
-  if (spec.opacity !== void 0) compareValues(spec.opacity, got.opacity, `${label}.opacity`, m);
-  if (spec.expansion !== void 0) compareValues(spec.expansion, got.expansion, `${label}.expansion`, m);
-  if (spec.feather_falloff && got.feather_falloff != null) expectThat(m, got.feather_falloff === spec.feather_falloff, `${label}.feather_falloff`, spec.feather_falloff, got.feather_falloff, "Feather falloff differs");
-  if (spec.motion_blur && got.motion_blur != null) expectThat(m, got.motion_blur === spec.motion_blur, `${label}.motion_blur`, spec.motion_blur, got.motion_blur, "Mask motion blur differs");
-  if (spec.locked !== void 0 && got.locked != null) expectThat(m, got.locked === spec.locked, `${label}.locked`, spec.locked, got.locked, "Lock state differs");
-  if (spec.roto_bezier !== void 0 && got.roto_bezier != null) expectThat(m, got.roto_bezier === spec.roto_bezier, `${label}.roto_bezier`, spec.roto_bezier, got.roto_bezier, "RotoBezier differs");
+  if (spec.name) expectThat(m, got.name === spec.name, `${label2}.name`, spec.name, got.name, "Mask name differs");
+  if (spec.mode) expectThat(m, got.mode === spec.mode, `${label2}.mode`, spec.mode, got.mode, "Mask mode differs");
+  if (spec.inverted !== void 0) expectThat(m, got.inverted === spec.inverted, `${label2}.inverted`, spec.inverted, got.inverted, "Inversion differs");
+  if (spec.feather) compareValues(spec.feather, got.feather, `${label2}.feather`, m);
+  if (spec.opacity !== void 0) compareValues(spec.opacity, got.opacity, `${label2}.opacity`, m);
+  if (spec.expansion !== void 0) compareValues(spec.expansion, got.expansion, `${label2}.expansion`, m);
+  if (spec.feather_falloff && got.feather_falloff != null) expectThat(m, got.feather_falloff === spec.feather_falloff, `${label2}.feather_falloff`, spec.feather_falloff, got.feather_falloff, "Feather falloff differs");
+  if (spec.motion_blur && got.motion_blur != null) expectThat(m, got.motion_blur === spec.motion_blur, `${label2}.motion_blur`, spec.motion_blur, got.motion_blur, "Mask motion blur differs");
+  if (spec.locked !== void 0 && got.locked != null) expectThat(m, got.locked === spec.locked, `${label2}.locked`, spec.locked, got.locked, "Lock state differs");
+  if (spec.roto_bezier !== void 0 && got.roto_bezier != null) expectThat(m, got.roto_bezier === spec.roto_bezier, `${label2}.roto_bezier`, spec.roto_bezier, got.roto_bezier, "RotoBezier differs");
   if (spec.color && Array.isArray(got.color)) {
     const off = spec.color.some((c, i) => !(Math.abs(c - got.color[i]) <= COLOR_TOLERANCE));
-    expectThat(m, !off, `${label}.color`, spec.color, got.color, "Mask colour differs");
+    expectThat(m, !off, `${label2}.color`, spec.color, got.color, "Mask colour differs");
   }
   if (spec.shape === "rect" || spec.shape === "ellipse") {
     const [l, t, w, h] = spec.box;
-    compareValues([l, t, l + w, t + h], got.box, `${label}.box`, m);
+    compareValues([l, t, l + w, t + h], got.box, `${label2}.box`, m);
   }
   if (spec.shape === "path" && spec.vertices) {
-    compareValues(spec.vertices.length, got.vertices, `${label}.vertices`, m);
+    compareValues(spec.vertices.length, got.vertices, `${label2}.vertices`, m);
     const xs = spec.vertices.map((v) => v[0]);
     const ys = spec.vertices.map((v) => v[1]);
-    compareValues([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], got.box, `${label}.box`, m);
-    if (got.closed !== void 0) expectThat(m, got.closed === (spec.closed !== false), `${label}.closed`, spec.closed !== false, got.closed, "Mask closed state differs");
+    compareValues([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], got.box, `${label2}.box`, m);
+    if (got.closed !== void 0) expectThat(m, got.closed === (spec.closed !== false), `${label2}.closed`, spec.closed !== false, got.closed, "Mask closed state differs");
   }
 }
 function maskMismatches(args, beforeRaw, afterRaw, written) {
@@ -67241,23 +67323,23 @@ function expectedSelectorValue(field, v) {
   if (typeof v === "string" && ENUMS[field]) return ENUMS[field][v];
   return v;
 }
-function checkSelectorChildren(m, label, spec, entry, info, skipField) {
+function checkSelectorChildren(m, label2, spec, entry, info, skipField) {
   for (const [field, value] of Object.entries(spec)) {
     if (field === "type" || value === void 0 || field === skipField) continue;
     const f = info.fields?.[field];
     if (!f) continue;
     const child = entry.children?.find((c) => c.matchName === f.match_name && c.name === f.name) ?? entry.children?.find((c) => c.matchName === f.match_name);
     if (!child) {
-      m.push({ path: `${label}.${field}`, expected: value, actual: void 0, message: `The selector's ${field} (${f.match_name}) is not in the read-back` });
+      m.push({ path: `${label2}.${field}`, expected: value, actual: void 0, message: `The selector's ${field} (${f.match_name}) is not in the read-back` });
       continue;
     }
     if (field === "expression") {
-      expectThat(m, child.expression === value, `${label}.expression`, value, child.expression, "The selector expression differs");
-      if (child.expression_error) m.push({ path: `${label}.expression_error`, expected: "", actual: child.expression_error, message: `The selector expression has an error: ${child.expression_error}` });
+      expectThat(m, child.expression === value, `${label2}.expression`, value, child.expression, "The selector expression differs");
+      if (child.expression_error) m.push({ path: `${label2}.expression_error`, expected: "", actual: child.expression_error, message: `The selector expression has an error: ${child.expression_error}` });
       continue;
     }
     const got = typeof child.value === "boolean" ? Number(child.value) : child.value;
-    compareValues(expectedSelectorValue(field, value), got, `${label}.${field}`, m);
+    compareValues(expectedSelectorValue(field, value), got, `${label2}.${field}`, m);
   }
 }
 function animatorMismatches(args, beforeRaw, afterRaw, written) {
@@ -68155,7 +68237,7 @@ var init_multicomp = __esm({
     lookupTool2 = registryLookup2;
     sleep2 = (ms) => new Promise((resolve7) => setTimeout(resolve7, ms));
     PROBE_NAME_LIMIT = 50;
-    call = (ctx, fn, args, label) => ctx.bridge.callHost(fn, args, { label, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
+    call = (ctx, fn, args, label2) => ctx.bridge.callHost(fn, args, { label: label2, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
     bad3 = (message, extra2 = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra2 });
     multicompTools = [
       {
@@ -68967,8 +69049,8 @@ function layoutMismatches2(plan2, args, before, after, w) {
   if (capped3 > 0) m.push({ path: "mismatches", expected: "no more mismatches", actual: capped3, message: `${capped3} more mismatch(es) are not listed (the first ${CHECKS} are shown)` });
   return m;
 }
-async function readHost6(ctx, host, args, label) {
-  const res = await ctx.bridge.callHost(host, args, { label, mutates: false, toolName: CALL });
+async function readHost6(ctx, host, args, label2) {
+  const res = await ctx.bridge.callHost(host, args, { label: label2, mutates: false, toolName: CALL });
   return res.result;
 }
 var RectSchema, MaskRef, RegionSourceSchema, ContentSchema, RegionSchema2, CopySchema2, CreateMasterSchema, AeLayoutApplySchema, cmp, nearly, ROWS, WARNINGS_SHOWN, RECEIPT_FULL_LAYERS, readOf6, compOf2, CHECKS, near9, nearList, CAMERA_COPY_NOTE, CALL, placementTools;
@@ -69377,33 +69459,33 @@ function batchMismatches(ops, afterRaw, offset) {
   });
   ops.forEach((op, i) => {
     const r = after.results[i];
-    const label = `ops[${offset + i + 1}]`;
+    const label2 = `ops[${offset + i + 1}]`;
     if (!r || r.error) {
-      m.push({ path: label, expected: "read-back", actual: r?.error, message: `Op ${offset + i + 1} could not be read back` });
+      m.push({ path: label2, expected: "read-back", actual: r?.error, message: `Op ${offset + i + 1} could not be read back` });
       return;
     }
     const finalExpr = lastExpr.get(propKey(op)) === i;
     const final = lastValue.get(propKey(op)) === i;
-    if (finalExpr && op.expression !== void 0) expectThat(m, r.expression === op.expression, `${label}.expression`, op.expression, r.expression, "Expression differs");
+    if (finalExpr && op.expression !== void 0) expectThat(m, r.expression === op.expression, `${label2}.expression`, op.expression, r.expression, "Expression differs");
     if (lastExprState.get(propKey(op)) === i) {
       const meantOn = op.expression_enabled === true || op.expression !== void 0 && op.expression_enabled !== false;
       if (r.expression_error && meantOn) {
-        m.push({ path: `${label}.expression_error`, expected: "no error", actual: r.expression_error, message: `Op ${offset + i + 1}'s expression is broken: ${r.expression_error}` });
+        m.push({ path: `${label2}.expression_error`, expected: "no error", actual: r.expression_error, message: `Op ${offset + i + 1}'s expression is broken: ${r.expression_error}` });
       } else if (op.expression_enabled !== void 0 && r.expression_enabled !== void 0) {
-        expectThat(m, r.expression_enabled === op.expression_enabled, `${label}.expression_enabled`, op.expression_enabled, r.expression_enabled, "Expression on/off differs");
+        expectThat(m, r.expression_enabled === op.expression_enabled, `${label2}.expression_enabled`, op.expression_enabled, r.expression_enabled, "Expression on/off differs");
       }
     }
     if (final && op.value != null && !op.keyframes?.length && (r.numKeys ?? 0) === 0 && op.expression === void 0) {
-      if (isShapeSpec(op.value)) m.push(...shapeValueMismatches(op.value, r.value, `${label}.value`));
-      else compareValues(asAe(wantedKeys(op.value, r.value)), asAe(trimTo(op.value, r.value)), `${label}.value`, m);
+      if (isShapeSpec(op.value)) m.push(...shapeValueMismatches(op.value, r.value, `${label2}.value`));
+      else compareValues(asAe(wantedKeys(op.value, r.value)), asAe(trimTo(op.value, r.value)), `${label2}.value`, m);
     }
     for (const k of op.keyframes ?? []) {
       const got = r.keys?.find((x) => Math.abs(x.time - k.time) < 5e-4);
-      if (!got || got.missing) m.push({ path: `${label}.keys@${k.time}`, expected: k.value, actual: void 0, message: `No key at ${k.time}s` });
-      else if (isShapeSpec(k.value)) m.push(...shapeValueMismatches(k.value, got.value, `${label}.keys@${k.time}`));
-      else if (isMarkerSpec(k.value)) m.push(...markerValueMismatches(k.value, got.value, `${label}.keys@${k.time}`));
-      else if (typeof k.value === "string" && isObject(got.value) && "comment" in got.value) m.push(...markerValueMismatches({ comment: k.value }, got.value, `${label}.keys@${k.time}`));
-      else compareValues(asAe(wantedKeys(k.value, got.value)), asAe(trimTo(k.value, got.value)), `${label}.keys@${k.time}`, m);
+      if (!got || got.missing) m.push({ path: `${label2}.keys@${k.time}`, expected: k.value, actual: void 0, message: `No key at ${k.time}s` });
+      else if (isShapeSpec(k.value)) m.push(...shapeValueMismatches(k.value, got.value, `${label2}.keys@${k.time}`));
+      else if (isMarkerSpec(k.value)) m.push(...markerValueMismatches(k.value, got.value, `${label2}.keys@${k.time}`));
+      else if (typeof k.value === "string" && isObject(got.value) && "comment" in got.value) m.push(...markerValueMismatches({ comment: k.value }, got.value, `${label2}.keys@${k.time}`));
+      else compareValues(asAe(wantedKeys(k.value, got.value)), asAe(trimTo(k.value, got.value)), `${label2}.keys@${k.time}`, m);
     }
   });
   return m;
@@ -69981,8 +70063,8 @@ function storeFingerprint(fp) {
 function getStoredFingerprint(id) {
   return fingerprintStore.get(id);
 }
-function sanitizeCheckpointLabel(label) {
-  const raw = (label ?? "checkpoint").trim();
+function sanitizeCheckpointLabel(label2) {
+  const raw = (label2 ?? "checkpoint").trim();
   if (!raw) return "checkpoint";
   let cleaned = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!cleaned) return "checkpoint";
@@ -71004,9 +71086,9 @@ ${args.description}`,
           if (unsafe.length > 0) {
             return { ok: false, error: "unsafe_jsx", message: `The skill's steps call members the safety lint refuses (a guard rail, not a sandbox). Nothing ran. Edit the skill (ae_skill_save with overwrite).`, problems: unsafe };
           }
-          const label = `Chroma AE MCP: skill ${skill.name}`;
+          const label2 = `Chroma AE MCP: skill ${skill.name}`;
           const guarded = skill.mutates || args.expect !== void 0;
-          const hostArgs2 = { steps: skill.steps, args: args.args ?? {}, label, mutates: guarded };
+          const hostArgs2 = { steps: skill.steps, args: args.args ?? {}, label: label2, mutates: guarded };
           const about = { skill: skill.name, scope: skill.scope, dir: skill.dir, steps: skill.steps.length };
           if (!guarded) {
             const res = await ctx.bridge.callHost("runSkill", hostArgs2, { label: `ae_skill_run: ${skill.name}`, mutates: false, toolName: "ae_skill_run" });
@@ -71021,7 +71103,7 @@ ${args.description}`,
           const snapshot = (suffix) => ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
             script: buildJsxCall("snapshotForReceipt", { comp_id: expect.comp_id }),
-            label: `${label} (${suffix} snapshot)`,
+            label: `${label2} (${suffix} snapshot)`,
             mutates: false,
             toolName: "ae_skill_run"
           });
@@ -71034,7 +71116,7 @@ ${args.description}`,
               const write = await ctx.bridge.evalRaw({
                 id: opId,
                 script: buildJsxCall("runSkill", { ...hostArgs2, expect }),
-                label,
+                label: label2,
                 mutates: true,
                 toolName: "ae_skill_run"
               });
@@ -71544,8 +71626,8 @@ function gather(src) {
   let inFlight = null;
   const f = info.inFlight;
   if (f && typeof f === "object") {
-    const label = typeof f.label === "string" && f.label ? f.label : typeof f.id === "string" && f.id ? f.id : "an operation";
-    inFlight = { label, runningMs: typeof f.runningMs === "number" && Number.isFinite(f.runningMs) ? f.runningMs : 0 };
+    const label2 = typeof f.label === "string" && f.label ? f.label : typeof f.id === "string" && f.id ? f.id : "an operation";
+    inFlight = { label: label2, runningMs: typeof f.runningMs === "number" && Number.isFinite(f.runningMs) ? f.runningMs : 0 };
   }
   let state = { sentActive: 0, abandoned: 0 };
   try {
@@ -72009,6 +72091,373 @@ function validCurve(curve) {
 init_assets2();
 init_diagnostics();
 init_dialogs();
+init_call_context();
+
+// src/popups.ts
+init_ask();
+init_dialogs();
+var KEEP_CLOSED_MS = 30 * 60 * 1e3;
+var TRANSIENT_MS = 2500;
+var SETTLE_MS2 = 2500;
+var TEXT_CHARS = 400;
+var PROGRESS_ONLY = /^(cancel|stop|abort)$/;
+var OK_LIKE2 = /^(ok|yes|continue)$/;
+var LEAVE_ID = "leave";
+function label(name) {
+  return normalizeOcrLabel(name ?? "").trim();
+}
+function plain(name) {
+  return label(name).toLowerCase().replace(/[^a-z ]/g, "").trim();
+}
+function letters(text) {
+  return (text ?? "").toLowerCase().replace(/[^\p{L}]/gu, "");
+}
+function popupSignature(d) {
+  return [letters(d.title), letters(d.text), d.buttons.map((b) => plain(b.name)).join("|")].join("\n");
+}
+function popupButtons(d) {
+  const painted = d.unattended !== void 0;
+  const pressable = new Set((d.unattended?.answerable ?? []).map(plain));
+  const many = d.buttons.length > 1 || d.other_pill_unread === true;
+  return d.buttons.map((b) => {
+    const name = label(b.name);
+    const destructive = isDestructiveButton(name) || many && OK_LIKE2.test(plain(name)) && DESTRUCTIVE_BODY_PATTERN.test(d.text);
+    return {
+      name,
+      ...b.default ? { default: true } : {},
+      destructive,
+      pressable: painted ? pressable.has(plain(name)) : b.enabled !== false
+    };
+  });
+}
+function isInfo(d, buttons) {
+  return buttons.length === 1 && d.checkboxes.length === 0 && d.other_pill_unread !== true && OK_LIKE2.test(plain(buttons[0].name)) && !buttons[0].destructive;
+}
+function isProgress(buttons) {
+  return buttons.length > 0 && buttons.every((b) => PROGRESS_ONLY.test(plain(b.name)));
+}
+function followUpFor(text) {
+  const t = text ?? "";
+  if (/font/i.test(t) && /(missing|not available|cannot access|can't access|substitut|not found|not installed)/i.test(t)) {
+    return "A font problem: offer ae_fonts check_files (which font files are missing or broken) and, if the user wants, ae_fonts replace with an installed font.";
+  }
+  if (/(missing|offline|could not be found|cannot be found|can't be found|not found)/i.test(t) && /(file|footage|item|frame|source)/i.test(t)) {
+    return "Missing files: offer ae_collect_relink to find and relink them.";
+  }
+  if (/(plug-?in|effect)/i.test(t) && /(missing|not installed|not available|not found)/i.test(t)) {
+    return "A missing effect or plug-in: say which layers use it (ae_find_layers or ae_describe_comp) and that the user has to install it.";
+  }
+  return void 0;
+}
+var PopupCenter = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.now = deps.now ?? Date.now;
+  }
+  deps;
+  records = /* @__PURE__ */ new Map();
+  byHandle = /* @__PURE__ */ new Map();
+  counter = 0;
+  running = null;
+  again = false;
+  watch = null;
+  now;
+  /** One-button presses under way (the operation that raised the popup goes on as soon as the key lands). */
+  pending = /* @__PURE__ */ new Set();
+  /**
+   * Waits (at most `maxMs`) for one-button presses under way: the call that raised the popup returns as soon as
+   * the key lands, and its result should carry the report.
+   */
+  async settle(maxMs = SETTLE_MS2) {
+    if (this.pending.size === 0) return;
+    let timer;
+    await Promise.race([
+      Promise.all([...this.pending]).then(() => void 0),
+      new Promise((resolve7) => {
+        timer = setTimeout(resolve7, maxMs);
+      })
+    ]);
+    if (timer) clearTimeout(timer);
+  }
+  /** Starts watching AE's windows; each change reads the popups again. */
+  start(watchFactory) {
+    if (this.watch) return;
+    this.watch = watchFactory(() => {
+      void this.refresh();
+    });
+    void this.refresh();
+  }
+  stop() {
+    this.watch?.stop();
+    this.watch = null;
+  }
+  /** Reads the popups again (calls made while one runs are folded into one more pass). */
+  refresh() {
+    if (this.running) {
+      this.again = true;
+      return this.running;
+    }
+    this.running = (async () => {
+      do {
+        this.again = false;
+        try {
+          await this.refreshOnce();
+        } catch (err) {
+          this.deps.log?.("warn", `Popup check failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } while (this.again);
+    })().finally(() => {
+      this.running = null;
+    });
+    return this.running;
+  }
+  async refreshOnce() {
+    const res = await this.deps.list();
+    if (!res.ok) return;
+    const present2 = /* @__PURE__ */ new Set();
+    for (const d of res.dialogs) {
+      present2.add(d.handle);
+      const sig = popupSignature(d);
+      const known = this.byHandle.get(d.handle);
+      const rec = known ? this.records.get(known) : void 0;
+      if (rec && rec.signature === sig) continue;
+      if (rec && rec.state === "open") this.closed(rec);
+      this.added(d, sig);
+    }
+    for (const [id, rec] of this.records) {
+      if (rec.state !== "open" || rec.pressing || present2.has(rec.handle)) continue;
+      if (rec.buttons.length === 0 && this.now() - rec.seen_at < TRANSIENT_MS) {
+        this.records.delete(id);
+        if (this.byHandle.get(rec.handle) === id) this.byHandle.delete(rec.handle);
+        continue;
+      }
+      this.closed(rec);
+    }
+    this.prune();
+  }
+  added(d, signature) {
+    const buttons = popupButtons(d);
+    if (isProgress(buttons) || buttons.length === 0 && d.caused_by_op !== null) {
+      this.byHandle.set(d.handle, `progress:${d.handle}`);
+      return;
+    }
+    this.counter += 1;
+    const rec = {
+      id: `popup_${this.now().toString(36)}_${this.counter}`,
+      handle: d.handle,
+      title: d.title,
+      text: (d.text ?? "").slice(0, TEXT_CHARS),
+      buttons,
+      caused_by_op: d.caused_by_op,
+      screenshot: d.screenshot,
+      seen_at: this.now(),
+      state: "open",
+      asked_in: [],
+      dialog: d,
+      signature
+    };
+    this.records.set(rec.id, rec);
+    this.byHandle.set(d.handle, rec.id);
+    const said = popupSaid(rec.title, rec.text);
+    if (d.caused_by_op !== null && isInfo(d, buttons) && buttons[0].pressable) {
+      const p = this.press(rec, buttons[0].name, "auto");
+      this.pending.add(p);
+      void p.finally(() => this.pending.delete(p));
+      return;
+    }
+    if (buttons.length > 0) this.deps.log?.("info", `After Effects popup "${rec.title || "untitled"}": ${said}`);
+    void this.ask(rec);
+  }
+  /** The popup closed without an answer of ours: the user answered it in After Effects (or AE closed it). */
+  closed(rec) {
+    rec.state = "closed";
+    if (rec.ask_id && this.deps.asks) this.deps.asks.answer(rec.ask_id, { dismissed: true });
+  }
+  /** ae_dialog_respond closed it (the agent answered): reported as such, not as closed in After Effects. */
+  noteAnswered(handle, button, by) {
+    const id = this.byHandle.get(handle);
+    const rec = id ? this.records.get(id) : void 0;
+    if (!rec || rec.state !== "open") return;
+    rec.state = "answered";
+    rec.answered = { by, button, at: this.now() };
+    if (by === "agent") rec.reported = reportKey(rec);
+    if (rec.ask_id && this.deps.asks) this.deps.asks.answer(rec.ask_id, { dismissed: true });
+  }
+  async press(rec, button, by, userWords) {
+    const b = rec.buttons.find((x) => x.name === button);
+    this.deps.markShown([rec.dialog]);
+    rec.pressing = true;
+    const res = await this.deps.respond({
+      handle: rec.handle,
+      button,
+      reason: by === "auto" ? "A one-button popup raised by our own operation: nothing to decide, pressed so the operation can go on; reported to the user." : `The user chose "${button}" when asked about this popup (${by === "panel" ? "in the Chroma panel" : "in the client"}).`,
+      ...userWords ? { user_instruction: userWords } : {},
+      ...b?.destructive && userWords ? { allow_destructive: true } : {}
+    }).catch((err) => ({ ok: false, error: err instanceof Error ? err.message : String(err) })).finally(() => {
+      rec.pressing = false;
+    });
+    if (rec.state !== "open") return;
+    if (res.ok === true && res.closed === true) {
+      rec.state = "answered";
+      rec.answered = { by, button: res.pressed ?? button, at: this.now() };
+      rec.problem = void 0;
+      const said = popupSaid(rec.title, rec.text);
+      this.deps.log?.("ok", `After Effects popup "${rec.title || "untitled"}": pressed "${rec.answered.button}" (${by === "auto" ? "automatically: one button, our own operation" : by === "panel" ? "the user's choice in the panel" : "the user's choice"}). It said: ${said}`);
+      return;
+    }
+    rec.problem = res.ok === true ? `"${button}" was pressed but the popup did not close.` : `"${button}" could not be pressed: ${oneLine2(res.message ?? res.error ?? "unknown error")}`;
+    this.deps.log?.("warn", `After Effects popup "${rec.title || "untitled"}": ${rec.problem}`);
+    if (by === "auto") void this.ask(rec);
+  }
+  async ask(rec) {
+    const pressable = rec.buttons.filter((b) => b.pressable);
+    if (pressable.length === 0) return;
+    const others = rec.buttons.filter((b) => !b.pressable).map((b) => `"${b.name}"`);
+    const options = [
+      ...pressable.map((b, i) => ({
+        id: `b${i}`,
+        label: b.name,
+        ...b.destructive ? { description: "Loses or replaces something." } : b.default ? { description: "The popup's default button." } : {}
+      })),
+      { id: LEAVE_ID, label: "Leave it", description: "I'll answer it in After Effects myself." }
+    ];
+    const said = popupSaid(rec.title, rec.text);
+    const question = (said || "A popup is open in After Effects.").slice(0, 300);
+    const context = [
+      rec.title && said !== oneLine2(rec.title) ? `"${oneLine2(rec.title)}"` : "",
+      others.length ? `Click ${others.join(", ")} in After Effects yourself if you want ${others.length === 1 ? "it" : "one of them"}.` : ""
+    ].filter(Boolean).join(" ");
+    const waitMs = this.deps.askWaitMs ?? 10 * 60 * 1e3;
+    const pick5 = (id) => id === LEAVE_ID ? null : pressable[Number(id.slice(1))]?.name ?? null;
+    const waits = [];
+    if (this.deps.asks) {
+      try {
+        const q = this.deps.asks.ask({
+          question,
+          kind: "choice",
+          options,
+          multi_select: false,
+          allow_other: false,
+          context,
+          source: "popup",
+          ...rec.screenshot ? { image_path: rec.screenshot } : {}
+        });
+        rec.ask_id = q.id;
+        rec.asked_in.push("panel");
+        waits.push(
+          this.deps.asks.wait(q.id, waitMs).then((a) => a && a.status === "answered" && a.choice_ids[0] ? { via: "panel", id: a.choice_ids[0] } : null)
+        );
+      } catch {
+      }
+    }
+    const channel = this.deps.clientChannel?.() ?? null;
+    if (channel) {
+      rec.asked_in.push("client");
+      waits.push(
+        askByElicitation(channel, { question: `After Effects asks: ${question}`, options, context, allow_other: false }, waitMs).then((r) => {
+          const chosen = r?.chosen;
+          return r && r.status === "answered" && chosen?.[0] ? { via: "client", id: chosen[0].id } : null;
+        }).catch(() => null)
+      );
+    }
+    if (waits.length === 0) return;
+    const first = await firstNonNull(waits);
+    if (!first || rec.state !== "open") return;
+    if (first.via === "client" && rec.ask_id && this.deps.asks) this.deps.asks.answer(rec.ask_id, { dismissed: true });
+    const button = pick5(first.id);
+    if (!button) {
+      rec.problem = "The user chose to answer it in After Effects.";
+      return;
+    }
+    const where = first.via === "panel" ? "in the Chroma panel" : "in the client";
+    await this.press(rec, button, first.via, `The user chose "${button}" ${where} when asked about the After Effects popup "${rec.title || "untitled"}".`);
+  }
+  /** Popups still open, oldest first (for ae_status and the panel). */
+  open() {
+    return [...this.records.values()].filter((r) => r.state === "open").sort((a, b) => a.seen_at - b.seen_at);
+  }
+  /**
+   * What the agent has not been told yet, once: popups pressed for it, answered by the user, closed in After
+   * Effects, or open and waiting. Null when there is nothing new.
+   */
+  takeReport() {
+    const now = this.now();
+    const fresh = [...this.records.values()].filter((r) => r.reported !== reportKey(r)).filter((r) => !r.pressing).filter((r) => !(r.state === "open" && r.buttons.length === 0 && now - r.seen_at < TRANSIENT_MS)).sort((a, b) => a.seen_at - b.seen_at);
+    if (fresh.length === 0) return null;
+    const out = {};
+    const hints = /* @__PURE__ */ new Set();
+    for (const r of fresh) {
+      r.reported = reportKey(r);
+      const said = popupSaid(r.title, r.text);
+      const hint = followUpFor(`${r.title} ${r.text}`);
+      if (hint) hints.add(hint);
+      const base = { title: r.title || "untitled", said, ...r.screenshot ? { screenshot: r.screenshot } : {} };
+      if (r.state === "answered" && r.answered) {
+        const key = r.answered.by === "auto" ? "pressed_for_you" : "answered_by_user";
+        (out[key] ??= []).push({ ...base, pressed: r.answered.button, ...r.answered.by === "auto" ? {} : { where: r.answered.by === "panel" ? "panel" : "client" } });
+      } else if (r.state === "closed") {
+        (out.closed_in_after_effects ??= []).push(base);
+      } else {
+        (out.open ??= []).push({
+          ...base,
+          handle: r.handle,
+          buttons: r.buttons.map((b) => ({ name: b.name, ...b.default ? { default: true } : {}, ...b.destructive ? { destructive: true } : {}, ...b.pressable ? {} : { only_in_after_effects: true } })),
+          caused_by_us: r.caused_by_op !== null,
+          ...r.asked_in.length ? { asked_in: r.asked_in } : {},
+          ...r.problem ? { problem: r.problem } : {}
+        });
+      }
+    }
+    const next = ["Tell the user in a line what each After Effects popup said and what was pressed."];
+    if (out.open) {
+      next.push(
+        out.open.some((o) => o.asked_in) ? "An open popup is being asked about in the panel: wait for the user's answer there, or ask in the chat with its buttons as the options and press their pick with ae_dialog_respond (user_instruction quoting them; allow_destructive for a destructive button)." : "For an open popup ask the user which button (its buttons are the options), then press it with ae_dialog_respond (user_instruction quoting them; allow_destructive for a destructive button)."
+      );
+      const onlyInAe = out.open.some((o) => (o.buttons ?? []).some((b) => b.only_in_after_effects));
+      if (onlyInAe) next.push("Buttons marked only_in_after_effects cannot be pressed from here: the user clicks them in After Effects.");
+    }
+    for (const h of hints) next.push(h);
+    return { ...out, next: next.join(" ") };
+  }
+  prune() {
+    const cutoff = this.now() - KEEP_CLOSED_MS;
+    for (const [id, r] of this.records) {
+      if (r.state !== "open" && r.seen_at < cutoff && r.reported === reportKey(r)) {
+        this.records.delete(id);
+        if (this.byHandle.get(r.handle) === id) this.byHandle.delete(r.handle);
+      }
+    }
+  }
+};
+function reportKey(r) {
+  return `${r.state}|${r.problem ?? ""}`;
+}
+function oneLine2(s) {
+  return (s ?? "").replace(/\s+/g, " ").trim();
+}
+function popupSaid(title, text) {
+  let body = oneLine2(text);
+  const t = oneLine2(title);
+  if (t) {
+    while (body.toLowerCase().startsWith(t.toLowerCase())) body = body.slice(t.length).replace(/^[\s:.-]+/, "");
+  }
+  return body || t;
+}
+function firstNonNull(promises6) {
+  return new Promise((resolve7) => {
+    let left = promises6.length;
+    for (const p of promises6) {
+      p.then((v) => {
+        if (v !== null) resolve7(v);
+        else if (--left === 0) resolve7(null);
+      }).catch(() => {
+        if (--left === 0) resolve7(null);
+      });
+    }
+  });
+}
+
+// src/panel-entry.ts
 var path62 = __toESM(require("node:path"), 1);
 
 // src/tool-families.ts
@@ -72521,7 +72970,7 @@ function recordUsage(ctx, entry, now = /* @__PURE__ */ new Date()) {
 }
 
 // src/tool-call.ts
-function oneLine2(text) {
+function oneLine3(text) {
   return text.replace(/[\x00-\x1f\x7f-\x9f\s]+/g, " ").trim().slice(0, 80);
 }
 var toolMap = /* @__PURE__ */ new Map();
@@ -72543,7 +72992,7 @@ function waitedMsOf(output) {
   return typeof w === "number" && Number.isFinite(w) && w > 0 ? w : void 0;
 }
 async function callTool(toolName, rawArgs, ctx, opts = {}) {
-  if (!isWriteTool(toolName)) return callToolOnce(toolName, rawArgs, ctx, opts);
+  if (!isWriteTool(toolName)) return await withPopupReport(await callToolOnce(toolName, rawArgs, ctx, opts), ctx);
   const started = Date.now();
   const { idempotency_key: key, ...args } = rawArgs ?? {};
   let response;
@@ -72570,7 +73019,24 @@ async function callTool(toolName, rawArgs, ctx, opts = {}) {
     ...replayed ? { idempotent_replay: true } : {},
     ...opts.via && opts.via !== "direct" ? { via: opts.via } : {}
   });
-  return response;
+  return await withPopupReport(response, ctx);
+}
+async function withPopupReport(response, ctx) {
+  if (!ctx.popups) return response;
+  await ctx.popups.settle();
+  const report = ctx.popups.takeReport();
+  if (!report) return response;
+  const text = response.content?.[0]?.text;
+  if (typeof text === "string" && text.startsWith("{")) {
+    try {
+      const body = JSON.parse(text);
+      if (body && typeof body === "object" && !Array.isArray(body)) {
+        return { ...response, content: [{ type: "text", text: JSON.stringify({ ...body, popups: report }) }, ...response.content.slice(1)] };
+      }
+    } catch {
+    }
+  }
+  return { ...response, content: [...response.content ?? [], { type: "text", text: JSON.stringify({ popups: report }) }] };
 }
 function withSuccessOutcome(response) {
   if (response.isError === true) return response;
@@ -72652,7 +73118,7 @@ async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
   const usage = (e, extra3, response) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra3, ...e, resultChars: resultCharsOf(response) });
   const tool = findTool(toolName);
   if (!tool) {
-    const response = envelope(formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`)), toolName);
+    const response = envelope(formatToolError(new Error(`Unknown tool: ${oneLine3(toolName)}`)), toolName);
     usage({ ms: 0, ok: false, errorKind: "unknown_tool", error: "Unknown tool" }, void 0, response);
     return response;
   }
@@ -73208,6 +73674,7 @@ function coreInstructions() {
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
     "Start a new task with ae_plan (the request, its intent, the layers it names): the plan, and whether to ask the user first or go ahead with stated assumptions.",
+    "A result can carry `popups`: what After Effects' popups said and what was pressed (or that one waits for the user). Tell the user in a line, and follow its `next`.",
     "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",
@@ -73395,7 +73862,7 @@ var InvokeArgs = external_exports.object({
 function sizeOf(value) {
   return JSON.stringify(value).length;
 }
-function oneLine3(text, max) {
+function oneLine4(text, max) {
   return text.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ").trim().slice(0, max);
 }
 function nameMatcher(pattern) {
@@ -73428,7 +73895,7 @@ async function runSearch(args, usage) {
     });
   }
   if (group && !Object.prototype.hasOwnProperty.call(TOOL_GROUPS, group)) {
-    return formatToolError(new Error(`Unknown group "${oneLine3(group, 60)}". Groups: ${Object.keys(TOOL_GROUPS).join(", ")}.`));
+    return formatToolError(new Error(`Unknown group "${oneLine4(group, 60)}". Groups: ${Object.keys(TOOL_GROUPS).join(", ")}.`));
   }
   const matches = pattern ? nameMatcher(pattern) : null;
   const nameMatches = (t) => !matches || matches(t.name) || !!familyTool(t.name)?.members.some((m) => matches(m.tool.name));
@@ -73509,7 +73976,7 @@ async function runGetSchema(args) {
   for (const name of wanted) {
     const t = findTool(name);
     if (!t) {
-      notFound.push({ name: oneLine3(name, NAME_MAX), closest: closestToolNames(name) });
+      notFound.push({ name: oneLine4(name, NAME_MAX), closest: closestToolNames(name) });
       continue;
     }
     if (total2 > SCHEMA_OUTPUT_SOFT_MAX) {
@@ -73543,7 +74010,7 @@ async function runGetSchema(args) {
   return formatToolResponse(result);
 }
 async function runInvoke(args, ctx, opts) {
-  const name = oneLine3(args.name, NAME_MAX);
+  const name = oneLine4(args.name, NAME_MAX);
   const base = { toolset: opts.toolset, client: opts.client, via: "ae_invoke_tool" };
   if (META_TOOL_NAMES.includes(args.name)) {
     const why = `ae_invoke_tool cannot call ${name}: it is a meta-tool. Call ${name} directly.`;
@@ -73634,13 +74101,13 @@ function metaToolList() {
 }
 async function callMetaTool(name, rawArgs, ctx, opts = {}) {
   const meta = META_BY_NAME.get(name);
-  if (!meta) return formatToolError(new Error(`Unknown tool: ${oneLine3(name, NAME_MAX)}`));
+  if (!meta) return formatToolError(new Error(`Unknown tool: ${oneLine4(name, NAME_MAX)}`));
   const started = Date.now();
   const parsed = meta.schema.safeParse(rawArgs ?? {});
   if (!parsed.success) {
     const unknown = parsed.error.issues.some((i) => i.code === "unrecognized_keys");
     const why = (`Invalid arguments for ${meta.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}` + (unknown ? ` ${meta.unknownFieldHint}` : "")).slice(0, 600);
-    ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(why, 200)}`);
+    ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine4(why, 200)}`);
     const response = formatToolError(new Error(why));
     recordUsage(ctx, { tool: meta.name, ms: 0, ok: false, errorKind: "invalid_args", error: why, resultChars: resultCharsOf(response), toolset: opts.toolset, client: opts.client, via: meta.name === "ae_invoke_tool" ? "ae_invoke_tool" : "direct" });
     return response;
@@ -73652,13 +74119,13 @@ async function callMetaTool(name, rawArgs, ctx, opts = {}) {
       const failed = "isError" in result && result.isError === true;
       ctx.log?.(
         failed ? "err" : "ok",
-        failed ? `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine3(result.content[0]?.text ?? "", 120)}` : `tool ${meta.name} ok (${Date.now() - started}ms)`
+        failed ? `tool ${meta.name} failed (${Date.now() - started}ms): ${oneLine4(result.content[0]?.text ?? "", 120)}` : `tool ${meta.name} ok (${Date.now() - started}ms)`
       );
       recordUsage(ctx, {
         tool: meta.name,
         ms: Date.now() - started,
         ok: !failed,
-        ...failed ? { errorKind: "error", error: oneLine3(result.content[0]?.text ?? "", 160) } : {},
+        ...failed ? { errorKind: "error", error: oneLine4(result.content[0]?.text ?? "", 160) } : {},
         resultChars: resultCharsOf(result),
         toolset: opts.toolset,
         client: opts.client,
@@ -73668,7 +74135,7 @@ async function callMetaTool(name, rawArgs, ctx, opts = {}) {
     }
     return result;
   } catch (err) {
-    const why = oneLine3(err instanceof Error ? err.message : String(err), 200);
+    const why = oneLine4(err instanceof Error ? err.message : String(err), 200);
     ctx.log?.("err", `tool ${meta.name} failed (${Date.now() - started}ms): ${why}`);
     const response = formatToolError(err);
     if (meta.logsItself) {
@@ -73868,11 +74335,11 @@ function titleOf(rel, text) {
   const m = /^#\s+(.+)$/m.exec(text);
   return m ? m[1].trim() : rel;
 }
-function resourcesOf(files, prefix, descriptions, label) {
+function resourcesOf(files, prefix, descriptions, label2) {
   return Object.keys(files).sort().map((rel) => ({
     uri: prefix + rel,
     name: titleOf(rel, files[rel]),
-    description: descriptions[rel] ?? `${label} guidance file ${rel}.`,
+    description: descriptions[rel] ?? `${label2} guidance file ${rel}.`,
     mimeType: "text/markdown",
     text: files[rel]
   }));
@@ -74493,6 +74960,16 @@ function createPanelMcp(opts) {
   const log = opts.log;
   const assetWatcher = new AssetWatcher(ctx, { log });
   if (opts.watchAssets !== false) assetWatcher.start();
+  const popups = new PopupCenter({
+    list: listDialogsForWatcher,
+    markShown,
+    respond: respondToDialog,
+    asks: ctx.asks,
+    clientChannel: clientRequestChannel,
+    log
+  });
+  ctx.popups = popups;
+  if (opts.watchPopups === true) popups.start((onChange) => startDialogWatch(onChange, log));
   const warnedToolsets = /* @__PURE__ */ new Set();
   async function handleHttp(req, res, bodyText) {
     const method = (req.method ?? "GET").toUpperCase();
@@ -74615,6 +75092,7 @@ data: ${JSON.stringify(msg)}
     assetWatcher,
     stop: () => {
       assetWatcher.stop();
+      popups.stop();
     },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
     renderLock: () => {

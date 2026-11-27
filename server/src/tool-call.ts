@@ -68,7 +68,7 @@ export async function callTool(
   ctx: ToolContext,
   opts: CallOptions = {}
 ): Promise<ToolCallResult> {
-  if (!isWriteTool(toolName)) return callToolOnce(toolName, rawArgs, ctx, opts);
+  if (!isWriteTool(toolName)) return await withPopupReport(await callToolOnce(toolName, rawArgs, ctx, opts), ctx);
   // A write: an idempotency_key (taken off before validation, so no schema has to declare it)
   // makes a resent call return the first answer; every write is listed for ae_recent_ops.
   const started = Date.now();
@@ -97,7 +97,32 @@ export async function callTool(
     ...(replayed ? { idempotent_replay: true as const } : {}),
     ...(opts.via && opts.via !== "direct" ? { via: opts.via } : {}),
   });
-  return response;
+  return await withPopupReport(response, ctx);
+}
+
+/**
+ * After Effects popups the agent has not been told about (pressed for it, answered by the user, closed in
+ * AE, or open and waiting): added once to the next result as `popups`, so the agent tells the user what AE
+ * said. A JSON object result gets the key; any other result gets it as one more text block.
+ */
+async function withPopupReport(response: ToolCallResult, ctx: ToolContext): Promise<ToolCallResult> {
+  if (!ctx.popups) return response;
+  // A one-button popup this call raised may be being pressed right now: its report belongs on this result.
+  await ctx.popups.settle();
+  const report = ctx.popups.takeReport();
+  if (!report) return response;
+  const text = response.content?.[0]?.text;
+  if (typeof text === "string" && text.startsWith("{")) {
+    try {
+      const body = JSON.parse(text) as unknown;
+      if (body && typeof body === "object" && !Array.isArray(body)) {
+        return { ...response, content: [{ type: "text", text: JSON.stringify({ ...(body as Record<string, unknown>), popups: report }) }, ...response.content.slice(1)] };
+      }
+    } catch {
+      // not JSON after all: a separate block below
+    }
+  }
+  return { ...response, content: [...(response.content ?? []), { type: "text", text: JSON.stringify({ popups: report }) }] };
 }
 
 /**

@@ -1210,6 +1210,8 @@
   var $askMore = byId("ask-more");
   var $askQuestion = byId("ask-question");
   var $askContext = byId("ask-context");
+  var $askTitle = byId("ask-title");
+  var $askImage = byId("ask-image");
   var $askOptions = byId("ask-options");
   var $askEditor = byId("ask-editor");
   var $askEditorSvg = byId("ask-editor-svg");
@@ -1476,6 +1478,21 @@
     previewDots = [];
     $askQuestion.textContent = q.question;
     $askContext.textContent = q.context || "";
+    // A popup After Effects shows (the service's popup watcher): titled so, with its screenshot.
+    var fromPopup = q.source === "popup";
+    if ($askTitle) $askTitle.textContent = fromPopup ? "After Effects asks" : "Claude asks";
+    if ($askImage) {
+      // A popup's screenshot file is rewritten for each popup behind the same window: never the cached copy.
+      if (q.image_path) delete imageCache[q.image_path];
+      var shot = q.image_path ? imageDataUrl(q.image_path) : null;
+      if (shot) {
+        $askImage.src = shot;
+        $askImage.hidden = false;
+      } else {
+        $askImage.removeAttribute("src");
+        $askImage.hidden = true;
+      }
+    }
     while ($askOptions.firstChild) $askOptions.removeChild($askOptions.firstChild);
     for (var i = 0; i < q.options.length; i++) {
       $askOptions.appendChild(buildOption(q, q.options[i]));
@@ -1490,7 +1507,7 @@
     $ask.classList.remove("ask-new");
     void $ask.offsetWidth; // restart the flash animation
     $ask.classList.add("ask-new");
-    logUi("", "Claude asks: " + q.question);
+    logUi("", (fromPopup ? "" : "Claude asks: ") + q.question);
     refreshAskState();
     startPreviews();
   }

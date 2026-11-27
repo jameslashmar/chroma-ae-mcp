@@ -2,7 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { AskStore } from "./asks.js";
 import { AssetWatcher } from "./tools/ext/assets.js";
 import { writeDiagnostics } from "./tools/ext/diagnostics.js";
-import { describeBlockingDialogs } from "./tools/ext/dialogs.js";
+import { describeBlockingDialogs, listDialogsForWatcher, markShown, respondToDialog, startDialogWatch } from "./tools/ext/dialogs.js";
+import { clientRequestChannel } from "./call-context.js";
+import { PopupCenter } from "./popups.js";
 import * as path from "node:path";
 import { handleRpc, type JsonRpcResponse } from "./mcp-rpc.js";
 import { CLIENT_HEADER, parseToolset, TOOLSET_HEADER } from "./toolsets.js";
@@ -27,6 +29,11 @@ export interface CreatePanelMcpOptions {
   serviceInfo?: () => Record<string, unknown>;
   /** Track what the user changes between the agent's writes (ae_session_changes). Default true. */
   sessionTracking?: boolean;
+  /**
+   * Watch After Effects' popups as they appear (popups.ts): ask the user about them, press a one-button popup
+   * our own operation raised, report each on the next tool result. Default false; the service turns it on.
+   */
+  watchPopups?: boolean;
 }
 
 export interface HttpRequestLike {
@@ -153,6 +160,17 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   // Polls only while ae_import_assets { watch: true } has turned it on.
   const assetWatcher = new AssetWatcher(ctx, { log });
   if (opts.watchAssets !== false) assetWatcher.start();
+
+  const popups = new PopupCenter({
+    list: listDialogsForWatcher,
+    markShown,
+    respond: respondToDialog,
+    asks: ctx.asks,
+    clientChannel: clientRequestChannel,
+    log,
+  });
+  ctx.popups = popups;
+  if (opts.watchPopups === true) popups.start((onChange) => startDialogWatch(onChange, log));
 
   const warnedToolsets = new Set<string>();
 
@@ -297,6 +315,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
     assetWatcher,
     stop: () => {
       assetWatcher.stop();
+      popups.stop();
     },
     saveDiagnostics: () => writeDiagnostics(ctx, opts.serviceInfo?.()),
     renderLock: () => {

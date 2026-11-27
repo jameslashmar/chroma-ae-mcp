@@ -3,6 +3,7 @@ import { zodToJsonSchema } from "../schema.js";
 import * as path from "node:path";
 import { z } from "zod";
 import type { AskStore } from "../asks.js";
+import type { PopupCenter } from "../popups.js";
 import { BridgeError, type HostTransport } from "../host.js";
 import { defaultDataDir, QuarantineBlockedError, type QuarantineStore } from "../quarantine.js";
 import { boundOutput } from "../receipts.js";
@@ -79,6 +80,8 @@ export interface ToolContext {
   settings?: SettingsStore;
   /** Questions for the user, shown in the panel. Only the panel-hosted MCP has it. */
   asks?: AskStore;
+  /** After Effects popups as they appear (popups.ts): asked about, pressed, reported on the next result. Panel only. */
+  popups?: PopupCenter;
   /** Where the server keeps its files (token, settings, global skills). */
   dataDir?: string;
   /** The panel service's own state (versions, eval queue, log paths), for ae_diagnostics. */

@@ -65,6 +65,16 @@ export const BODY_MARGIN_TOLERANCE = 8;
 /** The pill border is looked for this many word heights left and right of the label. */
 export const OUTLINE_NEAR_FACTOR = 0.8;
 export const OUTLINE_FAR_FACTOR = 2.2;
+/**
+ * A Windows message box (ExtendScript's "Script Alert", light theme: white body, grey button band at the
+ * bottom) has buttons about 88 px wide, so the border of "OK" sits about 3 word heights from the label.
+ * Measured on AE 27.0x78, 2026-11-27: label "OK" at x 343-358, word height 9, button border at x 314.
+ * The border is looked for this far only when that grey band is seen under a lighter body.
+ */
+export const MESSAGE_BOX_FAR_FACTOR = 4.5;
+/** Smallest brightness step (0-255) between a message box's body and its button band; both are light. */
+export const MESSAGE_BOX_BAND_STEP = 6;
+export const MESSAGE_BOX_MIN_LUM = 200;
 /** Smallest brightness difference (0-255) between the border or fill and the dialog background. A disabled button measured 19. */
 export const OUTLINE_MIN_CONTRAST = 15;
 /** The default button's ring colour (AE 26, dark UI) and the tolerance per channel. */
@@ -140,13 +150,28 @@ function stripHasEdge(png: PngPixels, xa: number, xb: number, y: number): boolea
   return max - min >= OUTLINE_MIN_CONTRAST;
 }
 
-function hasPillBorders(png: PngPixels, label: Box, wordHeight: number): boolean {
+function hasPillBorders(png: PngPixels, label: Box, wordHeight: number, farFactor = OUTLINE_FAR_FACTOR): boolean {
   const y = (label.y1 + label.y2) / 2;
   const near = OUTLINE_NEAR_FACTOR * wordHeight;
-  const far = OUTLINE_FAR_FACTOR * wordHeight;
+  const far = farFactor * wordHeight;
   const left = stripHasEdge(png, label.x1 - far, label.x1 - near, y);
   const right = stripHasEdge(png, label.x2 + near, label.x2 + far, y);
   return left && right;
+}
+
+/**
+ * A light message box's button band: near the left edge, the button row is light but darker than the body
+ * above it (Windows: #f0f0f0 under #ffffff).
+ */
+export function messageBoxBand(png: PngPixels, rowY: number, bodyY: number): boolean {
+  // Inside the window: the capture has a few transparent (black) columns of invisible frame at each side.
+  const x = Math.min(png.width - 1, Math.max(12, Math.round(png.width * 0.04)));
+  const yr = Math.round(rowY);
+  const yb = Math.round(bodyY);
+  if (yr < 0 || yr >= png.height || yb < 0 || yb >= png.height) return false;
+  const row = lum(png, x, yr);
+  const body = lum(png, x, yb);
+  return row >= MESSAGE_BOX_MIN_LUM && body >= MESSAGE_BOX_MIN_LUM && body - row >= MESSAGE_BOX_BAND_STEP;
 }
 
 function nearRing(r: number, g: number, b: number): boolean {
@@ -215,7 +240,7 @@ export function findRings(png: PngPixels, scale = 1): Box[] {
  * True when the row at the label's mid-height shows something besides this label and its own pill: another
  * pill or label that OCR did not read. The columns within the label's pill reach are ignored.
  */
-export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number, scale = 1): boolean {
+export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number, scale = 1, farFactor = OUTLINE_FAR_FACTOR): boolean {
   const y = Math.round((label.y1 + label.y2) / 2);
   if (y < 0 || y >= png.height) return true;
   const values: number[] = [];
@@ -233,7 +258,7 @@ export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number, s
       bg = l;
     }
   });
-  const reach = OUTLINE_FAR_FACTOR * wordHeight + OWN_PILL_SLACK * scale;
+  const reach = farFactor * wordHeight + OWN_PILL_SLACK * scale;
   const from = label.x1 - reach;
   const to = label.x2 + reach;
   // Skip the window's own edge: the capture can include the near-black resize border Windows draws outside
@@ -250,12 +275,15 @@ export function otherPillOnRow(png: PngPixels, label: Box, wordHeight: number, s
   return false;
 }
 
+/** The title bar's close button read as a line of its own ("x"): not part of what the popup says. */
+const CLOSE_GLYPH = /^[xX×]$/;
+
 function noButtons(infos: LineInfo[]): PaintedAnalysis {
   const body = infos
     .slice()
     .sort((a, b) => a.cy - b.cy)
     .map((i) => i.line.text.trim())
-    .filter((t) => t.length > 0)
+    .filter((t) => t.length > 0 && !CLOSE_GLYPH.test(t))
     .join("\n");
   return { buttons: [], default_index: null, default_source: null, body_text: body };
 }
@@ -323,10 +351,14 @@ export function analysePaintedDialog(
     if (Math.abs(candidates[0].box.x1 - margin) <= BODY_MARGIN_TOLERANCE * scale) return noButtons(infos);
   }
 
-  // 3. The pill borders (second signal, needs the screenshot).
+  let band = false;
+  // 3. The pill borders (second signal, needs the screenshot). A light message box's wide buttons are looked
+  // for further out, only when its grey button band is there.
   if (png) {
+    const lowestBody = bodyInfos.length > 0 ? bodyInfos.reduce((a, b) => (b.cy > a.cy ? b : a)) : null;
+    band = lowestBody !== null && messageBoxBand(png, ref.cy, lowestBody.cy);
     for (const c of candidates) {
-      if (!hasPillBorders(png, c.box, wordHeight)) return noButtons(infos);
+      if (!hasPillBorders(png, c.box, wordHeight) && !(band && hasPillBorders(png, c.box, wordHeight, MESSAGE_BOX_FAR_FACTOR))) return noButtons(infos);
     }
   }
 
@@ -363,7 +395,8 @@ export function analysePaintedDialog(
   }
   // With one button read, does the row show another pill OCR missed? Computed for the ringed case too: a lone ringed OK is not
   // an unread Cancel.
-  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale) : undefined;
+  // A light message box button reaches further from its label (MESSAGE_BOX_FAR_FACTOR): its own border is not another pill.
+  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale, band ? MESSAGE_BOX_FAR_FACTOR : OUTLINE_FAR_FACTOR) : undefined;
   if (defaultIndex === null && buttons.length === 1 && png && ringCount === 0) {
     const c = candidates[0];
     if (!otherPill) {
@@ -378,7 +411,7 @@ export function analysePaintedDialog(
     .slice()
     .sort((a, b) => a.cy - b.cy)
     .map((i) => i.line.text.trim())
-    .filter((t) => t.length > 0)
+    .filter((t) => t.length > 0 && !CLOSE_GLYPH.test(t))
     .join("\n");
   return { buttons, default_index: defaultIndex, default_source: source, body_text: body, ...(otherPill !== undefined ? { other_pill_unread: otherPill } : {}) };
 }
