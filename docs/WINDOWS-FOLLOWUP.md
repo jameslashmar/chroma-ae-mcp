@@ -89,3 +89,11 @@ Jay's live check on AE 26.3x87 found the blockers below. All were reproduced and
 **Evidence:** `dda6dc6`, `qa/live-evidence.mjs` on `181b0a1`: **587/587 passed, 11 skipped**, no failures. The 3D annotate step (comp 757) is refused before AE renders; the frame steps after it and the collect relink pass. A first run on `99bfa33`, before the render-hang guard, hung AE in that relink after comp 757's frame was never written; it was stopped and AE was killed.
 
 Not reproduced here: the BIB font warnings (this PC's fonts give none) and Jay's heavier scenes. Unit tests: 6009, all green; ES3 lint 0 issues.
+
+**Afterwards, 2026-11-27** (same PC, AE 26.3x87):
+
+- **`ae_fonts check_files`** (`57887e8`, `32faf2b`) lists the fonts behind the BIB warnings. It checks every installed font's file on disk: missing, empty, unreadable, not a font. On this PC: 824 fonts and 643 files in under 2 s, no problem, no popup. The 21 fonts without a file (variable-font named instances, Windows bitmap fonts) are listed apart.
+- **Track shake** (`50dece1`, `3c7a404`). On a 4K user shot, 8 points sat in a 1570 x 284 px band under a 2309 x 761 px surface. A corner of the perspective fit jumped 35 px in one frame while the points moved under 1 px.
+  - Track summaries now carry `model_advice`: the same points solved with fewer parameters.
+  - `ae_track_apply` takes `refit_model` and `smooth_frames`, and writes a steadier copy under a new `track_id` without tracking again.
+- **Evidence:** `qa/live-evidence.mjs` on `3c7a404`: **589/589 passed, 11 skipped**.
