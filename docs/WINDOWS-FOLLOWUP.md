@@ -73,3 +73,19 @@ Emre's Windows PC, AE 26.2.1, Node 22.23.2, branch `mac/live-fixes-2026-11-22` (
 10. **New tools:** all ran in smoke wave 6 and the calibration and passed. Wave 6: projection 0.0006 px, solve check mean 0.028 px, element colour match left 1.17 levels, slip along `region_track` 0.029 px, matte check clean and the copy removed.
 
 **Then (evidence):** `6a3637e`, `qa/live-evidence.mjs` on `de8388a`: 566/578 passed, 13 skipped, the 12 aerender failures explained in the notes, the in-AE render passed (2 items DONE, 5 frames, fps and size match). After smoke checks were added under every new tool and family name: `b73b523` on `7cb337d`, 579/591 passed, 13 skipped, the same 12 explained failures.
+
+## AE 26.3, Windows, 2026-11-26 (Jay's review of PR #19)
+
+Jay's live check on AE 26.3x87 found the blockers below. All were reproduced and fixed on a second Windows PC with AE 26.3x87, Node 24.
+
+| Jay found | Cause, measured on 26.3x87 | Fix |
+|---|---|---|
+| Frame grabs crash AE (the stale-frame retry's second `saveFrameToPng`) | A comp with a light whose image comes from a layer (the environment light; 26.3 reads it back as `LightType.AMBIENT` with a Source, and adding it switches the comp to Advanced 3D, `ADBE Calder`) and another enabled 3D layer never finishes rendering. `saveFrameToPng` writes nothing; a render-queue render of one PNG frame sits at 0 CPU and 0 GPU; after that AE writes no frame of any comp (a plain 2D comp neither, 2.5 min later) until it is restarted, and the next heavy call (the smoke's `collectSwitch`) hung for 25 min. Narrowed down: with the Source cleared, with a point or spot light (shadows or not), or with the light and its source but no other 3D layer, the comp renders. | `7911272`, `181b0a1`: `core.jsx` `envLightRenderHazard` (AE 26.3+, the comp and comps nested in it). `snapshotFrame` and `ae_render_queue_render` refuse such a comp before AE renders (`render_hang_env_light`, naming the light and the layer). A frame AE never writes is not asked for again and holds later frame renders until it appears or AE restarts (`f4fe55e`). |
+| `ae_fonts search "arial"`: 0 matches, scanned 100 | The search stopped at its 2.5 s budget, reading 12 members per font. | `bd7faaf`: names only for the filter, the rest for matches; the server continues the scan until the list is done (a minute at most). |
+| The first font scan: "Unknown BIB Error. cannot access font" warnings for ~2 min, ~100 checks failed as "a popup is open" | Not reproduced here (824 fonts, no warning). | `bd7faaf`: the smoke scans the font list once at the start and answers those warnings (OK) through `ae_dialogs` / `ae_dialog_respond`. |
+| `ae_create_layer` (cube mesh): width and height missing from the read-back | `parametricMeshOptions` / `parametricBevelOptions` are read-only PropertyGroups (`ADBE CubeMeshOptionsSGrp`, fields `ADBE <Type><Field>Strm`, booleans 0/1); the code set fields on a plain object and assigned it back ("readOnly attribute"). | `73e31ab`: each field set on its property, AE's limits checked first. |
+| `ae_camera_rig` 26.3 focus: "setValue ... Value is not an array" | There is no near/far blur multiplier: 26.3 has Focus Area Width (one number) and Near, Far Blur Level (`ADBE Camera Split Blur Level`, `[near, far]` in percent). | `73e31ab`: `focus.near_far_blur_level` (a number or `[near, far]`); `near_far_blur_multiplier` is refused, naming the new field. |
+
+**Evidence:** `dda6dc6`, `qa/live-evidence.mjs` on `181b0a1`: **587/587 passed, 11 skipped**, no failures. The 3D annotate step (comp 757) is refused before AE renders; the frame steps after it and the collect relink pass. A first run on `99bfa33`, before the render-hang guard, hung AE in that relink after comp 757's frame was never written; it was stopped and AE was killed.
+
+Not reproduced here: the BIB font warnings (this PC's fonts give none) and Jay's heavier scenes. Unit tests: 6009, all green; ES3 lint 0 issues.
