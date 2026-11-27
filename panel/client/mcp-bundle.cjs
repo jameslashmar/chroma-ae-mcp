@@ -73164,11 +73164,11 @@ var TOOLSET_HEADER = "x-chroma-toolset";
 var CLIENT_HEADER = "x-chroma-client";
 function parseToolset(value) {
   const raw = Array.isArray(value) ? value[0] : value;
-  if (raw === void 0 || raw === null) return { toolset: "full", invalid: false };
+  if (raw === void 0 || raw === null) return { toolset: "core", invalid: false };
   const v = String(raw).trim().toLowerCase();
-  if (v === "" || v === "full") return { toolset: "full", invalid: false };
-  if (v === "core") return { toolset: "core", invalid: false };
-  return { toolset: "full", invalid: true };
+  if (v === "full") return { toolset: "full", invalid: false };
+  if (v === "" || v === "core") return { toolset: "core", invalid: false };
+  return { toolset: "core", invalid: true };
 }
 var TOOL_GROUPS = {
   inspect: {
@@ -75048,7 +75048,7 @@ function createPanelMcp(opts) {
       const shown = String(Array.isArray(headerValue) ? headerValue[0] : headerValue).slice(0, 40);
       if (!warnedToolsets.has(shown)) {
         warnedToolsets.add(shown);
-        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
+        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the core tool list`);
       }
     }
     const clientHeader = req.headers?.[CLIENT_HEADER];

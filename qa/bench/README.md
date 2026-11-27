@@ -19,7 +19,7 @@ For each task, `run-bench.mjs` does the following:
 The checks look at the outcome, not at how Claude got there. A fade done with keys or with an expression passes the same way. A colour is checked on the rendered pixel.
 
 ```
-node qa/bench/run-bench.mjs [--tasks T01,T05] [--toolset core|full] [--model sonnet] [--out <dir>]
+node qa/bench/run-bench.mjs [--tasks T01,T05] [--toolset core|full|default] [--model sonnet] [--out <dir>]
 ```
 
 Needs:
@@ -28,6 +28,8 @@ Needs:
 - the token;
 - the `claude` CLI, logged in (`CLAUDE_BIN` if it is not on PATH);
 - ffmpeg for T14 (`FFMPEG`).
+
+`--toolset default` sends no header, the way the README's `claude mcp add` command connects.
 
 Each task is a real Claude session and costs real usage, about $0.1-0.5 each with the core toolset. A run writes `results.json`, `summary.md` and each task's transcript under `qa/out/bench/<time>/`.
 

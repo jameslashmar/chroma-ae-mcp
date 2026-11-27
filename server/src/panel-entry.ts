@@ -256,7 +256,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       const shown = String(Array.isArray(headerValue) ? headerValue[0] : headerValue).slice(0, 40);
       if (!warnedToolsets.has(shown)) {
         warnedToolsets.add(shown);
-        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the full tool list`);
+        log?.("warn", `Unknown toolset "${shown}" in X-Chroma-Toolset; serving the core tool list`);
       }
     }
     const clientHeader = req.headers?.[CLIENT_HEADER];

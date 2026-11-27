@@ -70,7 +70,8 @@ describe("mcp-rpc and panel-entry", () => {
           method: "initialize",
           params: { protocolVersion: supported },
         },
-        ctx
+        ctx,
+        { toolset: "full" }
       )) as JsonRpcSuccessResponse;
 
       expect(res).toEqual({
@@ -157,7 +158,8 @@ describe("mcp-rpc and panel-entry", () => {
         id: 3,
         method: "tools/list",
       },
-      ctx
+      ctx,
+      { toolset: "full" }
     )) as JsonRpcSuccessResponse;
 
     const tools = (
