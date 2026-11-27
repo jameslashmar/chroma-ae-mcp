@@ -98,6 +98,23 @@ describe("idempotency_key", () => {
     expect(writes()).toBe(1);
   });
 
+  it("the same key in another project is a new write, not a reuse (two sessions naming keys alike)", async () => {
+    let runs = 0;
+    const run = async () => {
+      runs++;
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, applied: true }) }] };
+    };
+    const a = await withIdempotency("ae_layer_ops", "trim-clip-2-5", { action: "trim", expect: { project_path: "C:/a/one.aep" } }, run);
+    const b = await withIdempotency("ae_layer_ops", "trim-clip-2-5", { action: "trim", expect: { project_path: "C:/b/two.aep" } }, run);
+    expect(runs).toBe(2);
+    expect(a.replayed).toBe(false);
+    expect(b.replayed).toBe(false);
+    // In the same project, other arguments under the same key are still refused.
+    const c = await withIdempotency("ae_layer_ops", "trim-clip-2-5", { action: "trim", in_point: 3, expect: { project_path: "C:/b/two.aep" } }, run);
+    expect(JSON.parse(c.response.content[0].text)).toMatchObject({ code: "idempotency_key_reused" });
+    expect(runs).toBe(2);
+  });
+
   it("without a key every call runs", async () => {
     const { ctx, writes } = fakeAe();
     await callTool("ae_batch_set", batch(50), ctx);
