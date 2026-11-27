@@ -287,8 +287,8 @@ function richScene(opts: { guideApi?: "legacy" | "options" | "none"; version?: s
     c.addGuide = (a: any, b?: any) => {
       if (typeof a === "object") {
         if (mode === "legacy") throw new Error("legacy only");
-        // AE 26.5's GuideOptions carries `orientation`, not `orientationType`.
-        if (a.orientationType !== undefined || typeof a.orientation !== "number") throw new Error("bad GuideOptions");
+        // The 26.5 notes name the direction `orientation`; AE 27.0 reads `orientationType`. The host gives both, the same.
+        if (typeof a.orientation !== "number" || a.orientationType !== a.orientation) throw new Error("bad GuideOptions");
         guides.push({ orientationType: a.orientation, positionType: 0, position: a.position });
       } else {
         if (mode === "options") throw new Error("options only");
@@ -1409,6 +1409,81 @@ describe("compsettings.jsx: guide words, enums and 26.5 options", () => {
     expect(s.written[1].pinned).toBe(true);
     const r = s.A.compsettingsRead({ comp_id: s.comp.id });
     expect(r.guides[0]).toMatchObject({ orientation: "vertical", position_kind: "percentage", position: 30, color: [0, 0, 1], pinned: true });
+    const json = (v: unknown) => JSON.parse(JSON.stringify(v));
+    expect(compSettingsMismatches({ comp_id: s.comp.id, guides, expect: expectArg } as any, info(), json(r), json(out))).toEqual([]);
+  });
+
+  /**
+   * AE 27.0x78 as measured: enum constants 14212 / 14213 (positions 14412 / 14413), a GuideOptions
+   * that reads `orientationType` and ignores `orientation`, and a two-argument addGuide that still
+   * takes 0 / 1 and makes any other number a horizontal guide.
+   */
+  function scene27() {
+    const s = richScene({ guideApi: "none", version: "27.0x78" });
+    const written: Rec[] = [];
+    const list: Rec[] = [];
+    Object.defineProperty(s.comp, "guides", { get: () => list.map((g) => ({ ...g })), configurable: true });
+    s.G.GuideOptions = class {};
+    s.G.GuideOrientationType = { HORIZONTAL: 14212, VERTICAL: 14213 };
+    s.G.GuidePositionType = { PIXEL: 14412, PERCENTAGE: 14413 };
+    s.comp.addGuide = (a: any, b?: number) => {
+      if (typeof a === "object") {
+        if (!(a instanceof (s.G.GuideOptions as any))) throw new Error("Expected a GuideOptions object.");
+        written.push({ op: "add", ...a });
+        list.push({ orientationType: a.orientationType ?? 14212, positionType: a.positionType ?? 14412, position: a.position, color: a.color ?? [0.125, 0.878, 1], pinned: a.pinned === true });
+      } else {
+        written.push({ op: "add_legacy", orientation: a, position: b });
+        list.push({ orientationType: a === 1 ? 14213 : 14212, positionType: 14412, position: b, color: [0.125, 0.878, 1], pinned: false });
+      }
+      return list.length - 1;
+    };
+    s.comp.setGuide = (a: any, b: any) => {
+      if (typeof b === "object") {
+        written.push({ op: "set", index: a, ...b });
+        const g = list[a];
+        g.position = b.position;
+        if (b.orientationType !== undefined) g.orientationType = b.orientationType;
+        if (b.positionType !== undefined) g.positionType = b.positionType;
+        if (b.color !== undefined) g.color = b.color;
+        if (b.pinned !== undefined) g.pinned = b.pinned;
+      } else {
+        written.push({ op: "set_legacy", index: b, position: a });
+        list[b].position = a;
+      }
+    };
+    s.comp.removeGuide = (i: number) => list.splice(i, 1);
+    return { ...s, written, list };
+  }
+
+  it("on AE 27.0 gives the two-argument addGuide 0 / 1, not the enum constant, and reads the enum back as words", () => {
+    const s = scene27();
+    const guides = [
+      { action: "add", orientation: "vertical", position: 400 },
+      { action: "add", orientation: "horizontal", position: 300 },
+      { action: "set", index: 0, position: 420 },
+      { action: "remove", index: 1 },
+    ];
+    const out = s.A.compsettingsApply({ comp_id: s.comp.id, guides, expect: GUARD });
+    expect(s.written.filter((w) => w.op === "add_legacy").map((w) => w.orientation)).toEqual([1, 0]);
+    expect(s.list).toHaveLength(1);
+    expect(s.list[0]).toMatchObject({ orientationType: 14213, position: 420 });
+    const r = s.A.compsettingsRead({ comp_id: s.comp.id });
+    expect(r.guides[0]).toMatchObject({ orientation: "vertical", position: 420 });
+    const json = (v: unknown) => JSON.parse(JSON.stringify(v));
+    expect(compSettingsMismatches({ comp_id: s.comp.id, guides, expect: expectArg } as any, info(), json(r), json(out))).toEqual([]);
+  });
+
+  it("on AE 27.0 writes the direction as orientationType in a GuideOptions object (colour, pinned, percentage)", () => {
+    const s = scene27();
+    const guides = [
+      { action: "add", orientation: "vertical", position: 25, position_type: "percentage", color: [1, 0, 0], pinned: true },
+      { action: "set", index: 0, position: 30, color: [0, 0, 1] },
+    ];
+    const out = s.A.compsettingsApply({ comp_id: s.comp.id, guides, expect: GUARD });
+    expect(s.written[0]).toMatchObject({ op: "add", orientationType: 14213, positionType: 14413, pinned: true });
+    expect(s.written[1]).toMatchObject({ op: "set", orientationType: 14213, positionType: 14413, pinned: true, color: [0, 0, 1] });
+    const r = s.A.compsettingsRead({ comp_id: s.comp.id });
+    expect(r.guides[0]).toMatchObject({ orientation: "vertical", position_kind: "percentage", position: 30, pinned: true });
     const json = (v: unknown) => JSON.parse(JSON.stringify(v));
     expect(compSettingsMismatches({ comp_id: s.comp.id, guides, expect: expectArg } as any, info(), json(r), json(out))).toEqual([]);
   });
