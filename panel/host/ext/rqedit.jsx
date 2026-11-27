@@ -1867,6 +1867,19 @@
     if (typeof args.expected_queued === "number" && queued !== args.expected_queued) {
       fail("guard", "Expected " + args.expected_queued + " QUEUED Render Queue item(s) but " + queued + " are QUEUED, so nothing was rendered. The queue changed after the others were held back.");
     }
+    // AE 26.3 never finishes this render and is then stuck until it is restarted (core.jsx, envLightRenderHazard).
+    if (typeof A.envLightRenderHazard === "function") {
+      for (var hi = 1; hi <= rq.numItems; hi++) {
+        var hit = rq.item(hi);
+        if (hit.status !== RQItemStatus.QUEUED) continue;
+        var hz = A.envLightRenderHazard(hit.comp);
+        if (hz) {
+          fail("render_hang_env_light", "Nothing was rendered: Render Queue item " + hi + " (\"" + hit.comp.name + "\") would never finish on After Effects " + app.version +
+            ". In \"" + hz.comp_name + "\" the environment light \"" + hz.light + "\" takes its image from a layer and \"" + hz.layer + "\" is a 3D layer it lights (Advanced 3D): " +
+            "AE 26.3 hangs on that render at 0 CPU and then renders nothing until it is restarted. Clear the light's Source or switch the light off, or render on another After Effects version.");
+        }
+      }
+    }
     var started = new Date().getTime();
     if (A.touch) A.touch();
     rq.render();

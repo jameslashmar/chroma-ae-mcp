@@ -12,7 +12,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, noteUnwrittenFrame, staleFrameOnDisk, unwrittenFrameHold, unwrittenFrameMessage, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, noteUnwrittenFrame, renderHangOf, staleFrameOnDisk, unwrittenFrameHold, unwrittenFrameMessage, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -435,7 +435,7 @@ export async function captureCompFrame(params: {
 
   // A safe point between frames: a cancelled call renders no more (an eval already sent has ended by now).
   checkCancelled(`rendering frame ${frameIndex + 1} at ${time}s`);
-  await ctx.bridge.evalRaw<Record<string, unknown>>({
+  const first = await ctx.bridge.evalRaw<Record<string, unknown>>({
     id: `${opId}_f${frameIndex}_try1`,
     script: buildJsxCall("snapshotFrame", {
       comp_id: compId,
@@ -449,6 +449,9 @@ export async function captureCompFrame(params: {
     toolName,
   });
 
+  // A comp AE 26.3 would never finish rendering: the host refused it before saveFrameToPng.
+  const hang = renderHangOf(first?.result);
+  if (hang) throw new Error(hang.message);
   const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
   if (check1.fresh) {
     return { path: pngPath1, time };

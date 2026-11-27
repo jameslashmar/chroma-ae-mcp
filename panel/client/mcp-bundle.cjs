@@ -28354,7 +28354,7 @@ async function captureCompFrame(params) {
   );
   const reqStart1 = Date.now();
   checkCancelled(`rendering frame ${frameIndex + 1} at ${time}s`);
-  await ctx.bridge.evalRaw({
+  const first = await ctx.bridge.evalRaw({
     id: `${opId}_f${frameIndex}_try1`,
     script: buildJsxCall("snapshotFrame", {
       comp_id: compId,
@@ -28367,6 +28367,8 @@ async function captureCompFrame(params) {
     mutates: false,
     toolName
   });
+  const hang = renderHangOf(first?.result);
+  if (hang) throw new Error(hang.message);
   const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
   if (check1.fresh) {
     return { path: pngPath1, time };
@@ -28796,17 +28798,25 @@ function unwrittenFrameHold() {
     unwrittenFrame = null;
     return null;
   }
-  const left = Math.max(1, Math.ceil((unwrittenFrameDeps.holdMs - age) / 1e3));
   return {
     error: "frame_render_pending",
     comp_id: u.compId,
     time: u.time,
-    seconds_left: left,
-    message: `Nothing was rendered: After Effects has not written the last frame it was asked for (${u.label}, ${Math.round(age / 1e3)} s ago) and may still be rendering it. A second frame render on top of it crashed After Effects 26.3 on an Advanced 3D comp, so frame renders wait up to ${left} s more. Call ae_status, then try again; for frames of an Advanced 3D comp on AE 26.3, render through the render queue (ae_render_queue_add) or try the comp on Classic 3D.`
+    seconds_left: Number.isFinite(unwrittenFrameDeps.holdMs) ? Math.max(1, Math.ceil((unwrittenFrameDeps.holdMs - age) / 1e3)) : null,
+    message: `Nothing was rendered: After Effects has not written the last frame it was asked for (${u.label}, ${Math.round(age / 1e3)} s ago). On AE 26.3 a render that never finishes leaves After Effects unable to write any frame until it is restarted, and a second frame render on top of it crashed After Effects 26.3. Frame renders are refused until that frame appears or After Effects is restarted. Tell the user: save the project (ae_save) and restart After Effects.`
   };
 }
+function renderHangMessage(h, aeVersion) {
+  const where = h.comp_name ? `"${h.comp_name}" (comp ${h.comp_id})` : `comp ${h.comp_id}`;
+  return `Nothing was rendered: After Effects ${aeVersion ?? "26.3"} never finishes rendering ${where}. Its environment light "${h.light}" takes its image from a layer, and "${h.layer}" is a 3D layer it lights, with the Advanced 3D renderer. On AE 26.3 that render hangs: no frame is written, a render-queue render stalls at 0 CPU, and After Effects then writes no frame of any comp until it is restarted. To render a frame of it, ask the user to clear that light's Source (Light Options) or switch the light off for the check; the comp itself was not changed.`;
+}
+function renderHangOf(result) {
+  const r = result;
+  if (!r || r.refused !== "render_hang_env_light" || !r.hazard) return null;
+  return { hazard: r.hazard, message: renderHangMessage(r.hazard, r.ae_version) };
+}
 function unwrittenFrameMessage(compId, time, waitedMs) {
-  return `After Effects did not write the frame of comp ${compId} at ${time}s (no complete PNG after ${Math.round(waitedMs / 1e3)} s). It was not asked again: a second saveFrameToPng while AE may still be rendering crashed After Effects 26.3 on an Advanced 3D comp. Frame renders now wait up to ${Math.round(unwrittenFrameDeps.holdMs / 1e3)} s for it. Call ae_status before the next call; for an Advanced 3D comp on AE 26.3, render the frame through the render queue (ae_render_queue_add) or try the comp on Classic 3D.`;
+  return `After Effects did not write the frame of comp ${compId} at ${time}s (no complete PNG after ${Math.round(waitedMs / 1e3)} s). It was not asked again: a second saveFrameToPng while AE may still be rendering crashed After Effects 26.3 on an Advanced 3D comp. Frame renders are refused until that frame appears or After Effects is restarted: on AE 26.3 After Effects then writes no frame of any comp. Tell the user: save the project (ae_save) and restart After Effects.`;
 }
 function snapshotOutput(fullPath, check, scale, maxSize) {
   const copy = writeScaledCopy(fullPath, fullPath.replace(/\.png$/i, "_small.png"), {
@@ -28943,12 +28953,12 @@ var init_render = __esm({
     PNG_IEND = Buffer.from([73, 69, 78, 68, 174, 66, 96, 130]);
     pngWaitDeps = { intervalMs: 100, timeoutMs: 1e4 };
     frameCaptureDeps = { lateWriteMs: 2e4, settleAfterFailMs: 2e4 };
-    unwrittenFrameDeps = { holdMs: 12e4 };
+    unwrittenFrameDeps = { holdMs: Number.POSITIVE_INFINITY };
     unwrittenFrame = null;
     renderTools = [
       {
         name: "ae_snapshot_frame",
-        description: "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). saveFrameToPng writes asynchronously, so the server waits (up to 10 s, then 20 s more while a render may be in progress) for the file to be non-empty and stable, and checks its mtime is newer than the request; a stale frame (a whole PNG older than the request) is retried once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. A frame AE never wrote is not retried (that second render crashed AE 26.3 on an Advanced 3D comp): it reports `frame_not_written`, and frame renders are refused with `frame_render_pending` for up to 2 minutes or until that file appears. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
+        description: "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). saveFrameToPng writes asynchronously, so the server waits (up to 10 s, then 20 s more while a render may be in progress) for the file to be non-empty and stable, and checks its mtime is newer than the request; a stale frame (a whole PNG older than the request) is retried once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. A frame AE never wrote is not retried (that second render crashed AE 26.3): it reports `frame_not_written`, and frame renders are refused with `frame_render_pending` until that file appears or After Effects is restarted. On AE 26.3 an Advanced 3D comp whose environment light takes its image from a layer, with another 3D layer, is refused before anything renders (`render_hang_env_light`): AE never finishes that render. `path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " + AGENT_SAFETY_GUIDANCE,
         schema: AeSnapshotFrameSchema,
         handler: async (args, ctx) => {
           const scale = args.scale ?? 0.5;
@@ -28987,6 +28997,10 @@ var init_render = __esm({
                   mutates: false,
                   toolName: "ae_snapshot_frame"
                 });
+                const hang = renderHangOf(resp1.result);
+                if (hang) {
+                  return { ok: false, error: "render_hang_env_light", kind: "render_hang_env_light", message: hang.message, hazard: hang.hazard, comp_id: args.comp_id, time, rendered: false };
+                }
                 const check1 = await waitForFreshPng(pngPath1, reqStart1);
                 if (check1.fresh) {
                   return {

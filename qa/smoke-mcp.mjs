@@ -2153,7 +2153,18 @@ async function main() {
     r = await call("ae_describe_comp", { comp_id: D });
     check("ae_describe_comp (a 3D comp with lights, a camera and text)", r.ok === true && r.read_only === true, `${r.comp?.num_layers} layers; ${r.summary?.slice(0, 80)}`);
     r = await call("ae_annotate_frame", { comp_id: D, time: 0 });
-    check("ae_annotate_frame (a 3D comp)", r.ok === true && fs.existsSync(String(r.path)), `${r.frames?.[0]?.layer_count} layer(s) drawn`);
+    // AE 26.3 never finishes rendering this comp (W5 Env takes its image from W5 HDRI, and W5 Cube is a 3D layer it
+    // lights) and then renders no frame until it is restarted (PR #19): there the frame must be refused before
+    // anything renders, naming the light. The frame steps after this one show AE still renders.
+    if (r.ok === true) {
+      check("ae_annotate_frame (a 3D comp)", fs.existsSync(String(r.path)), `${r.frames?.[0]?.layer_count} layer(s) drawn`);
+    } else {
+      check(
+        "ae_annotate_frame (a 3D comp: on AE 26.3 refused before AE renders, naming the environment light)",
+        /never finishes rendering "W5 3D".*"W5 Env" takes its image from a layer/.test(why(r)),
+        why(r).slice(0, 180)
+      );
+    }
   }
 
   // ---------- wave 5: reads, expressions, fonts, footage (ae_get_layer_full, ae_find_layers, ae_validate_expressions, ae_purge_unused, ae_fonts, ae_import_footage, ae_replace_footage, ae_brief) ----------

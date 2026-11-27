@@ -103,7 +103,7 @@ describe("captureCompFrame with a slow render", { timeout: 20000 }, () => {
     const t0 = Date.now();
     const err = await captureCompFrame({ ctx, opId: "op", compId: 7, time: 1, frameIndex: 0, framesDir: dir, waitMs: 150 }).catch((e) => e);
     expect(sent).toHaveLength(1);
-    expect(String(err.message)).toMatch(/did not write the frame of comp 7 at 1s.*not asked again.*ae_status/);
+    expect(String(err.message)).toMatch(/did not write the frame of comp 7 at 1s.*not asked again.*restart After Effects/);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(frameCaptureDeps.lateWriteMs - 200);
   });
 
