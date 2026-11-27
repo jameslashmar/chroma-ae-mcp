@@ -1198,6 +1198,19 @@ describe("ae_track_apply", () => {
     expect(out.notes.join(" ")).toMatch(/already on the layer was used as the placement/);
   });
 
+  it("refit_model and smooth_frames reach the write: an adjusted copy under a new track_id, the original kept", async () => {
+    stored("trk_apply_refit");
+    const { ctx } = fakeAe();
+    const out = (await tool("ae_track_apply").handler(
+      AeTrackApplySchema.parse({ comp_id: 1, track: { track_id: "trk_apply_refit" }, mode: "corner_pin", layer: { index: 1 }, refit_model: "translate", smooth_frames: 1, expect: expectArg }),
+      ctx
+    )) as any;
+    expect(out.ok).toBe(true);
+    expect(out.track_adjusted).toMatchObject({ from_track_id: "trk_apply_refit", model: "translate", smooth_frames: 1 });
+    expect(out.track_id).toBe(out.track_adjusted.track_id);
+    expect(out.track_id).not.toBe("trk_apply_refit");
+  });
+
   it("pins a layer: guard, read, write, separate read-back, and a receipt that matches", async () => {
     stored("trk_apply_pin");
     const { ctx, fns, calls } = fakeAe();

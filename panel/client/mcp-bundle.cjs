@@ -47876,7 +47876,9 @@ var init_planar = __esm({
               null_prefix: args.null_prefix,
               solved_null: args.solved_null,
               replace_keys: args.replace_keys,
-              range: args.range
+              range: args.range,
+              refit_model: args.refit_model,
+              smooth_frames: args.smooth_frames
             };
             return await applyTrackTo(ctx, {
               compId: args.comp_id,

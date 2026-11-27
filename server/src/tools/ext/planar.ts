@@ -2396,6 +2396,8 @@ export const planarTools: ToolDefinition<any>[] = [
           solved_null: args.solved_null,
           replace_keys: args.replace_keys,
           range: args.range,
+          refit_model: args.refit_model,
+          smooth_frames: args.smooth_frames,
         };
         return await applyTrackTo(ctx, {
           compId: args.comp_id,
