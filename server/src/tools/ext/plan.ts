@@ -427,6 +427,8 @@ export function buildPlan(args: AePlanArgs, ctx: PlanContext, askFirst: boolean)
   }
 
   const { steps, extras } = recipe(intent, { many: res.layers.length > 1, hazard: !!comp?.render_hazard });
+  // A plan that saves anyway (render) needs no separate offer to save.
+  if (steps.some((s) => s.tool === "ae_save")) extrasBefore.splice(0, extrasBefore.length, ...extrasBefore.filter((e) => e.tool !== "ae_save"));
 
   // The user's answers take the place of their questions.
   const answered: Record<string, unknown> = {};
@@ -451,7 +453,7 @@ export function buildPlan(args: AePlanArgs, ctx: PlanContext, askFirst: boolean)
     ? open.length
       ? "Ask these in the user's language, one at a time: choice and ease questions with ae_ask_user (question and options as given, kind 'ease' for feel), open ones in the chat. Skip any the request already answers. Then call ae_plan again with answers {id: value}, or go ahead with the defaults for the ones left."
       : "Nothing left to ask: go ahead with the plan."
-    : "Ask first is off (the user's choice in the Chroma panel): ask nothing. Go ahead with the plan and the assumptions; tell the user the assumptions in one short line, so they can correct you.";
+    : "Ask first is off (the user's choice in the Chroma panel): ask nothing. Go ahead with the plan; where the request already says what an assumption covers (a feel, a length), follow the request. Tell the user the assumptions you kept in one short line, so they can correct you.";
 
   return {
     ok: true,
@@ -479,7 +481,7 @@ export const planTools: ToolDefinition<any>[] = [
     name: "ae_plan",
     description:
       "Call it first for a new task. Pass the user's request (their words and language), the intent you read in it, and the layer names it mentions. It reads the open project once and returns: what it took the request to mean (comp and layers resolved from the active comp and the selection), a plan of steps with the tool for each, extras worth offering (marked try: safe to run, or ask: offer first), and hazards. " +
-      "Questions follow the user's choice in the Chroma panel (Ask first, off by default). Off: questions is empty and the defaults are listed as assumptions; go ahead and tell the user them in one line. On: questions lists what would change the work, each with options from the project and a default; ask them one at a time (ae_ask_user for choices, the chat for open ones), then call again with answers to get the plan with them. Read-only: it never changes the project.",
+      "Pass `answers` for anything the request already settles (a feel, a length: {feel: 'snappy'}). Questions follow the user's choice in the Chroma panel (Ask first, off by default). Off: questions is empty and the defaults are listed as assumptions; go ahead and tell the user them in one line. On: questions lists what would change the work, each with options from the project and a default; ask them one at a time (ae_ask_user for choices, the chat for open ones), then call again with answers to get the plan with them. Read-only: it never changes the project.",
     schema: AePlanSchema,
     handler: async (args: AePlanArgs, ctx: ToolContext) => {
       const answered = args.answers?.comp;

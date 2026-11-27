@@ -81,7 +81,11 @@ describe("buildPlan", () => {
     expect(p.questions).toEqual([]);
     expect(p.assumptions.map((a: any) => a.id)).toEqual(["layer", "duration", "feel"]);
     expect(p.assumptions.find((a: any) => a.id === "duration")).toMatchObject({ assumed: "1 s", value: "1" });
-    expect(p.next).toMatch(/Ask first is off.*ask nothing.*tell the user the assumptions/);
+    expect(p.next).toMatch(/Ask first is off.*ask nothing.*follow the request.*assumptions you kept/);
+    // What the request already says goes in as an answer and is no longer an assumption.
+    const told: any = buildPlan({ request: "snappier", intent: "animate", answers: { feel: "snappy" } }, project(), false);
+    expect(told.assumptions.map((a: any) => a.id)).not.toContain("feel");
+    expect(told.answered).toEqual({ feel: "snappy" });
     expect(p.plan.map((s: any) => s.tool)).toEqual(["ae_get_layer_props", "ae_set_property", "ae_set_keyframe_ease", "ae_motion_review"]);
   });
 
@@ -114,7 +118,10 @@ describe("buildPlan", () => {
     const p: any = buildPlan({ request: "render the endcard", intent: "render" }, project({ comp: false, unsaved: true }), true);
     expect(p.questions[0]).toMatchObject({ id: "comp", default: "8" });
     expect(p.questions[0].options.map((o: any) => o.label)).toEqual(["Endcard"]);
-    expect(p.extras[0]).toMatchObject({ tool: "ae_save", run: "ask" });
+    // A render saves anyway: no separate offer to save.
+    expect(p.extras.some((e: any) => e.tool === "ae_save")).toBe(false);
+    const anim: any = buildPlan({ request: "x", intent: "animate" }, project({ unsaved: true }), true);
+    expect(anim.extras[0]).toMatchObject({ tool: "ae_save", run: "ask" });
     const dirty: any = buildPlan({ request: "x", intent: "edit" }, project({ dirty: true }), false);
     expect(dirty.plan[0]).toMatchObject({ tool: "ae_checkpoint_create" });
     const hz: any = buildPlan({ request: "x", intent: "compose_3d" }, project({ hazard: true }), false);
