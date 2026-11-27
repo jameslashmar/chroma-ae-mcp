@@ -107,3 +107,17 @@ First run in After Effects 2027 (27.0x78), same PC. The panel (CSXS 12, manifest
 | `ae_comp_settings`: "Guide direction differs" (both guide steps; 592/594) | `GuideOrientationType` is HORIZONTAL 14212 / VERTICAL 14213, and guides read back with those values. The two-argument `addGuide(orientation, position)` still takes 0 / 1 and makes any other number a horizontal guide; the host passed the enum constant on 26.5+, so every vertical guide came out horizontal. `GuideOptions` has `orientationType` (with color, pinned, position, positionType) and ignores `orientation`, the name the 26.5 notes give; a plain object is refused. | `c27fb35`: the two-argument form always gets 0 / 1; a `GuideOptions` object gets the enum constant under both names. Before 26.5 nothing changes. |
 
 **Evidence:** `qa/live-evidence.mjs` on `c27fb35`: **594/594 passed, 9 skipped**, the 26.5 guide colour, pinned and percentage step included (26.3 skips it). The same commit's code on 26.3x87 (`e8b236c`, guides unchanged there): 592/592.
+
+**Then, the same day** (AE 27.0x78):
+
+- **In-AE render.** `CHROMA_SMOKE_RENDER_IN_AE=1` on `461f731` gave **604/604 passed, 8 skipped**:
+  - `ae_render_queue_render`: 2 items DONE and every output on disk. `ae_verify_render` found 5 frames, fps and size matching.
+  - aerender: 5 files, plus the aerender audio analysis and loudness.
+- **The environment-light render hang is still there.** I bypassed the guard with a raw `saveFrameToPng` on the 26.3 case (an environment light whose Source is a layer, plus a cube mesh; `ADBE Calder`, `LightType` 4415):
+  - The frame was not written in 90 s. An empty comp's frame took 0.5 s just before.
+  - A plain comp's frame was not written either in the next 60 s. AE is stuck until it restarts, as on 26.3.
+  - The guard stays on 27.0.
+- **Startup dialogs are out of the MCP's reach.** After AE is killed, the next start shows Crash Repair Options. Its buttons are Start in Safe Mode, Reset Preferences, Manage Plugins and Continue (the default).
+  - While it is open the extensions do not load: the service was not up after 60 s. No MCP tool can see or answer it, because the server runs inside AE.
+  - `panel/tools/ae-dialogs.ps1` run from outside reads it: the OCR text, the window rect and a screenshot. The buttons are painted, so the OCR only caught "Continue".
+  - `-Mode respond -Button Continue -Key enter` closed it (`post_enter`, with no focus change). The service was up 4 s later.
