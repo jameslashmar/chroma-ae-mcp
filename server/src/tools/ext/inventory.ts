@@ -419,7 +419,14 @@ export async function checkFontFiles(ctx: ToolContext, budgetMs = FONT_SEARCH_BU
   const byPath = new Map<string, ReturnType<typeof fontFileProblem>>();
   const problems: Array<FontFileRow & { problem: FontFileProblem; detail: string }> = [];
   const counts: Partial<Record<FontFileProblem, number>> = {};
+  // No file is not a fault: measured on AE 26.3 (Windows, 824 fonts) these were the named instances of a
+  // variable font (Cascadia Code Italic weights) and Windows' bitmap .fon fonts (Courier, MS Sans Serif, System).
+  const withoutFile: string[] = [];
   for (const row of rows) {
+    if (!row.location) {
+      withoutFile.push(row.postscript ?? `${row.family ?? "?"} ${row.style ?? ""}`.trim());
+      continue;
+    }
     const key = row.location ? `${row.location}|${row.adobe === true}` : "";
     let p = key ? byPath.get(key) : undefined;
     if (p === undefined) {
@@ -441,6 +448,11 @@ export async function checkFontFiles(ctx: ToolContext, budgetMs = FONT_SEARCH_BU
     problem_counts: counts,
     problems,
     ...(total > problems.length ? { problems_listed: problems.length } : {}),
+    ...(withoutFile.length
+      ? {
+          without_file: { count: withoutFile.length, fonts: withoutFile.slice(0, 30), note: "AE gives no file for these, which is normal for the named instances of a variable font and for Windows' bitmap (.fon) fonts; they are not counted as problems." },
+        }
+      : {}),
     scan_truncated: truncated,
     scan_calls: calls,
     seconds: Math.round((Date.now() - started) / 100) / 10,

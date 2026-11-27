@@ -76,13 +76,15 @@ describe("ae_fonts check_files", () => {
     const f = fontFolder();
     const steps = [
       { available: true, fonts: [{ postscript: "Good-A", family: "Good", style: "A", location: f.good, adobe: false }, { postscript: "Good-B", family: "Good", style: "B", location: f.good, adobe: false }], scan_truncated: true, next_family: 1, next_font: 0 },
-      { available: true, fonts: [{ postscript: "Gone-Regular", family: "Gone", style: "Regular", location: f.missing, adobe: false }, { postscript: "Junk-Regular", family: "Junk", style: "Regular", location: f.junk, adobe: false }, { postscript: "Ok-Regular", family: "Ok", style: "Regular", location: f.otf, adobe: false }], scan_truncated: false, next_family: null, next_font: null },
+      { available: true, fonts: [{ postscript: "Gone-Regular", family: "Gone", style: "Regular", location: f.missing, adobe: false }, { postscript: "Junk-Regular", family: "Junk", style: "Regular", location: f.junk, adobe: false }, { postscript: "Ok-Regular", family: "Ok", style: "Regular", location: f.otf, adobe: false }, { postscript: "Courier", family: "Courier", style: "Regular", location: null, adobe: false }], scan_truncated: false, next_family: null, next_font: null },
     ];
     const calls: Array<Record<string, unknown>> = [];
     const ctx = { bridge: { callHost: async (_fn: string, args: Record<string, unknown>) => ({ result: steps[calls.push(args) - 1] }) } } as unknown as ToolContext;
     const r: any = await checkFontFiles(ctx);
     expect(calls.map((c) => c.start_family)).toEqual([0, 1]);
-    expect(r).toMatchObject({ available: true, fonts: 5, files: 4, problem_fonts: 2, problem_counts: { missing: 1, not_a_font: 1 }, scan_truncated: false, scan_calls: 2 });
+    expect(r).toMatchObject({ available: true, fonts: 6, files: 4, problem_fonts: 2, problem_counts: { missing: 1, not_a_font: 1 }, scan_truncated: false, scan_calls: 2 });
+    // A font AE gives no file for (a bitmap .fon font, a named instance of a variable font) is listed apart, not as a problem.
+    expect(r.without_file).toMatchObject({ count: 1, fonts: ["Courier"] });
     expect(r.problems.map((p: any) => [p.postscript, p.problem])).toEqual([["Gone-Regular", "missing"], ["Junk-Regular", "not_a_font"]]);
     expect(r.note).toMatch(/Unknown BIB Error.*AdobeFnt\*\.lst/);
   });
