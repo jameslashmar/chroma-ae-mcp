@@ -75,7 +75,9 @@ import {
   quadCheck,
   ransacModel,
   rectQuad,
+  refitFrames,
   relativeTo,
+  smoothFrames,
   solveModel,
   unwrapDegrees,
   type Mat3,
@@ -290,6 +292,15 @@ const ApplyFields = {
     .object({ start: z.number().min(0), end: z.number().min(0) })
     .optional()
     .describe("Write only the frames in this time range (seconds). One call writes one span: keys already on the written properties refuse the write, and replace_keys removes ALL keys on them, not only the span's. A track holds at most 3000 frames."),
+  refit_model: ModelEnum.optional().describe(
+    "Solve every frame again from the tracked points with this model before writing, without tracking again. A model with fewer parameters holds a surface the points cover only partly much more steadily (perspective on points in a thin band swings the corners by tens of px); the track summary's model_advice says when and which. The adjusted track is saved under a new track_id (track_adjusted)."
+  ),
+  smooth_frames: z
+    .number()
+    .min(0)
+    .max(30)
+    .optional()
+    .describe("Smooth the surface's motion before writing: a Gaussian of this many frames (sigma) over the corner paths, then each frame is solved again. 1-2 takes out frame-to-frame shake and keeps the motion; more lags fast moves. Per-point nulls keep their tracked positions. Saved under a new track_id like refit_model."),
 };
 
 export const ApplyTargetSchema = z.object(ApplyFields).refine((v) => v.mode === "nulls" || v.layer !== undefined, { message: "Give `layer` for every mode but nulls." });
@@ -1216,6 +1227,88 @@ function slidingSummary(track: PlanarTrack): Record<string, unknown> {
   };
 }
 
+/** Models with fewer parameters to try for a track whose surface shakes. */
+const LOWER_MODELS: Record<MotionModel, MotionModel[]> = { perspective: ["affine", "similarity"], affine: ["similarity"], similarity: [], translate: [] };
+
+function meanFitRms(track: PlanarTrack): number | null {
+  const r = track.frames.filter((f) => f.ok && f.rms_px !== null && f.time !== track.ref_time).map((f) => f.rms_px as number);
+  return r.length ? r.reduce((a, b) => a + b, 0) / r.length : null;
+}
+
+/** How much of the surface (quad) the points' bounding box spans, in percent of its width and height. */
+export function pointsCover(points: Vec2[], quad: Vec2[]): { width_pct: number; height_pct: number } {
+  const span = (v: number[]) => Math.max(...v) - Math.min(...v);
+  const qw = span(quad.map((p) => p[0]));
+  const qh = span(quad.map((p) => p[1]));
+  return {
+    width_pct: qw > 0 ? Math.round((100 * span(points.map((p) => p[0]))) / qw) : 100,
+    height_pct: qh > 0 ? Math.round((100 * span(points.map((p) => p[1]))) / qh) : 100,
+  };
+}
+
+/**
+ * When the surface corners shake (corner_jitter_px of 1 px or more), the same tracked points solved
+ * with each model with fewer parameters: the corner shake, how well it still fits the points, and the
+ * model to write with (ae_track_apply refit_model), if one halves the shake and still fits (mean fit
+ * residual within 1 px, or twice the track's own) on as many frames. Measured on a 4K shot with 8 points
+ * in a 1570 x 284 px band under a 2309 x 761 px surface (2026-11-26): perspective moved a corner 35 px
+ * in one frame while the points moved under 1 px.
+ */
+export function modelAdvice(track: PlanarTrack): Record<string, unknown> | null {
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  const now = cornerJitter(track, quad);
+  if (now === null || now < 1 || LOWER_MODELS[track.model].length === 0) return null;
+  const okOf = (t: PlanarTrack) => t.frames.filter((f) => f.ok).length;
+  const rmsNow = meanFitRms(track);
+  const tried = LOWER_MODELS[track.model].map((m) => {
+    const alt = refitFrames(track, m);
+    const rms = meanFitRms(alt);
+    return { model: m, corner_jitter_px: cornerJitter(alt, quad), rms_px: rms === null ? null : r2(rms), frames_ok: okOf(alt) };
+  });
+  const limit = Math.max(1, 2 * (rmsNow ?? 0));
+  const fits = tried
+    .filter((t) => t.corner_jitter_px !== null && t.rms_px !== null && t.rms_px <= limit && t.frames_ok >= okOf(track) * 0.95)
+    .sort((x, y) => (x.corner_jitter_px as number) - (y.corner_jitter_px as number));
+  const best = fits.length && (fits[0].corner_jitter_px as number) <= now / 2 ? fits[0] : null;
+  const cover = pointsCover(track.ref_points, quad);
+  const why =
+    `The surface corners shake ${now} px from frame to frame while the points agree with the fit to ${rmsNow === null ? "?" : r2(rmsNow)} px: ` +
+    `the points span ${cover.width_pct}% of the surface's width and ${cover.height_pct}% of its height, and the ${track.model} fit swings the corners outside them. `;
+  const note = best
+    ? why +
+      `Solved again from the same points as ${best.model}, the corners shake ${best.corner_jitter_px} px (fit ${best.rms_px} px). ` +
+      `Write it with ae_track_apply refit_model: "${best.model}" (no new tracking), add smooth_frames 1-2 for what is left, or track again with points spread over the whole surface, near its corners.`
+    : why + "No model with fewer parameters fits the points well enough: track again with points spread over the whole surface (near its corners), or smooth with ae_track_apply smooth_frames.";
+  return { current: { model: track.model, corner_jitter_px: now, rms_px: rmsNow === null ? null : r2(rmsNow) }, tried, recommended: best ? { refit_model: best.model } : null, points_cover: cover, note };
+}
+
+/** ae_track_apply's refit_model and smooth_frames: the adjusted track, saved under a new track_id, and what changed. */
+export function adjustTrack(track: PlanarTrack, opts: { refit_model?: MotionModel; smooth_frames?: number }): { track: PlanarTrack; info: Record<string, unknown> | null } {
+  const refit = opts.refit_model && opts.refit_model !== track.model ? opts.refit_model : null;
+  const sigma = typeof opts.smooth_frames === "number" && opts.smooth_frames > 0 ? opts.smooth_frames : 0;
+  if (!refit && !sigma) return { track, info: null };
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  let t = track;
+  if (refit) t = refitFrames(t, refit);
+  if (sigma) t = smoothFrames(t, sigma);
+  const did = [refit ? `refit ${track.model} -> ${refit}` : "", sigma ? `smoothed over ${sigma} frame(s)` : ""].filter(Boolean).join(", ");
+  const derived: PlanarTrack = { ...t, track_id: newTrackId(), source: `${track.source} (${did}, from ${track.track_id})`, created: new Date().toISOString() };
+  saveTrack(derived);
+  const okOf = (x: PlanarTrack) => x.frames.filter((f) => f.ok).length;
+  return {
+    track: derived,
+    info: {
+      from_track_id: track.track_id,
+      track_id: derived.track_id,
+      model: derived.model,
+      ...(sigma ? { smooth_frames: sigma } : {}),
+      corner_jitter_px: { before: cornerJitter(track, quad), after: cornerJitter(derived, quad) },
+      frames_ok: { before: okOf(track), after: okOf(derived) },
+      note: `Written from track ${derived.track_id} (${did}); the original ${track.track_id} is unchanged.`,
+    },
+  };
+}
+
 export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string, unknown> {
   const ok = track.frames.filter((f) => f.ok);
   const rms = ok.map((f) => f.rms_px).filter((v): v is number => v !== null);
@@ -1243,6 +1336,10 @@ export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string
         : null,
     error_note: EXPECTED_ERROR_NOTE,
     corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...(() => {
+      const advice = modelAdvice(track);
+      return advice ? { model_advice: advice } : {};
+    })(),
     ...slidingSummary(track),
     ...lensSummary(track),
     frames_lost_per_point: lostPer,
@@ -1533,7 +1630,9 @@ async function applyTrackTo(
   const opId = a.opId ?? ctx.bridge.newOpId();
   const label = `${a.toolName} apply(${a.compId})`;
   const refTime = a.refTime ?? a.track.ref_time;
-  const based = relativeTo(a.track, refTime);
+  // refit_model / smooth_frames: written from an adjusted copy, saved under its own track_id.
+  const adjusted = adjustTrack(a.track, { refit_model: target.refit_model, smooth_frames: target.smooth_frames });
+  const based = relativeTo(adjusted.track, refTime);
   const refFrame = frameAt(based, refTime);
   if (!refFrame || !refFrame.ok || !refFrame.H) {
     throw new PlanarError("bad_args", `The reference frame at ${r2(refTime)} s has no solved motion, so it cannot be the frame the target looks right at. Pass a ref_time where the track is ok.`);
@@ -1718,6 +1817,7 @@ async function applyTrackTo(
     written: w.written ?? [],
     nulls: (w.nulls ?? []).map((n) => ({ id: n.layer_id, index: n.layer_index, name: n.name, keys: n.props.map((p) => `${p.role}:${p.numKeys}`).join(" ") })),
     notes,
+    ...(adjusted.info ? { track_adjusted: adjusted.info } : {}),
     ...(a.trackNote ?? {}),
     checkpoint: w.checkpoint,
     receipt: w.receipt,
@@ -2188,7 +2288,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
       "`isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). " +
       "Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. " +
-      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
+      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeTrackMultiSchema,
     handler: async (args: AeTrackMultiArgs, ctx: ToolContext) => {

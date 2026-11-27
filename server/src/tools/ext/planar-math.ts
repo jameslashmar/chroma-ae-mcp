@@ -711,6 +711,40 @@ export function smoothFrames(track: PlanarTrack, sigmaFrames: number): PlanarTra
   return relativeTo({ ...track, frames }, track.ref_time);
 }
 
+/**
+ * Solves every frame again from its tracked points with another model; the points stay as tracked,
+ * only H changes. A model with fewer parameters can hold a surface much more steadily when the points
+ * cover little of it: a perspective fit on points in a thin band swings the surface corners by tens of
+ * pixels from sub-pixel point noise (measured on a 4K shot, 2026-11-26). Points that do not agree are
+ * voted out (RANSAC, 2 px, or 3 px for fewer parameters than the track had). A frame with too few
+ * points for the model, or a degenerate set, is not ok afterwards.
+ */
+export function refitFrames(track: PlanarTrack, model: MotionModel): PlanarTrack {
+  if (model === track.model) return track;
+  const targets = quadGrid(track.tracking?.quad ?? boundingQuad(track.ref_points));
+  const frames: PlanarFrame[] = track.frames.map((fr, i) => {
+    if (!fr.ok) return fr;
+    const from: Vec2[] = [];
+    const to: Vec2[] = [];
+    fr.points.forEach((p, k) => {
+      if (p && track.ref_points[k]) {
+        from.push(track.ref_points[k]);
+        to.push(p);
+      }
+    });
+    if (from.length < MODEL_MIN_POINTS[model]) {
+      return { ...fr, ok: false, H: null, note: `${from.length} point(s), fewer than the ${model} model needs (${MODEL_MIN_POINTS[model]})` };
+    }
+    const fit = ransacModel(model, from, to, { thresholdPx: MODEL_PARAMS[model] < MODEL_PARAMS[track.model] ? 3 : 2, iterations: 200, seed: 1000 + i });
+    if (!fit) return { ...fr, ok: false, H: null, note: `the ${model} model could not be solved from this frame's points` };
+    // The expected error over the surface, for the new model, from the points that agree with it.
+    const keep = fit.inliers.map((v, k) => (v ? k : -1)).filter((k) => k >= 0);
+    const ex = expectedError(model, fit.H, keep.map((k) => from[k]), keep.map((k) => to[k]), targets);
+    return { ...fr, H: fit.H, rms_px: Number(fit.rms_px.toFixed(4)), expected_px: ex ? Number(ex.mean_px.toFixed(4)) : null, inliers: keep.length };
+  });
+  return relativeTo({ ...track, model, frames }, track.ref_time);
+}
+
 // ---------- bezier shapes ----------
 
 export interface ShapeData {
