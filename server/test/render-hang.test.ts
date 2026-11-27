@@ -24,10 +24,10 @@ afterEach(() => {
 function scene(o: { version?: string; renderer?: string; source?: boolean; lightOn?: boolean; card3d?: boolean } = {}) {
   const project = new FakeProject();
   const comp = project.addComp("W5 3D", 640, 360, 4);
-  (comp as any).renderer = o.renderer ?? "ADBE Advanced 3d";
+  (comp as any).renderer = o.renderer ?? "ADBE Calder";
   const hdri = comp.layers.addSolid([0.5, 0.5, 0.5], "HDRI", 640, 360, 1) as FakeLayer;
   const env = comp.layers.addLight("Env", [320, 180]) as FakeLayer;
-  env.lightType = ENV;
+  env.lightType = LightType.AMBIENT ?? 4415;
   (env as any).lightSource = o.source === false ? null : hdri;
   env.enabled = o.lightOn !== false;
   const card = comp.layers.addSolid([0.2, 0.6, 0.9], "Card", 300, 200, 1) as FakeLayer;
@@ -40,13 +40,13 @@ function scene(o: { version?: string; renderer?: string; source?: boolean; light
 }
 
 describe("core.jsx: the AE 26.3 environment-light render hang", () => {
-  it("finds an environment light with a layer source and a 3D layer it lights, in an Advanced 3D comp", () => {
+  it("finds a light with a layer source and a 3D layer it lights (26.3 reads the environment light back as AMBIENT)", () => {
     const { comp, A } = scene();
     expect(A.envLightRenderHazard(comp)).toMatchObject({ comp_id: comp.id, comp_name: "W5 3D", light: "Env", layer: "Card" });
   });
 
-  it("leaves alone what renders on 26.3: no source, the light off, no other 3D layer, Classic 3D, and AE before 26.3", () => {
-    for (const o of [{ source: false }, { lightOn: false }, { card3d: false }, { renderer: "ADBE Ernst" }, { version: "26.2.1" }, { version: "25.5" }]) {
+  it("leaves alone what renders on 26.3: no source, the light off, no other 3D layer, and AE before 26.3", () => {
+    for (const o of [{ source: false }, { lightOn: false }, { card3d: false }, { version: "26.2.1" }, { version: "25.5" }]) {
       const { comp, A } = scene(o);
       expect(A.envLightRenderHazard(comp), JSON.stringify(o)).toBeNull();
     }

@@ -1920,9 +1920,10 @@
     return result;
   };
 
-  // AE 26.3 (26.3x87, Windows, measured 2026-11-26, PR #19): an Advanced 3D comp never finishes
-  // rendering when it has an environment light whose image comes from a layer (lightSource) and
-  // another enabled 3D layer. saveFrameToPng writes nothing; a render-queue render of one PNG frame
+  // AE 26.3 (26.3x87, Windows, measured 2026-11-26, PR #19): a comp never finishes rendering when it
+  // has a light whose image comes from a layer (lightSource: the environment light, which 26.3 reads
+  // back as LightType.AMBIENT, 4415, with a Source; adding it switches the comp to Advanced 3D,
+  // renderer "ADBE Calder") and another enabled 3D layer (a solid made 3D or a parametric mesh). saveFrameToPng writes nothing; a render-queue render of one PNG frame
   // sits at 0 CPU and 0 GPU; from then on AE writes no frame of any comp until it is restarted, a
   // later saveFrameToPng crashed it, and other calls hung. Measured: the same comp with the light's
   // source removed, or with a point or spot light (shadows or not), renders; so does the light and its
@@ -1956,13 +1957,10 @@
       var kind = "";
       try { kind = String(l.reflect.name); } catch (eK) {}
       if (kind === "LightLayer") {
-        var isEnv = false;
+        // Only an environment light takes a Source; its type is not checked (26.3 reads it back as AMBIENT).
         var src = null;
-        try { isEnv = typeof LightType !== "undefined" && LightType.ENVIRONMENT !== undefined && l.lightType === LightType.ENVIRONMENT; } catch (e2) {}
-        if (isEnv) {
-          try { src = l.lightSource; } catch (e3) { src = null; }
-          if (src !== null && src !== undefined && light === null) light = l;
-        }
+        try { src = l.lightSource; } catch (e3) { src = null; }
+        if (src !== null && src !== undefined && light === null) light = l;
         continue;
       }
       if (kind === "CameraLayer") continue;
@@ -1973,8 +1971,8 @@
         if (l.source && l.source instanceof CompItem) nested.push(l.source);
       } catch (e5) {}
     }
-    if (renderer === "ADBE Advanced 3d" && light !== null && lit !== null) {
-      return { comp_id: comp.id, comp_name: comp.name, light: light.name, light_index: light.index, layer: lit.name, layer_index: lit.index };
+    if (light !== null && lit !== null) {
+      return { comp_id: comp.id, comp_name: comp.name, renderer: renderer, light: light.name, light_index: light.index, layer: lit.name, layer_index: lit.index };
     }
     for (var n = 0; n < nested.length; n++) {
       var h = envLightHazardIn(nested[n], depth + 1, seen);
