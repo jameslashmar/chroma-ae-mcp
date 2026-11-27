@@ -12,6 +12,7 @@
  *   checkpointed first and read back).
  */
 
+import * as fs from "node:fs";
 import { z } from "zod";
 import { BridgeError } from "../../host.js";
 import { QueueWaitError } from "../../queue.js";
@@ -37,7 +38,7 @@ const FontRefSchema = z
   .describe('A font: a PostScript name ("Arial-BoldMT"), or { family, style } ("Arial", "Bold").');
 export type FontRef = z.infer<typeof FontRefSchema>;
 
-export const FONT_ACTIONS = ["in_use", "search", "check", "replace"] as const;
+export const FONT_ACTIONS = ["in_use", "search", "check", "replace", "check_files"] as const;
 
 export const AeFontsSchema = z
   .object({
@@ -46,7 +47,8 @@ export const AeFontsSchema = z
       .optional()
       .describe(
         "in_use (default): the fonts the project's text layers use. search: find installed fonts. check: do these fonts exist, are they substituted, do they have the glyphs for this text. " +
-          "replace: swap one font for another project-wide (a write: Project.replaceFont, AE 24.5, is NOT undoable)."
+          "replace: swap one font for another project-wide (a write: Project.replaceFont, AE 24.5, is NOT undoable). " +
+          "check_files: every installed font's file checked on disk (missing, empty, unreadable, not a font), to find the fonts behind After Effects' \"Unknown BIB Error. cannot access font\" warnings."
       ),
     comp_id: z.number().int().optional().describe("in_use: only this comp's text layers. Default: the whole project."),
     missing_only: z.boolean().optional().describe("in_use: list only fonts known to be missing or substituted. Fonts whose state AE couldn't report are left out and counted in unknown_state."),
@@ -324,6 +326,128 @@ export async function searchFonts(args: z.infer<typeof AeFontsSchema>, ctx: Tool
   return out;
 }
 
+
+// ---------- check_files: fonts whose file AE cannot open ----------
+
+const FONT_SIGNATURES = [Buffer.from([0, 1, 0, 0]), Buffer.from("OTTO"), Buffer.from("true"), Buffer.from("typ1"), Buffer.from("ttcf"), Buffer.from("wOFF"), Buffer.from("wOF2")];
+
+export type FontFileProblem = "no_location" | "missing" | "not_a_file" | "empty" | "unreadable" | "not_a_font";
+
+/**
+ * What is wrong with a font's file on disk, or null. The TrueType/OpenType signature is checked only for
+ * .ttf/.otf/.ttc/.otc files that do not come from Adobe Fonts (those are stored in Adobe's own form).
+ */
+export function fontFileProblem(location: string | null, adobe: boolean | null): { problem: FontFileProblem; detail: string } | null {
+  if (!location) return { problem: "no_location", detail: "After Effects gives no file for this font." };
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(location);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "";
+    if (code === "ENOENT" || code === "ENOTDIR") return { problem: "missing", detail: "The file is not there (deleted, moved, or on a drive that is not connected)." };
+    return { problem: "unreadable", detail: `The file cannot be read (${code || (e as Error).message}).` };
+  }
+  if (!st.isFile()) return { problem: "not_a_file", detail: "The path is not a file." };
+  if (st.size === 0) return { problem: "empty", detail: "The file is empty (0 bytes)." };
+  let head = Buffer.alloc(0);
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(location, "r");
+    const buf = Buffer.alloc(4);
+    const n = fs.readSync(fd, buf, 0, 4, 0);
+    head = buf.subarray(0, n);
+  } catch (e) {
+    return { problem: "unreadable", detail: `The file cannot be read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}).` };
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+  if (adobe !== true && /\.(ttf|otf|ttc|otc)$/i.test(location) && !FONT_SIGNATURES.some((sig) => head.length === 4 && head.equals(sig))) {
+    return { problem: "not_a_font", detail: `The file does not start like a TrueType or OpenType font (first bytes ${head.toString("hex") || "none"}).` };
+  }
+  return null;
+}
+
+interface FontFileRow {
+  postscript: string | null;
+  family: string | null;
+  style: string | null;
+  location: string | null;
+  adobe: boolean | null;
+}
+
+const FONT_FILES_NOTE =
+  "After Effects shows \"Unknown BIB Error. cannot access font\" when its font engine (CoolType) cannot open a font file it has listed, the first time something reads that font in a session. " +
+  "For each font listed: install it again from a good copy, or remove it (Windows: Settings > Personalization > Fonts; macOS: Font Book); for an Adobe Fonts font, turn it off and on again in the Creative Cloud app. " +
+  "Then, with After Effects closed, delete Adobe's font cache files AdobeFnt*.lst (Windows: under %LOCALAPPDATA%\\Adobe\\TypeSupport and the CT Font Cache folders under %APPDATA%\\Adobe); After Effects builds them again on start. " +
+  "A font whose file is intact but damaged inside is not caught here: the warning, when it comes, is about the font AE was reading.";
+
+/**
+ * ae_fonts check_files: every installed font's file, checked on disk by the server (the host only lists
+ * names and paths, in steps like the search). Finds the fonts behind AE's "cannot access font" warnings.
+ */
+export async function checkFontFiles(ctx: ToolContext, budgetMs = FONT_SEARCH_BUDGET_MS) {
+  const started = Date.now();
+  const rows: FontFileRow[] = [];
+  let startFamily = 0;
+  let startFont = 0;
+  let calls = 0;
+  let truncated = false;
+  for (;;) {
+    const res = await ctx.bridge.callHost<{ available?: boolean; reason?: string; fonts?: FontFileRow[]; scan_truncated?: boolean; next_family?: number | null; next_font?: number | null }>(
+      "inventoryFontFiles",
+      { start_family: startFamily, start_font: startFont },
+      { label: "ae_fonts(check_files)", mutates: false, toolName: "ae_fonts" }
+    );
+    const r = res.result;
+    calls++;
+    if (r.available === false) return { available: false, reason: r.reason, action: "check_files" };
+    rows.push(...(r.fonts ?? []));
+    const nf = typeof r.next_family === "number" ? r.next_family : null;
+    const nfo = typeof r.next_font === "number" ? r.next_font : 0;
+    const moved = nf !== null && (nf > startFamily || (nf === startFamily && nfo > startFont));
+    if (r.scan_truncated !== true || !moved) {
+      truncated = r.scan_truncated === true;
+      break;
+    }
+    if (Date.now() - started >= budgetMs || calls >= FONT_SEARCH_MAX_CHUNKS) {
+      truncated = true;
+      break;
+    }
+    startFamily = nf as number;
+    startFont = nfo;
+  }
+  const byPath = new Map<string, ReturnType<typeof fontFileProblem>>();
+  const problems: Array<FontFileRow & { problem: FontFileProblem; detail: string }> = [];
+  const counts: Partial<Record<FontFileProblem, number>> = {};
+  for (const row of rows) {
+    const key = row.location ? `${row.location}|${row.adobe === true}` : "";
+    let p = key ? byPath.get(key) : undefined;
+    if (p === undefined) {
+      p = fontFileProblem(row.location, row.adobe);
+      if (key) byPath.set(key, p);
+    }
+    if (!p) continue;
+    counts[p.problem] = (counts[p.problem] ?? 0) + 1;
+    if (problems.length < 200) problems.push({ ...row, problem: p.problem, detail: p.detail });
+  }
+  const total = Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
+  return {
+    available: true,
+    action: "check_files",
+    fonts: rows.length,
+    files: byPath.size,
+    adobe_fonts: rows.filter((r) => r.adobe === true).length,
+    problem_fonts: total,
+    problem_counts: counts,
+    problems,
+    ...(total > problems.length ? { problems_listed: problems.length } : {}),
+    scan_truncated: truncated,
+    scan_calls: calls,
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+    note: total > 0 ? FONT_FILES_NOTE : "Every font file After Effects lists is there and readable. " + FONT_FILES_NOTE,
+  };
+}
+
 // ---------- tools ----------
 
 export const inventoryTools: ToolDefinition<any>[] = [
@@ -357,12 +481,14 @@ export const inventoryTools: ToolDefinition<any>[] = [
       "action replace: swap `from` for `to` in every text layer (Project.replaceFont, AE 24.5). It is NOT undoable, so: dry_run (the default) lists the layers it would change and the glyphs the new font lacks for their text; " +
       "dry_run false needs `expect`, makes a checkpoint first and REFUSES if none can be made or the project has unsaved changes (ae_save first, or turn automatic checkpoints on), then reads the project's used fonts back (old font gone, new font used and not substituted). " +
       "Restore from the checkpoint to undo. With no_font_locking missing glyphs cannot be detected; mixed-font text changes only the ranges that used the old font. " +
-      "in_use, search, check and dry-run replace are read-only. " +
+      "action check_files: every installed font's file checked on disk (missing, empty, unreadable, not a TrueType/OpenType file) with the font's names and path, and how to fix them: the fonts behind After Effects' \"Unknown BIB Error. cannot access font\" warnings. If AE shows that warning while this runs, answer it with OK (ae_dialogs, ae_dialog_respond). " +
+      "in_use, search, check, check_files and dry-run replace are read-only. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeFontsSchema,
     handler: async (args: z.infer<typeof AeFontsSchema>, ctx) => {
       const action = args.action ?? "in_use";
       if (action === "search") return searchFonts(args, ctx);
+      if (action === "check_files") return checkFontFiles(ctx);
       if (action === "check") {
         const res = await ctx.bridge.callHost<{ checked?: Array<{ exists: boolean | null; is_substitute: boolean | null; glyphs?: { supported: boolean | null } }> }>(
           "inventoryCheckFonts",

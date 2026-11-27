@@ -718,6 +718,62 @@
     return result;
   };
 
+  // ----- font files (ae_fonts check_files) -----
+  // Each installed font's names and file, in steps like the search (start_family / start_font, about
+  // 2.5 s a call); the server checks the files on disk, so AE opens none of them here. Reading
+  // `location` may still make AE open a font it has not loaded yet: on a PC with a broken font file
+  // AE can show "Unknown BIB Error. cannot access font" while this runs (PR #19, AE 26.3).
+  A.inventoryFontFiles = function (args) {
+    args = args || {};
+    var fonts = fontsApi();
+    if (!fonts) return { available: false, reason: noFontsReason(), fonts: [] };
+    var all = null;
+    try { all = fonts.allFonts; } catch (e0) { all = null; }
+    if (!all) return { available: false, reason: "app.fonts.allFonts could not be read.", fonts: [] };
+    var startFamily = 0;
+    if (typeof args.start_family === "number" && isFinite(args.start_family) && args.start_family > 0) startFamily = Math.floor(args.start_family);
+    var startFont = 0;
+    if (typeof args.start_font === "number" && isFinite(args.start_font) && args.start_font > 0) startFont = Math.floor(args.start_font);
+    var started = new Date().getTime();
+    var out = [];
+    var scanned = 0;
+    var nextFamily = null;
+    var nextFont = null;
+    var stop = false;
+    var familyCount = 0;
+    try { familyCount = all.length; } catch (eLen) { familyCount = 0; }
+    for (var i = startFamily; i < familyCount && !stop; i++) {
+      var fam = all[i];
+      var famLen = 0;
+      try { famLen = fam.length; } catch (e1) { famLen = 0; }
+      var j0 = 0;
+      if (i === startFamily) j0 = startFont;
+      for (var j = j0; j < famLen; j++) {
+        if (scanned > 0 && (scanned >= MAX_FONT_SCAN || ((j === j0 || scanned % 50 === 0) && new Date().getTime() - started > FONT_SCAN_MS))) {
+          stop = true;
+          nextFamily = i;
+          nextFont = j;
+          break;
+        }
+        scanned++;
+        var f = fam[j];
+        var row = { postscript: null, family: null, style: null, location: null, adobe: null };
+        var v = readMember(f, "postScriptName");
+        if (v !== undefined) row.postscript = clipStr(v, 200);
+        v = readMember(f, "familyName");
+        if (v !== undefined) row.family = clipStr(v, 200);
+        v = readMember(f, "styleName");
+        if (v !== undefined) row.style = clipStr(v, 200);
+        v = readMember(f, "location");
+        if (v !== undefined) row.location = clipStr(v, 1000);
+        v = readMember(f, "isFromAdobeFonts");
+        if (v !== undefined) row.adobe = v === true;
+        out.push(row);
+      }
+    }
+    return { available: true, fonts: out, scanned: scanned, scan_truncated: stop, next_family: nextFamily, next_font: nextFont, family_count: familyCount };
+  };
+
   // ----- check -----
 
   function fallbackFor(text) {

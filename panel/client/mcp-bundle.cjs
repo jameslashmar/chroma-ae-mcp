@@ -45462,6 +45462,30 @@ function smoothFrames(track, sigmaFrames) {
   });
   return relativeTo({ ...track, frames }, track.ref_time);
 }
+function refitFrames(track, model) {
+  if (model === track.model) return track;
+  const targets = quadGrid(track.tracking?.quad ?? boundingQuad(track.ref_points));
+  const frames = track.frames.map((fr, i) => {
+    if (!fr.ok) return fr;
+    const from = [];
+    const to = [];
+    fr.points.forEach((p, k) => {
+      if (p && track.ref_points[k]) {
+        from.push(track.ref_points[k]);
+        to.push(p);
+      }
+    });
+    if (from.length < MODEL_MIN_POINTS[model]) {
+      return { ...fr, ok: false, H: null, note: `${from.length} point(s), fewer than the ${model} model needs (${MODEL_MIN_POINTS[model]})` };
+    }
+    const fit = ransacModel(model, from, to, { thresholdPx: MODEL_PARAMS[model] < MODEL_PARAMS[track.model] ? 3 : 2, iterations: 200, seed: 1e3 + i });
+    if (!fit) return { ...fr, ok: false, H: null, note: `the ${model} model could not be solved from this frame's points` };
+    const keep = fit.inliers.map((v, k) => v ? k : -1).filter((k) => k >= 0);
+    const ex = expectedError(model, fit.H, keep.map((k) => from[k]), keep.map((k) => to[k]), targets);
+    return { ...fr, H: fit.H, rms_px: Number(fit.rms_px.toFixed(4)), expected_px: ex ? Number(ex.mean_px.toFixed(4)) : null, inliers: keep.length };
+  });
+  return relativeTo({ ...track, model, frames }, track.ref_time);
+}
 function transformShape(shape, P) {
   const n = shape.vertices.length;
   const map = (p) => {
@@ -46595,6 +46619,63 @@ function slidingSummary(track) {
     sliding_note: many ? `${sliding.length} of ${track.ref_points.length} points do not move with the plane the others define. Either they are off it (parallax: different depths), on something moving, or the shot is not one plane at all; then a 2D track cannot hold, and the shot needs a 3D camera solve (AE's 3D Camera Tracker, or Mocha with the right plane). Track again with points on one surface only (auto_points.exclude), or check the preview.` : `Point ${sliding.map((p) => p.index).join(", ")} does not move with the plane the others define (off the plane, on something moving, or a reflection). The fit votes it out, but the track is safer without it: track again with auto_points.exclude over it, or check the preview.`
   };
 }
+function meanFitRms(track) {
+  const r = track.frames.filter((f) => f.ok && f.rms_px !== null && f.time !== track.ref_time).map((f) => f.rms_px);
+  return r.length ? r.reduce((a, b) => a + b, 0) / r.length : null;
+}
+function pointsCover(points, quad) {
+  const span = (v) => Math.max(...v) - Math.min(...v);
+  const qw = span(quad.map((p) => p[0]));
+  const qh = span(quad.map((p) => p[1]));
+  return {
+    width_pct: qw > 0 ? Math.round(100 * span(points.map((p) => p[0])) / qw) : 100,
+    height_pct: qh > 0 ? Math.round(100 * span(points.map((p) => p[1])) / qh) : 100
+  };
+}
+function modelAdvice(track) {
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  const now = cornerJitter(track, quad);
+  if (now === null || now < 1 || LOWER_MODELS[track.model].length === 0) return null;
+  const okOf = (t) => t.frames.filter((f) => f.ok).length;
+  const rmsNow = meanFitRms(track);
+  const tried = LOWER_MODELS[track.model].map((m) => {
+    const alt = refitFrames(track, m);
+    const rms = meanFitRms(alt);
+    return { model: m, corner_jitter_px: cornerJitter(alt, quad), rms_px: rms === null ? null : r26(rms), frames_ok: okOf(alt) };
+  });
+  const limit = Math.max(1, 2 * (rmsNow ?? 0));
+  const fits2 = tried.filter((t) => t.corner_jitter_px !== null && t.rms_px !== null && t.rms_px <= limit && t.frames_ok >= okOf(track) * 0.95).sort((x, y) => x.corner_jitter_px - y.corner_jitter_px);
+  const best = fits2.length && fits2[0].corner_jitter_px <= now / 2 ? fits2[0] : null;
+  const cover = pointsCover(track.ref_points, quad);
+  const why = `The surface corners shake ${now} px from frame to frame while the points agree with the fit to ${rmsNow === null ? "?" : r26(rmsNow)} px: the points span ${cover.width_pct}% of the surface's width and ${cover.height_pct}% of its height, and the ${track.model} fit swings the corners outside them. `;
+  const note = best ? why + `Solved again from the same points as ${best.model}, the corners shake ${best.corner_jitter_px} px (fit ${best.rms_px} px). Write it with ae_track_apply refit_model: "${best.model}" (no new tracking), add smooth_frames 1-2 for what is left, or track again with points spread over the whole surface, near its corners.` : why + "No model with fewer parameters fits the points well enough: track again with points spread over the whole surface (near its corners), or smooth with ae_track_apply smooth_frames.";
+  return { current: { model: track.model, corner_jitter_px: now, rms_px: rmsNow === null ? null : r26(rmsNow) }, tried, recommended: best ? { refit_model: best.model } : null, points_cover: cover, note };
+}
+function adjustTrack(track, opts) {
+  const refit = opts.refit_model && opts.refit_model !== track.model ? opts.refit_model : null;
+  const sigma = typeof opts.smooth_frames === "number" && opts.smooth_frames > 0 ? opts.smooth_frames : 0;
+  if (!refit && !sigma) return { track, info: null };
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  let t = track;
+  if (refit) t = refitFrames(t, refit);
+  if (sigma) t = smoothFrames(t, sigma);
+  const did = [refit ? `refit ${track.model} -> ${refit}` : "", sigma ? `smoothed over ${sigma} frame(s)` : ""].filter(Boolean).join(", ");
+  const derived = { ...t, track_id: newTrackId(), source: `${track.source} (${did}, from ${track.track_id})`, created: (/* @__PURE__ */ new Date()).toISOString() };
+  saveTrack(derived);
+  const okOf = (x) => x.frames.filter((f) => f.ok).length;
+  return {
+    track: derived,
+    info: {
+      from_track_id: track.track_id,
+      track_id: derived.track_id,
+      model: derived.model,
+      ...sigma ? { smooth_frames: sigma } : {},
+      corner_jitter_px: { before: cornerJitter(track, quad), after: cornerJitter(derived, quad) },
+      frames_ok: { before: okOf(track), after: okOf(derived) },
+      note: `Written from track ${derived.track_id} (${did}); the original ${track.track_id} is unchanged.`
+    }
+  };
+}
 function trackSummary(track, maxFrames = 500) {
   const ok = track.frames.filter((f) => f.ok);
   const rms = ok.map((f) => f.rms_px).filter((v) => v !== null);
@@ -46619,6 +46700,10 @@ function trackSummary(track, maxFrames = 500) {
     expected_error_px: exp.length && worst ? { mean: r26(exp.reduce((a, f) => a + f.expected_px, 0) / exp.length), max: r26(worst.expected_px), worst_time: r4(worst.time), frames_without: Math.max(0, ok.length - 1 - exp.length) } : null,
     error_note: EXPECTED_ERROR_NOTE,
     corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...(() => {
+      const advice = modelAdvice(track);
+      return advice ? { model_advice: advice } : {};
+    })(),
     ...slidingSummary(track),
     ...lensSummary(track),
     frames_lost_per_point: lostPer,
@@ -46816,7 +46901,8 @@ async function applyTrackTo(ctx, a) {
   const opId = a.opId ?? ctx.bridge.newOpId();
   const label = `${a.toolName} apply(${a.compId})`;
   const refTime = a.refTime ?? a.track.ref_time;
-  const based = relativeTo(a.track, refTime);
+  const adjusted = adjustTrack(a.track, { refit_model: target.refit_model, smooth_frames: target.smooth_frames });
+  const based = relativeTo(adjusted.track, refTime);
   const refFrame = frameAt(based, refTime);
   if (!refFrame || !refFrame.ok || !refFrame.H) {
     throw new PlanarError("bad_args", `The reference frame at ${r26(refTime)} s has no solved motion, so it cannot be the frame the target looks right at. Pass a ref_time where the track is ok.`);
@@ -46990,6 +47076,7 @@ async function applyTrackTo(ctx, a) {
     written: w.written ?? [],
     nulls: (w.nulls ?? []).map((n) => ({ id: n.layer_id, index: n.layer_index, name: n.name, keys: n.props.map((p) => `${p.role}:${p.numKeys}`).join(" ") })),
     notes,
+    ...adjusted.info ? { track_adjusted: adjusted.info } : {},
     ...a.trackNote ?? {},
     checkpoint: w.checkpoint,
     receipt: w.receipt,
@@ -47375,7 +47462,7 @@ async function trackMulti(ctx, args) {
   }
   return result;
 }
-var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, EXPECTED_ERROR_NOTE, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, EXPECTED_ERROR_NOTE, LOWER_MODELS, round23, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
@@ -47456,7 +47543,11 @@ var init_planar = __esm({
       null_prefix: external_exports.string().min(1).max(100).optional().describe("Name prefix of the new nulls. Default 'Track'."),
       solved_null: external_exports.boolean().optional().describe("Nulls mode: also make one null with the solved Position, Rotation and Scale, for parenting. The tool never parents anything."),
       replace_keys: external_exports.boolean().optional().describe("Replace keys already on the written properties. Without it existing keys refuse the write. Expressions always refuse."),
-      range: external_exports.object({ start: external_exports.number().min(0), end: external_exports.number().min(0) }).optional().describe("Write only the frames in this time range (seconds). One call writes one span: keys already on the written properties refuse the write, and replace_keys removes ALL keys on them, not only the span's. A track holds at most 3000 frames.")
+      range: external_exports.object({ start: external_exports.number().min(0), end: external_exports.number().min(0) }).optional().describe("Write only the frames in this time range (seconds). One call writes one span: keys already on the written properties refuse the write, and replace_keys removes ALL keys on them, not only the span's. A track holds at most 3000 frames."),
+      refit_model: ModelEnum.optional().describe(
+        "Solve every frame again from the tracked points with this model before writing, without tracking again. A model with fewer parameters holds a surface the points cover only partly much more steadily (perspective on points in a thin band swings the corners by tens of px); the track summary's model_advice says when and which. The adjusted track is saved under a new track_id (track_adjusted)."
+      ),
+      smooth_frames: external_exports.number().min(0).max(30).optional().describe("Smooth the surface's motion before writing: a Gaussian of this many frames (sigma) over the corner paths, then each frame is solved again. 1-2 takes out frame-to-frame shake and keeps the motion; more lags fast moves. Per-point nulls keep their tracked positions. Saved under a new track_id like refit_model.")
     };
     ApplyTargetSchema = external_exports.object(ApplyFields).refine((v) => v.mode === "nulls" || v.layer !== void 0, { message: "Give `layer` for every mode but nulls." });
     AeTrackApplySchema = external_exports.object({
@@ -47671,6 +47762,7 @@ var init_planar = __esm({
       }
     };
     EXPECTED_ERROR_NOTE = "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
+    LOWER_MODELS = { perspective: ["affine", "similarity"], affine: ["similarity"], similarity: [], translate: [] };
     round23 = (v) => [r4(v[0]), r4(v[1])];
     sampleIdx = (n) => Array.from(/* @__PURE__ */ new Set([0, Math.floor((n - 1) / 2), n - 1])).filter((i) => i >= 0 && i < n);
     near5 = (a, b, tol) => Math.abs(a - b) <= tol;
@@ -47688,7 +47780,7 @@ var init_planar = __esm({
     planarTools = [
       {
         name: "ae_track_multi",
-        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
+        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
         schema: AeTrackMultiSchema,
         handler: async (args, ctx) => {
           try {
@@ -64302,10 +64394,102 @@ async function searchFonts(args, ctx, budgetMs = FONT_SEARCH_BUDGET_MS) {
   }
   return out;
 }
-var AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm2, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, inventoryTools;
+function fontFileProblem(location, adobe) {
+  if (!location) return { problem: "no_location", detail: "After Effects gives no file for this font." };
+  let st;
+  try {
+    st = fs57.statSync(location);
+  } catch (e) {
+    const code = e.code ?? "";
+    if (code === "ENOENT" || code === "ENOTDIR") return { problem: "missing", detail: "The file is not there (deleted, moved, or on a drive that is not connected)." };
+    return { problem: "unreadable", detail: `The file cannot be read (${code || e.message}).` };
+  }
+  if (!st.isFile()) return { problem: "not_a_file", detail: "The path is not a file." };
+  if (st.size === 0) return { problem: "empty", detail: "The file is empty (0 bytes)." };
+  let head3 = Buffer.alloc(0);
+  let fd = null;
+  try {
+    fd = fs57.openSync(location, "r");
+    const buf = Buffer.alloc(4);
+    const n = fs57.readSync(fd, buf, 0, 4, 0);
+    head3 = buf.subarray(0, n);
+  } catch (e) {
+    return { problem: "unreadable", detail: `The file cannot be read (${e.code ?? e.message}).` };
+  } finally {
+    if (fd !== null) fs57.closeSync(fd);
+  }
+  if (adobe !== true && /\.(ttf|otf|ttc|otc)$/i.test(location) && !FONT_SIGNATURES.some((sig) => head3.length === 4 && head3.equals(sig))) {
+    return { problem: "not_a_font", detail: `The file does not start like a TrueType or OpenType font (first bytes ${head3.toString("hex") || "none"}).` };
+  }
+  return null;
+}
+async function checkFontFiles(ctx, budgetMs = FONT_SEARCH_BUDGET_MS) {
+  const started = Date.now();
+  const rows = [];
+  let startFamily = 0;
+  let startFont = 0;
+  let calls = 0;
+  let truncated = false;
+  for (; ; ) {
+    const res = await ctx.bridge.callHost(
+      "inventoryFontFiles",
+      { start_family: startFamily, start_font: startFont },
+      { label: "ae_fonts(check_files)", mutates: false, toolName: "ae_fonts" }
+    );
+    const r = res.result;
+    calls++;
+    if (r.available === false) return { available: false, reason: r.reason, action: "check_files" };
+    rows.push(...r.fonts ?? []);
+    const nf = typeof r.next_family === "number" ? r.next_family : null;
+    const nfo = typeof r.next_font === "number" ? r.next_font : 0;
+    const moved = nf !== null && (nf > startFamily || nf === startFamily && nfo > startFont);
+    if (r.scan_truncated !== true || !moved) {
+      truncated = r.scan_truncated === true;
+      break;
+    }
+    if (Date.now() - started >= budgetMs || calls >= FONT_SEARCH_MAX_CHUNKS) {
+      truncated = true;
+      break;
+    }
+    startFamily = nf;
+    startFont = nfo;
+  }
+  const byPath = /* @__PURE__ */ new Map();
+  const problems = [];
+  const counts = {};
+  for (const row of rows) {
+    const key = row.location ? `${row.location}|${row.adobe === true}` : "";
+    let p = key ? byPath.get(key) : void 0;
+    if (p === void 0) {
+      p = fontFileProblem(row.location, row.adobe);
+      if (key) byPath.set(key, p);
+    }
+    if (!p) continue;
+    counts[p.problem] = (counts[p.problem] ?? 0) + 1;
+    if (problems.length < 200) problems.push({ ...row, problem: p.problem, detail: p.detail });
+  }
+  const total2 = Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
+  return {
+    available: true,
+    action: "check_files",
+    fonts: rows.length,
+    files: byPath.size,
+    adobe_fonts: rows.filter((r) => r.adobe === true).length,
+    problem_fonts: total2,
+    problem_counts: counts,
+    problems,
+    ...total2 > problems.length ? { problems_listed: problems.length } : {},
+    scan_truncated: truncated,
+    scan_calls: calls,
+    seconds: Math.round((Date.now() - started) / 100) / 10,
+    note: total2 > 0 ? FONT_FILES_NOTE : "Every font file After Effects lists is there and readable. " + FONT_FILES_NOTE
+  };
+}
+var fs57, AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm2, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, FONT_SIGNATURES, FONT_FILES_NOTE, inventoryTools;
 var init_inventory = __esm({
   "src/tools/ext/inventory.ts"() {
     "use strict";
+    fs57 = __toESM(require("node:fs"), 1);
     init_zod();
     init_host();
     init_queue();
@@ -64320,10 +64504,10 @@ var init_inventory = __esm({
       external_exports.string().min(1).max(200).describe("A PostScript name."),
       external_exports.object({ family: external_exports.string().min(1).max(200), style: external_exports.string().min(1).max(200) })
     ]).describe('A font: a PostScript name ("Arial-BoldMT"), or { family, style } ("Arial", "Bold").');
-    FONT_ACTIONS = ["in_use", "search", "check", "replace"];
+    FONT_ACTIONS = ["in_use", "search", "check", "replace", "check_files"];
     AeFontsSchema = external_exports.object({
       action: external_exports.enum(FONT_ACTIONS).optional().describe(
-        "in_use (default): the fonts the project's text layers use. search: find installed fonts. check: do these fonts exist, are they substituted, do they have the glyphs for this text. replace: swap one font for another project-wide (a write: Project.replaceFont, AE 24.5, is NOT undoable)."
+        `in_use (default): the fonts the project's text layers use. search: find installed fonts. check: do these fonts exist, are they substituted, do they have the glyphs for this text. replace: swap one font for another project-wide (a write: Project.replaceFont, AE 24.5, is NOT undoable). check_files: every installed font's file checked on disk (missing, empty, unreadable, not a font), to find the fonts behind After Effects' "Unknown BIB Error. cannot access font" warnings.`
       ),
       comp_id: external_exports.number().int().optional().describe("in_use: only this comp's text layers. Default: the whole project."),
       missing_only: external_exports.boolean().optional().describe("in_use: list only fonts known to be missing or substituted. Fonts whose state AE couldn't report are left out and counted in unknown_state."),
@@ -64358,6 +64542,8 @@ var init_inventory = __esm({
     ];
     FONT_SEARCH_BUDGET_MS = 6e4;
     FONT_SEARCH_MAX_CHUNKS = 200;
+    FONT_SIGNATURES = [Buffer.from([0, 1, 0, 0]), Buffer.from("OTTO"), Buffer.from("true"), Buffer.from("typ1"), Buffer.from("ttcf"), Buffer.from("wOFF"), Buffer.from("wOF2")];
+    FONT_FILES_NOTE = `After Effects shows "Unknown BIB Error. cannot access font" when its font engine (CoolType) cannot open a font file it has listed, the first time something reads that font in a session. For each font listed: install it again from a good copy, or remove it (Windows: Settings > Personalization > Fonts; macOS: Font Book); for an Adobe Fonts font, turn it off and on again in the Creative Cloud app. Then, with After Effects closed, delete Adobe's font cache files AdobeFnt*.lst (Windows: under %LOCALAPPDATA%\\Adobe\\TypeSupport and the CT Font Cache folders under %APPDATA%\\Adobe); After Effects builds them again on start. A font whose file is intact but damaged inside is not caught here: the warning, when it comes, is about the font AE was reading.`;
     inventoryTools = [
       {
         name: "ae_comp_tree",
@@ -64374,11 +64560,12 @@ var init_inventory = __esm({
       },
       {
         name: "ae_fonts",
-        description: "Fonts. action in_use (the default): list the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). skipped_layers counts text layers that could not be fully read (each counted once). Check them against the brief's fonts (ae_brief) before a delivery. action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the whole font list is scanned in short steps, up to a minute, and scan_truncated says if it was cut short, in which case a font not listed may still be installed): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. A font's fontID is stable only within one AE session. action check: for each of `fonts` (PostScript names or { family, style }) say whether it exists, whether AE would substitute it, duplicates, variable axes and, with `text`, which characters it lacks (AE 25.1+; Turkish s-cedilla, g-breve, dotless i, dotted I), with AE's default font for the script of what is missing; fonts that do not exist come with near matches. It also lists the project's missing or substituted fonts. action replace: swap `from` for `to` in every text layer (Project.replaceFont, AE 24.5). It is NOT undoable, so: dry_run (the default) lists the layers it would change and the glyphs the new font lacks for their text; dry_run false needs `expect`, makes a checkpoint first and REFUSES if none can be made or the project has unsaved changes (ae_save first, or turn automatic checkpoints on), then reads the project's used fonts back (old font gone, new font used and not substituted). Restore from the checkpoint to undo. With no_font_locking missing glyphs cannot be detected; mixed-font text changes only the ranges that used the old font. in_use, search, check and dry-run replace are read-only. " + AGENT_SAFETY_GUIDANCE,
+        description: "Fonts. action in_use (the default): list the fonts the project's text layers use (each keyframe of animated source text counts), with the family, style, file location, how many uses and which layers, and whether AE is substituting the font because it is missing (AE 24+; missing_known is false when AE couldn't say). skipped_layers counts text layers that could not be fully read (each counted once). Check them against the brief's fonts (ae_brief) before a delivery. action search: find installed fonts by query, family, style, writing_script, variable_only or adobe_only (paged, at most 100 per page; the whole font list is scanned in short steps, up to a minute, and scan_truncated says if it was cut short, in which case a font not listed may still be installed): PostScript name, family, style, native names, location, Adobe Fonts, variable axes. A font's fontID is stable only within one AE session. action check: for each of `fonts` (PostScript names or { family, style }) say whether it exists, whether AE would substitute it, duplicates, variable axes and, with `text`, which characters it lacks (AE 25.1+; Turkish s-cedilla, g-breve, dotless i, dotted I), with AE's default font for the script of what is missing; fonts that do not exist come with near matches. It also lists the project's missing or substituted fonts. action replace: swap `from` for `to` in every text layer (Project.replaceFont, AE 24.5). It is NOT undoable, so: dry_run (the default) lists the layers it would change and the glyphs the new font lacks for their text; dry_run false needs `expect`, makes a checkpoint first and REFUSES if none can be made or the project has unsaved changes (ae_save first, or turn automatic checkpoints on), then reads the project's used fonts back (old font gone, new font used and not substituted). Restore from the checkpoint to undo. With no_font_locking missing glyphs cannot be detected; mixed-font text changes only the ranges that used the old font. action check_files: every installed font's file checked on disk (missing, empty, unreadable, not a TrueType/OpenType file) with the font's names and path, and how to fix them: the fonts behind After Effects' \"Unknown BIB Error. cannot access font\" warnings. If AE shows that warning while this runs, answer it with OK (ae_dialogs, ae_dialog_respond). in_use, search, check, check_files and dry-run replace are read-only. " + AGENT_SAFETY_GUIDANCE,
         schema: AeFontsSchema,
         handler: async (args, ctx) => {
           const action = args.action ?? "in_use";
           if (action === "search") return searchFonts(args, ctx);
+          if (action === "check_files") return checkFontFiles(ctx);
           if (action === "check") {
             const res2 = await ctx.bridge.callHost(
               "inventoryCheckFonts",
@@ -64603,11 +64790,11 @@ async function queued9(ctx, label, opId, fn) {
     throw err;
   }
 }
-var fs57, path54, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
+var fs58, path54, AeKeyGreenScreenSchema, beforeFrames, beforeKey, KEYLIGHT_ARG_KEYS, keyTools;
 var init_key = __esm({
   "src/tools/ext/key.ts"() {
     "use strict";
-    fs57 = __toESM(require("node:fs"), 1);
+    fs58 = __toESM(require("node:fs"), 1);
     path54 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -64646,7 +64833,7 @@ var init_key = __esm({
         handler: async (args, ctx) => {
           const opId = ctx.bridge.newOpId();
           const framesDir = defaultFramesDir();
-          fs57.mkdirSync(framesDir, { recursive: true });
+          fs58.mkdirSync(framesDir, { recursive: true });
           const label = `ae_key_greenscreen(${args.comp_id})`;
           const readInfo2 = async (times, suffix) => (await ctx.bridge.evalRaw({
             id: `${opId}_${suffix}`,
@@ -64742,7 +64929,7 @@ var init_key = __esm({
             const kl = run.info.keylight;
             const pairs2 = run.after.map((a, i) => ({ before: run.before[i] ? decodePngFile(run.before[i]) : null, after: decodePngFile(a) }));
             const previewPath = path54.join(framesDir, `key_c${args.comp_id}_${opId}.png`);
-            fs57.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
+            fs58.writeFileSync(previewPath, encodePng(keyPreview(pairs2.map((p) => ({ before: p.before ?? p.after, after: p.after })))));
             const below = run.info.layers_below_visible;
             const canMeasure = below.length === 0 && pairs2.every((p) => p.before !== null) && run.screen !== null;
             const perFrame = canMeasure ? pairs2.map((p) => measureKey(p.before, p.after, run.screen)) : [];
@@ -65668,7 +65855,7 @@ function removeEmptyDirs(dir, top) {
   let cur = dir;
   for (; ; ) {
     try {
-      fs58.rmdirSync(cur);
+      fs59.rmdirSync(cur);
     } catch {
       return;
     }
@@ -65818,11 +66005,11 @@ async function reduceProjectMode(args, ctx) {
     })
   });
 }
-var fs58, path55, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
+var fs59, path55, AeAlignSchema, centre, AePurgeUnusedSchema, CONSOLIDATE_NOTE, REDUCE_NOTE, AeExportMogrtSchema, AeHouseStyleCheckSchema, LOGO_WORD, BACKGROUND_NAME, LOGO_BACKING, SAFE_AREA_MAX2, PRESET_ASPECT, layoutTools;
 var init_layout = __esm({
   "src/tools/ext/layout.ts"() {
     "use strict";
-    fs58 = __toESM(require("node:fs"), 1);
+    fs59 = __toESM(require("node:fs"), 1);
     path55 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -65956,7 +66143,7 @@ var init_layout = __esm({
         handler: async (args, ctx) => {
           if (args.path !== void 0) {
             if (!path55.isAbsolute(args.path) || !/\.mogrt$/i.test(args.path)) return { ok: false, error: "bad_path", message: `Give an absolute .mogrt path: ${args.path}` };
-            if (fs58.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
+            if (fs59.existsSync(args.path) && !args.overwrite) return { ok: false, error: "exists", message: `${args.path} exists; pass overwrite to replace it.` };
           }
           ctx.quarantine.assertClear();
           const opId = ctx.bridge.newOpId();
@@ -65964,7 +66151,7 @@ var init_layout = __esm({
           try {
             return await ctx.queue.run(`ae_export_mogrt(${args.comp_id})`, async () => {
               await verifyTargetGuard(ctx, { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id }, opId);
-              const createdDir = args.path !== void 0 ? fs58.mkdirSync(path55.dirname(args.path), { recursive: true }) : void 0;
+              const createdDir = args.path !== void 0 ? fs59.mkdirSync(path55.dirname(args.path), { recursive: true }) : void 0;
               let res;
               try {
                 res = await ctx.bridge.evalRaw({
@@ -65984,7 +66171,7 @@ var init_layout = __esm({
               let file = null;
               if (args.path) {
                 try {
-                  const st = fs58.statSync(args.path);
+                  const st = fs59.statSync(args.path);
                   file = { path: args.path, size: st.size, fresh: st.mtimeMs >= started - 2e3 };
                 } catch {
                   file = null;
@@ -66118,12 +66305,12 @@ function cuesFromTranscript(t) {
     if (!path56.isAbsolute(t.path)) throw new TranscriptError(`Transcript path must be absolute: ${t.path}`);
     let stat;
     try {
-      stat = fs59.statSync(t.path);
+      stat = fs60.statSync(t.path);
     } catch {
       throw new TranscriptError(`No transcript at ${t.path}`);
     }
     if (stat.size > MAX_TRANSCRIPT_BYTES2) throw new TranscriptError(`Transcript is over 5 MB: ${t.path}`);
-    text = fs59.readFileSync(t.path, "utf8").replace(/^﻿/, "");
+    text = fs60.readFileSync(t.path, "utf8").replace(/^﻿/, "");
   }
   const segments = parseTranscript(text ?? "", t.format ?? detectFormat(text ?? "", t.path));
   return transcriptCues(segments, { unit: t.unit, speaker_labels: t.speaker_labels, offset: t.offset });
@@ -66320,11 +66507,11 @@ async function editMarkers(args, ctx) {
     })
   });
 }
-var fs59, path56, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
+var fs60, path56, MAX_MARKERS_PER_CALL, MAX_TRANSCRIPT_BYTES2, TIME_TOLERANCE2, SAME_KEY, READ_CLIP, READ_CLIP_SUFFIX, MarkerExtraFields, MarkerInputSchema, MarkerSetSchema, MarkerEditSchema, TranscriptInputSchema, TargetFields, AeGetMarkersSchema, AeAddMarkersSchema, AeRemoveMarkersSchema, listOf, near8, listRead, markersTools;
 var init_markers = __esm({
   "src/tools/ext/markers.ts"() {
     "use strict";
-    fs59 = __toESM(require("node:fs"), 1);
+    fs60 = __toESM(require("node:fs"), 1);
     path56 = __toESM(require("node:path"), 1);
     init_zod();
     init_transcript();
@@ -67080,7 +67267,7 @@ function rememberJob(job) {
 function readJobFile(file) {
   let raw;
   try {
-    raw = fs60.readFileSync(file, "utf8");
+    raw = fs61.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return { jobs: [] };
     throw e;
@@ -67090,7 +67277,7 @@ function readJobFile(file) {
     if (parsed && Array.isArray(parsed.jobs)) return parsed;
   } catch {
   }
-  fs60.renameSync(file, `${file}.${Date.now()}.bak`);
+  fs61.renameSync(file, `${file}.${Date.now()}.bak`);
   return { jobs: [] };
 }
 function saveJob(job) {
@@ -67104,8 +67291,8 @@ function saveJob(job) {
     store.jobs.push(job);
     if (store.jobs.length > KEPT_JOBS) store.jobs = store.jobs.slice(-KEPT_JOBS);
     const tmp = `${file}.${process.pid}.tmp`;
-    fs60.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs60.renameSync(tmp, file);
+    fs61.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs61.renameSync(tmp, file);
     return { file };
   } catch (e) {
     return { file: null, error: e.message };
@@ -67477,12 +67664,12 @@ function jobFileNotes(job, store) {
   }
   return {};
 }
-var crypto20, fs60, path57, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
+var crypto20, fs61, path57, MULTICOMP_WRITE_TOOLS, MAX_JOB_COMPS, KEPT_JOBS, TABLE_LIMIT, AeMultiCompApplySchema, LAYER_KEYS, shortMismatches, memoryJobs, activeJobs, registryLookup2, lookupTool2, sleep2, PROBE_NAME_LIMIT, call, bad3, multicompTools;
 var init_multicomp = __esm({
   "src/tools/ext/multicomp.ts"() {
     "use strict";
     crypto20 = __toESM(require("node:crypto"), 1);
-    fs60 = __toESM(require("node:fs"), 1);
+    fs61 = __toESM(require("node:fs"), 1);
     path57 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -67616,10 +67803,10 @@ function execText2(cmd, args, timeoutMs = 15e3) {
 }
 function pngSize(file) {
   try {
-    const fd = fs61.openSync(file, "r");
+    const fd = fs62.openSync(file, "r");
     const buf = Buffer.alloc(24);
-    fs61.readSync(fd, buf, 0, 24, 0);
-    fs61.closeSync(fd);
+    fs62.readSync(fd, buf, 0, 24, 0);
+    fs62.closeSync(fd);
     if (buf.readUInt32BE(0) !== 2303741511 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
     return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
   } catch {
@@ -67645,7 +67832,7 @@ async function captureMacMainWindow(outDir) {
     if (shot.ok && size) return { ok: true, path: out, width: size.width, height: size.height };
     lastError = shot.error ? `screencapture_failed: ${shot.error}` : "screencapture_failed";
     try {
-      fs61.rmSync(out, { force: true });
+      fs62.rmSync(out, { force: true });
     } catch {
     }
     if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
@@ -67699,13 +67886,13 @@ function runPowerShellScript2(ps1Args) {
     );
   });
 }
-var import_node_child_process3, fs61, path58, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
+var import_node_child_process3, fs62, path58, CURATED_NATIVE_PANELS, runtimeOverrides2, AeListPanelsSchema, AeOpenPanelSchema, AeUiScreenshotSchema, panelsTools;
 var init_panels = __esm({
   "src/tools/ext/panels.ts"() {
     "use strict";
     init_win_exe();
     import_node_child_process3 = require("node:child_process");
-    fs61 = __toESM(require("node:fs"), 1);
+    fs62 = __toESM(require("node:fs"), 1);
     path58 = __toESM(require("node:path"), 1);
     init_zod();
     init_quarantine();
@@ -67886,7 +68073,7 @@ var init_panels = __esm({
           }
           const outDir = defaultUiDir();
           try {
-            fs61.mkdirSync(outDir, { recursive: true });
+            fs62.mkdirSync(outDir, { recursive: true });
           } catch {
           }
           if (platform === "darwin") {
@@ -68586,7 +68773,7 @@ function namePattern(name, sequence) {
 }
 function listDir(dir) {
   try {
-    return fs62.readdirSync(dir);
+    return fs63.readdirSync(dir);
   } catch {
     return [];
   }
@@ -68640,7 +68827,7 @@ function appendVersionLog(projectPath, entries2, notes) {
   let log = { entries: [] };
   let raw = null;
   try {
-    raw = fs62.readFileSync(file, "utf8");
+    raw = fs63.readFileSync(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -68655,21 +68842,21 @@ function appendVersionLog(projectPath, entries2, notes) {
       log = parsed;
     } else {
       const aside = `${file}.${Date.now()}.bak`;
-      fs62.renameSync(file, aside);
+      fs63.renameSync(file, aside);
       if (notes) notes.aside = aside;
     }
   }
   log.entries.push(...entries2);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs62.writeFileSync(tmp, JSON.stringify(log, null, 2));
-  fs62.renameSync(tmp, file);
+  fs63.writeFileSync(tmp, JSON.stringify(log, null, 2));
+  fs63.renameSync(tmp, file);
   return file;
 }
-var fs62, path59, VERSION_RE, escapeRe4;
+var fs63, path59, VERSION_RE, escapeRe4;
 var init_versions = __esm({
   "src/versions.ts"() {
     "use strict";
-    fs62 = __toESM(require("node:fs"), 1);
+    fs63 = __toESM(require("node:fs"), 1);
     path59 = __toESM(require("node:path"), 1);
     VERSION_RE = /(^|[^A-Za-z0-9])([vV])(\d{1,5})(?=$|[^0-9])/g;
     escapeRe4 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -69416,11 +69603,11 @@ function sanitizeCheckpointLabel(label) {
   if (/^auto-/i.test(cleaned)) cleaned = `manual-${cleaned}`;
   return cleaned;
 }
-var fs63, path60, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
+var fs64, path60, DIFF_EPSILON, COMP_SCALAR_FIELDS, LAYER_SCALAR_FIELDS, MAX_STORED_FINGERPRINTS, fingerprintStore, nextFingerprintSeq, AeCompFingerprintSchema, AeCompDiffSchema, AeCheckpointCreateSchema, AeCheckpointListSchema, AeAutoCheckpointSchema, AUTO_CHECKPOINT_TOOLS, AeCheckpointRevertSchema, receiptsTools;
 var init_receipts2 = __esm({
   "src/tools/ext/receipts.ts"() {
     "use strict";
-    fs63 = __toESM(require("node:fs"), 1);
+    fs64 = __toESM(require("node:fs"), 1);
     path60 = __toESM(require("node:path"), 1);
     init_zod();
     init_host();
@@ -69698,7 +69885,7 @@ var init_receipts2 = __esm({
                   actual: { project_path: "<unsaved>" }
                 });
               }
-              if (!fs63.existsSync(actualProjectPath)) {
+              if (!fs64.existsSync(actualProjectPath)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -69710,13 +69897,13 @@ var init_receipts2 = __esm({
               const ext2 = path60.extname(actualProjectPath) || ".aep";
               const baseName = path60.basename(actualProjectPath, ext2);
               const checkpointDir = checkpointDirFor(actualProjectPath);
-              fs63.mkdirSync(checkpointDir, { recursive: true });
+              fs64.mkdirSync(checkpointDir, { recursive: true });
               const stamp3 = formatBackupTimestamp(/* @__PURE__ */ new Date());
               const safeLabel = sanitizeCheckpointLabel(args.label);
               const checkpointFileName = `${baseName}_${stamp3}_${safeLabel}${ext2}`;
               const checkpointPath = path60.join(checkpointDir, checkpointFileName);
-              fs63.copyFileSync(actualProjectPath, checkpointPath);
-              const stat = fs63.statSync(checkpointPath);
+              fs64.copyFileSync(actualProjectPath, checkpointPath);
+              const stat = fs64.statSync(checkpointPath);
               const receipt = buildReceipt({
                 before: {
                   project_path: actualProjectPath,
@@ -69732,7 +69919,7 @@ var init_receipts2 = __esm({
                   checkpoint_exists: true
                 },
                 actualForExpected: {
-                  checkpoint_exists: fs63.existsSync(checkpointPath)
+                  checkpoint_exists: fs64.existsSync(checkpointPath)
                 }
               });
               return {
@@ -69775,7 +69962,7 @@ var init_receipts2 = __esm({
             });
           }
           const checkpointDir = checkpointDirFor(actualProjectPath);
-          if (!fs63.existsSync(checkpointDir)) {
+          if (!fs64.existsSync(checkpointDir)) {
             return {
               project_path: actualProjectPath,
               checkpoint_dir: checkpointDir,
@@ -69783,10 +69970,10 @@ var init_receipts2 = __esm({
               truncated: false
             };
           }
-          const entries2 = fs63.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
+          const entries2 = fs64.readdirSync(checkpointDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".aep"));
           const items = entries2.map((e) => {
             const fullPath = path60.join(checkpointDir, e.name);
-            const stat = fs63.statSync(fullPath);
+            const stat = fs64.statSync(fullPath);
             return {
               name: e.name,
               path: fullPath,
@@ -69839,7 +70026,7 @@ var init_receipts2 = __esm({
               ctx.quarantine.assertClear();
               const guardInfo = await verifyTargetGuard(ctx, args.expect, opId);
               const actualProjectPath = guardInfo.project_path ?? args.expect.project_path;
-              if (!fs63.existsSync(args.checkpoint_path)) {
+              if (!fs64.existsSync(args.checkpoint_path)) {
                 throw new BridgeError({
                   kind: "guard",
                   op_id: opId,
@@ -71757,7 +71944,7 @@ init_idempotency();
 init_registry();
 
 // src/usage-log.ts
-var fs64 = __toESM(require("node:fs"), 1);
+var fs65 = __toESM(require("node:fs"), 1);
 var fsp = __toESM(require("node:fs/promises"), 1);
 var path61 = __toESM(require("node:path"), 1);
 init_common();
@@ -71862,11 +72049,11 @@ function pruneOld(dir, now) {
   try {
     const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1);
     const keepFrom = monthOf(cutoff);
-    for (const name of fs64.readdirSync(dir)) {
+    for (const name of fs65.readdirSync(dir)) {
       const m = /^usage-(\d{4}-\d{2})\.jsonl$/.exec(name);
       if (m && m[1] < keepFrom) {
         try {
-          fs64.unlinkSync(path61.join(dir, name));
+          fs65.unlinkSync(path61.join(dir, name));
         } catch {
         }
       }
