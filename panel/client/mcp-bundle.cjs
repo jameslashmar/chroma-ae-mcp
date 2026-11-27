@@ -73092,6 +73092,54 @@ var CORE_PROPERTY_CAPS = {
   "ae_add_effect.params[].value": 400,
   "ae_set_effect.params[].value": 400
 };
+var CORE_COLLAPSE_MIN_CHARS = 600;
+var COLLAPSED_POINTER = "Per-field text and bounds: ae_get_tool_schema.";
+var isJson = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function shortTypeOf(n) {
+  if (!isJson(n)) return "any";
+  if (Array.isArray(n.enum)) return n.enum.map((v) => String(v)).join("|");
+  if (n.const !== void 0) return JSON.stringify(n.const);
+  const alts = n.anyOf ?? n.oneOf;
+  if (Array.isArray(alts)) return [...new Set(alts.map(shortTypeOf))].join(" or ");
+  const t = Array.isArray(n.type) ? n.type.join("|") : n.type;
+  if (t === "array") return Array.isArray(n.items) ? `[${n.items.map(shortTypeOf).join(",")}]` : `${shortTypeOf(n.items)}[]`;
+  if (t === "object" || isJson(n.properties)) return "object";
+  if (typeof t === "string") return t;
+  if (typeof n.description === "string" && n.description.trim()) return `(${firstSentences(n.description, UNTYPED_FIELD_TEXT_MAX)})`;
+  return "any";
+}
+var UNTYPED_FIELD_TEXT_MAX = 110;
+function fieldListOf(node) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  const add = (n) => {
+    if (!isJson(n)) return;
+    if (isJson(n.properties)) {
+      const required = Array.isArray(n.required) ? n.required.map(String) : [];
+      for (const [k, v] of Object.entries(n.properties)) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(`${k}${required.includes(k) ? "" : "?"}: ${shortTypeOf(v)}`);
+      }
+    }
+    if (isJson(n.items)) add(n.items);
+    for (const u of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(n[u])) for (const m of n[u]) add(m);
+  };
+  add(node);
+  return out;
+}
+function collapseLargeArgument(full, trimmed, path63) {
+  if (path63.split(".").length !== 2 || path63.endsWith(".expect")) return trimmed;
+  if (Object.keys(CORE_PROPERTY_CAPS).some((k) => k === path63 || k.startsWith(`${path63}.`) || k.startsWith(`${path63}[]`))) return trimmed;
+  if (!isJson(full) || !isJson(trimmed) || JSON.stringify(trimmed).length <= CORE_COLLAPSE_MIN_CHARS) return trimmed;
+  const fields = fieldListOf(full);
+  if (fields.length === 0) return trimmed;
+  const own = typeof trimmed.description === "string" ? trimmed.description.replace(/\s*$/, "") : "";
+  const text = `${own ? (/[.!?]$/.test(own) ? own : `${own}.`) + " " : ""}Fields: ${fields.join("; ")}. ${COLLAPSED_POINTER}`;
+  if (full.type === "array") return { type: "array", items: { type: "object" }, description: text };
+  if (full.type === "object") return { type: "object", description: text };
+  return { description: text };
+}
 function trimToolDescription(tool) {
   const override = CORE_DESCRIPTION_OVERRIDES[tool.name];
   const body = override ?? firstSentences(stripSafety2(tool.description), TOOL_DESC_MAX);
@@ -73112,7 +73160,12 @@ function trimSchema(node, path63 = "") {
       if (text) out.description = text;
     } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
       const props = {};
-      for (const [name, sub] of Object.entries(value)) props[name] = trimSchema(sub, path63 ? `${path63}.${name}` : name);
+      const required = Array.isArray(src.required) ? src.required.map(String) : [];
+      for (const [name, sub] of Object.entries(value)) {
+        const subPath = path63 ? `${path63}.${name}` : name;
+        const trimmed = trimSchema(sub, subPath);
+        props[name] = required.includes(name) ? trimmed : collapseLargeArgument(sub, trimmed, subPath);
+      }
       out.properties = props;
     } else if (key === "items") {
       out.items = trimSchema(value, `${path63}[]`);

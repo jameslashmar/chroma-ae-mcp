@@ -17,6 +17,7 @@ import { familyTool, listedTools } from "../src/tool-families.js";
 import { withIdempotencyKey } from "../src/write-tools.js";
 import { META_TOOLS, NAME_MAX, SCHEMA_OUTPUT_SOFT_MAX, SEARCH_OUTPUT_MAX, nameMatcher } from "../src/meta-tools.js";
 import {
+  COLLAPSED_POINTER,
   CORE_DESCRIPTION_OVERRIDES,
   CORE_TOOL_NAMES,
   META_TOOL_NAMES,
@@ -31,10 +32,12 @@ import {
 import { AGENT_SAFETY_GUIDANCE, toolInputSchema, type ToolContext, type ToolDefinition } from "../src/tools/common.js";
 
 /**
- * The size budget for the core tools/list JSON plus the core `instructions` (about 21k tokens).
- * 84,000 until ae_plan joined the core list as the entry point for a new task (about 1.3k chars).
+ * The size budget for the core tools/list JSON plus the core `instructions` (about 18.5k tokens).
+ * 84,000 until ae_plan joined the core list as the entry point for a new task (about 1.3k chars),
+ * then 86,000; 74,000 once large optional arguments are listed as typed field summaries
+ * (CORE_COLLAPSE_MIN_CHARS in toolsets.ts; measured 72,496 on 2026-11-27, down from 85,210).
  */
-const CORE_BUDGET_CHARS = 86_000;
+const CORE_BUDGET_CHARS = 74_000;
 
 /** A bridge that fails the test if anything reaches After Effects. */
 function noAeCtx(log?: (level: string, msg: string) => void): ToolContext {
@@ -219,6 +222,39 @@ function sameStructure(full: unknown, trimmed: unknown, at: string): string[] {
   return problems;
 }
 
+/** The core list's summarised arguments: name -> [full schema, summary], taken out of both schemas. */
+function takeCollapsed(full: any, trimmed: any): Map<string, [any, any]> {
+  const out = new Map<string, [any, any]>();
+  for (const [k, v] of Object.entries<any>(trimmed.properties ?? {})) {
+    if (typeof v?.description !== "string" || !v.description.endsWith(COLLAPSED_POINTER)) continue;
+    out.set(k, [full.properties[k], v]);
+    full.properties[k] = trimmed.properties[k] = "collapsed";
+  }
+  return out;
+}
+
+/** Every field name and enum value under a schema node, one level into arrays and unions. */
+function fieldFacts(node: any): { names: string[]; required: string[]; enums: string[] } {
+  const names: string[] = [];
+  const required: string[] = [];
+  const enums: string[] = [];
+  const add = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (n.properties) {
+      for (const [k, v] of Object.entries<any>(n.properties)) {
+        names.push(k);
+        for (const e of v.enum ?? []) enums.push(String(e));
+        for (const a of v.anyOf ?? []) for (const e of a.enum ?? []) enums.push(String(e));
+      }
+      required.push(...(n.required ?? []));
+    }
+    if (n.items && !Array.isArray(n.items)) add(n.items);
+    for (const u of ["anyOf", "oneOf", "allOf"]) for (const m of n[u] ?? []) add(m);
+  };
+  add(node);
+  return { names, required, enums };
+}
+
 describe("trimmed schemas", () => {
   it("keep every property, type, enum, required and nested structure of the full schema, for all core tools", async () => {
     const list = await rpc("tools/list", undefined, noAeCtx(), "core");
@@ -227,11 +263,41 @@ describe("trimmed schemas", () => {
     for (const name of CORE_TOOL_NAMES) {
       // The core list adds a bare idempotency_key to write tools (tool-call.ts takes it off before validation).
       const full = withIdempotencyKey(name, zodToJsonSchema(ALL_TOOLS.find((t) => t.name === name)!.schema), true);
-      const trimmed = byName.get(name).inputSchema;
-      expect(sameStructure(full, trimmed, name), name).toEqual([]);
+      const trimmed = structuredClone(byName.get(name).inputSchema);
       propertyCount += JSON.stringify(full).split('"type"').length;
+      // A summarised argument is checked on its own below; everything else keeps the whole structure.
+      takeCollapsed(full, trimmed);
+      expect(sameStructure(full, trimmed, name), name).toEqual([]);
     }
     expect(propertyCount).toBeGreaterThan(200); // the walk really covered something
+  });
+
+  it("summarise only large optional arguments, and keep every field, its optionality and every enum value in the summary", async () => {
+    const list = await rpc("tools/list", undefined, noAeCtx(), "core");
+    const byName = new Map<string, any>(list.tools.map((t: any) => [t.name, t]));
+    const summarised: string[] = [];
+    for (const name of CORE_TOOL_NAMES) {
+      const full = withIdempotencyKey(name, zodToJsonSchema(ALL_TOOLS.find((t) => t.name === name)!.schema), true);
+      const trimmed = structuredClone(byName.get(name).inputSchema);
+      for (const [arg, [f, summary]] of takeCollapsed(full, trimmed)) {
+        summarised.push(`${name}.${arg}`);
+        expect(full.required ?? [], `${name}.${arg} is required`).not.toContain(arg);
+        expect(arg, "expect stays whole").not.toBe("expect");
+        // The same top-level type, so a call can still be shaped without the schema.
+        if (f.type === "object" || f.type === "array") expect(summary.type, `${name}.${arg}`).toBe(f.type);
+        const facts = fieldFacts(f);
+        expect(facts.names.length, `${name}.${arg} has fields`).toBeGreaterThan(0);
+        for (const field of facts.names) {
+          const optional = !facts.required.includes(field);
+          expect(summary.description, `${name}.${arg}.${field}`).toMatch(new RegExp(`(^|[ ;])${field}${optional ? "\\?" : ""}: `));
+        }
+        for (const e of facts.enums) expect(summary.description, `${name}.${arg} enum ${e}`).toContain(e);
+      }
+    }
+    // The big ones are summarised; ae_plan, the targets and the edits themselves are not.
+    expect(summarised).toContain("ae_set_text.style");
+    expect(summarised).toContain("ae_layer_ops.where");
+    for (const kept of ["ae_batch_set.ops", "ae_add_effect.params", "ae_set_effect.params", "ae_plan.answers"]) expect(summarised).not.toContain(kept);
   });
 
   it("really shortens text, never uses $ref, and trims untyped descriptions less hard", async () => {

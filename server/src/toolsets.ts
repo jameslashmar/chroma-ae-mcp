@@ -330,6 +330,82 @@ const CORE_PROPERTY_CAPS: Record<string, number> = {
   "ae_set_effect.params[].value": 400,
 };
 
+/**
+ * A tool argument whose nested schema is still over this many characters after trimming is listed
+ * as a one-line summary in the core list: its own text, every field with its type and its enum
+ * values (`size?: [integer,integer]; justification?: left|center|right`), and a pointer to
+ * ae_get_tool_schema for the per-field text and bounds. Only optional arguments (settings such as text style or light options):
+ * a required argument is the call itself, and one holding a contract kept long on purpose
+ * (CORE_PROPERTY_CAPS) stays whole. Measured 2026-11-27: the core list was about 20k tokens and most of it was a
+ * few nested arguments (ae_set_text style, ranges and paragraphs; ae_layer_ops where; ae_import_assets
+ * rules and interpret; ae_render_queue_edit output modules). The server still checks every call
+ * against the full schema, and the full list and ae_get_tool_schema keep it whole.
+ */
+export const CORE_COLLAPSE_MIN_CHARS = 600;
+
+/** Ends every summarised argument; the test finds them by it. */
+export const COLLAPSED_POINTER = "Per-field text and bounds: ae_get_tool_schema.";
+
+const isJson = (v: unknown): v is Json => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** A short type for one field: number, a|b|c for an enum, T[] or [A,B] for arrays, object, or A or B for a union. */
+function shortTypeOf(n: unknown): string {
+  if (!isJson(n)) return "any";
+  if (Array.isArray(n.enum)) return n.enum.map((v) => String(v)).join("|");
+  if (n.const !== undefined) return JSON.stringify(n.const);
+  const alts = (n.anyOf ?? n.oneOf) as unknown;
+  if (Array.isArray(alts)) return [...new Set(alts.map(shortTypeOf))].join(" or ");
+  const t = Array.isArray(n.type) ? (n.type as unknown[]).join("|") : n.type;
+  if (t === "array") return Array.isArray(n.items) ? `[${(n.items as unknown[]).map(shortTypeOf).join(",")}]` : `${shortTypeOf(n.items)}[]`;
+  if (t === "object" || isJson(n.properties)) return "object";
+  if (typeof t === "string") return t;
+  // An untyped field (a union Zod could not express) says its forms in its text: keep that, briefly.
+  if (typeof n.description === "string" && n.description.trim()) return `(${firstSentences(n.description, UNTYPED_FIELD_TEXT_MAX)})`;
+  return "any";
+}
+
+/** How much of an untyped field's text a summarised argument keeps (its forms: "a name, { postscript } or { family, style }"). */
+const UNTYPED_FIELD_TEXT_MAX = 110;
+
+/**
+ * The fields of an object schema, of an array of objects, or of every member of a union, as
+ * `name: type` with `?` on an optional one.
+ */
+function fieldListOf(node: Json): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (n: unknown) => {
+    if (!isJson(n)) return;
+    if (isJson(n.properties)) {
+      const required = Array.isArray(n.required) ? (n.required as unknown[]).map(String) : [];
+      for (const [k, v] of Object.entries(n.properties)) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(`${k}${required.includes(k) ? "" : "?"}: ${shortTypeOf(v)}`);
+      }
+    }
+    if (isJson(n.items)) add(n.items);
+    for (const u of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(n[u])) for (const m of n[u] as unknown[]) add(m);
+  };
+  add(node);
+  return out;
+}
+
+function collapseLargeArgument(full: unknown, trimmed: unknown, path: string): unknown {
+  // Only a tool's own optional arguments (tool.argument; required ones are the call itself and stay whole),
+  // never one holding a contract kept long on purpose (CORE_PROPERTY_CAPS at it or below it), nor expect.
+  if (path.split(".").length !== 2 || path.endsWith(".expect")) return trimmed;
+  if (Object.keys(CORE_PROPERTY_CAPS).some((k) => k === path || k.startsWith(`${path}.`) || k.startsWith(`${path}[]`))) return trimmed;
+  if (!isJson(full) || !isJson(trimmed) || JSON.stringify(trimmed).length <= CORE_COLLAPSE_MIN_CHARS) return trimmed;
+  const fields = fieldListOf(full);
+  if (fields.length === 0) return trimmed;
+  const own = typeof trimmed.description === "string" ? trimmed.description.replace(/\s*$/, "") : "";
+  const text = `${own ? (/[.!?]$/.test(own) ? own : `${own}.`) + " " : ""}Fields: ${fields.join("; ")}. ${COLLAPSED_POINTER}`;
+  if (full.type === "array") return { type: "array", items: { type: "object" }, description: text };
+  if (full.type === "object") return { type: "object", description: text };
+  return { description: text };
+}
+
 export function trimToolDescription(tool: ToolDefinition<any>): string {
   const override = CORE_DESCRIPTION_OVERRIDES[tool.name];
   const body = override ?? firstSentences(stripSafety(tool.description), TOOL_DESC_MAX);
@@ -365,7 +441,12 @@ export function trimSchema(node: unknown, path = ""): unknown {
       if (text) out.description = text;
     } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
       const props: Json = {};
-      for (const [name, sub] of Object.entries(value as Json)) props[name] = trimSchema(sub, path ? `${path}.${name}` : name);
+      const required = Array.isArray(src.required) ? (src.required as unknown[]).map(String) : [];
+      for (const [name, sub] of Object.entries(value as Json)) {
+        const subPath = path ? `${path}.${name}` : name;
+        const trimmed = trimSchema(sub, subPath);
+        props[name] = required.includes(name) ? trimmed : collapseLargeArgument(sub, trimmed, subPath);
+      }
       out.properties = props;
     } else if (key === "items") {
       out.items = trimSchema(value, `${path}[]`);
