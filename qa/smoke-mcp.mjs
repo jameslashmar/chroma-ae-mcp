@@ -61,6 +61,22 @@ function postMcp(body, route = "/mcp") {
   });
 }
 
+/** GET a service route with the token (the panel's admin routes). */
+function getRoute(route) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: DEFAULT_HOST, port: Number(process.env.CHROMA_AE_MCP_PORT) || DEFAULT_PORT, method: "GET", path: route, timeout: 30_000, headers: { authorization: `Bearer ${token}` } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve(data ? JSON.parse(data) : null));
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 async function call(name, args = {}) {
   const r = await postMcp({ jsonrpc: "2.0", id: ++seq, method: "tools/call", params: { name, arguments: args } });
   if (r.error) return { __error: r.error.message };
@@ -608,6 +624,34 @@ async function main() {
   r = await call("ae_motion_review", { comp_id: LC });
   const edgeCut = (r.findings ?? []).find((f) => f.kind === "cut_off" && f.layer?.name === "Edge");
   check("ae_motion_review (rest bounds)", Boolean(edgeCut) && edgeCut.suggested_shift?.[0] < 0, String(edgeCut?.message ?? JSON.stringify(r.bounds_unchecked ?? r.by_kind)));
+
+  // ---------- ae_plan: read before a task; questions follow the panel's Ask first (off by default) ----------
+  {
+    const before = await getRoute("/admin/plan").catch(() => null);
+    const wasOn = before?.ask_first === true;
+    try {
+      if (wasOn) await postMcp({ ask_first: false }, "/admin/plan");
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"] });
+      check(
+        "ae_plan (Ask first off: no question, the defaults as assumptions, a plan of real tools)",
+        r.ok === true && r.ask_first === false && Array.isArray(r.questions) && r.questions.length === 0 && r.assumptions?.length > 0 && r.understood?.comp?.id === LC && r.understood?.layers?.[0]?.name === "Edge" && r.plan?.some((x) => x.tool === "ae_set_keyframe_ease"),
+        `${r.assumptions?.length} assumption(s): ${(r.assumptions ?? []).map((x) => `${x.id}=${x.assumed}`).join(", ")}; plan ${(r.plan ?? []).map((x) => x.tool).join(" > ")}`
+      );
+      const on = await postMcp({ ask_first: true }, "/admin/plan");
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"] });
+      const qs = r.questions ?? [];
+      check(
+        "ae_plan (Ask first on, switched like the panel button: questions with options from the comp)",
+        on?.ask_first === true && r.ask_first === true && qs.some((q) => q.id === "duration" && q.options?.length === 3) && qs.some((q) => q.id === "feel" && q.kind === "ease"),
+        `${qs.length} question(s): ${qs.map((q) => q.id).join(", ")}`
+      );
+      const answers = Object.fromEntries(qs.map((q) => [q.id, q.default]));
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"], answers });
+      check("ae_plan (the answers close the questions)", r.ok === true && (r.questions ?? []).length === 0 && Object.keys(r.answered ?? {}).length === qs.length, JSON.stringify(r.answered));
+    } finally {
+      await postMcp({ ask_first: wasOn }, "/admin/plan").catch(() => null);
+    }
+  }
 
   // ---------- 0.4: reads ----------
   r = await call("ae_comp_tree", {});

@@ -667,7 +667,7 @@ describe("panel/tools/stdio-relay.cjs", { timeout: 20000 }, () => {
     const replies = await runRelay(dir, server.port, [listTools(1)], { toolset: "core" });
     expect(replies[0].result.tools.map((t: any) => t.name)).toEqual(list.map((t) => t.name));
     const cached = JSON.parse(fs.readFileSync(path.join(dataDir, "relay-tools-core-cache.json"), "utf8"));
-    expect(cached.tools).toHaveLength(36);
+    expect(cached.tools).toHaveLength(37);
   });
 });
 

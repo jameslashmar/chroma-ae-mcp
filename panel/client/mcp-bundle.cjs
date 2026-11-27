@@ -648,12 +648,12 @@ function isValidCidr(ip, version) {
   }
   return false;
 }
-function floatSafeRemainder(val, step2) {
+function floatSafeRemainder(val, step3) {
   const valDecCount = (val.toString().split(".")[1] || "").length;
-  const stepDecCount = (step2.toString().split(".")[1] || "").length;
+  const stepDecCount = (step3.toString().split(".")[1] || "").length;
   const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
   const valInt = Number.parseInt(val.toFixed(decCount).replace(".", ""));
-  const stepInt = Number.parseInt(step2.toFixed(decCount).replace(".", ""));
+  const stepInt = Number.parseInt(step3.toFixed(decCount).replace(".", ""));
   return valInt % stepInt / 10 ** decCount;
 }
 function deepPartialify(schema) {
@@ -6393,7 +6393,8 @@ function cloneDefaults() {
   return {
     auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
     taste: cloneTaste(DEFAULT_SETTINGS.taste),
-    asset_watch: { ...DEFAULT_SETTINGS.asset_watch }
+    asset_watch: { ...DEFAULT_SETTINGS.asset_watch },
+    plan: { ...DEFAULT_SETTINGS.plan }
   };
 }
 function isCurve(v) {
@@ -6420,7 +6421,8 @@ var init_settings = __esm({
     DEFAULT_SETTINGS = {
       auto_checkpoint: { enabled: true, max_mb: 250 },
       taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
-      asset_watch: { enabled: false, since: null, recursive: true, sequences: true }
+      asset_watch: { enabled: false, since: null, recursive: true, sequences: true },
+      plan: { ask_first: false }
     };
     MIN_HANDLE = 1e-3;
     SettingsStore = class {
@@ -6437,8 +6439,16 @@ var init_settings = __esm({
         return {
           auto_checkpoint: { ...this.settings.auto_checkpoint },
           taste: cloneTaste(this.settings.taste),
-          asset_watch: { ...this.settings.asset_watch }
+          asset_watch: { ...this.settings.asset_watch },
+          plan: { ...this.settings.plan }
         };
+      }
+      updatePlan(patch) {
+        const next = { ...this.settings.plan };
+        if (typeof patch.ask_first === "boolean") next.ask_first = patch.ask_first;
+        this.settings = { ...this.settings, plan: next };
+        this.saveToDisk();
+        return this.get();
       }
       updateAssetWatch(patch) {
         const next = { ...this.settings.asset_watch };
@@ -6496,6 +6506,8 @@ var init_settings = __esm({
             if (typeof aw.recursive === "boolean") this.settings.asset_watch.recursive = aw.recursive;
             if (typeof aw.sequences === "boolean") this.settings.asset_watch.sequences = aw.sequences;
           }
+          const pl = parsed?.plan;
+          if (pl && typeof pl === "object" && typeof pl.ask_first === "boolean") this.settings.plan.ask_first = pl.ask_first;
         } catch {
         }
       }
@@ -7356,12 +7368,12 @@ function sequenceFindings(s) {
   for (const r of rows.slice(0, SEQUENCE_FINDINGS_MAX)) {
     const where = { ...r.item_ids[0] !== void 0 ? { item_id: r.item_ids[0] } : {}, item: rowName(r) };
     const ranges = r.missing_text ? `${r.missing_text}${r.ranges_truncated ? ", ..." : ""}` : "";
-    const extra = `${r.dir_hint ? ` (${r.dir_hint})` : ""}${r.hint ? ` ${r.hint}.` : ""}`;
+    const extra2 = `${r.dir_hint ? ` (${r.dir_hint})` : ""}${r.hint ? ` ${r.hint}.` : ""}`;
     if (r.state === "gaps") {
       out.push({
         severity: "warning",
         code: "sequence_gaps",
-        message: `Sequence "${rowName(r)}": ${r.missing} frame${r.missing === 1 ? "" : "s"} missing between ${r.first} and ${r.last} (${ranges}); ${r.on_disk} on disk.${extra}`,
+        message: `Sequence "${rowName(r)}": ${r.missing} frame${r.missing === 1 ? "" : "s"} missing between ${r.first} and ${r.last} (${ranges}); ${r.on_disk} on disk.${extra2}`,
         where,
         count: r.missing,
         fix: fix2
@@ -7377,7 +7389,7 @@ function sequenceFindings(s) {
       out.push({
         severity: "warning",
         code: "sequence_short",
-        message: `Sequence "${rowName(r)}": After Effects counts about ${r.ae_frames} frames but the folder holds ${r.first}-${r.last} (${r.on_disk} files): trailing or leading frames may have been lost.${extra}`,
+        message: `Sequence "${rowName(r)}": After Effects counts about ${r.ae_frames} frames but the folder holds ${r.first}-${r.last} (${r.on_disk} files): trailing or leading frames may have been lost.${extra2}`,
         where,
         confidence: "low",
         fix: fix2
@@ -7394,7 +7406,7 @@ function sequenceFindings(s) {
       out.push({
         severity: r.missing > 0 ? "warning" : "note",
         code: "sequence_writing",
-        message: `Sequence "${rowName(r)}" is still being written (${r.writing_reason ?? "recently written"}).` + (r.missing > 0 ? ` ${r.missing} frame${r.missing === 1 ? "" : "s"} below the highest written frame are not there yet (${ranges}); they may be out of order from a multi-frame render.` : "") + extra,
+        message: `Sequence "${rowName(r)}" is still being written (${r.writing_reason ?? "recently written"}).` + (r.missing > 0 ? ` ${r.missing} frame${r.missing === 1 ? "" : "s"} below the highest written frame are not there yet (${ranges}); they may be out of order from a multi-frame render.` : "") + extra2,
         where,
         ...r.missing > 0 ? { count: r.missing } : {}
       });
@@ -8659,10 +8671,10 @@ function resolveAerenderPath(options) {
   }
   if (platform === "darwin") {
     if (afterFxPath) {
-      const norm3 = afterFxPath.replace(/\\/g, "/");
-      const appIdx = norm3.toLowerCase().indexOf(".app");
+      const norm4 = afterFxPath.replace(/\\/g, "/");
+      const appIdx = norm4.toLowerCase().indexOf(".app");
       if (appIdx !== -1) {
-        const appBundlePath = norm3.slice(0, appIdx + 4);
+        const appBundlePath = norm4.slice(0, appIdx + 4);
         const parentDir = path12.posix.dirname(appBundlePath);
         const candidate2 = path12.posix.join(parentDir, "aerender");
         if (exists(candidate2)) {
@@ -8670,7 +8682,7 @@ function resolveAerenderPath(options) {
         }
         return candidate2;
       }
-      const dir = path12.posix.dirname(norm3);
+      const dir = path12.posix.dirname(norm4);
       const candidate = path12.posix.join(dir, "aerender");
       if (exists(candidate)) {
         return candidate;
@@ -8687,8 +8699,8 @@ function resolveAerenderPath(options) {
     return MACOS_FALLBACK_AERENDER;
   }
   if (afterFxPath) {
-    const norm3 = afterFxPath.replace(/\\/g, "/");
-    const dir = norm3.toLowerCase().endsWith(".exe") ? path12.posix.dirname(norm3) : norm3.replace(/\/+$/, "");
+    const norm4 = afterFxPath.replace(/\\/g, "/");
+    const dir = norm4.toLowerCase().endsWith(".exe") ? path12.posix.dirname(norm4) : norm4.replace(/\/+$/, "");
     const candidate = `${dir}/aerender.exe`;
     if (exists(candidate)) {
       return candidate;
@@ -10688,9 +10700,9 @@ function diffSnapshots(prev, live, serviceId) {
   diff.user_changed = lines.length ? `Since the last write: ${lines.join("; ")}.` : null;
   return diff;
 }
-function undoReach(step2, live, serviceId, opts = {}) {
+function undoReach(step3, live, serviceId, opts = {}) {
   const reopenedMs = opts.reopenedAt ? Date.parse(opts.reopenedAt) : NaN;
-  const stepMs = Date.parse(step2.at);
+  const stepMs = Date.parse(step3.at);
   if (Number.isFinite(reopenedMs) && Number.isFinite(stepMs) && stepMs < reopenedMs) {
     return {
       reach: "not_reachable",
@@ -10706,22 +10718,22 @@ function undoReach(step2, live, serviceId, opts = {}) {
   }
   let prefix = "";
   if (after(opts.undoPurge?.maybePurgedAt)) prefix = "a cache purge after this step (ae_memory_purge ram or all) may have cleared the undo history; ";
-  if (step2.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step2.item_ids, live)) {
+  if (step3.project_path === UNSAVED && live.project_path === UNSAVED && unsavedItemsDiffer(step3.item_ids, live)) {
     return { reach: "not_reachable", why: "another unsaved project is open (its items hardly overlap the step's)" };
   }
-  if (!pathsMatchForGuard(step2.project_path, live.project_path)) {
-    if (!looksLikeSaveAs(step2, live)) {
-      return { reach: "not_reachable", why: `another project is open (the step was made in ${step2.project_path})` };
+  if (!pathsMatchForGuard(step3.project_path, live.project_path)) {
+    if (!looksLikeSaveAs(step3, live)) {
+      return { reach: "not_reachable", why: `another project is open (the step was made in ${step3.project_path})` };
     }
-    prefix += `the project path changed (${step2.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
+    prefix += `the project path changed (${step3.project_path} -> ${live.project_path}) but its items match, so this is probably a Save As and the undo history may have survived; `;
   }
-  if (step2.build && live.build && step2.build !== live.build) {
+  if (step3.build && live.build && step3.build !== live.build) {
     return { reach: "not_reachable", why: "the After Effects build changed, so it was restarted or updated; AE keeps no undo history across a restart" };
   }
-  if (step2.revision_after !== null && live.revision !== null && live.revision < step2.revision_after) {
+  if (step3.revision_after !== null && live.revision !== null && live.revision < step3.revision_after) {
     return { reach: "not_reachable", why: "the project revision went back: it was reopened or reverted" };
   }
-  if (step2.service_id !== serviceId) {
+  if (step3.service_id !== serviceId) {
     return {
       reach: "possibly_reachable",
       why: `${prefix}the panel service restarted since this step; if After Effects itself restarted the step is gone, but a service reload alone leaves AE's undo stack intact`
@@ -10732,12 +10744,12 @@ function undoReach(step2, live, serviceId, opts = {}) {
     why: `${prefix}nothing proves it is gone, but the tool cannot see the undo stack (your own undos, the Levels of Undo limit and Edit > Purge are invisible)`
   };
 }
-function looksLikeSaveAs(step2, live) {
-  const ids = step2.item_ids;
-  if (!ids || ids.length === 0 || typeof step2.num_items !== "number" || live.items_truncated) return false;
+function looksLikeSaveAs(step3, live) {
+  const ids = step3.item_ids;
+  if (!ids || ids.length === 0 || typeof step3.num_items !== "number" || live.items_truncated) return false;
   const now = new Set(live.item_ids);
   const kept = ids.filter((id) => now.has(id)).length;
-  const countClose = Math.abs(live.num_items - step2.num_items) <= Math.max(1, Math.round(step2.num_items * 0.1));
+  const countClose = Math.abs(live.num_items - step3.num_items) <= Math.max(1, Math.round(step3.num_items * 0.1));
   return countClose && kept >= Math.ceil(ids.length * 0.9);
 }
 function sanitizeState(saved) {
@@ -10918,12 +10930,12 @@ async function noteAfterWrite(ctx, info, opts = {}) {
 async function noteUiWrite(ctx, info, opts = {}) {
   await noteAfterWrite(ctx, info, { addStep: false, skipRead: opts.skipRead });
 }
-async function readOpenProject(t, read3, extra) {
-  const first = t.compsToReadDetailed(null, extra);
+async function readOpenProject(t, read3, extra2) {
+  const first = t.compsToReadDetailed(null, extra2);
   const snap = await read3(first.ids);
   if (!snap) return null;
   if (!t.isLastProject(snap.project_path) && t.touchedComps(snap.project_path).length > 0) {
-    const second = t.compsToReadDetailed(snap.project_path, extra);
+    const second = t.compsToReadDetailed(snap.project_path, extra2);
     const again = await read3(second.ids);
     if (again) return { snap: again, dropped: second.dropped };
   }
@@ -11213,13 +11225,13 @@ var init_session = __esm({
         this.save();
       }
       /** Comp ids for a snapshot: the given ones plus those already tracked for the project. */
-      compsToRead(projectPath, extra) {
-        return this.compsToReadDetailed(projectPath, extra).ids;
+      compsToRead(projectPath, extra2) {
+        return this.compsToReadDetailed(projectPath, extra2).ids;
       }
       /** As compsToRead, and how many ids the cap dropped (the given ones come first, so they are the last to go). */
-      compsToReadDetailed(projectPath, extra) {
+      compsToReadDetailed(projectPath, extra2) {
         const ids = /* @__PURE__ */ new Set();
-        for (const id of extra) if (typeof id === "number") ids.add(id);
+        for (const id of extra2) if (typeof id === "number") ids.add(id);
         const known = projectPath ? this.touchedComps(projectPath) : (this.lastBaseline()?.comps ?? []).map((c) => c.id);
         for (const id of known) ids.add(id);
         const all = [...ids];
@@ -11251,8 +11263,8 @@ var init_session = __esm({
         this.save();
         return stored;
       }
-      addStep(step2) {
-        this.state.steps.push(step2);
+      addStep(step3) {
+        this.state.steps.push(step3);
         if (this.state.steps.length > MAX_STEPS) this.state.steps.splice(0, this.state.steps.length - MAX_STEPS);
         this.save();
       }
@@ -11394,7 +11406,7 @@ var init_session = __esm({
             };
           }
           const last = t.lastBaseline();
-          const extra = args.comp_ids ?? [];
+          const extra2 = args.comp_ids ?? [];
           const readIds = async (ids) => {
             const res = await ctx.bridge.callHost(
               "sessionSnapshot",
@@ -11403,7 +11415,7 @@ var init_session = __esm({
             );
             return res.result;
           };
-          const opened = await readOpenProject(t, readIds, extra);
+          const opened = await readOpenProject(t, readIds, extra2);
           if (!opened) throw new Error("sessionSnapshot returned no project state");
           let live = opened.snap;
           let dropped = opened.dropped;
@@ -16385,8 +16397,8 @@ var init_dialogs = __esm({
           } else {
             const psArgs = ["-Mode", "respond", "-Handle", String(args.handle), "-Button", args.button];
             let early = null;
-            const refuse2 = (error, message, extra = {}) => {
-              early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra };
+            const refuse2 = (error, message, extra2 = {}) => {
+              early = { ok: false, error, message: `"${args.button}" was NOT pressed: ${message}`, handle: args.handle, button: args.button, ...extra2 };
             };
             if (meta?.painted || meta?.shown?.painted) {
               const seen = meta.shown;
@@ -20216,26 +20228,26 @@ async function analyzeAudio(mono, sampleRate, opts = {}) {
   }
   const { env, hop, frameRate } = await onsetEnvelope(mono, sampleRate);
   const envMax = env.reduce((m, v) => Math.max(m, v), 0);
-  const norm3 = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
+  const norm4 = Float64Array.from(env, (v) => envMax > 0 ? v / envMax : 0);
   const sensitivity = Math.max(0, Math.min(1, opts.sensitivity ?? 0.5));
   const delta = 0.02 + (1 - sensitivity) * 0.16;
   const audible = toDb(peak) >= ONSET_FLOOR_DB;
-  const peakFrames = envMax > 0 && audible ? pickPeaks(norm3, frameRate, delta) : [];
+  const peakFrames = envMax > 0 && audible ? pickPeaks(norm4, frameRate, delta) : [];
   const hitWindow = Math.round(0.05 * sampleRate);
   const onsets = peakFrames.map((t) => {
     const at = t * hop;
     let p = 0;
     for (let i = Math.max(0, at - hop); i < Math.min(mono.length, at + hitWindow); i++) p = Math.max(p, Math.abs(mono[i]));
-    return { time: round32(at / sampleRate), strength: round32(norm3[t]), level_db: toDb(p) };
+    return { time: round32(at / sampleRate), strength: round32(norm4[t]), level_db: toDb(p) };
   }).filter((o) => o.level_db >= ONSET_FLOOR_DB);
   let tempo = null;
   let beats = [];
-  const est = onsets.length >= 4 ? estimatePeriod(norm3, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
+  const est = onsets.length >= 4 ? estimatePeriod(norm4, frameRate, opts.min_bpm ?? 60, opts.max_bpm ?? 200) : null;
   if (est) {
     const first = onsets[0].time;
     const last = onsets[onsets.length - 1].time;
     const periodSec = est.period / frameRate;
-    beats = (await trackBeats(norm3, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
+    beats = (await trackBeats(norm4, est.period)).map((t) => t * hop / sampleRate).filter((t) => t >= first - periodSec / 2 && t <= last + periodSec / 2).map(round32);
     const near10 = beats.filter((b) => onsets.some((o) => Math.abs(o.time - b) <= 0.07)).length;
     tempo = {
       bpm: Math.round(60 / periodSec * 10) / 10,
@@ -20925,7 +20937,7 @@ var init_transcribe2 = __esm({
     }).refine((v) => v.out_path === void 0 || path22.isAbsolute(v.out_path) && /\.json$/i.test(v.out_path), {
       message: "out_path must be an absolute path ending in .json."
     }).refine((v) => v.job_id === void 0 || v.output_module_template === void 0, { message: "output_module_template goes with comp_id." });
-    fail = (error, message, extra = {}) => ({ ok: false, error, message, ...extra });
+    fail = (error, message, extra2 = {}) => ({ ok: false, error, message, ...extra2 });
     transcribeTools = createTranscribeTools();
   }
 });
@@ -21745,17 +21757,17 @@ function renameMismatches(args, beforeRaw, afterRaw) {
 function recipeControlName(prefix, label) {
   return label ? `${prefix} ${label}` : prefix;
 }
-function resolveRecipeParams(recipe, given) {
+function resolveRecipeParams(recipe2, given) {
   const g = given ?? {};
-  const known = new Set(recipe.params.map((p) => p.key));
+  const known = new Set(recipe2.params.map((p) => p.key));
   for (const k of Object.keys(g)) {
-    if (!known.has(k)) return { ok: false, message: `Recipe ${recipe.name} has no parameter "${k}" (it takes: ${recipe.params.map((p) => p.key).join(", ") || "none"}).` };
+    if (!known.has(k)) return { ok: false, message: `Recipe ${recipe2.name} has no parameter "${k}" (it takes: ${recipe2.params.map((p) => p.key).join(", ") || "none"}).` };
   }
   const out = {};
-  for (const p of recipe.params) {
+  for (const p of recipe2.params) {
     let v = g[p.key];
     if (v === void 0) {
-      if (p.required) return { ok: false, message: `Recipe ${recipe.name} needs the parameter "${p.key}": ${p.describe}` };
+      if (p.required) return { ok: false, message: `Recipe ${recipe2.name} needs the parameter "${p.key}": ${p.describe}` };
       v = p.default;
     }
     if (v === void 0) continue;
@@ -21773,15 +21785,15 @@ function resolveRecipeParams(recipe, given) {
   }
   return { ok: true, params: out };
 }
-function planRecipeControls(recipe, prefix, values) {
+function planRecipeControls(recipe2, prefix, values) {
   const v = values ?? {};
-  const keys = new Set(recipe.controls.map((c) => c.key));
+  const keys = new Set(recipe2.controls.map((c) => c.key));
   for (const k of Object.keys(v)) {
-    if (!keys.has(k)) return { ok: false, message: `Recipe ${recipe.name} has no control "${k}" (controls: ${[...keys].join(", ") || "none"}).` };
+    if (!keys.has(k)) return { ok: false, message: `Recipe ${recipe2.name} has no control "${k}" (controls: ${[...keys].join(", ") || "none"}).` };
   }
-  const p = prefix ?? recipe.label;
+  const p = prefix ?? recipe2.label;
   const controls = [];
-  for (const c of recipe.controls) {
+  for (const c of recipe2.controls) {
     const value = v[c.key] ?? c.value;
     const name = recipeControlName(p, c.label);
     const problem = controlSpecProblem({ name, kind: c.kind, value });
@@ -23711,7 +23723,7 @@ var init_timeremap = __esm({
     MAX_PLAN_SAMPLES = 100;
     bad = (message) => ({ ok: false, error: "bad_args", message });
     fix = (n) => Math.round(n * 1e9) / 1e9;
-    snapTo2 = (t, step2) => fix(Math.round(t / step2) * step2);
+    snapTo2 = (t, step3) => fix(Math.round(t / step3) * step3);
     snapshotOf = (info) => ({
       in_point: info.in_point,
       out_point: info.out_point,
@@ -24319,12 +24331,12 @@ function expandItems(job, reads, now, queueReads = []) {
   return items;
 }
 function protectedReason(outputPath, projectPaths = []) {
-  const norm3 = outputPath.replace(/\\/g, "/").toLowerCase();
-  for (const seg of norm3.split("/")) {
+  const norm4 = outputPath.replace(/\\/g, "/").toLowerCase();
+  for (const seg of norm4.split("/")) {
     if (seg === "_mcp_backups" || seg === "_mcp_checkpoints") return `it is inside ${seg}, which holds the MCP's own backups`;
   }
   for (const p of projectPaths) {
-    if (p && p !== "<unsaved>" && p.replace(/\\/g, "/").toLowerCase() === norm3) return "it is the project file itself";
+    if (p && p !== "<unsaved>" && p.replace(/\\/g, "/").toLowerCase() === norm4) return "it is the project file itself";
   }
   return null;
 }
@@ -24439,9 +24451,9 @@ function sequenceRegex(base) {
 function outputFiles(outputPath) {
   try {
     if (isSequencePath(outputPath)) {
-      const norm3 = path24.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
-      const dir = path24.dirname(norm3);
-      const re = sequenceRegex(path24.basename(norm3));
+      const norm4 = path24.sep === "\\" ? outputPath : outputPath.replace(/\\/g, "/");
+      const dir = path24.dirname(norm4);
+      const re = sequenceRegex(path24.basename(norm4));
       return fs22.readdirSync(dir).filter((n) => re.test(n)).map((n) => path24.join(dir, n));
     }
     return fs22.existsSync(outputPath) ? [outputPath] : [];
@@ -31920,7 +31932,7 @@ function reviewProperty(s, analysis, speeds, path63, target, taste, choreo) {
     property: { name: s.property.name, path: path63 }
   };
   const { ease: easeArg, name: easeName } = fixEase(taste);
-  const fix2 = (keys, extra = {}) => ({
+  const fix2 = (keys, extra2 = {}) => ({
     tool: "ae_set_keyframe_ease",
     args: {
       comp_id: target.comp_id,
@@ -31928,7 +31940,7 @@ function reviewProperty(s, analysis, speeds, path63, target, taste, choreo) {
       path: path63,
       keys,
       ease: easeArg,
-      ...extra,
+      ...extra2,
       expect: { project_path: target.project_path, comp_id: target.comp_id }
     }
   });
@@ -33001,9 +33013,9 @@ function drawGantt(raw) {
   const png = createCanvas(width, height, [24, 24, 28, 255]);
   const ink = [225, 225, 225, 255];
   const dim2 = [110, 110, 120, 255];
-  const step2 = TICK_STEPS.find((s) => s >= dur / 10) ?? TICK_STEPS[TICK_STEPS.length - 1];
+  const step3 = TICK_STEPS.find((s) => s >= dur / 10) ?? TICK_STEPS[TICK_STEPS.length - 1];
   drawText(png, "SECONDS", 6, 4, 1, dim2);
-  for (let t = 0; t <= dur + 1e-6; t += step2) {
+  for (let t = 0; t <= dur + 1e-6; t += step3) {
     const x = xOf(t);
     fillRect(png, x, headerH - 8, 1, 8 + layers.length * rowH + 4, [60, 60, 68, 255]);
     const label = String(Math.round(t * 100) / 100);
@@ -33794,8 +33806,8 @@ function verdictOf(findings) {
   if (findings.some((f) => f.severity === "warn")) return "warn";
   return "pass";
 }
-function intendedCuts(info, extra, useComp, range) {
-  const all = [...extra ?? []];
+function intendedCuts(info, extra2, useComp, range) {
+  const all = [...extra2 ?? []];
   if (info && useComp) {
     for (const m of info.markers ?? []) all.push(m.time);
     for (const e of info.layer_edges ?? []) all.push(e.time);
@@ -34046,7 +34058,7 @@ async function scrubFile(args, ctx) {
   if (!stat.isFile() || stat.size === 0) return { ok: false, error: "empty", message: `${file} is not a file with content.` };
   const sequence = STILL_FILE.test(file) && (args.sequence ?? looksLikeSequence(file));
   const jsxPath = file.replace(/\\/g, "/");
-  const extra = [];
+  const extra2 = [];
   let sequenceInfo = null;
   if (sequence) {
     try {
@@ -34056,7 +34068,7 @@ async function scrubFile(args, ctx) {
     }
     if (sequenceInfo && sequenceInfo.missing.length > 0) {
       const list2 = describeRanges(sequenceInfo.missing);
-      extra.push({
+      extra2.push({
         kind: "sequence_gap",
         severity: "fail",
         value: sequenceInfo.missing.length,
@@ -34171,7 +34183,7 @@ async function scrubFile(args, ctx) {
       error: problems.length ? "sampling_failed" : "range_too_short",
       applied: true,
       message: problems.length ? `The render was imported but could not be sampled (temporary items: ${state}). Do not run this again before checking the project.` : `The range ${secs2(range.start)} to ${secs2(range.end)} is shorter than two frames. Nothing was sampled (temporary items: ${state}).`,
-      ...extra.length ? { findings: extra } : {},
+      ...extra2.length ? { findings: extra2 } : {},
       ...project2
     };
   }
@@ -34189,7 +34201,7 @@ async function scrubFile(args, ctx) {
       ...sequenceInfo ? { sequence_check: { pattern: sequenceInfo.pattern, first: sequenceInfo.first, last: sequenceInfo.last, present: sequenceInfo.present, missing: sequenceInfo.missing, truncated: sequenceInfo.truncated } } : {}
     }
   };
-  const result = finish(args, prep, plan2, cap2, [...extra, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
+  const result = finish(args, prep, plan2, cap2, [...extra2, ...sizeFindings(prep.size, args.expected_size, true)], framesDir);
   return { ...result, ...project2 };
 }
 var crypto11, fs34, path35, SCRUB_MAX_SAMPLES, MAX_LIST2, SAMPLE_PHASE, ScrubThresholdsSchema, DEFAULT_THRESHOLDS, AeScrubCheckSchema, EDGE_BAND, SEVERITY_ORDER2, secs2, median2, pairKind, KIND_TEXT, CHART_BG, CHART_GRID, CHART_DIFF, CHART_LUMA, CHART_CUT, CHART_BAD, labelText, round22, STILL_FILE, scrubTools;
@@ -35569,10 +35581,10 @@ async function writeZip(zipPath, inputs, opts = {}) {
       const { time, date } = dosDateTime(input.mtime);
       const offset = out.offset;
       const flags = 2056;
-      const extra = Buffer.alloc(zip64 ? 20 : 0);
+      const extra2 = Buffer.alloc(zip64 ? 20 : 0);
       if (zip64) {
-        extra.writeUInt16LE(1, 0);
-        extra.writeUInt16LE(16, 2);
+        extra2.writeUInt16LE(1, 0);
+        extra2.writeUInt16LE(16, 2);
       }
       const h = Buffer.alloc(30);
       h.writeUInt32LE(67324752, 0);
@@ -35585,8 +35597,8 @@ async function writeZip(zipPath, inputs, opts = {}) {
       h.writeUInt32LE(zip64 ? U32_MAX : 0, 18);
       h.writeUInt32LE(zip64 ? U32_MAX : 0, 22);
       h.writeUInt16LE(name.length, 26);
-      h.writeUInt16LE(extra.length, 28);
-      await out.write(Buffer.concat([h, name, extra]));
+      h.writeUInt16LE(extra2.length, 28);
+      await out.write(Buffer.concat([h, name, extra2]));
       const crc = new Crc32();
       let usize = 0;
       let csize = 0;
@@ -35623,13 +35635,13 @@ async function writeZip(zipPath, inputs, opts = {}) {
     const cdStart = out.offset;
     for (const r of central) {
       const big = r.zip64 || r.offset >= U32_MAX;
-      const extra = Buffer.alloc(big ? 28 : 0);
+      const extra2 = Buffer.alloc(big ? 28 : 0);
       if (big) {
-        extra.writeUInt16LE(1, 0);
-        extra.writeUInt16LE(24, 2);
-        extra.writeBigUInt64LE(BigInt(r.usize), 4);
-        extra.writeBigUInt64LE(BigInt(r.csize), 12);
-        extra.writeBigUInt64LE(BigInt(r.offset), 20);
+        extra2.writeUInt16LE(1, 0);
+        extra2.writeUInt16LE(24, 2);
+        extra2.writeBigUInt64LE(BigInt(r.usize), 4);
+        extra2.writeBigUInt64LE(BigInt(r.csize), 12);
+        extra2.writeBigUInt64LE(BigInt(r.offset), 20);
       }
       const c = Buffer.alloc(46);
       c.writeUInt32LE(33639248, 0);
@@ -35643,9 +35655,9 @@ async function writeZip(zipPath, inputs, opts = {}) {
       c.writeUInt32LE(big ? U32_MAX : r.csize, 20);
       c.writeUInt32LE(big ? U32_MAX : r.usize, 24);
       c.writeUInt16LE(r.name.length, 28);
-      c.writeUInt16LE(extra.length, 30);
+      c.writeUInt16LE(extra2.length, 30);
       c.writeUInt32LE(big ? U32_MAX : r.offset, 42);
-      await out.write(Buffer.concat([c, r.name, extra]));
+      await out.write(Buffer.concat([c, r.name, extra2]));
     }
     const cdSize = out.offset - cdStart;
     const needZip64 = opts.forceZip64 === true || central.length >= 65535 || cdStart >= U32_MAX || cdSize >= U32_MAX;
@@ -36263,9 +36275,9 @@ async function zipCollect(dest, manifest, stamp3) {
     inputs.push({ name, file: abs, mtime: st.mtime });
     expected.set(name, { bytes: st.size, sha1: f.sha1 });
   }
-  for (const extra of ["manifest.json", "collect-report.md", "collect-report.json"]) {
-    const abs = path36.join(dest, extra);
-    if (fs35.existsSync(abs)) inputs.push({ name: `${root}/${extra}`, file: abs, mtime: fs35.statSync(abs).mtime });
+  for (const extra2 of ["manifest.json", "collect-report.md", "collect-report.json"]) {
+    const abs = path36.join(dest, extra2);
+    if (fs35.existsSync(abs)) inputs.push({ name: `${root}/${extra2}`, file: abs, mtime: fs35.statSync(abs).mtime });
   }
   await writeFileAtomic(`${zipPath}.stamp`, `pending ${stamp3}`);
   const written = await writeZip(zipPath, inputs);
@@ -36577,14 +36589,14 @@ function verifyItemMismatches(relink, verify, trimmed, expected) {
   }
   return m;
 }
-function relinkMismatches(original, before, after, extra) {
+function relinkMismatches(original, before, after, extra2) {
   const m = [];
-  if (extra.phaseError) m.push({ path: "relink", expected: "the copy relinked and saved", actual: extra.phaseError, message: `Relinking the copy failed: ${extra.phaseError}. The copy was not saved.` });
-  if (extra.restoreError) {
-    m.push({ path: "reopen", expected: original, actual: null, message: `The original project could not be reopened: ${extra.restoreError}. Open ${original} by hand (File > Open); it was not changed.` });
+  if (extra2.phaseError) m.push({ path: "relink", expected: "the copy relinked and saved", actual: extra2.phaseError, message: `Relinking the copy failed: ${extra2.phaseError}. The copy was not saved.` });
+  if (extra2.restoreError) {
+    m.push({ path: "reopen", expected: original, actual: null, message: `The original project could not be reopened: ${extra2.restoreError}. Open ${original} by hand (File > Open); it was not changed.` });
   }
-  if (extra.relink && extra.relink.errors_total > 0) {
-    m.push({ path: "relink.errors", expected: 0, actual: extra.relink.errors_total, message: `${extra.relink.errors_total} item(s) could not be relinked or trimmed in the copy (see relink.errors)` });
+  if (extra2.relink && extra2.relink.errors_total > 0) {
+    m.push({ path: "relink.errors", expected: 0, actual: extra2.relink.errors_total, message: `${extra2.relink.errors_total} item(s) could not be relinked or trimmed in the copy (see relink.errors)` });
   }
   if (after) {
     expectThat(m, pathKey2(after.project_path) === pathKey2(original), "project_path", original, after.project_path, "The original project is not the open one again");
@@ -36908,7 +36920,7 @@ var init_collect = __esm({
       "Scripts, presets, expression-referenced files and anything the project reaches by absolute path through a script."
     ];
     read = (ctx, fn, args, toolName) => ctx.bridge.callHost(fn, args, { label: `${toolName} (${fn})`, mutates: false, toolName }).then((r) => r.result);
-    bad2 = (message, extra = {}) => ({ ok: false, error: "bad_args", message, ...extra });
+    bad2 = (message, extra2 = {}) => ({ ok: false, error: "bad_args", message, ...extra2 });
     OWN_REPORT_FILES = /* @__PURE__ */ new Set(["collect-report.md", "collect-report.json", "collect-report.md.tmp", "collect-report.json.tmp"]);
     sleep = (ms) => new Promise((resolve7) => {
       setTimeout(resolve7, ms);
@@ -37427,8 +37439,8 @@ function storeNotes(projectPath, saved) {
 function newRunId() {
   return `dl_${Date.now().toString(36)}_${crypto13.randomBytes(3).toString("hex")}`;
 }
-async function readProject(ctx, toolName, projectPath, extra = {}) {
-  const res = await ctx.bridge.callHost("deliverRead", { ...extra, expect: { project_path: projectPath } }, { label: `${toolName} (read project)`, mutates: false, toolName });
+async function readProject(ctx, toolName, projectPath, extra2 = {}) {
+  const res = await ctx.bridge.callHost("deliverRead", { ...extra2, expect: { project_path: projectPath } }, { label: `${toolName} (read project)`, mutates: false, toolName });
   const read3 = res.result;
   if (read3.guard_failed) {
     throw new BridgeError({
@@ -37488,7 +37500,7 @@ async function deliverRecipe(args, ctx) {
     return { ok: false, error: "not_found", applied: false, message: `Comp ${args.comp_id} is not a comp in this project. Nothing was written.` };
   }
   const stages = args.stages ? normalizeStages(args.stages) : existing ? existing.stages : normalizeStages(defaultStages());
-  const recipe = {
+  const recipe2 = {
     name,
     ...args.comp_id !== void 0 ? { comp_id: args.comp_id } : existing?.comp_id !== void 0 ? { comp_id: existing.comp_id } : {},
     checkpoint_mode: args.checkpoint_mode ?? existing?.checkpoint_mode ?? "each_write",
@@ -37503,16 +37515,16 @@ async function deliverRecipe(args, ctx) {
     if (s.kind === "render" && Object.keys(s.args).length === 0) warnings.push(`${s.id}: no args. The render stage needs its outputs (files, templates) in args, or the tool will refuse it.`);
     if (s.kind === "collect" && stagePrecheck(s)) warnings.push(`${s.id}: no args.dest. The collect stage needs the folder to copy into; the run stops at it until the recipe names one.`);
   }
-  if (recipe.comp_id === void 0) warnings.push("No comp_id: stages that take a comp get none, so they use their tool's own default or refuse.");
+  if (recipe2.comp_id === void 0) warnings.push("No comp_id: stages that take a comp get none, so they use their tool's own default or refuse.");
   try {
     store = loadStore(projectPath);
   } catch (e) {
     return unreadable(e);
   }
   store.recipes = store.recipes.filter((r) => r.name !== name);
-  store.recipes.push(recipe);
+  store.recipes.push(recipe2);
   const saved = saveStore(projectPath, store);
-  return { ok: true, applied: true, recipe, replaced: existing !== void 0, ...warnings.length ? { warnings } : {}, state_file: saved.file, ...storeNotes(projectPath, saved) };
+  return { ok: true, applied: true, recipe: recipe2, replaced: existing !== void 0, ...warnings.length ? { warnings } : {}, state_file: saved.file, ...storeNotes(projectPath, saved) };
 }
 function persist(env) {
   env.run.updated_at = (/* @__PURE__ */ new Date()).toISOString();
@@ -37548,10 +37560,10 @@ function setError(st, err) {
   st.applied = d.applied;
   st.summary = d.message;
 }
-function buildStageArgs(def, tool, run, extra = {}) {
+function buildStageArgs(def, tool, run, extra2 = {}) {
   const info = KIND_INFO[def.kind];
   const args = { ...def.args };
-  const withOutput = Object.keys(extra).length > 0;
+  const withOutput = Object.keys(extra2).length > 0;
   const ownTarget = def.kind === "loudness" && (args.audio_path !== void 0 || args.job_id !== void 0);
   if (!ownTarget && (!withOutput || info.fill_with_output)) {
     const fills = {
@@ -37562,20 +37574,20 @@ function buildStageArgs(def, tool, run, extra = {}) {
       comps: run.comp_name !== void 0 ? [run.comp_name] : void 0
     };
     for (const key of info.fill) {
-      if (key === "comp_id" && def.kind === "verify" && extra.job_id !== void 0) continue;
+      if (key === "comp_id" && def.kind === "verify" && extra2.job_id !== void 0) continue;
       if (args[key] === void 0 && fills[key] !== void 0 && schemaAcceptsKey(tool.schema, key)) args[key] = fills[key];
     }
   }
-  Object.assign(args, extra);
+  Object.assign(args, extra2);
   if (def.kind === "collect" && args.dry_run === void 0 && schemaAcceptsKey(tool.schema, "dry_run")) args.dry_run = false;
   if (schemaAcceptsKey(tool.schema, "expect")) args.expect = { project_path: run.project_path };
   if (def.kind === "checkpoint" && args.label === void 0) args.label = "deliver";
   return args;
 }
-async function invoke(env, tool, def, extra = {}) {
+async function invoke(env, tool, def, extra2 = {}) {
   const precheck = stagePrecheck(def);
   if (precheck) return { outcome: { status: "blocked", summary: precheck, findings: [] }, raw: null };
-  const args = buildStageArgs(def, tool, env.run, extra);
+  const args = buildStageArgs(def, tool, env.run, extra2);
   const parsed = tool.schema.safeParse(args);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
@@ -37657,13 +37669,13 @@ async function runPerOutput(env, st, tool) {
   let compsCut = false;
   let inLookup = false;
   for (const out of outputs.slice(0, MAX_OUTPUTS)) {
-    const extra = outputArgsFor(def.kind, out);
-    if (!extra) {
+    const extra2 = outputArgsFor(def.kind, out);
+    if (!extra2) {
       children.push({ output: outputLabel(out), status: "skipped", summary: "an image-sequence pattern has no single file for this tool" });
       continue;
     }
     try {
-      if (def.kind === "verify" && def.args.comp_id === void 0 && extra.job_id === void 0 && out.comp !== void 0 && out.comp !== env.run.comp_name) {
+      if (def.kind === "verify" && def.args.comp_id === void 0 && extra2.job_id === void 0 && out.comp !== void 0 && out.comp !== env.run.comp_name) {
         if (!compsByName) {
           inLookup = true;
           const read3 = await readProject(env.ctx, "ae_deliver_step", env.run.project_path, { list_comps: true });
@@ -37681,9 +37693,9 @@ async function runPerOutput(env, st, tool) {
           });
           continue;
         }
-        extra.comp_id = ids[0];
+        extra2.comp_id = ids[0];
       }
-      const { outcome } = await invoke(env, tool, def, extra);
+      const { outcome } = await invoke(env, tool, def, extra2);
       children.push({ output: outputLabel(out), status: outcome.status, summary: clip3(outcome.summary, 300) });
       findings.push(...outcome.findings);
       if (outcome.unverified) unverified = true;
@@ -38000,7 +38012,7 @@ function stageRow(s) {
     attempts: s.attempts
   };
 }
-function present(env, extra = {}) {
+function present(env, extra2 = {}) {
   const run = env.run;
   const cur = currentStage(run);
   const blocked = run.state === "blocked";
@@ -38020,7 +38032,7 @@ function present(env, extra = {}) {
     ...run.state === "done" || blocked ? { report: renderReport(run) } : {},
     state_file: env.saved.file,
     ...storeNotes(run.project_path, env.saved),
-    ...extra
+    ...extra2
   };
 }
 function findRun(store, runId) {
@@ -38052,27 +38064,27 @@ async function deliverStep(args, ctx) {
   }
   const maxStages = args.max_stages ?? MAX_STAGES;
   if (args.action === "start") {
-    const recipe = store.recipes.find((r) => r.name === args.recipe);
-    if (!recipe) return { ok: false, error: "not_found", applied: false, message: `No recipe "${args.recipe}" in this project. Make one with ae_deliver_recipe (action 'set').`, known: store.recipes.map((r) => r.name) };
-    if (recipe.comp_id !== void 0 && project2.comp_found === false) {
-      return { ok: false, error: "not_found", applied: false, message: `The recipe's comp ${recipe.comp_id} is not a comp in this project any more. Update the recipe. Nothing was run.` };
+    const recipe2 = store.recipes.find((r) => r.name === args.recipe);
+    if (!recipe2) return { ok: false, error: "not_found", applied: false, message: `No recipe "${args.recipe}" in this project. Make one with ae_deliver_recipe (action 'set').`, known: store.recipes.map((r) => r.name) };
+    if (recipe2.comp_id !== void 0 && project2.comp_found === false) {
+      return { ok: false, error: "not_found", applied: false, message: `The recipe's comp ${recipe2.comp_id} is not a comp in this project any more. Update the recipe. Nothing was run.` };
     }
-    const openRun = store.runs.find((r) => r.recipe === recipe.name && r.state !== "done" && r.state !== "cancelled");
+    const openRun = store.runs.find((r) => r.recipe === recipe2.name && r.state !== "done" && r.state !== "cancelled");
     if (openRun && !args.dry_run) {
-      return { ok: false, error: "run_open", applied: false, run_id: openRun.id, message: `Run ${openRun.id} of "${recipe.name}" is still open (${openRun.state}). Continue it with 'next', or end it with 'cancel', before starting another.` };
+      return { ok: false, error: "run_open", applied: false, run_id: openRun.id, message: `Run ${openRun.id} of "${recipe2.name}" is still open (${openRun.state}). Continue it with 'next', or end it with 'cancel', before starting another.` };
     }
     const run2 = {
       id: newRunId(),
-      recipe: recipe.name,
-      ...recipe.comp_id !== void 0 ? { comp_id: recipe.comp_id } : {},
+      recipe: recipe2.name,
+      ...recipe2.comp_id !== void 0 ? { comp_id: recipe2.comp_id } : {},
       ...project2.comp ? { comp_name: project2.comp.name } : {},
       project_path: projectPath,
       ...project2.ae_version ? { ae_version: project2.ae_version } : {},
-      checkpoint_mode: recipe.checkpoint_mode,
+      checkpoint_mode: recipe2.checkpoint_mode,
       created_at: (/* @__PURE__ */ new Date()).toISOString(),
       updated_at: (/* @__PURE__ */ new Date()).toISOString(),
       state: "in_progress",
-      stages: recipe.stages.map((def) => ({ id: def.id, kind: def.kind, tool: def.tool, def: JSON.parse(JSON.stringify(def)), status: "pending", attempts: 0 })),
+      stages: recipe2.stages.map((def) => ({ id: def.id, kind: def.kind, tool: def.tool, def: JSON.parse(JSON.stringify(def)), status: "pending", attempts: 0 })),
       outputs: [],
       checkpoints_taken: 0
     };
@@ -38116,7 +38128,7 @@ async function deliverStep(args, ctx) {
           fail_on: s.def.fail_on
         });
       }
-      return { ok: true, dry_run: true, applied: false, recipe: recipe.name, comp: project2.comp ?? null, project_dirty: project2.dirty ?? null, stages: plan2, note: "Nothing was run or written. Arguments of per-output stages are checked when the render's files are known." };
+      return { ok: true, dry_run: true, applied: false, recipe: recipe2.name, comp: project2.comp ?? null, project_dirty: project2.dirty ?? null, stages: plan2, note: "Nothing was run or written. Arguments of per-output stages are checked when the render's files are known." };
     }
     store.runs.push(run2);
     const env2 = { ctx, run: run2, store, saved: { file: null } };
@@ -38498,9 +38510,9 @@ function makePolyphase(factor) {
     const taps = [];
     for (let k = p; k < n; k += factor) taps.push(h[k]);
     const sum = taps.reduce((a, b) => a + b, 0);
-    const norm3 = Float64Array.from(taps, (v) => v / sum);
-    phases.push(norm3);
-    l1 = Math.max(l1, norm3.reduce((a, b) => a + Math.abs(b), 0));
+    const norm4 = Float64Array.from(taps, (v) => v / sum);
+    phases.push(norm4);
+    l1 = Math.max(l1, norm4.reduce((a, b) => a + Math.abs(b), 0));
   }
   return { factor, phases, half, l1 };
 }
@@ -38600,8 +38612,8 @@ function loudnessRange(shortTermPowers) {
 }
 async function measureLoudness(channels, sampleRate, options = {}) {
   const frames = channels[0]?.length ?? 0;
-  const step2 = Math.max(1, Math.round(0.1 * sampleRate));
-  const nSub = Math.floor(frames / step2);
+  const step3 = Math.max(1, Math.round(0.1 * sampleRate));
+  const nSub = Math.floor(frames / step3);
   const sub = new Float64Array(nSub);
   const weights = channelWeights(channels.length);
   const { stage1, stage2 } = kWeighting(sampleRate);
@@ -38620,8 +38632,8 @@ async function measureLoudness(channels, sampleRate, options = {}) {
     let s22 = 0;
     for (let j = 0; j < nSub; j++) {
       let acc = 0;
-      const end = (j + 1) * step2;
-      for (let i = j * step2; i < end; i++) {
+      const end = (j + 1) * step3;
+      for (let i = j * step3; i < end; i++) {
         const v = x[i];
         const y1 = b10 * v + s11;
         s11 = b11 * v - a11 * y1 + s12;
@@ -38632,7 +38644,7 @@ async function measureLoudness(channels, sampleRate, options = {}) {
         acc += y * y;
       }
       sub[j] += w * acc;
-      since += step2;
+      since += step3;
       if (since >= YIELD_SAMPLES) {
         since = 0;
         await yieldToLoop2();
@@ -38643,10 +38655,10 @@ async function measureLoudness(channels, sampleRate, options = {}) {
   for (let j = 0; j < nSub; j++) prefix[j + 1] = prefix[j] + sub[j];
   const nBlocks = Math.max(0, nSub - 3);
   const blockPower = new Float64Array(nBlocks);
-  for (let k = 0; k < nBlocks; k++) blockPower[k] = (prefix[k + 4] - prefix[k]) / (4 * step2);
+  for (let k = 0; k < nBlocks; k++) blockPower[k] = (prefix[k + 4] - prefix[k]) / (4 * step3);
   const nShort = Math.max(0, nSub - 29);
   const shortPower = new Float64Array(nShort);
-  for (let k = 0; k < nShort; k++) shortPower[k] = (prefix[k + 30] - prefix[k]) / (30 * step2);
+  for (let k = 0; k < nShort; k++) shortPower[k] = (prefix[k + 30] - prefix[k]) / (30 * step3);
   const gate = gatedLoudness(blockPower);
   let momentaryMax = -Infinity;
   for (let k = 0; k < nBlocks; k++) momentaryMax = Math.max(momentaryMax, lufsOf(blockPower[k]));
@@ -38667,7 +38679,7 @@ async function measureLoudness(channels, sampleRate, options = {}) {
     if (quietAt < 0 || l < lufsOf(series[quietAt])) quietAt = k;
   }
   const windowAt = (k) => {
-    const start = k * step2 / sampleRate;
+    const start = k * step3 / sampleRate;
     return { start: round33(start), end: round33(start + span), lufs: round1(lufsOf(series[k])), kind };
   };
   if (loudAt >= 0) loudest = windowAt(loudAt);
@@ -39817,8 +39829,8 @@ function skippedEntries(read3, only) {
 function isAeBlocked(err) {
   return err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued");
 }
-function withExtra(sk, extra) {
-  return { skipped: [...sk.skipped, ...extra].slice(0, SKIPPED_CAP), total: sk.total + extra.length };
+function withExtra(sk, extra2) {
+  return { skipped: [...sk.skipped, ...extra2].slice(0, SKIPPED_CAP), total: sk.total + extra2.length };
 }
 async function readText(ctx, opId, tool, label, args) {
   const res = await ctx.bridge.evalRaw({
@@ -40327,7 +40339,7 @@ var init_legibility = __esm({
     };
     MIN_PIXELS = 6;
     COLOUR_TOL = 26;
-    emptyAnalysis = (status, extra = {}) => ({
+    emptyAnalysis = (status, extra2 = {}) => ({
       status,
       glyph_pixels: 0,
       core_pixels: 0,
@@ -40339,7 +40351,7 @@ var init_legibility = __esm({
       ratios: new Float32Array(0),
       bg: new Uint8Array(0),
       fail_bounds: null,
-      ...extra
+      ...extra2
     });
     mixRgb = (a, b, t) => [
       b[0] * t + a[0] * (1 - t),
@@ -45768,12 +45780,12 @@ function boxBlurGray(img, r) {
   const { width: w, height: h } = img;
   const tmp = new Float32Array(w * h);
   const out = new Float32Array(w * h);
-  const norm3 = 1 / (2 * k + 1);
+  const norm4 = 1 / (2 * k + 1);
   for (let y = 0; y < h; y++) {
     let s = 0;
     for (let i = -k; i <= k; i++) s += img.data[y * w + Math.min(w - 1, Math.max(0, i))];
     for (let x = 0; x < w; x++) {
-      tmp[y * w + x] = s * norm3;
+      tmp[y * w + x] = s * norm4;
       s += img.data[y * w + Math.min(w - 1, x + k + 1)] - img.data[y * w + Math.max(0, x - k)];
     }
   }
@@ -45781,7 +45793,7 @@ function boxBlurGray(img, r) {
     let s = 0;
     for (let i = -k; i <= k; i++) s += tmp[Math.min(h - 1, Math.max(0, i)) * w + x];
     for (let y = 0; y < h; y++) {
-      out[y * w + x] = s * norm3;
+      out[y * w + x] = s * norm4;
       s += tmp[Math.min(h - 1, y + k + 1) * w + x] - tmp[Math.max(0, y - k) * w + x];
     }
   }
@@ -45820,8 +45832,8 @@ function trackTimes(start, end, fps, maxFrames) {
   const times = [];
   const first = Math.round(start * fps);
   const last = Math.round(end * fps);
-  const step2 = last >= first ? 1 : -1;
-  for (let f = first; step2 > 0 ? f <= last : f >= last; f += step2) {
+  const step3 = last >= first ? 1 : -1;
+  for (let f = first; step3 > 0 ? f <= last : f >= last; f += step3) {
     times.push(f / fps);
     if (times.length >= maxFrames) break;
   }
@@ -46138,9 +46150,9 @@ function loadTrack(trackId) {
 }
 function resolveEffectParams(params, wanted) {
   const out = {};
-  const norm3 = (s) => s.trim().toLowerCase();
+  const norm4 = (s) => s.trim().toLowerCase();
   for (const [key, w] of Object.entries(wanted)) {
-    const hit = params.find((p) => w.names.some((n) => norm3(n) === norm3(p.name)));
+    const hit = params.find((p) => w.names.some((n) => norm4(n) === norm4(p.name)));
     if (hit) {
       out[key] = hit.index;
     } else if (w.index !== void 0 && params.some((p) => p.index === w.index)) {
@@ -46478,8 +46490,8 @@ function lensCheck(track) {
   if (track.ref_points.length < 6 || !(reach >= 0.5)) return null;
   const model = track.ref_points.length >= 5 ? "perspective" : track.model;
   const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
-  const step2 = Math.max(1, Math.ceil(solved.length / 30));
-  const frames = solved.filter((_, i) => i % step2 === 0);
+  const step3 = Math.max(1, Math.ceil(solved.length / 30));
+  const frames = solved.filter((_, i) => i % step3 === 0);
   if (frames.length < 3) return null;
   const undistort = (p, k2) => {
     const dx = p[0] - c[0];
@@ -46681,8 +46693,8 @@ function trackSummary(track, maxFrames = 500) {
   const rms = ok.map((f) => f.rms_px).filter((v) => v !== null);
   const exp = ok.filter((f) => typeof f.expected_px === "number" && f.time !== track.ref_time);
   const worst = exp.reduce((w, f) => w === null || f.expected_px > w.expected_px ? f : w, null);
-  const step2 = Math.max(1, Math.ceil(track.frames.length / maxFrames));
-  const sampled = track.frames.filter((_, i) => i % step2 === 0 || i === track.frames.length - 1).slice(0, maxFrames);
+  const step3 = Math.max(1, Math.ceil(track.frames.length / maxFrames));
+  const sampled = track.frames.filter((_, i) => i % step3 === 0 || i === track.frames.length - 1).slice(0, maxFrames);
   const lostPer = track.ref_points.map((_, k) => track.frames.filter((f) => f.points[k] === null).length);
   return {
     track_id: track.track_id,
@@ -46709,7 +46721,7 @@ function trackSummary(track, maxFrames = 500) {
     frames_lost_per_point: lostPer,
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r26(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
-    ...step2 > 1 ? { frame_rows_sampled_every: step2 } : {},
+    ...step3 > 1 ? { frame_rows_sampled_every: step3 } : {},
     full_data: "The track file holds every frame with per-point positions and confidences."
   };
 }
@@ -46863,8 +46875,8 @@ function buildNullKeys(a) {
   }
   return out;
 }
-function expectedFor(kind, layerId, role, times, values, extra = {}) {
-  return { layerId, kind, role, keys: times.length, samples: sampleIdx(times.length).map((i) => ({ time: times[i], value: values[i] })), ...extra };
+function expectedFor(kind, layerId, role, times, values, extra2 = {}) {
+  return { layerId, kind, role, keys: times.length, samples: sampleIdx(times.length).map((i) => ({ time: times[i], value: values[i] })), ...extra2 };
 }
 function keyMismatches(expected, written, after) {
   const m = [];
@@ -48818,9 +48830,9 @@ function planSamples2(o) {
   const refF = refFrame ?? f0;
   let n = o.everyN ?? Math.max(1, Math.ceil(total2 / Math.max(2, o.maxSamples)));
   const asked = n;
-  const build = (step2) => {
+  const build = (step3) => {
     const set2 = /* @__PURE__ */ new Set([f0, f1, refF]);
-    for (let f = f0; f <= f1; f += step2) set2.add(f);
+    for (let f = f0; f <= f1; f += step3) set2.add(f);
     return [...set2].sort((a, b) => a - b);
   };
   let frames = build(n);
@@ -48832,17 +48844,17 @@ function planSamples2(o) {
 }
 function homographyAt(track, t) {
   const sorted = [...track].sort((a2, b2) => a2.time - b2.time);
-  const norm3 = (h) => Math.abs(h[8]) > 1e-12 ? h.map((v) => v / h[8]) : h.slice();
-  if (t <= sorted[0].time) return norm3(sorted[0].homography);
+  const norm4 = (h) => Math.abs(h[8]) > 1e-12 ? h.map((v) => v / h[8]) : h.slice();
+  if (t <= sorted[0].time) return norm4(sorted[0].homography);
   const lastE = sorted[sorted.length - 1];
-  if (t >= lastE.time) return norm3(lastE.homography);
+  if (t >= lastE.time) return norm4(lastE.homography);
   let i = 1;
   while (sorted[i].time < t) i++;
   const a = sorted[i - 1];
   const b = sorted[i];
   const k = (t - a.time) / (b.time - a.time);
-  const ha = norm3(a.homography);
-  const hb = norm3(b.homography);
+  const ha = norm4(a.homography);
+  const hb = norm4(b.homography);
   return ha.map((v, j) => v + (hb[j] - v) * k);
 }
 function trackEntriesOf(track) {
@@ -49311,20 +49323,20 @@ function measureSlip(frames, poly0, o) {
     const fr = frames[i];
     for (const f of patch) {
       if (f.lost) continue;
-      const step2 = f.tracker.step(fr.composite);
-      if (!step2) f.lost = true;
+      const step3 = f.tracker.step(fr.composite);
+      if (!step3) f.lost = true;
       else {
-        f.dx = step2.x - f.x0;
-        f.dy = step2.y - f.y0;
+        f.dx = step3.x - f.x0;
+        f.dy = step3.y - f.y0;
       }
     }
     for (const f of ring) {
       if (f.lost) continue;
-      const step2 = f.tracker.step(fr.plate);
-      if (!step2) f.lost = true;
+      const step3 = f.tracker.step(fr.plate);
+      if (!step3) f.lost = true;
       else {
-        f.dx = step2.x - f.x0;
-        f.dy = step2.y - f.y0;
+        f.dx = step3.x - f.x0;
+        f.dy = step3.y - f.y0;
       }
     }
     const pl = liveOf(patch);
@@ -50825,9 +50837,9 @@ function fitLevels(pairs2) {
   }
   return best && best.e <= err(lv) ? best.l : lv;
 }
-function nelderMead(f, x0, step2, iterations) {
+function nelderMead(f, x0, step3, iterations) {
   const n = x0.length;
-  let simplex = [x0, ...x0.map((_, i) => x0.map((v, j) => i === j ? v + step2 : v))].map((x) => ({ x, f: f(x) }));
+  let simplex = [x0, ...x0.map((_, i) => x0.map((v, j) => i === j ? v + step3 : v))].map((x) => ({ x, f: f(x) }));
   for (let it = 0; it < iterations; it++) {
     simplex.sort((a, b) => a.f - b.f);
     if (Math.abs(simplex[n].f - simplex[0].f) < 1e-14 && it > 50) break;
@@ -51034,13 +51046,13 @@ function edgeDistance(inside, w, h, cap2) {
       frontier.push(k);
     }
   }
-  for (let step2 = 1; step2 < cap2 && frontier.length; step2++) {
+  for (let step3 = 1; step3 < cap2 && frontier.length; step3++) {
     const next = [];
     for (const k of frontier) {
       const x = k % w;
       for (const n of [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, k >= w ? k - w : -1, k < w * (h - 1) ? k + w : -1]) {
-        if (n >= 0 && d[n] > step2) {
-          d[n] = step2;
+        if (n >= 0 && d[n] > step3) {
+          d[n] = step3;
           next.push(n);
         }
       }
@@ -51092,7 +51104,7 @@ function analyseMatte(alpha, w, h) {
     edge_length_px: edgeLen
   };
 }
-function edgeChatter(a, b, c, step2 = 0.15) {
+function edgeChatter(a, b, c, step3 = 0.15) {
   let edge = 0;
   let flips = 0;
   for (let k = 0; k < b.length; k++) {
@@ -51102,7 +51114,7 @@ function edgeChatter(a, b, c, step2 = 0.15) {
     edge++;
     const d1 = b[k] - a[k];
     const d2 = b[k] - c[k];
-    if (d1 > step2 && d2 > step2 || d1 < -step2 && d2 < -step2) flips++;
+    if (d1 > step3 && d2 > step3 || d1 < -step3 && d2 < -step3) flips++;
   }
   return edge ? flips / edge : 0;
 }
@@ -52735,12 +52747,12 @@ function planPickFrames(o) {
   const f0 = Math.round(o.start * fps);
   const f1 = Math.max(f0, Math.round(o.end * fps));
   const total2 = f1 - f0 + 1;
-  let step2 = Math.max(1, o.everyN);
+  let step3 = Math.max(1, o.everyN);
   const count = (s) => Math.floor((f1 - f0) / s) + 1;
-  while (count(step2) > o.maxRenders) step2++;
+  while (count(step3) > o.maxRenders) step3++;
   const times = [];
-  for (let f = f0; f <= f1; f += step2) times.push(f / fps);
-  return { times, total: total2, step: step2 };
+  for (let f = f0; f <= f1; f += step3) times.push(f / fps);
+  return { times, total: total2, step: step3 };
 }
 function alignGridFor(poly, maxSide = 96, margin = 2) {
   const b = polygonBounds(poly);
@@ -52828,14 +52840,14 @@ function findSpatialSources(gray, scale, poly, o) {
   const lb = [b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0];
   const wx = Math.round(win * bw);
   const wy = Math.round(win * bh);
-  let step2 = Math.max(1, Math.round(ringI / 4));
+  let step3 = Math.max(1, Math.round(ringI / 4));
   const cands = (s) => (Math.floor(2 * wx / s) + 1) * (Math.floor(2 * wy / s) + 1);
   const cap2 = o.maxCandidates ?? 6e3;
-  while (cands(step2) > cap2) step2++;
+  while (cands(step3) > cap2) step3++;
   const found = [];
   const bvals = new Float32Array(idx.length);
-  for (let dy = -wy; dy <= wy; dy += step2) {
-    for (let dx = -wx; dx <= wx; dx += step2) {
+  for (let dy = -wy; dy <= wy; dy += step3) {
+    for (let dx = -wx; dx <= wx; dx += step3) {
       if (Math.abs(dx) < bw + clr && Math.abs(dy) < bh + clr) continue;
       if (lb[0] + dx < 1 || lb[1] + dy < 1 || lb[2] + dx > cw - 2 || lb[3] + dy > ch - 2) continue;
       let ok = true;
@@ -52881,14 +52893,14 @@ function temporalSources(rows, o) {
   const frames = [...byFrame.keys()];
   const span = Math.max(...frames) - Math.min(...frames);
   const occFrames = occluded.map(([f]) => f);
-  const step2 = Math.max(1, o.step);
+  const step3 = Math.max(1, o.step);
   const spanOcc = {
-    start: r45(Math.max(Math.min(...occFrames) - (step2 - 1), Math.min(...frames)) / fps),
-    end: r45(Math.min(Math.max(...occFrames) + step2, Math.max(...frames) + 1) / fps)
+    start: r45(Math.max(Math.min(...occFrames) - (step3 - 1), Math.min(...frames)) / fps),
+    end: r45(Math.min(Math.max(...occFrames) + step3, Math.max(...frames) + 1) / fps)
   };
   const cleanFrames = [...byFrame.entries()].filter(([, r]) => r.cleanliness >= OCCLUDED_BELOW).map(([f]) => f);
   const found = [];
-  for (let k = -span; k <= span; k += step2) {
+  for (let k = -span; k <= span; k += step3) {
     if (k === 0) continue;
     let covers = 0;
     let clean = 0;
@@ -53811,9 +53823,9 @@ function checkPaintedStill(orig, painted) {
     const v = xs.slice().sort((a, b) => a - b);
     return v[Math.floor(v.length / 2)];
   };
-  const step2 = Math.max(1, Math.floor(Math.sqrt(w * h / 6e4)));
+  const step3 = Math.max(1, Math.floor(Math.sqrt(w * h / 6e4)));
   const diffs = [[], [], []];
-  for (let y = 0; y < h; y += step2) for (let x = 0; x < w; x += step2) {
+  for (let y = 0; y < h; y += step3) for (let x = 0; x < w; x += step3) {
     const k = (y * w + x) * 4;
     for (let c = 0; c < 3; c++) diffs[c].push(painted.data[k + c] - orig.data[k + c]);
   }
@@ -53822,7 +53834,7 @@ function checkPaintedStill(orig, painted) {
     let s = 0;
     let n = 0;
     const vals = [];
-    const st = Math.max(2, step2 * 2);
+    const st = Math.max(2, step3 * 2);
     for (let y = 8; y < h - 8; y += st) for (let x = 8; x < w - 8; x += st) {
       const a = lum2(painted.data, y * w + x);
       const b = lum2(orig.data, (y - dy) * w + (x - dx));
@@ -55481,10 +55493,10 @@ function toPatchRegion(region) {
   }
   return { kind: "polygon", points: region.polygon.map((p) => [p[0], p[1]]) };
 }
-function shapeVector(s, extra = []) {
+function shapeVector(s, extra2 = []) {
   const v = [];
   for (const list2 of [s.vertices, s.inTangents, s.outTangents]) for (const p of list2) v.push(p[0], p[1]);
-  return [...v, ...extra];
+  return [...v, ...extra2];
 }
 function followShapes(a) {
   const frames = [];
@@ -56475,16 +56487,16 @@ function planFrameTimes(o) {
   const wf1 = Math.max(wf0, clampF(Math.round((o.workStart + o.workDuration) * fps) - 1));
   const f0 = o.start !== void 0 ? clampF(Math.round(o.start * fps)) : wf0;
   const f1 = Math.max(f0, o.end !== void 0 ? clampF(Math.round(o.end * fps)) : wf1);
-  const step2 = Math.max(1, Math.round(o.step));
+  const step3 = Math.max(1, Math.round(o.step));
   const refF = o.refTime !== void 0 ? clampF(Math.round(o.refTime * fps)) : f0;
   const set2 = /* @__PURE__ */ new Set([f0, f1, refF]);
-  for (let f = f0; f <= f1; f += step2) set2.add(f);
+  for (let f = f0; f <= f1; f += step3) set2.add(f);
   const frames = [...set2].sort((a, b) => a - b);
   const cap2 = o.maxFrames ?? MAX_FRAMES2;
   if (frames.length > cap2) {
     throw new PlanarError("bad_args", `${frames.length} frames would be measured; the most is ${cap2}. Raise step or narrow start / end.`);
   }
-  return { times: frames.map((f) => f / fps), total_frames: f1 - f0 + 1, step: step2, range: [r48(f0 / fps), r48(f1 / fps)], ref_time: refF / fps };
+  return { times: frames.map((f) => f / fps), total_frames: f1 - f0 + 1, step: step3, range: [r48(f0 / fps), r48(f1 / fps)], ref_time: refF / fps };
 }
 function spreadFrames(from, to, n) {
   const out = /* @__PURE__ */ new Set();
@@ -58274,8 +58286,8 @@ var init_patchfit = __esm({
     REGION_TEXT = "Where the patch is, in comp pixels, AS IT LOOKS AT `ref_time` (the frame the patch holds). A rect, ellipse or polygon.";
     TRACK_TEXT = "How the shot moves: a track source (track_id from ae_track_multi / ae_track_read, nulls, corner_pin, tracker or transform). Its motion is reference frame -> frame and is re-based so `ref_time` is the identity. Without it the shot is taken as locked off.";
     REF_TEXT = "The frame the patch holds (seconds): the region is read as drawn there, the track is re-based so it is the identity, and the colour fit is anchored there. Default: the track's own reference frame when `track` is a track_id, else the first frame of the range. Refused where the track has no solved motion at that frame.";
-    renderFields = (renders, extra = "") => ({
-      max_renders: external_exports.number().int().min(4).max(600).default(renders).describe(`The most renders one call makes for measuring (each frame is one), default ${renders}.${extra}`),
+    renderFields = (renders, extra2 = "") => ({
+      max_renders: external_exports.number().int().min(4).max(600).default(renders).describe(`The most renders one call makes for measuring (each frame is one), default ${renders}.${extra2}`),
       max_seconds: external_exports.number().min(10).max(540).default(90).describe("The most seconds one call renders for (it holds the AE queue). Default 90.")
     });
     AePatchColorMatchSchema = external_exports.object({
@@ -58449,9 +58461,9 @@ function bilinear2(a, w, h, x, y) {
 function scanSide(gr, a, b, outward, o) {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
   const steps = Math.max(8, Math.min(200, Math.floor(len / 2)));
-  const step2 = 0.5;
+  const step3 = 0.5;
   const S = Math.max(2, o.searchPx);
-  const n = Math.floor(2 * S / step2) + 1;
+  const n = Math.floor(2 * S / step3) + 1;
   const prof = new Float64Array(n);
   const points = [];
   const strengths = [];
@@ -58463,7 +58475,7 @@ function scanSide(gr, a, b, outward, o) {
     const py = a[1] + (b[1] - a[1]) * u;
     let top = 0;
     for (let j = 0; j < n; j++) {
-      const d2 = -S + j * step2;
+      const d2 = -S + j * step3;
       const x = px + outward[0] * d2;
       const y = py + outward[1] * d2;
       if (x < 1 || y < 1 || x > w - 2 || y > h - 2) {
@@ -58483,14 +58495,14 @@ function scanSide(gr, a, b, outward, o) {
     if (peaks.length === 0) continue;
     let pick5 = peaks[0];
     if (o.prefer === "outer") pick5 = peaks[peaks.length - 1];
-    else if (o.prefer === "nearest") pick5 = peaks.reduce((best, j) => Math.abs(-S + j * step2) < Math.abs(-S + best * step2) ? j : best, peaks[0]);
-    if (peaks.some((j) => Math.abs(j - pick5) * step2 > 3)) competing++;
+    else if (o.prefer === "nearest") pick5 = peaks.reduce((best, j) => Math.abs(-S + j * step3) < Math.abs(-S + best * step3) ? j : best, peaks[0]);
+    if (peaks.some((j) => Math.abs(j - pick5) * step3 > 3)) competing++;
     const l = prof[pick5 - 1];
     const c = prof[pick5];
     const r = prof[pick5 + 1];
     const den = l - 2 * c + r;
     const off = den < 0 ? clamp4(0.5 * (l - r) / den, -0.5, 0.5) : 0;
-    const d = -S + (pick5 + off) * step2;
+    const d = -S + (pick5 + off) * step3;
     points.push([px + outward[0] * d, py + outward[1] * d]);
     strengths.push(c);
   }
@@ -58827,8 +58839,8 @@ function lumaQuantiles(img, mask, qs, opts = {}) {
 }
 function quadEdgeSigma(gray, quadImg, scale) {
   const half = 6;
-  const step2 = 0.5;
-  const n = Math.round(2 * half / step2) + 1;
+  const step3 = 0.5;
+  const n = Math.round(2 * half / step3) + 1;
   const acc = new Float64Array(n);
   const cnt = new Float64Array(n);
   const { width: w, height: h } = gray;
@@ -58853,7 +58865,7 @@ function quadEdgeSigma(gray, quadImg, scale) {
       if (px - half * 2 < 1 || py - half * 2 < 1 || px + half * 2 > w - 2 || py + half * 2 > h - 2) continue;
       const prof = new Float64Array(n);
       for (let j = 0; j < n; j++) {
-        const d = -half + j * step2;
+        const d = -half + j * step3;
         prof[j] = bilinear2(gray.data, w, h, px + nx * d, py + ny * d);
       }
       let jm = -1;
@@ -58888,11 +58900,11 @@ function quadEdgeSigma(gray, quadImg, scale) {
   const hi = mean2(ok.slice(-3).map((k) => avg[k]));
   const contrast = hi - lo;
   if (contrast < 6) return { sigma_px: null, sigma_measured_px: null, contrast: r213(contrast), samples: used, reason: "the step is under 6 gray levels, too faint to read a softness from" };
-  const norm3 = ok.map((k) => (avg[k] - lo) / contrast);
+  const norm4 = ok.map((k) => (avg[k] - lo) / contrast);
   const cross = (level) => {
     for (let i = 1; i < ok.length; i++) {
-      if (norm3[i - 1] < level && norm3[i] >= level) {
-        const t = (level - norm3[i - 1]) / (norm3[i] - norm3[i - 1]);
+      if (norm4[i - 1] < level && norm4[i] >= level) {
+        const t = (level - norm4[i - 1]) / (norm4[i] - norm4[i - 1]);
         return ok[i - 1] + t * (ok[i] - ok[i - 1]);
       }
     }
@@ -58901,7 +58913,7 @@ function quadEdgeSigma(gray, quadImg, scale) {
   const d10 = cross(0.1);
   const d90 = cross(0.9);
   if (d10 === null || d90 === null || d90 <= d10) return { sigma_px: null, sigma_measured_px: null, contrast: r213(contrast), samples: used, reason: "the averaged profile is not a clean step" };
-  const sigmaImg = (d90 - d10) * step2 / 2.563;
+  const sigmaImg = (d90 - d10) * step3 / 2.563;
   const measured = sigmaImg / scale;
   const sampling = 0.289 / scale;
   return { sigma_px: r312(Math.sqrt(Math.max(0, measured * measured - sampling * sampling))), sigma_measured_px: r312(measured), contrast: r213(contrast), samples: used };
@@ -60690,9 +60702,9 @@ var init_projectitems = __esm({
       }
     });
     MAX_READ_IDS = 500;
-    readItems = (ids, extra = {}) => ({
+    readItems = (ids, extra2 = {}) => ({
       host: "projectitemsReadItems",
-      args: { ids: [...new Set(ids.filter((n) => typeof n === "number"))].slice(0, MAX_READ_IDS), ...extra }
+      args: { ids: [...new Set(ids.filter((n) => typeof n === "number"))].slice(0, MAX_READ_IDS), ...extra2 }
     });
     OP_ACTIONS = ["create_folder", "move", "rename", "label", "comment", "delete", "organize", "remove_empty_folders"];
     ACTION_FIELDS = {
@@ -62692,6 +62704,369 @@ var init_timeline = __esm({
   }
 });
 
+// src/tools/ext/plan.ts
+function guessIntent(request2) {
+  for (const [intent, re] of KEYWORDS) if (re.test(request2)) return intent;
+  return "other";
+}
+function resolveLayers(ctx, names) {
+  const all = ctx.comp?.layers ?? [];
+  if (names && names.length) {
+    const found = [];
+    const unknown = [];
+    for (const n of names) {
+      const w = norm2(n);
+      const hit = all.find((l) => norm2(l.name) === w) ?? all.find((l) => norm2(l.name).includes(w));
+      if (hit) {
+        if (!found.includes(hit)) found.push(hit);
+      } else unknown.push(n);
+    }
+    if (found.length) return { layers: found, unknown, from: "named" };
+    return { layers: all.filter((l) => l.selected), unknown, from: all.some((l) => l.selected) ? "selected" : "none" };
+  }
+  const sel2 = all.filter((l) => l.selected);
+  return { layers: sel2, unknown: [], from: sel2.length ? "selected" : "none" };
+}
+function recipe(intent, a) {
+  switch (intent) {
+    case "animate":
+      return {
+        steps: [
+          step2("ae_get_layer_props", "read the property and any keys already on it"),
+          step2("ae_set_property", "set the keyframes (times, values)"),
+          step2("ae_set_keyframe_ease", "give them the feel (ease curve)"),
+          step2("ae_motion_review", "check spacing, speed jumps and the rest pose")
+        ],
+        extras: [
+          extra("Show the move as frames", "ae_contact_sheet", "the user sees the timing before judging it", "try"),
+          ...a.many ? [extra("Offset the layers in time", "ae_stagger", "several layers move: a stagger reads better than all at once", "ask")] : [],
+          extra("Save the project's motion language", "ae_brief", "durations and eases stay the same across the project", "ask")
+        ]
+      };
+    case "text":
+      return {
+        steps: [
+          step2("ae_fonts", "check the font exists and has every character of the text (action check, with text)"),
+          step2("ae_create_layer", "make the text layer, or ae_set_text to change one"),
+          step2("ae_fit_text", "fit it to its box or the safe area"),
+          step2("ae_check_legibility", "check it reads over the picture")
+        ],
+        extras: [
+          extra("Animate it in", "ae_text_animator", "a reveal by character, word or line", "ask"),
+          extra("Check overlaps with other text", "ae_check_text_overlap", "titles stacked in one comp", "try")
+        ]
+      };
+    case "track":
+      return {
+        steps: [
+          step2("ae_track_multi", "track points on the surface, with preview: look at the contact sheet"),
+          step2("ae_track_apply", "write it to the layer (corner_pin for a flat insert, transform to follow); follow model_advice with refit_model when the corners shake"),
+          step2("ae_patch_check", "render a few frames and measure slip against the plate")
+        ],
+        extras: [
+          extra("Steady a track that shakes", "ae_track_apply", "smooth_frames 1-2, or refit_model as model_advice says", "ask"),
+          extra("Stabilize the shot instead", "ae_stabilize", "when the goal is a steady picture, not an insert", "ask")
+        ]
+      };
+    case "key":
+      return {
+        steps: [
+          step2("ae_key_greenscreen", "Keylight, Key Cleaner and Spill Suppressor, with a measured check"),
+          step2("ae_matte_check", "holes, edge chatter and a see-through core on rendered frames")
+        ],
+        extras: [extra("Match the subject to the new background", "ae_color_match_element", "levels from pairs of element and plate areas", "ask")]
+      };
+    case "cleanup":
+      return {
+        steps: [
+          step2("ae_cleanplate_setup", "a clean plate to paint from, held to the shot's motion"),
+          step2("ae_patch_check", "measure slip, seam and edge of the patch on rendered frames")
+        ],
+        extras: [
+          extra("Fill from the frames around it", "ae_inpaint_plate", "the area shows in other frames", "ask"),
+          extra("Match the grain", "ae_patch_grain", "a clean patch looks pasted on a grainy plate", "try")
+        ]
+      };
+    case "color":
+      return {
+        steps: [
+          step2("ae_list_effects", "find the effect to use"),
+          step2("ae_add_effect", "add it"),
+          step2("ae_set_effect", "set its values"),
+          step2("ae_compare_frames", "compare before and after")
+        ],
+        extras: [extra("Match an element to its plate", "ae_color_match_element", "measured levels instead of eyeballing", "ask")]
+      };
+    case "compose_3d":
+      return {
+        steps: [
+          step2("ae_scene_3d_report", "where the camera, lights and layers are, by depth"),
+          step2("ae_camera_rig", "a camera with a controller, or retune the one there"),
+          step2("ae_create_layer", "lights, meshes and 3D layers"),
+          step2("ae_annotate_frame", "a frame with the layers labelled (include_3d)")
+        ],
+        extras: a.hazard ? [] : [extra("Depth spread for parallax", "ae_camera_rig", "spread: layers at different depths, scaled to keep their size", "ask")]
+      };
+    case "render":
+      return {
+        steps: [
+          step2("ae_preflight", "missing footage, fonts, expressions with errors, empty comps"),
+          step2("ae_save", "the render reads the saved project"),
+          step2("ae_render_templates", "the output modules this AE has"),
+          step2("ae_render_queue_add", "queue the comp with the output path and template"),
+          step2("ae_aerender_start", "render in the background (or ae_render_queue_render inside AE)"),
+          step2("ae_verify_render", "check the file: frames, size, fps, audio")
+        ],
+        extras: [
+          extra("Check against a delivery spec", "ae_check_delivery_file", "broadcast or platform specs", "try"),
+          extra("Collect the project with its files", "ae_collect_files", "hand-off or archive", "ask")
+        ]
+      };
+    case "review":
+      return {
+        steps: [
+          step2("ae_describe_comp", "what is in the comp and when"),
+          step2("ae_motion_review", "motion problems: speed jumps, linear keys, cut-off moves"),
+          step2("ae_contact_sheet", "frames to look at"),
+          step2("ae_timing_check", "holds, dead stretches, reading time")
+        ],
+        extras: [
+          extra("Check the house style", "ae_house_style_check", "the project's brief and taste rules", "try"),
+          extra("Check text legibility", "ae_check_legibility", "text over busy picture", "try")
+        ]
+      };
+    case "edit":
+      return {
+        steps: [
+          step2("ae_get_layer_props", "read what is there"),
+          step2("ae_set_property", "change it (or ae_layer_ops for layer order, duplicate, delete)"),
+          step2("ae_comp_diff", "say what changed")
+        ],
+        extras: [extra("Show the result", "ae_snapshot_frame", "a frame after the change", "try")]
+      };
+    default:
+      return {
+        steps: [step2("ae_describe_comp", "what is in the comp"), step2("ae_search_tools", "find the tools for the task (query: the user's words)")],
+        extras: []
+      };
+  }
+}
+function buildPlan(args, ctx, askFirst) {
+  const answers = args.answers ?? {};
+  const intent = args.intent ?? guessIntent(args.request);
+  const questions = [];
+  const notes = [];
+  const hazards = [];
+  const comp = ctx.comp;
+  if (ctx.comp_not_found) notes.push(`Comp ${args.comp_id} is not in the project.`);
+  if (!comp) {
+    if (ctx.comps_total === 0) notes.push("The project has no comp yet: the first step makes one (ae_create_comp).");
+    else {
+      const named = ctx.comps.filter((c) => args.request.toLowerCase().includes(c.name.toLowerCase()) && c.name.length > 2);
+      const pool = (named.length ? named : ctx.comps).slice(0, 8);
+      questions.push({
+        id: "comp",
+        question: "Which comp is this about?",
+        why: `${ctx.comps_total} comps and none is open in the viewer.`,
+        kind: "choice",
+        options: pool.map((c) => ({ value: String(c.id), label: c.name, detail: `${c.width}x${c.height}, ${c.fps} fps, ${sec(c.duration)}, ${c.num_layers} layers` })),
+        default: String(pool[0].id)
+      });
+    }
+  }
+  const res = resolveLayers(ctx, args.layers);
+  if (res.unknown.length) notes.push(`No layer named ${res.unknown.map((n) => `"${n}"`).join(", ")} in "${comp?.name ?? "the comp"}".`);
+  const fits2 = NEEDS_LAYER[intent];
+  if (comp && fits2 && res.layers.length === 0) {
+    const cands = comp.layers.filter(fits2);
+    if (cands.length === 1) {
+      res.layers.push(cands[0]);
+      notes.push(`"${cands[0].name}" is the only layer this can apply to.`);
+    } else if (cands.length > 1) {
+      questions.push({
+        id: "layer",
+        question: intent === "track" ? "Which layer should follow the surface?" : "Which layer is this about?",
+        why: "None is named in the request or selected.",
+        kind: "choice",
+        options: cands.slice(0, 8).map((l) => ({ value: String(l.index), label: l.name, detail: `${l.kind}${l.three_d ? ", 3D" : ""}${l.keyed.length ? ", keyed: " + l.keyed.join(", ") : ""}` })),
+        default: String(cands[0].index)
+      });
+    }
+  }
+  if (intent === "animate") {
+    const keyed = res.layers.filter((l) => l.keyed.length);
+    if (keyed.length) {
+      questions.push({
+        id: "existing_keys",
+        question: `${keyed.map((l) => `"${l.name}"`).join(", ")} already has keyframes (${[...new Set(keyed.flatMap((l) => l.keyed))].join(", ")}). Keep them and add, or replace them?`,
+        why: "Replacing removes the move that is there now.",
+        kind: "choice",
+        options: [
+          { value: "keep", label: "Keep them, add the new keys" },
+          { value: "replace", label: "Replace them" }
+        ],
+        default: "keep"
+      });
+    }
+    const fps = comp?.fps ?? 25;
+    questions.push({
+      id: "duration",
+      question: "How long should the move take?",
+      why: "Timing changes the feel more than anything else.",
+      kind: "choice",
+      options: [0.5, 1, 2].map((s) => ({ value: String(s), label: sec(s), detail: `${Math.round(s * fps)} frames at ${fps} fps` })),
+      default: "1"
+    });
+    questions.push({ id: "feel", question: "What should the move feel like?", why: "The ease curve sets the feel.", kind: "ease", options: EASES2, default: "gentle" });
+  }
+  if (intent === "text") {
+    questions.push({ id: "text", question: "What should the text say, exactly?", why: "The font is checked against every character of it.", kind: "open", default: "the text in the request" });
+  }
+  if (intent === "track") {
+    questions.push({ id: "surface", question: "Which surface should it stick to (where in the frame)?", why: "The points go on that surface only; points off it make the track slide.", kind: "open", default: "the surface the request names" });
+  }
+  if (intent === "render") {
+    questions.push({
+      id: "format",
+      question: "What should the file be?",
+      why: "The output module decides the codec and the extension.",
+      kind: "choice",
+      options: [
+        { value: "h264", label: "H.264 MP4 (review, web)" },
+        { value: "prores", label: "ProRes MOV (editing, grading)" },
+        { value: "png_sequence", label: "PNG sequence (frames)" }
+      ],
+      default: "h264"
+    });
+    if (comp && (comp.work_area[0] > 1e-3 || Math.abs(comp.work_area[1] - comp.duration) > 1e-3)) {
+      questions.push({
+        id: "range",
+        question: `Render the work area (${sec(comp.work_area[0])} to ${sec(comp.work_area[0] + comp.work_area[1])}) or the whole comp (${sec(comp.duration)})?`,
+        why: "The work area is shorter than the comp.",
+        kind: "choice",
+        options: [
+          { value: "work_area", label: "Work area" },
+          { value: "whole", label: "Whole comp" }
+        ],
+        default: "whole"
+      });
+    }
+  }
+  if (comp?.render_hazard) {
+    const h = comp.render_hazard;
+    hazards.push(
+      `After Effects ${ctx.ae_version} never finishes rendering "${h.comp_name}": the light "${h.light}" takes its image from a layer and "${h.layer}" is a 3D layer it lights. Frames and renders of it are refused before AE renders; for a frame, the user clears that light's Source or switches it off.`
+    );
+  }
+  const writes = intent !== "review";
+  const extrasBefore = [];
+  if (writes && ctx.project_path === "<unsaved>") {
+    extrasBefore.push(extra("Save the project first", "ae_save", "an unsaved project gets no checkpoint, so a write cannot be rolled back", "ask"));
+  } else if (writes && ctx.dirty) {
+    extrasBefore.push(extra("Checkpoint before the change", "ae_checkpoint_create", "the project has unsaved changes; a checkpoint keeps the way back", "try"));
+  }
+  const { steps, extras } = recipe(intent, { many: res.layers.length > 1, hazard: !!comp?.render_hazard });
+  const answered = {};
+  const open = [];
+  for (const q of questions) {
+    if (answers[q.id] !== void 0) answered[q.id] = answers[q.id];
+    else open.push(q);
+  }
+  const labelOf2 = (q, v) => q.options?.find((o) => o.value === v)?.label ?? v;
+  const assumptions = askFirst ? [] : open.map((q) => ({ id: q.id, assumed: labelOf2(q, q.default), value: q.default, because: q.why }));
+  const understood = {
+    intent,
+    intent_from: args.intent ? "given" : "guessed",
+    comp: comp ? { id: comp.id, name: comp.name, from: comp.why, size: [comp.width, comp.height], fps: comp.fps, duration: comp.duration, renderer: comp.renderer } : null,
+    layers: res.layers.map((l) => ({ index: l.index, name: l.name, kind: l.kind, keyed: l.keyed })),
+    layers_from: res.layers.length ? res.from : "none",
+    ...comp?.selected_properties.length ? { selected_properties: comp.selected_properties } : {}
+  };
+  const next = askFirst ? open.length ? "Ask these in the user's language, one at a time: choice and ease questions with ae_ask_user (question and options as given, kind 'ease' for feel), open ones in the chat. Skip any the request already answers. Then call ae_plan again with answers {id: value}, or go ahead with the defaults for the ones left." : "Nothing left to ask: go ahead with the plan." : "Ask first is off (the user's choice in the Chroma panel): ask nothing. Go ahead with the plan and the assumptions; tell the user the assumptions in one short line, so they can correct you.";
+  return {
+    ok: true,
+    action: "plan",
+    ask_first: askFirst,
+    understood,
+    ...Object.keys(answered).length ? { answered } : {},
+    questions: askFirst ? open : [],
+    assumptions,
+    plan: [...extrasBefore.filter((e) => e.run === "try").map((e) => ({ tool: e.tool, does: e.title.toLowerCase() })), ...steps],
+    extras: [...extrasBefore.filter((e) => e.run === "ask"), ...extras],
+    ...hazards.length ? { hazards } : {},
+    ...notes.length ? { notes } : {},
+    project: { path: ctx.project_path, dirty: ctx.dirty, ae_version: ctx.ae_version, comps: ctx.comps_total, render_queue: ctx.render_queue },
+    next
+  };
+}
+function askFirstOf(settings) {
+  return settings ? settings.get().plan.ask_first === true : false;
+}
+var PLAN_INTENTS, AePlanSchema, PLAN_TOOLS, step2, extra, KEYWORDS, NEEDS_LAYER, norm2, sec, EASES2, planTools;
+var init_plan = __esm({
+  "src/tools/ext/plan.ts"() {
+    "use strict";
+    init_zod();
+    PLAN_INTENTS = ["animate", "text", "track", "key", "cleanup", "color", "compose_3d", "render", "review", "edit", "other"];
+    AePlanSchema = external_exports.object({
+      request: external_exports.string().min(1).max(4e3).describe("The user's request, in their words and language."),
+      intent: external_exports.enum(PLAN_INTENTS).optional().describe(
+        "The kind of task, as you read the request (track: pin to a moving surface; key: green screen; cleanup: paint out; edit: change what is there). Default: guessed from English words."
+      ),
+      comp_id: external_exports.number().int().optional().describe("Default: the active comp, else the only one."),
+      layers: external_exports.array(external_exports.string().min(1).max(200)).max(20).optional().describe("Layer names the request mentions."),
+      answers: external_exports.record(external_exports.union([external_exports.string(), external_exports.number(), external_exports.boolean()])).optional().describe("Answers to an earlier call's questions: {question id: option value or text}.")
+    });
+    PLAN_TOOLS = /* @__PURE__ */ new Set();
+    step2 = (tool, does) => {
+      PLAN_TOOLS.add(tool);
+      return { tool, does };
+    };
+    extra = (title, tool, why, run) => {
+      PLAN_TOOLS.add(tool);
+      return { title, tool, why, run };
+    };
+    KEYWORDS = [
+      ["render", /\b(render|export|deliver|output|encode)/i],
+      ["track", /\b(track|stick|pin|attach|follow)/i],
+      ["key", /\b(green ?screen|blue ?screen|chroma ?key|keying|key out)/i],
+      ["cleanup", /\b(remove|clean ?up|paint out|erase|wire|rig removal)/i],
+      ["text", /\b(text|title|caption|subtitle|font|lower third|typography)/i],
+      ["compose_3d", /\b(3d|camera|light|depth|parallax)/i],
+      ["color", /\b(colou?r|grade|grading|lut|match)/i],
+      ["animate", /\b(animat|move|motion|keyframe|ease|bounce|slide|fade|pop|spin)/i],
+      ["review", /\b(review|critique|feedback|look at|check)/i]
+    ];
+    NEEDS_LAYER = {
+      animate: (l) => l.kind !== "camera" && l.kind !== "light",
+      key: (l) => l.kind === "footage" || l.kind === "precomp" || l.kind === "av",
+      cleanup: (l) => l.kind === "footage" || l.kind === "precomp" || l.kind === "av",
+      color: (l) => l.kind !== "camera" && l.kind !== "light" && l.kind !== "null",
+      track: (l) => l.kind !== "camera" && l.kind !== "light" && l.kind !== "null"
+    };
+    norm2 = (s) => s.toLowerCase().replace(/[\s_\-]+/g, " ").trim();
+    sec = (s) => `${Number(s.toFixed(2))} s`;
+    EASES2 = [
+      { value: "gentle", label: "Gentle", detail: "[0.25, 0.1, 0.25, 1]" },
+      { value: "snappy", label: "Snappy", detail: "[0.2, 0, 0, 1]" },
+      { value: "expo_out", label: "Fast out, soft landing", detail: "[0.16, 1, 0.3, 1]" }
+    ];
+    planTools = [
+      {
+        name: "ae_plan",
+        description: "Call it first for a new task. Pass the user's request (their words and language), the intent you read in it, and the layer names it mentions. It reads the open project once and returns: what it took the request to mean (comp and layers resolved from the active comp and the selection), a plan of steps with the tool for each, extras worth offering (marked try: safe to run, or ask: offer first), and hazards. Questions follow the user's choice in the Chroma panel (Ask first, off by default). Off: questions is empty and the defaults are listed as assumptions; go ahead and tell the user them in one line. On: questions lists what would change the work, each with options from the project and a default; ask them one at a time (ae_ask_user for choices, the chat for open ones), then call again with answers to get the plan with them. Read-only: it never changes the project.",
+        schema: AePlanSchema,
+        handler: async (args, ctx) => {
+          const answered = args.answers?.comp;
+          const compId = args.comp_id ?? (answered !== void 0 && Number.isFinite(Number(answered)) ? Number(answered) : void 0);
+          const res = await ctx.bridge.callHost("planContext", compId !== void 0 ? { comp_id: compId } : {}, { label: "ae_plan", mutates: false, toolName: "ae_plan" });
+          return buildPlan({ ...args, ...compId !== void 0 ? { comp_id: compId } : {} }, res.result, askFirstOf(ctx.settings));
+        }
+      }
+    ];
+  }
+});
+
 // src/tools/ext/compsettings.ts
 function compareToBrief(info, match) {
   const out = [];
@@ -62710,28 +63085,28 @@ function compareToBrief(info, match) {
 function runGuideSteps(before, applied) {
   const list2 = before.map((g) => ({ ...g }));
   const touched = list2.map(() => false);
-  for (const step2 of applied) {
-    if (step2.action === "add") {
+  for (const step3 of applied) {
+    if (step3.action === "add") {
       list2.push({
-        orientation_type: step2.orientation_type,
-        orientation: step2.orientation,
-        position: step2.position,
-        position_kind: step2.position_kind,
-        color: step2.color,
-        pinned: step2.pinned,
+        orientation_type: step3.orientation_type,
+        orientation: step3.orientation,
+        position: step3.position,
+        position_kind: step3.position_kind,
+        color: step3.color,
+        pinned: step3.pinned,
         added: true
       });
       touched.push(true);
-    } else if (step2.action === "set" && step2.index !== void 0 && list2[step2.index]) {
-      const g = list2[step2.index];
-      g.position = step2.position;
-      touched[step2.index] = true;
-      if (step2.position_kind !== void 0) g.position_kind = step2.position_kind;
-      if (step2.color !== void 0) g.color = step2.color;
-      if (step2.pinned !== void 0) g.pinned = step2.pinned;
-    } else if (step2.action === "remove" && step2.index !== void 0) {
-      list2.splice(step2.index, 1);
-      touched.splice(step2.index, 1);
+    } else if (step3.action === "set" && step3.index !== void 0 && list2[step3.index]) {
+      const g = list2[step3.index];
+      g.position = step3.position;
+      touched[step3.index] = true;
+      if (step3.position_kind !== void 0) g.position_kind = step3.position_kind;
+      if (step3.color !== void 0) g.color = step3.color;
+      if (step3.pinned !== void 0) g.pinned = step3.pinned;
+    } else if (step3.action === "remove" && step3.index !== void 0) {
+      list2.splice(step3.index, 1);
+      touched.splice(step3.index, 1);
     }
   }
   return { list: list2, touched };
@@ -64227,7 +64602,7 @@ var init_explore = __esm({
 // src/tools/ext/inventory.ts
 function fontMatches(font, ref3) {
   if (typeof ref3 === "string") return font.postscript === ref3;
-  return norm2(font.family) === norm2(ref3.family) && norm2(font.style) === norm2(ref3.style);
+  return norm3(font.family) === norm3(ref3.family) && norm3(font.style) === norm3(ref3.style);
 }
 function checkpointRefusal(cp) {
   if (cp.status === "skipped") {
@@ -64495,7 +64870,7 @@ async function checkFontFiles(ctx, budgetMs = FONT_SEARCH_BUDGET_MS) {
     note: total2 > 0 ? FONT_FILES_NOTE : "Every font file After Effects lists is there and readable. " + FONT_FILES_NOTE
   };
 }
-var fs57, AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm2, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, FONT_SIGNATURES, FONT_FILES_NOTE, inventoryTools;
+var fs57, AeCompTreeSchema, FontRefSchema, FONT_ACTIONS, AeFontsSchema, norm3, REPLACE_NOTES, FONT_SEARCH_BUDGET_MS, FONT_SEARCH_MAX_CHUNKS, FONT_SIGNATURES, FONT_FILES_NOTE, inventoryTools;
 var init_inventory = __esm({
   "src/tools/ext/inventory.ts"() {
     "use strict";
@@ -64545,7 +64920,7 @@ var init_inventory = __esm({
         if (v.dry_run === false && !v.expect) ctx.addIssue({ code: external_exports.ZodIssueCode.custom, path: ["expect"], message: "replace with dry_run false needs expect (the target guard)." });
       }
     });
-    norm2 = (s) => String(s ?? "").toLowerCase().replace(/[\s\-_]+/g, "");
+    norm3 = (s) => String(s ?? "").toLowerCase().replace(/[\s\-_]+/g, "");
     REPLACE_NOTES = [
       "Replacing a font is not undoable: Edit > Undo (Ctrl+Z) does not restore it; ae_checkpoint_revert with the checkpoint does.",
       "With no_font_locking, missing glyphs cannot be detected. A substituted from-font with identical properties ignores noFontLocking. In a document with mixed fonts only the ranges that used the old font change."
@@ -65296,8 +65671,8 @@ function createLayerMismatches(args, beforeRaw, afterRaw, written) {
   expectThat(m, kindsFor(args.type).includes(made.kind), "layer.kind", args.type, made.kind, "The new layer is of another kind");
   if (args.name) expectThat(m, made.name === args.name, "layer.name", args.name, made.name, "Name differs");
   if (args.type === "text" && args.text !== void 0 && made.text !== void 0 && args.text.length <= 200) {
-    const norm3 = (s) => s.replace(/\r\n?|\n/g, "\n");
-    expectThat(m, norm3(made.text) === norm3(args.text), "layer.text", args.text, made.text, "Text differs");
+    const norm4 = (s) => s.replace(/\r\n?|\n/g, "\n");
+    expectThat(m, norm4(made.text) === norm4(args.text), "layer.text", args.text, made.text, "Text differs");
   }
   if (args.three_d && args.type !== "camera" && args.type !== "light") {
     expectThat(m, made.threeD === true, "layer.threeD", true, made.threeD, "Layer is not 3D");
@@ -65788,8 +66163,8 @@ function alignMismatches(args, afterRaw, written) {
   } else {
     const h = args.distribute === "horizontal";
     const cs = rects.map((r) => centre(r, h)).sort((a, b) => a - b);
-    const step2 = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
-    cs.forEach((c, i) => expectThat(m, near10(c, cs[0] + step2 * i), `centres[${i}]`, Math.round((cs[0] + step2 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
+    const step3 = (cs[cs.length - 1] - cs[0]) / (cs.length - 1);
+    cs.forEach((c, i) => expectThat(m, near10(c, cs[0] + step3 * i), `centres[${i}]`, Math.round((cs[0] + step3 * i) * 10) / 10, Math.round(c * 10) / 10, "Centres are not evenly spaced"));
   }
   return m;
 }
@@ -67780,7 +68155,7 @@ var init_multicomp = __esm({
     sleep2 = (ms) => new Promise((resolve7) => setTimeout(resolve7, ms));
     PROBE_NAME_LIMIT = 50;
     call = (ctx, fn, args, label) => ctx.bridge.callHost(fn, args, { label, mutates: false, toolName: "ae_multi_comp_apply" }).then((r) => r.result);
-    bad3 = (message, extra = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra });
+    bad3 = (message, extra2 = {}) => ({ ok: false, error: "bad_args", applied: false, message, ...extra2 });
     multicompTools = [
       {
         name: "ae_multi_comp_apply",
@@ -68923,9 +69298,9 @@ function saveTemplateMismatches(args, before, after, written) {
   return m;
 }
 function sameFootage(a, b, sequence) {
-  const norm3 = (p) => normalizeGuardPath(p);
-  if (!sequence) return norm3(a) === norm3(b);
-  const dir = (p) => norm3(p).replace(/[\\/][^\\/]*$/, "");
+  const norm4 = (p) => normalizeGuardPath(p);
+  if (!sequence) return norm4(a) === norm4(b);
+  const dir = (p) => norm4(p).replace(/[\\/][^\\/]*$/, "");
   const ver = (p) => versionToken(p.split(/[\\/]/).pop() ?? "")?.number ?? null;
   return dir(a) === dir(b) && ver(a) === ver(b);
 }
@@ -69236,7 +69611,7 @@ var init_production = __esm({
           if (args.item_ids?.length && missingIds.length === args.item_ids.length) {
             return { ok: false, error: "not_found", message: `No footage item with a file has id ${missingIds.join(", ")}`, missing_ids: missingIds };
           }
-          const extra = {
+          const extra2 = {
             ...files.truncated ? { truncated: true, truncated_note: "More than 500 footage items have a file; only the first 500 were checked. Pass item_ids for the rest." } : {},
             ...missingIds.length ? { missing_ids: missingIds } : {}
           };
@@ -69258,7 +69633,7 @@ var init_production = __esm({
             return { ok: false, error: "no_such_version", message: `No v${args.version} found next to ${report[0].file}`, items: report };
           }
           if (!args.update || args.dry_run || outdated.length === 0) {
-            return { ok: true, ...args.dry_run ? { dry_run: true } : {}, checked: report.length, outdated: outdated.length, ...extra, items: args.update ? outdated : report };
+            return { ok: true, ...args.dry_run ? { dry_run: true } : {}, checked: report.length, outdated: outdated.length, ...extra2, items: args.update ? outdated : report };
           }
           const jobs = outdated.map((r) => ({ item_id: r.item_id, path: r.target, sequence: r.sequence }));
           const ids = jobs.map((j) => j.item_id);
@@ -69303,7 +69678,7 @@ var init_production = __esm({
           }
           return {
             ...out,
-            ...extra,
+            ...extra2,
             items: outdated,
             ...logPath ? { log_path: logPath } : { log_path: null },
             ...logNotes.aside ? { log_aside: logNotes.aside, log_note: "The existing versions log could not be read as JSON; it was kept as log_aside and a new log was started." } : {},
@@ -70448,15 +70823,15 @@ function unreadable2(skill) {
 }
 function lintSteps(steps) {
   const problems = [];
-  for (const step2 of steps) {
-    for (const f of lintEs3(step2.code)) problems.push(`${step2.file} line ${f.line}: ${f.message}`);
+  for (const step3 of steps) {
+    for (const f of lintEs3(step3.code)) problems.push(`${step3.file} line ${f.line}: ${f.message}`);
   }
   return problems;
 }
 function lintStepsSafety(steps, mutates) {
   const problems = [];
-  for (const step2 of steps) {
-    for (const f of lintJsxSafety(step2.code, { mutates })) problems.push(`${step2.file} ${describeSafetyFinding(f)}`);
+  for (const step3 of steps) {
+    for (const f of lintJsxSafety(step3.code, { mutates })) problems.push(`${step3.file} ${describeSafetyFinding(f)}`);
   }
   return problems;
 }
@@ -70738,6 +71113,7 @@ var init_ext = __esm({
     init_animate();
     init_annotate();
     init_ask();
+    init_plan();
     init_assets2();
     init_audio2();
     init_brief();
@@ -70780,6 +71156,7 @@ var init_ext = __esm({
       ...framesTools,
       ...motionTools,
       ...askTools,
+      ...planTools,
       ...skillsTools,
       ...briefTools,
       ...aerenderTools,
@@ -70891,12 +71268,12 @@ function changedNothing(r) {
 }
 function markReplay(r, firstAt, waited) {
   const j = responseJson(r);
-  const extra = { idempotent_replay: true, first_called_at: new Date(firstAt).toISOString(), ...waited ? { waited_for_first_call: true } : {} };
-  const text = j ? JSON.stringify({ ...j, ...extra }) : r.content?.[0]?.text ?? "";
+  const extra2 = { idempotent_replay: true, first_called_at: new Date(firstAt).toISOString(), ...waited ? { waited_for_first_call: true } : {} };
+  const text = j ? JSON.stringify({ ...j, ...extra2 }) : r.content?.[0]?.text ?? "";
   return { ...r.isError ? { isError: true } : {}, content: [{ type: "text", text }] };
 }
-function refusal(message, extra = {}) {
-  return { isError: true, content: [{ type: "text", text: JSON.stringify({ kind: "evalscript_error", code: "idempotency_key_reused", outcome: "not_applied", message, ...extra }) }] };
+function refusal(message, extra2 = {}) {
+  return { isError: true, content: [{ type: "text", text: JSON.stringify({ kind: "evalscript_error", code: "idempotency_key_reused", outcome: "not_applied", message, ...extra2 }) }] };
 }
 function badIdempotencyKey(key) {
   if (typeof key !== "string" || key.trim().length === 0) return "idempotency_key must be a non-empty string.";
@@ -72251,27 +72628,27 @@ function envelope(response, toolName) {
   if (isError) ok = false;
   else if (typeof body.ok === "boolean") ok = body.ok;
   else ok = !(typeof body.error === "string" && body.error.length > 0);
-  const extra = {};
+  const extra2 = {};
   if (!ok && typeof body.code !== "string") {
-    if (/^Invalid arguments for /.test(message)) extra.code = "invalid_args";
-    else if (/^Unknown tool: /.test(message)) extra.code = "unknown_tool";
-    else if (typeof body.error === "string" && body.error) extra.code = body.error;
-    else if (typeof body.kind === "string" && body.kind) extra.code = body.kind;
-    else extra.code = "error";
+    if (/^Invalid arguments for /.test(message)) extra2.code = "invalid_args";
+    else if (/^Unknown tool: /.test(message)) extra2.code = "unknown_tool";
+    else if (typeof body.error === "string" && body.error) extra2.code = body.error;
+    else if (typeof body.kind === "string" && body.kind) extra2.code = body.kind;
+    else extra2.code = "error";
   }
-  const code = extra.code ?? body.code;
+  const code = extra2.code ?? body.code;
   if (!ok && body.outcome === void 0 && isWriteTool(toolName)) {
-    if (code && NOT_APPLIED_CODES.has(code)) extra.outcome = "not_applied";
-    else if (code === "timeout" || body.kind === "timeout") extra.outcome = "unknown";
+    if (code && NOT_APPLIED_CODES.has(code)) extra2.outcome = "not_applied";
+    else if (code === "timeout" || body.kind === "timeout") extra2.outcome = "unknown";
   }
-  const out = { ok, ...extra, ...body, ...body.ok === void 0 ? {} : { ok } };
+  const out = { ok, ...extra2, ...body, ...body.ok === void 0 ? {} : { ok } };
   const next = { ...response, content: [{ type: "text", text: JSON.stringify(out) }, ...response.content.slice(1)] };
   if (structuredResultsOn()) next.structuredContent = out;
   return next;
 }
 async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
   const via = opts.via ?? "direct";
-  const usage = (e, extra2, response) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra2, ...e, resultChars: resultCharsOf(response) });
+  const usage = (e, extra3, response) => recordUsage(ctx, { tool: toolName, toolset: opts.toolset, client: opts.client, via, ...extra3, ...e, resultChars: resultCharsOf(response) });
   const tool = findTool(toolName);
   if (!tool) {
     const response = envelope(formatToolError(new Error(`Unknown tool: ${oneLine2(toolName)}`)), toolName);
@@ -72279,11 +72656,11 @@ async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
     return response;
   }
   const parsed = tool.schema.safeParse(rawArgs ?? {});
-  const extra = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : void 0;
+  const extra2 = toolName === "ae_run_jsx" ? runJsxFields(parsed.success ? parsed.data : rawArgs) : void 0;
   if (!parsed.success) {
     const why = `Invalid arguments for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`).join("; ")}`;
     const response = envelope(formatToolError(new Error(why)), toolName);
-    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra, response);
+    usage({ ms: 0, ok: false, errorKind: "invalid_args", error: why }, extra2, response);
     return response;
   }
   const started = Date.now();
@@ -72295,7 +72672,7 @@ async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
     const response = envelope(formatToolResponse(output), toolName);
     usage(
       failure2 ? { ms: Date.now() - started, ok: true, resultOk: false, resultKind: failure2.kind, resultError: failure2.error, waitedMs } : { ms: Date.now() - started, ok: true, waitedMs },
-      extra,
+      extra2,
       response
     );
     return response;
@@ -72303,7 +72680,7 @@ async function callToolOnce(toolName, rawArgs, ctx, opts = {}) {
     const why = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").slice(0, 200);
     ctx.log?.("err", `tool ${toolName} failed (${Date.now() - started}ms): ${why}`);
     const response = envelope(formatToolError(err), toolName);
-    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra, response);
+    usage({ ms: Date.now() - started, ok: false, errorKind: errorKindOf(err), error: errorTextOf(err) }, extra2, response);
     return response;
   }
 }
@@ -72552,8 +72929,9 @@ var TOOL_GROUPS = {
     ]
   },
   app: {
-    blurb: "ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer.",
+    blurb: "Task plans, ExtendScript, dialogs, questions, diagnostics, memory, panels, skills, viewer.",
     tools: [
+      "ae_plan",
       "ae_run_jsx",
       "ae_dialogs",
       "ae_dialog_respond",
@@ -72602,6 +72980,7 @@ var SEARCH_HINTS = {
   ae_captions: "subtitles lower thirds speech words"
 };
 var CORE_TOOL_NAMES = [
+  "ae_plan",
   "ae_status",
   "ae_get_project",
   "ae_get_comp",
@@ -72639,6 +73018,7 @@ var CORE_TOOL_NAMES = [
 var META_TOOL_NAMES = ["ae_search_tools", "ae_get_tool_schema", "ae_invoke_tool"];
 var SCHEMA_POINTER = "More: ae_get_tool_schema.";
 var CORE_DESCRIPTION_OVERRIDES = {
+  ae_plan: "Call first for a new task (request, intent, named layers). Returns what it took the request to mean, the plan with a tool per step, extras and hazards; questions only when the user turned Ask first on in the panel (off by default: go ahead, state the assumptions). Read-only.",
   ae_run_jsx: "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render: 'Start After Effects\' OWN render of the queued items (like pressing Render), returning a job id at once; poll ae_render_queue_render_status. AE stays busy until it ends and other AE tools are refused: tell the user first, save a dirty project, prefer ae_aerender_start. Never ask the user to press Render. `engine: "media_encoder"` queues the SAVED project in Media Encoder (AE stays free; the user checks the preset and presses Start): ask the user first, then `user_confirmed: true`; offer only if aerender did not start or a long render would lock AE. `item_indexes` renders only those items (not with media_encoder), else ALL queued; items it unchecked that could not be queued again are listed as pending_restores and block a new item_indexes render. Tell the user any `resource_warnings` / `sequence_check`.',
   ae_aerender_start: "Start a background aerender process for a saved, non-dirty project. One source: comp_name + output_path, rq_index + item_comp_id (a queued, saved item), or whole_queue. Returns a job id; follow with ae_aerender_status. `continue_on_missing_footage` renders anyway (colour bars for missing footage). If it cannot run, use ae_render_queue_render. Tell the user any `resource_warnings` / `sequence_check`.",
@@ -72773,6 +73153,7 @@ function coreInstructions() {
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
+    "Start a new task with ae_plan (the request, its intent, the layers it names): the plan, and whether to ask the user first or go ahead with stated assumptions.",
     "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",
@@ -74186,7 +74567,9 @@ data: ${JSON.stringify(msg)}
       const info = renderGate.active();
       return info ? { info, message: renderGateMessage(info) } : null;
     },
-    clearRenderLock: () => renderGate.clear()
+    clearRenderLock: () => renderGate.clear(),
+    planSettings: () => ({ ask_first: ctx.settings.get().plan.ask_first }),
+    setAskFirst: (on) => ({ ask_first: ctx.settings.updatePlan({ ask_first: on }).plan.ask_first })
   };
 }
 // Annotate the CommonJS export names for ESM import in node:

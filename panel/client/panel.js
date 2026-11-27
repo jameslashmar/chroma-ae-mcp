@@ -38,6 +38,7 @@
   var $regenTokenBtn = typeof document !== "undefined" ? document.getElementById("regen-token-btn") : null;
   var $log = typeof document !== "undefined" ? document.getElementById("log") : null;
   var $serveBtn = typeof document !== "undefined" ? document.getElementById("serve-btn") : null;
+  var $askFirstBtn = typeof document !== "undefined" ? document.getElementById("ask-first-btn") : null;
   var $serveLabel = typeof document !== "undefined" ? document.getElementById("serve-label") : null;
 
   var host = common.createHostAdapter();
@@ -691,6 +692,55 @@
       : "Stop the MCP: agents' tool calls are refused until you press Start. A call already running finishes first.";
   }
 
+  // ---------- Ask first (ae_plan) ----------
+  // Whether the agent asks the user before a task. The service keeps it (GET / POST /admin/plan); off by default.
+  var askFirst = null;
+  var askFirstBusy = false;
+
+  function renderAskFirst() {
+    if (!$askFirstBtn) return;
+    if (askFirst === null) {
+      $askFirstBtn.hidden = true;
+      return;
+    }
+    $askFirstBtn.hidden = false;
+    $askFirstBtn.disabled = askFirstBusy;
+    $askFirstBtn.setAttribute("aria-pressed", askFirst ? "true" : "false");
+    $askFirstBtn.setAttribute("aria-label", askFirst ? "Ask first is on" : "Ask first is off");
+    $askFirstBtn.title = askFirst
+      ? "Ask first is on: before a task the agent asks what would change the work. Click to let it go ahead and tell you what it assumed."
+      : "Ask first is off: the agent goes ahead and tells you what it assumed. Click to have it ask before a task.";
+  }
+
+  function loadAskFirst() {
+    requestService("GET", "/admin/plan", function (err, statusCode, body) {
+      if (!err && statusCode === 200 && body && body.ok === true) askFirst = body.ask_first === true;
+      renderAskFirst();
+    });
+  }
+
+  function bindAskFirst() {
+    if (!$askFirstBtn) return;
+    $askFirstBtn.addEventListener("click", function () {
+      if (askFirstBusy || askFirst === null) return;
+      var want = !askFirst;
+      askFirstBusy = true;
+      renderAskFirst();
+      requestService("POST", "/admin/plan", { ask_first: want }, function (err, statusCode, body) {
+        askFirstBusy = false;
+        if (err || statusCode !== 200 || !body || body.ok !== true) {
+          var why = err ? err.message : (body && body.error && body.error.message) || "HTTP " + statusCode;
+          logUi("err", "Ask first could not be switched: " + why);
+          renderAskFirst();
+          return;
+        }
+        askFirst = body.ask_first === true;
+        renderAskFirst();
+        logUi("ok", askFirst ? "Ask first on: the agent asks before a task" : "Ask first off: the agent goes ahead and says what it assumed");
+      });
+    });
+  }
+
   function bindServe() {
     if (!$serveBtn) return;
     $serveBtn.addEventListener("click", function () {
@@ -744,6 +794,8 @@
 
       var hasSwitch = typeof body.serving === "boolean";
       if (!serveBusy) renderServe(hasSwitch ? (body.serving ? "serving" : "stopped") : null);
+      // Ask first shows once the service answers (an older service without /admin/plan keeps it hidden).
+      if (askFirst === null && !askFirstBusy) loadAskFirst();
 
       if (body.aeVersion && body.aeVersion !== "unknown" && $ae) {
         $ae.textContent = "AE " + shortVersion(body.aeVersion);
@@ -1773,6 +1825,7 @@
     bindSettings();
     bindConfirm();
     bindServe();
+    bindAskFirst();
 
     refreshTokenFromDisk();
     updateSetupUi();

@@ -149,9 +149,9 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
     ],
   },
   app: {
-    blurb: "ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer.",
+    blurb: "Task plans, ExtendScript, dialogs, questions, diagnostics, memory, panels, skills, viewer.",
     tools: [
-      "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_ask_user", "ae_diagnostics", "ae_memory_status",
+      "ae_plan", "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_ask_user", "ae_diagnostics", "ae_memory_status",
       "ae_memory_purge", "ae_list_panels", "ae_open_panel", "ae_ui_screenshot", "ae_view", "ae_skill_list",
       "ae_skill_save", "ae_skill_run",
     ],
@@ -196,7 +196,7 @@ export const SEARCH_HINTS: Record<string, string> = {
 // ---------- core list ----------
 
 export const CORE_TOOL_NAMES: readonly string[] = [
-  "ae_status", "ae_get_project", "ae_get_comp", "ae_comp_tree", "ae_get_layer_props", "ae_find_layers",
+  "ae_plan", "ae_status", "ae_get_project", "ae_get_comp", "ae_comp_tree", "ae_get_layer_props", "ae_find_layers",
   "ae_get_keyframes", "ae_set_property", "ae_batch_set", "ae_set_text", "ae_create_layer", "ae_create_comp",
   "ae_layer_ops", "ae_import_footage", "ae_add_effect", "ae_set_effect", "ae_save", "ae_snapshot_frame",
   "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_skill_run", "ae_multi_comp_apply",
@@ -215,6 +215,8 @@ const SCHEMA_POINTER = "More: ae_get_tool_schema.";
 
 /** Hand-written summaries for the core tools whose first sentence is not enough. */
 export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  ae_plan:
+    "Call first for a new task (request, intent, named layers). Returns what it took the request to mean, the plan with a tool per step, extras and hazards; questions only when the user turned Ask first on in the panel (off by default: go ahead, state the assumptions). Read-only.",
   ae_run_jsx:
     "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render:
@@ -423,6 +425,7 @@ export function coreInstructions(): string {
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
+    "Start a new task with ae_plan (the request, its intent, the layers it names): the plan, and whether to ask the user first or go ahead with stated assumptions.",
     "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",

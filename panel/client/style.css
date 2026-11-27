@@ -177,10 +177,38 @@ input:focus-visible {
 /* The button takes the push to the right; the badge sits straight after it. */
 .header .serve-btn:not([hidden]) + .badge { margin-left: 0; }
 
+/* Ask first, left of Start / Stop: whether the agent asks before a task (ae_plan). Off by default: grey; on: blue. */
+.ask-first-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: #333;
+  color: #aaa;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ask-first-btn[aria-pressed="true"] { background: #1d3550; color: #9cc8ff; }
+.ask-first-btn:hover:not(:disabled) { filter: brightness(1.25); }
+.ask-first-btn:disabled { opacity: 0.55; cursor: default; }
+.ask-first-icon { width: 9px; height: 9px; flex-shrink: 0; }
+/* With Ask first shown, it takes the push to the right and Start / Stop sits straight after it. */
+.header .ask-first-btn:not([hidden]) + .serve-btn { margin-left: 0; }
+
 /* Narrow panels keep the icon only (the button's aria-label and tooltip still name it). */
 @media (max-width: 379px) {
   .serve-label { display: none; }
   .serve-btn { padding: 3px 7px; }
+  .ask-first-label { display: none; }
+  .ask-first-btn { padding: 3px 7px; }
 }
 
 .badge-host:not(:empty)::before {

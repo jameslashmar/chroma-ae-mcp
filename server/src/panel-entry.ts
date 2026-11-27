@@ -104,6 +104,9 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
   renderLock: () => { info: RenderGateInfo; message: string } | null;
   /** The user's way out of a render gate that will not lift (the panel's button). Returns the cleared gate, or null when it was open. */
   clearRenderLock: () => RenderGateInfo | null;
+  /** The panel's "Ask first" button (GET / POST /admin/plan): whether ae_plan asks the user before a task. */
+  planSettings: () => { ask_first: boolean };
+  setAskFirst: (on: boolean) => { ask_first: boolean };
 } {
   const resolvedDataDir = opts.dataDir ?? defaultDataDir();
   const queue = new SingleWriterQueue();
@@ -301,5 +304,7 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       return info ? { info, message: renderGateMessage(info) } : null;
     },
     clearRenderLock: () => renderGate.clear(),
+    planSettings: () => ({ ask_first: (ctx.settings as SettingsStore).get().plan.ask_first }),
+    setAskFirst: (on: boolean) => ({ ask_first: (ctx.settings as SettingsStore).updatePlan({ ask_first: on }).plan.ask_first }),
   };
 }

@@ -106,16 +106,24 @@ export interface AssetWatchSettings {
   sequences: boolean;
 }
 
+/** ae_plan: whether the agent asks the user before a task (the panel's "Ask first" button). */
+export interface PlanSettings {
+  /** Off by default: the agent goes ahead with the plan's defaults and says what it assumed. */
+  ask_first: boolean;
+}
+
 export interface Settings {
   auto_checkpoint: AutoCheckpointSettings;
   taste: TasteSettings;
   asset_watch: AssetWatchSettings;
+  plan: PlanSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   auto_checkpoint: { enabled: true, max_mb: 250 },
   taste: { preferred_ease: null, allow_linear_non_motion: false, avoid_overshoot: false, notes: "" },
   asset_watch: { enabled: false, since: null, recursive: true, sequences: true },
+  plan: { ask_first: false },
 };
 
 export function defaultSettingsFilePath(): string {
@@ -133,6 +141,7 @@ function cloneDefaults(): Settings {
     auto_checkpoint: { ...DEFAULT_SETTINGS.auto_checkpoint },
     taste: cloneTaste(DEFAULT_SETTINGS.taste),
     asset_watch: { ...DEFAULT_SETTINGS.asset_watch },
+    plan: { ...DEFAULT_SETTINGS.plan },
   };
 }
 
@@ -176,7 +185,16 @@ export class SettingsStore {
       auto_checkpoint: { ...this.settings.auto_checkpoint },
       taste: cloneTaste(this.settings.taste),
       asset_watch: { ...this.settings.asset_watch },
+      plan: { ...this.settings.plan },
     };
+  }
+
+  updatePlan(patch: Partial<PlanSettings>): Settings {
+    const next = { ...this.settings.plan };
+    if (typeof patch.ask_first === "boolean") next.ask_first = patch.ask_first;
+    this.settings = { ...this.settings, plan: next };
+    this.saveToDisk();
+    return this.get();
   }
 
   updateAssetWatch(patch: Partial<AssetWatchSettings>): Settings {
@@ -218,6 +236,7 @@ export class SettingsStore {
         auto_checkpoint?: Partial<AutoCheckpointSettings>;
         taste?: Partial<TasteSettings>;
         asset_watch?: Partial<AssetWatchSettings>;
+        plan?: Partial<PlanSettings>;
       };
       const ac = parsed?.auto_checkpoint;
       if (ac && typeof ac === "object") {
@@ -242,6 +261,8 @@ export class SettingsStore {
         if (typeof aw.recursive === "boolean") this.settings.asset_watch.recursive = aw.recursive;
         if (typeof aw.sequences === "boolean") this.settings.asset_watch.sequences = aw.sequences;
       }
+      const pl = parsed?.plan;
+      if (pl && typeof pl === "object" && typeof pl.ask_first === "boolean") this.settings.plan.ask_first = pl.ask_first;
     } catch {
       // Ignore a corrupt or unreadable file on startup; keep the defaults
     }
