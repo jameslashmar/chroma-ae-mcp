@@ -1396,7 +1396,7 @@ async function main() {
     check("ae_track_read (transform: the plate's own keys)", r.ok === true && r.frames >= 5 && r.model === "similarity", `${r.frames} frames, model ${r.model}; ${r.message ?? ""}`);
 
     // A Corner Pin on a solid, then the same track as a layer transform, CC Power Pin and transform + residual pin on others.
-    for (const [nm, size] of [["W4 Pin", [200, 120]], ["W4 Pin2", [200, 120]], ["W4 Pin3", [200, 120]], ["W4 Pin4", [200, 120]]]) {
+    for (const [nm, size] of [["W4 Pin", [200, 120]], ["W4 Pin2", [200, 120]], ["W4 Pin3", [200, 120]], ["W4 Pin4", [200, 120]], ["W4 Pin5", [200, 120]]]) {
       await call("ae_create_layer", { comp_id: PL, type: "solid", name: nm, color: [1, 0, 0], width: size[0], height: size[1], expect });
     }
     r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "corner_pin", layer: { name: "W4 Pin" }, expect });
@@ -1409,6 +1409,13 @@ async function main() {
     check("ae_track_apply (power_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames; ${why(r)}`);
     r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform_pin", layer: { name: "W4 Pin3" }, expect });
     check("ae_track_apply (transform_pin)", r.ok === true && r.applied === true && r.receipt?.matches === true, `${r.frames_written} frames; ${why(r)}`);
+    // refit_model / smooth_frames: written from an adjusted copy saved under a new track_id; the original track stays.
+    r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "corner_pin", layer: { name: "W4 Pin5" }, refit_model: "translate", smooth_frames: 1, expect });
+    check(
+      "ae_track_apply (refit_model and smooth_frames: an adjusted copy under a new track_id)",
+      r.ok === true && r.applied === true && r.receipt?.matches === true && r.track_adjusted?.model === "translate" && r.track_adjusted?.from_track_id === planarTrack && r.track_id === r.track_adjusted?.track_id && r.track_id !== planarTrack,
+      `corner shake ${JSON.stringify(r.track_adjusted?.corner_jitter_px)}; ${why(r)}`
+    );
     r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin4" }, range: { start: 0, end: 0.08 }, expect });
     check("ae_track_apply (transform, a time range)", r.ok === true && r.applied === true && r.receipt?.matches === true && r.frames_written <= 4, `${r.frames_written} frames; ${why(r)}`);
     r = await call("ae_track_apply", { comp_id: PL, track: { track_id: planarTrack }, mode: "transform", layer: { name: "W4 Pin" }, expect });
@@ -2193,7 +2200,17 @@ async function main() {
     check("ae_render_templates (save without an item is refused)", refused(r), why(r).slice(0, 100));
     skip("ae_render_templates (save, a real template)", "a saved template goes into the user's After Effects preferences, which the smoke does not touch");
 
-    // Fonts: search, check (with glyphs), a replace dry run, the composed lines, a captions font check, the preflight glyph check.
+    // Fonts: every font file on disk, search, check (with glyphs), a replace dry run, the composed lines, a captions font check, the preflight glyph check.
+    // check_files reads every font's location, which can raise AE's font warnings on a PC with a broken font: answered like the warm-up.
+    {
+      const fc = await fontSearchAnsweringWarnings({ action: "check_files" });
+      const x = fc.result;
+      check(
+        "ae_fonts (check_files: every font file on disk)",
+        x.available === false || (x.available === true && x.fonts > 0 && Array.isArray(x.problems) && x.scan_truncated === false && fc.leftOpen === 0),
+        `${x.fonts} fonts, ${x.files} files, ${x.problem_fonts} problem(s) ${JSON.stringify(x.problem_counts)}${(x.problems ?? []).length ? ": " + x.problems.slice(0, 3).map((p) => `${p.postscript} ${p.problem}`).join(", ") : ""}, ${x.without_file?.count ?? 0} without a file, ${x.seconds} s; ${fc.answered} warning(s) answered${x.available === false ? "; " + x.reason : ""}`
+      );
+    }
     r = await call("ae_fonts", { action: "search", query: "arial", page_size: 5 });
     check("ae_fonts (search)", r.available === true && Array.isArray(r.fonts) && r.fonts.length >= 1 && typeof r.total_matches === "number", `${r.total_matches} matches, scanned ${r.scanned}${r.scan_truncated ? " (cut short)" : ""}`);
     const psName = r.fonts?.[0]?.postscript;
