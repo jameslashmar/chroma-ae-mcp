@@ -97,3 +97,13 @@ Not reproduced here: the BIB font warnings (this PC's fonts give none) and Jay's
   - Track summaries now carry `model_advice`: the same points solved with fewer parameters.
   - `ae_track_apply` takes `refit_model` and `smooth_frames`, and writes a steadier copy under a new `track_id` without tracking again.
 - **Evidence:** `qa/live-evidence.mjs` on `3c7a404`: **589/589 passed, 11 skipped**.
+
+## AE 27.0, Windows, 2026-11-27
+
+First run in After Effects 2027 (27.0x78), same PC. The panel (CSXS 12, manifest range 25.0 to 99.9) loads as is; `extLoadFailures` is empty.
+
+| Found | Cause, measured on 27.0x78 | Fix |
+|---|---|---|
+| `ae_comp_settings`: "Guide direction differs" (both guide steps; 592/594) | `GuideOrientationType` is HORIZONTAL 14212 / VERTICAL 14213, and guides read back with those values. The two-argument `addGuide(orientation, position)` still takes 0 / 1 and makes any other number a horizontal guide; the host passed the enum constant on 26.5+, so every vertical guide came out horizontal. `GuideOptions` has `orientationType` (with color, pinned, position, positionType) and ignores `orientation`, the name the 26.5 notes give; a plain object is refused. | `c27fb35`: the two-argument form always gets 0 / 1; a `GuideOptions` object gets the enum constant under both names. Before 26.5 nothing changes. |
+
+**Evidence:** `qa/live-evidence.mjs` on `c27fb35`: **594/594 passed, 9 skipped**, the 26.5 guide colour, pinned and percentage step included (26.3 skips it). The same commit's code on 26.3x87 (`e8b236c`, guides unchanged there): 592/592.
