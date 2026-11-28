@@ -16,8 +16,11 @@
  * resending that is exactly what must not happen.
  *
  * Module-level, so every request (HTTP, relay, ae_invoke_tool) shares it; at most 200 keys for an
- * hour. A key is scoped to its tool and to the client that sent it (X-Chroma-Client), so two agents
- * that happen to pick the same key never get each other's answer.
+ * hour. A key is scoped to its tool, to the client that sent it (X-Chroma-Client) and to the project
+ * the write targets (expect.project_path), so two agents that happen to pick the same key never get
+ * each other's answer. Agents name keys after what they do ("t11-trim-clip-2-5"), so a second session
+ * doing the same thing in another project within the hour picks the same key: that is a new write, not
+ * a resend (measured with qa/bench, 2026-11-27: the trim was refused as idempotency_key_reused).
  */
 
 import * as crypto from "node:crypto";
@@ -125,7 +128,7 @@ export async function withIdempotency(
   client = ""
 ): Promise<{ response: StoredResponse; replayed: boolean }> {
   prune(now());
-  const id = `${client}\n${tool}\n${key}`;
+  const id = `${client}\n${tool}\n${projectOf(args)}\n${key}`;
   const hash = argumentsHash(tool, key, args);
   const found = entries.get(id);
   if (found && found.hash !== hash) {
@@ -157,6 +160,12 @@ export async function withIdempotency(
   if (changedNothing(response)) entries.delete(id);
   else entry.response = response;
   return { replayed: false, response };
+}
+
+/** The project a write targets (its expect.project_path), or "" when it names none. */
+function projectOf(args: unknown): string {
+  const expect = (args as { expect?: { project_path?: unknown } } | null)?.expect;
+  return typeof expect?.project_path === "string" ? expect.project_path : "";
 }
 
 /** For tests. */

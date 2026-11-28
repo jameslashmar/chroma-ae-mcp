@@ -71367,6 +71367,7 @@ async function withIdempotency(tool, key, args, run, now = Date.now, client = ""
   prune(now());
   const id = `${client}
 ${tool}
+${projectOf(args)}
 ${key}`;
   const hash = argumentsHash(tool, key, args);
   const found = entries.get(id);
@@ -71398,6 +71399,10 @@ ${key}`;
   if (changedNothing(response)) entries.delete(id);
   else entry.response = response;
   return { replayed: false, response };
+}
+function projectOf(args) {
+  const expect = args?.expect;
+  return typeof expect?.project_path === "string" ? expect.project_path : "";
 }
 function summariseWrite(r) {
   const j = responseJson(r) ?? {};
