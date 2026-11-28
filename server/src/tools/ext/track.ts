@@ -259,6 +259,68 @@ export class PointTracker {
   }
 }
 
+/**
+ * How a pattern holds against sliding: the smaller over the larger eigenvalue of its structure tensor
+ * (the summed outer products of its gradients), 0..1. Near 0 the pattern changes in one direction only
+ * (an edge, or a mark longer than the pattern) and its match can slide along the other: Hollywood Camera
+ * Work's single-marker plate, a 22 x 42 px marker followed with a 31 px pattern, slid up and down it by
+ * up to 3.5 px from frame to frame at a confidence of 0.99 (0.017 here); with 41 px (0.08) it held within
+ * 0.8 px, with 51 px (0.47) within 0.7. Null when the pattern reaches outside the frame.
+ */
+export function patternIsotropy(frame: GrayImage, cx: number, cy: number, size: number): number | null {
+  const p = extractPatch(frame, cx, cy, size);
+  if (!p) return null;
+  const w = p.width;
+  const d = p.data;
+  let a = 0;
+  let b = 0;
+  let c = 0;
+  for (let y = 1; y < p.height - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = (d[y * w + x + 1] - d[y * w + x - 1]) / 2;
+      const gy = (d[(y + 1) * w + x] - d[(y - 1) * w + x]) / 2;
+      a += gx * gx;
+      b += gy * gy;
+      c += gx * gy;
+    }
+  }
+  const half = (a + b) / 2;
+  const disc = Math.sqrt(Math.max(0, half * half - (a * b - c * c)));
+  return half + disc > 0 ? (half - disc) / (half + disc) : 0;
+}
+
+/** Under this patternIsotropy a pattern can slide along itself. */
+export const MIN_PATTERN_ISOTROPY = 0.1;
+
+/**
+ * The pattern size to follow (cx, cy) with: `requested` when it holds against sliding; when it does not
+ * and the size was not given, the first larger one (by 10 px, up to 4 steps) that does. An edge holds at
+ * no size: then `requested` with a note.
+ */
+export function choosePatternSize(frame: GrayImage, cx: number, cy: number, requested: number, given: boolean): { size: number; isotropy: number | null; note?: string } {
+  const at = (s: number) => patternIsotropy(frame, cx, cy, s);
+  const r0 = at(requested);
+  if (r0 === null || r0 >= MIN_PATTERN_ISOTROPY) return { size: requested, isotropy: r0 };
+  if (!given) {
+    for (let s = requested + 10; s <= requested + 40; s += 10) {
+      const r = at(s | 1);
+      if (r === null) break;
+      if (r >= MIN_PATTERN_ISOTROPY) {
+        return {
+          size: s | 1,
+          isotropy: r,
+          note: `A ${requested} px pattern at that point changes in one direction only (a mark longer than the pattern, or an edge), so its match could slide along it; ${s | 1} px was used instead, which holds.`,
+        };
+      }
+    }
+  }
+  return {
+    size: requested,
+    isotropy: r0,
+    note: `The ${requested} px pattern at that point changes in one direction only (an edge, or a mark longer than the pattern): the track can slide along it with a high confidence. Pick a corner or a whole mark${given ? ", or a larger pattern_size" : ""}.`,
+  };
+}
+
 /** Box blur of radius `r` pixels (a (2r+1) square), edges clamped. r <= 0 returns the image itself. */
 export function boxBlurGray(img: GrayImage, r: number): GrayImage {
   const k = Math.floor(r);
@@ -370,7 +432,15 @@ export const AeTrackPointSchema = z.object({
     .describe("The feature to follow, [x, y] in comp pixels at the start time. Pick a corner, a mark or an edge crossing, not a flat area."),
   start: z.number().min(0).optional().describe("Seconds. Default: the work area start."),
   end: z.number().min(0).optional().describe("Seconds. Default: the work area end. An end before the start tracks backwards."),
-  pattern_size: z.number().int().min(9).max(201).optional().describe("Side of the square pattern in comp pixels (odd). Default 31."),
+  pattern_size: z
+    .number()
+    .int()
+    .min(9)
+    .max(201)
+    .optional()
+    .describe(
+      "Side of the square pattern in comp pixels (odd). Default 31; left out, it is grown by up to 40 px when a 31 px pattern changes in one direction only (a mark longer than it, or an edge), whose match could slide along it (pattern_size_used, pattern_note)."
+    ),
   search_radius: z
     .number()
     .int()
@@ -450,6 +520,7 @@ export const trackTools: ToolDefinition<any>[] = [
         let tracker: PointTracker | null = null;
         let firstFrame: PNG | null = null;
         let scale = 1;
+        let pattern: { size: number; isotropy: number | null; note?: string } = { size: patchSize, isotropy: null };
         const points: Array<{ time: number; x: number; y: number; confidence: number; adapted: boolean }> = [];
         let lostAt: { time: number; frame: number } | null = null;
 
@@ -461,9 +532,13 @@ export const trackTools: ToolDefinition<any>[] = [
             firstFrame = png;
             // Frames come back at full resolution; map comp pixels onto them.
             scale = png.width / Number(comp.width);
-            tracker = new PointTracker(gray, args.point[0] * scale - 0.5, args.point[1] * scale - 0.5, {
+            const px = args.point[0] * scale - 0.5;
+            const py = args.point[1] * scale - 0.5;
+            const chosen = choosePatternSize(gray, px, py, Math.max(9, Math.round(patchSize * scale) | 1), args.pattern_size !== undefined);
+            pattern = { size: Math.round(chosen.size / scale) | 1, isotropy: chosen.isotropy, note: chosen.note };
+            tracker = new PointTracker(gray, px, py, {
               ...opts,
-              patchSize: Math.max(9, Math.round(patchSize * scale) | 1),
+              patchSize: chosen.size,
               searchRadius: Math.max(2, Math.round(opts.searchRadius * scale)),
             });
             points.push({ time: times[0], x: args.point[0], y: args.point[1], confidence: 1, adapted: false });
@@ -478,7 +553,7 @@ export const trackTools: ToolDefinition<any>[] = [
           fs.rmSync(snap.path, { force: true });
           if (lostAt) break;
         }
-        return { comp, fps, start, end, times, points, lostAt, firstFrame: firstFrame!, scale, contrast: tracker!.contrast };
+        return { comp, fps, start, end, times, points, lostAt, firstFrame: firstFrame!, scale, contrast: tracker!.contrast, pattern };
       });
 
       const { points, lostAt } = tracked;
@@ -489,7 +564,7 @@ export const trackTools: ToolDefinition<any>[] = [
           drawTrackPreview(
             tracked.firstFrame,
             points.map((p) => ({ x: p.x * tracked.scale - 0.5, y: p.y * tracked.scale - 0.5 })),
-            patchSize * tracked.scale,
+            tracked.pattern.size * tracked.scale,
             lostAt !== null
           )
         )
@@ -508,6 +583,9 @@ export const trackTools: ToolDefinition<any>[] = [
         min_confidence: conf.length ? r2(Math.min(...conf)) : null,
         adapted_frames: points.filter((p) => p.adapted).length,
         pattern_contrast: r2(tracked.contrast),
+        pattern_size_used: tracked.pattern.size,
+        ...(tracked.pattern.isotropy !== null ? { pattern_isotropy: r2(tracked.pattern.isotropy) } : {}),
+        ...(tracked.pattern.note ? { pattern_note: tracked.pattern.note } : {}),
         preview_path: previewPath,
         path: points.map((p) => [Math.round(p.time * 10000) / 10000, r2(p.x), r2(p.y), r2(p.confidence)]),
         path_format: "[time_s, x_px, y_px, confidence]",

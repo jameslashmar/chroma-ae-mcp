@@ -45910,6 +45910,8 @@ function checkPaths(samples, opts = {}) {
   const whole = robustPath(f, cx, cy, wholeHalf, false, 0.05 * k);
   const jump = [];
   const off = [];
+  const fast = new Uint8Array(n);
+  const dropCost = new Float64Array(n);
   if (nPts > 2) {
     const ref3 = s[0].points;
     const rcx = ref3.reduce((t, p) => t + p[0], 0) / nPts;
@@ -45936,12 +45938,42 @@ function checkPaths(samples, opts = {}) {
     });
     for (let c = 0; c < nPts; c++) {
       const d = new Float64Array(n);
+      const X = shx[c];
+      const Y = shy[c];
       for (let i = 1; i < n - 1; i++) {
         if (f[i] - f[i - 1] !== 1 || f[i + 1] - f[i] !== 1) continue;
-        d[i] = Math.hypot(shx[c][i] - (shx[c][i - 1] + shx[c][i + 1]) / 2, shy[c][i] - (shy[c][i - 1] + shy[c][i + 1]) / 2);
+        if (i >= 2 && i < n - 2 && f[i] - f[i - 2] === 2 && f[i + 2] - f[i] === 2) {
+          const qx = (4 * (X[i - 1] + X[i + 1]) - (X[i - 2] + X[i + 2])) / 6;
+          const qy = (4 * (Y[i - 1] + Y[i + 1]) - (Y[i - 2] + Y[i + 2])) / 6;
+          d[i] = Math.hypot(X[i] - qx, Y[i] - qy);
+          dropCost[i] = Math.max(dropCost[i], Math.hypot((X[i - 1] + X[i + 1]) / 2 - qx, (Y[i - 1] + Y[i + 1]) / 2 - qy));
+        } else {
+          d[i] = Math.hypot(X[i] - (X[i - 1] + X[i + 1]) / 2, Y[i] - (Y[i - 1] + Y[i + 1]) / 2);
+        }
       }
       jump.push(d);
       off.push(robustPath(f, shx[c], shy[c], shapeHalf, true, 0.03 * k).res);
+    }
+    const step3 = new Array(n).fill(null);
+    for (let i = 1; i < n; i++) {
+      if (f[i] - f[i - 1] !== 1) continue;
+      let m = 0;
+      for (let c = 0; c < nPts; c++) m = Math.max(m, Math.hypot(shx[c][i] - shx[c][i - 1], shy[c][i] - shy[c][i - 1]));
+      step3[i] = m;
+    }
+    let lo = 0;
+    let hi = 0;
+    for (let i = 0; i < n; i++) {
+      while (f[lo] < f[i] - FAST_OUTER) lo++;
+      while (hi < n - 1 && f[hi + 1] <= f[i] + FAST_OUTER) hi++;
+      const before = [];
+      const after = [];
+      for (let j = lo; j <= hi; j++) {
+        if (step3[j] === null || Math.abs(f[j] - f[i]) < FAST_INNER) continue;
+        (f[j] < f[i] ? before : after).push(step3[j]);
+      }
+      const speed = Math.max(before.length >= 3 ? median4(before) : 0, after.length >= 3 ? median4(after) : 0);
+      if (speed > FAST_SHAPE_PX * k) fast[i] = 1;
     }
   }
   const checkable = [];
@@ -45953,11 +45985,12 @@ function checkPaths(samples, opts = {}) {
   const offLimit = Math.max(CORNER_OFF_PX * k, SIGMA_TIMES * offSigma);
   const edge = (i) => i < 2 || i >= n - 2 ? 1.5 : 1;
   const flags = [];
-  const worstOf2 = (r, limit) => {
+  const worstOf2 = (r, limit, skipFast) => {
     let worst = 0;
     let at = null;
     let over = 0;
     for (let i = 0; i < n; i++) {
+      if (skipFast && fast[i]) continue;
       if (r[i] > worst) {
         worst = r[i];
         at = f[i];
@@ -45967,16 +46000,26 @@ function checkPaths(samples, opts = {}) {
     return { worst: round23(worst), at, over };
   };
   const perCorner = jump.map((rj, c) => {
-    const a = worstOf2(rj, jumpLimit);
-    const b = worstOf2(off[c], offLimit);
+    const a = worstOf2(rj, jumpLimit, false);
+    const b = worstOf2(off[c], offLimit, true);
     return { worst_jump_px: a.worst, worst_jump_frame: a.at, jumps: a.over, worst_off_px: b.worst, worst_off_frame: b.at, off_frames: b.over };
   });
   const jmax = (i) => i < 0 || i >= n ? 0 : Math.max(...jump.map((r) => r[i]));
+  const kept = [];
   for (let i = 0; jump.length && i < n; i++) {
     const rj = jmax(i);
     const ro = Math.max(...off.map((r) => r[i]));
-    if (rj > jumpLimit && rj >= jmax(i - 1) && rj >= jmax(i + 1)) flags.push({ frame: f[i], kind: "jump", px: round23(rj), limit_px: round23(jumpLimit) });
-    else if (ro > offLimit * edge(i)) flags.push({ frame: f[i], kind: "off_path", px: round23(ro), limit_px: round23(offLimit * edge(i)) });
+    const isJump = rj > jumpLimit && rj >= jmax(i - 1) && rj >= jmax(i + 1);
+    if (isJump && rj > dropCost[i]) flags.push({ frame: f[i], kind: "jump", px: round23(rj), limit_px: round23(jumpLimit) });
+    else if (!fast[i] && ro > offLimit * edge(i)) flags.push({ frame: f[i], kind: "off_path", px: round23(ro), limit_px: round23(offLimit * edge(i)) });
+    else if (isJump) kept.push(f[i]);
+  }
+  const fastRanges = [];
+  for (let i = 0; i < n; i++) {
+    if (!fast[i]) continue;
+    const last = fastRanges[fastRanges.length - 1];
+    if (last && f[i] - last[1] <= 1) last[1] = f[i];
+    else fastRanges.push([f[i], f[i]]);
   }
   let wWorst = 0;
   let wFrame = null;
@@ -45995,16 +46038,22 @@ function checkPaths(samples, opts = {}) {
     per_corner: perCorner,
     whole: { worst_px: round23(wWorst), worst_frame: wFrame, sigma_px: round23(wholeSigma) },
     flags,
+    fast_frames: fast.reduce((t, v) => t + v, 0),
+    fast_ranges: fastRanges,
+    jumps_kept: kept,
     residuals: f.map((fr, i) => ({ frame: fr, jump: jump.map((r) => r[i]), off: off.map((r) => r[i]), whole: whole.res[i] }))
   };
 }
-var CORNER_JUMP_PX, CORNER_OFF_PX, SIGMA_TIMES, rayleighSigma, median4, round23;
+var CORNER_JUMP_PX, CORNER_OFF_PX, SIGMA_TIMES, FAST_SHAPE_PX, FAST_INNER, FAST_OUTER, rayleighSigma, median4, round23;
 var init_path_check = __esm({
   "src/tools/ext/path-check.ts"() {
     "use strict";
     CORNER_JUMP_PX = 0.6;
     CORNER_OFF_PX = 2;
     SIGMA_TIMES = 6;
+    FAST_SHAPE_PX = 2.5;
+    FAST_INNER = 3;
+    FAST_OUTER = 12;
     rayleighSigma = (v) => {
       if (!v.length) return 0;
       const s = v.slice().sort((a, b) => a - b);
@@ -47625,6 +47674,50 @@ function matchTemplate(img, tpl, cx, cy, radius) {
   const offY = sy.every(Number.isFinite) ? subPixel(sy[0], sy[1], sy[2]) : 0;
   return { x: icx + bx + offX, y: icy + by + offY, score: best };
 }
+function patternIsotropy(frame, cx, cy, size) {
+  const p = extractPatch(frame, cx, cy, size);
+  if (!p) return null;
+  const w = p.width;
+  const d = p.data;
+  let a = 0;
+  let b = 0;
+  let c = 0;
+  for (let y = 1; y < p.height - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = (d[y * w + x + 1] - d[y * w + x - 1]) / 2;
+      const gy = (d[(y + 1) * w + x] - d[(y - 1) * w + x]) / 2;
+      a += gx * gx;
+      b += gy * gy;
+      c += gx * gy;
+    }
+  }
+  const half = (a + b) / 2;
+  const disc = Math.sqrt(Math.max(0, half * half - (a * b - c * c)));
+  return half + disc > 0 ? (half - disc) / (half + disc) : 0;
+}
+function choosePatternSize(frame, cx, cy, requested, given) {
+  const at = (s) => patternIsotropy(frame, cx, cy, s);
+  const r0 = at(requested);
+  if (r0 === null || r0 >= MIN_PATTERN_ISOTROPY) return { size: requested, isotropy: r0 };
+  if (!given) {
+    for (let s = requested + 10; s <= requested + 40; s += 10) {
+      const r = at(s | 1);
+      if (r === null) break;
+      if (r >= MIN_PATTERN_ISOTROPY) {
+        return {
+          size: s | 1,
+          isotropy: r,
+          note: `A ${requested} px pattern at that point changes in one direction only (a mark longer than the pattern, or an edge), so its match could slide along it; ${s | 1} px was used instead, which holds.`
+        };
+      }
+    }
+  }
+  return {
+    size: requested,
+    isotropy: r0,
+    note: `The ${requested} px pattern at that point changes in one direction only (an edge, or a mark longer than the pattern): the track can slide along it with a high confidence. Pick a corner or a whole mark${given ? ", or a larger pattern_size" : ""}.`
+  };
+}
 function boxBlurGray(img, r) {
   const k = Math.floor(r);
   if (!(k > 0)) return img;
@@ -47714,7 +47807,7 @@ async function queued(ctx, label2, opId, fn) {
     throw err;
   }
 }
-var fs44, path44, MIN_PATTERN_STD, PointTracker, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
+var fs44, path44, MIN_PATTERN_STD, PointTracker, MIN_PATTERN_ISOTROPY, AeTrackPointSchema, MAX_TRACK_FRAMES, trackTools;
 var init_track = __esm({
   "src/tools/ext/track.ts"() {
     "use strict";
@@ -47806,12 +47899,15 @@ var init_track = __esm({
         return { x: pick5.x, y: pick5.y, confidence: pick5.score, adapted };
       }
     };
+    MIN_PATTERN_ISOTROPY = 0.1;
     AeTrackPointSchema = external_exports.object({
       comp_id: external_exports.number().int(),
       point: external_exports.array(external_exports.number()).length(2).describe("The feature to follow, [x, y] in comp pixels at the start time. Pick a corner, a mark or an edge crossing, not a flat area."),
       start: external_exports.number().min(0).optional().describe("Seconds. Default: the work area start."),
       end: external_exports.number().min(0).optional().describe("Seconds. Default: the work area end. An end before the start tracks backwards."),
-      pattern_size: external_exports.number().int().min(9).max(201).optional().describe("Side of the square pattern in comp pixels (odd). Default 31."),
+      pattern_size: external_exports.number().int().min(9).max(201).optional().describe(
+        "Side of the square pattern in comp pixels (odd). Default 31; left out, it is grown by up to 40 px when a 31 px pattern changes in one direction only (a mark longer than it, or an edge), whose match could slide along it (pattern_size_used, pattern_note)."
+      ),
       search_radius: external_exports.number().int().min(2).max(300).optional().describe("How far (px) from the predicted position to look each frame. Default 40; raise it for fast motion."),
       min_confidence: external_exports.number().min(0).max(1).optional().describe("Below this match score (0..1) the point counts as lost and tracking stops. Default 0.6."),
       apply: external_exports.object({
@@ -47853,6 +47949,7 @@ var init_track = __esm({
             let tracker2 = null;
             let firstFrame = null;
             let scale = 1;
+            let pattern = { size: patchSize, isotropy: null };
             const points2 = [];
             let lostAt2 = null;
             for (let i = 0; i < times2.length; i++) {
@@ -47862,9 +47959,13 @@ var init_track = __esm({
               if (i === 0) {
                 firstFrame = png;
                 scale = png.width / Number(comp.width);
-                tracker2 = new PointTracker(gray, args.point[0] * scale - 0.5, args.point[1] * scale - 0.5, {
+                const px = args.point[0] * scale - 0.5;
+                const py = args.point[1] * scale - 0.5;
+                const chosen = choosePatternSize(gray, px, py, Math.max(9, Math.round(patchSize * scale) | 1), args.pattern_size !== void 0);
+                pattern = { size: Math.round(chosen.size / scale) | 1, isotropy: chosen.isotropy, note: chosen.note };
+                tracker2 = new PointTracker(gray, px, py, {
                   ...opts,
-                  patchSize: Math.max(9, Math.round(patchSize * scale) | 1),
+                  patchSize: chosen.size,
                   searchRadius: Math.max(2, Math.round(opts.searchRadius * scale))
                 });
                 points2.push({ time: times2[0], x: args.point[0], y: args.point[1], confidence: 1, adapted: false });
@@ -47879,7 +47980,7 @@ var init_track = __esm({
               fs44.rmSync(snap.path, { force: true });
               if (lostAt2) break;
             }
-            return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast };
+            return { comp, fps, start, end, times: times2, points: points2, lostAt: lostAt2, firstFrame, scale, contrast: tracker2.contrast, pattern };
           });
           const { points, lostAt } = tracked;
           const previewPath = path44.join(framesDir, `track_c${args.comp_id}_${opId}.png`);
@@ -47889,7 +47990,7 @@ var init_track = __esm({
               drawTrackPreview(
                 tracked.firstFrame,
                 points.map((p) => ({ x: p.x * tracked.scale - 0.5, y: p.y * tracked.scale - 0.5 })),
-                patchSize * tracked.scale,
+                tracked.pattern.size * tracked.scale,
                 lostAt !== null
               )
             )
@@ -47908,6 +48009,9 @@ var init_track = __esm({
             min_confidence: conf.length ? r214(Math.min(...conf)) : null,
             adapted_frames: points.filter((p) => p.adapted).length,
             pattern_contrast: r214(tracked.contrast),
+            pattern_size_used: tracked.pattern.size,
+            ...tracked.pattern.isotropy !== null ? { pattern_isotropy: r214(tracked.pattern.isotropy) } : {},
+            ...tracked.pattern.note ? { pattern_note: tracked.pattern.note } : {},
             preview_path: previewPath,
             path: points.map((p) => [Math.round(p.time * 1e4) / 1e4, r214(p.x), r214(p.y), r214(p.confidence)]),
             path_format: "[time_s, x_px, y_px, confidence]"
@@ -48518,6 +48622,8 @@ function pathReport(res, nCorners, flagged) {
     ...flagged !== null ? { frames_flagged: flagged } : { frames_over: new Set(res.flags.map((f) => f.frame)).size },
     per_corner: per,
     worst: res.flags.slice(0, 8).map((f) => ({ frame: f.frame, kind: f.kind, px: f.px })),
+    ...res.fast_frames ? { fast_turn_frames: res.fast_frames, fast_turn_ranges: res.fast_ranges.slice(0, 8) } : {},
+    ...res.jumps_kept.length ? { jumps_kept: res.jumps_kept.slice(0, 16) } : {},
     sharpest_move: res.whole
   };
 }
@@ -50136,7 +50242,7 @@ var init_planar = __esm({
     };
     CORNER_NAMES = ["UL", "UR", "LR", "LL"];
     cornerName = (k, n) => n === 4 ? CORNER_NAMES[k] : `point ${k + 1}`;
-    PATH_CHECK_NOTE = "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the fit through its 3 neighbours each side (over jump_limit_px: a tick the eye sees), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
+    PATH_CHECK_NOTE = "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the curve through its 2 neighbours each side (over jump_limit_px: a tick the eye sees; kept and listed in jumps_kept when AE's straight line between its neighbours would be further off), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. Where the surface itself turns fast (its shape moving over 2.5 px a frame, such as a board or phone turned edge-on in the hand: fast_turn_frames, fast_turn_ranges) a wrong stretch cannot be told from the turn, so off its path is not checked there (jumps still are): look at those frames. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
     EXPECTED_ERROR_NOTE = "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
     LOWER_MODELS = { perspective: ["affine", "similarity"], affine: ["similarity"], similarity: [], translate: [] };
     round25 = (v) => [r4(v[0]), r4(v[1])];

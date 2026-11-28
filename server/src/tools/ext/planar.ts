@@ -1440,12 +1440,14 @@ function pathReport(res: PathCheckResult, nCorners: number, flagged: number | nu
     ...(flagged !== null ? { frames_flagged: flagged } : { frames_over: new Set(res.flags.map((f) => f.frame)).size }),
     per_corner: per,
     worst: res.flags.slice(0, 8).map((f) => ({ frame: f.frame, kind: f.kind, px: f.px })),
+    ...(res.fast_frames ? { fast_turn_frames: res.fast_frames, fast_turn_ranges: res.fast_ranges.slice(0, 8) } : {}),
+    ...(res.jumps_kept.length ? { jumps_kept: res.jumps_kept.slice(0, 16) } : {}),
     sharpest_move: res.whole,
   };
 }
 
 const PATH_CHECK_NOTE =
-  "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the fit through its 3 neighbours each side (over jump_limit_px: a tick the eye sees), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
+  "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the curve through its 2 neighbours each side (over jump_limit_px: a tick the eye sees; kept and listed in jumps_kept when AE's straight line between its neighbours would be further off), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. Where the surface itself turns fast (its shape moving over 2.5 px a frame, such as a board or phone turned edge-on in the hand: fast_turn_frames, fast_turn_ranges) a wrong stretch cannot be told from the turn, so off its path is not checked there (jumps still are): look at those frames. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
 
 /**
  * Once a track is finished: every corner's path checked for jumps (path-check.ts), whatever made the

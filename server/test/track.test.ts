@@ -108,3 +108,50 @@ describe("tracking core", () => {
     expect(AeTrackPointSchema.safeParse({ comp_id: 1, point: [10, 10], apply: { null_name: "T" } }).success).toBe(false);
   });
 });
+
+describe("pattern size against sliding", () => {
+  /** A dark 22 x 42 marker (a strip of tape) on a noisy green-grey cloth, centred at (cx, cy). */
+  function markerFrame(cx: number, cy: number): GrayImage {
+    const data = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        // Coverage of the pixel by the marker, for sub-pixel motion.
+        const cov = (a: number, lo: number, hi: number) => Math.max(0, Math.min(a + 0.5, hi) - Math.max(a - 0.5, lo));
+        const m = cov(x, cx - 11, cx + 11) * cov(y, cy - 21, cy + 21);
+        data[y * W + x] = 150 + 0.15 * noise(x, y) - 100 * m;
+      }
+    }
+    return { width: W, height: H, data };
+  }
+
+  it("grows a pattern shorter than the mark it sits on, and keeps a given size with a note", async () => {
+    const { choosePatternSize, patternIsotropy, MIN_PATTERN_ISOTROPY } = await import("../src/tools/ext/track.js");
+    const f = markerFrame(160, 100);
+    expect(patternIsotropy(f, 160, 100, 31)!).toBeLessThan(MIN_PATTERN_ISOTROPY);
+    const auto = choosePatternSize(f, 160, 100, 31, false);
+    expect(auto.size).toBeGreaterThan(31);
+    expect(auto.isotropy!).toBeGreaterThanOrEqual(MIN_PATTERN_ISOTROPY);
+    expect(auto.note).toMatch(/slide/);
+    const given = choosePatternSize(f, 160, 100, 31, true);
+    expect(given.size).toBe(31);
+    expect(given.note).toMatch(/larger pattern_size/);
+    // A textured disc holds at once: no note.
+    expect(choosePatternSize(frameWithDisc(160, 100), 160, 100, 31, false)).toMatchObject({ size: 31 });
+    expect(choosePatternSize(frameWithDisc(160, 100), 160, 100, 31, false).note).toBeUndefined();
+  });
+
+  it("follows the marker within half a pixel with the size it chose", async () => {
+    const { choosePatternSize } = await import("../src/tools/ext/track.js");
+    const f0 = markerFrame(160, 100);
+    const size = choosePatternSize(f0, 160, 100, 31, false).size;
+    const tr = new PointTracker(f0, 160, 100, { patchSize: size, searchRadius: 12, minConfidence: 0.6, adaptBelow: 0.8 });
+    let worst = 0;
+    for (let i = 1; i <= 20; i++) {
+      const cx = 160 + 0.7 * i;
+      const cy = 100 + 1.3 * Math.sin(i / 3) + 0.4 * i;
+      const s = tr.step(markerFrame(cx, cy))!;
+      worst = Math.max(worst, Math.hypot(s.x - cx, s.y - cy));
+    }
+    expect(worst).toBeLessThan(0.5);
+  });
+});

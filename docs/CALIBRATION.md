@@ -165,7 +165,8 @@ Free Hollywood Camera Work VFX plates (1280 x 1080 DVCPRO HD, interpreted with s
 
 - the worst frame and the number of jumps are reported, not medians;
 - an independent reference is used only where it is independent: SIFT matched straight to the reference frame on a textured surface, with whatever stands in front at the reference frame masked out;
-- every result is also looked at: close-ups of the corners frame by frame, and each frame warped back onto the reference frame by the track and overlaid on it (the reference's detail in one colour, the frame's in another: a right track shows them as one).
+- every result is also looked at: close-ups of the corners frame by frame, and each frame warped back onto the reference frame by the track and overlaid on it (the reference's detail in one colour, the frame's in another: a right track shows them as one);
+- on a marked wall, the marks themselves: each mark's patch at the reference frame is matched in every frame warped back by the track, and its shift is the track's error there. A homography fitted to the matched marks (RANSAC) says whether the marks are on one plane at all. An overlay of the whole region scaled down to fit a screen hid drifts of 5-25 px on the marked walls below: they were first reported here as right.
 
 Every track's corner paths also go through the tool's own path check (path-check.ts), which knows nothing of how they were made.
 
@@ -182,12 +183,19 @@ The thresholds were set on four tuning plates (the U-Haul truck, the licence pla
 
 ### Clips never used for tuning (run once, thresholds fixed)
 
-| Clip (frames) | Surface | What was found |
-|---|---|---|
-| Window set extension (210) | Marked green screen behind a window, candles and a tree in front, a push-in | Right where written (overlay); frames 61-67, a few px off, were caught by the path check and not written; lost near the end when the marks leave |
-| MM test wide (215) | Marked studio wall, a person in front | Right where written (overlay); the last 49 frames not ok: once the person covers much of a sparsely marked wall the cell check gives up (honest, but over-cautious) |
-| MM test close (308) | Marked wall, a pole with flags passing in front | Frames 26-61 written a few px off (overlay), not caught: a few faint marks against a large textured occluder |
-| Glasses (285) | One lens of a pair of glasses on a turning head | Right to frame 154; around frame 200 2-3 px off, not caught (the lens is curved, the head turns); 270-275 caught |
+Hollywood Camera Work's own pages say what each plate is for, and only some are planar tracking plates (the green cloud, the painting, the licence plate, the U-Haul and the laptop; the picture frame and markers-on-sticks plates were not downloaded). The marked walls (Matchmove Test Wide and Close, the window, Embassy, F15) are 3D matchmove plates: a patch of their wall is a fair planar test, but not what they were shot for. The glasses, the soda can, the sword and the head are object-tracking plates; the face is motion capture.
+
+| Clip (frames) | Plate's purpose | Surface | What was found |
+|---|---|---|---|
+| Green cloud (195) | Planar tracking | A plain green board shaped like a cloud, held up and turned edge-on and back several times | `region` on the outline: right on every frame looked at (overlay, the whole outline lines up); 5 frames at the most edge-on not ok, rightly (1-3 px off). The first path check flagged 35 right frames, which led to its fast-turn rule (below) |
+| Window set extension (210) | 2D, planar or matchmove (the page: planar is "not very good for this") | Marked green screen behind a window, candles and a tree in front, a push-in | Frames 61-67, a few px off, caught by the path check; frames 53-58 and 68-85 a few px off too and written (overlay of the 4 marks); 0-1 px before 50 and from 90 to 140 |
+| MM test wide (215) | 3D matchmove | Marked studio wall, a person in front | **Wrong and not caught.** On the wall's 14 marks: 2 px off at frame 20, 6 at 40, 9 (worst marks 20) at 60, 25 at 100, while 10-13 of the marks fit one plane within 0.6-1.4 px. The region took in the curve of the cyc at the bottom; the surface check passed to frame 108 |
+| MM test close (308) | 3D matchmove | Marked wall, a pole with flags passing in front | Frames 24-66 written 2-5 px off (marks), not caught: a few faint marks against a large textured occluder |
+| Glasses (285) | 3D object tracking | One lens of a pair of glasses on a turning head | Right to frame 154; around frame 200 2-3 px off, not caught (the lens is curved, the head turns); 270-275 caught |
+| Dolly without markers (172) | "Failed matchmove" | A plain, unevenly lit green screen | `region` refused: "the region is flat (almost no edges or texture to follow)" |
+| Single marker (249) | 2D tracking, one marker, pan and tilt | A 22 x 42 px blue tape mark on wrinkled cloth | `ae_track_point` at its default 31 px pattern followed it at a confidence of 0.99 but slid up and down the mark by up to 3.5 px (its colour centroid as the reference; 0.5 px across). A pattern changing in one direction only is now grown until it holds: 51 px here, within 0.72 px on all 248 frames |
+
+So on marked green walls with few marks the region track drifts by a few px to tens of px and its own checks do not see it: that is the case to fix next (the marks, matched the way they were measured here, are an independent check and a correction).
 
 The SIFT reference could not judge the three marked green walls: too few, too faint features (14 of 210 frames solved on the window). Matched on the person in front, it showed a wall moving that the overlay shows standing still.
 
@@ -211,13 +219,18 @@ The SIFT reference could not judge the three marked green walls: too few, too fa
 
 - **What it measures.** A camera shake moves, turns and scales the whole surface at once (the walking U-Haul's true corners jolt 20-26 px off a smooth path in one frame). The check takes that shared similarity out and looks at the surface's shape.
 - **Two limits.**
-  - A jump (half the second difference) over 0.6 px. On the tuning plates' good tracks the worst was 0.46.
+  - A jump over 0.6 px: the frame against the quadratic through its two neighbours each side (it was half the second difference, the line through one each side, which put the peak of a board turning edge-on 2.7 px off). On the tuning plates' good tracks the worst was 0.46.
   - A distance off the robust fit through the 12 frames on each side over 2 px. The truck's true corners make a smooth 1.24 px bump there.
 
   Both limits rise to 6 times the shot's own noise when that is higher, and scale with the comp's height from 1080 lines.
+- **Where the surface turns fast, off its path is not checked.** The green cloud, turned edge-on and back in the hand, went from 388 px wide to 203 and back to 376 within 24 frames, and the fit through 25 frames could not follow it: 35 frames of a right track (every one looked at) were up to 55 px off it, and not writing them would have left AE to draw a straight line across the turn. A wrong stretch and a real wobble look alike in a path. So where the shape's speed on either flank (the median step of the frames 3 to 12 away on one side) is over 2.5 px a frame, those frames are reported (`fast_turn_frames`) and only jumps are checked. Every frame the check had rightly flagged, on the tuning plates and the held-out clips, had flanks of 2.1 px a frame or less; the cloud's turns ran at 2.9-7.7. The flanks, not the frames next to it: the glasses' lens flipping 20-30 px for six frames made its own neighbourhood look fast, and two of its frames 24-32 px off went unflagged that way.
+- **A jump is kept when leaving it out would be worse.** AE fills a frame that is not written with the line between its neighbours, which misses a surface speeding up or slowing down by its acceleration. A frame over the jump limit is not written only when it is further off the curve through its neighbours than that line would be (`jumps_kept` lists the others). On a steady surface the line is on the curve, so nothing changes there.
+- **The checks against the clips.** With these three changes, the flags on the four tuning plates are the same frames as before; the glasses' and MM Close's caught stretches are all still caught; the window's frames 117-125, flagged before and right (overlay), are written; the cloud keeps flags on its last four frames (below) and on jumps of 0.7-1.9 px. One loss: MM Wide's frames 82-83, 97-98 and 105-106, 17-25 px off in a drift that went uncaught around them anyway, are no longer flagged, because its wrong track's shape moved fast.
 - **What it cannot do.**
   - One edge moving by d shows as about 0.42 d, because taking the shared motion out takes part of it. So frames are flagged, not corners.
-  - A wrong stretch longer than 12 frames, or one that drifts smoothly, can pass.
+  - A wrong stretch longer than 12 frames, or one that drifts smoothly, can pass (MM Wide drifted 25 px in 100 frames).
+  - A wrong stretch while the surface turns fast can pass.
+  - At a track's first and last frames the fit is a line from one side, so the last frames of a surface still turning fast can be flagged although right (the cloud's last four). A quadratic there followed the green board's wrong first frames, which matter more.
   - The whole surface jumping cannot be told from a camera jolt by the path alone, so it is reported (`sharpest_move`), never flagged.
 
 ### Other measurements

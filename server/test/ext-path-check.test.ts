@@ -67,6 +67,36 @@ describe("checkPaths", () => {
     expect(res.per_corner[1].worst_off_px).toBeGreaterThan(CORNER_OFF_PX);
   });
 
+  it("does not flag a board turned edge-on and back in the hand, and reports those frames as too fast to check", () => {
+    // A 400 x 500 board held up and turned about its vertical axis: 60 degrees away and back within 24
+    // frames (its width 400 -> 200 -> 400), with the near side growing in perspective, and a slow sway.
+    const W = 200;
+    const H = 250;
+    const turnAt = (i: number) => (Math.abs(i - 60) < 12 ? (Math.PI / 3) * 0.5 * (1 + Math.cos((Math.PI * (i - 60)) / 12)) : 0);
+    const samples: PathSample[] = Array.from({ length: 140 }, (_, i) => {
+      const th = turnAt(i);
+      const pts: Vec2[] = [
+        [-W, -H],
+        [W, -H],
+        [W, H],
+        [-W, H],
+      ].map(([x, y]) => {
+        const z = 1500 + Math.sin(th) * x;
+        const f = 1500;
+        return [640 + 3 * Math.sin(i / 15) + (f * Math.cos(th) * x) / z, 400 + (f * y) / z] as Vec2;
+      });
+      return { frame: i, points: pts };
+    });
+    const res = checkPaths(samples)!;
+    expect(res.flags).toEqual([]);
+    expect(res.fast_frames).toBeGreaterThan(5);
+    expect(res.fast_ranges.every(([a, b]) => a >= 40 && b <= 80)).toBe(true);
+    // The same path with the drag of the test above, on a steady stretch: still found.
+    const pull = (i: number) => (i >= 100 && i < 108 ? 12 * Math.sin(((i - 99) / 9) * Math.PI) : 0);
+    const bent = checkPaths(samples.map((s) => ({ frame: s.frame, points: s.points.map((q, k) => (k === 1 || k === 2 ? ([q[0] - pull(s.frame), q[1]] as Vec2) : q)) })))!;
+    expect(bent.flags.some((fl) => fl.frame >= 102 && fl.frame <= 105)).toBe(true);
+  });
+
   it("raises its limits on a shot whose corners are noisy throughout, instead of flagging every frame", () => {
     let seed = 3;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 2;
