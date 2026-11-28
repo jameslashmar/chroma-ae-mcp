@@ -353,3 +353,91 @@ describe("register.cjs setup text (the panel's Copy button)", () => {
     expect(() => register.setupText("cursor", {}, env)).toThrow(/Node\.js was not found/);
   });
 });
+
+describe("Code Mode for Claude Code (the gear menu's experimental switch)", () => {
+  const VAR = "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE";
+  function codeEnv() {
+    const { env } = fakeEnv();
+    return { env, file: path.join(env.home, ".claude", "settings.json") };
+  }
+  const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"));
+
+  it("is off with no settings.json, and switching it off writes nothing", () => {
+    const { env, file } = codeEnv();
+    expect(register.codeModeState(env)).toEqual({ ok: true, enabled: false, file });
+    expect(register.setCodeMode(env, false)).toEqual({ ok: true, enabled: false, file });
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("switches on (creating settings.json) and off again, leaving nothing behind", () => {
+    const { env, file } = codeEnv();
+    expect(register.setCodeMode(env, true)).toEqual({ ok: true, enabled: true, file });
+    expect(read(file)).toEqual({ env: { [VAR]: "1" } });
+    expect(fs.existsSync(file + ".chroma-bak")).toBe(false);
+    expect(register.setCodeMode(env, false).enabled).toBe(false);
+    expect(read(file)).toEqual({});
+  });
+
+  it("keeps every other setting and env variable, and backs up the original once", () => {
+    const { env, file } = codeEnv();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const original = { model: "opus", permissions: { allow: ["Bash(git status)"] }, env: { OTHER: "x" } };
+    fs.writeFileSync(file, JSON.stringify(original, null, 2) + "\n");
+    register.setCodeMode(env, true);
+    expect(read(file)).toEqual({ ...original, env: { OTHER: "x", [VAR]: "1" } });
+    expect(read(file + ".chroma-bak")).toEqual(original);
+    register.setCodeMode(env, false);
+    expect(read(file)).toEqual(original);
+    expect(read(file + ".chroma-bak")).toEqual(original);
+  });
+
+  it("writes nothing when it is already as asked", () => {
+    const { env, file } = codeEnv();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const text = '{"env":{"' + VAR + '":"1"}}';
+    fs.writeFileSync(file, text);
+    expect(register.setCodeMode(env, true).enabled).toBe(true);
+    expect(fs.readFileSync(file, "utf8")).toBe(text);
+  });
+
+  it('reads "true" as on, and switching on writes the documented "1"', () => {
+    const { env, file } = codeEnv();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ env: { [VAR]: "true" } }));
+    expect(register.codeModeState(env).enabled).toBe(true);
+    register.setCodeMode(env, true);
+    expect(read(file).env[VAR]).toBe("1");
+  });
+
+  it("refuses a settings.json that isn't plain JSON, or whose env isn't an object, and leaves it unchanged", () => {
+    const { env, file } = codeEnv();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "{ // a comment\n}");
+    const state = register.codeModeState(env);
+    expect(state.ok).toBe(false);
+    expect(state.error).toMatch(/isn't plain JSON/);
+    expect(() => register.setCodeMode(env, true)).toThrow(/isn't plain JSON/);
+    expect(fs.readFileSync(file, "utf8")).toBe("{ // a comment\n}");
+    fs.writeFileSync(file, JSON.stringify({ env: ["not", "an", "object"] }));
+    expect(() => register.setCodeMode(env, true)).toThrow(/"env" isn't an object/);
+    expect(read(file)).toEqual({ env: ["not", "an", "object"] });
+  });
+
+  it("follows CLAUDE_CONFIG_DIR, as Claude Code does", () => {
+    const { env } = codeEnv();
+    const dir = path.join(env.home, "elsewhere");
+    const moved = { ...env, claudeConfigDir: dir };
+    expect(register.claudeSettingsPath(moved)).toBe(path.join(dir, "settings.json"));
+    register.setCodeMode(moved, true);
+    expect(read(path.join(dir, "settings.json")).env[VAR]).toBe("1");
+    expect(fs.existsSync(path.join(env.home, ".claude", "settings.json"))).toBe(false);
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = dir;
+    try {
+      expect(register.defaultEnv().claudeConfigDir).toBe(dir);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved;
+    }
+  });
+});

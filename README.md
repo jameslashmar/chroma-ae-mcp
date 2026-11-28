@@ -94,7 +94,12 @@ Several items come from [premiere-pro-mcp](https://github.com/leancoderkavy/prem
 - The port stays with this AE, so agents get that message rather than "can't connect".
 - Each AE launch starts with the MCP on.
 
-**The gear** in the panel's header opens **New token**, **Save diagnostics**, **Check for updates** and the version. It works with the arrow keys and Escape. Actions that change something (New token, Clear render lock) ask first in a dialog inside the panel, with Cancel selected.
+**The gear** in the panel's header opens **New token**, **Save diagnostics**, **Check for updates**, **Code Mode for Claude Code** and the version. It works with the arrow keys and Escape.
+
+**Code Mode for Claude Code** (experimental, off by default) is a switch for [Claude Code's Code Mode](https://code.claude.com/docs/en/code-mode), in which Claude writes JavaScript that makes several tool calls in one step instead of one call at a time.
+- **What it changes:** it adds or removes `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE` in the `env` block of Claude Code's `settings.json` (`~/.claude`, or `CLAUDE_CONFIG_DIR`). Nothing else in the file is touched, and the first change backs the file up as `settings.json.chroma-bak`.
+- **Where it applies:** Claude Code terminal sessions started after the switch, on Claude Code 2.1.323 or later. Not the Desktop app or VS Code.
+- **What it's good for:** with this MCP, a repetitive job (many layers, a batch of reads) runs as a few pieces of code instead of dozens of tool calls. Every call is still guarded and queued by the server as usual. Actions that change something (New token, Clear render lock) ask first in a dialog inside the panel, with Cancel selected.
 
 ### Updates
 

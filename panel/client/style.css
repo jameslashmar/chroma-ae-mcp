@@ -686,6 +686,35 @@ input:focus-visible {
 
 .menu-item:focus-visible { outline-offset: -2px; }
 .menu-item:disabled { opacity: 0.55; cursor: default; }
+.menu-item[hidden] { display: none; }
+
+/* A switch in the menu (Code Mode): a tick when on, the same indent when off. */
+.menu-check {
+  position: relative;
+  padding-left: 26px;
+  border-top: 1px solid var(--border);
+}
+.menu-check::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  width: 4px;
+  height: 8px;
+  margin-top: -6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+  opacity: 0;
+}
+.menu-check[aria-checked="true"]::before { opacity: 1; }
+.menu-tag {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 .settings-status {
   margin: 2px 0;
