@@ -41,6 +41,8 @@ function defaultEnv() {
     platform: process.platform,
     home,
     appData,
+    // Claude Code's own config folder (settings.json): CLAUDE_CONFIG_DIR moves it, as in Claude Code.
+    claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"),
     pathEnv: process.env.PATH || "",
     dirs: usualDirs(process.platform, home, appData),
     relayPath: path.join(__dirname, "stdio-relay.cjs"),
@@ -158,6 +160,56 @@ function setJsonServer(file, entry) {
   if (entry) cfg.mcpServers[NAME] = entry;
   else delete cfg.mcpServers[NAME];
   backupAndWrite(file, JSON.stringify(cfg, null, 2) + "\n");
+}
+
+// ---------- Code Mode for Claude Code (the gear menu's experimental switch) ----------
+// Claude Code's Code Mode (it writes JavaScript that makes several tool calls in one step) is
+// turned on by this variable in the `env` block of Claude Code's user settings.json. It is
+// experimental, off by default, and only takes effect in Claude Code terminal sessions started
+// after the change (not the Desktop app or VS Code). Only this one key is touched.
+const CODE_MODE_VAR = "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE";
+const CODE_MODE_MIN_VERSION = "2.1.323";
+
+function claudeSettingsPath(env) {
+  return path.join(env.claudeConfigDir || path.join(env.home, ".claude"), "settings.json");
+}
+
+function codeModeOn(value) {
+  return value === "1" || value === 1 || value === true || value === "true";
+}
+
+// { ok, enabled, file } or { ok: false, enabled: false, file, error } when settings.json can't be read.
+function codeModeState(env) {
+  const file = claudeSettingsPath(env);
+  try {
+    const cfg = readJson(file);
+    const vars = cfg.env && typeof cfg.env === "object" && !Array.isArray(cfg.env) ? cfg.env : {};
+    return { ok: true, enabled: codeModeOn(vars[CODE_MODE_VAR]), file };
+  } catch (e) {
+    return { ok: false, enabled: false, file, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// Turns Code Mode on or off in Claude Code's settings.json and returns the state after it. Throws
+// (and writes nothing) when the file isn't plain JSON or its `env` isn't an object. Nothing is
+// written when the setting is already as asked, so an untouched file stays byte for byte the same.
+function setCodeMode(env, on) {
+  const file = claudeSettingsPath(env);
+  const cfg = readJson(file);
+  if (cfg.env !== undefined && (cfg.env === null || typeof cfg.env !== "object" || Array.isArray(cfg.env))) {
+    throw new Error(file + ': "env" isn\'t an object; edit it by hand.');
+  }
+  const current = cfg.env ? cfg.env[CODE_MODE_VAR] : undefined;
+  if (on ? current === "1" : !codeModeOn(current)) return codeModeState(env);
+  if (on) {
+    if (!cfg.env) cfg.env = {};
+    cfg.env[CODE_MODE_VAR] = "1";
+  } else if (cfg.env) {
+    delete cfg.env[CODE_MODE_VAR];
+    if (Object.keys(cfg.env).length === 0) delete cfg.env;
+  }
+  backupAndWrite(file, JSON.stringify(cfg, null, 2) + "\n");
+  return codeModeState(env);
 }
 
 function hasJsonServer(file) {
@@ -515,4 +567,9 @@ module.exports = {
   tomlString,
   findNode,
   defaultEnv,
+  CODE_MODE_VAR,
+  CODE_MODE_MIN_VERSION,
+  claudeSettingsPath,
+  codeModeState,
+  setCodeMode,
 };

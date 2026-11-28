@@ -203,7 +203,7 @@
   function settingsItems() {
     var out = [];
     if (!$settingsMenu) return out;
-    var all = $settingsMenu.querySelectorAll("[role=menuitem]");
+    var all = $settingsMenu.querySelectorAll("[role=menuitem], [role=menuitemcheckbox]");
     for (var i = 0; i < all.length; i++) if (!all[i].disabled && !all[i].hidden) out.push(all[i]);
     return out;
   }
@@ -215,6 +215,7 @@
   function openSettings() {
     if (!$settingsMenu || !$settingsBtn) return;
     setSettingsStatus("");
+    refreshCodeMode();
     $settingsMenu.hidden = false;
     $settingsBtn.setAttribute("aria-expanded", "true");
     var items = settingsItems();
@@ -930,6 +931,67 @@
       logUi("err", "Register helper unavailable: " + (e && e.message ? e.message : String(e)));
     }
     return register;
+  }
+
+  // ---------- Code Mode for Claude Code (gear menu, experimental, off by default) ----------
+  // tools/register.cjs adds or removes CLAUDE_CODE_EXPERIMENTAL_CODE_MODE in the `env` block of
+  // Claude Code's settings.json. It takes effect in Claude Code terminal sessions started afterwards.
+  var $codeModeBtn = el("code-mode-btn");
+  var codeModeBusy = false;
+
+  // Hidden when the helper can't be loaded; disabled (with the reason on hover) when settings.json can't be read.
+  function renderCodeMode(state) {
+    if (!$codeModeBtn) return;
+    if (!state) {
+      $codeModeBtn.hidden = true;
+      return;
+    }
+    $codeModeBtn.hidden = false;
+    $codeModeBtn.disabled = codeModeBusy || !state.ok;
+    $codeModeBtn.setAttribute("aria-checked", state.enabled ? "true" : "false");
+    if (!state.ok && state.error) $codeModeBtn.title = state.error;
+  }
+
+  function refreshCodeMode() {
+    if (!$codeModeBtn) return null;
+    if (!loadRegister() || typeof register.codeModeState !== "function") {
+      renderCodeMode(null);
+      return null;
+    }
+    var state = register.codeModeState(register.defaultEnv());
+    renderCodeMode(state);
+    return state;
+  }
+
+  function bindCodeMode() {
+    if (!$codeModeBtn) return;
+    $codeModeBtn.addEventListener("click", function () {
+      if (codeModeBusy) return;
+      var state = refreshCodeMode();
+      if (!state) return;
+      if (!state.ok) {
+        setSettingsStatus(state.error, true);
+        return;
+      }
+      codeModeBusy = true;
+      var msg = "";
+      try {
+        var after = register.setCodeMode(register.defaultEnv(), !state.enabled);
+        codeModeBusy = false;
+        renderCodeMode(after);
+        msg = after.enabled
+          ? "Code Mode on (experimental): Claude Code terminal sessions you start from now use it. Needs Claude Code " + register.CODE_MODE_MIN_VERSION + " or later."
+          : "Code Mode off: new Claude Code sessions call tools one at a time.";
+        setSettingsStatus(msg);
+        logUi("ok", msg + " (" + after.file + ")");
+      } catch (e) {
+        codeModeBusy = false;
+        refreshCodeMode();
+        msg = e && e.message ? e.message : String(e);
+        setSettingsStatus(msg, true);
+        logUi("err", "Code Mode not changed: " + msg);
+      }
+    });
   }
 
   // One AI is chosen at a time; Copy puts that AI's setup on the clipboard.
@@ -1854,6 +1916,8 @@
     bindUpdate();
     bindRegisterToggle();
     renderRegister();
+    bindCodeMode();
+    refreshCodeMode();
     relayout();
 
     tick();
