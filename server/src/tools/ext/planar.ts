@@ -92,7 +92,8 @@ import {
 } from "./planar-math.js";
 import { blit, createCanvas, cropImage, drawCross, drawLabel, drawLine, drawPolygon, encodePng, fitWithin, resizeArea, scaleNearest, strokeRect, type RgbaImage } from "./png-utils.js";
 import { checkPaths, type PathCheckResult } from "./path-check.js";
-import { compToImgH, imgToCompH, OccluderDetector, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
+import { compToImgH, imgToCompH, OccluderDetector, pyramid, RegionAligner, RegionTracker, underMatte, verdict, verdictWhy } from "./region-track.js";
+import { MIN_SURFACE_POINTS, SurfacePoints } from "./surface-points.js";
 import { fitScreenQuad, keyPresenceOf, keyStrength, sampleKey, type ScreenKey } from "./screen-track.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
 import { boxBlurGray, makeWarpedTemplate, PointTracker, toGray, trackTimes, type GrayImage, type Template } from "./track.js";
@@ -347,7 +348,7 @@ export const AeTrackMultiSchema = z
       })
       .optional()
       .describe(
-        "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed. Refused on a flat area (a plain green screen): use points on its markers or corners."
+        "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed; and against the surface's own distinct points (its marks and corners, at least 4): a frame where most of them sit over 1.5 px from where the track puts them is not ok (the region is following something off the surface's plane: a second wall, the curve of a cyc, a stand in front). Refused on a flat area (a plain green screen): use points on its markers or corners."
       ),
     screen: z
       .object({
@@ -441,11 +442,10 @@ async function read<T>(ctx: ToolContext, opId: string, tag: string, host: string
 }
 
 async function readComp(ctx: ToolContext, opId: string, compId: number, layers: LayerSelector[] | undefined, toolName: string): Promise<CompInfo> {
-  const info = await read<CompInfo>(ctx, opId, "comp", "planarComp", { comp_id: compId, ...(layers ? { layers } : {}) }, toolName);
-  if (Number(info.pixel_aspect) > 0 && Math.abs(Number(info.pixel_aspect) - 1) > 1e-6) {
-    throw new PlanarError("refused", `The comp's pixel aspect is ${info.pixel_aspect}, not 1. Planar tracking works on square pixels only.`);
-  }
-  return info;
+  // Non-square pixels need nothing of their own here: AE renders such a comp's frames on its own pixel grid
+  // (a 1280 x 1080 comp of pixel aspect 1.5 came back 1280 x 1080, matching its DVCPRO HD source to 0.001 px,
+  // AE 27.0x78), so a track is made and written in comp pixels like any other.
+  return read<CompInfo>(ctx, opId, "comp", "planarComp", { comp_id: compId, ...(layers ? { layers } : {}) }, toolName);
 }
 
 const snapFrame = (t: number, fps: number): number => Math.round(t * fps) / fps;
@@ -1001,6 +1001,13 @@ export const maxMissesFor = (fps: number): number => Math.max(12, Math.round(2 *
  * makes the images the aligner was built on from a frame (a screen: its brightness and its key); a screen
  * also has an occluder detector.
  */
+/**
+ * A region track's frame whose own distinct points (surface-points.ts) sit further than this (comp px at
+ * 1080 lines) from where the track puts them is not ok. On right tracks they sat 0.1-0.4 px off (the U-Haul
+ * truck) and up to 0.6 (the window's good stretch); drifts the region's own checks missed measured 1.6-29.
+ */
+export const SURFACE_POINT_LIMIT_PX = 1.5;
+
 export class RegionDirection implements DirectionTracker {
   private readonly rt: RegionTracker;
 
@@ -1010,13 +1017,18 @@ export class RegionDirection implements DirectionTracker {
     private readonly scale: number,
     private readonly maxMisses: number,
     private readonly channels: (gray: GrayImage, rgba?: RgbaImage) => GrayImage | GrayImage[] = (g) => g,
-    detector: OccluderDetector | null = null
+    detector: OccluderDetector | null = null,
+    /** The surface's own points, checked on every frame (region tracks); `pointLimitPx` in comp px. */
+    surfacePoints: SurfacePoints | null = null,
+    pointLimitPx = SURFACE_POINT_LIMIT_PX
   ) {
     this.rt = new RegionTracker(
       aligner,
       quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2),
       detector,
-      Math.max(4, Math.round(6 * scale))
+      Math.max(4, Math.round(6 * scale)),
+      surfacePoints && surfacePoints.count >= MIN_SURFACE_POINTS ? surfacePoints : null,
+      pointLimitPx * scale
     );
   }
 
@@ -2562,6 +2574,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       // The region (a region track's area, or where a points track is checked), built once when trackers are made.
       let aligner: RegionAligner | null = null;
       let detector: OccluderDetector | null = null;
+      let surfacePoints: SurfacePoints | null = null;
       if (o.method === "screen" && !o.area) throw new PlanarError("refused", "This screen track was made by an older version of the tool, which followed the screen's edges another way; it cannot be continued. Track it again.");
       if (((!state.forward.done && !fwd) || (!state.backward.done && !bwd)) && o.area) {
         try {
@@ -2573,6 +2586,21 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
             detector = new OccluderDetector(refPng!, mask, aligner, (r, g, b) => keyPresenceOf(key, r, g, b));
           } else {
             aligner = new RegionAligner(refGray!, mask);
+            if (o.method === "region") {
+              // Not under a hand-drawn matte at the reference frame: what it covers is in front, not the surface.
+              let pmask = mask;
+              if (matteCompId !== null) {
+                const refMatte = matteOf(await snapFrom(matteCompId, refTime, 199999, false));
+                const margin = Math.max(4, Math.round(8 * scale));
+                pmask = mask.map((v, i) => (v > 0 && !underMatte(refMatte, i % refMatte.width, Math.floor(i / refMatte.width), margin) ? v : 0));
+              }
+              surfacePoints = new SurfacePoints(refGray!, pmask);
+              if (!stored && surfacePoints.count < MIN_SURFACE_POINTS) {
+                notes.push(
+                  `The region has ${surfacePoints.count} distinct point${surfacePoints.count === 1 ? "" : "s"} (marks, corners) of its own, fewer than ${MIN_SURFACE_POINTS}, so its frames are not checked against them: a drift of the whole region can pass the other checks. Look at the preview.`
+                );
+              }
+            }
           }
         } catch (err) {
           if (o.method === "screen") {
@@ -2590,7 +2618,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       const fresh = (dir: "forward" | "backward"): DirectionTracker => {
         const ds = state[dir];
         if (o.method === "region") {
-          const d = new RegionDirection(aligner!, quad, scale, maxMisses);
+          const d = new RegionDirection(aligner!, quad, scale, maxMisses, (g) => g, null, surfacePoints, SURFACE_POINT_LIMIT_PX * Math.max(1, compSize[1] / 1080));
           if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
           return d;
         }
@@ -2930,7 +2958,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). " +
       "Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). " +
       "For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front later are pushed out of the fit (exclude what is in front at ref_time), and it is the most accurate (0.1-0.9 px on real plates, through a person walking in front). For a keyable screen give `screen` {corners}. When something in front still pulls the fit, `holdout_layers` names layers with a matte of it (a solid with an animated mask, a Roto Brush matte): it is left out of every frame. Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
-      "Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. Once the track is finished its corners' paths are checked too, whatever made them (`path_check`): a frame where the surface's shape jumps against its neighbours, or leaves the path of the frames around it, is not written either, and `jump_preview_path` shows close-ups of the four corners round the worst ones. " +
+      "Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. Comps with non-square pixels (DVCPRO HD, anamorphic) are tracked and written in comp pixels. Once the track is finished its corners' paths are checked too, whatever made them (`path_check`): a frame where the surface's shape jumps against its neighbours, or leaves the path of the frames around it, is not written either, and `jump_preview_path` shows close-ups of the four corners round the worst ones. " +
       "`isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). " +
       "Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. " +
       "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +

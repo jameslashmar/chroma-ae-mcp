@@ -527,6 +527,42 @@ describe("buildInsertKeys", () => {
     expect(keys.max_fit_px).toBe(0);
   });
 
+  it("in a comp of 1.5-wide pixels, pins the square-pixel insert as After Effects draws it there (narrower by 1.5)", async () => {
+    const { insertLayerMatrix, parOf, toDisplay } = await import("../src/tools/ext/screenrep.js");
+    const hs = [identityH(), rotH(2, 1.01, 5, -3), persH];
+    const keys = buildInsertKeys({ frames: frames(hs), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 0, transform: false, compPar: 1.5 });
+    const M = insertLayerMatrix(INSERT, COMP, 1.5);
+    const roles = ["ul", "ur", "lr", "ll"] as const;
+    hs.forEach((Hm, t) => {
+      RECT.forEach((c, k) => {
+        const back = applyH(M, keys.exact[roles[k]][t]) as Vec2;
+        expect(dist(back, applyH(Hm, c) as Vec2)).toBeLessThan(0.01);
+      });
+    });
+    // The layer's own 160 px across take 160 / 1.5 comp px: the pins sit 1.5 times as far from the anchor in x as in comp px.
+    expect(keys.exact.ul[0][0]).toBeCloseTo(80 + (80 - 160) * 1.5, 3);
+    expect(keys.exact.ul[0][1]).toBeCloseTo(45 + (50 - 100), 3);
+    // Square pixels: the same as before.
+    const sq = buildInsertKeys({ frames: frames(hs), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 0, transform: false, compPar: 1 });
+    expect(sq.exact).toEqual(buildInsertKeys({ frames: frames(hs), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 0, transform: false }).exact);
+    // A similarity on the layer transform is square pixels only.
+    expect(() => buildInsertKeys({ frames: frames(hs), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 0, transform: true, compPar: 1.5 })).toThrow(/square pixels/);
+    expect(parOf(1.5)).toBe(1.5);
+    expect(parOf(1.0000001)).toBe(1);
+    expect(parOf(undefined)).toBe(1);
+    // As the screen shows: a 100 x 100 comp-px square of 1.5-wide pixels is 150 x 100.
+    expect(toDisplay([[0, 0], [100, 100]], 1.5)).toEqual([[0, 0], [150, 100]]);
+  });
+
+  it("estimates a screen's aspect as it shows: the same corners in a 1.5 comp read 1.5 times wider", () => {
+    // A 16:10 screen seen square on, drawn in a comp of 1.5-wide pixels: 240 x 225 comp px.
+    const corners: Vec2[] = [[100, 100], [340, 100], [340, 325], [100, 325]];
+    const sq = estimateAspect(corners, [220, 212.5]);
+    const shown = estimateAspect(corners.map((p) => [p[0] * 1.5, p[1]] as Vec2), [330, 212.5]);
+    expect(sq.aspect).toBeCloseTo(240 / 225, 2);
+    expect(shown.aspect).toBeCloseTo(1.6, 2);
+  });
+
   it("pushes each edge out by the expansion, a percent of the screen's width or height, as CC Power Pin does", () => {
     const keys = buildInsertKeys({ frames: frames([identityH()]), refCorners: RECT, compSize: COMP, insertSize: INSERT, expansionPct: 5, transform: false });
     // Screen 160 x 90 centred at (160, 95); the layer sits 80 px left of and 55 px above the comp's origin.
@@ -1221,13 +1257,14 @@ describe("screenrep.jsx", () => {
     expect(undo.begun).toBe(0);
   });
 
-  it("refuses a comp with non-square pixels", () => {
+  it("a comp with non-square pixels: writes the pins it is given, and refuses only transform_pin", () => {
     const s = hostScene();
     s.comp.pixelAspect = 1.5;
     const { A, undo } = s.hostLoad();
-    expect(() => A.screenrepApply(applyArgs(s))).toThrow(/pixel aspect/);
-    expect(() => A.screenrepInfo({ comp_id: s.comp.id })).not.toThrow();
+    expect(() => A.screenrepApply({ ...applyArgs(s), motion_blur: "transform_pin", transform: { position: [[0, 0]], rotation: [0], scale: [[100, 100]] } })).toThrow(/pixel aspect/);
     expect(undo.begun).toBe(0);
+    expect(() => A.screenrepInfo({ comp_id: s.comp.id })).not.toThrow();
+    expect(() => A.screenrepApply(applyArgs(s))).not.toThrow();
   });
 
   it("removes everything it made if the core fails midway, and closes the undo group", () => {
@@ -1823,7 +1860,8 @@ describe("ae_screen_replace", () => {
     await refuses(base("trk_sr_10", { reflections: true, plate: { name: "Plate" } }), fakeAe({ info: { can_set_track_matte: false } }), /23 or later/, "refused");
     await refuses(base("trk_sr_10", { reflections: true, plate: { name: "Plate" } }), fakeAe({ info: { plate: { index: 2, id: 100, name: "Plate", locked: true, enabled: true, three_d: false } } }), /is locked/, "refused");
     await refuses(base("trk_sr_10", { insert: { layer: { name: "Clip" } } }), fakeAe({ info: { insert: { kind: "footage", item_id: 55, name: "Clip.mov", width: 1920, height: 1080, duration: 10, has_video: true, missing: false, pixel_aspect: 1, from_layer: { index: 1, id: 101, name: "Clip", locked: true, enabled: true, three_d: false } } } }), /is locked/, "refused");
-    await refuses(base("trk_sr_10"), fakeAe({ info: { comp: { id: 1, name: "Main", width: W, height: H, pixel_aspect: 2, fps: 10, duration: 1, time: 0, work_area_start: 0, work_area_duration: 1, num_layers: 2, motion_blur: false } } }), /pixel aspect/, "refused");
+    // Non-square pixels are refused only for transform_pin (a similarity on the layer transform).
+    await refuses(base("trk_sr_10", { motion_blur: "transform_pin" }), fakeAe({ info: { comp: { id: 1, name: "Main", width: W, height: H, pixel_aspect: 2, fps: 10, duration: 1, time: 0, work_area_start: 0, work_area_duration: 1, num_layers: 2, motion_blur: false } } }), /pixel aspect 2/, "refused");
     await refuses(base("trk_sr_10", { range: { start: 9, end: 10 } }), fakeAe(), /No frame of the track is ok/, "bad_args");
   });
 

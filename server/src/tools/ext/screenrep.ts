@@ -779,10 +779,23 @@ const round2 = (v: Vec2): Vec2 => [r4(v[0]), r4(v[1])];
  * pin keeps the rest of the perspective. `expansionPct` pushes each edge out by
  * that percent of the screen's width or height (expandQuad), in comp space, before
  * the corners are brought into layer space.
+ *
+ * `compPar` is the comp's pixel aspect. The insert comp has square pixels, and After Effects draws a
+ * square-pixel layer in a comp of wider pixels narrower by that factor (a 1.5 comp: 2 layer px across
+ * take 1.33 comp px), so its matrix is M = T(position) . diag(1 / par, 1) . T(-anchor). Not with
+ * `transform` (a similarity of the track on the layer transform), which is for square pixels only.
  */
-export function buildInsertKeys(a: { frames: PlanarFrame[]; refCorners: Vec2[]; compSize: Vec2; insertSize: Vec2; expansionPct: number; transform: boolean }): InsertKeys {
+export function insertLayerMatrix(insertSize: Vec2, compSize: Vec2, compPar = 1): Mat3 {
+  const anchor: Vec2 = [insertSize[0] / 2, insertSize[1] / 2];
+  const k = compPar > 0 ? 1 / compPar : 1;
+  return [k, 0, compSize[0] / 2 - k * anchor[0], 0, 1, compSize[1] / 2 - anchor[1], 0, 0, 1];
+}
+
+export function buildInsertKeys(a: { frames: PlanarFrame[]; refCorners: Vec2[]; compSize: Vec2; insertSize: Vec2; expansionPct: number; transform: boolean; compPar?: number }): InsertKeys {
   const anchor: Vec2 = [a.insertSize[0] / 2, a.insertSize[1] / 2];
-  const M0 = layerMatrix({ anchor, position: [a.compSize[0] / 2, a.compSize[1] / 2], scale_pct: [100, 100], rotation_deg: 0 });
+  const par = a.compPar ?? 1;
+  if (a.transform && Math.abs(par - 1) > 1e-6) throw new Error("transform_pin needs square pixels");
+  const M0 = Math.abs(par - 1) > 1e-6 ? insertLayerMatrix(a.insertSize, a.compSize, par) : layerMatrix({ anchor, position: [a.compSize[0] / 2, a.compSize[1] / 2], scale_pct: [100, 100], rotation_deg: 0 });
   const mk = () => ({ ul: [] as Vec2[], ur: [] as Vec2[], ll: [] as Vec2[], lr: [] as Vec2[] });
   const exact = mk();
   const expanded = mk();
@@ -1046,11 +1059,18 @@ interface CompInfo {
 }
 
 async function readComp(ctx: ToolContext, opId: string, compId: number, layers: LayerSelector[] | undefined, toolName: string): Promise<CompInfo> {
-  const info = await readHost<CompInfo>(ctx, opId, "comp", "planarComp", { comp_id: compId, ...(layers ? { layers } : {}) }, toolName);
-  if (Number(info.pixel_aspect) > 0 && Math.abs(Number(info.pixel_aspect) - 1) > 1e-6) {
-    throw new PlanarError("refused", `The comp's pixel aspect is ${info.pixel_aspect}, not 1. Screen replacement works on square pixels only.`);
-  }
-  return info;
+  return readHost<CompInfo>(ctx, opId, "comp", "planarComp", { comp_id: compId, ...(layers ? { layers } : {}) }, toolName);
+}
+
+/** A comp's pixel aspect, 1 when it is missing or square to 6 places. */
+export function parOf(v: unknown): number {
+  const p = Number(v);
+  return p > 0 && Math.abs(p - 1) > 1e-6 ? p : 1;
+}
+
+/** Comp pixels to how they show: x times the pixel aspect. */
+export function toDisplay(points: Vec2[], par: number): Vec2[] {
+  return points.map((p) => [p[0] * par, p[1]] as Vec2);
 }
 
 /** Renders one frame of a comp, decodes it and deletes the file. */
@@ -1301,8 +1321,11 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
 
   const { comp, scale, snap, snapped, points, excursions } = ran;
   const quad = quadMetrics(snapped);
-  const principal: Vec2 = [comp.width / 2, comp.height / 2];
-  const est = quad.ok ? estimateAspect(snapped, principal) : null;
+  // The aspect as the screen shows: comp pixels are `par` wide.
+  const par = parOf(comp.pixel_aspect);
+  const principal: Vec2 = [(comp.width / 2) * par, comp.height / 2];
+  const est = quad.ok ? estimateAspect(toDisplay(snapped, par), principal) : null;
+  const parNote = par !== 1 ? `The comp's pixels are not square (pixel aspect ${r3(par)}): the aspect was worked out as the screen shows; the corners and px are comp pixels.` : null;
   const sidesToDraw: Array<[Vec2, Vec2] | null> = snap.sides.map((s, i) => {
     if (!s.line) return null;
     const proj = (p: Vec2): Vec2 => {
@@ -1346,6 +1369,7 @@ async function screenCorners(ctx: ToolContext, args: AeScreenCornersArgs): Promi
   });
   const lowest = Math.min(...snap.corners.map((c) => c.confidence));
   const notes: string[] = [COLOUR_NOTE];
+  if (parNote) notes.push(parNote);
   if (lowest < 0.5) notes.push(`The least certain corner has confidence ${lowest}: look at preview_path before using these corners, or give better guesses.`);
   if (est && est.method === "perspective") {
     notes.push(
@@ -1823,8 +1847,17 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
       insert: args.insert.item_id !== undefined ? { item_id: args.insert.item_id } : { layer: args.insert.layer },
     }, toolName);
     const comp = info.comp;
-    if (Number(comp.pixel_aspect) > 0 && Math.abs(Number(comp.pixel_aspect) - 1) > 1e-6) {
-      throw new PlanarError("refused", `The comp's pixel aspect is ${comp.pixel_aspect}, not 1. Screen replacement works on square pixels only.`);
+    const par = parOf(comp.pixel_aspect);
+    if (par !== 1) {
+      if (args.motion_blur === "transform_pin") {
+        throw new PlanarError(
+          "refused",
+          `The comp's pixels are not square (pixel aspect ${r3(par)}), and motion_blur transform_pin puts a similarity of the track on the layer transform, which is worked out for square pixels only. Use motion_blur force (CC Force Motion Blur) or none.`
+        );
+      }
+      notes.push(
+        `The comp's pixels are not square (pixel aspect ${r3(par)}): the screen's aspect was worked out as it shows (each comp pixel ${r3(par)} wide), and the square-pixel insert is pinned so that it shows at that aspect. The track's px are comp pixels.`
+      );
     }
     const item = info.insert;
     if (!item) throw new PlanarError("not_found", "The insert could not be resolved.");
@@ -1869,8 +1902,8 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
       notes.push(`The track is a ${track.model} track: the screen moves without changing its shape. If the camera or the screen turns, track four points with the perspective model.`);
     }
 
-    // The aspect and the insert comp.
-    const est = estimateAspect(corners, [comp.width / 2, comp.height / 2]);
+    // The aspect and the insert comp, as the screen shows: comp pixels are `par` wide.
+    const est = estimateAspect(toDisplay(corners, par), [(comp.width / 2) * par, comp.height / 2]);
     const aspect = args.insert_aspect ?? est.aspect;
     if (!(aspect >= 0.1 && aspect <= 10)) throw new PlanarError("bad_args", `The screen's aspect came out at ${r3(aspect)}; give insert_aspect.`);
     if (args.insert_aspect === undefined) {
@@ -2001,6 +2034,7 @@ async function screenReplace(ctx: ToolContext, args: AeScreenReplaceArgs): Promi
     insertSize,
     expansionPct: args.expansion_pct,
     transform: args.motion_blur === "transform_pin",
+    compPar: parOf(comp.pixel_aspect),
   });
   if (keys.times.length === 0) throw new PlanarError("bad_args", "No frame of the track could be turned into keys (every frame was degenerate).");
   if (keys.skipped.length > 0) notes.push(`${keys.skipped.length} frame(s) were not written (degenerate for this screen); the keys interpolate across them.`);
@@ -2207,7 +2241,7 @@ export const screenrepTools: ToolDefinition<any>[] = [
       "(3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; " +
       "(5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur. Effects follow the shared order (colour, blur, pin, motion blur). " +
       "After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: occluding hands need a roto layer of yours (not scriptable), grain (ae_patch_grain) and a check (ae_patch_check). " +
-      "Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, a comp with non-square pixels, and reflections without AE 23+ track mattes. " +
+      "Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, motion_blur transform_pin in a comp with non-square pixels, and reflections without AE 23+ track mattes. In a comp with non-square pixels the screen's aspect is worked out as the picture shows (each comp pixel its pixel aspect wide) and the square-pixel insert is pinned so it shows at that aspect. " +
       "The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeScreenReplaceSchema,

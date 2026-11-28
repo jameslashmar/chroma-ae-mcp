@@ -660,7 +660,9 @@
   A.screenrepApply = function (args) {
     assertGuard(args.expect);
     var comp = requireComp(args.comp_id);
-    requireSquarePixels(comp);
+    // Non-square comp pixels: the server worked the pin values out for the square-pixel insert comp drawn
+    // narrower by the pixel aspect; a similarity on the layer transform (transform_pin) is square pixels only.
+    if (args.motion_blur === "transform_pin") requireSquarePixels(comp);
     var kind = args.pin;
     if (kind !== "power_pin" && kind !== "corner_pin") fail("bad_args", "pin must be power_pin or corner_pin");
     var name = args.name;

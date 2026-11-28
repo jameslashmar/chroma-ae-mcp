@@ -23,6 +23,7 @@
  */
 
 import { applyH, invertH, mulH, quadCheck, quadGrid, type Mat3, type Vec2 } from "./planar-math.js";
+import type { SurfacePoints, SurfacePointsCheck } from "./surface-points.js";
 import type { GrayImage } from "./track.js";
 
 /** NCC over the kept samples a frame needs to count as on the surface. */
@@ -1295,6 +1296,8 @@ export interface RegionStep {
   note?: string;
   /** Frames in a row without a verdict, this one included. */
   misses: number;
+  /** The surface's own points against the solved motion (surface-points.ts), when they were checked. */
+  points?: SurfacePointsCheck;
 }
 
 /**
@@ -1316,12 +1319,18 @@ export class RegionTracker {
   misses = 0;
   private readonly grid: Vec2[];
 
+  private pointSeed = 0;
+
   constructor(
     readonly aligner: RegionAligner,
     private readonly quadImg: Vec2[],
     private readonly detector: OccluderDetector | null = null,
     /** How far round a hand-drawn matte samples are left out too, image px. */
-    private readonly matteMarginPx = 6
+    private readonly matteMarginPx = 6,
+    /** The surface's own points, checked on every frame the region lined up (null: not checked). */
+    private readonly surfacePoints: SurfacePoints | null = null,
+    /** Over this (image px) at the points, a frame is not ok. */
+    private readonly pointLimitPx = 1.5
   ) {
     this.grid = quadGrid(quadImg);
   }
@@ -1425,7 +1434,32 @@ export class RegionTracker {
       this.Hprev2 = this.Hprev;
       this.Hprev = best.H;
       this.misses = 0;
+      // The surface's own points: where the region lined up but its marks are not where the motion puts them,
+      // the region followed something off the surface's plane. The motion is followed on (the next frame starts
+      // from it, and the track can come back), but the frame is not ok.
+      const sp = this.surfacePoints;
+      // With a hand-drawn matte, a point whose patch touches it is not looked for.
+      const skip = sp && matte ? (x: number, y: number) => underMatte(matte, x, y, sp.reach + this.matteMarginPx) : undefined;
+      const pts = sp ? sp.check(Array.isArray(frame) ? frame[0] : frame, best.H, 1 + this.pointSeed++, skip) : null;
+      if (pts && pts.px > this.pointLimitPx) {
+        return {
+          ok: false,
+          H: best.H,
+          ncc: best.ncc,
+          coverage: best.coverage,
+          expected_px: null,
+          cells: best.cells,
+          model,
+          occluded,
+          misses: 0,
+          points: pts,
+          note:
+            `the region lined up, but the surface's own marks (${pts.used} of ${pts.matched} found) sit ${Math.round(pts.px * 10) / 10} image px from where it puts them: ` +
+            "it is following something that is not on the surface's plane (a second wall or the curve of a cyc, a stand or a frame in front, lens distortion at the edge of a wide shot). Draw the region on the one plane, or exclude the rest",
+        };
+      }
       return {
+        ...(pts ? { points: pts } : {}),
         ok: true,
         H: best.H,
         ncc: best.ncc,
@@ -1480,6 +1514,17 @@ export class RegionTracker {
     const c = quadCheck(q as Vec2[]);
     return c.ok ? null : `the surface quad is degenerate: ${c.reason}`;
   }
+}
+
+/** Whether a matte (alpha 0-255) covers (x, y) or any point at `r` px round it, frame image px. */
+export function underMatte(matte: GrayImage, x: number, y: number, r: number): boolean {
+  for (const [dx, dy] of [[0, 0], [-r, -r], [0, -r], [r, -r], [-r, 0], [r, 0], [-r, r], [0, r], [r, r]]) {
+    const X = Math.round(x + dx);
+    const Y = Math.round(y + dy);
+    if (X < 0 || Y < 0 || X >= matte.width || Y >= matte.height) continue;
+    if (matte.data[Y * matte.width + X] > 127) return true;
+  }
+  return false;
 }
 
 export const verdict = (r: AlignResult): boolean => r.ncc >= VERDICT_NCC && r.coverage >= VERDICT_COVERAGE && cellsAgree(r.cells);

@@ -1031,10 +1031,10 @@ describe("ae_track_multi", () => {
     expect(out.frames).toBe(3);
   }, 30000);
 
-  it("refuses a comp with non-square pixels, a bad reference time, and too few usable points, before rendering", async () => {
+  it("tracks a comp with non-square pixels in its own pixels; refuses a bad reference time and too few usable points before rendering", async () => {
+    // AE renders a comp of wider pixels on its own pixel grid, so it is tracked like any other.
     const odd = fakeAe({ comp: { pixel_aspect: 2 } });
-    expect(await tool("ae_track_multi").handler(multi({}), odd.ctx)).toMatchObject({ ok: false, error: "refused" });
-    expect(odd.fns()).not.toContain("snapshotFrame");
+    expect(await tool("ae_track_multi").handler(multi({}), odd.ctx)).toMatchObject({ ok: true });
     const late = fakeAe();
     expect(await tool("ae_track_multi").handler(multi({ ref_time: 5 }), late.ctx)).toMatchObject({ ok: false, error: "bad_args" });
     expect(late.fns()).not.toContain("snapshotFrame");

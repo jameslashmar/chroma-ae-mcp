@@ -40488,12 +40488,12 @@ async function measureLoudness(channels, sampleRate, options = {}) {
     if (loudAt < 0 || l > lufsOf(series[loudAt])) loudAt = k;
     if (quietAt < 0 || l < lufsOf(series[quietAt])) quietAt = k;
   }
-  const windowAt = (k) => {
+  const windowAt2 = (k) => {
     const start = k * step3 / sampleRate;
     return { start: round33(start), end: round33(start + span), lufs: round1(lufsOf(series[k])), kind };
   };
-  if (loudAt >= 0) loudest = windowAt(loudAt);
-  if (quietAt >= 0) quietest = windowAt(quietAt);
+  if (loudAt >= 0) loudest = windowAt2(loudAt);
+  if (quietAt >= 0) quietest = windowAt2(quietAt);
   const poly = makePolyphase(oversamplingFor(sampleRate));
   const peaks = [];
   for (const x of channels) peaks.push(await channelPeak(x, poly, !options.float));
@@ -46416,6 +46416,15 @@ function unionExclude(a, b) {
   if (!b) return a;
   return a.map((x, l) => x.map((v, k) => v || b[l][k] ? 1 : 0));
 }
+function underMatte(matte, x, y, r) {
+  for (const [dx, dy] of [[0, 0], [-r, -r], [0, -r], [r, -r], [-r, 0], [r, 0], [-r, r], [0, r], [r, r]]) {
+    const X = Math.round(x + dx);
+    const Y = Math.round(y + dy);
+    if (X < 0 || Y < 0 || X >= matte.width || Y >= matte.height) continue;
+    if (matte.data[Y * matte.width + X] > 127) return true;
+  }
+  return false;
+}
 function verdictWhy(r) {
   if (!(r.ncc >= VERDICT_NCC && r.coverage >= VERDICT_COVERAGE)) {
     return `the frame does not match the surface (correlation ${round24(r.ncc)} over ${Math.round(100 * r.coverage)}% of it; needs ${VERDICT_NCC} over ${Math.round(100 * VERDICT_COVERAGE)}%)`;
@@ -47190,22 +47199,27 @@ var init_region_track = __esm({
       }
     };
     RegionTracker = class {
-      constructor(aligner, quadImg, detector = null, matteMarginPx = 6) {
+      constructor(aligner, quadImg, detector = null, matteMarginPx = 6, surfacePoints = null, pointLimitPx = 1.5) {
         this.aligner = aligner;
         this.quadImg = quadImg;
         this.detector = detector;
         this.matteMarginPx = matteMarginPx;
+        this.surfacePoints = surfacePoints;
+        this.pointLimitPx = pointLimitPx;
         this.grid = quadGrid(quadImg);
       }
       aligner;
       quadImg;
       detector;
       matteMarginPx;
+      surfacePoints;
+      pointLimitPx;
       Hprev = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       Hprev2 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       prior = null;
       misses = 0;
       grid;
+      pointSeed = 0;
       restore(last, prev) {
         this.Hprev = last.slice();
         this.Hprev2 = (prev ?? last).slice();
@@ -47289,7 +47303,26 @@ var init_region_track = __esm({
           this.Hprev2 = this.Hprev;
           this.Hprev = best.H;
           this.misses = 0;
+          const sp = this.surfacePoints;
+          const skip = sp && matte ? (x, y) => underMatte(matte, x, y, sp.reach + this.matteMarginPx) : void 0;
+          const pts = sp ? sp.check(Array.isArray(frame) ? frame[0] : frame, best.H, 1 + this.pointSeed++, skip) : null;
+          if (pts && pts.px > this.pointLimitPx) {
+            return {
+              ok: false,
+              H: best.H,
+              ncc: best.ncc,
+              coverage: best.coverage,
+              expected_px: null,
+              cells: best.cells,
+              model,
+              occluded,
+              misses: 0,
+              points: pts,
+              note: `the region lined up, but the surface's own marks (${pts.used} of ${pts.matched} found) sit ${Math.round(pts.px * 10) / 10} image px from where it puts them: it is following something that is not on the surface's plane (a second wall or the curve of a cyc, a stand or a frame in front, lens distortion at the edge of a wide shot). Draw the region on the one plane, or exclude the rest`
+            };
+          }
           return {
+            ...pts ? { points: pts } : {},
             ok: true,
             H: best.H,
             ncc: best.ncc,
@@ -47343,318 +47376,6 @@ var init_region_track = __esm({
     };
     verdict = (r) => r.ncc >= VERDICT_NCC && r.coverage >= VERDICT_COVERAGE && cellsAgree(r.cells);
     round24 = (v) => Math.round(v * 100) / 100;
-  }
-});
-
-// src/tools/ext/edges.ts
-function sobel2(g) {
-  const { width: w, height: h, data: d } = g;
-  const gx = new Float32Array(w * h);
-  const gy = new Float32Array(w * h);
-  const mag = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      const a = d[i - w - 1];
-      const b = d[i - w];
-      const c = d[i - w + 1];
-      const l = d[i - 1];
-      const r = d[i + 1];
-      const e = d[i + w - 1];
-      const f = d[i + w];
-      const k = d[i + w + 1];
-      const sx = (c + 2 * r + k - (a + 2 * l + e)) / 8;
-      const sy = (e + 2 * f + k - (a + 2 * b + c)) / 8;
-      gx[i] = sx;
-      gy[i] = sy;
-      mag[i] = Math.hypot(sx, sy);
-    }
-  }
-  return { width: w, height: h, gx, gy, mag };
-}
-function bilinear(a, w, h, x, y) {
-  const xc = clamp2(x, 0, w - 1.001);
-  const yc = clamp2(y, 0, h - 1.001);
-  const x0 = Math.floor(xc);
-  const y0 = Math.floor(yc);
-  const fx = xc - x0;
-  const fy = yc - y0;
-  const i = y0 * w + x0;
-  return (a[i] * (1 - fx) + a[i + 1] * fx) * (1 - fy) + (a[i + w] * (1 - fx) + a[i + w + 1] * fx) * fy;
-}
-function scanSide(gr, a, b, outward, o) {
-  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  const steps = Math.max(8, Math.min(200, Math.floor(len / 2)));
-  const step3 = 0.5;
-  const S = Math.max(2, o.searchPx);
-  const n = Math.floor(2 * S / step3) + 1;
-  const prof = new Float64Array(n);
-  const points = [];
-  const strengths = [];
-  let competing = 0;
-  const { width: w, height: h } = gr;
-  for (let k = 0; k < steps; k++) {
-    const u = 0.1 + 0.8 * (k + 0.5) / steps;
-    const px = a[0] + (b[0] - a[0]) * u;
-    const py = a[1] + (b[1] - a[1]) * u;
-    let top = 0;
-    for (let j = 0; j < n; j++) {
-      const d2 = -S + j * step3;
-      const x = px + outward[0] * d2;
-      const y = py + outward[1] * d2;
-      if (x < 1 || y < 1 || x > w - 2 || y > h - 2) {
-        prof[j] = 0;
-        continue;
-      }
-      const sx = bilinear(gr.gx, w, h, x, y);
-      const sy = bilinear(gr.gy, w, h, x, y);
-      prof[j] = Math.abs(sx * outward[0] + sy * outward[1]);
-      if (prof[j] > top) top = prof[j];
-    }
-    if (top < MIN_EDGE) continue;
-    const peaks = [];
-    for (let j = 1; j < n - 1; j++) {
-      if (prof[j] > prof[j - 1] && prof[j] >= prof[j + 1] && prof[j] >= 0.6 * top && prof[j] >= MIN_EDGE) peaks.push(j);
-    }
-    if (peaks.length === 0) continue;
-    let pick5 = peaks[0];
-    if (o.prefer === "outer") pick5 = peaks[peaks.length - 1];
-    else if (o.prefer === "nearest") pick5 = peaks.reduce((best, j) => Math.abs(-S + j * step3) < Math.abs(-S + best * step3) ? j : best, peaks[0]);
-    if (peaks.some((j) => Math.abs(j - pick5) * step3 > 3)) competing++;
-    const l = prof[pick5 - 1];
-    const c = prof[pick5];
-    const r = prof[pick5 + 1];
-    const den = l - 2 * c + r;
-    const off = den < 0 ? clamp2(0.5 * (l - r) / den, -0.5, 0.5) : 0;
-    const d = -S + (pick5 + off) * step3;
-    points.push([px + outward[0] * d, py + outward[1] * d]);
-    strengths.push(c);
-  }
-  return { points, strengths, competing, found: points.length, expected: steps };
-}
-function totalLeastSquares(pts) {
-  const n = pts.length;
-  const cx = pts.reduce((s, p) => s + p[0], 0) / n;
-  const cy = pts.reduce((s, p) => s + p[1], 0) / n;
-  let sxx = 0;
-  let sxy = 0;
-  let syy = 0;
-  for (const p of pts) {
-    const dx = p[0] - cx;
-    const dy = p[1] - cy;
-    sxx += dx * dx;
-    sxy += dx * dy;
-    syy += dy * dy;
-  }
-  const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-  return { c: [cx, cy], dir: [Math.cos(ang), Math.sin(ang)] };
-}
-function fitLine(pts, tol = 1) {
-  if (pts.length < 6) return null;
-  let use = pts;
-  let line = totalLeastSquares(use);
-  for (let it = 0; it < 4; it++) {
-    const res = pts.map((p) => distToLine(p, line.c, line.dir));
-    const thr = Math.max(tol, 2.5 * 1.4826 * median5(res));
-    const next = pts.filter((_, i) => res[i] <= thr);
-    if (next.length < 6 || next.length === use.length) break;
-    use = next;
-    line = totalLeastSquares(use);
-  }
-  const rms = Math.sqrt(use.reduce((s, p) => s + distToLine(p, line.c, line.dir) ** 2, 0) / use.length);
-  return { c: line.c, dir: line.dir, inliers: use.length, total: pts.length, rms };
-}
-function intersectLines(a, b) {
-  const cr = a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0];
-  if (Math.abs(cr) < 0.25) return null;
-  const t = ((b.c[0] - a.c[0]) * b.dir[1] - (b.c[1] - a.c[1]) * b.dir[0]) / cr;
-  return [a.c[0] + a.dir[0] * t, a.c[1] + a.dir[1] * t];
-}
-var clamp2, median5, MIN_EDGE, distToLine;
-var init_edges = __esm({
-  "src/tools/ext/edges.ts"() {
-    "use strict";
-    clamp2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    median5 = (a) => {
-      if (a.length === 0) return 0;
-      const s = [...a].sort((x, y) => x - y);
-      const m = s.length >> 1;
-      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-    };
-    MIN_EDGE = 3;
-    distToLine = (p, c, dir) => Math.abs((p[0] - c[0]) * dir[1] - (p[1] - c[1]) * dir[0]);
-  }
-});
-
-// src/tools/ext/screen-track.ts
-function insideQuad(q, x, y) {
-  let sign = 0;
-  for (let i = 0; i < 4; i++) {
-    const a = q[i];
-    const b = q[(i + 1) % 4];
-    const c = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
-    const s = c > 0 ? 1 : c < 0 ? -1 : 0;
-    if (s === 0) continue;
-    if (sign === 0) sign = s;
-    else if (s !== sign) return false;
-  }
-  return true;
-}
-function sampleKey(img, quad) {
-  const c = centroid2(quad);
-  const inner = quad.map((p) => [c[0] + (p[0] - c[0]) * 0.7, c[1] + (p[1] - c[1]) * 0.7]);
-  const xs = inner.map((p) => p[0]);
-  const ys = inner.map((p) => p[1]);
-  const x0 = Math.max(0, Math.floor(Math.min(...xs)));
-  const x1 = Math.min(img.width - 1, Math.ceil(Math.max(...xs)));
-  const y0 = Math.max(0, Math.floor(Math.min(...ys)));
-  const y1 = Math.min(img.height - 1, Math.ceil(Math.max(...ys)));
-  const step3 = Math.max(1, Math.floor(Math.sqrt((x1 - x0 + 1) * (y1 - y0 + 1) / 2e4)));
-  const rs = [];
-  const gs = [];
-  const ls = [];
-  const raw = [[], [], []];
-  for (let y = y0; y <= y1; y += step3) {
-    for (let x = x0; x <= x1; x += step3) {
-      if (!insideQuad(inner, x, y)) continue;
-      const i = (y * img.width + x) * 4;
-      const r = img.data[i];
-      const g = img.data[i + 1];
-      const b = img.data[i + 2];
-      const s = r + g + b;
-      if (s < 30) continue;
-      rs.push(r / s);
-      gs.push(g / s);
-      ls.push(luma(r, g, b));
-      raw[0].push(r);
-      raw[1].push(g);
-      raw[2].push(b);
-    }
-  }
-  if (rs.length < 50) return null;
-  const med = (a) => {
-    const v = a.slice().sort((p, q) => p - q);
-    return v[v.length >> 1];
-  };
-  const chroma = [med(rs), med(gs)];
-  if (Math.hypot(chroma[0] - 1 / 3, chroma[1] - 1 / 3) < 0.08) return null;
-  const d = rs.map((r, k) => Math.hypot(r - chroma[0], gs[k] - chroma[1]));
-  const mad = 1.4826 * med(d);
-  const keyed = d.filter((v) => v <= Math.max(0.03, 4 * mad)).length / d.length;
-  if (keyed < 0.6) return null;
-  const innerT = Math.max(0.025, 3 * mad);
-  return { chroma, luma: med(ls), inner: innerT, outer: innerT + Math.max(0.03, 0.5 * innerT), rgb: [med(raw[0]), med(raw[1]), med(raw[2])] };
-}
-function keyPresenceOf(key, r, g, b) {
-  const s = r + g + b;
-  if (!(s > 0)) return 0;
-  const d = Math.hypot(r / s - key.chroma[0], g / s - key.chroma[1]);
-  const near10 = Math.max(0.08, key.outer);
-  const far = near10 + 0.06;
-  let a = d <= near10 ? 1 : d >= far ? 0 : (far - d) / (far - near10);
-  if (a > 0) {
-    const l = luma(r, g, b);
-    const dark0 = 0.15 * key.luma;
-    const dark1 = 0.25 * key.luma;
-    if (l < dark1) a *= l <= dark0 ? 0 : (l - dark0) / (dark1 - dark0);
-  }
-  return a;
-}
-function keyStrength(img, key, box) {
-  const { width: w, height: h } = img;
-  const out = new Float32Array(w * h);
-  const m = (key.rgb[0] + key.rgb[1] + key.rgb[2]) / 3;
-  let u = [key.rgb[0] - m, key.rgb[1] - m, key.rgb[2] - m];
-  const n = Math.hypot(u[0], u[1], u[2]) || 1;
-  u = u.map((v) => v / n);
-  const x0 = Math.max(0, Math.floor(box[0]));
-  const y0 = Math.max(0, Math.floor(box[1]));
-  const x1 = Math.min(w - 1, Math.ceil(box[2]));
-  const y1 = Math.min(h - 1, Math.ceil(box[3]));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const i = y * w + x;
-      out[i] = u[0] * img.data[i * 4] + u[1] * img.data[i * 4 + 1] + u[2] * img.data[i * 4 + 2];
-    }
-  }
-  return { width: w, height: h, data: out };
-}
-function rng(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = a + 1831565813 >>> 0;
-    let t = a;
-    t = Math.imul(t ^ t >>> 15, t | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-function ransacLine(pts, tol = 1, iterations = 120, seed = 7) {
-  if (pts.length < 6) return null;
-  const rand = rng(seed);
-  let best = [];
-  for (let it = 0; it < iterations; it++) {
-    const a = pts[Math.floor(rand() * pts.length)];
-    const b = pts[Math.floor(rand() * pts.length)];
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const n = Math.hypot(dx, dy);
-    if (n < 8) continue;
-    const nx = -dy / n;
-    const ny = dx / n;
-    const inl = pts.filter((p) => Math.abs((p[0] - a[0]) * nx + (p[1] - a[1]) * ny) <= tol);
-    if (inl.length > best.length) best = inl;
-  }
-  if (best.length < 6) return fitLine(pts, tol);
-  const line = fitLine(best, tol);
-  return line ? { ...line, total: pts.length } : null;
-}
-function fitScreenQuad(strength, pred, band) {
-  const gr = sobel2(strength);
-  const c = centroid2(pred);
-  const sides = [];
-  for (let i = 0; i < 4; i++) {
-    const a = pred[i];
-    const b = pred[(i + 1) % 4];
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len < 8) return { ok: false, corners: pred, sides, expected_px: null, why: "the screen is too small" };
-    let normal = [(b[1] - a[1]) / len, -(b[0] - a[0]) / len];
-    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    if ((mid[0] - c[0]) * normal[0] + (mid[1] - c[1]) * normal[1] < 0) normal = [-normal[0], -normal[1]];
-    const scan = scanSide(gr, a, b, normal, { searchPx: band, prefer: "nearest" });
-    const line = ransacLine(scan.points);
-    sides.push({ support: line ? line.inliers / Math.max(1, scan.expected) : 0, rms_px: line ? line.rms : null, line });
-  }
-  const weak = sides.map((s, i) => s.support < MIN_SIDE_SUPPORT ? i : -1).filter((i) => i >= 0);
-  if (weak.length) {
-    const names = ["top", "right", "bottom", "left"];
-    return { ok: false, corners: pred, sides, expected_px: null, why: `the screen's ${weak.map((i) => names[i]).join(" and ")} edge was not found (covered, out of frame, or not the key colour)` };
-  }
-  const corners = [];
-  let ex = 0;
-  for (let i = 0; i < 4; i++) {
-    const p = sides[(i + 3) % 4];
-    const n = sides[i];
-    const meet = intersectLines(p.line, n.line);
-    if (!meet) return { ok: false, corners: pred, sides, expected_px: null, why: "two neighbouring edges are almost parallel" };
-    corners.push(meet);
-    const e = (s) => 2 * Math.max(0.1, s.rms_px ?? 1) / Math.sqrt(Math.max(1, s.line.inliers));
-    const sin = Math.abs(p.line.dir[0] * n.line.dir[1] - p.line.dir[1] * n.line.dir[0]);
-    ex += Math.hypot(e(p), e(n)) / Math.max(0.25, sin);
-  }
-  const chk = quadCheck(corners);
-  if (!chk.ok) return { ok: false, corners, sides, expected_px: null, why: `the outline is not a quad: ${chk.reason}` };
-  return { ok: true, corners, sides, expected_px: ex / 4 };
-}
-var luma, centroid2, MIN_SIDE_SUPPORT;
-var init_screen_track = __esm({
-  "src/tools/ext/screen-track.ts"() {
-    "use strict";
-    init_edges();
-    init_planar_math();
-    luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    centroid2 = (q) => [q.reduce((s, p) => s + p[0], 0) / q.length, q.reduce((s, p) => s + p[1], 0) / q.length];
-    MIN_SIDE_SUPPORT = 0.25;
   }
 });
 
@@ -48155,6 +47876,498 @@ var init_track = __esm({
   }
 });
 
+// src/tools/ext/surface-points.ts
+function bilinear(img, x, y) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  if (x0 < 0 || y0 < 0 || x0 + 1 >= img.width || y0 + 1 >= img.height) return NaN;
+  const fx = x - x0;
+  const fy = y - y0;
+  const w = img.width;
+  const d = img.data;
+  return (d[y0 * w + x0] * (1 - fx) + d[y0 * w + x0 + 1] * fx) * (1 - fy) + (d[(y0 + 1) * w + x0] * (1 - fx) + d[(y0 + 1) * w + x0 + 1] * fx) * fy;
+}
+function patchAt(img, x, y, n, step3) {
+  const t = new Float64Array(n * n);
+  const h = (n - 1) / 2;
+  for (let v = 0; v < n; v++) for (let u = 0; u < n; u++) t[v * n + u] = bilinear(img, x + (u - h) * step3, y + (v - h) * step3);
+  return t;
+}
+function windowAt(img, H, x, y, n, r, step3) {
+  const m = n + 2 * r;
+  const out = new Float64Array(m * m);
+  const h = (m - 1) / 2;
+  for (let v = 0; v < m; v++) {
+    for (let u = 0; u < m; u++) {
+      const p = applyH(H, [x + (u - h) * step3, y + (v - h) * step3]);
+      out[v * m + u] = p ? bilinear(img, p[0], p[1]) : NaN;
+    }
+  }
+  return out;
+}
+function search(t, n, w, r) {
+  const m = n + 2 * r;
+  const k = 2 * r + 1;
+  let tm = 0;
+  for (let i = 0; i < t.length; i++) tm += t[i];
+  tm /= t.length;
+  let tv = 0;
+  for (let i = 0; i < t.length; i++) tv += (t[i] - tm) ** 2;
+  if (!(tv > 0) || Number.isNaN(tv)) return null;
+  const sc = new Float64Array(k * k).fill(-2);
+  let best = -2;
+  let bi = -1;
+  for (let dy = 0; dy < k; dy++) {
+    for (let dx = 0; dx < k; dx++) {
+      let wm = 0;
+      let bad4 = false;
+      for (let v = 0; v < n && !bad4; v++) {
+        for (let u = 0; u < n; u++) {
+          const q = w[(v + dy) * m + u + dx];
+          if (Number.isNaN(q)) {
+            bad4 = true;
+            break;
+          }
+          wm += q;
+        }
+      }
+      if (bad4) continue;
+      wm /= n * n;
+      let cr = 0;
+      let wv = 0;
+      for (let v = 0; v < n; v++) {
+        for (let u = 0; u < n; u++) {
+          const a = t[v * n + u] - tm;
+          const b = w[(v + dy) * m + u + dx] - wm;
+          cr += a * b;
+          wv += b * b;
+        }
+      }
+      const s = wv > 0 ? cr / Math.sqrt(tv * wv) : -2;
+      sc[dy * k + dx] = s;
+      if (s > best) {
+        best = s;
+        bi = dy * k + dx;
+      }
+    }
+  }
+  if (bi < 0) return null;
+  const bx = bi % k;
+  const by = (bi - bx) / k;
+  const sub = (a, b, c) => {
+    const d = a - 2 * b + c;
+    return d < 0 && a > -2 && c > -2 ? 0.5 * (a - c) / d : 0;
+  };
+  const ox = bx > 0 && bx < k - 1 ? sub(sc[by * k + bx - 1], best, sc[by * k + bx + 1]) : 0;
+  const oy = by > 0 && by < k - 1 ? sub(sc[(by - 1) * k + bx], best, sc[(by + 1) * k + bx]) : 0;
+  return { dx: bx - r + ox, dy: by - r + oy, score: best };
+}
+var MIN_SURFACE_POINTS, MAX_POINTS, COARSE_REACH, FINE_REACH, COARSE_MIN_SCORE, FINE_MIN_SCORE, FEW_MIN_SCORE, RANSAC_PX, median5, SurfacePoints;
+var init_surface_points = __esm({
+  "src/tools/ext/surface-points.ts"() {
+    "use strict";
+    init_planar_math();
+    init_track();
+    MIN_SURFACE_POINTS = 4;
+    MAX_POINTS = 40;
+    COARSE_REACH = 20;
+    FINE_REACH = 3;
+    COARSE_MIN_SCORE = 0.6;
+    FINE_MIN_SCORE = 0.7;
+    FEW_MIN_SCORE = 0.8;
+    RANSAC_PX = 1.5;
+    median5 = (v) => {
+      const s = v.slice().sort((a, b) => a - b);
+      return s.length ? s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2 : NaN;
+    };
+    SurfacePoints = class {
+      points;
+      coarse;
+      fine;
+      n;
+      nc;
+      /**
+       * `ref` is the reference frame (the same image the region is aligned in), `mask` > 0 on the surface. The
+       * patch is 41 px at 1080 lines, scaled with the image's height.
+       */
+      constructor(ref3, mask) {
+        const f = Math.max(0.5, ref3.height / 1080);
+        this.n = Math.max(21, Math.round(41 * f)) | 1;
+        this.nc = Math.max(11, Math.round(this.n / 2)) | 1;
+        const reach = (this.n - 1) / 2 + FINE_REACH + 2 * COARSE_REACH;
+        const on = (x, y) => {
+          const X = Math.round(x);
+          const Y = Math.round(y);
+          return X >= 0 && Y >= 0 && X < ref3.width && Y < ref3.height && mask[Y * ref3.width + X] > 0;
+        };
+        const inside = (x, y) => {
+          const h = (this.n - 1) / 2 + 4;
+          return on(x, y) && on(x - h, y - h) && on(x + h, y - h) && on(x - h, y + h) && on(x + h, y + h) && x - reach >= 0 && y - reach >= 0 && x + reach < ref3.width && y + reach < ref3.height;
+        };
+        const found = goodFeatures(ref3, mask, { count: MAX_POINTS * 2, minDistancePx: Math.round(40 * f), patchSize: this.n, spread: true });
+        this.points = found.filter((p) => p.std >= 4 && inside(p.x, p.y) && (patternIsotropy(ref3, p.x, p.y, this.n) ?? 0) >= MIN_PATTERN_ISOTROPY).slice(0, MAX_POINTS).map((p) => [p.x, p.y]);
+        this.coarse = this.points.map(([x, y]) => patchAt(ref3, x, y, this.nc, 2));
+        this.fine = this.points.map(([x, y]) => patchAt(ref3, x, y, this.n, 1));
+      }
+      get count() {
+        return this.points.length;
+      }
+      /** Half the patch, image px: how far round a point its match looks. */
+      get reach() {
+        return (this.n - 1) / 2;
+      }
+      /**
+       * How far the track `H` (reference image px -> frame image px) is off at the surface's points in `frame`.
+       * Null when fewer than MIN_SURFACE_POINTS were matched, or when 4 to 7 were and one match was weak.
+       */
+      check(frame, H, seed = 1, skip) {
+        if (this.points.length < MIN_SURFACE_POINTS) return null;
+        const shifts = [];
+        this.points.forEach(([x, y], k) => {
+          if (skip) {
+            const at = applyH(H, [x, y]);
+            if (!at || skip(at[0], at[1])) return;
+          }
+          const c = search(this.coarse[k], this.nc, windowAt(frame, H, x, y, this.nc, COARSE_REACH, 2), COARSE_REACH);
+          if (!c || c.score < COARSE_MIN_SCORE) return;
+          const cx = 2 * c.dx;
+          const cy = 2 * c.dy;
+          const Hs = mulH(H, translationH(cx, cy));
+          const fn = search(this.fine[k], this.n, windowAt(frame, Hs, x, y, this.n, FINE_REACH, 1), FINE_REACH);
+          if (!fn || fn.score < FINE_MIN_SCORE) return;
+          shifts.push({ k, dx: cx + fn.dx, dy: cy + fn.dy, score: fn.score });
+        });
+        if (shifts.length < MIN_SURFACE_POINTS) return null;
+        let use = shifts;
+        if (shifts.length >= 8) {
+          const from = shifts.map((s) => this.points[s.k]);
+          const to = shifts.map((s) => [this.points[s.k][0] + s.dx, this.points[s.k][1] + s.dy]);
+          const fit = ransacModel("perspective", from, to, { thresholdPx: RANSAC_PX, iterations: 300, seed });
+          if (fit) {
+            const inl = shifts.filter((_, i) => fit.inliers[i]);
+            if (inl.length >= Math.max(MIN_SURFACE_POINTS, 0.5 * shifts.length)) use = inl;
+          }
+        } else if (!shifts.every((s) => s.score >= FEW_MIN_SCORE)) {
+          return null;
+        }
+        return { matched: shifts.length, used: use.length, px: median5(use.map((s) => Math.hypot(s.dx, s.dy))) };
+      }
+    };
+  }
+});
+
+// src/tools/ext/edges.ts
+function sobel2(g) {
+  const { width: w, height: h, data: d } = g;
+  const gx = new Float32Array(w * h);
+  const gy = new Float32Array(w * h);
+  const mag = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const a = d[i - w - 1];
+      const b = d[i - w];
+      const c = d[i - w + 1];
+      const l = d[i - 1];
+      const r = d[i + 1];
+      const e = d[i + w - 1];
+      const f = d[i + w];
+      const k = d[i + w + 1];
+      const sx = (c + 2 * r + k - (a + 2 * l + e)) / 8;
+      const sy = (e + 2 * f + k - (a + 2 * b + c)) / 8;
+      gx[i] = sx;
+      gy[i] = sy;
+      mag[i] = Math.hypot(sx, sy);
+    }
+  }
+  return { width: w, height: h, gx, gy, mag };
+}
+function bilinear2(a, w, h, x, y) {
+  const xc = clamp2(x, 0, w - 1.001);
+  const yc = clamp2(y, 0, h - 1.001);
+  const x0 = Math.floor(xc);
+  const y0 = Math.floor(yc);
+  const fx = xc - x0;
+  const fy = yc - y0;
+  const i = y0 * w + x0;
+  return (a[i] * (1 - fx) + a[i + 1] * fx) * (1 - fy) + (a[i + w] * (1 - fx) + a[i + w + 1] * fx) * fy;
+}
+function scanSide(gr, a, b, outward, o) {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const steps = Math.max(8, Math.min(200, Math.floor(len / 2)));
+  const step3 = 0.5;
+  const S = Math.max(2, o.searchPx);
+  const n = Math.floor(2 * S / step3) + 1;
+  const prof = new Float64Array(n);
+  const points = [];
+  const strengths = [];
+  let competing = 0;
+  const { width: w, height: h } = gr;
+  for (let k = 0; k < steps; k++) {
+    const u = 0.1 + 0.8 * (k + 0.5) / steps;
+    const px = a[0] + (b[0] - a[0]) * u;
+    const py = a[1] + (b[1] - a[1]) * u;
+    let top = 0;
+    for (let j = 0; j < n; j++) {
+      const d2 = -S + j * step3;
+      const x = px + outward[0] * d2;
+      const y = py + outward[1] * d2;
+      if (x < 1 || y < 1 || x > w - 2 || y > h - 2) {
+        prof[j] = 0;
+        continue;
+      }
+      const sx = bilinear2(gr.gx, w, h, x, y);
+      const sy = bilinear2(gr.gy, w, h, x, y);
+      prof[j] = Math.abs(sx * outward[0] + sy * outward[1]);
+      if (prof[j] > top) top = prof[j];
+    }
+    if (top < MIN_EDGE) continue;
+    const peaks = [];
+    for (let j = 1; j < n - 1; j++) {
+      if (prof[j] > prof[j - 1] && prof[j] >= prof[j + 1] && prof[j] >= 0.6 * top && prof[j] >= MIN_EDGE) peaks.push(j);
+    }
+    if (peaks.length === 0) continue;
+    let pick5 = peaks[0];
+    if (o.prefer === "outer") pick5 = peaks[peaks.length - 1];
+    else if (o.prefer === "nearest") pick5 = peaks.reduce((best, j) => Math.abs(-S + j * step3) < Math.abs(-S + best * step3) ? j : best, peaks[0]);
+    if (peaks.some((j) => Math.abs(j - pick5) * step3 > 3)) competing++;
+    const l = prof[pick5 - 1];
+    const c = prof[pick5];
+    const r = prof[pick5 + 1];
+    const den = l - 2 * c + r;
+    const off = den < 0 ? clamp2(0.5 * (l - r) / den, -0.5, 0.5) : 0;
+    const d = -S + (pick5 + off) * step3;
+    points.push([px + outward[0] * d, py + outward[1] * d]);
+    strengths.push(c);
+  }
+  return { points, strengths, competing, found: points.length, expected: steps };
+}
+function totalLeastSquares(pts) {
+  const n = pts.length;
+  const cx = pts.reduce((s, p) => s + p[0], 0) / n;
+  const cy = pts.reduce((s, p) => s + p[1], 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (const p of pts) {
+    const dx = p[0] - cx;
+    const dy = p[1] - cy;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  return { c: [cx, cy], dir: [Math.cos(ang), Math.sin(ang)] };
+}
+function fitLine(pts, tol = 1) {
+  if (pts.length < 6) return null;
+  let use = pts;
+  let line = totalLeastSquares(use);
+  for (let it = 0; it < 4; it++) {
+    const res = pts.map((p) => distToLine(p, line.c, line.dir));
+    const thr = Math.max(tol, 2.5 * 1.4826 * median6(res));
+    const next = pts.filter((_, i) => res[i] <= thr);
+    if (next.length < 6 || next.length === use.length) break;
+    use = next;
+    line = totalLeastSquares(use);
+  }
+  const rms = Math.sqrt(use.reduce((s, p) => s + distToLine(p, line.c, line.dir) ** 2, 0) / use.length);
+  return { c: line.c, dir: line.dir, inliers: use.length, total: pts.length, rms };
+}
+function intersectLines(a, b) {
+  const cr = a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0];
+  if (Math.abs(cr) < 0.25) return null;
+  const t = ((b.c[0] - a.c[0]) * b.dir[1] - (b.c[1] - a.c[1]) * b.dir[0]) / cr;
+  return [a.c[0] + a.dir[0] * t, a.c[1] + a.dir[1] * t];
+}
+var clamp2, median6, MIN_EDGE, distToLine;
+var init_edges = __esm({
+  "src/tools/ext/edges.ts"() {
+    "use strict";
+    clamp2 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    median6 = (a) => {
+      if (a.length === 0) return 0;
+      const s = [...a].sort((x, y) => x - y);
+      const m = s.length >> 1;
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    MIN_EDGE = 3;
+    distToLine = (p, c, dir) => Math.abs((p[0] - c[0]) * dir[1] - (p[1] - c[1]) * dir[0]);
+  }
+});
+
+// src/tools/ext/screen-track.ts
+function insideQuad(q, x, y) {
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = q[i];
+    const b = q[(i + 1) % 4];
+    const c = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+    const s = c > 0 ? 1 : c < 0 ? -1 : 0;
+    if (s === 0) continue;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
+}
+function sampleKey(img, quad) {
+  const c = centroid2(quad);
+  const inner = quad.map((p) => [c[0] + (p[0] - c[0]) * 0.7, c[1] + (p[1] - c[1]) * 0.7]);
+  const xs = inner.map((p) => p[0]);
+  const ys = inner.map((p) => p[1]);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs)));
+  const x1 = Math.min(img.width - 1, Math.ceil(Math.max(...xs)));
+  const y0 = Math.max(0, Math.floor(Math.min(...ys)));
+  const y1 = Math.min(img.height - 1, Math.ceil(Math.max(...ys)));
+  const step3 = Math.max(1, Math.floor(Math.sqrt((x1 - x0 + 1) * (y1 - y0 + 1) / 2e4)));
+  const rs = [];
+  const gs = [];
+  const ls = [];
+  const raw = [[], [], []];
+  for (let y = y0; y <= y1; y += step3) {
+    for (let x = x0; x <= x1; x += step3) {
+      if (!insideQuad(inner, x, y)) continue;
+      const i = (y * img.width + x) * 4;
+      const r = img.data[i];
+      const g = img.data[i + 1];
+      const b = img.data[i + 2];
+      const s = r + g + b;
+      if (s < 30) continue;
+      rs.push(r / s);
+      gs.push(g / s);
+      ls.push(luma(r, g, b));
+      raw[0].push(r);
+      raw[1].push(g);
+      raw[2].push(b);
+    }
+  }
+  if (rs.length < 50) return null;
+  const med = (a) => {
+    const v = a.slice().sort((p, q) => p - q);
+    return v[v.length >> 1];
+  };
+  const chroma = [med(rs), med(gs)];
+  if (Math.hypot(chroma[0] - 1 / 3, chroma[1] - 1 / 3) < 0.08) return null;
+  const d = rs.map((r, k) => Math.hypot(r - chroma[0], gs[k] - chroma[1]));
+  const mad = 1.4826 * med(d);
+  const keyed = d.filter((v) => v <= Math.max(0.03, 4 * mad)).length / d.length;
+  if (keyed < 0.6) return null;
+  const innerT = Math.max(0.025, 3 * mad);
+  return { chroma, luma: med(ls), inner: innerT, outer: innerT + Math.max(0.03, 0.5 * innerT), rgb: [med(raw[0]), med(raw[1]), med(raw[2])] };
+}
+function keyPresenceOf(key, r, g, b) {
+  const s = r + g + b;
+  if (!(s > 0)) return 0;
+  const d = Math.hypot(r / s - key.chroma[0], g / s - key.chroma[1]);
+  const near10 = Math.max(0.08, key.outer);
+  const far = near10 + 0.06;
+  let a = d <= near10 ? 1 : d >= far ? 0 : (far - d) / (far - near10);
+  if (a > 0) {
+    const l = luma(r, g, b);
+    const dark0 = 0.15 * key.luma;
+    const dark1 = 0.25 * key.luma;
+    if (l < dark1) a *= l <= dark0 ? 0 : (l - dark0) / (dark1 - dark0);
+  }
+  return a;
+}
+function keyStrength(img, key, box) {
+  const { width: w, height: h } = img;
+  const out = new Float32Array(w * h);
+  const m = (key.rgb[0] + key.rgb[1] + key.rgb[2]) / 3;
+  let u = [key.rgb[0] - m, key.rgb[1] - m, key.rgb[2] - m];
+  const n = Math.hypot(u[0], u[1], u[2]) || 1;
+  u = u.map((v) => v / n);
+  const x0 = Math.max(0, Math.floor(box[0]));
+  const y0 = Math.max(0, Math.floor(box[1]));
+  const x1 = Math.min(w - 1, Math.ceil(box[2]));
+  const y1 = Math.min(h - 1, Math.ceil(box[3]));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = y * w + x;
+      out[i] = u[0] * img.data[i * 4] + u[1] * img.data[i * 4 + 1] + u[2] * img.data[i * 4 + 2];
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function ransacLine(pts, tol = 1, iterations = 120, seed = 7) {
+  if (pts.length < 6) return null;
+  const rand = rng(seed);
+  let best = [];
+  for (let it = 0; it < iterations; it++) {
+    const a = pts[Math.floor(rand() * pts.length)];
+    const b = pts[Math.floor(rand() * pts.length)];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const n = Math.hypot(dx, dy);
+    if (n < 8) continue;
+    const nx = -dy / n;
+    const ny = dx / n;
+    const inl = pts.filter((p) => Math.abs((p[0] - a[0]) * nx + (p[1] - a[1]) * ny) <= tol);
+    if (inl.length > best.length) best = inl;
+  }
+  if (best.length < 6) return fitLine(pts, tol);
+  const line = fitLine(best, tol);
+  return line ? { ...line, total: pts.length } : null;
+}
+function fitScreenQuad(strength, pred, band) {
+  const gr = sobel2(strength);
+  const c = centroid2(pred);
+  const sides = [];
+  for (let i = 0; i < 4; i++) {
+    const a = pred[i];
+    const b = pred[(i + 1) % 4];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 8) return { ok: false, corners: pred, sides, expected_px: null, why: "the screen is too small" };
+    let normal = [(b[1] - a[1]) / len, -(b[0] - a[0]) / len];
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if ((mid[0] - c[0]) * normal[0] + (mid[1] - c[1]) * normal[1] < 0) normal = [-normal[0], -normal[1]];
+    const scan = scanSide(gr, a, b, normal, { searchPx: band, prefer: "nearest" });
+    const line = ransacLine(scan.points);
+    sides.push({ support: line ? line.inliers / Math.max(1, scan.expected) : 0, rms_px: line ? line.rms : null, line });
+  }
+  const weak = sides.map((s, i) => s.support < MIN_SIDE_SUPPORT ? i : -1).filter((i) => i >= 0);
+  if (weak.length) {
+    const names = ["top", "right", "bottom", "left"];
+    return { ok: false, corners: pred, sides, expected_px: null, why: `the screen's ${weak.map((i) => names[i]).join(" and ")} edge was not found (covered, out of frame, or not the key colour)` };
+  }
+  const corners = [];
+  let ex = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = sides[(i + 3) % 4];
+    const n = sides[i];
+    const meet = intersectLines(p.line, n.line);
+    if (!meet) return { ok: false, corners: pred, sides, expected_px: null, why: "two neighbouring edges are almost parallel" };
+    corners.push(meet);
+    const e = (s) => 2 * Math.max(0.1, s.rms_px ?? 1) / Math.sqrt(Math.max(1, s.line.inliers));
+    const sin = Math.abs(p.line.dir[0] * n.line.dir[1] - p.line.dir[1] * n.line.dir[0]);
+    ex += Math.hypot(e(p), e(n)) / Math.max(0.25, sin);
+  }
+  const chk = quadCheck(corners);
+  if (!chk.ok) return { ok: false, corners, sides, expected_px: null, why: `the outline is not a quad: ${chk.reason}` };
+  return { ok: true, corners, sides, expected_px: ex / 4 };
+}
+var luma, centroid2, MIN_SIDE_SUPPORT;
+var init_screen_track = __esm({
+  "src/tools/ext/screen-track.ts"() {
+    "use strict";
+    init_edges();
+    init_planar_math();
+    luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    centroid2 = (q) => [q.reduce((s, p) => s + p[0], 0) / q.length, q.reduce((s, p) => s + p[1], 0) / q.length];
+    MIN_SIDE_SUPPORT = 0.25;
+  }
+});
+
 // src/tools/ext/planar.ts
 function tracksDir() {
   return path45.join(path45.dirname(defaultFramesDir()), "tracks");
@@ -48245,11 +48458,7 @@ async function read2(ctx, opId, tag, host, args, toolName, slow = false) {
   return res.result;
 }
 async function readComp2(ctx, opId, compId, layers, toolName) {
-  const info = await read2(ctx, opId, "comp", "planarComp", { comp_id: compId, ...layers ? { layers } : {} }, toolName);
-  if (Number(info.pixel_aspect) > 0 && Math.abs(Number(info.pixel_aspect) - 1) > 1e-6) {
-    throw new PlanarError("refused", `The comp's pixel aspect is ${info.pixel_aspect}, not 1. Planar tracking works on square pixels only.`);
-  }
-  return info;
+  return read2(ctx, opId, "comp", "planarComp", { comp_id: compId, ...layers ? { layers } : {} }, toolName);
 }
 function layerSampleOf(raw) {
   const own = layerMatrix({ anchor: raw.anchor, position: raw.position, scale_pct: raw.scale, rotation_deg: raw.rotation });
@@ -48739,19 +48948,19 @@ function slidingPoints(track) {
       if (p && q) per[k].push(Math.hypot(p[0] - q[0], p[1] - q[1]));
     });
   }
-  const median9 = (xs) => {
+  const median10 = (xs) => {
     const v = xs.slice().sort((a, b) => a - b);
     return v.length ? v[Math.floor(v.length / 2)] : 0;
   };
   const all = per.flat();
-  const noise = Math.max(0.15, median9(all) * 1.4826);
+  const noise = Math.max(0.15, median10(all) * 1.4826);
   const limit = Math.max(1.5, 5 * noise);
   const out = [];
   per.forEach((res, k) => {
     if (res.length < 5) return;
     const late2 = res.slice(Math.floor(res.length / 2));
     const off = res.filter((e) => e > limit).length;
-    if (median9(late2) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r26(median9(res)), frames_off_plane: off, frames: res.length });
+    if (median10(late2) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r26(median10(res)), frames_off_plane: off, frames: res.length });
   });
   return out;
 }
@@ -49569,6 +49778,7 @@ async function trackMulti(ctx, args) {
       const opts = mkOpts();
       let aligner = null;
       let detector = null;
+      let surfacePoints = null;
       if (o.method === "screen" && !o.area) throw new PlanarError("refused", "This screen track was made by an older version of the tool, which followed the screen's edges another way; it cannot be continued. Track it again.");
       if ((!state.forward.done && !fwd || !state.backward.done && !bwd) && o.area) {
         try {
@@ -49579,6 +49789,20 @@ async function trackMulti(ctx, args) {
             detector = new OccluderDetector(refPng, mask, aligner, (r, g, b) => keyPresenceOf(key, r, g, b));
           } else {
             aligner = new RegionAligner(refGray, mask);
+            if (o.method === "region") {
+              let pmask = mask;
+              if (matteCompId !== null) {
+                const refMatte = matteOf(await snapFrom(matteCompId, refTime, 199999, false));
+                const margin = Math.max(4, Math.round(8 * scale));
+                pmask = mask.map((v, i) => v > 0 && !underMatte(refMatte, i % refMatte.width, Math.floor(i / refMatte.width), margin) ? v : 0);
+              }
+              surfacePoints = new SurfacePoints(refGray, pmask);
+              if (!stored && surfacePoints.count < MIN_SURFACE_POINTS) {
+                notes2.push(
+                  `The region has ${surfacePoints.count} distinct point${surfacePoints.count === 1 ? "" : "s"} (marks, corners) of its own, fewer than ${MIN_SURFACE_POINTS}, so its frames are not checked against them: a drift of the whole region can pass the other checks. Look at the preview.`
+                );
+              }
+            }
           }
         } catch (err) {
           if (o.method === "screen") {
@@ -49596,7 +49820,7 @@ async function trackMulti(ctx, args) {
       const fresh = (dir) => {
         const ds = state[dir];
         if (o.method === "region") {
-          const d = new RegionDirection(aligner, quad, scale, maxMisses);
+          const d = new RegionDirection(aligner, quad, scale, maxMisses, (g) => g, null, surfacePoints, SURFACE_POINT_LIMIT_PX * Math.max(1, compSize[1] / 1080));
           if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
           return d;
         }
@@ -49902,7 +50126,7 @@ async function trackMulti(ctx, args) {
   }
   return result;
 }
-var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, maxMissesFor, RegionDirection, VerifiedPoints, CORNER_NAMES, cornerName, PATH_CHECK_NOTE, EXPECTED_ERROR_NOTE, LOWER_MODELS, round25, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
+var crypto17, fs45, path45, PlanarError, fail2, errMessage5, r26, r4, yieldLoop, TRACK_ID, KEEP_TRACKS, MAX_TRACK_FRAMES2, MAX_KEYS, trackFilePath, BLURRINESS_PER_SIGMA, blurrinessFromSigma, sigmaFromBlurriness, Point, RegionSchema, ModelEnum, TrackSourceSchema, APPLY_MODES, ApplyFields, ApplyTargetSchema, AeTrackApplySchema, AeTrackReadSchema, AeTrackMultiSchema, snapFrame, MultiTracker, maxMissesFor, SURFACE_POINT_LIMIT_PX, RegionDirection, VerifiedPoints, CORNER_NAMES, cornerName, PATH_CHECK_NOTE, EXPECTED_ERROR_NOTE, LOWER_MODELS, round25, sampleIdx, near5, MOTION_BLUR_NOTE, LIVE, LIVE_MAX, emptyDirection, isBlocked, planarTools;
 var init_planar = __esm({
   "src/tools/ext/planar.ts"() {
     "use strict";
@@ -49922,6 +50146,7 @@ var init_planar = __esm({
     init_png_utils();
     init_path_check();
     init_region_track();
+    init_surface_points();
     init_screen_track();
     init_session();
     init_track();
@@ -50018,7 +50243,7 @@ var init_planar = __esm({
         area: RegionSchema.describe("The flat surface to follow, in comp pixels at ref_time: all of it (a sign, a wall, a painting, a phone or laptop screen with its bezel), not a few spots on it. A polygon [UL, UR, LR, LL] is also the quad written by ae_track_apply."),
         exclude: external_exports.array(RegionSchema).max(8).optional().describe("Parts of the area that are not the surface at ref_time: a person or object standing in front of it then, a reflection, a hole, something attached that moves on its own. Whatever is inside the area at ref_time becomes part of what is followed: on a sparsely marked green wall, a person in front at ref_time out-textured the marks and the track followed the person. People who come in front later need no exclude.")
       }).optional().describe(
-        "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed. Refused on a flat area (a plain green screen): use points on its markers or corners."
+        "Follow the surface by all of its textured pixels instead of a few points (the default choice for a textured planar surface): every frame is aligned to the reference frame's area (perspective, no drift); anything crossing in front is pushed out of the fit and remembered on the next frame. Every frame is checked against the surface and one that does not line up is reported, not keyed; and against the surface's own distinct points (its marks and corners, at least 4): a frame where most of them sit over 1.5 px from where the track puts them is not ok (the region is following something off the surface's plane: a second wall, the curve of a cyc, a stand in front). Refused on a flat area (a plain green screen): use points on its markers or corners."
       ),
       screen: external_exports.object({
         corners: external_exports.array(Point).length(4).describe("The screen's corners [UL, UR, LR, LL] in comp pixels at ref_time, where the key colour ends. A few pixels off is fine: they are snapped to the key edge first (the snapped ones come back).")
@@ -50220,8 +50445,9 @@ var init_planar = __esm({
       }
     };
     maxMissesFor = (fps) => Math.max(12, Math.round(2 * (fps > 0 ? fps : 25)));
+    SURFACE_POINT_LIMIT_PX = 1.5;
     RegionDirection = class {
-      constructor(aligner, quad, scale, maxMisses, channels = (g) => g, detector = null) {
+      constructor(aligner, quad, scale, maxMisses, channels = (g) => g, detector = null, surfacePoints = null, pointLimitPx = SURFACE_POINT_LIMIT_PX) {
         this.quad = quad;
         this.scale = scale;
         this.maxMisses = maxMisses;
@@ -50230,7 +50456,9 @@ var init_planar = __esm({
           aligner,
           quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5]),
           detector,
-          Math.max(4, Math.round(6 * scale))
+          Math.max(4, Math.round(6 * scale)),
+          surfacePoints && surfacePoints.count >= MIN_SURFACE_POINTS ? surfacePoints : null,
+          pointLimitPx * scale
         );
       }
       quad;
@@ -50346,7 +50574,7 @@ var init_planar = __esm({
     planarTools = [
       {
         name: "ae_track_multi",
-        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front later are pushed out of the fit (exclude what is in front at ref_time), and it is the most accurate (0.1-0.9 px on real plates, through a person walking in front). For a keyable screen give `screen` {corners}. When something in front still pulls the fit, `holdout_layers` names layers with a matte of it (a solid with an animated mask, a Roto Brush matte): it is left out of every frame. Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. Once the track is finished its corners' paths are checked too, whatever made them (`path_check`): a frame where the surface's shape jumps against its neighbours, or leaves the path of the frames around it, is not written either, and `jump_preview_path` shows close-ups of the four corners round the worst ones. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
+        description: "Track 1-8 points together through a comp, inside the MCP (nothing to install): AE renders each frame once and every point is followed on it by normalized cross-correlation, then a motion model is solved per frame (translate, similarity = position+rotation+scale, affine, perspective). Runs forwards AND backwards from a reference frame (`ref_time`, where `points` apply), so a frame you cleaned can be tracked back. A lost point is re-acquired where the other points' motion says it should be; the track stops only when too few points survive (reported with the frame and reason: lost, or cut). For a textured flat surface (a sign, a wall, a painting, a screen showing a picture) give `region` {area, exclude}: every textured pixel of the area is aligned to the reference frame (perspective), people and objects crossing in front later are pushed out of the fit (exclude what is in front at ref_time), and it is the most accurate (0.1-0.9 px on real plates, through a person walking in front). For a keyable screen give `screen` {corners}. When something in front still pulls the fit, `holdout_layers` names layers with a matte of it (a solid with an animated mask, a Roto Brush matte): it is left out of every frame. Otherwise give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. Every frame is checked against the surface (the region, `quad`, the auto_points region or the points' hull): a frame that does not line up is ok false with a note (frames_not_ok) and is never written as a key; two seconds of such frames in a row stop the direction as lost. Comps with non-square pixels (DVCPRO HD, anamorphic) are tracked and written in comp pixels. Once the track is finished its corners' paths are checked too, whatever made them (`path_check`): a frame where the surface's shape jumps against its neighbours, or leaves the path of the frames around it, is not written either, and `jump_preview_path` shows close-ups of the four corners round the worst ones. `isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. `preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " + AGENT_SAFETY_GUIDANCE,
         schema: AeTrackMultiSchema,
         handler: async (args, ctx) => {
           try {
@@ -50511,7 +50739,7 @@ function localAffine(ref3, cur, comp, w) {
   const p = cx[0] - c0[0], r = cx[1] - c0[1], q = cy[0] - c0[0], s = cy[1] - c0[1];
   return [p * ia + q * ic, p * ib + q * id, r * ia + s * ic, r * ib + s * id];
 }
-var fs46, r37, MAX_POINTS, AeCameraSolveCheckSchema, pct2, solveCheckTools;
+var fs46, r37, MAX_POINTS2, AeCameraSolveCheckSchema, pct2, solveCheckTools;
 var init_solvecheck = __esm({
   "src/tools/ext/solvecheck.ts"() {
     "use strict";
@@ -50525,10 +50753,10 @@ var init_solvecheck = __esm({
     init_frames();
     init_track();
     r37 = (v) => Math.round(v * 1e3) / 1e3;
-    MAX_POINTS = 40;
+    MAX_POINTS2 = 40;
     AeCameraSolveCheckSchema = external_exports.object({
       comp_id: external_exports.number().int(),
-      points: external_exports.array(LayerSelectorSchema).min(1).max(MAX_POINTS).optional().describe("The 3D layers that mark tracked features: the nulls the 3D Camera Tracker made ('Create Null and Camera' on selected track points). Default: every 3D null in the comp (up to 40)."),
+      points: external_exports.array(LayerSelectorSchema).min(1).max(MAX_POINTS2).optional().describe("The 3D layers that mark tracked features: the nulls the 3D Camera Tracker made ('Create Null and Camera' on selected track points). Default: every 3D null in the comp (up to 40)."),
       camera: LayerSelectorSchema.optional().describe("The solved camera. Default: the front-most enabled camera at each frame."),
       start: external_exports.number().min(0).optional().describe("First time, seconds. Default the work area start."),
       end: external_exports.number().min(0).optional().describe("Last time, seconds. Default the work area end."),
@@ -50575,7 +50803,7 @@ var init_solvecheck = __esm({
               }
               if (missing.length) return { ok: false, error: "not_found", message: `No single layer matches ${missing.join(", ")} in the first 500 layers.` };
             } else {
-              pointLayers = first.layers.filter((l) => l.three_d && l.kind === "null").slice(0, MAX_POINTS);
+              pointLayers = first.layers.filter((l) => l.three_d && l.kind === "null").slice(0, MAX_POINTS2);
               if (!pointLayers.length) return { ok: false, error: "not_found", message: "The comp has no 3D nulls. In the 3D Camera Tracker, select track points and use 'Create Null and Camera', then check again (or pass `points`)." };
             }
             let cameraId = null;
@@ -50989,8 +51217,8 @@ function lumaPercentiles(img, mask, threshold = 0.5, opts = {}) {
 }
 function madSigma(a) {
   if (a.length === 0) return 0;
-  const m = median6(a);
-  return 1.4826 * median6(a.map((v) => Math.abs(v - m)));
+  const m = median7(a);
+  return 1.4826 * median7(a.map((v) => Math.abs(v - m)));
 }
 function noiseSigma(gray, mask) {
   const { width: w, height: h, data } = gray;
@@ -51045,7 +51273,7 @@ function temporalLag1(a, b, mask) {
   }
   if (all.length < 50) return null;
   const sigma = madSigma(all) || 1;
-  const m = median6(all);
+  const m = median7(all);
   const ok = (k) => k < n && mask[k] >= 0.5 && Math.abs(d[k] - m) <= 4 * sigma;
   let num5 = 0;
   let den = 0;
@@ -51292,7 +51520,7 @@ function offsetPolygon(poly, d) {
   }
   return out;
 }
-var polygonArea, FAR, LUMA, LIN_LUT, EMPTY_STATS, median6;
+var polygonArea, FAR, LUMA, LIN_LUT, EMPTY_STATS, median7;
 var init_region_math = __esm({
   "src/tools/ext/region-math.ts"() {
     "use strict";
@@ -51317,7 +51545,7 @@ var init_region_math = __esm({
       clipped_low: 0,
       clipped_high: 0
     };
-    median6 = (a) => {
+    median7 = (a) => {
       if (a.length === 0) return 0;
       const s = Float64Array.from(a).sort();
       const m = s.length >> 1;
@@ -55350,12 +55578,12 @@ function medianSample(samples, size) {
   }
   return out;
 }
-function medianDistance(sample, median9, mask) {
+function medianDistance(sample, median10, mask) {
   let sum = 0;
   let n = 0;
   for (let i = 0; i < sample.length; i++) {
-    if (mask[i] < 0.5 || !Number.isFinite(sample[i]) || !Number.isFinite(median9[i])) continue;
-    sum += Math.abs(sample[i] - median9[i]);
+    if (mask[i] < 0.5 || !Number.isFinite(sample[i]) || !Number.isFinite(median10[i])) continue;
+    sum += Math.abs(sample[i] - median10[i]);
     n++;
   }
   return n >= 20 ? sum / n : null;
@@ -59188,7 +59416,7 @@ function landing(H, scale, width, height, srcW, srcH, k) {
   if (!(u >= 0 && v >= 0 && u <= srcW - 1 && v <= srcH - 1)) return null;
   return [u, v];
 }
-function bilinear2(get, w, h, u, v) {
+function bilinear3(get, w, h, u, v) {
   const x0 = Math.min(Math.max(0, w - 2), Math.floor(u));
   const y0 = Math.min(Math.max(0, h - 2), Math.floor(v));
   const fx = w < 2 ? 0 : u - x0;
@@ -59210,7 +59438,7 @@ function warpRgbaToRef(src, H, scale, ring) {
     if (!at) continue;
     valid[k] = 1;
     validCount++;
-    for (let c = 0; c < 3; c++) data[k * 4 + c] = Math.round(bilinear2((i) => src.data[i * 4 + c], src.width, src.height, at[0], at[1]));
+    for (let c = 0; c < 3; c++) data[k * 4 + c] = Math.round(bilinear3((i) => src.data[i * 4 + c], src.width, src.height, at[0], at[1]));
     data[k * 4 + 3] = 255;
   }
   return { img: { width, height, data }, valid, validCount };
@@ -59226,7 +59454,7 @@ function warpGrayToRef(src, H, scale, ring) {
     if (!at) continue;
     valid[k] = 1;
     validCount++;
-    data[k] = bilinear2((i) => src.data[i], src.width, src.height, at[0], at[1]);
+    data[k] = bilinear3((i) => src.data[i], src.width, src.height, at[0], at[1]);
   }
   return { gray: { width, height, data }, valid, validCount };
 }
@@ -60099,10 +60327,10 @@ function grainFrame(inp) {
   return { ring, patch };
 }
 function medianSigma(rows) {
-  const spatial = [0, 1, 2].map((c) => r311(median7(rows.map((r) => r.spatial[c]))));
+  const spatial = [0, 1, 2].map((c) => r311(median8(rows.map((r) => r.spatial[c]))));
   const temps = rows.map((r) => r.temporal).filter((t) => t > 0);
   const lags = rows.map((r) => r.lag1).filter((v) => v !== null);
-  return { spatial, temporal: temps.length ? r311(median7(temps)) : 0, lag1: lags.length ? r311(median7(lags)) : null, frames: rows.length };
+  return { spatial, temporal: temps.length ? r311(median8(temps)) : 0, lag1: lags.length ? r311(median8(lags)) : null, frames: rows.length };
 }
 function grainMismatches(args, patchId, before, after, written) {
   const m = [];
@@ -60640,7 +60868,7 @@ async function finishHandler(args, ctx) {
     if (sig.length > 0 && Math.max(...sigLayer) > 0.15 / ls.scale) {
       const keyed = sig.length > 1 && spread >= 1;
       const times2 = keyed ? sig.map((x) => x.time) : [sig[0].time];
-      const values = keyed ? blurrinessAt.map(r311) : [r311(median7(blurrinessAt))];
+      const values = keyed ? blurrinessAt.map(r311) : [r311(median8(blurrinessAt))];
       plan2.blur = { times: times2, values, replace_existing: args.replace_existing };
       if (own && oldBlurriness !== null) {
         notes.push(`The earlier sit-in blur (Blurriness ${r311(oldBlurriness)}, sigma ${r311(oldSigma)} px at the reference frame) was in the composite when the patch was measured, so the amount written is the square root of its square plus the extra sigma measured at each time, and it replaces the earlier blur.`);
@@ -60681,7 +60909,7 @@ async function finishHandler(args, ctx) {
       report.motion_blur = { result: "No track given: the motion of the shot is unknown, so motion blur is not matched." };
     } else {
       const lens = prepSpeeds.map((v) => blurLengthPx(v, shutter));
-      const stats = { shutter_angle: shutter, max_px: r212(lens.length ? Math.max(...lens) : 0), p95_px: r212(percentile2(lens, 0.95)), median_px: r212(median7(lens)), frames: lens.length };
+      const stats = { shutter_angle: shutter, max_px: r212(lens.length ? Math.max(...lens) : 0), p95_px: r212(percentile2(lens, 0.95)), median_px: r212(median8(lens)), frames: lens.length };
       report.motion_blur = {
         ...stats,
         mover: info.layer.pinned ? "pin effect" : "layer transform",
@@ -60772,7 +61000,7 @@ async function finishHandler(args, ctx) {
   }
   return result;
 }
-var crypto19, fs53, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, ADD_GRAIN_CURVE, r212, r311, r48, errMessage11, yieldLoop6, clamp4, median7, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
+var crypto19, fs53, path50, COLOR_EFFECT_NAME, BLUR_EFFECT_NAME, GRAIN_EFFECT_NAME, MAX_FRAMES2, OUT_CAP3, MAX_PLATE_LAYERS, KEEP_STATES, EIGHT_BIT_HALF, SHARPNESS_SLACK, ADD_GRAIN_CURVE, r212, r311, r48, errMessage11, yieldLoop6, clamp4, median8, mean, ENCODED_TO_LINEAR_EXPONENT, scalePoly2, LOST_REASON, CHANNEL_KEYS, r4e, fail5, BLOCKED_NOTE3, STATE_ID, LayerSel, PATCH_LAYER_TEXT, HIDE_TEXT, REGION_TEXT, TRACK_TEXT, REF_TEXT, renderFields, AePatchColorMatchSchema, AePatchGrainSchema, AePatchFinishSchema, MAX_RENDER_RETRIES, meanAbsOf, ERODE_PX, sigmaMean, percentile2, patchfitTools;
 var init_patchfit = __esm({
   "src/tools/ext/patchfit.ts"() {
     "use strict";
@@ -60819,7 +61047,7 @@ var init_patchfit = __esm({
     errMessage11 = (err) => err instanceof Error ? err.message : String(err);
     yieldLoop6 = () => new Promise((r) => setImmediate(r));
     clamp4 = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    median7 = (a) => {
+    median8 = (a) => {
       if (a.length === 0) return 0;
       const s = Float64Array.from(a).sort();
       const m = s.length >> 1;
@@ -61309,7 +61537,7 @@ function quadEdgeSigma(gray, quadImg, scale) {
       const prof = new Float64Array(n);
       for (let j = 0; j < n; j++) {
         const d = -half + j * step3;
-        prof[j] = bilinear(gray.data, w, h, px + nx * d, py + ny * d);
+        prof[j] = bilinear2(gray.data, w, h, px + nx * d, py + ny * d);
       }
       let jm = -1;
       let best = 0;
@@ -61400,9 +61628,16 @@ function insertCompSize(src, aspect, fit) {
   }
   return [clamp5(Math.round(w), 4, 3e4), clamp5(Math.round(h), 4, 3e4)];
 }
+function insertLayerMatrix(insertSize, compSize, compPar = 1) {
+  const anchor = [insertSize[0] / 2, insertSize[1] / 2];
+  const k = compPar > 0 ? 1 / compPar : 1;
+  return [k, 0, compSize[0] / 2 - k * anchor[0], 0, 1, compSize[1] / 2 - anchor[1], 0, 0, 1];
+}
 function buildInsertKeys(a) {
   const anchor = [a.insertSize[0] / 2, a.insertSize[1] / 2];
-  const M0 = layerMatrix({ anchor, position: [a.compSize[0] / 2, a.compSize[1] / 2], scale_pct: [100, 100], rotation_deg: 0 });
+  const par = a.compPar ?? 1;
+  if (a.transform && Math.abs(par - 1) > 1e-6) throw new Error("transform_pin needs square pixels");
+  const M0 = Math.abs(par - 1) > 1e-6 ? insertLayerMatrix(a.insertSize, a.compSize, par) : layerMatrix({ anchor, position: [a.compSize[0] / 2, a.compSize[1] / 2], scale_pct: [100, 100], rotation_deg: 0 });
   const mk = () => ({ ul: [], ur: [], ll: [], lr: [] });
   const exact = mk();
   const expanded = mk();
@@ -61604,11 +61839,14 @@ function isAeBlocked4(err) {
   return err instanceof BridgeError && (err.kind === "timeout" || err.kind === "queued");
 }
 async function readComp3(ctx, opId, compId, layers, toolName) {
-  const info = await readHost5(ctx, opId, "comp", "planarComp", { comp_id: compId, ...layers ? { layers } : {} }, toolName);
-  if (Number(info.pixel_aspect) > 0 && Math.abs(Number(info.pixel_aspect) - 1) > 1e-6) {
-    throw new PlanarError("refused", `The comp's pixel aspect is ${info.pixel_aspect}, not 1. Screen replacement works on square pixels only.`);
-  }
-  return info;
+  return readHost5(ctx, opId, "comp", "planarComp", { comp_id: compId, ...layers ? { layers } : {} }, toolName);
+}
+function parOf(v) {
+  const p = Number(v);
+  return p > 0 && Math.abs(p - 1) > 1e-6 ? p : 1;
+}
+function toDisplay(points, par) {
+  return points.map((p) => [p[0] * par, p[1]]);
 }
 async function renderFrame(ctx, opId, compId, time, index, framesDir, toolName) {
   const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName });
@@ -61747,8 +61985,10 @@ async function screenCorners(ctx, args) {
   }
   const { comp, scale, snap, snapped, points, excursions } = ran;
   const quad = quadMetrics(snapped);
-  const principal = [comp.width / 2, comp.height / 2];
-  const est = quad.ok ? estimateAspect(snapped, principal) : null;
+  const par = parOf(comp.pixel_aspect);
+  const principal = [comp.width / 2 * par, comp.height / 2];
+  const est = quad.ok ? estimateAspect(toDisplay(snapped, par), principal) : null;
+  const parNote = par !== 1 ? `The comp's pixels are not square (pixel aspect ${r312(par)}): the aspect was worked out as the screen shows; the corners and px are comp pixels.` : null;
   const sidesToDraw = snap.sides.map((s, i) => {
     if (!s.line) return null;
     const proj = (p) => {
@@ -61791,6 +62031,7 @@ async function screenCorners(ctx, args) {
   });
   const lowest = Math.min(...snap.corners.map((c) => c.confidence));
   const notes = [COLOUR_NOTE2];
+  if (parNote) notes.push(parNote);
   if (lowest < 0.5) notes.push(`The least certain corner has confidence ${lowest}: look at preview_path before using these corners, or give better guesses.`);
   if (est && est.method === "perspective") {
     notes.push(
@@ -62043,9 +62284,9 @@ async function measureLook(ctx, p) {
   }
   out.frames_measured = p02s.length;
   if (p02s.length > 0) {
-    out.black = median8(p02s);
-    out.white = median8(p98s);
-    out.p95 = median8(p95s);
+    out.black = median9(p02s);
+    out.white = median9(p98s);
+    out.p95 = median9(p95s);
   }
   if (p.needMeasure && p.insertItem && p.insertItem.kind === "comp" && p.insertGiven.black === void 0 && p.insertGiven.white === void 0 && !out.blocked) {
     const dur = p.insertItem.duration;
@@ -62069,7 +62310,7 @@ async function measureLook(ctx, p) {
         out.skipped.push(`insert at ${r213(at[i])} s: ${errMessage12(err)}`);
       }
     }
-    if (blacks.length > 0) out.insert = { black: median8(blacks), white: median8(whites), frames: blacks.length, source: "measured" };
+    if (blacks.length > 0) out.insert = { black: median9(blacks), white: median9(whites), frames: blacks.length, source: "measured" };
   }
   out.budget = { ...budget.used, max_renders: p.maxRenders, max_seconds: p.maxSeconds };
   return out;
@@ -62090,8 +62331,17 @@ async function screenReplace(ctx, args) {
       insert: args.insert.item_id !== void 0 ? { item_id: args.insert.item_id } : { layer: args.insert.layer }
     }, toolName);
     const comp2 = info2.comp;
-    if (Number(comp2.pixel_aspect) > 0 && Math.abs(Number(comp2.pixel_aspect) - 1) > 1e-6) {
-      throw new PlanarError("refused", `The comp's pixel aspect is ${comp2.pixel_aspect}, not 1. Screen replacement works on square pixels only.`);
+    const par = parOf(comp2.pixel_aspect);
+    if (par !== 1) {
+      if (args.motion_blur === "transform_pin") {
+        throw new PlanarError(
+          "refused",
+          `The comp's pixels are not square (pixel aspect ${r312(par)}), and motion_blur transform_pin puts a similarity of the track on the layer transform, which is worked out for square pixels only. Use motion_blur force (CC Force Motion Blur) or none.`
+        );
+      }
+      notes.push(
+        `The comp's pixels are not square (pixel aspect ${r312(par)}): the screen's aspect was worked out as it shows (each comp pixel ${r312(par)} wide), and the square-pixel insert is pinned so that it shows at that aspect. The track's px are comp pixels.`
+      );
     }
     const item2 = info2.insert;
     if (!item2) throw new PlanarError("not_found", "The insert could not be resolved.");
@@ -62134,7 +62384,7 @@ async function screenReplace(ctx, args) {
     if (track.model !== "perspective" && track.model !== "affine") {
       notes.push(`The track is a ${track.model} track: the screen moves without changing its shape. If the camera or the screen turns, track four points with the perspective model.`);
     }
-    const est = estimateAspect(corners, [comp2.width / 2, comp2.height / 2]);
+    const est = estimateAspect(toDisplay(corners, par), [comp2.width / 2 * par, comp2.height / 2]);
     const aspect = args.insert_aspect ?? est.aspect;
     if (!(aspect >= 0.1 && aspect <= 10)) throw new PlanarError("bad_args", `The screen's aspect came out at ${r312(aspect)}; give insert_aspect.`);
     if (args.insert_aspect === void 0) {
@@ -62252,7 +62502,8 @@ async function screenReplace(ctx, args) {
     compSize: [comp.width, comp.height],
     insertSize,
     expansionPct: args.expansion_pct,
-    transform: args.motion_blur === "transform_pin"
+    transform: args.motion_blur === "transform_pin",
+    compPar: parOf(comp.pixel_aspect)
   });
   if (keys.times.length === 0) throw new PlanarError("bad_args", "No frame of the track could be turned into keys (every frame was degenerate).");
   if (keys.skipped.length > 0) notes.push(`${keys.skipped.length} frame(s) were not written (degenerate for this screen); the keys interpolate across them.`);
@@ -62418,7 +62669,7 @@ async function screenReplace(ctx, args) {
     ...w.user_changed ? { user_changed: w.user_changed } : {}
   };
 }
-var fs54, path51, r213, r312, r49, clamp5, errMessage12, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES2, median8, mean2, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round26, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
+var fs54, path51, r213, r312, r49, clamp5, errMessage12, yieldLoop7, failure, snapFrame3, MAX_KEYS3, CORNER_NAMES2, median9, mean2, MIN_CORNER_SCORE, cross3, dot3, COMMON_RATIOS, round26, RED2, GREEN2, YELLOW, CYAN, Point2, CornersField, AeScreenCornersSchema, InsertSchema, AeScreenReplaceSchema, COLOUR_NOTE2, ROLES, sampleIdx3, near7, FOLLOW_UPS, screenrepTools;
 var init_screenrep = __esm({
   "src/tools/ext/screenrep.ts"() {
     "use strict";
@@ -62453,7 +62704,7 @@ var init_screenrep = __esm({
     snapFrame3 = (t, fps) => Math.round(t * fps) / fps;
     MAX_KEYS3 = 3e3;
     CORNER_NAMES2 = ["UL", "UR", "LR", "LL"];
-    median8 = (a) => {
+    median9 = (a) => {
       if (a.length === 0) return 0;
       const s = [...a].sort((x, y) => x - y);
       const m = s.length >> 1;
@@ -62567,7 +62818,7 @@ var init_screenrep = __esm({
       },
       {
         name: "ae_screen_replace",
-        description: "Replace a screen, sign or poster on a tracked plane in ONE undo step, from a planar track (ae_track_multi / ae_track_read) and the screen's four corners [UL, UR, LR, LL] at the reference frame (ae_screen_corners). It makes: (1) an insert precomp '<name> INSERT' at the screen's aspect (estimated from the corners in perspective, or `insert_aspect`) holding the footage or comp at 100%, filled or fitted (`fit`) so it keeps its proportions; (2) the insert layer directly above `plate`, with CC Power Pin (default) or Corner Pin keyed to the corners moved by the track, in the layer's own space, with `expansion_pct` (default 2%) of overscan under the bezel; (3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; (5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur. Effects follow the shared order (colour, blur, pin, motion blur). After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: occluding hands need a roto layer of yours (not scriptable), grain (ae_patch_grain) and a check (ae_patch_check). Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, a comp with non-square pixels, and reflections without AE 23+ track mattes. The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " + AGENT_SAFETY_GUIDANCE,
+        description: "Replace a screen, sign or poster on a tracked plane in ONE undo step, from a planar track (ae_track_multi / ae_track_read) and the screen's four corners [UL, UR, LR, LL] at the reference frame (ae_screen_corners). It makes: (1) an insert precomp '<name> INSERT' at the screen's aspect (estimated from the corners in perspective, or `insert_aspect`) holding the footage or comp at 100%, filled or fitted (`fit`) so it keeps its proportions; (2) the insert layer directly above `plate`, with CC Power Pin (default) or Corner Pin keyed to the corners moved by the track, in the layer's own space, with `expansion_pct` (default 2%) of overscan under the bezel; (3) the look, measured from the plate on rendered frames before the write: Levels so the insert's blacks sit at the screen's black (2nd percentile luma inside the moved screen, over `max_samples` frames) and a 0-2 px Gaussian Blur from the softness of the bezel's edge; (4) optionally `reflections`: a duplicate of the plate above the insert in Screen mode with Levels that keep only its highlights, track-matted by the insert's alpha, so glare follows without mask keys; (5) optionally `motion_blur`: transform_pin keys the similarity part of the track on the layer's Position / Rotation / Scale (so layer motion blur works) and the residual perspective in the pin, or force adds CC Force Motion Blur. Effects follow the shared order (colour, blur, pin, motion blur). After the write it renders the first, reference, last and fastest frame again and writes a before / after sheet (`sheet_path`). The result lists the follow-ups: occluding hands need a roto layer of yours (not scriptable), grain (ae_patch_grain) and a check (ae_patch_check). Refuses before touching the project when the corners do not make a quad, when the track has no solved motion at ref_time or is a perspective track with fewer than 4 points, on locked or missing layers, motion_blur transform_pin in a comp with non-square pixels, and reflections without AE 23+ track mattes. In a comp with non-square pixels the screen's aspect is worked out as the picture shows (each comp pixel its pixel aspect wide) and the square-pixel insert is pinned so it shows at that aspect. The core (comp, layer, pin, keys) is all or nothing; the look steps are best effort and report what they could not do (look_skipped) with the effect's parameter table, because CC Power Pin's and Levels' parameters are unmeasured on this AE. The receipt checks the layer order, the insert comp's size, the key counts and sample values, every Levels, blur and reflection-Levels parameter written, CC Power Pin's Expansion, the Screen mode, opacity and matte of the reflection, and the motion blur switches. " + AGENT_SAFETY_GUIDANCE,
         schema: AeScreenReplaceSchema,
         handler: async (args, ctx) => {
           try {
@@ -67470,12 +67721,12 @@ function detectScreenColor(img, minCoverage = 0.1) {
   const blue = pick5(2);
   const best = green.coverage >= blue.coverage ? { ...green, kind: "green" } : { ...blue, kind: "blue" };
   if (best.coverage < minCoverage) return null;
-  const median9 = (v) => {
+  const median10 = (v) => {
     const s = [...v].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
   const round6 = (v) => Math.round(v * 1e3) / 1e3;
-  return { color: [round6(median9(best.rs)), round6(median9(best.gs)), round6(median9(best.bs))], kind: best.kind, coverage: round6(best.coverage) };
+  return { color: [round6(median10(best.rs)), round6(median10(best.gs)), round6(median10(best.bs))], kind: best.kind, coverage: round6(best.coverage) };
 }
 function measureKey(before, after, screen, edge = 3) {
   const { width: w, height: h } = before;

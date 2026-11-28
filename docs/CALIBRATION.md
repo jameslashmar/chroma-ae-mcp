@@ -195,7 +195,23 @@ Hollywood Camera Work's own pages say what each plate is for, and only some are 
 | Dolly without markers (172) | "Failed matchmove" | A plain, unevenly lit green screen | `region` refused: "the region is flat (almost no edges or texture to follow)" |
 | Single marker (249) | 2D tracking, one marker, pan and tilt | A 22 x 42 px blue tape mark on wrinkled cloth | `ae_track_point` at its default 31 px pattern followed it at a confidence of 0.99 but slid up and down the mark by up to 3.5 px (its colour centroid as the reference; 0.5 px across). A pattern changing in one direction only is now grown until it holds: 51 px here, within 0.72 px on all 248 frames |
 
-So on marked green walls with few marks the region track drifts by a few px to tens of px and its own checks do not see it: that is the case to fix next (the marks, matched the way they were measured here, are an independent check and a correction).
+So on marked green walls with few marks the region track drifted by a few px to tens of px and its own checks did not see it.
+
+### The surface's own points (surface-points.ts)
+
+- **What it does.** At the reference frame up to 40 distinct points are picked inside the region: corners and marks, spread out, each holding against sliding. On every frame the region lined up, each one's reference patch is looked for in the frame warped back by the track (at half size within 40 px, then at full size within 3 px). Over 8 points, the ones one homography explains (RANSAC, 1.5 px) are kept, if they are at least half; with 4 to 7, every match must be strong. A frame where the kept points' median distance from the track is over 1.5 px (at 1080 lines) is not ok, with a note saying the region follows something off the surface's plane. Under 4 points there is no check, and the result says so.
+- **Measured, with the region tracks of the clips above:**
+
+  | Clip | Points | Before | With the check |
+  |---|---|---|---|
+  | U-Haul truck | 40 | 189 written, worst 0.9 px | 189 written: the points sat 0.1-0.4 px off on every frame |
+  | Licence plate | 2 | 90 written | no check (too few points) |
+  | Matchmove Test Wide | 14 | about 107 written, drifting to 29 px | 20 written; from frame 20 on not ok |
+  | Window | 7 | 145 written, 53-58 and 68-85 a few px off | 101 written; 49-82 and the last frames not ok; 83-132, right in the overlay, written |
+  | Matchmove Test Close | 15 | 64 written, up to 22 px off at the bottom left | 8 written |
+
+- **A correction was tried and left out.** The points' homography applied to the track moved the truck's right corners by 1.2-5.8 px while the points themselves sat 0.1-0.4 px off: a person in front kept the points on part of the truck, and a fit to them, carried to the far corners, was worse than the region's own. The check turns a silent drift into frames that say why they are not written; it does not fix them. Draw the region on the one plane, or exclude what is not on it.
+- **What it cannot do.** A surface with fewer than 4 distinct points (a plain screen, the licence plate, the glasses' lens) is not checked. Points on something passing in front are left out only when their match fails or they are outvoted; with a holdout matte, points under it are skipped.
 
 The SIFT reference could not judge the three marked green walls: too few, too faint features (14 of 210 frames solved on the window). Matched on the person in front, it showed a wall moving that the overlay shows standing still.
 
@@ -238,6 +254,8 @@ The SIFT reference could not judge the three marked green walls: too few, too fa
 - **The surface check** (region-track.ts): correlation 0.85 or more over 20% or more of the visible region, and a 6 x 6 grid of cells. At least 35% of the textured cells must agree, and the agreeing ones alone must hold the region's corners within 2 px (or twice the whole fit). On a screen only the key's correlation counts: over 60 frames of a right fit on the laptop, the key's held 0.98 while the brightness's fell from 0.78 to 0.66.
 - **`expected_error_px` of a region track** (the fit's covariance times 12): true / expected had a median of 0.98 on the truck and 0.86 on the plate (textured). On mostly flat surfaces it is 2-2.5.
 - **`ae_screen_corners`** on the laptop against the keyed reference: `auto` (the key edge) 0.49-0.61 px; `inner` 1.4-3.2 px; `outer` 11-18 px (the bezel's outer edge).
+- **An insert of another aspect than the screen** (a 4:3 grid of circles on the laptop's screen, AE 27.0, 2026-11-28): every frame rendered by AE and warped back from the track's corners onto the insert comp, the circles came out round (axis ratio 1.000-1.002), 100 px as placed, centred within 0.1 px, with `fill` (the sides cropped) and with `fit` (bars).
+- **Non-square pixels** (the same laptop plate interpreted as DVCPRO HD, pixel aspect 1.5, in a 1280 x 1080 comp of 1.5): AE rendered the comp's frames on its own pixel grid, matching the source to 0.001 px, and the screen track gave the same frames as in the square comp. Read in comp pixels, the screen's aspect came out 1.04 (the anamorphic squeeze); read as the picture shows it, 1.53. The square-pixel insert, pinned through a layer matrix narrowed by 1.5, warped back onto its comp: circles round to 1.002, centred within 0.7 insert px (0.2 comp px).
 - **CC Power Pin**: with the reference motion written by `ae_screen_replace`, the rendered insert was within 0.99 px of the corners on all 37 sampled frames (a constant 1 px inward bias of the render). Expansion 2 landed within 0.85 px of expandQuad's corners.
 - **Speed**: 180-500 ms of Node per frame for a region or screen track (1280 x 1080), on top of AE's render.
 - **Mind the comp.** A pinned insert left on in the comp is rendered with the plate: a screen track run with the previous track's magenta insert on top followed its flicker. Track with `isolate_layers` on the plate.
