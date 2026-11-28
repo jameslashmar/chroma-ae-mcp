@@ -375,6 +375,14 @@ export const AeTrackMultiSchema = z
       .max(100)
       .optional()
       .describe("Track only these layers (the plate): a temporary copy of the comp with every other layer off is rendered, so patches and overlays above the plate cannot corrupt the track. The copy is removed in the same call (two undo entries). Needs `expect`."),
+    holdout_layers: z
+      .array(LayerSelectorSchema)
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        "Region and screen tracks: layers that hold a matte of what passes in front of the surface (a solid with an animated mask drawn round a hand, a Roto Brush or key matte of a person). Their alpha (their brightness if they render opaque) is rendered every frame from a temporary copy of the comp showing only them, and the surface under it, with a few pixels round it, is left out of the fit. The plate is rendered without them (from isolate_layers, or every layer that is on but these). For what the automatic checks miss: something in front with the surface's own colours, or a corner whose sides are both hidden. Each frame is then two renders. Writes temporary comps: needs `expect`."
+      ),
     max_frames: z.number().int().min(1).max(1000).default(250).describe("Most frames (renders) in one call. Default 250. When it runs out the result has `next` and `continue_track_id`. After a panel restart a continued call first renders the reference frame again; that one render is not counted here and is reported as `budget.rebuild_renders`."),
     max_seconds: z.number().min(5).max(300).default(90).describe("Most seconds of rendering in one call. Default 90. A continued call that had to rebuild its reference frame still tracks at least one frame, even if that rebuild used up this limit."),
     preview: z.boolean().default(true).describe("Write a contact sheet of the first, reference and last frame of this call with point paths, pattern boxes and the surface quad. Default true."),
@@ -384,8 +392,8 @@ export const AeTrackMultiSchema = z
   .refine((v) => [v.points, v.auto_points, v.region, v.screen, v.continue_track_id].filter((x) => x !== undefined).length === 1, {
     message: "Give exactly one of points, auto_points, region, screen or continue_track_id.",
   })
-  .refine((v) => (v.isolate_layers === undefined && v.apply === undefined) || v.expect !== undefined, {
-    message: "isolate_layers and apply write to the project, so `expect` is required.",
+  .refine((v) => (v.isolate_layers === undefined && v.apply === undefined && v.holdout_layers === undefined) || v.expect !== undefined, {
+    message: "isolate_layers, holdout_layers and apply write to the project, so `expect` is required.",
   });
 
 export type AeTrackMultiArgs = z.infer<typeof AeTrackMultiSchema>;
@@ -416,6 +424,7 @@ interface CompInfo {
   work_area_start: number;
   work_area_duration: number;
   layers: Array<{ index: number; id: number; name: string; locked: boolean; enabled: boolean; three_d: boolean }>;
+  num_layers?: number;
 }
 
 /** A read-only host call inside a queue lease the caller already holds. */
@@ -1106,6 +1115,19 @@ export class VerifiedPoints implements DirectionTracker {
     }
     return res;
   }
+}
+
+/** A rendered holdout layer as a matte: its alpha, or (when AE rendered it opaque) its brightness. */
+export function matteOf(png: RgbaImage): GrayImage {
+  const n = png.width * png.height;
+  let seeThrough = false;
+  for (let i = 0; i < n && !seeThrough; i++) if (png.data[i * 4 + 3] < 250) seeThrough = true;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    out[i] = seeThrough ? png.data[o + 3] : 0.2126 * png.data[o] + 0.7152 * png.data[o + 1] + 0.0722 * png.data[o + 2];
+  }
+  return { width: png.width, height: png.height, data: out };
 }
 
 /**
@@ -2174,6 +2196,8 @@ interface TrackOptionsStored {
   pre_blur: number;
   channel: Channel;
   isolate_layers?: LayerSelector[];
+  /** Layers whose matte is left out of the fit (region and screen tracks). */
+  holdout_layers?: LayerSelector[];
   /** points (the default, older tracks have none), region or screen. */
   method?: "points" | "region" | "screen";
   /** screen: the key read at ref_time. */
@@ -2232,10 +2256,14 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
   const storedOpts = stored?.tracking?.options as unknown as TrackOptionsStored | undefined;
   const isolate = args.isolate_layers ?? storedOpts?.isolate_layers;
   if (isolate && !args.expect) throw new PlanarError("bad_args", "isolate_layers writes to the project (a temporary comp), so `expect` is required.");
+  const holdout = args.holdout_layers ?? storedOpts?.holdout_layers;
+  if (holdout && !args.expect) throw new PlanarError("bad_args", "holdout_layers writes to the project (temporary comps), so `expect` is required.");
+  const holdoutMethod = args.region ? "region" : args.screen ? "screen" : (storedOpts?.method ?? "points");
+  if (holdout && holdoutMethod === "points") throw new PlanarError("bad_args", "holdout_layers works with region and screen tracks: points are not fitted per pixel.");
   const expect: ExpectGuard | null = args.expect ? { project_path: args.expect.project_path, comp_id: args.expect.comp_id ?? args.comp_id } : null;
 
   // isolate_layers writes (a temporary comp), so it obeys the quarantine like every guarded write.
-  if (isolate && expect) ctx.quarantine.assertClear();
+  if ((isolate || holdout) && expect) ctx.quarantine.assertClear();
 
   const ran = await queued(ctx, label, opId, async () => {
     const comp = await readComp(ctx, opId, args.comp_id, isolate, toolName);
@@ -2281,6 +2309,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           pre_blur: args.pre_blur ?? 0,
           channel: args.channel,
           ...(args.isolate_layers ? { isolate_layers: args.isolate_layers } : {}),
+          ...(args.holdout_layers ? { holdout_layers: args.holdout_layers } : {}),
           method: args.region ? "region" : args.screen ? "screen" : "points",
           ...(args.region ? { area: args.region.area, exclude: args.region.exclude ?? [] } : { exclude: args.auto_points?.exclude ?? [] }),
         };
@@ -2296,9 +2325,26 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
     let checkpoint: Awaited<ReturnType<typeof autoCheckpoint>> | null = null;
     let sessionFields: { user_changed?: string } = {};
     let showLayers: Array<{ index: number; id: number }> | null = null;
+    let matteLayers: Array<{ index: number; id: number }> | null = null;
     if (isolate && expect) {
       showLayers = comp.layers.map((l) => ({ index: l.index, id: l.id }));
       if (showLayers.length === 0) throw new PlanarError("not_found", "isolate_layers matched no layer.");
+    }
+    if (holdout && expect) {
+      const hc = await readComp(ctx, `${opId}h`, args.comp_id, holdout, toolName);
+      matteLayers = hc.layers.map((l) => ({ index: l.index, id: l.id }));
+      if (matteLayers.length === 0) throw new PlanarError("not_found", "holdout_layers matched no layer.");
+      if (!showLayers) {
+        // The plate without the mattes: every layer that is on, but them.
+        const nAll = Number(comp.num_layers ?? 0);
+        if (nAll > 100) throw new PlanarError("bad_args", `The comp has ${nAll} layers; with holdout_layers, name the plate layers in isolate_layers.`);
+        const all = await readComp(ctx, `${opId}a`, args.comp_id, Array.from({ length: nAll }, (_, i) => ({ index: i + 1 })), toolName);
+        const ids = new Set(matteLayers.map((l) => l.id));
+        showLayers = all.layers.filter((l) => l.enabled && !ids.has(l.id)).map((l) => ({ index: l.index, id: l.id }));
+        if (showLayers.length === 0) throw new PlanarError("not_found", "No layer is on but the holdout layers: nothing to track.");
+      }
+    }
+    if ((isolate || holdout) && expect) {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       checkpoint = await autoCheckpoint(ctx, guard, toolName);
@@ -2310,9 +2356,9 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
     let rebuildRenders = 0;
     // A rebuilt continued call always tracks at least one frame, whatever max_seconds says, or it would return the same `next` forever.
     let mustAdvance = false;
-    const chunk = async (renderCompId: number) => {
-      const snap = async (time: number, index: number, charge = true) => {
-        const s = await captureCompFrame({ ctx, opId, compId: renderCompId, time, frameIndex: index, framesDir, toolName });
+    const chunk = async (renderCompId: number, matteCompId: number | null = null) => {
+      const snapFrom = async (compId: number, time: number, index: number, charge = true) => {
+        const s = await captureCompFrame({ ctx, opId, compId, time, frameIndex: index, framesDir, toolName });
         if (charge) budget.spend();
         else rebuildRenders++;
         try {
@@ -2321,6 +2367,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           fs.rmSync(s.path, { force: true });
         }
       };
+      const snap = (time: number, index: number, charge = true) => snapFrom(renderCompId, time, index, charge);
 
       const cached = stored ? LIVE.get(stored.track_id) : undefined;
       // The reference frame: needed for new tracks, and to rebuild the trackers after a restart.
@@ -2509,8 +2556,10 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         for (; i < times.length; i++) {
           if (!mustAdvance && budget.exhausted()) break;
           let png: PNG;
+          let matte: GrayImage | undefined;
           try {
             png = await snap(times[i], (dir === "forward" ? 1 : 100001) + i);
+            if (matteCompId !== null) matte = matteOf(await snapFrom(matteCompId, times[i], (dir === "forward" ? 200001 : 300001) + i));
             mustAdvance = false;
           } catch (err) {
             run_.renderError = errMessage(err);
@@ -2518,7 +2567,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
             break;
           }
           await yieldLoop();
-          const res = mt.step(prep(png), times[i], png);
+          const res = mt.step(prep(png), times[i], png, matte);
           await yieldLoop();
           if (res.stop) {
             ds.done = true;
@@ -2589,38 +2638,74 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       return { track, notes, previewPath, previewError, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
     };
 
+    type Temp = { copy_id: number; removed: boolean; error?: string };
     let value: Awaited<ReturnType<typeof chunk>>;
-    let temp: { copy_id: number; removed: boolean; error?: string } | null = null;
-    if (showLayers && expect) {
-      let wrapped: Awaited<ReturnType<typeof withIsolatedPlate<Awaited<ReturnType<typeof chunk>>>>>;
-      try {
-        wrapped = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers, expect, toolName, note }, chunk);
-      } catch (err) {
-        const plateTemp = (err as { plateTemp?: { copy_id: number; removed: boolean; error?: string } } | null)?.plateTemp;
-        // No copy was made: nothing was written, so the error goes up as it is.
-        if (!plateTemp) throw err;
-        const made = await verifyPlateGone(ctx, opId, plateTemp, toolName);
-        // The copy exists (or existed): the write happened, so report it instead of throwing.
-        try {
-          await noteAfterWrite(ctx, note!, { addStep: true });
-        } catch {
-          // reporting only
-        }
-        return {
-          failure: {
-            error: err instanceof PlanarError ? err.code : "failed",
-            message: errMessage(err),
-            temp: made,
-            checkpoint,
-            sessionFields,
-          },
-        };
+    // Every temporary copy made (the plate's, the mattes'), whatever happens.
+    const temps: Temp[] = [];
+    const takeTemp = (err: unknown) => {
+      const t = (err as { plateTemp?: Temp } | null)?.plateTemp;
+      if (t) {
+        temps.push(t);
+        delete (err as { plateTemp?: Temp }).plateTemp;
       }
-      value = wrapped.value;
-      temp = wrapped.temp ? await verifyPlateGone(ctx, opId, wrapped.temp, toolName) : null;
+    };
+    const plateRun = async (matteId: number | null): Promise<Awaited<ReturnType<typeof chunk>>> => {
+      if (!(showLayers && expect)) return chunk(args.comp_id, matteId);
+      try {
+        const w = await withIsolatedPlate(ctx, opId, { compId: args.comp_id, showLayers, expect, toolName, note }, (id) => chunk(id, matteId));
+        if (w.temp) temps.push(w.temp);
+        return w.value;
+      } catch (err) {
+        takeTemp(err);
+        throw err;
+      }
+    };
+    const merge = (list: Array<Temp & { read_back?: boolean }>): (Temp & { read_back?: boolean; copies?: number }) | null => {
+      if (!list.length) return null;
+      const bad = list.find((t) => !t.removed);
+      const errs = list.map((t) => t.error).filter(Boolean);
+      return { copy_id: (bad ?? list[0]).copy_id, removed: !bad, ...(errs.length ? { error: errs.join("; ") } : {}), ...(list.length > 1 ? { copies: list.length } : {}) };
+    };
+    try {
+      if (matteLayers && expect) {
+        try {
+          const w = await withIsolatedPlate(ctx, `${opId}m`, { compId: args.comp_id, showLayers: matteLayers, expect, toolName, note }, (mid) => plateRun(mid));
+          if (w.temp) temps.push(w.temp);
+          value = w.value;
+        } catch (err) {
+          takeTemp(err);
+          throw err;
+        }
+      } else {
+        value = await plateRun(null);
+      }
+    } catch (err) {
+      // No copy was made: nothing was written, so the error goes up as it is.
+      if (!temps.length) throw err;
+      const made: Array<Temp & { read_back?: boolean }> = [];
+      for (const t of temps) made.push(await verifyPlateGone(ctx, opId, t, toolName));
+      // A copy exists (or existed): the write happened, so report it instead of throwing.
+      try {
+        await noteAfterWrite(ctx, note!, { addStep: true });
+      } catch {
+        // reporting only
+      }
+      return {
+        failure: {
+          error: err instanceof PlanarError ? err.code : "failed",
+          message: errMessage(err),
+          temp: merge(made) as Temp,
+          checkpoint,
+          sessionFields,
+        },
+      };
+    }
+    let temp: (Temp & { read_back?: boolean; copies?: number }) | null = null;
+    if (temps.length) {
+      const made: Array<Temp & { read_back?: boolean }> = [];
+      for (const t of temps) made.push(await verifyPlateGone(ctx, opId, t, toolName));
+      temp = merge(made);
       await noteAfterWrite(ctx, note!, { addStep: true });
-    } else {
-      value = await chunk(args.comp_id);
     }
     return { ...value, temp, checkpoint, sessionFields, fps, rendersUsed: budget.used.renders, rebuildRenders };
   });
@@ -2658,7 +2743,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
   else notes.push("Points must lie on one plane: a point on a different depth slides against the others and the fit gets worse (see rms_px).");
   const lostDir = [st.forward, st.backward].find((d) => d.stop?.reason === "lost");
   if (lostDir && lostDir.stop) notes.push(`A direction stopped at ${r2(lostDir.stop.time)} s: ${maxMissesFor(ran.fps)} frames in a row did not line up with the surface (gone, covered, or out of frame). Frames past it are not in the track; track that part again from a reference frame inside it.`);
-  if (ran.temp) notes.push("isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
+  if (ran.temp) notes.push(ran.temp.copies && ran.temp.copies > 1 ? `The plate and the holdout mattes were rendered from ${ran.temp.copies} temporary copies of the comp, each removed again: two undo entries for each.` : "isolate_layers made a temporary copy of the comp and removed it again: two undo entries, one for each.");
   if (ran.blocked) notes.push("AE stopped responding during a render (often a modal dialog); check ae_dialogs and continue the track.");
   const baseMismatches: ReceiptMismatch[] = [];
   if (ran.temp && !ran.temp.removed) {

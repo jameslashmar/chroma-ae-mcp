@@ -705,6 +705,7 @@ interface Call {
 }
 
 const COPY_ID = 900;
+const MATTE_COPY_ID = 950;
 
 interface AeOpts {
   comp?: Record<string, unknown>;
@@ -722,6 +723,8 @@ interface AeOpts {
   refPin?: Record<"ul" | "ur" | "ll" | "lr", number[]>;
   /** planarItemExists answers true: the copy is still there after its removal. */
   copyStays?: boolean;
+  /** A holdout matte: the copy that shows layer id 300 renders this instead of `frame`. */
+  matte?: (k: number) => PNG;
 }
 
 function fakeAe(opts: AeOpts = {}) {
@@ -762,10 +765,13 @@ function fakeAe(opts: AeOpts = {}) {
         if (opts.failRenders || (opts.failRendersOnCopy && args.comp_id === COPY_ID)) throw new Error("render failed");
         const k = Math.round(args.time * 10);
         fs.mkdirSync(path.dirname(args.output_path), { recursive: true });
-        fs.writeFileSync(args.output_path, PNG.sync.write((opts.frame ?? frameAtK)(k)));
+        fs.writeFileSync(args.output_path, PNG.sync.write(args.comp_id === MATTE_COPY_ID && opts.matte ? opts.matte(k) : (opts.frame ?? frameAtK)(k)));
         return ok({ path: args.output_path, time: args.time });
       }
-      if (fn === "planarIsolateBegin") return ok({ copy_id: COPY_ID, copy_name: "_chroma_plate_Main", original_id: 1 });
+      if (fn === "planarIsolateBegin") {
+        const matteCopy = (args.show_layers ?? []).some((l: any) => l.id === 300);
+        return ok({ copy_id: matteCopy ? MATTE_COPY_ID : COPY_ID, copy_name: "_chroma_plate_Main", original_id: 1 });
+      }
       if (fn === "planarIsolateEnd") {
         if (opts.failEnd) throw new Error("item is locked");
         return ok({ removed: true, copy_id: COPY_ID });
@@ -2084,6 +2090,59 @@ describe("ae_track_multi region, screen and the surface check", () => {
       expect(quadErr(fr.H!, truth, QUAD)).toBeLessThan(0.1);
     }
     expect(out.notes.join(" ")).toMatch(/one flat surface/);
+  });
+
+  it("leaves what a holdout layer's matte covers out of the fit, rendered from its own copy of the comp", async () => {
+    // A block of the same kind of texture, moving the other way, over the lower right of the plane, and its matte.
+    const inBlock = (x: number, y: number) => x >= 130 && x < 190 && y >= 70 && y < 130;
+    const plate = (k: number) => {
+      const png = frameAtK(k);
+      const inv = invertH(motion(10 - k))!;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (!inBlock(x, y)) continue;
+          const p = applyH(inv, [x + 0.5, y + 0.5]) as Vec2;
+          const i = (y * W + x) * 4;
+          png.data[i] = png.data[i + 1] = png.data[i + 2] = Math.max(0, Math.min(255, Math.round(tex(p[0] + 37, p[1] - 23))));
+        }
+      }
+      return png;
+    };
+    const matte = () => {
+      const png = new PNG({ width: W, height: H });
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inBlock(x, y)) png.data.fill(255, (y * W + x) * 4, (y * W + x) * 4 + 4);
+      return png;
+    };
+    const layers = [
+      { index: 1, id: 100, name: "Plate" },
+      { index: 2, id: 300, name: "Hand matte" },
+    ];
+    const { ctx, calls } = fakeAe({ frame: plate, matte, layers });
+    const args = AeTrackMultiSchema.parse({ comp_id: 1, region: { area: { polygon: QUAD } }, holdout_layers: [{ id: 300 }], expect: expectArg, preview: false });
+    const out = (await tool("ae_track_multi").handler(args, ctx)) as Out;
+    expect(out.ok).toBe(true);
+    expect(out.complete).toBe(true);
+    expect(out.frames_ok).toBe(10);
+    const track = loadTrack(out.track_id)!;
+    for (const fr of track.frames) {
+      const k = Math.round(fr.time * 10);
+      expect(quadErr(fr.H!, mulH(motion(k), invertH(motion(5))!), QUAD)).toBeLessThan(0.15);
+    }
+    // Two copies: the matte alone, and the plate without it; both removed.
+    const begins = calls.filter((c) => c.fn === "planarIsolateBegin").map((c) => c.args.show_layers);
+    expect(begins).toEqual([[{ index: 2, id: 300 }], [{ index: 1, id: 100 }]]);
+    expect(calls.filter((c) => c.fn === "planarIsolateEnd")).toHaveLength(2);
+    expect(calls.filter((c) => c.fn === "snapshotFrame" && c.args.comp_id === MATTE_COPY_ID).length).toBeGreaterThanOrEqual(9);
+    expect(out.temp_comp).toEqual({ copy_removed: true });
+    expect(out.notes.join(" ")).toMatch(/2 temporary copies/);
+  }, 60000);
+
+  it("refuses holdout_layers without expect, and on a points track", async () => {
+    expect(AeTrackMultiSchema.safeParse({ comp_id: 1, region: { area: { polygon: QUAD } }, holdout_layers: [{ id: 300 }] }).success).toBe(false);
+    const { ctx } = fakeAe();
+    const out = (await tool("ae_track_multi").handler(multi({ holdout_layers: [{ id: 300 }], expect: expectArg }), ctx)) as Out;
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/region and screen/);
   });
 
   it("refuses a flat region with a way out", async () => {
