@@ -14,7 +14,7 @@ mistake.
 
 - **ExtendScript is ECMAScript 3.** No `let`, `const`, arrow functions, template strings or
   `class`; use `var` and `function`. No `forEach` / `map` / `filter` / `reduce` unless `core.jsx`
-  polyfills it. There is no native `JSON`; use `__chromaAe.jsonStringify`.
+  polyfills it. There is no native `JSON`; use `__chromaAe.stringify`.
 - **No chained ternaries, parenthesised or not.** ExtendScript parses them left-associatively:
   `a ? b : c ? d : e` runs as `(a ? b : c) ? d : e`, so the logic is silently wrong. Write
   `if / else`. `scripts/lint-jsx.mjs` fails on any chained ternary.
