@@ -211,7 +211,18 @@ So on marked green walls with few marks the region track drifted by a few px to 
   | Matchmove Test Close | 15 | 64 written, up to 22 px off at the bottom left | 8 written |
 
 - **A correction was tried and left out.** The points' homography applied to the track moved the truck's right corners by 1.2-5.8 px while the points themselves sat 0.1-0.4 px off: a person in front kept the points on part of the truck, and a fit to them, carried to the far corners, was worse than the region's own. The check turns a silent drift into frames that say why they are not written; it does not fix them. Draw the region on the one plane, or exclude what is not on it.
-- **What it cannot do.** A surface with fewer than 4 distinct points (a plain screen, the licence plate, the glasses' lens) is not checked. Points on something passing in front are left out only when their match fails or they are outvoted; with a holdout matte, points under it are skipped.
+- **What it cannot do.** A surface with fewer than 4 distinct points (a plain screen, the licence plate, the glasses' lens) is not checked. Points on something passing in front are left out only when their match fails or they are outvoted; with a holdout matte, points under it are skipped. A minority of points off the plane is outvoted, so the part of the surface they are on can be off without a frame failing (below: the curve at the foot of Embassy's wall).
+
+### Four more clips, never seen, with every check in place (region tracks, run once)
+
+| Clip (frames) | Plate's purpose | Region | Written | Judged by |
+|---|---|---|---|---|
+| Picture frame (193) | Planar tracking | The ornate metal frame and its "Baby" lettering, the glass picture (moving reflections) left out | 193; worst jump 0.15 px | Overlay: the frame and the lettering line up on every frame looked at |
+| Markers on sticks (142) | Object removal by planar tracking | A patch of sloping lawn, the marker on its stick left out (a second one walks in) | 93; 49 not ok on the lawn's own points (1.6 px: a lawn is not one plane) | Overlay: the sprinkler cover on the lawn lines up; the markers on sticks, off the ground, do not, as they should not |
+| F15 (309, 238 reached) | 3D matchmove | A patch of the marked back wall | 101; 32 not written on expected error, 26 on the path check, the rest on the points | The wall's marks on every sixth written frame: median 0 px, none over 2; frames 10-46 px off (168-234) are all not written |
+| Embassy (479, 212 reached) | 3D matchmove | The marked back wall, the woman and a stand left out | 140 | Overlay of the marks: right to frame 110; from there the marks at the foot of the region, on the curve into the floor, sit 2-5 px off while the wall above them lines up (outvoted, so not caught) |
+
+On the four, nothing off the surface's plane was written as right except the foot of Embassy's wall, a part of the region that was not on the plane.
 
 The SIFT reference could not judge the three marked green walls: too few, too faint features (14 of 210 frames solved on the window). Matched on the person in front, it showed a wall moving that the overlay shows standing still.
 
