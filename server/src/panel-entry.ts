@@ -41,6 +41,8 @@ export interface HttpResponseLike {
   writableEnded?: boolean;
   setHeader?: (name: string, value: string) => void;
   writeHead?: (statusCode: number, headers?: Record<string, string>) => void;
+  /** For the event-stream reply (progress notifications). */
+  write?: (chunk: string) => unknown;
   end: (body?: string) => void;
 }
 
@@ -241,6 +243,28 @@ export function createPanelMcp(opts: CreatePanelMcpOptions): {
       .replace(/[^ -~]+/g, " ")
       .trim()
       .slice(0, 40);
+    // A tools/call that asks for progress (_meta.progressToken) from a client that takes an event stream is
+    // answered as one: a notifications/progress event per After Effects eval, then the result. Everything
+    // else stays a single JSON reply.
+    const accept = String(req.headers?.accept ?? "");
+    const p = parsed as { method?: unknown; params?: { _meta?: { progressToken?: unknown } } };
+    const isCall = !!p && !Array.isArray(parsed) && p.method === "tools/call";
+    const token = isCall ? p.params?._meta?.progressToken : undefined;
+    // The relay says the client handles elicitation/create; a call can then ask it questions on its stream.
+    const elicitHeader = req.headers?.["x-chroma-elicitation"];
+    const elicitation = isCall && String(Array.isArray(elicitHeader) ? elicitHeader[0] : elicitHeader ?? "") === "1";
+    if ((typeof token === "string" || typeof token === "number" || elicitation) && /text\/event-stream/i.test(accept) && typeof res.write === "function" && typeof res.setHeader === "function") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      const event = (msg: unknown) => {
+        if (!res.writableEnded) res.write?.(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+      };
+      const streamed = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined, notify: event, elicitation });
+      if (streamed) event(streamed);
+      if (!res.writableEnded) res.end();
+      return;
+    }
     const rpcResponse = await handleRpc(parsed, ctx, { toolset: choice.toolset, client: client || undefined });
 
     if (

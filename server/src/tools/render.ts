@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
+import { adjustOutputPath, catalogFor, entryFor } from "./ext/render-formats.js";
 import { BridgeError, SLOW_TIMEOUT_MS } from "../host.js";
 import { buildJsxCall } from "../jsx.js";
 import { defaultDataDir } from "../quarantine.js";
@@ -121,6 +122,33 @@ export function isFreshPngFile(
   }
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_IEND = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+
+/**
+ * A PNG file ends with its IEND chunk. AE can pause while it writes a frame (seen under load: about
+ * 4 in 1000 renders during a long track), so a size that held still across two polls is not enough:
+ * a file that starts like a PNG but does not end like one is still being written. Files that are not
+ * PNGs (test doubles) are not judged.
+ */
+export function pngComplete(filePath: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const size = fs.fstatSync(fd).size;
+    const head = Buffer.alloc(8);
+    if (fs.readSync(fd, head, 0, 8, 0) < 8 || !head.equals(PNG_SIGNATURE)) return true;
+    if (size < 20) return false;
+    const tail = Buffer.alloc(8);
+    fs.readSync(fd, tail, 0, 8, size - 8);
+    return tail.equals(PNG_IEND);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
 /** The poll of waitForFreshPng. Production keeps 100 ms / 10 s; test/setup-resources.ts sets a short interval so render tests do not sleep. */
 export const pngWaitDeps = { intervalMs: 100, timeoutMs: 10_000 };
 
@@ -141,9 +169,158 @@ export async function waitForFreshPng(
     if (Date.now() >= deadline) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
     const next = isFreshPngFile(filePath, requestStartMs);
-    if (next.fresh && last.fresh && next.size === last.size) return next;
+    if (next.fresh && last.fresh && next.size === last.size && pngComplete(filePath)) return next;
     last = next;
   }
+}
+
+/**
+ * How long a frame grab waits for a render AE has started but not finished. saveFrameToPng returns
+ * before the PNG is written: the file is there at 0 bytes and fills in later (measured on AE 26.0).
+ * On a heavy 3D comp that can take longer than the normal wait, and a second saveFrameToPng sent
+ * while the first is still rendering, then the next call on top of both, is the likeliest cause of
+ * the AE 26.3 crash seen after "no fresh PNG after retry" on a 3D comp (ROADMAP). So: while the
+ * file is still empty or growing, wait for it before retrying; and after a final failure, give a
+ * render still in progress time to end before returning, so the next call does not land on it.
+ */
+export const frameCaptureDeps = { lateWriteMs: 20_000, settleAfterFailMs: 20_000 };
+
+/** The PNG is on disk but empty or still changing: AE is most likely still writing it. */
+export function stillWriting(filePath: string, before: { size: number; mtimeMs: number }): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const st = fs.statSync(filePath);
+    return st.size === 0 || st.size !== before.size || st.mtimeMs !== before.mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * AE may still be rendering a frame whose file it has not created yet, so a missing PNG counts as a
+ * render in progress too, not only an empty or growing one. Seen on AE 26.3 (2026-11-25, live smoke on
+ * Windows): saveFrameToPng returned at once, no file appeared within the normal wait, and the retry's
+ * second saveFrameToPng crashed AE in the Advanced 3D renderer. Waiting costs a stale frame (one AE
+ * never writes) lateWriteMs more before its retry; overlapping a render costs the session.
+ */
+export function mayStillBeRendering(filePath: string, before: { size: number; mtimeMs: number }): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return true;
+  } catch {
+    return true;
+  }
+  return stillWriting(filePath, before);
+}
+
+/**
+ * The stale-frame retry is for the case it was made for: AE wrote a whole PNG, but an older one (its
+ * cached frame; the file's mtime is before the request). Only then is a second saveFrameToPng sent.
+ *
+ * A frame AE never wrote (no file, or one still empty or cut off after every wait) is NOT retried.
+ * AE 26.3 (26.3x87, Windows, PR #19): on an Advanced 3D comp saveFrameToPng returned at once and wrote
+ * nothing in 30 s, and the retry's second saveFrameToPng crashed AE ("Set Artisan Task: Advanced 3D"),
+ * twice. Waiting longer before the retry (9c52623) did not help.
+ */
+export function staleFrameOnDisk(filePath: string, requestStartMs: number): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const st = fs.statSync(filePath);
+    return st.size > 0 && st.mtimeMs < requestStartMs - 50 && pngComplete(filePath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * After a frame AE never wrote, no other frame is asked of AE until that file appears or AE is
+ * restarted (the server runs in AE's panel, so a restart clears this). Measured on AE 26.3x87: once a
+ * frame was not written, AE wrote no frame of any comp for the rest of the session (a plain 2D comp
+ * 2.5 minutes later neither), a later saveFrameToPng crashed AE (PR #19) and another call hung.
+ * holdMs only exists so tests can end the hold.
+ */
+export const unwrittenFrameDeps = { holdMs: Number.POSITIVE_INFINITY };
+let unwrittenFrame: { path: string; since: number; compId: number; time: number; label: string } | null = null;
+
+export function noteUnwrittenFrame(filePath: string, compId: number, time: number, label: string): void {
+  unwrittenFrame = { path: filePath, since: Date.now(), compId, time, label };
+}
+
+/** For tests: forget a frame left unwritten by an earlier test. */
+export function resetUnwrittenFrame(): void {
+  unwrittenFrame = null;
+}
+
+export interface UnwrittenFrameHold {
+  error: "frame_render_pending";
+  message: string;
+  comp_id: number;
+  time: number;
+  /** null: no time limit, the hold ends when the frame appears or After Effects restarts. */
+  seconds_left: number | null;
+}
+
+/** Null when a new saveFrameToPng may go to AE; otherwise why not, and for how long. */
+export function unwrittenFrameHold(): UnwrittenFrameHold | null {
+  const u = unwrittenFrame;
+  if (!u) return null;
+  let landed = false;
+  try {
+    landed = fs.existsSync(u.path) && fs.statSync(u.path).size > 0;
+  } catch {
+    landed = false;
+  }
+  const age = Date.now() - u.since;
+  if (landed || age >= unwrittenFrameDeps.holdMs) {
+    unwrittenFrame = null;
+    return null;
+  }
+  return {
+    error: "frame_render_pending",
+    comp_id: u.compId,
+    time: u.time,
+    seconds_left: Number.isFinite(unwrittenFrameDeps.holdMs) ? Math.max(1, Math.ceil((unwrittenFrameDeps.holdMs - age) / 1000)) : null,
+    message:
+      `Nothing was rendered: After Effects has not written the last frame it was asked for (${u.label}, ${Math.round(age / 1000)} s ago). ` +
+      "On AE 26.3 a render that never finishes leaves After Effects unable to write any frame until it is restarted, and a second frame render on top of it crashed After Effects 26.3. " +
+      "Frame renders are refused until that frame appears or After Effects is restarted. Tell the user: save the project (ae_save) and restart After Effects.",
+  };
+}
+
+/** What the host's snapshotFrame found that AE 26.3 would never finish rendering. */
+export interface RenderHangHazard {
+  comp_id: number;
+  comp_name: string;
+  light: string;
+  light_index?: number;
+  layer: string;
+  layer_index?: number;
+}
+
+/** The refusal for a comp AE 26.3 would never finish rendering (host: refused "render_hang_env_light"). */
+export function renderHangMessage(h: RenderHangHazard, aeVersion?: string): string {
+  const where = h.comp_name ? `"${h.comp_name}" (comp ${h.comp_id})` : `comp ${h.comp_id}`;
+  return (
+    `Nothing was rendered: After Effects ${aeVersion ?? "26.3"} never finishes rendering ${where}. Its environment light "${h.light}" takes its image from a layer, and "${h.layer}" is a 3D layer it lights, with the Advanced 3D renderer. ` +
+    "On AE 26.3 that render hangs: no frame is written, a render-queue render stalls at 0 CPU, and After Effects then writes no frame of any comp until it is restarted. " +
+    "To render a frame of it, ask the user to clear that light's Source (Light Options) or switch the light off for the check; the comp itself was not changed."
+  );
+}
+
+/** The host's snapshotFrame answer when it refused a comp AE 26.3 would never finish rendering, else null. */
+export function renderHangOf(result: unknown): { hazard: RenderHangHazard; message: string } | null {
+  const r = result as { refused?: unknown; hazard?: RenderHangHazard; ae_version?: string } | null | undefined;
+  if (!r || r.refused !== "render_hang_env_light" || !r.hazard) return null;
+  return { hazard: r.hazard, message: renderHangMessage(r.hazard, r.ae_version) };
+}
+
+/** The message for a frame AE did not write, sent no second time. */
+export function unwrittenFrameMessage(compId: number, time: number, waitedMs: number): string {
+  return (
+    `After Effects did not write the frame of comp ${compId} at ${time}s (no complete PNG after ${Math.round(waitedMs / 1000)} s). ` +
+    "It was not asked again: a second saveFrameToPng while AE may still be rendering crashed After Effects 26.3 on an Advanced 3D comp. " +
+    "Frame renders are refused until that frame appears or After Effects is restarted: on AE 26.3 After Effects then writes no frame of any comp. " +
+    "Tell the user: save the project (ae_save) and restart After Effects."
+  );
 }
 
 /**
@@ -257,8 +434,10 @@ export const renderTools: ToolDefinition<any>[] = [
   {
     name: "ae_snapshot_frame",
     description:
-      "Render a single frame of a composition to a unique PNG path in `%LOCALAPPDATA%\\chroma-ae-mcp\\frames\\`. " +
-      "saveFrameToPng writes asynchronously, so the server waits (up to 10 s) for the file to be non-empty and stable, and checks its mtime is newer than the request; if not, retries once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
+      "Render a single frame of a composition to a unique PNG path in frames/ in the data folder (ae_status: state_dir). " +
+      "saveFrameToPng writes asynchronously, so the server waits (up to 10 s, then 20 s more while a render may be in progress) for the file to be non-empty and stable, and checks its mtime is newer than the request; a stale frame (a whole PNG older than the request) is retried once with a slight time nudge (+0.001s), and if still invalid reports `stale_frame`. " +
+      "A frame AE never wrote is not retried (that second render crashed AE 26.3): it reports `frame_not_written`, and frame renders are refused with `frame_render_pending` until that file appears or After Effects is restarted. " +
+      "On AE 26.3 an Advanced 3D comp whose environment light takes its image from a layer, with another 3D layer, is refused before anything renders (`render_hang_env_light`): AE never finishes that render. " +
       "`path` is the PNG at the requested `scale` or `max_size` (shrunk on the server), `full_path` the full-resolution render. " +
       "To keep chosen frames (a plate, a check frame) pass `save_to: {folder, overwrite?}` and `frames` or `times` (up to 50): full-resolution `<comp>_<frame>.png` files in that existing folder. " +
       AGENT_SAFETY_GUIDANCE,
@@ -281,6 +460,9 @@ export const renderTools: ToolDefinition<any>[] = [
         return await ctx.queue.run(
           `ae_snapshot_frame(${args.comp_id} @ ${time}s)`,
           async () => {
+            // A frame AE has not written yet may still be rendering: nothing more is sent on top of it.
+            const hold = unwrittenFrameHold();
+            if (hold) return { ok: false, kind: hold.error, ...hold, requested: { comp_id: args.comp_id, time } };
             const uniqueSuffix1 = `${Date.now()}_${crypto
               .randomBytes(4)
               .toString("hex")}`;
@@ -304,6 +486,10 @@ export const renderTools: ToolDefinition<any>[] = [
               toolName: "ae_snapshot_frame",
             });
 
+            const hang = renderHangOf(resp1.result);
+            if (hang) {
+              return { ok: false, error: "render_hang_env_light", kind: "render_hang_env_light", message: hang.message, hazard: hang.hazard, comp_id: args.comp_id, time, rendered: false };
+            }
             const check1 = await waitForFreshPng(pngPath1, reqStart1);
             if (check1.fresh) {
               return {
@@ -321,7 +507,41 @@ export const renderTools: ToolDefinition<any>[] = [
               };
             }
 
-            // Retry once with a small time nudge
+            // A render still in progress (file missing, empty or growing) is waited for, never overlapped with a second one.
+            if (mayStillBeRendering(pngPath1, check1)) {
+              const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
+              if (late1.fresh) {
+                return {
+                  ok: true,
+                  ...snapshotOutput(pngPath1, late1, scale, args.max_size),
+                  comp_id: args.comp_id,
+                  time: (resp1.result?.time as number | undefined) ?? time,
+                  scale,
+                  ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
+                  retried: false,
+                  comp_width: resp1.result?.width,
+                  comp_height: resp1.result?.height,
+                };
+              }
+            }
+
+            // Retry once with a small time nudge, only for a stale frame (a whole PNG older than the request).
+            // A frame AE never wrote is not asked for again: that second saveFrameToPng crashed AE 26.3.
+            if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+              noteUnwrittenFrame(pngPath1, args.comp_id, time, `ae_snapshot_frame(${args.comp_id} @ ${time}s)`);
+              const st = isFreshPngFile(pngPath1, reqStart1);
+              return {
+                ok: false,
+                error: "frame_not_written",
+                kind: "frame_not_written",
+                message: unwrittenFrameMessage(args.comp_id, time, Date.now() - reqStart1),
+                comp_id: args.comp_id,
+                time,
+                scale,
+                retried: false,
+                attempts: [{ path: pngPath1, exists: fs.existsSync(pngPath1), size: st.size, mtimeMs: st.mtimeMs }],
+              };
+            }
             const nudgedTime = Math.max(0, time + 0.001);
             const uniqueSuffix2 = `${Date.now()}_${crypto
               .randomBytes(4)
@@ -361,6 +581,32 @@ export const renderTools: ToolDefinition<any>[] = [
               };
             }
 
+            // Let a render still in progress end before the next call reaches AE; if either file fills in meanwhile, use it.
+            const pending = [
+              { p: pngPath2, start: reqStart2, last: check2, resp: resp2, t: nudgedTime, retried: true },
+              { p: pngPath1, start: reqStart1, last: check1, resp: resp1, t: time, retried: false },
+            ].filter((x) => mayStillBeRendering(x.p, x.last));
+            const settleStart = Date.now();
+            for (const x of pending) {
+              const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - settleStart);
+              if (left <= 0) break;
+              const late = await waitForFreshPng(x.p, x.start, left);
+              if (late.fresh) {
+                return {
+                  ok: true,
+                  ...snapshotOutput(x.p, late, scale, args.max_size),
+                  comp_id: args.comp_id,
+                  time: (x.resp.result?.time as number | undefined) ?? x.t,
+                  scale,
+                  ...(args.max_size !== undefined ? { max_size: args.max_size } : {}),
+                  retried: x.retried,
+                  comp_width: x.resp.result?.width,
+                  comp_height: x.resp.result?.height,
+                };
+              }
+            }
+            // The retry itself was never written: hold later frames as for a first frame never written.
+            if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, args.comp_id, nudgedTime, `ae_snapshot_frame(${args.comp_id} @ ${nudgedTime}s retry)`);
             return {
               ok: false,
               error: "stale_frame",
@@ -399,6 +645,9 @@ export const renderTools: ToolDefinition<any>[] = [
     handler: async (args, ctx) => {
       ctx.quarantine.assertClear();
       const opId = ctx.bridge.newOpId();
+      // AE names the file after the template's format (render-formats.ts): fit the path to it when the template was measured.
+      const adjusted = adjustOutputPath(args.output_path, entryFor(catalogFor(ctx), args.output_module_template));
+      const outputPath = adjusted ? adjusted.to : args.output_path;
       const effectiveExpect = {
         project_path: args.expect.project_path,
         comp_id: args.expect.comp_id ?? args.comp_id,
@@ -415,7 +664,7 @@ export const renderTools: ToolDefinition<any>[] = [
             // Read-only, before the checkpoint: a refusal leaves no trace.
             let preflight: Awaited<ReturnType<typeof runPreflightGate>>["summary"] | undefined;
             if (args.preflight) {
-              const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId, comp_ids: [args.comp_id], planned_output: args.output_path });
+              const gate = await runPreflightGate(ctx, { toolName: "ae_render_queue_add", opId, comp_ids: [args.comp_id], planned_output: outputPath });
               if (gate.blocked) return preflightRefusal("ae_render_queue_add", gate.summary);
               preflight = gate.summary;
             }
@@ -434,7 +683,7 @@ export const renderTools: ToolDefinition<any>[] = [
               id: opId,
               script: buildJsxCall("rqAdd", {
                 comp_id: args.comp_id,
-                output_path: args.output_path,
+                output_path: outputPath,
                 output_module_template: args.output_module_template,
                 render_settings_template: args.render_settings_template,
                 expect: effectiveExpect,
@@ -495,6 +744,7 @@ export const renderTools: ToolDefinition<any>[] = [
               result: addResp.result,
               checkpoint,
               ...(preflight ? { preflight } : {}),
+              ...(adjusted ? { output_path_adjusted: adjusted } : {}),
               receipt,
             };
           }

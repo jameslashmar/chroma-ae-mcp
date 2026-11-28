@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { withIdempotencyKey } from "./write-tools.js";
 import { zodToJsonSchema } from "./schema.js";
 import {
   CORE_TOOL_NAMES,
@@ -14,7 +15,8 @@ import {
   type ListedTool,
 } from "./toolsets.js";
 import { callTool, findTool, type CallOptions, type ToolCallResult } from "./tool-call.js";
-import { AGENT_SAFETY_GUIDANCE, formatToolError, formatToolResponse, type ToolContext } from "./tools/common.js";
+import { familyTool, listedTools } from "./tool-families.js";
+import { AGENT_SAFETY_GUIDANCE, formatToolError, formatToolResponse, toolInputSchema, type ToolContext, type ToolDefinition } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 import { recordUsage, resultCharsOf } from "./usage-log.js";
 
@@ -117,7 +119,7 @@ async function runSearch(args: z.infer<typeof SearchArgs>, usage: MetaUsage): Pr
 
   if (!query && !pattern && !group) {
     return formatToolResponse({
-      total_tools: ALL_TOOLS.length,
+      total_tools: listedTools().length,
       listed_directly: CORE_TOOL_NAMES.length,
       groups: groupCounts(),
       next: "Call again with `query` (keywords), `pattern` (a name fragment, ^ and $ anchor it) and/or `group`. Then ae_get_tool_schema { name }, then ae_invoke_tool { name, arguments }.",
@@ -129,8 +131,10 @@ async function runSearch(args: z.infer<typeof SearchArgs>, usage: MetaUsage): Pr
   }
 
   const matches = pattern ? nameMatcher(pattern) : null;
-  const candidates = ALL_TOOLS.filter((t) => (!group || groupOf(t.name) === group) && (!matches || matches(t.name)));
-  let ordered: Array<{ name: string; tool: (typeof ALL_TOOLS)[number]; score?: number }>;
+  // A family matches a name pattern through its own name or any of its actions' old names (^ae_track_ finds ae_track).
+  const nameMatches = (t: ToolDefinition<any>) => !matches || matches(t.name) || !!familyTool(t.name)?.members.some((m) => matches(m.tool.name));
+  const candidates = listedTools().filter((t) => (!group || groupOf(t.name) === group) && nameMatches(t));
+  let ordered: Array<{ name: string; tool: ToolDefinition<any>; score?: number }>;
   if (query) {
     const allowed = new Set(candidates.map((t) => t.name));
     ordered = rankTools(query, allowed).map((r) => ({ name: r.tool.name, tool: r.tool, score: Math.round(r.score * 100) / 100 }));
@@ -156,8 +160,10 @@ async function runSearch(args: z.infer<typeof SearchArgs>, usage: MetaUsage): Pr
       call: CORE_SET.has(o.name) ? "direct" : "ae_invoke_tool",
       summary: firstSentences(stripSafety(o.tool.description), 220),
     };
+    const fam = familyTool(o.name);
+    if (fam) entry.actions = fam.members.map((m) => `${m.action} (${m.tool.name})`);
     if (o.score !== undefined) entry.score = o.score;
-    if (detail === "schema") entry.inputSchema = trimSchema(zodToJsonSchema(o.tool.schema), o.tool.name);
+    if (detail === "schema") entry.inputSchema = trimSchema(toolInputSchema(o.tool), o.tool.name);
     page.push(entry);
   }
 
@@ -229,7 +235,7 @@ async function runGetSchema(args: z.infer<typeof SchemaArgs>): Promise<ToolCallR
       call: CORE_SET.has(t.name) ? "direct" : "ae_invoke_tool",
       // Verbatim, including the safety text for tools that carry it.
       description: t.description,
-      inputSchema: zodToJsonSchema(t.schema),
+      inputSchema: withIdempotencyKey(t.name, toolInputSchema(t)),
     };
     total += JSON.stringify(entry).length;
     tools.push(entry);
@@ -276,7 +282,7 @@ async function runInvoke(args: z.infer<typeof InvokeArgs>, ctx: ToolContext, opt
 // ---------- definitions ----------
 
 const SEARCH_DESCRIPTION =
-  `Find tools: ${ALL_TOOLS.length} After Effects tools exist but only ${CORE_TOOL_NAMES.length} are listed, so search the rest here. ` +
+  `Find tools: ${listedTools().length} After Effects tools exist but only ${CORE_TOOL_NAMES.length} are listed, so search the rest here. ` +
   "Give `query` (keywords, e.g. 'remove object from shot', 'captions', 'track'), `pattern` (a name fragment, not a regex: ^ anchors the start and $ the end, e.g. ^ae_track) and/or `group`; an empty call lists the groups; `offset` pages. " +
   "Then ae_get_tool_schema { name } for the full schema and ae_invoke_tool { name, arguments } to call it. Never touches After Effects.";
 
@@ -354,7 +360,13 @@ export function isMetaTool(name: string): boolean {
 }
 
 export function metaToolList(): ListedTool[] {
-  return META_TOOLS.map((m) => ({ name: m.name, description: m.description, inputSchema: m.inputSchema }));
+  // Search and schema never touch After Effects; invoke runs whatever tool it is given.
+  return META_TOOLS.map((m) => ({
+    name: m.name,
+    description: m.description,
+    inputSchema: m.inputSchema,
+    annotations: m.name === "ae_invoke_tool" ? { openWorldHint: false } : { readOnlyHint: true, openWorldHint: false },
+  }));
 }
 
 export async function callMetaTool(

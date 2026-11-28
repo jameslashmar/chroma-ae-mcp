@@ -234,7 +234,13 @@ export function createVerifyTools(options: VerifyOptions = {}): ToolDefinition<a
         const stat = fs.statSync(file);
         if (stat.size === 0) return { ok: false, error: "empty", message: `${file} is empty.` };
         if (args.comp_id === undefined && jobCompId === undefined && !compName) {
-          return { ok: false, error: "bad_args", message: "Give comp_id to compare with (a whole-queue job renders several comps)." };
+          return {
+            ok: false,
+            error: "bad_args",
+            message: args.job_id
+              ? "Give comp_id to compare with (a whole-queue job renders several comps)."
+              : "Give comp_id: the comp to compare this render with (a file path does not say which comp made it; expect.comp_id is only the target guard).",
+          };
         }
         // Only a still can be an image sequence; a movie keeps its own rate.
         const sequence = (args.sequence ?? (jobIsSequence || looksLikeSequence(file))) && STILL.test(file);

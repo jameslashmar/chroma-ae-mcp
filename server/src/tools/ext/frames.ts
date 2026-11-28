@@ -1,3 +1,4 @@
+import { checkCancelled } from "../../call-context.js";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -11,7 +12,7 @@ import {
   type ToolContext,
   type ToolDefinition,
 } from "../common.js";
-import { defaultFramesDir, waitForFreshPng } from "../render.js";
+import { defaultFramesDir, frameCaptureDeps, isFreshPngFile, pngComplete, mayStillBeRendering, noteUnwrittenFrame, renderHangOf, staleFrameOnDisk, unwrittenFrameHold, unwrittenFrameMessage, waitForFreshPng } from "../render.js";
 
 export type FrameFlag = "blank" | "black" | "transparent";
 
@@ -93,13 +94,13 @@ export const AeCompareFramesSchema = z
       .boolean()
       .default(false)
       .describe(
-        "If true, writes a visual diff PNG for each compared pair to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "If true, writes a visual diff PNG for each compared pair to frames/ in the data folder (ae_status: state_dir)."
       ),
     diff_png: z
       .boolean()
       .optional()
       .describe(
-        "Optional alias for `write_diff_png` to write diff PNGs to %LOCALAPPDATA%\\chroma-ae-mcp\\frames."
+        "Optional alias for `write_diff_png` to write diff PNGs to frames/ in the data folder (ae_status: state_dir)."
       ),
   })
   .superRefine((val, ctx) => {
@@ -158,11 +159,20 @@ export function decodePngFile(filePath: string): PNG {
   if (!fs.existsSync(filePath)) {
     throw new Error(`PNG file not found: ${filePath}`);
   }
+  // A frame AE is still writing (it can pause mid-file): wait up to 3 s for its IEND before decoding.
+  const deadline = Date.now() + 3000;
+  while (!pngComplete(filePath) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
   const buf = fs.readFileSync(filePath);
   if (buf.length === 0) {
     throw new Error(`PNG file is empty (0 bytes): ${filePath}`);
   }
-  return PNG.sync.read(buf);
+  try {
+    return PNG.sync.read(buf);
+  } catch (e) {
+    throw new Error(`PNG file could not be decoded (${(e as Error).message}); AE may not have finished writing it: ${filePath}`);
+  }
 }
 
 /**
@@ -399,6 +409,8 @@ export function compareDecodedFrames(
  * +0.001s time nudge if the first write is stale. Callers must already hold
  * the queue (it uses `evalRaw`, never `callHost`).
  */
+export { frameCaptureDeps } from "../render.js";
+
 export async function captureCompFrame(params: {
   ctx: ToolContext;
   opId: string;
@@ -411,6 +423,9 @@ export async function captureCompFrame(params: {
 }): Promise<{ path: string; time: number }> {
   const { ctx, opId, compId, time, frameIndex, framesDir } = params;
   const toolName = params.toolName ?? "ae_compare_frames";
+  // A frame AE has not written yet may still be rendering: nothing more is sent on top of it (AE 26.3 crashed).
+  const hold = unwrittenFrameHold();
+  if (hold) throw new Error(hold.message);
   const suffix1 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const pngPath1 = path.join(
     framesDir,
@@ -418,7 +433,9 @@ export async function captureCompFrame(params: {
   );
   const reqStart1 = Date.now();
 
-  await ctx.bridge.evalRaw<Record<string, unknown>>({
+  // A safe point between frames: a cancelled call renders no more (an eval already sent has ended by now).
+  checkCancelled(`rendering frame ${frameIndex + 1} at ${time}s`);
+  const first = await ctx.bridge.evalRaw<Record<string, unknown>>({
     id: `${opId}_f${frameIndex}_try1`,
     script: buildJsxCall("snapshotFrame", {
       comp_id: compId,
@@ -432,12 +449,25 @@ export async function captureCompFrame(params: {
     toolName,
   });
 
+  // A comp AE 26.3 would never finish rendering: the host refused it before saveFrameToPng.
+  const hang = renderHangOf(first?.result);
+  if (hang) throw new Error(hang.message);
   const check1 = await waitForFreshPng(pngPath1, reqStart1, params.waitMs);
   if (check1.fresh) {
     return { path: pngPath1, time };
   }
+  // Never start a second render while the first may still be rendering (no file yet) or writing.
+  if (mayStillBeRendering(pngPath1, check1)) {
+    const late1 = await waitForFreshPng(pngPath1, reqStart1, frameCaptureDeps.lateWriteMs);
+    if (late1.fresh) return { path: pngPath1, time };
+  }
 
-  // Retry once with a slight +0.001s time nudge
+  // Retry once with a slight +0.001s time nudge, only for a stale frame (a whole PNG older than the request).
+  // A frame AE never wrote is not asked for again: that second saveFrameToPng crashed AE 26.3 (PR #19).
+  if (!staleFrameOnDisk(pngPath1, reqStart1)) {
+    noteUnwrittenFrame(pngPath1, compId, time, `${toolName}(${compId} @ ${time}s)`);
+    throw new Error(unwrittenFrameMessage(compId, time, Date.now() - reqStart1));
+  }
   const nudgedTime = Math.max(0, time + 0.001);
   const suffix2 = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const pngPath2 = path.join(
@@ -465,8 +495,26 @@ export async function captureCompFrame(params: {
     return { path: pngPath2, time: nudgedTime };
   }
 
+  // Both failed. If AE is still writing either file, let it finish before anything else is sent.
+  let settled = "";
+  const pending = [
+    { p: pngPath2, start: reqStart2, last: check2, t: nudgedTime },
+    { p: pngPath1, start: reqStart1, last: isFreshPngFile(pngPath1, reqStart1), t: time },
+  ].filter((x) => mayStillBeRendering(x.p, x.last));
+  if (pending.length > 0) {
+    const t0 = Date.now();
+    for (const x of pending) {
+      const left = frameCaptureDeps.settleAfterFailMs - (Date.now() - t0);
+      if (left <= 0) break;
+      const late = await waitForFreshPng(x.p, x.start, left);
+      if (late.fresh) return { path: x.p, time: x.t };
+    }
+    settled = ` After Effects was still writing the frame; waited ${Math.round((Date.now() - t0) / 1000)} s for it to finish before returning. Call ae_status before the next call.`;
+  }
+  if (!staleFrameOnDisk(pngPath2, reqStart2)) noteUnwrittenFrame(pngPath2, compId, nudgedTime, `${toolName}(${compId} @ ${nudgedTime}s retry)`);
+
   throw new Error(
-    `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.`
+    `saveFrameToPng did not produce a fresh non-empty PNG for comp ${compId} at time ${time}s after retry.${settled}`
   );
 }
 
@@ -475,7 +523,7 @@ export const framesTools: ToolDefinition<any>[] = [
     name: "ae_compare_frames",
     description:
       "Compare 2 to 20 composition frames captured at `times` (via `snapshotFrame` + `waitForFreshPng`) or two existing PNG files (`a_path`, `b_path`). " +
-      "Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to `%LOCALAPPDATA%\\chroma-ae-mcp\\frames`. " +
+      "Decodes frames with `pngjs`, flags blank, black, or fully transparent frames, returns pairwise `mean_abs_diff` (0..1), `max_diff` (0..1), and `pct_pixels_changed` over `threshold`, and optionally writes a `diff_png` to frames/ in the data folder (ae_status: state_dir). " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeCompareFramesSchema,
     handler: async (args: AeCompareFramesArgs, ctx: ToolContext) => {

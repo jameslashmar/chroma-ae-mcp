@@ -734,7 +734,7 @@ describe("projectsession.jsx", () => {
     expect(untitled.closes).toEqual([]);
   });
 
-  it("refuses to save over the file without a backup, and marks every write host no_op", () => {
+  it("refuses to save over the file without a backup, and marks a host write that changed state no_undo_step", () => {
     const target = path.join(tmp(), "next.aep");
     fs.writeFileSync(target, "x");
     const nobackup = hostScene({ file: "C:/p/a.aep", dirty: true });
@@ -743,11 +743,12 @@ describe("projectsession.jsx", () => {
     expect(out.reason).toContain("_mcp_backups");
     expect(nobackup.closes).toEqual([]);
     const ok = hostScene({ file: "C:/p/a.aep", dirty: false });
-    expect(ok.A.projectsessionOpen({ path: target }).no_op).toBe(true);
-    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionNew({}).no_op).toBe(true);
-    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionClose({}).no_op).toBe(true);
-    expect(hostScene({ file: "C:/p/a.aep", dirty: true }).A.projectsessionClose({}).no_op).toBe(true);
-    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionPrefsSet({ set: { enabled: true } }).no_op).toBe(true);
+    expect(ok.A.projectsessionOpen({ path: target }).no_undo_step).toBe(true);
+    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionNew({}).no_undo_step).toBe(true);
+    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionClose({}).no_undo_step).toBe(true);
+    expect(hostScene({ file: "C:/p/a.aep", dirty: true }).A.projectsessionClose({ if_dirty: "discard" }).no_undo_step).toBe(true);
+    expect(hostScene({ file: "C:/p/a.aep", dirty: true }).A.projectsessionClose({})).toMatchObject({ applied: false, no_op: true });
+    expect(hostScene({ file: "C:/p/a.aep" }).A.projectsessionPrefsSet({ set: { enabled: true } })).toMatchObject({ applied: false, no_op: true });
   });
 
   it("puts the previous project back when the new one fails to open", () => {
@@ -888,7 +889,8 @@ describe("projectsession.jsx", () => {
     const h = hostScene({ file: null });
     const prefs = withPrefs(h, { "Auto-Save|Auto-Save Enabled": false, "Auto-Save|Auto-Save Interval": 20 });
     const ok = h.A.projectsessionPrefsSet({ set: { enabled: true, interval_minutes: 5 }, expect: GUARD });
-    expect(ok).toMatchObject({ applied: true, saved_to_disk: true });
+    expect(ok).toMatchObject({ applied: true, saved_to_disk: true, no_undo_step: true });
+    expect(ok.no_op).toBeUndefined();
     expect(ok.written.map((w: any) => [w.field, w.value])).toEqual([["enabled", true], ["interval_minutes", 5]]);
     expect(prefs.store["Auto-Save|Auto-Save Enabled"]).toBe(true);
     expect(prefs.disks()).toBe(1);
@@ -1066,7 +1068,7 @@ describe("review fixes (server)", () => {
     fs.writeFileSync(target, "x");
     const { ctx, calls } = fakeAe({
       projectsessionRead: [state(), state(), openState(target)],
-      projectsessionOpen: [{ applied: true, opened: true, no_op: true }],
+      projectsessionOpen: [{ applied: true, opened: true, no_undo_step: true }],
     });
     const spy = vi.spyOn(ctx.bridge, "evalRaw");
     await tool.handler(parse({ action: "open", path: target, expect: GUARD }).data!, ctx);
@@ -1082,7 +1084,7 @@ describe("review fixes (server)", () => {
     fs.writeFileSync(target, "x");
     const open = fakeAe({
       projectsessionRead: [state(), state(), openState(target)],
-      projectsessionOpen: [{ applied: true, opened: true, closed_previous: true, no_op: true }],
+      projectsessionOpen: [{ applied: true, opened: true, closed_previous: true, no_undo_step: true }],
       sessionSnapshot: [{}],
     });
     expect(tracker.reopenedAt()).toBeNull();
@@ -1092,11 +1094,31 @@ describe("review fixes (server)", () => {
     expect(tracker.agentWritesSince("<unsaved>", null)).toEqual([]);
   });
 
+  it("says outcome applied for a new, an open and a close that changed the project", async () => {
+    const target = path.join(tmp(), "next.aep");
+    fs.writeFileSync(target, "x");
+    const created: any = await tool.handler(
+      parse({ action: "new", expect: GUARD }).data!,
+      fakeAe({ projectsessionRead: [state(), state(), state()], projectsessionNew: [{ applied: true, created: true, closed_previous: true, no_undo_step: true }] }).ctx
+    );
+    expect(created).toMatchObject({ applied: true, outcome: "applied" });
+    const opened: any = await tool.handler(
+      parse({ action: "open", path: target, expect: GUARD }).data!,
+      fakeAe({ projectsessionRead: [state(), state(), openState(target)], projectsessionOpen: [{ applied: true, opened: true, closed_previous: true, no_undo_step: true }] }).ctx
+    );
+    expect(opened).toMatchObject({ applied: true, outcome: "applied" });
+    const closed: any = await tool.handler(
+      parse({ action: "close", expect: GUARD }).data!,
+      fakeAe({ projectsessionRead: [state(), state(), state()], projectsessionClose: [{ applied: true, closed: true, no_undo_step: true }] }).ctx
+    );
+    expect(closed).toMatchObject({ applied: true, outcome: "applied" });
+  });
+
   it("marks a close, and a write that threw after it may have closed the project, but not a needs_user or a refusal", async () => {
     const tracker = installSessionTracking({ dataDir: tmp() });
     const close = fakeAe({
       projectsessionRead: [state(), state(), state()],
-      projectsessionClose: [{ applied: true, closed: true, no_op: true }],
+      projectsessionClose: [{ applied: true, closed: true, no_undo_step: true }],
       sessionSnapshot: [{}],
     });
     await tool.handler(parse({ action: "close", expect: GUARD }).data!, close.ctx);
@@ -1134,7 +1156,7 @@ describe("review fixes (server)", () => {
     const { ctx, calls } = fakeAe(
       {
         projectsessionRead: [state({ project_path: projectFile, dirty: false }), state({ project_path: projectFile }), state()],
-        projectsessionClose: [{ applied: true, closed: true, saved_previous: true, no_op: true }],
+        projectsessionClose: [{ applied: true, closed: true, saved_previous: true, no_undo_step: true }],
       },
       projectFile
     );
@@ -1149,7 +1171,7 @@ describe("review fixes (server)", () => {
     fs.writeFileSync(target, "x");
     const { ctx } = fakeAe({
       projectsessionRead: [state(), state(), state({ project_path: target, dirty: false })],
-      projectsessionOpen: [{ applied: true, opened: true, project_path: "C:/stale.aep", dirty: true, no_op: true }],
+      projectsessionOpen: [{ applied: true, opened: true, project_path: "C:/stale.aep", dirty: true, no_undo_step: true }],
     });
     const res: any = await tool.handler(parse({ action: "open", path: target, expect: GUARD }).data!, ctx);
     expect(res.project_path).toBe(target);
@@ -1174,7 +1196,7 @@ describe("review fixes (server)", () => {
     const failed = fakeAe(
       {
         projectsessionRead: [state({ project_path: projectFile }), state({ project_path: projectFile }), state({ project_path: projectFile }), state({ project_path: projectFile })],
-        projectsessionOpen: [{ applied: true, opened: false, error: "cannot open", closed_previous: true, no_op: true }],
+        projectsessionOpen: [{ applied: true, opened: false, error: "cannot open", closed_previous: true, no_undo_step: true }],
       },
       projectFile
     );

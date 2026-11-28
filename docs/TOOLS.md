@@ -1,12 +1,12 @@
-# Tools (180)
+# Tools (184)
 
 Every tool the MCP serves, by group. Each tool's schema and description, as the agent sees them, live in `server/src/tools/`. The rules every write follows are in [SAFETY.md](SAFETY.md).
 
 ## Toolsets: full and core
 
-`tools/list` has two shapes, chosen per request by the `X-Chroma-Toolset` header (the stdio relay sends it for core: when `CHROMA_AE_MCP_TOOLSET=core` is in its environment, or, with the variable unset, for every client except `claude-code`, which defers tool schemas itself and gets the full list; `CHROMA_AE_MCP_TOOLSET=full` opts out of core for any client, and Claude Code over HTTP gets the full list). The counts in this file are for the tools themselves: the three meta-tools below are not in the 180.
+`tools/list` has two shapes, chosen per request by the `X-Chroma-Toolset` header (the stdio relay sends it for core: when `CHROMA_AE_MCP_TOOLSET=core` is in its environment, or, with the variable unset, for every client except `claude-code`, which defers tool schemas itself and gets the full list; `CHROMA_AE_MCP_TOOLSET=full` opts out of core for any client, and Claude Code over HTTP gets the full list). The counts in this file are for the tools themselves: the three meta-tools below are not in the 184.
 
-- **full** (the default; also an unset, empty or unknown value): all 180 tools, exactly as the tools define themselves, about 795,000 characters. No meta-tools are listed and `initialize` sends no `instructions`. Use it for a client that defers tool schemas itself (Claude Code does).
+- **full** (the default; also an unset, empty or unknown value): all 184 tools as 134 entries, because 19 [tool families](#tool-families) stand in for 69 of them; about 784,000 characters (807,000 before the families). Every other tool is listed exactly as it defines itself. No meta-tools are listed and `initialize` sends no `instructions`. Use it for a client that defers tool schemas itself (Claude Code does).
 - **core**: 33 everyday tools with shortened text, plus `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool`. The list and the `instructions` that `initialize` returns (the safety text once, how to use the three tools, the group index) are held to 84,000 characters (about 20,000 tokens; measured 82,210 on 2026-11-08) by a test. We added it because it is **not confirmed** that Claude Desktop defers tool schemas the way Claude Code does, and 200,000 tokens of schemas per conversation is too much to risk.
 
 The shortened text keeps every property name, type, enum, `required` and nested structure; only descriptions shrink (the first clause; 28 of the 33 tools have a hand-written summary, and a few untyped values such as `ae_set_property.value`, `ae_batch_set` `ops[].value` and the effect `params[].value` keep up to 400-600 characters because their text is the only description of what they accept). Calls are always validated against the full schema.
@@ -23,9 +23,43 @@ All three reject fields they do not know (put a tool's arguments under `argument
 
 The core list: `ae_status`, `ae_get_project`, `ae_get_comp`, `ae_comp_tree`, `ae_get_layer_props`, `ae_find_layers`, `ae_get_keyframes`, `ae_set_property`, `ae_batch_set`, `ae_set_text`, `ae_create_layer`, `ae_create_comp`, `ae_layer_ops`, `ae_import_footage`, `ae_add_effect`, `ae_set_effect`, `ae_save`, `ae_snapshot_frame`, `ae_run_jsx`, `ae_dialogs`, `ae_dialog_respond`, `ae_skill_run`, `ae_multi_comp_apply`, `ae_render_queue_add`, `ae_render_queue_edit`, `ae_render_queue_status`, `ae_render_queue_render`, `ae_render_queue_render_status`, `ae_render_templates`, `ae_aerender_start`, `ae_aerender_status`, `ae_set_footage_interpretation`, `ae_import_assets`.
 
+### Tool families
+
+Runs of tools that work on one thing are listed as one tool with an `action` field (`server/src/tool-families.ts`): `ae_track { action: "point", ... }` instead of `ae_track_point { ... }`. The agent has fewer, clearer tools to choose between, and the safety text is in each family once instead of in every member.
+
+Nothing breaks. The member tools are still registered and still answer under their old names, through `tools/call`, `ae_invoke_tool` and `ae_get_tool_schema`; skills, receipts and usage logs that name them keep working. Each action is validated with its member's own schema and run by its member's own handler, so its errors, checkpoints and receipts are the member's; a validation error names both (`Invalid arguments for ae_track (action read, as ae_track_read): ...`). The family's listed schema is the members' fields merged: `action` is an enum, and a field that only some actions take starts its description with them (`[point, multi] ...`); fields the members define differently are an `anyOf`. Annotations take the worst case of the members (read-only only when every action is), and a family takes an `idempotency_key` when any action writes.
+
+A member that has an `action` field of its own takes it as `<action>_action` in the family: `ae_deliver { action: "step", step_action: "next" }` is `ae_deliver_step { action: "next" }` (also `rules_action` in `ae_taste`, `recipe_action` in `ae_deliver`, `roundtrip_action` in `ae_stabilize`, `setup_action` in `ae_cleanplate`).
+
+Five families share their name with the member that was there before (`ae_captions`, `ae_render_batch`, `ae_taste`, `ae_variants`, `ae_stabilize`): called without `action` they run that member, exactly as before. The others require `action`.
+
+`ae_search_tools` returns the family, with an `actions` list such as `["point (ae_track_point)", ...]`; a `pattern` also matches the members' old names (`^ae_track_` finds `ae_track`), and the closest-name hints for an unknown tool include the old names. The **core** list is unchanged: it lists member tools, because its size budget is tight.
+
+| Family | Actions (old tool) |
+|---|---|
+| `ae_render_queue` | `add` (`ae_render_queue_add`), `status`, `inspect`, `edit`, `duplicate`, `apply_spec`, `render`, `render_status` (`ae_render_queue_<action>`) |
+| `ae_render_batch` | `start` (`ae_render_batch`, the default), `plan`, `status`, `resume`, `cancel` (`ae_render_batch_<action>`) |
+| `ae_aerender` | `start`, `status`, `cancel` (`ae_aerender_<action>`) |
+| `ae_captions` | `build` (`ae_captions`, the default), `plan`, `read`, `export`, `qa` (`ae_captions_<action>`) |
+| `ae_rig` | `add_controls`, `link`, `unlink`, `rename`, `list` (`ae_rig_<action>`) |
+| `ae_path` | `read`, `write`, `operator`, `link`, `connector` (`ae_path_<action>`) |
+| `ae_track` | `point`, `multi`, `read`, `apply` (`ae_track_<action>`) |
+| `ae_patch` | `check`, `color_match`, `grain`, `finish` (`ae_patch_<action>`) |
+| `ae_checkpoint` | `create`, `list`, `revert` (`ae_checkpoint_<action>`) |
+| `ae_skill` | `list`, `save`, `run` (`ae_skill_<action>`) |
+| `ae_taste` | `prefs` (`ae_taste`, the default), `baseline` (`ae_taste_baseline`), `learn` (`ae_learn_taste`), `rules` (`ae_taste_rules`) |
+| `ae_variants` | `create` (`ae_variants`, the default), `pick`, `discard` (`ae_variants_<action>`) |
+| `ae_dialog` | `list` (`ae_dialogs`), `respond` (`ae_dialog_respond`) |
+| `ae_deliver` | `specs` (`ae_delivery_specs`), `recipe`, `step`, `status` (`ae_deliver_<action>`) |
+| `ae_collect` | `files`, `relink`, `report` (`ae_collect_<action>`) |
+| `ae_loudness` | `check`, `apply` (`ae_loudness_<action>`) |
+| `ae_stabilize` | `apply` (`ae_stabilize`, the default), `roundtrip` (`ae_stabilize_roundtrip`) |
+| `ae_cleanplate` | `pick`, `setup` (`ae_cleanplate_<action>`) |
+| `ae_screen` | `corners`, `replace` (`ae_screen_<action>`) |
+
 ### Search groups
 
-Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.ts`; a test fails for a tool without one). These are for `ae_search_tools`, not the sections below.
+Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.ts`; a test fails for a tool without one); a family is in the group of its first action. These are for `ae_search_tools`, not the sections below. The counts are what the search shows, a family once (the group's own tools in brackets where that differs).
 
 | Group | Tools | What |
 |---|---|---|
@@ -35,14 +69,14 @@ Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.t
 | `effects` | 5 | Add, change and remove effects, presets, green-screen keying |
 | `text` | 9 | Text content and styling, animators, fitting, measuring, backdrops, fonts, legibility |
 | `motion` | 9 | Keyframe easing and retiming, staggers, time remap, graphs, timing checks, camera rigs |
-| `rig_paths` | 15 | Rigs and controls, paths, expression recipes, Essential Graphics, .mogrt |
-| `tracking_patching` | 19 | Tracking, stabilizing, object removal, patches, screen replacement |
-| `render` | 18 | Render queue, rendering in After Effects or with aerender, batches, templates, verifying |
-| `delivery` | 10 | Delivery specs and recipes, preflight, house style, collect and relink |
-| `captions_audio` | 10 | Captions, transcription, audio analysis, loudness, cue keys |
-| `review` | 11 | Stills, contact sheets, annotated frames, motion review, brief and taste |
-| `safety` | 11 | Quarantine, checkpoints, variants, session changes, project sessions |
-| `app` | 14 | ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer |
+| `rig_paths` | 7 (15) | Rigs and controls, paths, expression recipes, Essential Graphics, .mogrt |
+| `tracking_patching` | 13 (22) | Tracking, stabilizing, object removal, patches, screen replacement |
+| `render` | 5 (18) | Render queue, rendering in After Effects or with aerender, batches, templates, verifying |
+| `delivery` | 5 (10) | Delivery specs and recipes, preflight, house style, collect and relink |
+| `captions_audio` | 5 (10) | Captions, transcription, audio analysis, loudness, cue keys |
+| `review` | 8 (11) | Stills, contact sheets, annotated frames, motion review, brief and taste |
+| `safety` | 8 (11) | Quarantine, checkpoints, variants, session changes, project sessions |
+| `app` | 11 (14) | ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer |
 
 ## Motion guidance
 
@@ -54,8 +88,8 @@ Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.t
 
 | Group | Tools |
 |---|---|
-| Status & control | `ae_status` (`detail: true` adds the selection, selected properties as ready-made paths, the viewer and the environment), `ae_quarantine_status`, `ae_acknowledge` |
-| Read | `ae_get_project` and `ae_get_comp` (filtered and paged for big projects), `ae_get_layer_props` (`meta` says what each property accepts), `ae_get_layer_full` (opt-in meta, full text values and bounds in comp space; kinds include 3D model and parametric mesh layers), `ae_find_layers`, `ae_list_effects`, `ae_validate_expressions` (`fix` + `apply` repairs broken expressions project-wide after a checkpoint, then checks again), `ae_comp_tree` (what nests what, where a comp is used, unused comps), `ae_fonts` (fonts in use and missing ones; `search` finds installed fonts, `check` tests that fonts exist, are not substituted and have the glyphs for real text, `replace` swaps a font project-wide behind a mandatory checkpoint, dry run by default, not undoable) |
+| Status & control | `ae_status` (`detail: true` adds the selection, selected properties as ready-made paths, the viewer and the environment), `ae_quarantine_status`, `ae_acknowledge`, `ae_recent_ops` (the last writes and how each ended; never touches AE) |
+| Read | `ae_get_project` and `ae_get_comp` (filtered and paged for big projects), `ae_get_layer_props` (`meta` says what each property accepts), `ae_get_layer_full` (opt-in meta, full text values and bounds in comp space; kinds include 3D model and parametric mesh layers), `ae_find_layers`, `ae_list_effects`, `ae_validate_expressions` (`fix` + `apply` repairs broken expressions project-wide after a checkpoint, then checks again), `ae_comp_tree` (what nests what, where a comp is used, unused comps), `ae_fonts` (fonts in use and missing ones; `search` finds installed fonts, `check` tests that fonts exist, are not substituted and have the glyphs for real text, `replace` swaps a font project-wide behind a mandatory checkpoint, dry run by default, not undoable; `check_files` checks every installed font's file on disk, to find the fonts behind After Effects' "cannot access font" warnings) |
 | Script | `ae_run_jsx`: a read, or a guarded write with a receipt. A safety lint runs first and refuses outside programs, file writes and deletes, dialogs, quitting, opening and closing projects, and writes in read mode, naming the tool to use instead. It is a guard rail, not a sandbox. `ae_skill_save` and `ae_skill_run` use the same lint. |
 | Write | `ae_set_property` (value, keyframes or expression; path and marker values; fonts checked; expression errors in the receipt), `ae_set_keyframe_ease` (presets, explicit speed and influence, or a CSS-style `curve` shaped onto each segment; `rove_between` makes the middle keys roving; per-key interpolation, spatial tangents, continuity and auto-bezier flags, roving, label, or `keys: "selected"`), `ae_set_text` (string, style ranges, per-paragraph styles, typography such as caps, kerning, ligatures, scales, stroke order and joins, paragraph spacing and indents, box size, alignment, auto-fit and inset; fonts looked up by PostScript name or family and style, and refused when not installed), `ae_import_footage` (also as a comp, a cropped-layer comp or a whole project; a sequence `range`; placeholders), `ae_replace_footage` (also `action: "reload"` for file footage, listing items whose size or duration changed), `ae_batch_set` (values, keys, expressions, paths and markers on many layers: everything is found before anything is written, 500 ops per undo step) |
 | Layers | `ae_create_layer` (solid, null, adjustment, text, shape, camera, light, footage, precomp, and on AE 26.3 parametric meshes; named, parented and placed; lights of every type; vertical text), `ae_precompose`, `ae_set_track_matte` (any layer as the matte on AE 23+; the layer above on older AE, refused otherwise), `ae_align` (to the comp, a safe area or the layers' box; or distribute) |
@@ -67,8 +101,8 @@ Every tool belongs to exactly one group (`TOOL_GROUPS` in `server/src/toolsets.t
 | Effects | `ae_add_effect`, `ae_set_effect` (also moves or duplicates effects, sets popups by label on AE 26.0+, picks an input layer and stage on AE 26.5+), `ae_remove_effect`, `ae_apply_preset` (.ffx), `ae_list_presets`. Parameters scripts can't set (Colorama's Output Cycle, the Curves curve) are listed as `settable: false`; a preset saved from AE carries them. Layer styles go in through a route nobody has probed live yet (a preset is the fallback). |
 | Motion | `ae_contact_sheet` (up to 24 frames in one labelled PNG), `ae_motion_graph` (value and speed of one property, with the easing per key pair), `ae_motion_review` (linear moves, dead starts and stops, speed jolts, overshoot, keys between frames, and where layers come to rest against the frame and safe areas; most findings come with a ready `ae_set_keyframe_ease` fix in the user's preferred ease, roving the middle keys of a spatial move; also choreography from the keys: the same ease and duration everywhere, entrances that ease in and exits that ease out, exits not shorter than entrances, staggers too slow or uneven, too much moving at once, text still moving after it landed, over-long moves, and overshoot on opacity, colour or counting numbers), `ae_timing_check` (lines on screen too briefly to read, stretches over 3 s where nothing changes, a blank first frame, a long film with no sound, and numbers or names not in the brief's approved facts) |
 | Frames | `ae_snapshot_frame` (rendered at full size, shrunk on the server to `scale` or `max_size`), `ae_compare_frames` (pixel diff; flags blank, black or transparent frames) |
-| Tracking & keying | `ae_track_point` (a sub-pixel point tracker that writes the path to a null; within 0.04 px on a test shot), `ae_key_greenscreen` (Keylight, Key Cleaner and Spill Suppressor, then a measured check for screen left, holes, spill and recoloured subject, with ready fixes and a before/after preview) |
-| Planar tracking | `ae_track_multi` (1 to 8 points followed together, forwards and backwards from a reference frame, with translation, similarity, affine or perspective solved per frame; lost points are found again and long shots are tracked in chunks you continue with `continue_track_id`; optionally on an isolated copy of the plate), `ae_track_read` (a track already in the project, from nulls, Corner Pin or CC Power Pin keys, AE Tracker points or transform keys, into the same format), `ae_track_apply` (a track as nulls, Corner Pin or CC Power Pin keys in the layer's own space, layer transform keys, or transform plus a residual pin, in one guarded undo step). Tracks are stored by `track_id`; the tools below use them. Points must lie on one plane. |
+| Tracking & keying | `ae_matte_check` (any matte on rendered frames: holes in the subject, a see-through core, garbage specks, a faint veil, soft-edge width and edge chatter over three consecutive frames; a layer is rendered alone in a temporary copy), `ae_color_match_element` (fits a per-channel Levels, black, white and gamma, from 1-3 pairs of element and plate areas you pick, writes it as one effect and measures what is left; 11.8 to 0.3 levels on a test element), `ae_camera_solve_check` (checks a 3D camera solve, AE's Camera Tracker or another, against the picture: each solved null projected through the camera and its feature found on every sampled frame, so the error per point is how far a parented element would slide; read-only), `ae_track_point` (a sub-pixel point tracker that writes the path to a null; within 0.04 px on a test shot), `ae_key_greenscreen` (Keylight, Key Cleaner and Spill Suppressor, then a measured check for screen left, holes, spill and recoloured subject, with ready fixes and a before/after preview) |
+| Planar tracking | `ae_track_multi` (1 to 8 points followed together, forwards and backwards from a reference frame, with translation, similarity, affine or perspective solved per frame; lost points are found again and long shots are tracked in chunks you continue with `continue_track_id`; optionally on an isolated copy of the plate), `ae_track_read` (a track already in the project, from nulls, Corner Pin or CC Power Pin keys, AE Tracker points or transform keys, into the same format), `ae_track_apply` (a track as nulls, Corner Pin or CC Power Pin keys in the layer's own space, layer transform keys, or transform plus a residual pin, in one guarded undo step; `refit_model` and `smooth_frames` write a steadier copy without tracking again, and the track summary's `model_advice` says when the surface corners shake and which model holds them). Tracks are stored by `track_id`; the tools below use them. Points must lie on one plane. |
 | Stabilizing | `ae_stabilize` (lock, smooth or position-only from a track, written as layer transform keys, a Transform effect or Corner Pin keys; scale-to-fill or Motion Tile edges; before and after sheets and a measured residual-motion check), `ae_stabilize_roundtrip` (builds a stabilize, fix, unstabilize rig: a padded work comp with a steady copy of the plate, put back over the original with the exact inverse motion, so only the patches are resampled; `remove` takes it out again) |
 | Removing things | `ae_cleanplate_pick` (scores sampled frames for sharpness, motion, track quality, coverage and cleanliness, and proposes the reference frame and clone sources; read only unless `isolate` is on), `ae_cleanplate_setup` (builds the patch in one undo step: a freeze, a rendered still or an offset clone in a patch precomp, masked, tracked back from the reference frame, with an optional holdout matte; `needs_fix` until the hole is clean; `action: "reload"` reloads a painted still), `ae_inpaint_plate` (a clean plate made in Node, because Content-Aware Fill has no scripting API: a temporal median over tracked frames, then diffusion or patch fill for what no frame shows; written as a PNG to the plates folder, imported as a still, optionally placed in a patch or work comp) |
 | Mattes | `ae_mask_follow` (a mask, existing or new, that rides a planar track in the layer's own space, feather points kept), `ae_garbage_matte` (a hidden tracked matte solid wired as the alpha or luma track matte of several layers, with feather, expansion and choke), `ae_caf_prep` (a tracked Subtract mask, expansion and work area for Content-Aware Fill, plus the exact panel steps for the one click only the user can make; `find_fill` finds the fill layer CAF generated, read only) |
@@ -118,3 +152,25 @@ CEP extensions open directly. AE's own Window-menu panels open through `app.exec
 - Data dir (`%LOCALAPPDATA%\chroma-ae-mcp`, `~/Library/Application Support/chroma-ae-mcp`): token, `settings.json` (auto checkpoints, taste, asset watch), `service.log`, `diagnostics/`, global `skills/`, `frames/`, `renders/` (and `renders/batches/<id>/` for `ae_render_batch`), `session-state.json` and `inflight-ops.json` (`ae_session_changes`), `learn-taste.json` (`ae_learn_taste`), `variants/` and `variant-picks.jsonl` (`ae_variants`), `tracks/` (the planar track store: `<track_id>.json`, newest 200 kept; re-basing never overwrites a stored track, a re-based copy gets its own id; `continue_track_id` adds frames to its own file), `patchfit/` (the state of a chunked `ae_patch_color_match`, newest 50 kept).
 - Next to a project: `<name> chroma plates/` (the stills `ae_cleanplate_setup` and `ae_inpaint_plate` write, never over an existing file; needs a saved project), `<name>.brief.json`, `<name>.versions.json` (`ae_version_footage`'s log), `<name>.jobs.json` (`ae_multi_comp_apply`'s jobs), `<name>.deliver.json` (`ae_deliver_step`'s runs), `_collect/` (`ae_collect_files`: the .aep copy, `_Footage/`, `manifest.json` and the report), `ae-skills/`, `_assets/`, `_mcp_checkpoints/`, `_mcp_backups/` (copies taken by `ae_save`).
 - Audio renders for `ae_audio_analyze` go to `renders/audio/` in the data dir.
+
+## Result envelope
+
+Every tool result is a JSON object (in the text content) that carries these fields on top of the tool's own (server/src/tool-call.ts `envelope`):
+
+| Field | When | Meaning |
+|---|---|---|
+| `ok` | always | The call did what was asked. `false` for an MCP error, a typed refusal (`ok: false` or an `error` field) and invalid arguments. |
+| `code` | when `ok` is false | Machine-readable reason: the host's code (`not_found`, `bad_args`, ...), `invalid_args`, `unknown_tool`, `guard`, `queued`, `quarantined`, `timeout`, or the tool's `error`. |
+| `outcome` | writes | `applied`, `no_op`, `partial`, `not_applied` (nothing in the project changed) or `unknown` (may be part-way in: read the state before anything else). |
+| `message`, `next_steps` | failures | What happened and what to do next. |
+
+Write tools also take an optional `idempotency_key` (a resend with the same key and arguments returns the first answer) and are listed by `ae_recent_ops`. Every tool carries MCP annotations (read-only, destructive, idempotent, open world; server/src/tool-annotations.ts).
+
+With `CHROMA_AE_MCP_STRUCTURED=1` the same object is also sent as `structuredContent`, and the full tool list declares this envelope as each tool's `outputSchema`. It is off by default until Claude Desktop and Claude Code are measured with it (a client that passes both the text and the structure to the model would pay for the result twice).
+
+## Progress and cancellation
+
+- **Progress.** A `tools/call` with `_meta.progressToken`, sent with `Accept: text/event-stream`, is answered as an event stream: one `notifications/progress` per After Effects eval of the call (a growing count and the eval's label, such as `ae_scrub_check(12 @ 0.24s)`; no total, since most tools do not know how many evals they need), then the result. The stdio relay asks for the stream and passes each notification on as it arrives. Without the header or the token the reply is one JSON object, as before.
+- **Cancellation.** `notifications/cancelled` (with the call's `requestId`, from the same client) stops the call at its next safe point: before it enters the write queue, before each frame a loop renders, and just before a guarded write is sent (then `outcome: not_applied`). An eval already sent to After Effects is always let finish: abandoning one wedges the ExtendScript bridge. The answer carries `code: cancelled`; `ae_batch_set` still lists the chunks it wrote.
+- On macOS the panel page cannot answer while After Effects runs a long ExtendScript (`qa/cep-freeze-check.mjs`), so progress and cancellation reach it only between evals there.
+- **Questions in the client.** A client that declares the `elicitation` capability at `initialize` (the relay passes it on as `X-Chroma-Elicitation: 1`) gets `ae_ask_user`'s plain single-choice questions as `elicitation/create` on the call's event stream, and answers them in its own UI; the relay posts the answer back. Ease curves, several answers and pictures still use the panel, and so does a client that refuses the request.

@@ -4,6 +4,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
+import { adjustOutputPath, catalogFor, entryFor } from "./render-formats.js";
 import { BridgeError } from "../../host.js";
 import { buildJsxCall, pathsMatchForGuard } from "../../jsx.js";
 import { defaultDataDir } from "../../quarantine.js";
@@ -41,6 +42,12 @@ export interface AerenderJobRecord {
   comp_name: string;
   /** The -output path; for an rq_index / whole_queue job the first output module's path (the item brings its own). */
   output_path: string;
+  /**
+   * Set when After Effects wrote the render under another extension than the -output path asked for
+   * (it names the file after the output module's format: "smoke.avi" with an H.264 module is
+   * "smoke.mp4"). output_path is then the file that was written and this the path that was asked for.
+   */
+  requested_output_path?: string;
   output_module_template?: string;
   render_settings_template?: string;
   /** For an rq_index job: the item's frame range read at launch (not passed to aerender). */
@@ -84,6 +91,36 @@ export interface AerenderJobRecord {
   cep_children_max?: number;
   /** Windows, set when an engine exit failed an attempt: CEP extensions that start by themselves in After Effects (read from their manifests). */
   cep_autostart?: CepAutostartEntry[];
+}
+
+/**
+ * The file a finished render wrote when it is not at `requested`: After Effects replaces the
+ * extension with the output module format's own (macOS AE's default module is H.264, so "x.avi"
+ * comes out as "x.mp4"). Only a single-file output counts (a [####] sequence keeps its pattern),
+ * only a sibling with the same name and another extension, modified at or after the job started
+ * (2 s allowance), and only when exactly one such file exists. Null otherwise.
+ */
+export function findRenamedOutput(requested: string, startedAtMs: number, fsLike: Pick<typeof fs, "existsSync" | "readdirSync" | "statSync"> = fs): string | null {
+  if (!requested || /\[#+\]/.test(requested)) return null;
+  try {
+    if (fsLike.existsSync(requested)) return null;
+    const dir = path.dirname(requested);
+    const stem = path.basename(requested, path.extname(requested));
+    const ext = path.extname(requested).toLowerCase();
+    const found = (fsLike.readdirSync(dir) as string[]).filter((n) => {
+      const e = path.extname(n);
+      if (!e || e.toLowerCase() === ext || path.basename(n, e) !== stem) return false;
+      try {
+        const st = fsLike.statSync(path.join(dir, n));
+        return st.isFile() && st.mtimeMs >= startedAtMs - 2000;
+      } catch {
+        return false;
+      }
+    });
+    return found.length === 1 ? path.join(dir, found[0]) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** One CEP extension that starts by itself when After Effects starts or is activated. */
@@ -1559,8 +1596,14 @@ export class AerenderStartGate {
         logError = null;
       }
       const succeeded = code === 0 && logError === null;
+      // A -comp job's file can come out under the module format's extension, not the one asked for.
+      let renamed: string | null = null;
+      if (succeeded && current && !current.output_paths?.length && current.rq_index === undefined && !current.whole_queue) {
+        renamed = findRenamedOutput(current.output_path, Date.parse(current.started_at));
+      }
       registry.update(jobId, {
         state: succeeded ? "succeeded" : "failed",
+        ...(renamed && current ? { output_path: renamed, requested_output_path: current.output_path } : {}),
         ...(logError ? { error: logError } : {}),
         exit_code: code,
         signal: signal ?? null,
@@ -2427,7 +2470,7 @@ export function createAerenderTools(
     {
       name: "ae_aerender_start",
       description:
-        "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to `%LOCALAPPDATA%\\chroma-ae-mcp\\renders\\<job>.log` and tracking the job in a JSON-mirrored registry. " +
+        "Start a background `aerender` process (`windowsHide: true`, detached) for a saved, non-dirty After Effects project (with preflight: true, after an ae_preflight delivery check that refuses on a blocker), logging stdout/stderr to renders/<job>.log in the data folder (ae_status: state_dir) and tracking the job in a JSON-mirrored registry. " +
         "Exactly one source: comp_name with output_path (aerender -comp), rq_index with item_comp_id (-rqindex: one existing Render Queue item with all its output modules and its own settings, the way to render items built with ae_render_queue_edit / _duplicate / _apply_spec) or whole_queue (every QUEUED item). " +
         "A queue source needs a saved, non-dirty project (aerender reads the saved file: items added since the last save are not in it), the item QUEUED (ae_render_queue_edit queued: true, then ae_save) and its comp id matching item_comp_id; it is re-read through ae_render_queue_inspect's reader right before the spawn and refused with the reason otherwise. " +
         "output_path, templates and start/end frames are refused with a queue source (they would override the item). The result lists output_paths, every file the render should write; ae_verify_render with the job_id checks them all. " +
@@ -2446,6 +2489,9 @@ export function createAerenderTools(
         const cepRefusal = cepAutostartRefusal("ae_aerender_start", args.allow_many_cep_extensions);
         if (cepRefusal) return cepRefusal;
         const fromQueue = args.rq_index !== undefined || args.whole_queue === true;
+        // AE names the file after the template's format (render-formats.ts): fit the path to it when the template was measured.
+        const adjusted = !fromQueue && args.output_path ? adjustOutputPath(args.output_path, entryFor(catalogFor(ctx), args.output_module_template)) : null;
+        if (adjusted) args = { ...args, output_path: adjusted.to };
         const compName = args.comp_name ?? "";
         const labelOf = args.whole_queue === true ? "whole queue" : args.rq_index !== undefined ? `rq ${args.rq_index}` : compName;
         // Before the lease: the probe takes about a second and must not hold the queue.
@@ -2642,6 +2688,7 @@ export function createAerenderTools(
                 project_path: initialRecord.project_path,
                 comp_name: initialRecord.comp_name,
                 output_path: initialRecord.output_path,
+                ...(adjusted ? { output_path_adjusted: adjusted } : {}),
                 aerender_path: initialRecord.aerender_path,
                 args: initialRecord.args,
                 log_path: initialRecord.log_path,
@@ -2721,6 +2768,12 @@ export function createAerenderTools(
           project_path: job.project_path,
           comp_name: job.comp_name,
           output_path: job.output_path,
+          ...(job.requested_output_path
+            ? {
+                requested_output_path: job.requested_output_path,
+                output_note: `After Effects wrote ${path.basename(job.output_path)}, not ${path.basename(job.requested_output_path)}: it names the file after the output module's format. Pass output_module_template for another format, or an output_path with this extension.`,
+              }
+            : {}),
           aerender_path: job.aerender_path,
           log_path: job.log_path,
           started_at: job.started_at,

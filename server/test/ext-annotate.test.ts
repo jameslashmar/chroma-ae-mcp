@@ -682,13 +682,13 @@ describe("ae_annotate_frame handler", () => {
     expect(res.notes.join(" ")).not.toMatch(/estimate/);
   });
 
-  it("with include_3d notes the camera used and that the projection is an estimate", async () => {
+  it("with include_3d notes the camera used and how the projection was checked", async () => {
     const read = READ([HL(1, { three_d: true, rect: { left: -100, top: -50, width: 200, height: 100 }, transform: T({ position: [500, 250, 0] }) })]);
     const { ctx } = fakeAe([read], () => solid(1000, 500, [10, 10, 10, 255]));
     const res = (await tool.handler(AeAnnotateFrameSchema.parse({ comp_id: 1, time: 1, include_3d: true }), ctx)) as Record<string, any>;
     expect(res.frames[0].layers[0].box.projection).toBe("3d-estimated");
     expect(res.frames[0].notes.join(" ")).toMatch(/default comp camera/);
-    expect(res.notes.join(" ")).toMatch(/estimate/);
+    expect(res.notes.join(" ")).toMatch(/toComp/);
   });
 
   it("refuses a zoom region outside the comp with a plain error, before any render", async () => {

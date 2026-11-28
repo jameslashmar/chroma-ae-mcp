@@ -401,7 +401,7 @@ interface CompInfo {
   workAreaDuration: number;
 }
 
-async function queued<T>(ctx: ToolContext, label: string, opId: string, fn: () => Promise<T>): Promise<T> {
+export async function queued<T>(ctx: ToolContext, label: string, opId: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await ctx.queue.run(label, fn);
   } catch (err) {

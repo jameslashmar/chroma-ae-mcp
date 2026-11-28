@@ -50,14 +50,50 @@ function safe(fn, fallback) {
   }
 }
 
+// A control's label. AE 26 on macOS leaves name and title empty on its own
+// buttons and puts the label in AXDescription ("Cancel", "Don’t Save").
+function label(el) {
+  return String(
+    safe(function () { return el.name(); }, "") ||
+      safe(function () { return el.title(); }, "") ||
+      attr(el, "AXTitle") ||
+      attr(el, "AXDescription") ||
+      ""
+  );
+}
+
+// Labels compared case-blind and with typographic apostrophes made plain,
+// so "Don't Save" finds AE's "Don’t Save".
+function sameLabel(a, b) {
+  function norm(s) {
+    return String(s || "").replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  return norm(a) === norm(b);
+}
+
+// Descendants with the given AXRole, in reading order. AE paints its dialogs
+// as AXLayoutArea elements whose controls are plain UI elements (and may sit
+// in a nested layout area or group), so the typed collections (buttons(),
+// staticTexts()) can miss them.
+function byRole(el, role, depth) {
+  var out = [];
+  var kids = safe(function () { return el.uiElements(); }, []);
+  for (var i = 0; i < kids.length; i++) {
+    var r = String(attr(kids[i], "AXRole") || "");
+    if (r === role) out.push(kids[i]);
+    else if (depth > 0 && (r === "AXLayoutArea" || r === "AXGroup")) out = out.concat(byRole(kids[i], role, depth - 1));
+  }
+  return out;
+}
+
 function texts(el) {
   var out = [];
-  var st = safe(function () { return el.staticTexts(); }, []);
+  var st = byRole(el, "AXStaticText", 2);
   for (var i = 0; i < st.length; i++) {
-    var v = safe(function () { return st[i].value(); }, "") || safe(function () { return st[i].name(); }, "");
+    var v = safe(function () { return st[i].value(); }, "") || attr(st[i], "AXDescription") || safe(function () { return st[i].name(); }, "");
     if (v) out.push(String(v));
   }
-  var ta = safe(function () { return el.textAreas(); }, []);
+  var ta = byRole(el, "AXTextArea", 2);
   for (var j = 0; j < ta.length; j++) {
     var tv = safe(function () { return ta[j].value(); }, "");
     if (tv) out.push(String(tv));
@@ -71,21 +107,21 @@ function describe(el, handle) {
   var modal = attr(el, "AXModal") === true;
   var isSheet = role === "AXSheet";
   if (!modal && !isSheet && subrole !== "AXDialog" && subrole !== "AXSystemDialog") return null;
-  var buttons = safe(function () { return el.buttons(); }, []).map(function (b) {
+  var buttons = byRole(el, "AXButton", 2).map(function (b) {
     return {
-      name: String(safe(function () { return b.name(); }, "") || safe(function () { return b.title(); }, "") || ""),
+      name: label(b),
       automationId: "",
       enabled: safe(function () { return b.enabled(); }, true) === true,
     };
   });
-  var checkboxes = safe(function () { return el.checkboxes(); }, []).map(function (c) {
-    return { name: String(safe(function () { return c.name(); }, "") || ""), checked: safe(function () { return c.value(); }, 0) === 1 };
+  var checkboxes = byRole(el, "AXCheckBox", 2).map(function (c) {
+    return { name: label(c), checked: safe(function () { return c.value(); }, 0) === 1 };
   });
   var pos = safe(function () { return el.position(); }, [0, 0]);
   var size = safe(function () { return el.size(); }, [0, 0]);
   return {
     handle: handle,
-    title: String(safe(function () { return el.name(); }, "") || ""),
+    title: String(safe(function () { return el.name(); }, "") || attr(el, "AXTitle") || ""),
     class: subrole || role,
     isModal: modal || isSheet || subrole === "AXDialog" || subrole === "AXSystemDialog",
     text: texts(el),
@@ -102,10 +138,25 @@ function aeProcess(se) {
   return procs[0];
 }
 
+// The process's top-level elements that can be dialogs. AE 26 on macOS
+// reports no AXWindows at all: its windows, dialogs included, are AXLayoutArea
+// children of the process (subrole AXDialog, AXModal true for a prompt).
+// Ordinary Cocoa windows are AXWindow children; the menu bar is left out.
+function topLevel(proc) {
+  var kids = safe(function () { return proc.uiElements(); }, null);
+  if (!kids) return proc.windows();
+  var out = [];
+  for (var i = 0; i < kids.length; i++) {
+    var r = String(attr(kids[i], "AXRole") || "");
+    if (r === "AXWindow" || r === "AXLayoutArea" || r === "AXSheet") out.push(kids[i]);
+  }
+  return out;
+}
+
 function elementFor(proc, handle) {
   var wi = Math.floor(handle / 100);
   var si = handle % 100;
-  var wins = proc.windows();
+  var wins = topLevel(proc);
   if (wi < 1 || wi > wins.length) return null;
   var w = wins[wi - 1];
   if (si === 0) return w;
@@ -122,7 +173,7 @@ function run(argv) {
     if (mode === "list") {
       if (!proc) return JSON.stringify({ ok: true, ae_pid: null, dialogs: [] });
       var out = [];
-      var wins = proc.windows();
+      var wins = topLevel(proc);
       for (var i = 0; i < wins.length; i++) {
         var d = describe(wins[i], (i + 1) * 100);
         if (d) out.push(d);
@@ -151,23 +202,23 @@ function run(argv) {
       }
       // Plain values, taken before pressing: the specifiers re-resolve by index.
       var titleBefore = String(safe(function () { return el.name(); }, "") || "");
-      var winCountBefore = proc.windows().length;
-      var sheetCountBefore = Math.floor(handle / 100) >= 1 ? safe(function () { return proc.windows()[Math.floor(handle / 100) - 1].sheets().length; }, 0) : 0;
+      var winCountBefore = topLevel(proc).length;
+      var sheetCountBefore = Math.floor(handle / 100) >= 1 ? safe(function () { return topLevel(proc)[Math.floor(handle / 100) - 1].sheets().length; }, 0) : 0;
       var checked = null;
       if (check) {
-        var boxes = safe(function () { return el.checkboxes(); }, []);
+        var boxes = byRole(el, "AXCheckBox", 2);
         var box = null;
         for (var b = 0; b < boxes.length; b++) {
-          if (String(safe(function () { return boxes[b].name(); }, "")).toLowerCase() === check.toLowerCase()) box = boxes[b];
+          if (sameLabel(label(boxes[b]), check)) box = boxes[b];
         }
         if (!box) return JSON.stringify({ ok: false, error: "checkbox_not_found" });
         if (safe(function () { return box.value(); }, 0) !== 1) box.actions.byName("AXPress").perform();
         checked = check;
       }
-      var buttons = safe(function () { return el.buttons(); }, []);
+      var buttons = byRole(el, "AXButton", 2);
       var target = null;
       for (var k = 0; k < buttons.length; k++) {
-        if (String(safe(function () { return buttons[k].name(); }, "")).toLowerCase() === buttonName.toLowerCase()) target = buttons[k];
+        if (sameLabel(label(buttons[k]), buttonName)) target = buttons[k];
       }
       if (!target) return JSON.stringify({ ok: false, error: "button_not_found" });
       target.actions.byName("AXPress").perform();
@@ -176,8 +227,8 @@ function run(argv) {
       var closed = !still;
       if (!closed) {
         var titleAfter = String(safe(function () { return still.name(); }, "") || "");
-        var winCountAfter = proc.windows().length;
-        var sheetCountAfter = safe(function () { return proc.windows()[Math.floor(handle / 100) - 1].sheets().length; }, 0);
+        var winCountAfter = topLevel(proc).length;
+        var sheetCountAfter = safe(function () { return topLevel(proc)[Math.floor(handle / 100) - 1].sheets().length; }, 0);
         closed = titleAfter !== titleBefore || winCountAfter < winCountBefore || sheetCountAfter < sheetCountBefore;
       }
       return JSON.stringify({ ok: true, handle: handle, pressed: buttonName, checked: checked, closed: closed });

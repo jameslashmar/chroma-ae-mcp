@@ -249,7 +249,10 @@ function proofAe(
         const n = shots++;
         const isOriginal = written++ === 0;
         if (opts.staleShot === n) {
-          // No file: waitForFreshPng finds nothing and the capture retries.
+          // AE's cached frame: a whole PNG dated before the request, so the capture retries with a time nudge.
+          writeSolid(out, [10, 20, 30, 255]);
+          const old = new Date(Date.now() - 60_000);
+          fs.utimesSync(out, old, old);
         } else if (isOriginal) writeSolid(out, [10, 20, 30, 255]);
         else if (opts.sameInsideBox) writeBoxed(out);
         else writeSolid(out, opts.copyColour ?? [200, 100, 50, 255]);

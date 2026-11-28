@@ -194,7 +194,7 @@ describe("ae_view schema", () => {
   it("is a UI write: expect is required and it takes no automatic checkpoint", () => {
     expect(AeViewSchema.safeParse({ focus: true }).success).toBe(false);
     expect(AUTO_CHECKPOINT_TOOLS).not.toContain("ae_view");
-    expect(tool.description).toContain("Jay may be editing live");
+    expect(tool.description).toContain("The user may be editing live");
   });
 });
 

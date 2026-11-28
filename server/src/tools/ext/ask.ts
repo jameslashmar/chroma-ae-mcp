@@ -1,3 +1,4 @@
+import { currentCall } from "../../call-context.js";
 /**
  * server/src/tools/ext/ask.ts
  *
@@ -90,6 +91,57 @@ export function checkImagePath(p: string): string | null {
 }
 
 /** What the agent gets back for a question and its answer, if any. */
+type ElicitArgs = { question: string; options: Array<{ id: string; label: string; description?: string }>; context?: string; allow_other?: boolean };
+
+/**
+ * Asks through the client (MCP elicitation/create): an enum of the options, plus a free-text field when
+ * allow_other. Null when the client refuses the request, so the panel asks instead.
+ */
+export async function askByElicitation(
+  request: (method: string, params: Record<string, unknown>, timeoutMs: number) => Promise<Record<string, unknown> | null>,
+  args: ElicitArgs,
+  timeoutMs: number
+): Promise<Record<string, unknown> | null> {
+  const allowOther = args.allow_other ?? true;
+  const ids = args.options.map((o) => o.id);
+  const lines = [args.question, ...(args.context ? [args.context] : []), ...args.options.filter((o) => o.description).map((o) => `${o.label}: ${o.description}`)];
+  const requestedSchema = {
+    type: "object",
+    properties: {
+      choice: { type: "string", title: "Answer", enum: ids, enumNames: args.options.map((o) => o.label) },
+      ...(allowOther ? { other: { type: "string", title: "Or your own answer" } } : {}),
+    },
+    required: allowOther ? [] : ["choice"],
+  };
+  const res = await request("elicitation/create", { message: lines.join("\n"), requestedSchema }, timeoutMs);
+  if (!res) {
+    return {
+      status: "no_answer",
+      via: "elicitation",
+      question: args.question,
+      message: "The user did not answer in the client in time. Ask again later, or go on with a sensible default and say which.",
+    };
+  }
+  if (res.error) return null;
+  const result = (res.result ?? {}) as { action?: string; content?: { choice?: unknown; other?: unknown } };
+  const q: AskQuestion = {
+    id: `elicit_${Date.now()}`,
+    question: args.question,
+    kind: "choice",
+    options: args.options as AskQuestion["options"],
+    multi_select: false,
+    allow_other: allowOther,
+    ...(args.context ? { context: args.context } : {}),
+    asked_at: Date.now(),
+  };
+  const choice = typeof result.content?.choice === "string" && ids.includes(result.content.choice) ? [result.content.choice] : [];
+  const other = typeof result.content?.other === "string" && result.content.other.trim() ? result.content.other.trim().slice(0, 2000) : undefined;
+  if (result.action === "accept" && (choice.length || other)) {
+    return { ...presentAnswer(q, { status: "answered", choice_ids: choice, ...(other ? { other } : {}), answered_at: Date.now() }), via: "elicitation" };
+  }
+  return { ...presentAnswer(q, { status: "dismissed", choice_ids: [], answered_at: Date.now() }), via: "elicitation" };
+}
+
 export function presentAnswer(q: AskQuestion, a: AskAnswer | undefined | null) {
   if (!a) {
     return {
@@ -137,9 +189,16 @@ export const askTools: ToolDefinition<any>[] = [
       "Ask the user a question in the Chroma AE MCP panel inside After Effects and wait for the answer. Opens the panel if it is closed (not while ae_render_queue_render holds After Effects: the question then waits for a panel that is already open). " +
       "Use it when a choice is the user's to make (a look, a timing, which variant), and show rather than describe: give each option an image (an ae_contact_sheet of that variant) or, with kind 'ease', a curve. " +
       "For eases, offer 3 or 4 distinct curves (for example gentle [0.25,0.1,0.25,1], snappy [0.2,0,0,1], expo out [0.16,1,0.3,1], anticipate [0.6,-0.28,0.74,0.05] on non-spatial properties); the user can also drag the handles, and the answer's curve goes straight into ae_set_keyframe_ease. " +
-      "Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project.",
+      "Ask one thing at a time. Results: 'answered' (chosen options, free text, curve), 'dismissed', or 'waiting' (call again with ask_id). Never touches the project. " +
+      "When the client handles MCP elicitation, a plain single choice without pictures is asked in the client's own UI instead (via: 'elicitation'; 'no_answer' when it was not answered in time); ease curves, several answers and pictures always use the panel.",
     schema: AeAskUserSchema,
     handler: async (args, ctx) => {
+      // A client that handles elicitation asks in its own UI: a plain choice, one answer, no pictures.
+      const call = currentCall();
+      if (!args.ask_id && call?.request && args.question && args.options && (args.kind ?? "choice") === "choice" && !args.multi_select && !args.options.some((o: { image_path?: string }) => o.image_path)) {
+        const viaClient = await askByElicitation(call.request, { ...args, question: args.question, options: args.options }, (args.wait_seconds ?? DEFAULT_WAIT_SECONDS) * 1000);
+        if (viaClient) return viaClient;
+      }
       const asks = ctx.asks;
       if (!asks) {
         return {

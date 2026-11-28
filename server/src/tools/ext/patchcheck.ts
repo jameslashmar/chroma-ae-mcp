@@ -99,10 +99,10 @@ import {
   type Pt,
   type RegionSpec,
 } from "./region-math.js";
-import { applyH, goodFeatures, ransacModel, type Mat3, type PlanarTrack } from "./planar-math.js";
+import { applyH, goodFeatures, invertH, jacobianAt, mulH, ransacModel, type Mat3, type PlanarTrack } from "./planar-math.js";
 import { createRenderBudget, PlanarError, resolveTrackSource, TrackSourceSchema } from "./planar.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite } from "./session.js";
-import { PointTracker, toGray, type GrayImage } from "./track.js";
+import { makeWarpedTemplate, PointTracker, toGray, type GrayImage } from "./track.js";
 import { expectThat } from "./write-runner.js";
 
 // ---------- schemas ----------
@@ -144,7 +144,8 @@ export const RegionTrackInputSchema = z
   .union([RegionTrackSchema, TrackSourceSchema])
   .describe(
     "How the region moves: either a list of { time, homography } entries, or a track source (track_id from ae_track_multi / ae_track_read, nulls, corner_pin, tracker or transform) that is resolved to the same thing. " +
-      "A track source's motion is reference frame -> frame, so the region must be given AS IT LOOKS AT THE TRACK'S REFERENCE FRAME (the track's ref_time; the result reports it)."
+      "A track source's motion is reference frame -> frame, so the region must be given AS IT LOOKS AT THE TRACK'S REFERENCE FRAME (the track's ref_time; the result reports it). " +
+      "With a track, slip is measured along it (every feature looked for where the track puts it): within 0.1 px of the truth on a pinned test insert. Without one the slip comes from the ring's own motion and reads perspective and big moves between samples as slip."
   );
 
 const budgetFields = (renders: number) => ({
@@ -985,11 +986,59 @@ export function analyseFrame(inp: {
 
 // ---------- slip ----------
 
+/** measureSlip with the region's track: features looked for where the track puts them, patterns warped, slip relative to the ring. */
+function slipAlongTrack(frames: SlipFrame[], patch: Follower[], ring: Follower[], result: SlipResult, scale: number, patchSize: number): SlipResult {
+  const f0 = frames[0];
+  let maxSlip = 0;
+  let measured = 0;
+  const residual = (list: Follower[], img: (f: SlipFrame) => GrayImage, refImg: GrayImage, fr: SlipFrame): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    for (const f of list) {
+      if (f.lost) continue;
+      const pred = applyH(fr.motion!, [f.x0, f.y0]);
+      if (!pred) continue;
+      const J = jacobianAt(fr.motion!, [f.x0, f.y0]);
+      const tpl = J ? makeWarpedTemplate(refImg, f.x0, f.y0, patchSize, [J[0], J[1], 0, J[2], J[3], 0]) : null;
+      const s = f.tracker.step(img(fr), { x: pred[0], y: pred[1] }, tpl && tpl.std >= 3 ? tpl : undefined);
+      if (!s) {
+        f.lost = true;
+        continue;
+      }
+      out.push([s.x - pred[0], s.y - pred[1]]);
+    }
+    return out;
+  };
+  for (let i = 1; i < frames.length; i++) {
+    const fr = frames[i];
+    const pr = residual(patch, (f) => f.composite, f0.composite, fr);
+    const rr = residual(ring, (f) => f.plate, f0.plate, fr);
+    if (pr.length >= 2 && rr.length >= 2) {
+      const dx = medianOf(pr.map((r) => r[0])) - medianOf(rr.map((r) => r[0]));
+      const dy = medianOf(pr.map((r) => r[1])) - medianOf(rr.map((r) => r[1]));
+      const slip = Math.hypot(dx, dy) / scale;
+      result.series.push({ time: fr.time, slip_px: r3(slip), patch_live: pr.length, ring_live: rr.length });
+      if (slip > maxSlip) maxSlip = slip;
+      measured++;
+    } else {
+      result.series.push({ time: fr.time, slip_px: null, patch_live: pr.length, ring_live: rr.length });
+    }
+  }
+  result.ring_model = { similarity: 0, translate: 0 };
+  if (measured === 0) return { ...result, reason: "the features were lost in every later frame even along the region's track: check the track (ae_track_multi's expected_error_px) or sample closer frames" };
+  return { ...result, status: "ok", max_slip_px: r3(maxSlip) };
+}
+
 export interface SlipFrame {
   time: number;
   /** Gray crops (0..255) of the composite and of the plate, at the same crop in every frame. */
   composite: GrayImage;
   plate: GrayImage;
+  /**
+   * How the shot moved from the first slip frame to this one, in the crop's own pixels (the region
+   * track carried into the crop), when the region has a track. With it every feature is looked for
+   * where the plate's motion puts it, with its first-frame pattern warped the same way.
+   */
+  motion?: Mat3 | null;
 }
 
 export interface SlipResult {
@@ -1023,6 +1072,13 @@ interface Follower {
  * that fit puts them, in comp pixels (`scale` is image pixels per comp pixel), so
  * a zoom, turn or shift of the shot is not counted as the patch swimming. A patch with nothing to
  * follow (a flat fill) is reported as not measurable, never as 0.
+ *
+ * With the region's track (`motion` on every frame) the track does the predicting instead: each
+ * feature, patch and ring alike, is looked for where the track puts it, with its first-frame pattern
+ * warped by the track's local affine there, and the slip is the patch features' median offset from
+ * the track minus the ring features' (whatever error the track itself has cancels). Calibrated on a
+ * pinned insert (docs/CALIBRATION.md): the old way read 0.7 px a frame apart and lost its features
+ * across 10 frames of motion (9-29 px of false slip on an insert with none).
  */
 export function measureSlip(
   frames: SlipFrame[],
@@ -1062,6 +1118,7 @@ export function measureSlip(
     return { ...result, reason: "the patch has no texture to follow (a flat or nearly flat fill, or a region too small for a pattern), so slip can't be measured; it is not 0" };
   }
   if (ring.length < 3) return { ...result, reason: "the ring around the patch has no texture to follow, so slip can't be measured" };
+  if (frames.every((f) => f.motion)) return slipAlongTrack(frames, patch, ring, result, o.scale, o.patchSize);
   const liveOf = (list: Follower[]) => list.filter((f) => !f.lost && f.dx !== null && f.dy !== null);
   const modelFrames = { similarity: 0, translate: 0 };
   /**
@@ -2068,6 +2125,8 @@ async function patchCheckHandler(args: AePatchCheckArgs, ctx: ToolContext) {
       const notes: string[] = [];
       const slipFrames: SlipFrame[] = [];
       let slipPoly0: Pt[] | null = null;
+      // Where the slip crops sit in the render (image px) and how big a comp pixel is there, for carrying the region track into the crop.
+      let slipCrop: { x0: number; y0: number; sx: number; sy: number } | null = null;
       let slipBytes = 0;
       let blocked = false;
       let imgScale = 1;
@@ -2140,6 +2199,7 @@ async function patchCheckHandler(args: AePatchCheckArgs, ctx: ToolContext) {
               slipFrames.push({ time: pair.time, composite: toGray(ca.img), plate: toGray(cb.img) });
               await yieldLoop();
               if (!slipPoly0) slipPoly0 = scalePoly(poly, sx, sy).map((p) => [p[0] - ca.x0, p[1] - ca.y0] as Pt);
+              if (!slipCrop) slipCrop = { x0: ca.x0, y0: ca.y0, sx, sy };
             } else if (ca && ca.img.width * ca.img.height > 4_000_000 && !notes.some((n) => n.startsWith("Slip"))) {
               notes.push("Slip was skipped: the region travels over more than 4 million pixels of the render. Give a smaller range or a lower resolution factor.");
             }
@@ -2151,6 +2211,14 @@ async function patchCheckHandler(args: AePatchCheckArgs, ctx: ToolContext) {
       }
       let slip: SlipResult | null = null;
       if (slipFrames.length >= 2 && slipPoly0) {
+        // With a region track: the motion from the first slip frame to each, in crop pixels.
+        if (prep.track && slipCrop) {
+          const c = slipCrop;
+          const toCrop: Mat3 = [c.sx, 0, -c.x0, 0, c.sy, -c.y0, 0, 0, 1];
+          const fromCrop = invertH(toCrop);
+          const h0 = invertH(homographyAt(prep.track.entries, slipFrames[0].time) as Mat3);
+          if (fromCrop && h0) for (const sf of slipFrames) sf.motion = mulH(toCrop, mulH(mulH(homographyAt(prep.track.entries, sf.time) as Mat3, h0), fromCrop));
+        }
         try {
           await yieldLoop();
           slip = measureSlip(slipFrames, slipPoly0, { patchSize: PATCH_SIZE, searchPx: 16, features: 8, scale: imgScale, gapPx: (args.ring_gap_px + halfFeather) * imgScale, ringPx: args.ring_px * imgScale });

@@ -129,7 +129,7 @@ describe("stagger schemas", () => {
   });
 
   it("both tools end their description with the safety guidance", () => {
-    for (const t of staggerTools) expect(t.description).toMatch(/Jay may be editing live/);
+    for (const t of staggerTools) expect(t.description).toMatch(/The user may be editing live/);
   });
 });
 

@@ -182,7 +182,7 @@ describe("usage log", () => {
     const all = await lines();
     expect(all).toHaveLength(5);
     expect(all[0].result_chars).toBe(good.content[0].text.length);
-    expect(all[0].result_chars).toBe(JSON.stringify({ done: true, secret_result: "do-not-log" }).length);
+    expect(all[0].result_chars).toBe(JSON.stringify({ ok: true, done: true, secret_result: "do-not-log" }).length);
     expect(all[1].result_chars).toBeGreaterThan(0);
     expect(all[2].result_chars).toBe(bad.content[0].text.length);
     expect(all[3].result_chars).toBe(unknown.content[0].text.length);
@@ -330,7 +330,7 @@ describe("usage log", () => {
     await callMetaTool("ae_search_tools", { pattern: "^ae_track", group: "tracking_patching" }, ctx);
     await callMetaTool("ae_search_tools", { query: "zzzz qqqq nonsense" }, ctx);
     const [q, g, p, none] = await lines();
-    expect(q.top).toBe("ae_track_point");
+    expect(q.top).toBe("ae_track");
     expect(q.top_score).toBeGreaterThan(4);
     expect(q).not.toHaveProperty("group");
     expect(g).toMatchObject({ group: "tracking_patching" });

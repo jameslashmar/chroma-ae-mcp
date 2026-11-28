@@ -140,6 +140,8 @@ const ENV_TOOLSET = resolveToolset();
 // and the client's initialize can switch it to full (see observeInitialize).
 const TOOLSET = { toolset: ENV_TOOLSET.toolset };
 let clientName = "";
+// The client said at initialize that it handles elicitation/create: the panel may then ask it questions.
+let clientElicits = false;
 let toolsetDecided = false;
 const TOKEN_PATH = path.join(dataDir(), "token");
 
@@ -194,6 +196,8 @@ function observeInitialize(message) {
     if (!m || typeof m !== "object" || m.method !== "initialize") continue;
     const info = m.params && typeof m.params === "object" && m.params.clientInfo && typeof m.params.clientInfo === "object" ? m.params.clientInfo : {};
     clientName = sanitizeClientName(info.name);
+    const caps = m.params && typeof m.params === "object" && m.params.capabilities && typeof m.params.capabilities === "object" ? m.params.capabilities : {};
+    clientElicits = !!caps.elicitation && typeof caps.elicitation === "object";
     toolsetDecided = true;
     let why;
     if (ENV_TOOLSET.set) {
@@ -233,16 +237,51 @@ function post(bodyText) {
           {
             Authorization: "Bearer " + token,
             "Content-Type": "application/json",
-            Accept: "application/json",
+            // A tools/call with _meta.progressToken is answered as an event stream (progress, then the result).
+            Accept: "application/json, text/event-stream",
             "Content-Length": Buffer.byteLength(bodyText),
           },
           // The panel is stateless, so the choice goes with every request. A panel that does
           // not know the header ignores it and serves the full list.
           TOOLSET.toolset === "core" ? { "X-Chroma-Toolset": "core" } : {},
-          clientName ? { "X-Chroma-Client": clientName } : {}
+          clientName ? { "X-Chroma-Client": clientName } : {},
+          clientElicits ? { "X-Chroma-Elicitation": "1" } : {}
         ),
       },
       (res) => {
+        if (/text\/event-stream/i.test(String(res.headers["content-type"] || ""))) {
+          // Progress notifications go out as they arrive; the result is handled below like a JSON reply.
+          let buf = "";
+          let final = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => {
+            buf += c;
+            let i;
+            while ((i = buf.indexOf("\n\n")) !== -1) {
+              const event = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const data = event
+                .split("\n")
+                .filter((l) => l.startsWith("data:"))
+                .map((l) => l.slice(5).replace(/^ /, ""))
+                .join("\n");
+              if (!data) continue;
+              let msg;
+              try {
+                msg = JSON.parse(data);
+              } catch {
+                continue;
+              }
+              // Notifications (progress) and the panel's own requests (elicitation/create) go to the client now;
+              // the call's result is the reply handled below.
+              if (msg && typeof msg === "object" && !Array.isArray(msg) && (msg.id === undefined || typeof msg.method === "string")) send(msg);
+              else final = data;
+            }
+          });
+          res.on("end", () => resolve({ status: res.statusCode || 0, text: final, token }));
+          res.on("error", reject);
+          return;
+        }
         const chunks = [];
         res.on("data", (c) => chunks.push(c));
         res.on("end", () =>
@@ -523,6 +562,15 @@ async function reasonFor(message, fallback) {
 }
 
 async function relay(message) {
+  // The client's answer to a request the panel sent (elicitation/create): pass it on; there is nothing to reply.
+  if (message && typeof message === "object" && !Array.isArray(message) && message.method === undefined && ("result" in message || "error" in message)) {
+    try {
+      await post(JSON.stringify(message));
+    } catch (err) {
+      log("could not pass a client answer to the panel: " + (err && err.message ? err.message : String(err)));
+    }
+    return;
+  }
   let res;
   try {
     res = await post(JSON.stringify(message));

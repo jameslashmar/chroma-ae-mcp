@@ -299,6 +299,97 @@
     return out;
   }
 
+  // AE 26.3 as shipped (26.3x87, measured 2026-11-26): parametricMeshOptions and parametricBevelOptions
+  // are read-only PropertyGroups of the layer's current type (ADBE CubeMeshOptionsSGrp ...), each field
+  // a OneD property, booleans as 0/1. Assigning the group back throws "readOnly attribute", and fields
+  // set on the group object as on a plain object change nothing: that is why width and height were
+  // missing from the read-back (PR #19). Match names: "ADBE <Type><Field>Strm" and
+  // "ADBE <Type>Bevel<Field>Strm", with Slice Start / End as StartAngle / EndAngle.
+  var MESH_MATCH_RENAMES = { sliceStart: "StartAngle", sliceEnd: "EndAngle" };
+
+  function capFirst(s) {
+    return s.charAt(0).toUpperCase() + s.substring(1);
+  }
+
+  function meshFieldProp(group, typeName, field, bevel) {
+    if (!group || typeof group.property !== "function") return null;
+    var stem = MESH_MATCH_RENAMES[field];
+    if (stem === undefined) stem = capFirst(field);
+    var mid = "";
+    if (bevel) mid = "Bevel";
+    var p = null;
+    try { p = group.property("ADBE " + capFirst(typeName) + mid + stem + "Strm"); } catch (e0) { p = null; }
+    if (p) return p;
+    // A match name AE renamed: the display name without spaces ("Slice Start" for sliceStart).
+    var want = field.toLowerCase();
+    var n = 0;
+    try { n = group.numProperties; } catch (e1) { n = 0; }
+    for (var i = 1; i <= n; i++) {
+      try {
+        var c = group.property(i);
+        if (String(c.name).toLowerCase().replace(/\s+/g, "") === want) return c;
+      } catch (e2) {}
+    }
+    return null;
+  }
+
+  // Whether the options are AE 26.3's property group (true) or the plain object some builds returned.
+  function isPropGroup(o) {
+    return o !== null && o !== undefined && typeof o.property === "function" && typeof o.numProperties === "number";
+  }
+
+  function readMeshFields(o, typeName, fields, bevel) {
+    var out = {};
+    if (!o) return out;
+    for (var k in fields) {
+      if (!fields.hasOwnProperty(k)) continue;
+      if (isPropGroup(o)) {
+        var p = meshFieldProp(o, typeName, k, bevel);
+        if (!p) continue;
+        var v = null;
+        try { v = p.value; } catch (eV) { v = null; }
+        if (!isNum(v)) continue;
+        if (fields[k] === "b") out[k] = v >= 0.5;
+        else out[k] = v;
+      } else if (o[k] !== undefined) {
+        out[k] = o[k];
+      }
+    }
+    return out;
+  }
+
+  // Sets the planned fields: per property on AE 26.3's group (limits checked first), or the old way
+  // (change the object, assign it back). Returns warnings.
+  function writeMeshFields(layer, attr, typeName, fields, want, bevel) {
+    var warnings = [];
+    var o = layer[attr];
+    var k;
+    if (isPropGroup(o)) {
+      for (k in want) {
+        if (!want.hasOwnProperty(k)) continue;
+        var p = meshFieldProp(o, typeName, k, bevel);
+        if (!p) fail("unsupported", "This " + typeName + " mesh has no " + k + " property in " + o.name + " (After Effects " + app.version + ")");
+        var v = want[k];
+        if (fields[k] === "b") {
+          if (v === true) v = 1;
+          else v = 0;
+        }
+        checkLimits(p, v, (bevel ? "bevel_options." : "mesh_options.") + k);
+        p.setValue(v);
+      }
+      return warnings;
+    }
+    for (k in want) {
+      if (want.hasOwnProperty(k)) o[k] = want[k];
+    }
+    try {
+      layer[attr] = o;
+    } catch (eA) {
+      warnings.push("Assigning the " + (bevel ? "bevel" : "mesh") + " options back failed (" + eA.message + "); check the read-back");
+    }
+    return warnings;
+  }
+
   function readMesh(l) {
     var out = { type: null, options: {}, bevel: {} };
     var tn = null;
@@ -307,23 +398,12 @@
     } catch (e0) {}
     out.type = tn;
     if (tn === null) return out;
-    var k;
     try {
-      var o = l.parametricMeshOptions;
-      if (o) {
-        for (k in MESH_FIELDS[tn]) {
-          if (MESH_FIELDS[tn].hasOwnProperty(k) && o[k] !== undefined) out.options[k] = o[k];
-        }
-      }
+      out.options = readMeshFields(l.parametricMeshOptions, tn, MESH_FIELDS[tn], false);
     } catch (e1) {}
     if (MESH_BEVEL_FIELDS[tn]) {
       try {
-        var b = l.parametricBevelOptions;
-        if (b) {
-          for (k in MESH_BEVEL_FIELDS[tn]) {
-            if (MESH_BEVEL_FIELDS[tn].hasOwnProperty(k) && b[k] !== undefined) out.bevel[k] = b[k];
-          }
-        }
+        out.bevel = readMeshFields(l.parametricBevelOptions, tn, MESH_BEVEL_FIELDS[tn], true);
       } catch (e2) {}
     }
     return out;
@@ -826,31 +906,16 @@
             if (meshPlan.options.hasOwnProperty(mk)) haveOpts = true;
           }
           if (haveOpts) {
-            // The options object is read, changed and assigned back whole.
-            var mo = layer.parametricMeshOptions;
-            for (mk in meshPlan.options) {
-              if (meshPlan.options.hasOwnProperty(mk)) mo[mk] = meshPlan.options[mk];
-            }
-            try {
-              layer.parametricMeshOptions = mo;
-            } catch (eMo) {
-              meshWarnings.push("Assigning the mesh options back failed (" + eMo.message + "); check the read-back");
-            }
+            var mw = writeMeshFields(layer, "parametricMeshOptions", meshPlan.type, MESH_FIELDS[meshPlan.type], meshPlan.options, false);
+            for (var mwi = 0; mwi < mw.length; mwi++) meshWarnings.push(mw[mwi]);
           }
           var haveBevel = false;
           for (mk in meshPlan.bevel) {
             if (meshPlan.bevel.hasOwnProperty(mk)) haveBevel = true;
           }
           if (haveBevel) {
-            var mb = layer.parametricBevelOptions;
-            for (mk in meshPlan.bevel) {
-              if (meshPlan.bevel.hasOwnProperty(mk)) mb[mk] = meshPlan.bevel[mk];
-            }
-            try {
-              layer.parametricBevelOptions = mb;
-            } catch (eMb) {
-              meshWarnings.push("Assigning the bevel options back failed (" + eMb.message + "); check the read-back");
-            }
+            var bw = writeMeshFields(layer, "parametricBevelOptions", meshPlan.type, MESH_BEVEL_FIELDS[meshPlan.type], meshPlan.bevel, true);
+            for (var bwi = 0; bwi < bw.length; bwi++) meshWarnings.push(bw[bwi]);
           }
         }
         if (type === "text" && fontPS !== null) {

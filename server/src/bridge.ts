@@ -6,6 +6,7 @@ import {
   DEFAULT_BRIDGE_PORT,
   DEFAULT_TIMEOUT_MS,
   HEALTH_TIMEOUT_MS,
+  bridgeErrorFromHost,
   normalizeErrorKind,
   SLOW_TIMEOUT_MS,
   type BridgeErrorDetail,
@@ -210,6 +211,7 @@ export class BridgeClient implements HostTransport {
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,
+          ...(params.mutates && !isRender ? { outcome: "unknown" as const } : {}),
           message:
             `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
               timeoutMs / 1000
@@ -245,15 +247,7 @@ export class BridgeClient implements HostTransport {
         message: "Unknown ExtendScript error",
         kind: "evalscript_error",
       };
-      const mappedKind = normalizeErrorKind(errObj.kind);
-      throw new BridgeError({
-        kind: mappedKind,
-        op_id: payload.id ?? params.id,
-        message: errObj.message,
-        line: errObj.line,
-        actual: errObj.actual,
-        expected: errObj.expected,
-      });
+      throw bridgeErrorFromHost(errObj, payload.id ?? params.id, { mutates: params.mutates === true && !isRender, label: params.label });
     }
 
     return payload;

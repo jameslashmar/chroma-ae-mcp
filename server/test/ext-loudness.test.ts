@@ -528,7 +528,7 @@ describe("schemas", () => {
   });
 
   it("the mutating tool ends its description with the agent safety guidance", () => {
-    expect(tool("ae_loudness_apply").description).toMatch(/Jay may be editing live/);
+    expect(tool("ae_loudness_apply").description).toMatch(/The user may be editing live/);
     expect(loudnessTools.map((t) => t.name)).toEqual(["ae_loudness_check", "ae_loudness_apply"]);
   });
 });

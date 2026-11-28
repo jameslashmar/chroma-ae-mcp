@@ -170,7 +170,7 @@ describe("collect schemas", () => {
 
   it("exports three tools, the mutating one ending with the safety guidance", () => {
     expect(collectTools.map((t) => t.name)).toEqual(["ae_collect_files", "ae_collect_relink", "ae_collect_report"]);
-    expect(tool("ae_collect_relink").description).toContain("Jay may be editing live");
+    expect(tool("ae_collect_relink").description).toContain("The user may be editing live");
   });
 });
 

@@ -983,7 +983,10 @@
   A.presetFolders = function () {
     var folders = [];
     try {
+      // Windows: appPackage is "Support Files", which holds Presets. macOS:
+      // appPackage is the .app bundle and Presets sits beside it.
       var app1 = new Folder(Folder.appPackage.fsName + "/Presets");
+      if (!app1.exists && Folder.appPackage.parent) app1 = new Folder(Folder.appPackage.parent.fsName + "/Presets");
       if (app1.exists) folders.push({ kind: "app", path: app1.fsName });
     } catch (e1) {}
     try {

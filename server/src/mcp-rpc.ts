@@ -1,4 +1,6 @@
+import { listedTools } from "./tool-families.js";
 import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
+import { cancelCall, deliverClientResponse, requestFromClient, runInCall } from "./call-context.js";
 import { callTool } from "./tool-call.js";
 import {
   coreInstructions,
@@ -48,8 +50,12 @@ const PROMPTS: PromptDef[] = [
 /** Per-request options. `toolset` comes from the X-Chroma-Toolset header (see toolsets.ts). */
 export interface RpcOptions {
   toolset?: Toolset | string | null;
-  /** The X-Chroma-Client value (the MCP client's name, sanitised by the relay). Usage log only. */
+  /** The X-Chroma-Client value (the MCP client's name, sanitised by the relay). Usage log and cancellation scope. */
   client?: string | null;
+  /** Sends a notification on this request's response stream (progress); only when the transport streams. */
+  notify?: (message: Record<string, unknown>) => void;
+  /** The client handles elicitation/create (the relay's X-Chroma-Elicitation header): tools may ask it questions. */
+  elicitation?: boolean;
 }
 
 /** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
@@ -57,7 +63,7 @@ export function listTools(toolset: Toolset): ListedTool[] {
   if (toolset === "core") {
     return [...metaToolList(), ...coreTools().map(trimmedListEntry)];
   }
-  return ALL_TOOLS.map(fullListEntry);
+  return listedTools().map(fullListEntry);
 }
 
 export const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -118,7 +124,9 @@ async function handleSingleRpc(
   message: unknown,
   ctx: ToolContext,
   toolset: Toolset,
-  client?: string
+  client?: string,
+  notify?: (message: Record<string, unknown>) => void,
+  elicitation?: boolean
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -132,12 +140,20 @@ async function handleSingleRpc(
       : null;
 
   const method = message.method;
+  // A client's answer to a request this server sent on a response stream (elicitation/create).
+  if (method === undefined && hasId && ("result" in message || "error" in message)) {
+    deliverClientResponse(message);
+    return null;
+  }
   if (typeof method !== "string" || method.length === 0) {
     return makeErrorResponse(id, -32600, "Invalid Request: missing method");
   }
 
-  // Notifications (no `id`) produce no response.
+  // Notifications (no `id`) produce no response. notifications/cancelled stops a running call at its next safe point.
   if (!hasId) {
+    if (method === "notifications/cancelled" && isPlainObject(message.params)) {
+      cancelCall(client ?? "", message.params.requestId, message.params.reason);
+    }
     return null;
   }
 
@@ -232,9 +248,20 @@ async function handleSingleRpc(
 
       // Meta-tools answer in either toolset (they are only listed in core). Everything else,
       // listed or not, goes through the one shared path in tool-call.ts.
-      const result = isMetaTool(toolName)
-        ? await callMetaTool(toolName, rawArgs, ctx, { toolset, client })
-        : await callTool(toolName, rawArgs, ctx, { toolset, client });
+      const meta = isPlainObject(params._meta) ? params._meta : {};
+      const token = meta.progressToken;
+      const state = {
+        requestId: id ?? "",
+        client: client ?? "",
+        cancelled: false,
+        progress: 0,
+        ...(typeof token === "string" || typeof token === "number" ? { progressToken: token } : {}),
+        ...(notify ? { notify } : {}),
+        ...(notify && elicitation ? { request: (m: string, p: Record<string, unknown>, ms: number) => requestFromClient(notify, m, p, ms) } : {}),
+      };
+      const result = await runInCall(state, () =>
+        isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
+      );
       return { jsonrpc: "2.0", id, result };
     }
 
@@ -331,7 +358,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation);
       if (res !== null) {
         results.push(res);
       }
@@ -339,5 +366,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx, toolset, client);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation);
 }

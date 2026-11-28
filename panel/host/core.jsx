@@ -21,6 +21,38 @@
 
   // ---------- errors ----------
 
+  // Whether the current evalScript has touched the project: an undo group
+  // opened (A.withUndo) or a write that has no undo group (save, open, close,
+  // purge, replaceFont, preferences) called A.touch() first. The panel's eval
+  // wrapper calls A.beginCall() before each script, and A.formatError reports
+  // the flag, so the server can tell "nothing was changed" (not_applied) from
+  // "a change may be part-way in" (unknown).
+  var touchedThisCall = false;
+  A.beginCall = function () {
+    touchedThisCall = false;
+  };
+  A.touch = function () {
+    touchedThisCall = true;
+  };
+  A.wasTouched = function () {
+    return touchedThisCall;
+  };
+
+  // A refusal made before anything is touched: the server reports it as
+  // outcome "not_applied" with this code, even when it is thrown later than a
+  // check would normally run (the caller asserts nothing was changed).
+  A.refuse = function (code, message, extra) {
+    var e = new Error(message);
+    e.__kind = "evalscript_error";
+    e.__code = String(code || "refused");
+    e.__refused = true;
+    if (extra) {
+      if (extra.actual !== undefined) e.__actual = extra.actual;
+      if (extra.expected !== undefined) e.__expected = extra.expected;
+    }
+    throw e;
+  };
+
   function fail(kind, message, extra) {
     var e = new Error(message);
     e.__kind = kind;
@@ -53,6 +85,9 @@
     try { if (e && e.__actual !== undefined) out.actual = e.__actual; } catch (e4) {}
     try { if (e && e.__expected !== undefined) out.expected = e.__expected; } catch (e5) {}
     try { if (e && e.__sourceText !== undefined) out.sourceText = e.__sourceText; } catch (e6) {}
+    try { if (e && e.__code !== undefined) out.code = String(e.__code); } catch (e7) {}
+    try { if (e && e.__refused === true) out.refused = true; } catch (e8) {}
+    out.touched = touchedThisCall;
     return out;
   };
 
@@ -140,6 +175,7 @@
       undoDepth++;
       try { return fn(); } finally { undoDepth--; }
     }
+    touchedThisCall = true;
     app.beginUndoGroup(label || "Chroma AE MCP");
     undoDepth = 1;
     try {
@@ -1884,18 +1920,92 @@
     return result;
   };
 
+  // AE 26.3 (26.3x87, Windows, measured 2026-11-26, PR #19): a comp never finishes rendering when it
+  // has a light whose image comes from a layer (lightSource: the environment light, which 26.3 reads
+  // back as LightType.AMBIENT, 4415, with a Source; adding it switches the comp to Advanced 3D,
+  // renderer "ADBE Calder") and another enabled 3D layer (a solid made 3D or a parametric mesh). saveFrameToPng writes nothing; a render-queue render of one PNG frame
+  // sits at 0 CPU and 0 GPU; from then on AE writes no frame of any comp until it is restarted, a
+  // later saveFrameToPng crashed it, and other calls hung. Measured: the same comp with the light's
+  // source removed, or with a point or spot light (shadows or not), renders; so does the light and its
+  // source with no other 3D layer. A precomp renders as part of its parent, so nested comps count.
+  function aeVersionAtLeast(major, minor) {
+    try {
+      var m = String(app.version).match(/^(\d+)\.(\d+)/);
+      if (!m) return false;
+      var a = parseInt(m[1], 10);
+      var b = parseInt(m[2], 10);
+      if (a !== major) return a > major;
+      return b >= minor;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function envLightHazardIn(comp, depth, seen) {
+    if (!comp || depth > 12 || seen[comp.id] === true) return null;
+    seen[comp.id] = true;
+    var renderer = "";
+    try { renderer = String(comp.renderer); } catch (e0) {}
+    var light = null;
+    var lit = null;
+    var nested = [];
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var l = comp.layer(i);
+      var on = false;
+      try { on = l.enabled === true; } catch (e1) {}
+      if (!on) continue;
+      var kind = "";
+      try { kind = String(l.reflect.name); } catch (eK) {}
+      if (kind === "LightLayer") {
+        // Only an environment light takes a Source; its type is not checked (26.3 reads it back as AMBIENT).
+        var src = null;
+        try { src = l.lightSource; } catch (e3) { src = null; }
+        if (src !== null && src !== undefined && light === null) light = l;
+        continue;
+      }
+      if (kind === "CameraLayer") continue;
+      var threeD = false;
+      try { threeD = l.threeDLayer === true; } catch (e4) {}
+      if (threeD && lit === null) lit = l;
+      try {
+        if (l.source && l.source instanceof CompItem) nested.push(l.source);
+      } catch (e5) {}
+    }
+    if (light !== null && lit !== null) {
+      return { comp_id: comp.id, comp_name: comp.name, renderer: renderer, light: light.name, light_index: light.index, layer: lit.name, layer_index: lit.index };
+    }
+    for (var n = 0; n < nested.length; n++) {
+      var h = envLightHazardIn(nested[n], depth + 1, seen);
+      if (h) return h;
+    }
+    return null;
+  }
+
+  // Null, or where the AE 26.3 render hang would come from in this comp (or a comp nested in it).
+  A.envLightRenderHazard = function (comp) {
+    if (!aeVersionAtLeast(26, 3)) return null;
+    try {
+      return envLightHazardIn(comp, 0, {});
+    } catch (e) {
+      return null;
+    }
+  };
+
   // saveFrameToPng into the server-allocated path, at full resolution. It must
   // not touch the comp: changing resolutionFactor, even temporarily, put steps
   // on Jay's undo stack (measured 2026-10-27). saveFrameToPng writes the file
-  // asynchronously; the server waits for it.
+  // asynchronously; the server waits for it. A comp AE 26.3 would never finish
+  // rendering is refused before saveFrameToPng (render_hang_env_light).
   A.snapshotFrame = function (args) {
     var c = requireComp(args.comp_id);
-    var f = new File(args.output_path);
-    var dir = f.parent;
-    if (dir && !dir.exists) dir.create();
     var t = args.time;
     if (t < 0) t = 0;
     if (t > c.duration) t = c.duration;
+    var hazard = A.envLightRenderHazard(c);
+    if (hazard) return { refused: "render_hang_env_light", hazard: hazard, ae_version: String(app.version), time: t, width: c.width, height: c.height };
+    var f = new File(args.output_path);
+    var dir = f.parent;
+    if (dir && !dir.exists) dir.create();
     c.saveFrameToPng(t, f);
     return { path: f.fsName, time: t, width: c.width, height: c.height };
   };
@@ -1904,6 +2014,8 @@
     assertGuard(args.expect);
     var c = requireComp(args.comp_id);
     var rq = app.project.renderQueue;
+    // Outside an undo group: say the project is being touched, so a failing template is not reported as not_applied.
+    A.touch();
     var item = rq.items.add(c);
     if (args.render_settings_template) item.applyTemplate(args.render_settings_template);
     var om = item.outputModule(1);
@@ -1922,10 +2034,12 @@
       var folder = null;
       try { folder = target.parent; } catch (eParent) { folder = null; }
       if (folder && folder.exists === false) fail("bad_args", "The folder for " + args.save_as_path + " does not exist.");
+      A.touch();
       app.project.save(target);
       return { project_path: projectPath(), dirty: app.project.dirty, saved_as: args.save_as_path };
     }
     if (!app.project.file) fail("guard", "Project is unsaved; use ae_save with save_as: { path } to give it a name.");
+    A.touch();
     app.project.save();
     return { project_path: projectPath(), dirty: app.project.dirty };
   };

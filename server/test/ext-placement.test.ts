@@ -153,7 +153,7 @@ describe("AeLayoutApplySchema", () => {
     expect(ALL_TOOLS.some((t) => t.name === "ae_layout_apply")).toBe(true);
     expect(AUTO_CHECKPOINT_TOOLS).toContain("ae_layout_apply");
     expect(tool.description).toMatch(/verified: false/);
-    expect(tool.description.endsWith("(3) Jay may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.")).toBe(true);
+    expect(tool.description.endsWith("(3) The user may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.")).toBe(true);
   });
 });
 

@@ -33,6 +33,10 @@ import {
   TrackSourceSchema,
   type MultiTrackOptions,
   type LayerSample,
+  cornerJitter,
+  flagUnreliableFrames,
+  lensCheck,
+  slidingPoints,
 } from "../src/tools/ext/planar.js";
 import { applyH, identityH, invertH, mulH, type Mat3, type PlanarFrame, type PlanarTrack, type Vec2 } from "../src/tools/ext/planar-math.js";
 import { installSessionTracking, resetSessionTracking } from "../src/tools/ext/session.js";
@@ -335,8 +339,8 @@ describe("schemas", () => {
 
   it("the mutating tools say so in their descriptions", () => {
     expect(planarTools.map((t) => t.name)).toEqual(["ae_track_multi", "ae_track_read", "ae_track_apply"]);
-    for (const name of ["ae_track_multi", "ae_track_apply"]) expect(tool(name).description).toContain("Jay may be editing live");
-    expect(tool("ae_track_read").description).not.toContain("Jay may be editing live");
+    for (const name of ["ae_track_multi", "ae_track_apply"]) expect(tool(name).description).toContain("The user may be editing live");
+    expect(tool("ae_track_read").description).not.toContain("The user may be editing live");
   });
 });
 
@@ -1194,6 +1198,19 @@ describe("ae_track_apply", () => {
     expect(out.notes.join(" ")).toMatch(/already on the layer was used as the placement/);
   });
 
+  it("refit_model and smooth_frames reach the write: an adjusted copy under a new track_id, the original kept", async () => {
+    stored("trk_apply_refit");
+    const { ctx } = fakeAe();
+    const out = (await tool("ae_track_apply").handler(
+      AeTrackApplySchema.parse({ comp_id: 1, track: { track_id: "trk_apply_refit" }, mode: "corner_pin", layer: { index: 1 }, refit_model: "translate", smooth_frames: 1, expect: expectArg }),
+      ctx
+    )) as any;
+    expect(out.ok).toBe(true);
+    expect(out.track_adjusted).toMatchObject({ from_track_id: "trk_apply_refit", model: "translate", smooth_frames: 1 });
+    expect(out.track_id).toBe(out.track_adjusted.track_id);
+    expect(out.track_id).not.toBe("trk_apply_refit");
+  });
+
   it("pins a layer: guard, read, write, separate read-back, and a receipt that matches", async () => {
     stored("trk_apply_pin");
     const { ctx, fns, calls } = fakeAe();
@@ -1908,5 +1925,98 @@ describe("planar.jsx", () => {
       expect(fx.numProperties).toBe(1);
       expect(undo.begun).toBe(0);
     });
+  });
+});
+
+describe("track honesty: sliding points and corner jitter", () => {
+  let seed = 99;
+  const uni = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32;
+  const gauss = () => Math.sqrt(-2 * Math.log(uni())) * Math.cos(2 * Math.PI * uni());
+  const refPoints: Vec2[] = [[100, 100], [300, 110], [520, 90], [110, 300], [310, 290], [500, 310], [200, 200], [420, 210]];
+  /** 40 frames of a smooth pan; `extra` moves some points on their own (a nearer surface). */
+  function makeTrack(noise: number, extra: (k: number, i: number) => Vec2 = () => [0, 0]): PlanarTrack {
+    const frames: PlanarFrame[] = [];
+    for (let i = 0; i < 40; i++) {
+      const H: Mat3 = [1, 0, 30 * Math.sin(i / 12), 0, 1, 8 * Math.sin(i / 20), 0, 0, 1];
+      const points = refPoints.map((p, k) => {
+        const q = applyH(H, p)!;
+        const e = extra(k, i);
+        return [q[0] + e[0] + noise * gauss(), q[1] + e[1] + noise * gauss()] as Vec2;
+      });
+      // The track's own H carries the noise of the fit: jitter it the same way.
+      const Hj: Mat3 = [1, 0, H[2] + noise * gauss() * 0.5, 0, 1, H[5] + noise * gauss() * 0.5, 0, 0, 1];
+      frames.push({ time: i / 25, ok: true, H: i === 0 ? identityH() : Hj, points, confidence: points.map(() => 0.9), rms_px: 0.1, inliers: 8 });
+    }
+    return { version: 1, track_id: "t", comp_id: 1, comp_size: [640, 360], fps: 25, ref_time: 0, model: "perspective", ref_points: refPoints, frames, source: "test", created: "" };
+  }
+
+  it("finds no sliding point on one plane, and names the ones on a second surface", () => {
+    expect(slidingPoints(makeTrack(0.2))).toEqual([]);
+    // Points 2 and 5 drift away: 0.4 px more each frame.
+    const sliding = slidingPoints(makeTrack(0.2, (k, i) => (k === 2 || k === 5 ? [0.4 * i, 0] : [0, 0])));
+    expect(sliding.map((p) => p.index)).toEqual([2, 5]);
+    expect(sliding[0].frames_off_plane).toBeGreaterThan(10);
+  });
+
+  it("marks frames whose expected error is far above the track's typical one as not ok", () => {
+    const t = makeTrack(0.2);
+    t.frames.forEach((f, i) => (f.expected_px = i === 0 ? 0 : 0.3 + (i % 3) * 0.05));
+    t.frames[17].expected_px = 25;
+    t.frames[30].expected_px = 1.9; // high, but under the 2 px floor
+    expect(flagUnreliableFrames(t)).toEqual([t.frames[17].time]);
+    expect(t.frames[17].ok).toBe(false);
+    expect(t.frames[17].note).toMatch(/unreliable fit/);
+    expect(t.frames[30].ok).toBe(true);
+    // A track with no expected errors (an old one) is left alone.
+    expect(flagUnreliableFrames(makeTrack(0.2))).toEqual([]);
+  });
+
+  it("estimates the corners' frame-to-frame shake, not their motion", () => {
+    const quad: Vec2[] = [[100, 90], [520, 90], [520, 310], [100, 310]];
+    const still = cornerJitter(makeTrack(0), quad)!;
+    expect(still).toBeLessThan(0.05); // a smooth pan alone leaves almost nothing
+    const shaky = cornerJitter(makeTrack(1), quad)!;
+    // The H noise is 0.5 px per axis: about 0.5 px of shake.
+    expect(shaky).toBeGreaterThan(0.3);
+    expect(shaky).toBeLessThan(0.8);
+  });
+});
+
+describe("lens distortion seen through a track", () => {
+  const W = 960;
+  const H = 540;
+  const c = [W / 2, H / 2];
+  const half = Math.hypot(W / 2, H / 2);
+  const distort = (p: Vec2, k: number): Vec2 => {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const f = 1 + (k * (dx * dx + dy * dy)) / (half * half);
+    return [c[0] + dx * f, c[1] + dy * f];
+  };
+  const ref: Vec2[] = [[80, 60], [480, 50], [880, 70], [90, 270], [870, 280], [70, 480], [480, 490], [890, 470]];
+  function track(k: number): PlanarTrack {
+    const frames: PlanarFrame[] = [];
+    for (let i = 0; i < 25; i++) {
+      // A pan and a slight zoom: the points cross different distances from the centre.
+      const Hm: Mat3 = [1 + 0.004 * i, 0, 6 * i - 1.9 * i, 0, 1 + 0.004 * i, 3 * i - 1.1 * i, 0, 0, 1];
+      const pts = ref.map((p) => distort(applyH(Hm, p)!, k));
+      frames.push({ time: i / 25, ok: true, H: Hm, points: pts, confidence: pts.map(() => 1), rms_px: 0, inliers: 8 });
+    }
+    return { version: 1, track_id: "l", comp_id: 1, comp_size: [W, H], fps: 25, ref_time: 0, model: "perspective", ref_points: ref.map((p) => distort(p, k)), frames, source: "test", created: "" };
+  }
+
+  it("finds the bend of a distorted lens and how far it moves a corner", () => {
+    const l = lensCheck(track(0.08))!;
+    expect(l.distorted).toBe(true);
+    expect(l.k).toBeGreaterThan(0.06);
+    expect(l.k).toBeLessThan(0.1);
+    expect(l.edge_px).toBeGreaterThan(30);
+  });
+
+  it("says nothing of a straight lens, and needs points that reach out", () => {
+    expect(lensCheck(track(0))!.distorted).toBe(false);
+    const t = track(0.08);
+    t.ref_points = t.ref_points.map((p) => [c[0] + (p[0] - c[0]) * 0.3, c[1] + (p[1] - c[1]) * 0.3] as Vec2);
+    expect(lensCheck(t)).toBeNull();
   });
 });

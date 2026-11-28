@@ -1,3 +1,5 @@
+import { CancelledError } from "../call-context.js";
+import { zodToJsonSchema } from "../schema.js";
 import * as path from "node:path";
 import { z } from "zod";
 import type { AskStore } from "../asks.js";
@@ -10,7 +12,7 @@ import type { SettingsStore } from "../settings.js";
 export const AGENT_SAFETY_GUIDANCE =
   "IMPORTANT: (1) Always re-read project/comp state before writing. " +
   "(2) Long synchronous loops in ExtendScript freeze After Effects' UI. " +
-  "(3) Jay may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.";
+  "(3) The user may be editing live in After Effects, so a target guard failure (kind: 'guard') means STOP and re-read state—do NOT retry with stale expectations.";
 
 export const ExpectSchema = z
   .object({
@@ -95,6 +97,8 @@ export interface ToolDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
   description: string;
   schema: TSchema;
+  /** The JSON schema to show when it is not simply `schema`'s (a tool family merges its members'). */
+  inputJsonSchema?: Record<string, unknown>;
   handler: (
     args: z.infer<TSchema>,
     ctx: ToolContext
@@ -148,6 +152,12 @@ export function formatToolError(err: unknown): {
       ],
     };
   }
+  if (err instanceof CancelledError) {
+    return {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ kind: "cancelled", code: "cancelled", message: err.message, ...(err.outcome ? { outcome: err.outcome } : {}) }) }],
+    };
+  }
   if (err instanceof QueueWaitError) {
     return {
       isError: true,
@@ -182,4 +192,9 @@ export function formatToolError(err: unknown): {
       },
     ],
   };
+}
+
+/** The JSON schema a client sees for a tool: its own, or zodToJsonSchema of its zod schema. */
+export function toolInputSchema(t: ToolDefinition<any>): Record<string, unknown> {
+  return t.inputJsonSchema ?? (zodToJsonSchema(t.schema) as Record<string, unknown>);
 }

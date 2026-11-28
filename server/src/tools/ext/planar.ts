@@ -60,6 +60,8 @@ import { captureCompFrame, decodePngFile } from "./frames.js";
 import {
   applyH,
   boundingQuad,
+  expectedError,
+  quadGrid,
   decomposeLayerMatrix,
   decomposeSimilarity,
   frameAt,
@@ -73,7 +75,9 @@ import {
   quadCheck,
   ransacModel,
   rectQuad,
+  refitFrames,
   relativeTo,
+  smoothFrames,
   solveModel,
   unwrapDegrees,
   type Mat3,
@@ -288,6 +292,15 @@ const ApplyFields = {
     .object({ start: z.number().min(0), end: z.number().min(0) })
     .optional()
     .describe("Write only the frames in this time range (seconds). One call writes one span: keys already on the written properties refuse the write, and replace_keys removes ALL keys on them, not only the span's. A track holds at most 3000 frames."),
+  refit_model: ModelEnum.optional().describe(
+    "Solve every frame again from the tracked points with this model before writing, without tracking again. A model with fewer parameters holds a surface the points cover only partly much more steadily (perspective on points in a thin band swings the corners by tens of px); the track summary's model_advice says when and which. The adjusted track is saved under a new track_id (track_adjusted)."
+  ),
+  smooth_frames: z
+    .number()
+    .min(0)
+    .max(30)
+    .optional()
+    .describe("Smooth the surface's motion before writing: a Gaussian of this many frames (sigma) over the corner paths, then each frame is solved again. 1-2 takes out frame-to-frame shake and keeps the motion; more lags fast moves. Per-point nulls keep their tracked positions. Saved under a new track_id like refit_model."),
 };
 
 export const ApplyTargetSchema = z.object(ApplyFields).refine((v) => v.mode === "nulls" || v.layer !== undefined, { message: "Give `layer` for every mode but nulls." });
@@ -630,10 +643,11 @@ export function trackFromSeries(a: {
       const v = a.confidence?.[i]?.[k];
       return v === null || v === undefined ? null : Math.min(1, Math.max(0, v / confScale));
     });
-    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, inliers: n };
+    if (i === refIdx) return { time: t, ok: true, H: identityH(), points: pts, confidence: conf, rms_px: 0, expected_px: 0, inliers: n };
     const sol = solveModel(a.model, refPoints, pts);
     if (!sol) return { time: t, ok: false, H: null, points: pts, confidence: conf, rms_px: null, inliers: 0, note: "the points are degenerate at this frame (coincident or collinear)" };
-    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), inliers: n };
+    const ex = expectedError(a.model, sol.H, refPoints, pts, quadGrid(boundingQuad(refPoints)));
+    return { time: t, ok: true, H: sol.H, points: pts, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers: n };
   });
   return {
     version: 1,
@@ -923,8 +937,10 @@ export class MultiTracker {
       }
     }
     if (ok) this.lastH = sol.H;
+    const fit = survivors.filter((_, k) => sol!.inliers[k]);
+    const ex = expectedError(this.opts.model, sol.H, fit.map((i) => this.refPoints[i]), fit.map((i) => pos[i] as Vec2), quadGrid(this.quad));
     return {
-      frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), inliers, ...(note ? { note } : {}) },
+      frame: { time, ok, H: ok ? sol.H : null, points: pos, confidence: conf, rms_px: r4(sol.rms_px), expected_px: ex ? r4(ex.mean_px) : null, inliers, ...(note ? { note } : {}) },
       stop: null,
       lost: alive.filter((i) => pos[i] === null),
       reacquired,
@@ -1013,9 +1029,291 @@ export function channelGray(img: RgbaImage, channel: Channel): GrayImage {
 
 // ---------- the track summary and preview ----------
 
+/**
+ * Lens distortion seen through a track: a lens that bends straight lines moves points near the frame's
+ * edge away from where one plane's homography puts them, radially, and more the further out they are.
+ * A one-parameter radial model about the frame centre, p_d = c + (p_u - c)(1 + k r^2) with r over the
+ * half diagonal, is fitted to the tracked points (the fit's inliers, as the tracker uses them): when
+ * taking it out lowers the fit residual by a quarter or more (and 0.1 px or more) and moves a frame
+ * corner over 5 px, the plate is distorted. Calibrated on AE's Optics Compensation: field of view 40
+ * (a corner about 35 px) and 80 (about 160 px) were caught, a straight lens was not. `edge_px` is how far the model moves a frame
+ * corner. Null when the points do not reach out from the centre (they must span at least half the
+ * half-diagonal) or there are too few to say.
+ */
+export function lensCheck(track: PlanarTrack): { k: number; edge_px: number; residual_px: number; residual_without_px: number; distorted: boolean } | null {
+  const [w, h] = track.comp_size;
+  const c: Vec2 = [w / 2, h / 2];
+  const half = Math.hypot(w / 2, h / 2);
+  const reach = Math.max(...track.ref_points.map((p) => Math.hypot(p[0] - c[0], p[1] - c[1]) / half));
+  if (track.ref_points.length < 6 || !(reach >= 0.5)) return null;
+  const model: MotionModel = track.ref_points.length >= 5 ? "perspective" : track.model;
+  const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
+  const step = Math.max(1, Math.ceil(solved.length / 30));
+  const frames = solved.filter((_, i) => i % step === 0);
+  if (frames.length < 3) return null;
+  // The exact inverse of p_d = c + u (1 + k |u|^2 / half^2), by fixed-point iteration on |u|.
+  const undistort = (p: Vec2, k: number): Vec2 => {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const rd2 = (dx * dx + dy * dy) / (half * half);
+    let f = 1 + k * rd2;
+    for (let it = 0; it < 8; it++) {
+      if (!(f > 0.2)) break;
+      const ru2 = rd2 / (f * f);
+      f = 1 + k * ru2;
+    }
+    if (!(f > 0.2)) f = 1;
+    return [c[0] + dx / f, c[1] + dy / f];
+  };
+  const cost = (k: number): number => {
+    let sq = 0;
+    let n = 0;
+    for (const f of frames) {
+      const idx = f.points.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
+      if (idx.length < 6) continue;
+      const from = idx.map((i) => undistort(track.ref_points[i], k));
+      const to = idx.map((i) => undistort(f.points[i] as Vec2, k));
+      // Robust, as the tracker is: points the fit votes out (off the plane, at a frame edge) do not count.
+      const fit = ransacModel(model, from, to, { thresholdPx: 3, iterations: 40, seed: 1 });
+      if (!fit) continue;
+      const inl = fit.inliers.filter(Boolean).length;
+      if (inl < 6) continue;
+      sq += fit.rms_px * fit.rms_px * inl;
+      n += inl;
+    }
+    return n ? Math.sqrt(sq / n) : Infinity;
+  };
+  // A coarse scan, then golden section around the best.
+  let bestK = 0;
+  let bestC = cost(0);
+  const base = bestC;
+  if (!Number.isFinite(base)) return null;
+  for (let k = -0.3; k <= 0.3001; k += 0.03) {
+    const v = cost(k);
+    if (v < bestC) {
+      bestC = v;
+      bestK = k;
+    }
+  }
+  let lo = bestK - 0.03;
+  let hi = bestK + 0.03;
+  const g = (Math.sqrt(5) - 1) / 2;
+  for (let it = 0; it < 30; it++) {
+    const a = hi - g * (hi - lo);
+    const b = lo + g * (hi - lo);
+    if (cost(a) < cost(b)) hi = b;
+    else lo = a;
+  }
+  const k = (lo + hi) / 2;
+  const kc = cost(k);
+  if (kc < bestC) {
+    bestC = kc;
+    bestK = k;
+  }
+  const edge = Math.abs(bestK) * half;
+  return { k: r4(bestK), edge_px: r2(edge), residual_px: r4(bestC), residual_without_px: r4(base), distorted: base - bestC > 0.1 && bestC < base * 0.75 && edge > 5 };
+}
+
+/**
+ * Once a track is finished: a frame whose expected error is far above the track's own typical one
+ * (8x its median and over 2 px) got a wild fit, usually from too few inliers or a point off the plane
+ * voting with the rest. Seen on a parallax shot: such frames were 20-120 px off while marked ok. They
+ * become not ok with a note, so ae_track_apply interpolates across them instead of writing the jump.
+ */
+export function flagUnreliableFrames(track: PlanarTrack): number[] {
+  const ex = track.frames
+    .filter((f) => f.ok && typeof f.expected_px === "number" && f.time !== track.ref_time)
+    .map((f) => f.expected_px as number)
+    .sort((a, b) => a - b);
+  if (ex.length < 5) return [];
+  const typical = ex[Math.floor(ex.length / 2)];
+  const limit = Math.max(2, 8 * typical);
+  const flagged: number[] = [];
+  for (const f of track.frames) {
+    if (f.ok && typeof f.expected_px === "number" && f.expected_px > limit) {
+      f.ok = false;
+      f.note = `unreliable fit: expected error ${r2(f.expected_px)} px against a typical ${r2(typical)} px (too few points agreeing, or points off the plane)`;
+      flagged.push(f.time);
+    }
+  }
+  return flagged;
+}
+
+/**
+ * Points that do not move with the plane the others define: per point, how far it sits from where
+ * the solved motion puts it, frame by frame. A point on the plane stays within the trackers' noise;
+ * one off the plane (parallax), on a moving object or in a reflection drifts away, and the robust fit
+ * votes it out more and more often.
+ */
+export function slidingPoints(track: PlanarTrack): Array<{ index: number; median_px: number; frames_off_plane: number; frames: number }> {
+  const solved = track.frames.filter((f) => f.ok && f.H && f.time !== track.ref_time);
+  if (solved.length < 5) return [];
+  const per: number[][] = track.ref_points.map(() => []);
+  for (const f of solved) {
+    track.ref_points.forEach((rp, k) => {
+      const p = f.points[k];
+      const q = applyH(f.H!, rp);
+      if (p && q) per[k].push(Math.hypot(p[0] - q[0], p[1] - q[1]));
+    });
+  }
+  const median = (xs: number[]) => {
+    const v = xs.slice().sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)] : 0;
+  };
+  // The noise floor: the median residual over every point and frame, as a robust sigma.
+  const all = per.flat();
+  const noise = Math.max(0.15, median(all) * 1.4826);
+  const limit = Math.max(1.5, 5 * noise);
+  const out: Array<{ index: number; median_px: number; frames_off_plane: number; frames: number }> = [];
+  per.forEach((res, k) => {
+    if (res.length < 5) return;
+    // The later half carries parallax: it grows with the motion since the reference frame.
+    const late = res.slice(Math.floor(res.length / 2));
+    const off = res.filter((e) => e > limit).length;
+    if (median(late) > limit || off >= Math.max(3, res.length * 0.25)) out.push({ index: k, median_px: r2(median(res)), frames_off_plane: off, frames: res.length });
+  });
+  return out;
+}
+
+/**
+ * Frame-to-frame shake of the surface corners that the motion does not explain, px: third differences
+ * of each corner's path (smooth motion, even accelerating, leaves almost none; white noise of sigma
+ * leaves sqrt(20) sigma), as a robust sigma. The largest corner's.
+ */
+export function cornerJitter(track: PlanarTrack, quad: Vec2[]): number | null {
+  const frames = track.frames.filter((f) => f.ok && f.H);
+  if (frames.length < 8) return null;
+  let worst = 0;
+  for (const corner of quad) {
+    const path = frames.map((f) => applyH(f.H!, corner));
+    const d3: number[] = [];
+    for (let i = 3; i < path.length; i++) {
+      const [a, b, c, d] = [path[i - 3], path[i - 2], path[i - 1], path[i]];
+      if (!a || !b || !c || !d) continue;
+      d3.push(Math.hypot(d[0] - 3 * c[0] + 3 * b[0] - a[0], d[1] - 3 * c[1] + 3 * b[1] - a[1]));
+    }
+    if (d3.length < 4) continue;
+    d3.sort((x, y) => x - y);
+    // |d3| of 2-D white noise is Rayleigh with scale sqrt(20) sigma; its median is 1.1774 times that.
+    const sigma = d3[Math.floor(d3.length / 2)] / (1.1774 * Math.sqrt(20));
+    if (sigma > worst) worst = sigma;
+  }
+  return r2(worst);
+}
+
+const EXPECTED_ERROR_NOTE =
+  "expected_error_px is how far the solved surface (the quad) is likely to be from the true motion, per frame: point noise from the residuals, carried through the fit to the whole quad (on AE shots with known motion the true error was 0.7-1.0x this). rms_px only says how well the points agree with each other and runs 3-5x below the true error. expected_error_px is null for frames without spare points: give more points than the model needs (perspective 5+, similarity 3+).";
+
+function lensSummary(track: PlanarTrack): Record<string, unknown> {
+  const l = lensCheck(track);
+  if (!l) return {};
+  // A straight lens leaves the cost flat in k, so its k means nothing: only the residuals are given.
+  if (!l.distorted) return { lens: { distorted: false, residual_px: l.residual_px, residual_without_px: l.residual_without_px } };
+  return {
+    lens: { ...l },
+    lens_note: `The points bend the way a lens does (radial k ${l.k}; a frame corner moves about ${l.edge_px} px): one plane's motion leaves ${l.residual_without_px} px of fit residual that a lens model brings to ${l.residual_px} px. A 2D track and anything pinned to it will slide near the edges. Undistort the plate first (Optics Compensation, or the lens profile from the camera), track and composite on it, then put the distortion back; or keep the points and the insert near the middle of the frame.`,
+  };
+}
+
+function slidingSummary(track: PlanarTrack): Record<string, unknown> {
+  const sliding = slidingPoints(track);
+  if (!sliding.length) return {};
+  const many = sliding.length >= 2 && sliding.length >= track.ref_points.length / 4;
+  return {
+    sliding_points: sliding,
+    sliding_note: many
+      ? `${sliding.length} of ${track.ref_points.length} points do not move with the plane the others define. Either they are off it (parallax: different depths), on something moving, or the shot is not one plane at all; then a 2D track cannot hold, and the shot needs a 3D camera solve (AE's 3D Camera Tracker, or Mocha with the right plane). Track again with points on one surface only (auto_points.exclude), or check the preview.`
+      : `Point ${sliding.map((p) => p.index).join(", ")} does not move with the plane the others define (off the plane, on something moving, or a reflection). The fit votes it out, but the track is safer without it: track again with auto_points.exclude over it, or check the preview.`,
+  };
+}
+
+/** Models with fewer parameters to try for a track whose surface shakes. */
+const LOWER_MODELS: Record<MotionModel, MotionModel[]> = { perspective: ["affine", "similarity"], affine: ["similarity"], similarity: [], translate: [] };
+
+function meanFitRms(track: PlanarTrack): number | null {
+  const r = track.frames.filter((f) => f.ok && f.rms_px !== null && f.time !== track.ref_time).map((f) => f.rms_px as number);
+  return r.length ? r.reduce((a, b) => a + b, 0) / r.length : null;
+}
+
+/** How much of the surface (quad) the points' bounding box spans, in percent of its width and height. */
+export function pointsCover(points: Vec2[], quad: Vec2[]): { width_pct: number; height_pct: number } {
+  const span = (v: number[]) => Math.max(...v) - Math.min(...v);
+  const qw = span(quad.map((p) => p[0]));
+  const qh = span(quad.map((p) => p[1]));
+  return {
+    width_pct: qw > 0 ? Math.round((100 * span(points.map((p) => p[0]))) / qw) : 100,
+    height_pct: qh > 0 ? Math.round((100 * span(points.map((p) => p[1]))) / qh) : 100,
+  };
+}
+
+/**
+ * When the surface corners shake (corner_jitter_px of 1 px or more), the same tracked points solved
+ * with each model with fewer parameters: the corner shake, how well it still fits the points, and the
+ * model to write with (ae_track_apply refit_model), if one halves the shake and still fits (mean fit
+ * residual within 1 px, or twice the track's own) on as many frames. Measured on a 4K shot with 8 points
+ * in a 1570 x 284 px band under a 2309 x 761 px surface (2026-11-26): perspective moved a corner 35 px
+ * in one frame while the points moved under 1 px.
+ */
+export function modelAdvice(track: PlanarTrack): Record<string, unknown> | null {
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  const now = cornerJitter(track, quad);
+  if (now === null || now < 1 || LOWER_MODELS[track.model].length === 0) return null;
+  const okOf = (t: PlanarTrack) => t.frames.filter((f) => f.ok).length;
+  const rmsNow = meanFitRms(track);
+  const tried = LOWER_MODELS[track.model].map((m) => {
+    const alt = refitFrames(track, m);
+    const rms = meanFitRms(alt);
+    return { model: m, corner_jitter_px: cornerJitter(alt, quad), rms_px: rms === null ? null : r2(rms), frames_ok: okOf(alt) };
+  });
+  const limit = Math.max(1, 2 * (rmsNow ?? 0));
+  const fits = tried
+    .filter((t) => t.corner_jitter_px !== null && t.rms_px !== null && t.rms_px <= limit && t.frames_ok >= okOf(track) * 0.95)
+    .sort((x, y) => (x.corner_jitter_px as number) - (y.corner_jitter_px as number));
+  const best = fits.length && (fits[0].corner_jitter_px as number) <= now / 2 ? fits[0] : null;
+  const cover = pointsCover(track.ref_points, quad);
+  const why =
+    `The surface corners shake ${now} px from frame to frame while the points agree with the fit to ${rmsNow === null ? "?" : r2(rmsNow)} px: ` +
+    `the points span ${cover.width_pct}% of the surface's width and ${cover.height_pct}% of its height, and the ${track.model} fit swings the corners outside them. `;
+  const note = best
+    ? why +
+      `Solved again from the same points as ${best.model}, the corners shake ${best.corner_jitter_px} px (fit ${best.rms_px} px). ` +
+      `Write it with ae_track_apply refit_model: "${best.model}" (no new tracking), add smooth_frames 1-2 for what is left, or track again with points spread over the whole surface, near its corners.`
+    : why + "No model with fewer parameters fits the points well enough: track again with points spread over the whole surface (near its corners), or smooth with ae_track_apply smooth_frames.";
+  return { current: { model: track.model, corner_jitter_px: now, rms_px: rmsNow === null ? null : r2(rmsNow) }, tried, recommended: best ? { refit_model: best.model } : null, points_cover: cover, note };
+}
+
+/** ae_track_apply's refit_model and smooth_frames: the adjusted track, saved under a new track_id, and what changed. */
+export function adjustTrack(track: PlanarTrack, opts: { refit_model?: MotionModel; smooth_frames?: number }): { track: PlanarTrack; info: Record<string, unknown> | null } {
+  const refit = opts.refit_model && opts.refit_model !== track.model ? opts.refit_model : null;
+  const sigma = typeof opts.smooth_frames === "number" && opts.smooth_frames > 0 ? opts.smooth_frames : 0;
+  if (!refit && !sigma) return { track, info: null };
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  let t = track;
+  if (refit) t = refitFrames(t, refit);
+  if (sigma) t = smoothFrames(t, sigma);
+  const did = [refit ? `refit ${track.model} -> ${refit}` : "", sigma ? `smoothed over ${sigma} frame(s)` : ""].filter(Boolean).join(", ");
+  const derived: PlanarTrack = { ...t, track_id: newTrackId(), source: `${track.source} (${did}, from ${track.track_id})`, created: new Date().toISOString() };
+  saveTrack(derived);
+  const okOf = (x: PlanarTrack) => x.frames.filter((f) => f.ok).length;
+  return {
+    track: derived,
+    info: {
+      from_track_id: track.track_id,
+      track_id: derived.track_id,
+      model: derived.model,
+      ...(sigma ? { smooth_frames: sigma } : {}),
+      corner_jitter_px: { before: cornerJitter(track, quad), after: cornerJitter(derived, quad) },
+      frames_ok: { before: okOf(track), after: okOf(derived) },
+      note: `Written from track ${derived.track_id} (${did}); the original ${track.track_id} is unchanged.`,
+    },
+  };
+}
+
 export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string, unknown> {
   const ok = track.frames.filter((f) => f.ok);
   const rms = ok.map((f) => f.rms_px).filter((v): v is number => v !== null);
+  const exp = ok.filter((f) => typeof f.expected_px === "number" && f.time !== track.ref_time);
+  const worst = exp.reduce<PlanarFrame | null>((w, f) => (w === null || (f.expected_px as number) > (w.expected_px as number) ? f : w), null);
   const step = Math.max(1, Math.ceil(track.frames.length / maxFrames));
   const sampled = track.frames.filter((_, i) => i % step === 0 || i === track.frames.length - 1).slice(0, maxFrames);
   const lostPer = track.ref_points.map((_, k) => track.frames.filter((f) => f.points[k] === null).length);
@@ -1032,6 +1330,18 @@ export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string
     first_time: track.frames.length ? r4(track.frames[0].time) : null,
     last_time: track.frames.length ? r4(track.frames[track.frames.length - 1].time) : null,
     rms_px: rms.length ? { mean: r2(rms.reduce((a, b) => a + b, 0) / rms.length), max: r2(Math.max(...rms)) } : null,
+    expected_error_px:
+      exp.length && worst
+        ? { mean: r2(exp.reduce((a, f) => a + (f.expected_px as number), 0) / exp.length), max: r2(worst.expected_px as number), worst_time: r4(worst.time), frames_without: Math.max(0, ok.length - 1 - exp.length) }
+        : null,
+    error_note: EXPECTED_ERROR_NOTE,
+    corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...(() => {
+      const advice = modelAdvice(track);
+      return advice ? { model_advice: advice } : {};
+    })(),
+    ...slidingSummary(track),
+    ...lensSummary(track),
     frames_lost_per_point: lostPer,
     frame_rows: sampled.map((f) => [r4(f.time), f.ok ? 1 : 0, f.rms_px === null ? null : r2(f.rms_px), f.inliers, f.H ? f.H.map((v) => Number(v.toPrecision(8))) : null]),
     frame_rows_format: "[time_s, ok, rms_px, inliers, H (row-major 3x3, ref comp px -> comp px at time_s; 8 significant digits, the track file has full precision)]",
@@ -1320,7 +1630,9 @@ async function applyTrackTo(
   const opId = a.opId ?? ctx.bridge.newOpId();
   const label = `${a.toolName} apply(${a.compId})`;
   const refTime = a.refTime ?? a.track.ref_time;
-  const based = relativeTo(a.track, refTime);
+  // refit_model / smooth_frames: written from an adjusted copy, saved under its own track_id.
+  const adjusted = adjustTrack(a.track, { refit_model: target.refit_model, smooth_frames: target.smooth_frames });
+  const based = relativeTo(adjusted.track, refTime);
   const refFrame = frameAt(based, refTime);
   if (!refFrame || !refFrame.ok || !refFrame.H) {
     throw new PlanarError("bad_args", `The reference frame at ${r2(refTime)} s has no solved motion, so it cannot be the frame the target looks right at. Pass a ref_time where the track is ok.`);
@@ -1492,9 +1804,20 @@ async function applyTrackTo(
     frames_written: keys ? keys.times.length : Math.max(0, ...nullKeys.map((n) => n.times.length)),
     ...(skipped.length ? { frames_skipped: skipped.slice(0, 100).map(r4), frames_skipped_total: skipped.length } : {}),
     ...(lay ? { layer: { index: lay.index, id: lay.id, name: lay.name } } : {}),
+    // The keys say where the layer should be; the render says whether it sticks. This call measures slip on renders along the same track.
+    ...(lay
+      ? {
+          verify_with: {
+            tool: "ae_patch_check",
+            why: "Renders a few frames and measures whether the layer slides against the plate along this track (slip, within 0.1 px on a test insert), plus seam and edge.",
+            arguments: { comp_id: a.compId, patch_layers: [{ id: lay.id }], region_track: { track_id: based.track_id }, grain_probes: 0 },
+          },
+        }
+      : {}),
     written: w.written ?? [],
     nulls: (w.nulls ?? []).map((n) => ({ id: n.layer_id, index: n.layer_index, name: n.name, keys: n.props.map((p) => `${p.role}:${p.numKeys}`).join(" ") })),
     notes,
+    ...(adjusted.info ? { track_adjusted: adjusted.info } : {}),
     ...(a.trackNote ?? {}),
     checkpoint: w.checkpoint,
     receipt: w.receipt,
@@ -1745,6 +2068,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         points: refPoints.map((p, i) => (aliveRef[i] ? p : null)),
         confidence: refPoints.map((_, i) => (aliveRef[i] ? 1 : null)),
         rms_px: 0,
+        expected_px: 0,
         inliers: aliveRef.filter(Boolean).length,
       };
 
@@ -1815,6 +2139,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           };
       remember(track.track_id, { forward: fwd, backward: bwd });
       track.tracking!.options = o as unknown as Record<string, unknown>;
+      if (track.tracking!.forward.done && track.tracking!.backward.done) flagUnreliableFrames(track);
       saveTrack(track);
 
       let previewPath: string | undefined;
@@ -1963,7 +2288,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Give `points`, or `auto_points` {region, exclude, count} to let the tool pick Shi-Tomasi corners inside a region and outside the object you are removing; the chosen points come back. Points must lie on ONE plane. " +
       "`isolate_layers` renders a temporary copy of the comp with only the plate on, so patches and overlays above it cannot corrupt the track (the copy is removed in the same call; needs `expect`). " +
       "Long shots are chunked (`max_frames`, `max_seconds`): while `complete` is false, call again with `continue_track_id`. The result is a summary with at most 500 sampled frames; the full track is stored under `track_id` for ae_track_apply and the other planar tools. " +
-      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
+      "`preview_path` is a contact sheet of the first, reference and last frame of the call with the points (cyan, lost ones red) and the surface quad (green): look at it before trusting the track. Judge the track by `expected_error_px` (how far the surface is likely off, per frame), `corner_jitter_px`, `sliding_points` (points that do not move with the plane) and `lens` (a lens that bends lines, seen when the points reach out towards the frame's edges), not by `rms_px`, which only says how well the points agree. When the corners shake (corner_jitter_px 1 px or more), `model_advice` gives the same points solved with fewer parameters and the model to write with (ae_track_apply refit_model, no new tracking); points that cover only a thin band of the surface make a perspective fit swing its corners. `apply` writes the finished track like ae_track_apply. Every frame is a render. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeTrackMultiSchema,
     handler: async (args: AeTrackMultiArgs, ctx: ToolContext) => {
@@ -1981,7 +2306,7 @@ export const planarTools: ToolDefinition<any>[] = [
       "Read a track that already exists in the project into the shared track format, and store it under a new `track_id` for ae_track_apply and the other planar tools. Changes nothing in the project. " +
       "Sources: `nulls` (1-8 layers' Position keys, ae_track_point's nulls included), `corner_pin` (a Corner Pin or CC Power Pin's four points, in the layer's own space converted to comp pixels: what Mocha AE's 'Create Track Data' and AE's Perspective Corner Pin tracker leave), `tracker` (AE Tracker track points on a layer), `transform` (a layer's Position/Rotation/Scale keys as a similarity track of its corners), or an existing `track_id`. " +
       "Keys are sampled on the comp's frame grid: the result says how many frames were interpolated, how many keys are off the grid, and which properties are expression-driven. It returns the parameter table it used for pin effects, because those point names are unverified. 3D layers and non-square pixels are refused. " +
-      "Returns the same bounded summary and (with `preview`) contact sheet as ae_track_multi. Mocha's project data and the Warp Stabilizer / 3D Camera Tracker solves cannot be read; only keyframes made from them can.",
+      "Returns the same bounded summary and (with `preview`) contact sheet as ae_track_multi. Mocha's project data and the Warp Stabilizer / 3D Camera Tracker solves cannot be read. Keyframes Mocha or a Warp Stabilizer leave on 2D layers can; the 3D Camera Tracker's nulls and camera are 3D layers, which are refused.",
     schema: AeTrackReadSchema,
     handler: async (args: AeTrackReadArgs, ctx: ToolContext) => {
       const toolName = "ae_track_read";
@@ -2071,6 +2396,8 @@ export const planarTools: ToolDefinition<any>[] = [
           solved_null: args.solved_null,
           replace_keys: args.replace_keys,
           range: args.range,
+          refit_model: args.refit_model,
+          smooth_frames: args.smooth_frames,
         };
         return await applyTrackTo(ctx, {
           compId: args.comp_id,

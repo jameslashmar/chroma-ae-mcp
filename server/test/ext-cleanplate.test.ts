@@ -609,7 +609,7 @@ function fakeAe(opts: AeOpts = {}) {
         });
       }
       if (fn === "cleanplateFootage") return ok({ found: true, id: args.footage_id, name: "still.png", path: "x.png", missing: false, width: W, height: H });
-      if (fn === "cleanplateReload") return ok({ no_op: true, reloaded: true, footage: { id: args.footage_id ?? 55, name: "still.png", path: "x.png" } });
+      if (fn === "cleanplateReload") return ok({ no_undo_step: true, reloaded: true, footage: { id: args.footage_id ?? 55, name: "still.png", path: "x.png" } });
       throw new Error(`Unexpected script: ${script}`);
     },
     queue,
@@ -974,7 +974,8 @@ describe("ae_cleanplate_setup (build)", () => {
     const still = path.join(plates, "Plate still f4.png");
     expect(out.still_path).toBe(still);
     expect(fs.existsSync(still)).toBe(true);
-    expect(fs.readdirSync(plates)).toEqual(["Plate still f4.png"]);
+    // The still, and a hidden copy as rendered that the reload compares the painted file with.
+    expect(fs.readdirSync(plates).sort()).toEqual([".chroma-original-Plate still f4.png", "Plate still f4.png"]);
     expect(calls.find((c) => c.fn === "cleanplateBuild")!.args.still_path).toBe(still);
     expect(out.imported_item).toMatchObject({ id: 55 });
     expect(out.temp_comp).toEqual({ copy_removed: true });
@@ -1612,7 +1613,7 @@ describe("cleanplate.jsx", () => {
     let reloaded = 0;
     item.mainSource.reload = () => reloaded++;
     const out = A.cleanplateReload({ footage_id: item.id, expect: GUARD });
-    expect(out).toMatchObject({ no_op: true, reloaded: true, footage: { id: item.id } });
+    expect(out).toMatchObject({ no_undo_step: true, reloaded: true, footage: { id: item.id } });
     expect(reloaded).toBe(1);
     expect(undo.begun).toBe(0);
     fs.rmSync(file);

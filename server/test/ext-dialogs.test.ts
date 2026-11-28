@@ -75,7 +75,7 @@ describe("ext/dialogs tools (Task G5)", () => {
     }
   });
 
-  it("includes Jay's dialog rules in tool descriptions and locates ae-dialogs.ps1", () => {
+  it("includes the dialog rules in tool descriptions and locates ae-dialogs.ps1", () => {
     for (const tool of dialogsTools) {
       expect(tool.description).toMatch(/never suppress/i);
       expect(tool.description).toMatch(/caused_by_op|own operation caused/i);

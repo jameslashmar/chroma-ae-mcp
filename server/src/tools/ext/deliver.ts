@@ -184,7 +184,7 @@ export const AeDeliverStepSchema = z
       .enum(["start", "next", "retry", "skip", "cancel"])
       .describe(
         "start: a new run from a recipe, then stages run until one blocks or waits. next: continue the run (polls a render that is in flight first). " +
-          "retry: run the stopped stage again, after you fixed what it reported. skip: pass the stopped stage with a written acknowledgement (only when Jay accepts what it found). cancel: stop the run and any render it started."
+          "retry: run the stopped stage again, after you fixed what it reported. skip: pass the stopped stage with a written acknowledgement (only when the user accepts what it found). cancel: stop the run and any render it started."
       ),
     recipe: RecipeNameSchema.optional().describe("start: which recipe."),
     run_id: z
@@ -193,7 +193,7 @@ export const AeDeliverStepSchema = z
       .optional()
       .describe("The run. Default: the latest run that is not done or cancelled."),
     stage: StageIdSchema.optional().describe("retry / skip: the stopped stage's id. Optional; it must be the stage the run stopped at."),
-    acknowledge: z.string().min(5).max(500).optional().describe("skip: why the stopped stage may be passed (kept in the record and the report). Never skip a blocker on your own: ask Jay."),
+    acknowledge: z.string().min(5).max(500).optional().describe("skip: why the stopped stage may be passed (kept in the record and the report). Never skip a blocker on your own: ask the user."),
     max_stages: z.number().int().min(1).max(MAX_STAGES).optional().describe("Run at most this many stages in this call. Default: until one blocks, waits or the recipe ends."),
     dry_run: z.boolean().optional().describe("start: show the stages, their tools and whether each is available, check the arguments that don't depend on the render, and write nothing."),
     expect: DeliverExpectSchema,
@@ -723,7 +723,7 @@ export function describeError(err: unknown): { error: string; message: string; a
 export function nextHint(run: Run): string {
   const cur = currentStage(run);
   if (run.state === "cancelled") return "The run was cancelled. Start a new one with action 'start'.";
-  if (!cur) return "Delivery is complete. Show Jay the report; the files are listed under outputs.";
+  if (!cur) return "Delivery is complete. Show the user the report; the files are listed under outputs.";
   if (run.state === "waiting") return `Stage "${cur.id}" is still running. Call ae_deliver_step with action 'next' again to check it.`;
   if (run.state === "blocked") {
     if (isPollable(cur) && cur.status !== "running") {
@@ -732,8 +732,8 @@ export function nextHint(run: Run): string {
       }
       return `Stopped at stage "${cur.id}". Call ae_deliver_step with action 'next' to check its render or audio job again. 'retry' starts a new one, and is refused while the old one may still be running.`;
     }
-    if (cur.status === "unavailable") return `Stage "${cur.id}" needs ${cur.tool}, which this server doesn't have. Make it optional in the recipe and retry, or skip it with an acknowledgement if Jay agrees.`;
-    return `Stopped at stage "${cur.id}". Fix what it reports, then call ae_deliver_step with action 'retry'. Skip it (action 'skip', with acknowledge) only if Jay accepts what it found.`;
+    if (cur.status === "unavailable") return `Stage "${cur.id}" needs ${cur.tool}, which this server doesn't have. Make it optional in the recipe and retry, or skip it with an acknowledgement if the user agrees.`;
+    return `Stopped at stage "${cur.id}". Fix what it reports, then call ae_deliver_step with action 'retry'. Skip it (action 'skip', with acknowledge) only if the user accepts what it found.`;
   }
   return "Call ae_deliver_step with action 'next' to run the remaining stages.";
 }
@@ -1414,7 +1414,7 @@ async function pollLoudness(env: Env, st: StageState): Promise<void> {
   const tool = await lookupTool(st.def.tool);
   const jobId = st.job_ids?.[0];
   if (!tool || !jobId) {
-    Object.assign(st, { status: "error", error: "unavailable", summary: `${st.def.tool} is not registered, so the audio render can't be followed. Skip this stage with an acknowledgement if Jay agrees.` });
+    Object.assign(st, { status: "error", error: "unavailable", summary: `${st.def.tool} is not registered, so the audio render can't be followed. Skip this stage with an acknowledgement if the user agrees.` });
     return;
   }
   const args: Record<string, unknown> = { job_id: jobId, wait_seconds: 10 };
@@ -1972,7 +1972,7 @@ export const deliverTools: ToolDefinition<any>[] = [
     name: "ae_deliver_step",
     description:
       "Run a delivery recipe one safe step at a time. 'start' makes a run from a recipe and runs its stages in order until one blocks, a render is in flight or max_stages is reached; " +
-      "'next' continues (it follows a render that is running first), 'retry' runs the stopped stage again after you fixed what it reported, 'skip' passes it with a written acknowledgement (only when Jay accepts it), 'cancel' ends the run and its render. " +
+      "'next' continues (it follows a render that is running first), 'retry' runs the stopped stage again after you fixed what it reported, 'skip' passes it with a written acknowledgement (only when the user accepts it), 'cancel' ends the run and its render. " +
       "Each stage is an existing tool run through its own handler (guard, undo group and read-back stay that tool's); a checkpoint is taken before each stage that writes. A blocker stops the run; a warning is listed and the run goes on. " +
       "A tool that isn't registered is reported as 'unavailable' (optional stages go on). The run is recorded in <project>.deliver.json, so it survives a restart, and every call returns the stage table and, when done or stopped, a report. " +
       "dry_run on start shows the plan without running it. Each stage is its own undo step; the way back is the checkpoint (ae_checkpoint_revert). " +

@@ -10,7 +10,7 @@ import {
   type CepExtensionInfo,
   type ToolDefinition,
 } from "../common.js";
-import { locateDialogsPs1Script, parsePs1JsonOutput } from "./dialogs.js";
+import { locateDialogsPs1Script, locateToolScript, parsePs1JsonOutput } from "./dialogs.js";
 
 export const CURATED_NATIVE_PANELS = [
   "Align",
@@ -62,6 +62,8 @@ export type Ps1RunnerFn = (args: string[]) => Promise<string>;
 interface PanelsRuntimeOverrides {
   platform?: NodeJS.Platform;
   ps1Runner?: Ps1RunnerFn;
+  /** Replaces the macOS window lookup and capture (tests). */
+  macCapture?: (outDir: string) => Promise<Record<string, unknown>>;
   uiDir?: string;
   scriptPath?: string | null;
 }
@@ -116,6 +118,63 @@ export function parseCepExtensions(raw: string | unknown[]): CepExtensionInfo[] 
       if (typeof item.type === "string") entry.type = item.type;
       return entry;
     });
+}
+
+function execText(cmd: string, args: string[], timeoutMs = 15_000): Promise<{ ok: boolean; stdout: string; error?: string }> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const out = typeof stdout === "string" ? stdout.trim() : "";
+      if (err && !out) resolve({ ok: false, stdout: "", error: (typeof stderr === "string" && stderr.trim()) || (err instanceof Error ? err.message : String(err)) });
+      else resolve({ ok: true, stdout: out });
+    });
+  });
+}
+
+/** Width and height from a PNG's IHDR chunk, or null. */
+export function pngSize(file: string): { width: number; height: number } | null {
+  try {
+    const fd = fs.openSync(file, "r");
+    const buf = Buffer.alloc(24);
+    fs.readSync(fd, buf, 0, 24, 0);
+    fs.closeSync(fd);
+    if (buf.readUInt32BE(0) !== 0x89504e47 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * macOS: finds After Effects' main window through CoreGraphics (panel/tools/ae-window-mac.js) and
+ * records that one window with `screencapture -x -o -l <id>`, which neither activates AE nor
+ * moves anything. Needs Screen Recording permission for After Effects (the panel's app).
+ */
+async function captureMacMainWindow(outDir: string): Promise<Record<string, unknown>> {
+  if (runtimeOverrides.macCapture) return runtimeOverrides.macCapture(outDir);
+  const script = locateToolScript("ae-window-mac.js");
+  if (!script) return { ok: false, error: "ae_window_mac_script_not_found" };
+  // Two tries: the window id can change while AE redraws (a workspace change, a panel opening), and a capture
+  // started just then fails with "could not create image from window" (seen once in a live smoke run).
+  let lastError = "screencapture_failed";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const found = await execText("osascript", ["-l", "JavaScript", script, "main"]);
+    if (!found.ok) return { ok: false, error: found.error ?? "osascript_exec_failed" };
+    const info = parsePs1JsonOutput<{ ok: boolean; error?: string; can_record?: boolean; locked?: boolean; asleep?: boolean; window?: { window_id: number; onscreen: boolean } }>(found.stdout);
+    if (info.locked === true || info.asleep === true) return { ok: false, error: "screen_locked_or_asleep" };
+    if (!info.ok || !info.window) return { ok: false, error: info.error ?? "ae_window_not_found" };
+    if (info.can_record === false) return { ok: false, error: "screen_recording_permission_needed" };
+    if (!info.window.onscreen) return { ok: false, error: "ae_minimized" };
+    const out = path.join(outDir, `ae_main_${Date.now()}.png`);
+    const shot = await execText("/usr/sbin/screencapture", ["-x", "-o", "-l", String(info.window.window_id), out]);
+    const size = pngSize(out);
+    if (shot.ok && size) return { ok: true, path: out, width: size.width, height: size.height };
+    lastError = shot.error ? `screencapture_failed: ${shot.error}` : "screencapture_failed";
+    try {
+      fs.rmSync(out, { force: true });
+    } catch {}
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 500));
+  }
+  return { ok: false, error: lastError };
 }
 
 function runPowerShellScript(ps1Args: string[]): Promise<string> {
@@ -397,13 +456,13 @@ export const panelsTools: ToolDefinition<any>[] = [
   {
     name: "ae_ui_screenshot",
     description:
-      "READ-ONLY. Captures a PNG screenshot of After Effects' main window (window class AE_CApplication_*) via Win32 PrintWindow into %LOCALAPPDATA%/chroma-ae-mcp/ui/ without bringing the window to the foreground or activating it. Returns { ok: true, path, width, height }. Use this to visually verify panel open/closed visibility because native Window-menu commands toggle and their state cannot be read via scripting. " +
-      "When AE is minimized it returns `error: 'ae_minimized'` instead of an image: ask the user to restore the window (this tool never does). " +
+      "READ-ONLY. Captures a PNG screenshot of After Effects' main window (Windows: window class AE_CApplication_* via Win32 PrintWindow; macOS: screencapture of that one window) into the data dir's ui/ folder without bringing the window to the foreground or activating it. Returns { ok: true, path, width, height }. Use this to visually verify panel open/closed visibility because native Window-menu commands toggle and their state cannot be read via scripting. " +
+      "When AE is minimized (on macOS also: on another desktop) it returns `error: 'ae_minimized'` instead of an image: ask the user to restore the window (this tool never does). On macOS `screen_recording_permission_needed` means After Effects needs Screen Recording in System Settings > Privacy & Security. " +
       AGENT_SAFETY_GUIDANCE,
     schema: AeUiScreenshotSchema,
     handler: async () => {
       const platform = currentPlatform();
-      if (platform !== "win32") {
+      if (platform !== "win32" && platform !== "darwin") {
         return {
           ok: false,
           error: "not_implemented_on_this_os",
@@ -414,6 +473,33 @@ export const panelsTools: ToolDefinition<any>[] = [
       try {
         fs.mkdirSync(outDir, { recursive: true });
       } catch {}
+
+      if (platform === "darwin") {
+        const r = await captureMacMainWindow(outDir);
+        if (r.ok === true) return { ok: true, path: r.path, width: r.width, height: r.height };
+        if (r.error === "ae_minimized") {
+          return {
+            ok: false,
+            error: "ae_minimized",
+            message: "The After Effects window is minimized or on another desktop, so macOS has nothing to capture. Ask the user to bring it back, then try again.",
+          };
+        }
+        if (r.error === "screen_locked_or_asleep") {
+          return {
+            ok: false,
+            error: "screen_locked_or_asleep",
+            message: "The Mac's screen is locked or its display is asleep, so macOS gives no image of any window. Try again when the user is back at the screen.",
+          };
+        }
+        if (r.error === "screen_recording_permission_needed") {
+          return {
+            ok: false,
+            error: "screen_recording_permission_needed",
+            message: "macOS needs Screen Recording permission for After Effects: System Settings > Privacy & Security > Screen Recording, turn on After Effects, then restart it.",
+          };
+        }
+        return { ok: false, error: String(r.error ?? "screenshot_failed") };
+      }
 
       const rawStdout = await runPowerShellScript([
         "-Mode",

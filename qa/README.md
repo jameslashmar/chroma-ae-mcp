@@ -35,6 +35,10 @@ node qa/runner.js qa/scenarios/voxmark/01-markers-speakers.mjs
 
 Reports are written to `qa/out/junit.xml` and `qa/out/report.md`.
 
+## Compositing calibration
+
+`qa/calibrate-compositing.mjs` measures the tracking, colour, grain and inpaint tools against answers After Effects knows (keyframed motion, solids at known opacities, a known patch or object) on a real photograph: `node qa/calibrate-compositing.mjs --plate <image or video>`. The results and how they set the tools' defaults are in [docs/CALIBRATION.md](../docs/CALIBRATION.md).
+
 ## Live smoke test of the MCP tools
 
 `qa/smoke-mcp.mjs` calls every chroma-ae-mcp tool through the panel's MCP endpoint (`POST /mcp`) against the After Effects on this machine:

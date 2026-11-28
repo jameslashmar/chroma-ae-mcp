@@ -23,6 +23,8 @@ import {
   type PlanarFrame,
   type PlanarTrack,
   type Vec2,
+  expectedError,
+  quadGrid,
 } from "../src/tools/ext/planar-math.js";
 
 const close = (a: ArrayLike<number>, b: ArrayLike<number>, tol = 1e-6) => {
@@ -300,5 +302,69 @@ describe("goodFeatures", () => {
 
   it("finds nothing in a flat image", () => {
     expect(goodFeatures({ width: W, height: H, data: new Float32Array(W * H).fill(90) }, null, { count: 4, minDistancePx: 10, patchSize: 11 })).toEqual([]);
+  });
+});
+
+describe("expectedError", () => {
+  // A seeded normal generator, so the test is the same every run.
+  let seed = 12345;
+  const uni = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) + 0.5) / 2 ** 32;
+  const gauss = () => Math.sqrt(-2 * Math.log(uni())) * Math.cos(2 * Math.PI * uni());
+  const quad: Vec2[] = [[200, 120], [760, 120], [760, 420], [200, 420]];
+  const truth = (p: Vec2): Vec2 => {
+    const w = 1 + 0.0002 * p[0] - 0.0001 * p[1];
+    return [(1.05 * p[0] + 0.04 * p[1] + 12) / w, (-0.03 * p[0] + 0.98 * p[1] + 7) / w];
+  };
+
+  it.each([
+    ["perspective", 8, 0.3],
+    ["perspective", 6, 0.5],
+    ["similarity", 5, 0.3],
+  ] as const)("predicts the true surface error of a %s fit from %i noisy points (sigma %s px)", (model, n, sigma) => {
+    const grid = quadGrid(quad);
+    let truSum = 0;
+    let predSum = 0;
+    let used = 0;
+    for (let trial = 0; trial < 300; trial++) {
+      // Points inside the middle of the quad, so the corners are extrapolated.
+      const from: Vec2[] = Array.from({ length: n }, () => [300 + uni() * 360, 170 + uni() * 200] as Vec2);
+      const sim = (p: Vec2): Vec2 => (model === "similarity" ? [1.02 * p[0] - 0.05 * p[1] + 9, 0.05 * p[0] + 1.02 * p[1] - 4] : truth(p));
+      const to = from.map((p) => {
+        const q = sim(p);
+        return [q[0] + sigma * gauss(), q[1] + sigma * gauss()] as Vec2;
+      });
+      const fit = solveModel(model, from, to);
+      if (!fit) continue;
+      const pred = expectedError(model, fit.H, from, to, grid);
+      if (!pred) continue;
+      const tru = grid.reduce((a, p) => {
+        const q = applyH(fit.H, p)!;
+        const t = sim(p);
+        return a + Math.hypot(q[0] - t[0], q[1] - t[1]);
+      }, 0) / grid.length;
+      truSum += tru;
+      predSum += pred.mean_px;
+      used++;
+    }
+    expect(used).toBeGreaterThan(250);
+    // On average the prediction matches the truth; rms_px would be several times too small.
+    expect(truSum / predSum).toBeGreaterThan(0.75);
+    expect(truSum / predSum).toBeLessThan(1.25);
+  });
+
+  it("needs spare points and grows away from them", () => {
+    const from: Vec2[] = [[0, 0], [100, 0], [100, 100], [0, 100]];
+    const to = from.map((p) => [p[0] + 1, p[1] + 2] as Vec2);
+    const fit = solveModel("perspective", from, to)!;
+    expect(expectedError("perspective", fit.H, from, to, quadGrid(quad))).toBeNull(); // 4 points, 8 unknowns: nothing spare
+    const five: Vec2[] = [...from, [50, 50]];
+    const noisy = five.map((p, i) => [p[0] + 1 + (i % 2 ? 0.3 : -0.3), p[1] + 2 + (i % 3 ? 0.2 : -0.2)] as Vec2);
+    const f5 = solveModel("perspective", five, noisy)!;
+    const near = expectedError("perspective", f5.H, five, noisy, [[50, 50]])!;
+    const far = expectedError("perspective", f5.H, five, noisy, [[400, 400]])!;
+    expect(far.mean_px).toBeGreaterThan(near.mean_px * 3);
+    expect(quadGrid(quad)).toHaveLength(25);
+    expect(quadGrid(quad)[0]).toEqual([200, 120]);
+    expect(quadGrid(quad)[24]).toEqual([760, 420]);
   });
 });

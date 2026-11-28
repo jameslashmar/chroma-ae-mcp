@@ -987,7 +987,7 @@ describe("timelineDetectCuts under node:vm", () => {
       modes.push(m);
       return [1.5, 3];
     };
-    return { comp, layer, A, undo, modes, G };
+    return { comp, layer, A, undo, modes, G, project };
   }
 
   it("lists the cuts with no undo group and states the clip duration", () => {
@@ -1016,7 +1016,7 @@ describe("timelineDetectCuts under node:vm", () => {
   });
 
   it("refuses before anything runs: time remapping, no video, a solid, a locked layer, an old AE", () => {
-    const { comp, layer, A, undo, modes, G } = cutScene();
+    const { comp, layer, A, undo, modes, G, project } = cutScene();
     const args = { comp_id: comp.id, layer: { id: layer.id }, mode: "split", expect: GUARD };
     (layer as any).timeRemapEnabled = true;
     expect(() => A.timelineDetectCuts(args)).toThrow(/time remapping/);
@@ -1030,6 +1030,9 @@ describe("timelineDetectCuts under node:vm", () => {
     layer.locked = false;
     const solid = comp.layers.addSolid([1, 1, 1], "Solid", 10, 10, 1, 4);
     expect(() => A.timelineDetectCuts({ ...args, layer: { id: solid.id } })).toThrow(/solid/);
+    const pre = comp.layers.add(project.addComp("Inner", 64, 36, 2), 2);
+    (pre as any).hasVideo = true;
+    expect(() => A.timelineDetectCuts({ ...args, layer: { id: pre.id } })).toThrow(/pre-comp: After Effects runs Scene Edit Detection on footage layers only/);
     const saved = (layer as any).doSceneEditDetection;
     (layer as any).doSceneEditDetection = undefined;
     expect(() => A.timelineDetectCuts(args)).toThrow(/22\.3/);

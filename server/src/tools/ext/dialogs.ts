@@ -10,9 +10,9 @@ import { analysePaintedDialog, type OcrLine, type PngPixels } from "./dialog-geo
 import { powershellExe } from "../../win-exe.js";
 
 export const JAY_DIALOG_RULES =
-  "Jay's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). " +
-  "(2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless Jay gave an explicit user_instruction. " +
-  "(3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.";
+  "The user's dialog rules: (1) Popups are NEVER suppressed (never call app.beginSuppressDialogs). " +
+  "(2) Answer ONLY dialogs that our own operation caused (caused_by_op is non-null), unless the user gave an explicit user_instruction. " +
+  "(3) Destructive answers (Save, Don't Save, Replace, Delete, Overwrite, Discard, Remove, Revert) require BOTH allow_destructive: true AND a non-empty user_instruction quoting the user's explicit instruction.";
 
 export const DESTRUCTIVE_BUTTON_PATTERN =
   /save|don't save|dont save|replace|delete|overwrite|discard|remove|revert/i;
@@ -798,7 +798,7 @@ export function evaluateRespondPolicy(params: {
       allowed: false,
       error: "refused_not_caused_by_our_op",
       message:
-        "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting Jay was provided.",
+        "Refused to respond to dialog: caused_by_op is null (dialog was not caused by our own in-flight operation) and no non-empty user_instruction quoting the user was provided.",
     };
   }
 
@@ -809,7 +809,7 @@ export function evaluateRespondPolicy(params: {
         error: "refused_destructive_button",
         message:
           `Refused to click destructive button "${params.button}": buttons matching ` +
-          `${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay's explicit instruction.`,
+          `${DESTRUCTIVE_BUTTON_PATTERN.toString()} require BOTH allow_destructive: true AND a non-empty user_instruction quoting the user's explicit instruction.`,
       };
     }
   }
@@ -933,7 +933,7 @@ export const AeDialogsSchema = z.object({
     .default(true)
     .optional()
     .describe(
-      "Whether to capture a PNG screenshot of each open dialog into %LOCALAPPDATA%/chroma-ae-mcp/dialogs/ (default: true). One file per dialog handle, overwritten on each call."
+      "Whether to capture a PNG screenshot of each open dialog into dialogs/ in the data folder (ae_status: state_dir) (default: true). One file per dialog handle, overwritten on each call."
     ),
 });
 
@@ -973,7 +973,7 @@ export const AeDialogRespondSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Verbatim quote of Jay's explicit instruction authorizing answering an external dialog or pressing a destructive button."
+      "Verbatim quote of the user's explicit instruction authorizing answering an external dialog or pressing a destructive button."
     ),
 });
 
@@ -1051,7 +1051,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialogs",
     description:
-      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in %LOCALAPPDATA%/chroma-ae-mcp/dialogs/), first_seen, caused_by_op and kind (info: one OK button, nothing to decide; question; destructive: a button that loses work; advisory only). AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). The button row is the bottom row of the dialog only (a wrapped last line of the message is never a button) and the DEFAULT button is the one outlined in blue (buttons[].default, default_button, default_source \"ring\" or \"only_button\"; null when no outline was found). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: Cancel/No/Close, and the default button when it is OK/Yes/Continue. Look at the screenshot when in doubt. " +
+      "READ-ONLY. Lists modal/popup dialogs currently open in After Effects from outside AE's blocked ExtendScript thread (Windows: UI Automation; macOS: System Events, which needs Accessibility permission for After Effects and gives no screenshots), returning handle, title, class, text, buttons, checkboxes, boundingRect, screenshot path (in dialogs/ in the data folder (ae_status: state_dir)), first_seen, caused_by_op and kind (info: one OK button, nothing to decide; question; destructive: a button that loses work; advisory only). AE paints many dialogs itself, so UI Automation sees no text or buttons in them; then text and button labels come from OCR of the screenshot (text_source: \"ocr\"; the usual misread 0K is corrected to OK and the original kept as raw_name, other misreads are possible). The button row is the bottom row of the dialog only (a wrapped last line of the message is never a button) and the DEFAULT button is the one outlined in blue (buttons[].default, default_button, default_source \"ring\" or \"only_button\"; null when no outline was found). For those dialogs `unattended` lists the buttons ae_dialog_respond can press: Cancel/No/Close, and the default button when it is OK/Yes/Continue. Look at the screenshot when in doubt. " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -1089,7 +1089,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
   {
     name: "ae_dialog_respond",
     description:
-      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask Jay to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell Jay what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask Jay. Logs every response to %LOCALAPPDATA%/chroma-ae-mcp/dialogs/responses.jsonl. " +
+      "Responds to an open After Effects modal dialog by its handle using Windows UI Automation, or on macOS the button's AXPress through System Events (never brings windows to the foreground or moves the mouse; on macOS the handle is window index * 100 + sheet index and the dialog's title must be unchanged). For AE-painted dialogs (OCR buttons) two answers are possible without focusing AE: Cancel/No/Close (sent as Escape) and the DEFAULT button (outlined in blue, see default_button in ae_dialogs; a lone button is its own default) when it is OK/Yes/Continue (sent as Enter). The dialog is read again just before the key and refused with dialog_changed when its title, text, buttons or default differ from what ae_dialogs showed. A button that is not the default returns button_not_default (with the default named), any other case button_not_answerable: both mean it was NOT pressed, so ask the user to click it. The result carries dialog.title and dialog.text (what the popup said, for example how many frames are missing) and a message: tell the user what you dismissed. If the key did not close the dialog (closed: false) nothing else is tried: ask the user. Logs every response to dialogs/responses.jsonl in the data folder (ae_status: state_dir). " +
       JAY_DIALOG_RULES +
       " " +
       AGENT_SAFETY_GUIDANCE,
@@ -1144,7 +1144,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
           return {
             ok: false,
             error: "refused_destructive_dialog",
-            message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`,
+            message: `"${args.button}" was NOT pressed: the text of this dialog talks about replacing, overwriting, deleting, discarding, removing, erasing or losing something, so OK or Yes on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`,
             handle: args.handle,
             button: args.button,
           };
@@ -1210,7 +1210,7 @@ export const dialogsTools: ToolDefinition<any>[] = [
                   } else if (decision.action === "enter" && (d.buttons.length > 1 || d.other_pill_unread === true) && DESTRUCTIVE_BODY_PATTERN.test(d.text) && !(args.allow_destructive === true && (args.user_instruction ?? "").trim().length > 0)) {
                     refuse(
                       "refused_destructive_dialog",
-                      `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting Jay.`
+                      `the text of this dialog talks about replacing, overwriting, deleting, discarding or losing something, so OK on it needs BOTH allow_destructive: true AND a non-empty user_instruction quoting the user.`
                     );
                   } else {
                     // A key posted to the dialog's own window; AE keeps its focus state. A focus-taking

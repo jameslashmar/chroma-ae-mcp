@@ -1,3 +1,4 @@
+import { CancelledError, checkCancelled } from "../../call-context.js";
 /**
  * server/src/tools/ext/write-runner.ts
  *
@@ -12,8 +13,9 @@
  * each time, so a new tool can't skip a step.
  */
 
-import { BridgeError } from "../../host.js";
+import { BridgeError, withOutcome } from "../../host.js";
 import { buildJsxCall } from "../../jsx.js";
+import { QuarantineBlockedError } from "../../quarantine.js";
 import { QueueWaitError } from "../../queue.js";
 import { buildReceipt, type ReceiptMismatch } from "../../receipts.js";
 import type { ExpectGuard, ToolContext } from "../common.js";
@@ -72,12 +74,17 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
     return res.result ?? null;
   };
 
+  // Where the write is: until the write's evalScript is sent nothing in the project has changed,
+  // so any failure is "not_applied"; a failure of the write itself is whatever the host reports.
+  let sent = false;
+  let checkpointPath: string | null = null;
   try {
     return await ctx.queue.run(spec.label, async () => {
       ctx.quarantine.assertClear();
       const guard = await verifyTargetGuard(ctx, expect, opId);
       const checkpoint = await autoCheckpoint(ctx, guard, spec.toolName);
-      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpoint?.path ?? null };
+      checkpointPath = checkpoint?.path ?? null;
+      const note = { opId, toolName: spec.toolName, label: spec.label, expect, checkpoint: checkpointPath };
       const sessionFields = await noteBeforeWrite(ctx, note);
       const before = await read("before");
       // The record lives while the evalScript runs; if AE dies mid-write it is
@@ -85,6 +92,9 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       beginInflight(note);
       let write;
       try {
+        // The last safe point: after this the write is in After Effects' hands.
+        checkCancelled("the write was sent");
+        sent = true;
         write = await ctx.bridge.evalRaw<W>({
           id: opId,
           script: buildJsxCall(spec.write.host, { ...spec.write.args, expect }),
@@ -124,11 +134,13 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
       }
       const receipt = buildReceipt({ before, after, customMismatches: custom });
       // A failed read-back means AE is likely stuck: no session snapshot behind it.
-      // A host that changed nothing returns no_op: true and opened no undo group.
-      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true, undoable: spec.undoable !== false });
+      // No undo step is recorded for a host that changed nothing (no_op: true) or that changed
+      // state without opening an undo group (no_undo_step: true). Only no_op says "nothing happened".
+      await noteAfterWrite(ctx, note, { skipRead: !!readBackFailure, addStep: written.no_op !== true && written.no_undo_step !== true, undoable: spec.undoable !== false });
       return {
         op_id: opId,
         applied: true as const,
+        outcome: written.no_op === true ? ("no_op" as const) : ("applied" as const),
         ...shown,
         checkpoint,
         receipt,
@@ -137,9 +149,17 @@ export async function runGuardedWrite<W extends Written = Written>(ctx: ToolCont
     });
   } catch (err) {
     if (err instanceof QueueWaitError) {
-      throw new BridgeError({ kind: "queued", op_id: opId, message: err.message });
+      throw withOutcome(new BridgeError({ kind: "queued", op_id: opId, message: err.message }), "not_applied", spec.label);
     }
-    throw err;
+    if (err instanceof QuarantineBlockedError) throw err;
+    if (err instanceof CancelledError) {
+      err.outcome = sent ? "unknown" : "not_applied";
+      throw err;
+    }
+    if (err instanceof BridgeError) throw withOutcome(err, sent ? "unknown" : "not_applied", spec.label, checkpointPath);
+    // Not a bridge error (a bug in a read or check before the write, or a host transport fault).
+    const message = err instanceof Error ? err.message : String(err);
+    throw withOutcome(new BridgeError({ kind: "evalscript_error", op_id: opId, message }), sent ? "unknown" : "not_applied", spec.label, checkpointPath);
   }
 }
 

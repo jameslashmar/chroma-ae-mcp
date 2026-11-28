@@ -186,7 +186,7 @@ Everything else stays in `ae_run_jsx`.
 
 ## 10. Compositing (wave 4)
 
-Built on the tracker and frame analysis in the MCP's own Node code: AE renders frames (`saveFrameToPng`), Node measures them, a short host function writes the result. No outside tools. A track is stored by `track_id` (in the data dir) and shared by every tool below. Everything here is ✅ (0.4): built and reviewed, never run in AE.
+Built on the tracker and frame analysis in the MCP's own Node code: AE renders frames (`saveFrameToPng`), Node measures them, a short host function writes the result. No outside tools. A track is stored by `track_id` (in the data dir) and shared by every tool below. Everything here is ✅ (0.4): built, reviewed and run live in AE by `qa/smoke-mcp.mjs`, but only on synthetic test plates (noise and solids); how well it does on real footage has not been measured.
 
 | Capability | Status | Priority | Notes |
 |---|---|---|---|

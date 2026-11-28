@@ -1,5 +1,59 @@
 # Handover: 0.4 waves 4 and 5, 2026-11-03 to 2026-11-05
 
+## macOS and Windows live checks, 2026-11-22 (`mac/live-fixes-2026-11-22`)
+
+### Where it is
+- **Branch.** `mac/live-fixes-2026-11-22` on the private remote `xmadbad/chroma-ae-mcp`. It is not on origin and not merged. It is 37 commits on top of origin/main: 33 from the Mac session (`cd21c06` to `b3a9b2a`) and 4 from the Windows run (`5b903d1`, `a4d01e1`, `de8388a`, `6a3637e`). The tip is `6a3637e` plus the commit that carries these docs.
+- **Evidence.** `b73b523` is the live evidence for `7cb337d` (Emre's Windows PC, AE 26.2.1): 579 of 591 passed, 13 skipped, the 12 failures (the aerender family) explained in the notes, the in-AE render passed. `7cb337d` and `020f932` give every new tool and family name a smoke check of its own (each family compared with its member under the old name), which the PR's evidence check requires. The earlier `6a3637e` (566 of 578, on `de8388a`) predates those steps. The Mac's evidence is the commit bodies and `docs/WINDOWS-FOLLOWUP.md`.
+- **To do.** It needs a PR to main. Detail on the Mac side is in `docs/WINDOWS-FOLLOWUP.md` (what changed, the checklist, now with Windows results) and `docs/CALIBRATION.md` (both platforms).
+
+### What the Mac session did
+First live run on a Mac (AE 26.2.1, Apple silicon). Before it: smoke 529/534. After it: unit tests 5884, ES3 lint clean, `qa/live-reliability.mjs` 10/10, smoke 573 of 574 with a render in AE (the one failure was the keep-alive reset, fixed).
+- **Write outcomes.** A failed write says `not_applied` or `unknown` with `next_steps`, from a per-call "touched" flag (an undo group opened, or `A.touch()`); a success says `applied` or `no_op`. `ae_batch_set` lists the chunks already written when a later one fails.
+- **Idempotency.** Write tools take `idempotency_key` (per tool and client, 200 keys, 1 h); `ae_recent_ops` lists them. The 20 core write tools carry a bare field.
+- **One result envelope.** `ok` on every result, `code` on every failure, `outcome` when certain (`6687f07`). `CHROMA_AE_MCP_STRUCTURED=1` adds `structuredContent` and an `outputSchema`; off by default until the Claude clients are measured with it.
+- **Annotations.** Every `tools/list` entry carries read-only, destructive, idempotent and open-world hints (`server/src/tool-annotations.ts`, hand-kept lists).
+- **Progress and cancellation.** `tools/call` with a `progressToken` is answered as an event stream, one notification per AE eval; `notifications/cancelled` stops only at safe points (before the queue, before each rendered frame, before a guarded write). An eval already sent always finishes.
+- **`ae_ask_user`** uses elicitation when the client declares it, and falls back to the panel.
+- **Frame grabs.** They wait for a PNG that is still being written and never start a second render over it; a frame now counts as written only once the file ends with IEND (about 4 reads in 1000 were cut short in a long calibration track). This is the likeliest cause of the AE 26.3 3D annotate crash.
+- **`Connection: close`** on every reply of the panel service: on macOS the CEP page stops during a long eval, and reused keep-alive sockets died with ECONNRESET (3 of 3 before, 0 of 3 after).
+- **Tool families.** 181 tools show as 131 entries; 19 families with an `action` field stand in for 69 member tools. Members stay callable under their old names. The core list is unchanged (36 tools, 83,978 of 84,000 characters).
+- **Smaller.** `ae_detect_cuts` refuses a pre-comp layer before asking AE; render formats are measured by intent (`ae_render_templates` with `allow_temp`), and `output_path` gets the template's extension; the panel manifest carries the real VERSION; model-facing text says "the user", not Jay.
+- **macOS only.** Popup reading in `ae_dialogs` (AXLayoutArea and AXDescription), the Presets folder beside the .app, `ae_ui_screenshot` through screencapture, `scripts/install-dev-mac.sh`, a macOS job in `ae-live.yml`, and `qa/ci-live.mjs` restarting AE on macOS (the service cannot be reloaded through its debug port there).
+- **QA.** `qa/ci-live.mjs` refuses a second copy of the extension in the user CEP folder and checks the folder AE loaded (`/health` `extensionDir`), on both platforms. Smoke wave 6 for the new tools on both platforms; `qa/live-reliability.mjs`, `qa/cep-freeze-check.mjs`, `qa/calibrate-compositing.mjs`.
+
+Compositing calibration on the Mac (`docs/CALIBRATION.md`), and what it changed:
+- **Honest track error.** `rms_px` ran 3-5x below the true error. Tracks now report `expected_error_px` (true error 0.71-0.87x of it on clean shots, 1.6x under motion blur), `corner_jitter_px` and `sliding_points`; frames with 8x the median expected error are marked not ok.
+- **`ae_patch_grain`.** Add Grain's Size 1 is clumped (neighbour correlation 0.68), and the old first guess started 7x too low. Size now comes from the plate's grain, Intensity from the measured curve and, since `b3a9b2a`, from the area's gray (factor `1 + 1.98 (0.5 - gray)`); tolerance 5%.
+- **3D projection.** X, Y and Z rotation were applied in the wrong order: up to 472 px off (82 px mean). Now 0.000 px against `toComp`, pinned by `projection-ae.test.ts`.
+- **New tools.** `ae_camera_solve_check`, `ae_color_match_element` (11.8 to 0.34 levels), `ae_matte_check`, light tracking by `ae_patch_color_match` on any element (0.19 levels).
+- **Corrections.** `ae_patch_check` slip along `region_track` (read 9-29 px on a locked insert, now 0.04-0.13); the Corner-Pinned `clone_offset` (a shift-only clone was 5.4-6.0 px off); `painted_check` on `ae_cleanplate_setup` reload; a `lens` warning in track summaries.
+
+### What the Windows run found
+Emre's Windows PC, AE 26.2.1, Node 22.23.2, same branch.
+- **Build.** `npm install` (not `npm ci`: `node_modules` carries a Dropbox-ignore marker here), build, bundle, 169 test files / 5974 tests, lint 63 files 0 issues. After the rebase onto `b3a9b2a`: 5976 tests, lint 0 issues.
+- **CEP freeze (`qa/cep-freeze-check.mjs`).** The service keeps answering while AE runs ExtendScript. A 7 s eval (took 7.7 s) and a 12 s eval (13.3 s): `/health` answered in 3 ms on a new connection and 2 ms on a reused one, no reset. So the busy refusals in `ae-activity.ts` work as designed on Windows; macOS needs its own answer (open below).
+- **Smoke.** On `1159b80`: 556/568, 14 skipped. With `CHROMA_SMOKE_RENDER_IN_AE=1`: 564/578, and 566/578 once the smoke made its render folder. Evidence run: 566/578, 13 skipped. Each run is about 4 minutes. The only failures are 12 checks of the aerender family. Cause: `aerender` is refused up front with `too_many_cep_extensions` (limit 6, on main since `bd3fb09`). This PC has six other auto-starting CEP extensions (Overlord, AEUX, Anubis, LaForge); the refusal counted 7, and 8 in the evidence run where two copies of ours were loaded. Not caused by the branch. Using aerender here means turning off at least two of them. The skips are AE 26.3/26.5-only steps, layer style, Tracker data, Content-Aware Fill, a PSD import, a saved render template, memory purge all, a running-batch cancel, and the aerender-dependent checks.
+- **`qa/live-reliability.mjs`:** 10/10.
+- **Relay.** `stdio-relay.test.ts` passes. The dev relay driven as an MCP client: `claude-ai` 36 tools, 81,087 characters, `ae_status` in 67 ms; `claude-code` 134 tools, 796,505 characters, 84 ms; run inside the Claude Desktop Microsoft Store package, 36 tools, 72 ms. Claude Code's own HTTP connection made every call of the session without a reset. The Desktop app itself was not opened for a call.
+- **WINDOWS-FOLLOWUP items.** 1: AE 26.2.1 on Windows refuses scene edit detection on a pre-comp too, so the up-front refusal is right on both. 2: cut after a semi-transparent shot behaves as on macOS (60% alpha: 1 cut; opaque: 2). 3 (aerender under another extension) and 4 (AE 26.3, not installed) were not run. All ten items are listed with results in `docs/WINDOWS-FOLLOWUP.md`.
+- **Calibration** (`docs/CALIBRATION.md`, rock-surface photograph, so tracking numbers are not like for like). Projection and the Add Grain curve are the same as on the Mac to the printed digits, so no per-platform `ADD_GRAIN_CURVE` or tone factor is needed. Motion blur: `expected_error_px` under-reads 3.5x here (1.6x on the Mac). Colour: worst residual 1.27 levels against 33.0 uncorrected (Mac 0.2 against 8.9); on a second, brighter plate 1.78 against 90.5. The residual is 2-4% of the uncorrected error on both platforms, so it follows the plate, probably 8-bit rounding on a darkened bright plate; one plate on both platforms would settle it.
+- **Panel install pitfall.** The PC had the released 0.7.4 panel installed system-wide (CEP's common `extensions` folder). With the same extension id, CEP loads that copy and ignores the per-user dev link, so the run would have tested the wrong code. It was moved out for the run and moved back. `qa/ci-live.mjs` scans only the user folder and misses it; the `/health` `extensionDir` check catches it.
+
+Two bugs found on Windows, fixed on the branch:
+- **`5b903d1` smoke made no render folder.** Only the aerender step made `<dir>/render`, so where aerender is refused the in-AE render failed with "Directory does not exist" (2 checks). The smoke now makes it first.
+- **`a4d01e1` writes without an undo group reported `no_op`.** `projectsession.jsx` used `no_op: true` to mean "no undo group, no Ctrl+Z step", but the new write outcomes read `no_op` as "nothing changed", so `ae_project_session` new/open/close (and autosave `set`) answered `applied: true, outcome: "no_op"` after replacing the open project. Hosts now say `no_undo_step: true`; `runGuardedWrite` records no undo step for either flag and only `no_op` gives outcome `no_op`. `cleanplate.jsx` reload had the same mix-up. Every other host's `no_op` was audited: all mean "nothing changed". Live after the fix: `ae_project_session new` gives `applied`, `no_undo_step: true`. `de8388a` rebuilds the panel bundle.
+
+### Open, for Jay
+- **Open the PR** from `mac/live-fixes-2026-11-22` to main (the branch is on the private remote only); it carries its own Windows evidence.
+- **macOS freeze.** The CEP service stops answering during a long eval, so busy refusals cannot be fast there. The Mac review proposes running the MCP server outside the CEP page. Decision needed.
+- **aerender on Emre's PC** is refused (six other auto-starting extensions; the engine exited at every start with that many on 2026-11-08). Item 3 stays unverified on Windows until two of them are turned off for a run, or another Windows machine runs it.
+- **AE 26.3** (item 4, the 3D annotate crash) is untested on Windows.
+- **`qa/ci-live.mjs`** scans only the user CEP folder for a second copy; consider scanning the system-wide folder too.
+- **Motion blur:** `expected_error_px` under-reads 3.5x on the Windows plate (1.6x on the Mac). Decide whether to correct it or only say so in the tool text.
+- **Colour residual:** run one plate on both platforms.
+- **Grain on real film grain** is still unchecked (the test plate's AE Noise is not Gaussian).
+
 ## Live session 2026-11-08 (`feat/usage-log`, AE 26.2.1, throwaway project)
 - **Measured.** `item_indexes` works: only item 1 rendered (DONE); item 2 was unchecked during the render (`render = false` reads back UNQUEUED and `render()` skipped it) and QUEUED again afterwards, `restore.state: restored`. `ae_verify_render` writes no ERR line any more (its "gone" check logs OK). The ES3 pre-check refused let, const, an arrow function and a template string in 33 ms without touching AE; a string or comment containing those words still ran.
 - **Relay, simulated** (clientInfo `claude-ai` and `cursor`, Node 22 and 17.7.2): `claude-ai` got core (36 tools, 79,801 characters, 2,829 characters of instructions); `cursor` got full (180 tools, 803,235 characters); env `full` plus `claude-ai` got full. The real Claude Desktop client name is still unconfirmed.
@@ -571,7 +625,7 @@ Each line is a guess the code makes or works around. Where the code can work eit
 | Roto Brush and Track Mask (strokes, propagation, Freeze) | `ae_mask_follow` and `ae_garbage_matte` follow planar motion only. A moving person or hand needs the user's own roto layer, used as `matte_layer` or a holdout. Screens are keyed with `ae_key_greenscreen` |
 | Mocha AE (running it, reading its project data) | The user tracks in Mocha and uses Create Track Data; `ae_track_read` reads the Corner Pin or CC Power Pin keys that leaves. `ae_track_multi` tracks planes inside the MCP |
 | Warp Stabilizer VFX (starting, waiting for or reading the analysis) | `ae_stabilize` from a track made by `ae_track_multi` or read by `ae_track_read` |
-| The 3D Camera Tracker solve | `ae_track_read` reads keys made from it; nothing reads the solve itself |
+| The 3D Camera Tracker solve | Nothing reads it: the Camera Tracker makes 3D nulls and a 3D camera, and `ae_track_read` refuses 3D layers |
 | AE's Tracker panel and Track Motion (driving them) | `ae_track_point` and `ae_track_multi`; `ae_track_read` reads the points an AE Tracker already made |
 | Clone Stamp and other paint strokes | `ae_cleanplate_setup` builds a freeze, still, spatial or time clone patch; the user paints inside the PATCH precomp and `action: "reload"` takes a painted still |
 | Menu commands such as Trim Comp to Work Area through `app.executeCommand` (it does nothing through CEP except Window-menu panels) | Native DOM methods; `ae_comp_settings` trims to the work area itself |
@@ -698,7 +752,7 @@ Each group has the same three files: `panel/host/ext/<group>.jsx`, `server/src/t
 
 **Shared pieces these waves added or lean on:**
 - `server/src/tools/ext/session.ts`: the session tracker. After each guarded write it keeps a snapshot, writes a write-ahead record while the write runs (a record left at the next start becomes a quarantine entry), and logs every agent write per project (`agentWritesSince`). `installSessionTracking()` and `installSessionBridgeHook(bridge)` run at startup. `ae_learn_taste` and `ae_project_session` read the write log.
-- `write-runner.ts`: `HostCall.timeoutMs` for slow writes, and `no_op: true` from a host means no undo step is recorded.
+- `write-runner.ts`: `HostCall.timeoutMs` for slow writes, and `no_op: true` from a host means nothing changed (no undo step, outcome `no_op`); `no_undo_step: true` means state changed with no undo group (no undo step, outcome `applied`).
 - A tool that closes or reopens a project calls `markReopened()` so earlier undo steps are reported as gone (`ae_collect_relink`, `ae_project_session`). The bridge hook does the same for any write whose script calls `openProject(`.
 - Write tools that touch a locked layer, a keyframed property or a missing sub-property refuse before the undo group, and look a property up again after `addProperty`.
 
@@ -790,7 +844,7 @@ Each line is a guess the code makes or works around. Where the code can work eit
 
 **camera**
 - The camera's point of interest is `ADBE Point of Interest` (falls back to `ADBE Anchor Point`).
-- The sign of X/Y rotation (inherited from `annotate`), and a parented two-node camera's point of interest.
+- A parented two-node camera's point of interest. (The rotation order and signs were measured in 2026-11 against AE's own `toComp`: `Orientation(X.Y.Z) . Rotation(X.Y.Z)`, all positive; a two-node camera looks at its point of interest with +Y down, then the same rotations. The old order was up to 470 px off; see docs/CALIBRATION.md.)
 - Setting `autoOrient` to no auto-orient hides the Point of Interest.
 - The zoom set by script matches the Camera Settings dialog for the comp's film size.
 - The Focus Distance expression lands on the target's sharp plane in Classic and Advanced 3D.

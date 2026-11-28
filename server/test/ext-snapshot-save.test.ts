@@ -41,8 +41,12 @@ afterEach(() => {
   for (const d of tmp.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
-/** A fake AE: getComp answers the comp, snapshotFrame writes a PNG unless `skip` says to leave it out. */
-function fakeAe(opts: { name?: string; fps?: number; duration?: number; skip?: (call: number, time: number) => boolean } = {}) {
+/**
+ * A fake AE: getComp answers the comp, snapshotFrame writes a PNG. When `stale` says so it hands back AE's cached
+ * frame instead: a whole PNG dated before the request (the case the time-nudge retry is for; a frame with no file
+ * at all is never retried, see frame-capture-late.test.ts).
+ */
+function fakeAe(opts: { name?: string; fps?: number; duration?: number; stale?: (call: number, time: number) => boolean } = {}) {
   const dir = tempDir();
   const queue = new SingleWriterQueue();
   const quarantine = new QuarantineStore(path.join(dir, "quarantine.json"));
@@ -57,7 +61,11 @@ function fakeAe(opts: { name?: string; fps?: number; duration?: number; skip?: (
       const outPath = JSON.parse(`"${m[1]}"`) as string;
       const time = Number(/"time":([0-9.eE+-]+)/.exec(script)![1]);
       snaps.push({ time, output_path: outPath });
-      if (!opts.skip?.(n++, time)) fs.writeFileSync(outPath, pngBytes(64, 36, Math.round(time * 10)));
+      fs.writeFileSync(outPath, pngBytes(64, 36, Math.round(time * 10)));
+      if (opts.stale?.(n++, time)) {
+        const old = new Date(Date.now() - 60_000);
+        fs.utimesSync(outPath, old, old);
+      }
       return { ok: true, result: { path: outPath, time, width: 64, height: 36 }, durationMs: 1 };
     },
     queue,
@@ -154,7 +162,7 @@ describe("ae_snapshot_frame save_to", () => {
     it("retries a stale frame once with a time nudge and reports the time that was rendered", async () => {
       pngWaitDeps.timeoutMs = 60;
       const out = tempDir();
-      const ae = fakeAe({ skip: (call) => call === 0 });
+      const ae = fakeAe({ stale: (call) => call === 0 });
       const res = await ae.run({ save_to: { folder: out }, frames: [25] });
       expect(res.ok).toBe(true);
       expect(ae.snaps).toHaveLength(2);
@@ -166,7 +174,7 @@ describe("ae_snapshot_frame save_to", () => {
     it("reports a frame that stays stale in failed and still saves the others", async () => {
       pngWaitDeps.timeoutMs = 60;
       const out = tempDir();
-      const ae = fakeAe({ skip: (_c, time) => Math.abs(time - 1) < 0.01 });
+      const ae = fakeAe({ stale: (_c, time) => Math.abs(time - 1) < 0.01 });
       const res = await ae.run({ save_to: { folder: out }, frames: [25, 50] });
       expect(res).toMatchObject({ ok: false, error: "some_frames_not_saved" });
       expect(res.saved.map((s: any) => s.frame)).toEqual([50]);

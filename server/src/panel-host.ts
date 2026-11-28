@@ -1,8 +1,10 @@
+import { noteProgress } from "./call-context.js";
 import * as crypto from "node:crypto";
 import { noteOpFinished, noteOpStarted } from "./tools/ext/dialogs.js";
 import {
   BridgeError,
   DEFAULT_TIMEOUT_MS,
+  bridgeErrorFromHost,
   normalizeErrorKind,
   type CallHostOptions,
   type EvalSuccessResponse,
@@ -188,6 +190,8 @@ export class PanelHost implements HostTransport {
   }): Promise<EvalSuccessResponse<T>> {
     // While AE renders for ae_render_queue_render it cannot answer: refuse at once, send nothing.
     renderGate.check(params.id);
+    // One step of the running tools/call: a progress notification when the client asked for them.
+    noteProgress(params.label);
     const isRender = renderGate.isRenderOp(params.id);
     // AE has been busy for a while with something this server is not waiting on (a popup, a script,
     // a manual render), or an earlier eval of ours is still running in it: refuse at once, send nothing.
@@ -290,11 +294,12 @@ export class PanelHost implements HostTransport {
                   return `"${x.title ?? "untitled"}"${btns ? ` [${btns}]` : ""}`;
                 })
                 .join("; ") +
-              ". Read them with ae_dialogs; answer with ae_dialog_respond only under Jay's rules."
+              ". Read them with ae_dialogs; answer with ae_dialog_respond only under the user's rules."
             : "";
         throw new BridgeError({
           kind: "timeout",
           op_id: params.id,
+          ...(params.mutates && !isRender ? { outcome: "unknown" as const } : {}),
           actual: blocking.length > 0 ? { blocking_dialogs: blocking } : undefined,
           message:
             `Operation "${params.label}" (${params.id}) timed out after ${Math.round(
@@ -337,15 +342,7 @@ export class PanelHost implements HostTransport {
         message: "Unknown ExtendScript error",
         kind: "evalscript_error",
       };
-      const mappedKind = normalizeErrorKind(errObj.kind);
-      throw new BridgeError({
-        kind: mappedKind,
-        op_id: params.id,
-        message: errObj.message || "Unknown ExtendScript error",
-        line: errObj.line,
-        actual: errObj.actual,
-        expected: errObj.expected,
-      });
+      throw bridgeErrorFromHost(errObj, params.id, { mutates: params.mutates === true && !isRender, label: params.label });
     }
 
     return {

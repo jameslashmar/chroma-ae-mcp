@@ -496,9 +496,11 @@
     }
     var saved = false;
     if (args.save_first === true && open !== "<unsaved>") {
+      if (A.touch) A.touch();
       app.project.save();
       saved = true;
     }
+    if (A.touch) A.touch();
     app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
     app.open(target);
     return {

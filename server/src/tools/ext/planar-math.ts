@@ -29,7 +29,13 @@ export interface PlanarFrame {
   H: Mat3 | null;
   points: Array<Vec2 | null>;
   confidence: Array<number | null>;
+  /** How well the points agree with the solved model (fit residual). Not the error: see expected_px. */
   rms_px: number | null;
+  /**
+   * The expected error of the solved surface over the quad, px (expectedError): null when the frame
+   * has no spare points. Absent on tracks made before it existed.
+   */
+  expected_px?: number | null;
   inliers: number;
   /** Why a frame is not ok, or a warning about it. */
   note?: string;
@@ -400,6 +406,115 @@ export function reprojectionErrors(H: Mat3, from: Vec2[], to: Vec2[]): number[] 
   return out;
 }
 
+/** Free parameters of each model: what the residuals' degrees of freedom are counted against. */
+export const MODEL_PARAMS: Record<MotionModel, number> = { translate: 2, similarity: 4, affine: 6, perspective: 8 };
+
+/**
+ * How far the solved surface is likely to be from the true one, at `targets` (ref comp px).
+ *
+ * rms_px, the fit residual, measures how well the points agree with each other, not the error: the
+ * fit bends towards the very points it is measured on (with 8 points and a perspective model it
+ * absorbs half of their noise), and it says nothing about the area away from the points, where a
+ * perspective fit amplifies small point errors. Here the point noise is estimated from the residuals
+ * with the model's degrees of freedom (sigma^2 = SSR / (2n - k)) and propagated through the fit's
+ * covariance (sigma^2 (J^T J)^-1) to each target. Calibrated against After Effects shots with known
+ * motion (qa/calibrate-compositing.mjs): the true error over the surface was 0.7-1.0 times this.
+ *
+ * Null when there are no spare points (2n <= k: as many as the model needs) or the fit is degenerate.
+ */
+export function expectedError(
+  model: MotionModel,
+  H: Mat3,
+  from: Vec2[],
+  to: Vec2[],
+  targets: Vec2[]
+): { sigma_px: number; mean_px: number; max_px: number } | null {
+  const k = MODEL_PARAMS[model];
+  const n = from.length;
+  if (n !== to.length || 2 * n <= k || targets.length === 0) return null;
+  const err = reprojectionErrors(H, from, to);
+  if (!err) return null;
+  const sigma2 = err.reduce((a, e) => a + e * e, 0) / (2 * n - k);
+  // Normalised source coordinates keep J^T J well conditioned for the perspective terms.
+  const c = centroid(from);
+  let spread = 0;
+  for (const p of from) spread += Math.hypot(p[0] - c[0], p[1] - c[1]);
+  const sc = spread / n > 1e-6 ? spread / n / Math.SQRT2 : 1;
+  const Hn = mulH(H, [sc, 0, c[0], 0, sc, c[1], 0, 0, 1]);
+  const rows = (p: Vec2): [number[], number[]] | null => {
+    const x = (p[0] - c[0]) / sc;
+    const y = (p[1] - c[1]) / sc;
+    if (model === "translate") return [[1, 0], [0, 1]];
+    if (model === "similarity") return [[x, -y, 1, 0], [y, x, 0, 1]];
+    if (model === "affine") return [[x, y, 1, 0, 0, 0], [0, 0, 0, x, y, 1]];
+    const w = Hn[6] * x + Hn[7] * y + Hn[8];
+    if (!(Math.abs(w) > 1e-9)) return null;
+    const u = (Hn[0] * x + Hn[1] * y + Hn[2]) / w;
+    const v = (Hn[3] * x + Hn[4] * y + Hn[5]) / w;
+    return [
+      [x / w, y / w, 1 / w, 0, 0, 0, (-u * x) / w, (-u * y) / w],
+      [0, 0, 0, x / w, y / w, 1 / w, (-v * x) / w, (-v * y) / w],
+    ];
+  };
+  // A = J^T J, then its inverse by Gauss-Jordan with pivoting.
+  const A: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+  for (const p of from) {
+    const r = rows(p);
+    if (!r) return null;
+    for (const row of r) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) A[i][j] += row[i] * row[j];
+  }
+  const inv: number[][] = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => (i === j ? 1 : 0)));
+  for (let col = 0; col < k; col++) {
+    let piv = col;
+    for (let r = col + 1; r < k; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    if (!(Math.abs(A[piv][col]) > 1e-12)) return null;
+    [A[col], A[piv]] = [A[piv], A[col]];
+    [inv[col], inv[piv]] = [inv[piv], inv[col]];
+    const d = A[col][col];
+    for (let j = 0; j < k; j++) {
+      A[col][j] /= d;
+      inv[col][j] /= d;
+    }
+    for (let r = 0; r < k; r++) {
+      if (r === col) continue;
+      const f = A[r][col];
+      if (f === 0) continue;
+      for (let j = 0; j < k; j++) {
+        A[r][j] -= f * A[col][j];
+        inv[r][j] -= f * inv[col][j];
+      }
+    }
+  }
+  let sum = 0;
+  let max = 0;
+  for (const t of targets) {
+    const r = rows(t);
+    if (!r) return null;
+    let v = 0;
+    for (const row of r) for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) v += row[i] * inv[i][j] * row[j];
+    const e = Math.sqrt(Math.max(0, sigma2 * v));
+    sum += e;
+    if (e > max) max = e;
+  }
+  if (!Number.isFinite(sum)) return null;
+  return { sigma_px: Math.sqrt(sigma2), mean_px: sum / targets.length, max_px: max };
+}
+
+/** A 5 x 5 grid over a quad [UL, UR, LR, LL] (bilinear), where a surface's error is judged. */
+export function quadGrid(quad: Vec2[], steps = 4): Vec2[] {
+  const out: Vec2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      const s = i / steps;
+      const t = j / steps;
+      const top: Vec2 = [quad[0][0] + (quad[1][0] - quad[0][0]) * s, quad[0][1] + (quad[1][1] - quad[0][1]) * s];
+      const bottom: Vec2 = [quad[3][0] + (quad[2][0] - quad[3][0]) * s, quad[3][1] + (quad[2][1] - quad[3][1]) * s];
+      out.push([top[0] + (bottom[0] - top[0]) * t, top[1] + (bottom[1] - top[1]) * t]);
+    }
+  }
+  return out;
+}
+
 /** A small seeded generator, so a track solved twice gives the same answer. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -594,6 +709,40 @@ export function smoothFrames(track: PlanarTrack, sigmaFrames: number): PlanarTra
     return { ...fr, H: sol.H };
   });
   return relativeTo({ ...track, frames }, track.ref_time);
+}
+
+/**
+ * Solves every frame again from its tracked points with another model; the points stay as tracked,
+ * only H changes. A model with fewer parameters can hold a surface much more steadily when the points
+ * cover little of it: a perspective fit on points in a thin band swings the surface corners by tens of
+ * pixels from sub-pixel point noise (measured on a 4K shot, 2026-11-26). Points that do not agree are
+ * voted out (RANSAC, 2 px, or 3 px for fewer parameters than the track had). A frame with too few
+ * points for the model, or a degenerate set, is not ok afterwards.
+ */
+export function refitFrames(track: PlanarTrack, model: MotionModel): PlanarTrack {
+  if (model === track.model) return track;
+  const targets = quadGrid(track.tracking?.quad ?? boundingQuad(track.ref_points));
+  const frames: PlanarFrame[] = track.frames.map((fr, i) => {
+    if (!fr.ok) return fr;
+    const from: Vec2[] = [];
+    const to: Vec2[] = [];
+    fr.points.forEach((p, k) => {
+      if (p && track.ref_points[k]) {
+        from.push(track.ref_points[k]);
+        to.push(p);
+      }
+    });
+    if (from.length < MODEL_MIN_POINTS[model]) {
+      return { ...fr, ok: false, H: null, note: `${from.length} point(s), fewer than the ${model} model needs (${MODEL_MIN_POINTS[model]})` };
+    }
+    const fit = ransacModel(model, from, to, { thresholdPx: MODEL_PARAMS[model] < MODEL_PARAMS[track.model] ? 3 : 2, iterations: 200, seed: 1000 + i });
+    if (!fit) return { ...fr, ok: false, H: null, note: `the ${model} model could not be solved from this frame's points` };
+    // The expected error over the surface, for the new model, from the points that agree with it.
+    const keep = fit.inliers.map((v, k) => (v ? k : -1)).filter((k) => k >= 0);
+    const ex = expectedError(model, fit.H, keep.map((k) => from[k]), keep.map((k) => to[k]), targets);
+    return { ...fr, H: fit.H, rms_px: Number(fit.rms_px.toFixed(4)), expected_px: ex ? Number(ex.mean_px.toFixed(4)) : null, inliers: keep.length };
+  });
+  return relativeTo({ ...track, model, frames }, track.ref_time);
 }
 
 // ---------- bezier shapes ----------

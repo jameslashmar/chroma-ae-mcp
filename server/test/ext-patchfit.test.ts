@@ -26,6 +26,7 @@ import {
   finishMismatches,
   fitFrame,
   grainIntensityFor,
+  grainSizeFor,
   grainMismatches,
   levelsFromGainOffset,
   makeRingSet,
@@ -47,7 +48,7 @@ import {
 } from "../src/tools/ext/patchfit.js";
 import { loadTrack, saveTrack } from "../src/tools/ext/planar.js";
 import type { Mat3, PlanarTrack } from "../src/tools/ext/planar-math.js";
-import type { Pt } from "../src/tools/ext/region-math.js";
+import { temporalLag1, type Pt } from "../src/tools/ext/region-math.js";
 import { toGray } from "../src/tools/ext/track.js";
 import { FakeGroup, FakeLayer, FakeProject, FakeProperty, GUARD, loadHost, PropertyValueType, type FakeComp } from "./support/fake-ae.js";
 
@@ -340,11 +341,41 @@ describe("the ring fit", () => {
 
 describe("grain, sharpness, motion blur and edge helpers", () => {
   it("scales Add Grain intensity by the measured ratio, within a cap", () => {
-    expect(grainIntensityFor(4)).toBeCloseTo(0.2);
-    expect(grainIntensityFor(0.1)).toBe(0.02);
+    // Through Add Grain's measured curve: 2.58 sigma per unit of Intensity at Size 1, 8.59 at 0.25.
+    expect(grainIntensityFor(4)).toBeCloseTo(4 / 2.58, 3);
+    expect(grainIntensityFor(4, 0.25)).toBeCloseTo(4 / 8.59, 3);
+    expect(grainIntensityFor(4, 0.875)).toBeCloseTo(4 / ((3.37 + 2.58) / 2), 3);
+    expect(grainIntensityFor(0.01)).toBe(0.02);
+    // Darker areas get more grain per unit: a shadow needs less Intensity for the same sigma.
+    expect(grainIntensityFor(4, 0.25, 0.25)).toBeCloseTo(4 / (8.59 * 1.495), 3);
+    expect(grainIntensityFor(4, 0.25, 0.75)).toBeCloseTo(4 / (8.59 * 0.505), 3);
     expect(nextGrainIntensity(0.2, 8, 4)).toBeCloseTo(0.1);
     expect(nextGrainIntensity(0.2, 0.5, 4)).toBeCloseTo(0.8);
     expect(nextGrainIntensity(0.2, 0, 4)).toBeCloseTo(0.8);
+  });
+
+  it("picks the Add Grain Size whose grain is as coarse as the plate's", () => {
+    expect(grainSizeFor(null)).toBeNull();
+    expect(grainSizeFor(-0.05)).toBe(0.25); // per-pixel noise
+    expect(grainSizeFor(0.681)).toBe(1);
+    expect(grainSizeFor(0.42)).toBeCloseTo(0.625, 2);
+    expect(grainSizeFor(0.99)).toBe(2);
+  });
+
+  it("measures grain coarseness from two frames: about 0 for per-pixel noise, high for blurred noise", () => {
+    let seed = 5;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5) * 20;
+    const w = 80;
+    const h = 60;
+    const noise = () => Float32Array.from({ length: w * h }, () => 128 + rnd());
+    const blur = (d: Float32Array) => Float32Array.from(d, (_, k) => (k % w > 0 && k % w < w - 1 && k > w && k < w * (h - 1) ? (d[k - 1] + d[k] + d[k + 1] + d[k - w] + d[k + w]) / 5 : d[k]));
+    const mask = new Float32Array(w * h).fill(1);
+    const white = temporalLag1({ width: w, height: h, data: noise() }, { width: w, height: h, data: noise() }, mask)!;
+    const soft = temporalLag1({ width: w, height: h, data: blur(noise()) }, { width: w, height: h, data: blur(noise()) }, mask)!;
+    expect(Math.abs(white)).toBeLessThan(0.08);
+    // A 5-point cross blur shares 2 of 5 samples with each neighbour: 0.4 in theory.
+    expect(soft).toBeGreaterThan(0.3);
+    expect(soft).toBeLessThan(0.5);
   });
 
   it("finds the blur that brings a sharp region to a target detail", () => {
@@ -396,7 +427,7 @@ describe("schemas", () => {
 
   it("takes defaults for ae_patch_grain and needs plate_layer for match", () => {
     const a = AePatchGrainSchema.parse(base);
-    expect(a).toMatchObject({ method: "add", degrain: "none", rounds: 2, samples: 3, tolerance: 0.1, min_sigma: 0.6 });
+    expect(a).toMatchObject({ method: "add", degrain: "none", rounds: 2, samples: 3, tolerance: 0.05, min_sigma: 0.6 });
     expect(AePatchGrainSchema.safeParse({ ...base, method: "match" }).success).toBe(false);
     expect(AePatchGrainSchema.safeParse({ ...base, method: "match", plate_layer: { index: 2 } }).success).toBe(true);
     expect(AePatchGrainSchema.safeParse({ ...base, rounds: 4 }).success).toBe(false);

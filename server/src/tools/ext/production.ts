@@ -14,13 +14,17 @@
  */
 
 import { z } from "zod";
+import { BridgeError } from "../../host.js";
 import { normalizeGuardPath } from "../../jsx.js";
+import { QuarantineBlockedError } from "../../quarantine.js";
+import { CancelledError } from "../../call-context.js";
 import type { ReceiptMismatch } from "../../receipts.js";
 import { compareValues } from "../../receipts.js";
 import { appendVersionLog, planVersion, versionToken, type VersionLogEntry } from "../../versions.js";
 import { AGENT_SAFETY_GUIDANCE, ExpectSchema, LayerSelectorSchema, type ToolContext, type ToolDefinition } from "../common.js";
 import { KeyframeItemSchema } from "../mutate.js";
 import { DEFAULT_AUDIO_TEMPLATE } from "./audio.js";
+import { catalogFor, intentsOf, rememberCatalog, type FormatCatalog, type FormatEntry } from "./render-formats.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 const PathSchema = z.array(z.union([z.string().min(1), z.number().int().positive()])).min(1);
@@ -134,6 +138,10 @@ export function egpMismatches(args: z.infer<typeof AeSetEssentialGraphicsSchema>
 
 // ---------- render templates ----------
 
+/** How to read the measured formats: nothing names a codec, because a script cannot read one. */
+export const FORMATS_NOTE =
+  "Measured by applying each template: format (container), extension, alpha, sequence, audio, H.264 bitrate from the name. A script cannot read the codec, so two QuickTime templates (e.g. High Quality, Lossless) differ only by name: pick by name and say which you chose. Pass the name as output_module_template; the render tools then give output_path the template's extension.";
+
 export const AeRenderTemplatesSchema = z
   .object({
     action: z
@@ -143,7 +151,7 @@ export const AeRenderTemplatesSchema = z
     allow_temp: z
       .boolean()
       .optional()
-      .describe("list: with an empty render queue, add a temporary item to read the names from and remove it again. That marks the project changed (save before aerender). Needs expect."),
+      .describe("list: measure every output module template on a temporary item, removed again: what it writes (format, extension, alpha, sequence, audio, H.264 bitrate) and template names grouped by intent. Also reads the names when the queue is empty. Marks the project changed (save before aerender). Needs expect."),
     comp_id: z.number().int().optional().describe("list: the comp for the temporary item. Default the first comp."),
     kind: z.enum(["render_settings", "output_module"]).optional().describe("save: what to store."),
     item_index: z.number().int().positive().optional().describe("save: the render-queue item's 1-based index."),
@@ -456,6 +464,7 @@ export const productionTools: ToolDefinition<any>[] = [
       "List the render-settings and output-module template names this AE has (built-in and the user's), read from a render-queue item: an existing one changes nothing; " +
       "with an empty queue, allow_temp adds a temporary item and removes it (the project is then marked changed: save before aerender). " +
       `Says whether '${DEFAULT_AUDIO_TEMPLATE}', the audio template ae_audio_analyze uses by default, is there. ` +
+      "With allow_temp and expect it also measures what each output module template writes (format, extension, alpha, sequence, audio, H.264 bitrate; never the codec, which a script cannot read) and groups the names by intent (h264, quicktime, quicktime_alpha, image_sequence, audio_only, alpha_only): turn what the user asks for (a web H.264, a master with alpha, a TIFF sequence) into one of these names and pass it as output_module_template. The measurement is kept per AE version; the render tools then give output_path the template's extension (output_path_adjusted). " +
       "With action save it stores a render-queue item's render settings or one of its output modules as a named template (RenderQueueItem / OutputModule.saveAsTemplate) guarded by `expect`; it is NOT undoable (a machine-wide preference, not a project change: Edit > Undo (Ctrl+Z) does not remove it and neither does ae_checkpoint_revert): " +
       "the item is checked by index and comp id, a blank name is refused, a name that already exists is refused unless allow_replace, and the read-back (a separate evalScript) checks the name is in the list. " +
       "Templates are machine-wide preferences, outlive the project and cannot be deleted or renamed by script; they may not reach aerender until After Effects flushes its preferences (unmeasured). " +
@@ -482,27 +491,52 @@ export const productionTools: ToolDefinition<any>[] = [
         });
       }
       type Templates = { source: string; render_settings: string[]; output_modules: string[]; needs_item?: boolean };
-      // Look first: an existing item answers with no guard, no checkpoint and no change.
-      let res = (await ctx.bridge.callHost<Templates>("renderTemplates", {}, { label: "ae_render_templates", mutates: false, toolName: "ae_render_templates" })).result;
-      if (res.needs_item) {
-        if (!args.allow_temp) {
-          return { ok: false, error: "empty_queue", message: "The render queue is empty. Add an item (ae_render_queue_add), or call again with allow_temp and expect." };
-        }
-        if (!args.expect) return { ok: false, error: "bad_args", message: "allow_temp needs expect." };
-        const out = await runGuardedWrite(ctx, {
+      // Look first: an existing item answers with no guard, no checkpoint and no change (C79), also with allow_temp.
+      const res = (await ctx.bridge.callHost<Templates>("renderTemplates", {}, { label: "ae_render_templates", mutates: false, toolName: "ae_render_templates" })).result;
+      const cached = catalogFor(ctx);
+      const sameNames = (c: FormatCatalog | null) => !!c && c.templates.map((t) => t.name).sort().join("\n") === [...res.output_modules].sort().join("\n");
+      // A temporary item only when it is asked for (allow_temp with expect) and needed: an empty queue, or no
+      // measured formats for this template list yet (a new AE, or a template the user saved since).
+      const measure = args.allow_temp === true && !!args.expect && (res.needs_item === true || !sameNames(cached));
+      if (res.needs_item && !args.allow_temp) {
+        return { ok: false, error: "empty_queue", message: "The render queue is empty. Add an item (ae_render_queue_add), or call again with allow_temp and expect." };
+      }
+      if (res.needs_item && !args.expect) return { ok: false, error: "bad_args", message: "allow_temp needs expect." };
+      if (measure && args.expect) {
+        type Measured = { ae_version: string; templates: FormatEntry[]; render_settings: string[] };
+        const out = (await runGuardedWrite(ctx, {
           toolName: "ae_render_templates",
-          label: "ae_render_templates (temporary item)",
+          label: "ae_render_templates (measure formats on a temporary item)",
           expect: args.expect,
           read: () => ({ host: "rqStatus", args: {} }),
-          write: { host: "renderTemplates", args: { allow_temp: true, comp_id: args.comp_id, label: "Read render templates" } },
+          write: { host: "renderFormatCatalog", args: { comp_id: args.comp_id, label: "Read render formats" } },
           check: (before, after) => {
             const n = (s: unknown) => (s as { numItems?: number } | null)?.numItems;
             return n(before) === n(after) ? [] : [{ path: "renderQueue.numItems", expected: n(before), actual: n(after), message: "The temporary render-queue item was not removed" }];
           },
-        });
-        res = out as unknown as Templates;
+        })) as unknown as Measured & Record<string, unknown>;
+        const catalog: FormatCatalog = { ae_version: out.ae_version, measured_at: new Date().toISOString(), templates: out.templates ?? [] };
+        if (catalog.templates.length) rememberCatalog(catalog, ctx.dataDir);
+        const names = catalog.templates.map((t) => t.name);
+        const { templates: _t, ae_version: _v, count: _c, ...rest } = out;
+        return {
+          ...rest,
+          source: "temporary_item",
+          render_settings: out.render_settings ?? [],
+          output_modules: names,
+          formats: catalog.templates,
+          intents: intentsOf(catalog.templates),
+          formats_note: FORMATS_NOTE,
+          audio_template_found: names.includes(DEFAULT_AUDIO_TEMPLATE),
+        };
       }
-      return { ...res, audio_template_found: res.output_modules.includes(DEFAULT_AUDIO_TEMPLATE) };
+      return {
+        ...res,
+        audio_template_found: res.output_modules.includes(DEFAULT_AUDIO_TEMPLATE),
+        ...(cached
+          ? { formats: cached.templates, intents: intentsOf(cached.templates), formats_measured: { ae_version: cached.ae_version, at: cached.measured_at }, formats_note: FORMATS_NOTE }
+          : { formats: null, formats_hint: "Call with allow_temp and expect to measure what each template writes (format, alpha, sequence, audio); it adds and removes a temporary queue item." }),
+      };
     },
   },
   {
@@ -618,13 +652,15 @@ export const productionTools: ToolDefinition<any>[] = [
           )
         ).result;
         if (check && check.ok === false) {
-          return { ok: false, error: "bad_args", applied: false, done: 0, message: `${check.error ?? "An op is invalid"}. Nothing was written.` };
+          return { ok: false, error: "bad_args", applied: false, outcome: "not_applied" as const, done: 0, message: `${check.error ?? "An op is invalid"}. Nothing was written.` };
         }
       }
       for (let start = 0; start < args.ops.length; start += size) {
         const ops = args.ops.slice(start, start + size);
         if (start > 0) await sleep(250);
-        const res = (await runGuardedWrite(ctx, {
+        let res;
+        try {
+          res = (await runGuardedWrite(ctx, {
           toolName: "ae_batch_set",
           label: `ae_batch_set(${start + 1}-${start + ops.length} of ${args.ops.length})`,
           expect: args.expect,
@@ -633,6 +669,28 @@ export const productionTools: ToolDefinition<any>[] = [
           write: { host: "batchSet", args: { comp_id: args.comp_id, ops, base: start, allow_substitute: args.allow_substitute, label: `Batch set ${start + 1}-${start + ops.length}` } },
           check: (_before, after, w) => (w.failed_at ? [] : batchMismatches(ops, after, start)),
         })) as unknown as { done?: number; failed_at?: number; error?: string; receipt: { matches: boolean; mismatches: ReceiptMismatch[] }; checkpoint: unknown };
+        } catch (err) {
+          // The first chunk's error is the whole answer (it carries its own outcome). A later chunk's
+          // must not hide the chunks that were written before it.
+          const quarantined = err instanceof QuarantineBlockedError;
+          const cancelled = err instanceof CancelledError;
+          if (chunks.length === 0 || !(err instanceof BridgeError || quarantined || cancelled)) throw err;
+          // A quarantine refusal (another write timed out while this batch waited between chunks) stops the chunk before
+          // it is sent; a cancellation says itself whether the chunk was sent.
+          const chunkOutcome = quarantined ? "not_applied" : cancelled ? (err as CancelledError).outcome ?? "not_applied" : (err as BridgeError).outcome ?? "unknown";
+          return {
+            ok: false,
+            error: quarantined ? "quarantined" : cancelled ? "cancelled" : (err as BridgeError).kind,
+            ...(!quarantined && !cancelled && (err as BridgeError).code ? { code: (err as BridgeError).code } : {}),
+            outcome: "partial" as const,
+            failed_chunk: `${start + 1}-${start + ops.length}`,
+            failed_chunk_outcome: chunkOutcome,
+            message: `Ops 1-${start} were applied (${chunks.length} undo step(s)); ops ${start + 1}-${start + ops.length} failed (${chunkOutcome}): ${(err as Error).message} Later chunks were not run.`,
+            done,
+            chunks,
+            ...(quarantined || cancelled ? {} : { next_steps: (err as BridgeError).next_steps }),
+          };
+        }
         // runGuardedWrite spreads the write's own result at the top level, also when the read-back failed.
         const chunkDone = typeof res.done === "number" ? res.done : 0;
         done += chunkDone;
@@ -642,6 +700,9 @@ export const productionTools: ToolDefinition<any>[] = [
           return {
             ok: false,
             error: "op_failed",
+            // The failing op may have written part of itself (some keys, a value before its expression) inside the
+            // chunk's undo group, so with nothing else applied the outcome is unknown, not not_applied.
+            outcome: done > 0 ? ("partial" as const) : ("unknown" as const),
             failed_op: start + res.failed_at,
             message: `Op ${start + res.failed_at} failed: ${res.error}. Ops before it in this chunk were applied (one undo step); later chunks were not run.`,
             done,
@@ -654,6 +715,7 @@ export const productionTools: ToolDefinition<any>[] = [
             ok: false,
             error: "read_back_failed",
             applied: true,
+            outcome: "unknown" as const,
             done,
             chunks,
             mismatches: res.receipt.mismatches.filter((m) => m.path === "read_back"),
@@ -661,7 +723,7 @@ export const productionTools: ToolDefinition<any>[] = [
           };
         }
       }
-      return { ok: true, applied: true, done, chunks, matches: mismatches.length === 0, mismatches: mismatches.slice(0, 50), mismatches_truncated: mismatches.length > 50 };
+      return { ok: true, applied: true, outcome: "applied" as const, done, chunks, matches: mismatches.length === 0, mismatches: mismatches.slice(0, 50), mismatches_truncated: mismatches.length > 50 };
     },
   },
 ];

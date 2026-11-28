@@ -713,7 +713,7 @@ describe("schemas", () => {
 
   it("both tools carry the safety guidance", () => {
     expect(stabilizeTools.map((t) => t.name)).toEqual(["ae_stabilize", "ae_stabilize_roundtrip"]);
-    for (const t of stabilizeTools) expect(t.description).toContain("Jay may be editing live");
+    for (const t of stabilizeTools) expect(t.description).toContain("The user may be editing live");
   });
 });
 
