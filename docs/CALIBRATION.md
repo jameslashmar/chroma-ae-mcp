@@ -289,3 +289,24 @@ The HCW laptop plate (a green screen with a hand moving across it, 1280 x 1080 w
 - The first fit, on the key channel's excess, read a finger's darker edge as screen (the excess shrinks with brightness) and asked for more; the fit now works on chromaticity (the excess over the mean of R, G and B).
 - The screen moved up to 5.5 px a frame as the picture shows it, and the insert had no motion blur: its content stayed sharp while the bezel and the hand were smeared. CC Force Motion Blur's own default shutter phase is 0, which puts the blur half a shutter ahead of the frame, up to 1.4 px ahead of the plate's here; the track follows the middle of the plate's blur, so the tool (and `ae_screen_replace`'s `force`) sets phase -angle / 2.
 - A whole call (three writes and 32 renders) took 16-18 s.
+
+## Forward-backward check and light normalisation (2026-11-28)
+
+The two pieces of `docs/TRACKING-RESEARCH.md` built first, each measured against an independent reference.
+
+- **Forward-backward check** (`fb_check_px`, Kalal, Mikolajczyk and Matas 2010) on Single Marker (`ae_track_point`'s tracker against the blue marker's colour centroid):
+  - With a 41 px pattern, the round trip of every accepted match had a median of 0.09 px, a 95th percentile of 0.21 and a maximum of 0.66 over 248 frames. No frame was refused at the 2 px default, and the track matched its run without the check (0.79 px worst against the centroid).
+  - With a 31 px pattern, which slides up and down the 22 x 42 px marker (up to 3.5 px off at confidence 0.99), the round trip came back 6.8 px off at frame 10 and the point was reported lost there.
+  - The backward search has to start where the forward step went (the match less the velocity it predicted with). Started from the old position, it lands back on the original mark and misses an identical look-alike.
+  - On a 160-line test comp, 2 px at 1080 lines became 0.3 px, inside a right match's sub-pixel noise, so the limit never goes under 1 px.
+- **Light normalisation** (`normalize_light`). The U-Haul plate was given a synthetic shadow band (Gaussian, 150 px wide, 55% deep) sweeping over the truck at 4 px a frame, plus a +-10% flicker, and the region track was measured against the SIFT reference:
+
+  | Setting | Shadow plate | Clean plate |
+  |---|---|---|
+  | Off | 69 frames, then lost; 0.64 px median, 1.17 px worst | 189/189, 0.20 px median, 0.87 px worst |
+  | Plain high-pass (radius 4-12) | 89-90 frames, then lost: the shadow's lower contrast still failed the surface check | 177/189 (radius 8) |
+  | Light normalisation, radius 8 | 189/189, 0.19 px median, 1.09 px worst | 189/189, 0.18 px median, 0.99 px worst |
+  | Light normalisation, radius 16 | 145 frames | 182 frames |
+
+  It costs about 60% more time a frame, and it lifts noise in flat areas, so it stays off by default.
+

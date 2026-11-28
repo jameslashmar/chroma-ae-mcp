@@ -166,6 +166,13 @@ export interface TrackOptions {
   minConfidence: number;
   /** Below this confidence against the first pattern, the previous frame's pattern is tried (AE's default is 80%). */
   adaptBelow: number;
+  /**
+   * Forward-backward check (Kalal, Mikolajczyk and Matas, ICPR 2010): the pattern found in the new frame is
+   * searched back in the frame the point was last measured on; when it lands further than this (px) from where
+   * the point was, the match is a look-alike (a repeating texture, the next mark along) and the point counts as
+   * lost for the frame. 0 or unset: off.
+   */
+  fbMaxPx?: number;
 }
 
 export interface TrackStep {
@@ -173,6 +180,17 @@ export interface TrackStep {
   y: number;
   confidence: number;
   adapted: boolean;
+  /** The forward-backward distance (px), when the check ran. */
+  fb_px?: number;
+}
+
+/** Where a tracker stands: position, velocity and the frame the position was measured on (null after a relocate). */
+export interface TrackerMotion {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  frame?: GrayImage | null;
 }
 
 // A pattern this flat (gray levels, 0-255) has nothing to lock onto.
@@ -183,6 +201,8 @@ export class PointTracker {
   private current: Template;
   private last: { x: number; y: number };
   private velocity = { x: 0, y: 0 };
+  /** The frame `last` was measured on, for the forward-backward check; null when `last` is a prediction. */
+  private lastFrame: GrayImage | null;
 
   constructor(frame: GrayImage, x: number, y: number, private readonly opts: TrackOptions) {
     const patch = extractPatch(frame, x, y, opts.patchSize);
@@ -195,6 +215,7 @@ export class PointTracker {
     }
     this.current = this.first;
     this.last = { x, y };
+    this.lastFrame = frame;
   }
 
   get contrast(): number {
@@ -206,24 +227,45 @@ export class PointTracker {
     return { x: this.last.x, y: this.last.y };
   }
 
-  /** Position and velocity, to take a step back (see restoreMotion). */
-  get motion(): { x: number; y: number; vx: number; vy: number } {
-    return { x: this.last.x, y: this.last.y, vx: this.velocity.x, vy: this.velocity.y };
+  /** Position, velocity and the frame they were measured on, to take a step back (see restoreMotion). */
+  get motion(): TrackerMotion {
+    return { x: this.last.x, y: this.last.y, vx: this.velocity.x, vy: this.velocity.y, frame: this.lastFrame };
   }
 
   /** Puts the position and velocity back to a saved `motion`, so the next step is judged from there. */
-  restoreMotion(m: { x: number; y: number; vx: number; vy: number }): void {
+  restoreMotion(m: TrackerMotion): void {
     this.last = { x: m.x, y: m.y };
     this.velocity = { x: m.vx, y: m.vy };
+    if (m.frame !== undefined) this.lastFrame = m.frame;
   }
 
   /** Score of the best match in the latest step, whether or not it was accepted (0 when nothing could be matched). */
   lastScore = 0;
+  /** The forward-backward distance of the latest step (px), null when it did not run. */
+  lastFb: number | null = null;
 
   /** Puts the tracker at (x, y) and forgets its velocity (a point re-acquired from other points' motion). */
   relocate(x: number, y: number): void {
     this.last = { x, y };
     this.velocity = { x: 0, y: 0 };
+    // A predicted position was not measured on any frame: nothing to check the next match back against.
+    this.lastFrame = null;
+  }
+
+  /**
+   * The pattern at (x, y) in `frame`, tracked back into the frame the point was last measured on the way the
+   * forward step went (searched round the match less the velocity the forward step predicted with, as far): the
+   * distance from where the point was. A match on a look-alike tracks back onto the look-alike's own place.
+   */
+  private backward(frame: GrayImage, x: number, y: number, vx: number, vy: number): number | null {
+    if (!this.lastFrame || this.lastFrame === frame) return null;
+    const patch = extractPatch(frame, x, y, this.opts.patchSize);
+    if (!patch) return null;
+    const t = makeTemplate(patch);
+    if (t.std < MIN_PATTERN_STD) return null;
+    const back = matchTemplate(this.lastFrame, t, x - vx, y - vy, this.opts.searchRadius);
+    if (!back) return null;
+    return Math.hypot(back.x - this.last.x, back.y - this.last.y);
   }
 
   /**
@@ -247,15 +289,26 @@ export class PointTracker {
       }
     }
     this.lastScore = pick ? pick.score : 0;
+    this.lastFb = null;
     if (!pick || pick.score < this.opts.minConfidence) return null;
+    let fb: number | undefined;
+    if (this.opts.fbMaxPx && this.opts.fbMaxPx > 0) {
+      const d = this.backward(frame, pick.x, pick.y, px - this.last.x, py - this.last.y);
+      if (d !== null) {
+        fb = d;
+        this.lastFb = d;
+        if (d > this.opts.fbMaxPx) return null;
+      }
+    }
     this.velocity = { x: pick.x - this.last.x, y: pick.y - this.last.y };
     this.last = { x: pick.x, y: pick.y };
+    this.lastFrame = frame;
     const next = extractPatch(frame, pick.x, pick.y, this.opts.patchSize);
     if (next && pick.score < this.opts.adaptBelow) {
       const t = makeTemplate(next);
       if (t.std >= MIN_PATTERN_STD) this.current = t;
     }
-    return { x: pick.x, y: pick.y, confidence: pick.score, adapted };
+    return { x: pick.x, y: pick.y, confidence: pick.score, adapted, ...(fb !== undefined ? { fb_px: fb } : {}) };
   }
 }
 
@@ -355,6 +408,36 @@ export function boxBlurGray(img: GrayImage, r: number): GrayImage {
  * offsets; only the linear part is used). Null when the pattern leaves the image
  * or the linear part cannot be inverted.
  */
+/**
+ * Local contrast normalisation of a gray frame for tracking: the frame less its local mean (three box blurs of
+ * radius r, close to a Gaussian of sigma r), divided by its local RMS contrast over the same window, scaled to
+ * about +-40 levels round mid-grey. Light that changes across the picture is taken out whether it adds (a
+ * flicker, a vignette) or multiplies (a shadow halving the texture's contrast under it), which a per-channel gain
+ * and bias over the whole surface cannot model; a plain high-pass handles only the first. On the U-Haul plate
+ * with a 55% shadow band sweeping over the truck and a +-10% flicker: without it the region track was lost after
+ * 69 frames; a plain high-pass held 90; this, at r 8, all 189 at 0.19 px median against SIFT, and on the clean
+ * plate it changed nothing (189 / 189, 0.18 px). It lifts noise in flat areas, so it is not on by default.
+ * r under 1: the frame as it is.
+ */
+export function normalizeLight(img: GrayImage, r: number): GrayImage {
+  const k = Math.round(r);
+  if (!(k >= 1)) return img;
+  const blur3 = (g: GrayImage) => boxBlurGray(boxBlurGray(boxBlurGray(g, k), k), k);
+  const mean = blur3(img);
+  const n = img.data.length;
+  const d = new Float32Array(n);
+  const sq = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    d[i] = img.data[i] - mean.data[i];
+    sq[i] = d[i] * d[i];
+  }
+  const ms = blur3({ width: img.width, height: img.height, data: sq });
+  const out = new Float32Array(n);
+  // 16 (4 levels RMS) keeps flat, noisy areas from being blown up to full contrast.
+  for (let i = 0; i < n; i++) out[i] = 128 + (40 * d[i]) / Math.sqrt(ms.data[i] + 16);
+  return { width: img.width, height: img.height, data: out };
+}
+
 export function makeWarpedTemplate(ref: GrayImage, cx: number, cy: number, size: number, affine2x3: number[]): Template | null {
   const [a, b, , c, d] = affine2x3;
   const det = a * d - b * c;
@@ -449,6 +532,20 @@ export const AeTrackPointSchema = z.object({
     .optional()
     .describe("How far (px) from the predicted position to look each frame. Default 40; raise it for fast motion."),
   min_confidence: z.number().min(0).max(1).optional().describe("Below this match score (0..1) the point counts as lost and tracking stops. Default 0.6."),
+  normalize_light: z
+    .number()
+    .min(0)
+    .max(60)
+    .optional()
+    .describe("Local contrast normalisation before matching, radius in px at 1080 lines (see ae_track_multi): for a shadow, flicker or uneven light over the point. 8 is the measured setting; default 0, off."),
+  fb_check_px: z
+    .number()
+    .min(0)
+    .max(20)
+    .default(2)
+    .describe(
+      "Forward-backward check (px at 1080 lines): every match is searched back in the frame before; when it lands further than this from where the point was, the match was a look-alike (a repeating texture, the next mark along) and the point counts as lost there. Default 2; 0 turns it off. fb_max_px reports the largest distance of the accepted frames."
+    ),
   apply: z
     .object({
       null_name: z.string().min(1).max(200).describe("Name of the new null layer that gets the track as Position keys, one per frame."),
@@ -502,6 +599,7 @@ export const trackTools: ToolDefinition<any>[] = [
         adaptBelow: 0.8,
       };
       const label = `ae_track_point(${args.comp_id})`;
+      const fbAt1080 = args.fb_check_px ?? 2;
 
       const tracked = await queued(ctx, label, opId, async () => {
         const compResp = await ctx.bridge.evalRaw<CompInfo>({
@@ -521,13 +619,13 @@ export const trackTools: ToolDefinition<any>[] = [
         let firstFrame: PNG | null = null;
         let scale = 1;
         let pattern: { size: number; isotropy: number | null; note?: string } = { size: patchSize, isotropy: null };
-        const points: Array<{ time: number; x: number; y: number; confidence: number; adapted: boolean }> = [];
-        let lostAt: { time: number; frame: number } | null = null;
+        const points: Array<{ time: number; x: number; y: number; confidence: number; adapted: boolean; fb?: number }> = [];
+        let lostAt: { time: number; frame: number; reason?: string } | null = null;
 
         for (let i = 0; i < times.length; i++) {
           const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: times[i], frameIndex: i, framesDir, toolName: "ae_track_point" });
           const png = decodePngFile(snap.path);
-          const gray = toGray(png);
+          const gray = normalizeLight(toGray(png), ((args.normalize_light ?? 0) * png.height) / 1080);
           if (i === 0) {
             firstFrame = png;
             // Frames come back at full resolution; map comp pixels onto them.
@@ -540,14 +638,23 @@ export const trackTools: ToolDefinition<any>[] = [
               ...opts,
               patchSize: chosen.size,
               searchRadius: Math.max(2, Math.round(opts.searchRadius * scale)),
+              // A right match comes back within a few tenths of a pixel at any resolution: the limit never goes under 1 px.
+              fbMaxPx: fbAt1080 > 0 ? Math.max(1, (fbAt1080 * png.height) / 1080) : 0,
             });
             points.push({ time: times[0], x: args.point[0], y: args.point[1], confidence: 1, adapted: false });
           } else {
             const s = tracker!.step(gray);
             if (!s) {
-              lostAt = { time: times[i], frame: Math.round(times[i] * fps) };
+              const fbFail = tracker!.lastFb !== null && tracker!.lastScore >= opts.minConfidence;
+              lostAt = {
+                time: times[i],
+                frame: Math.round(times[i] * fps),
+                reason: fbFail
+                  ? `forward-backward: the match, searched back in the frame before, landed ${Math.round(tracker!.lastFb! * 100) / 100} px from where the point was (a look-alike, at confidence ${Math.round(tracker!.lastScore * 100) / 100})`
+                  : `confidence ${Math.round(tracker!.lastScore * 100) / 100} under min_confidence`,
+              };
             } else {
-              points.push({ time: times[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
+              points.push({ time: times[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted, ...(s.fb_px !== undefined ? { fb: s.fb_px / scale } : {}) });
             }
           }
           fs.rmSync(snap.path, { force: true });
@@ -582,6 +689,7 @@ export const trackTools: ToolDefinition<any>[] = [
         mean_confidence: conf.length ? r2(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
         min_confidence: conf.length ? r2(Math.min(...conf)) : null,
         adapted_frames: points.filter((p) => p.adapted).length,
+        ...(fbAt1080 > 0 ? { fb_check_px: fbAt1080, fb_max_px: points.some((p) => p.fb !== undefined) ? r2(Math.max(...points.filter((p) => p.fb !== undefined).map((p) => p.fb!))) : null } : {}),
         pattern_contrast: r2(tracked.contrast),
         pattern_size_used: tracked.pattern.size,
         ...(tracked.pattern.isotropy !== null ? { pattern_isotropy: r2(tracked.pattern.isotropy) } : {}),

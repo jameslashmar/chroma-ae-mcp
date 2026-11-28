@@ -96,7 +96,7 @@ import { compToImgH, imgToCompH, OccluderDetector, pyramid, RegionAligner, Regio
 import { MIN_SURFACE_POINTS, SurfacePoints } from "./surface-points.js";
 import { fitScreenQuad, keyPresenceOf, keyStrength, sampleKey, type ScreenKey } from "./screen-track.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
-import { boxBlurGray, makeWarpedTemplate, PointTracker, toGray, trackTimes, type GrayImage, type Template } from "./track.js";
+import { boxBlurGray, makeWarpedTemplate, normalizeLight, PointTracker, toGray, trackTimes, type GrayImage, type Template } from "./track.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
 
 export type { MotionModel, PlanarFrame, PlanarTrack, Vec2, Mat3 } from "./planar-math.js";
@@ -368,6 +368,22 @@ export const AeTrackMultiSchema = z
     min_confidence: z.number().min(0).max(1).default(0.6).describe("Below this match score (0..1) a point counts as lost for the frame. Default 0.6."),
     warp_patterns: z.boolean().optional().describe("Re-sample each pattern through the local affine of the motion so far, so rotation and zoom do not kill the match. Default on for similarity, affine and perspective."),
     pre_blur: z.number().int().min(0).max(3).optional().describe("Box blur radius (px) on the gray frame, for grainy plates. Default 0."),
+    normalize_light: z
+      .number()
+      .min(0)
+      .max(60)
+      .optional()
+      .describe(
+        "Local contrast normalisation before matching (every method), radius in px at 1080 lines: each frame less its local mean, divided by its local contrast, so light that changes across the surface (a shadow sweeping over it, a flicker, uneven light) stops moving or losing the track. A plain high-pass (Mocha's, SynthEyes' Hi-Pass) handles only light that adds; this also handles a shadow that halves the texture's contrast. 8 is the measured setting; 0 (default) is off, because it lifts noise in flat areas."
+      ),
+    fb_check_px: z
+      .number()
+      .min(0)
+      .max(20)
+      .default(2)
+      .describe(
+        "Points: forward-backward check (px at 1080 lines). Each point's match is searched back in the frame before; further than this from where the point was, the match was a look-alike (a repeating texture, the next mark along) and the point counts as lost for the frame (then re-acquired where the other points' motion puts it). Default 2; 0 turns it off."
+      ),
     channel: z.enum(["luma", "red", "green", "blue", "saturation"]).default("luma").describe("Which channel to track. Default luma."),
     quad: z.array(Point).length(4).optional().describe("The surface's corners [UL, UR, LR, LL] in comp pixels at ref_time, drawn in the preview as it moves. Default: the bounding box of the points."),
     isolate_layers: z
@@ -787,6 +803,8 @@ export interface MultiTrackOptions {
   /** RANSAC inlier distance in comp px. */
   ransacPx: number;
   seed: number;
+  /** Forward-backward limit in comp px (see TrackOptions.fbMaxPx); 0 or unset: off. */
+  fbCheckPx?: number;
 }
 
 export interface StepResult {
@@ -830,6 +848,8 @@ export class MultiTracker {
             searchRadius: Math.max(2, Math.round(opts.searchRadius * scale)),
             minConfidence: opts.minConfidence,
             adaptBelow: 0.8,
+            // A right match comes back within a few tenths of a pixel at any resolution: the limit never goes under 1 px.
+            fbMaxPx: opts.fbCheckPx && opts.fbCheckPx > 0 ? Math.max(1, opts.fbCheckPx * scale) : 0,
           })
         );
       } catch (err) {
@@ -2288,6 +2308,10 @@ interface TrackOptionsStored {
   warp_patterns: boolean;
   pre_blur: number;
   channel: Channel;
+  /** Forward-backward limit, px at 1080 lines (points); older tracks have none: off. */
+  fb_check_px?: number;
+  /** Local contrast normalisation radius, px at 1080 lines (every method); older tracks have none: off. */
+  normalize_light?: number;
   isolate_layers?: LayerSelector[];
   /** Layers whose matte is left out of the fit (region and screen tracks). */
   holdout_layers?: LayerSelector[];
@@ -2401,6 +2425,8 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           warp_patterns: args.warp_patterns ?? true,
           pre_blur: args.pre_blur ?? 0,
           channel: args.channel,
+          fb_check_px: args.fb_check_px,
+          normalize_light: args.normalize_light ?? 0,
           ...(args.isolate_layers ? { isolate_layers: args.isolate_layers } : {}),
           ...(args.holdout_layers ? { holdout_layers: args.holdout_layers } : {}),
           method: args.region ? "region" : args.screen ? "screen" : "points",
@@ -2411,7 +2437,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       o.model = "perspective";
     }
     const maxMisses = maxMissesFor(fps);
-    const prep = (png: RgbaImage): GrayImage => boxBlurGray(channelGray(png, o.channel), o.pre_blur);
+    const prep = (png: RgbaImage): GrayImage => normalizeLight(boxBlurGray(channelGray(png, o.channel), o.pre_blur), ((o.normalize_light ?? 0) * png.height) / 1080);
 
     // The guard, checkpoint and session record come before the temporary comp exists.
     let note: WriteInfo | undefined;
@@ -2521,6 +2547,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         warpPatterns: o.warp_patterns,
         ransacPx: Math.max(2, o.pattern_size / 10),
         seed: 1234,
+        fbCheckPx: ((o.fb_check_px ?? 0) * compSize[1]) / 1080,
       });
       let state: TrackingState;
       const quad: Vec2[] = stored ? stored.tracking!.quad : o.method === "screen" ? refPoints : ((args.quad as Vec2[] | undefined) ?? (o.method === "region" ? refPoints : boundingQuad(refPoints)));

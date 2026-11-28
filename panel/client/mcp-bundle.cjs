@@ -47548,6 +47548,23 @@ function boxBlurGray(img, r) {
   }
   return { width: w, height: h, data: out };
 }
+function normalizeLight(img, r) {
+  const k = Math.round(r);
+  if (!(k >= 1)) return img;
+  const blur3 = (g) => boxBlurGray(boxBlurGray(boxBlurGray(g, k), k), k);
+  const mean3 = blur3(img);
+  const n = img.data.length;
+  const d = new Float32Array(n);
+  const sq = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    d[i] = img.data[i] - mean3.data[i];
+    sq[i] = d[i] * d[i];
+  }
+  const ms = blur3({ width: img.width, height: img.height, data: sq });
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = 128 + 40 * d[i] / Math.sqrt(ms.data[i] + 16);
+  return { width: img.width, height: img.height, data: out };
+}
 function makeWarpedTemplate(ref3, cx, cy, size, affine2x3) {
   const [a, b, , c, d] = affine2x3;
   const det = a * d - b * c;
@@ -47643,12 +47660,15 @@ var init_track = __esm({
         }
         this.current = this.first;
         this.last = { x, y };
+        this.lastFrame = frame;
       }
       opts;
       first;
       current;
       last;
       velocity = { x: 0, y: 0 };
+      /** The frame `last` was measured on, for the forward-backward check; null when `last` is a prediction. */
+      lastFrame;
       get contrast() {
         return this.first.std;
       }
@@ -47656,21 +47676,40 @@ var init_track = __esm({
       get position() {
         return { x: this.last.x, y: this.last.y };
       }
-      /** Position and velocity, to take a step back (see restoreMotion). */
+      /** Position, velocity and the frame they were measured on, to take a step back (see restoreMotion). */
       get motion() {
-        return { x: this.last.x, y: this.last.y, vx: this.velocity.x, vy: this.velocity.y };
+        return { x: this.last.x, y: this.last.y, vx: this.velocity.x, vy: this.velocity.y, frame: this.lastFrame };
       }
       /** Puts the position and velocity back to a saved `motion`, so the next step is judged from there. */
       restoreMotion(m) {
         this.last = { x: m.x, y: m.y };
         this.velocity = { x: m.vx, y: m.vy };
+        if (m.frame !== void 0) this.lastFrame = m.frame;
       }
       /** Score of the best match in the latest step, whether or not it was accepted (0 when nothing could be matched). */
       lastScore = 0;
+      /** The forward-backward distance of the latest step (px), null when it did not run. */
+      lastFb = null;
       /** Puts the tracker at (x, y) and forgets its velocity (a point re-acquired from other points' motion). */
       relocate(x, y) {
         this.last = { x, y };
         this.velocity = { x: 0, y: 0 };
+        this.lastFrame = null;
+      }
+      /**
+       * The pattern at (x, y) in `frame`, tracked back into the frame the point was last measured on the way the
+       * forward step went (searched round the match less the velocity the forward step predicted with, as far): the
+       * distance from where the point was. A match on a look-alike tracks back onto the look-alike's own place.
+       */
+      backward(frame, x, y, vx, vy) {
+        if (!this.lastFrame || this.lastFrame === frame) return null;
+        const patch = extractPatch(frame, x, y, this.opts.patchSize);
+        if (!patch) return null;
+        const t = makeTemplate2(patch);
+        if (t.std < MIN_PATTERN_STD) return null;
+        const back = matchTemplate(this.lastFrame, t, x - vx, y - vy, this.opts.searchRadius);
+        if (!back) return null;
+        return Math.hypot(back.x - this.last.x, back.y - this.last.y);
       }
       /**
        * The next frame's position, or null when the point is lost. `predicted`
@@ -47693,15 +47732,26 @@ var init_track = __esm({
           }
         }
         this.lastScore = pick5 ? pick5.score : 0;
+        this.lastFb = null;
         if (!pick5 || pick5.score < this.opts.minConfidence) return null;
+        let fb;
+        if (this.opts.fbMaxPx && this.opts.fbMaxPx > 0) {
+          const d = this.backward(frame, pick5.x, pick5.y, px - this.last.x, py - this.last.y);
+          if (d !== null) {
+            fb = d;
+            this.lastFb = d;
+            if (d > this.opts.fbMaxPx) return null;
+          }
+        }
         this.velocity = { x: pick5.x - this.last.x, y: pick5.y - this.last.y };
         this.last = { x: pick5.x, y: pick5.y };
+        this.lastFrame = frame;
         const next = extractPatch(frame, pick5.x, pick5.y, this.opts.patchSize);
         if (next && pick5.score < this.opts.adaptBelow) {
           const t = makeTemplate2(next);
           if (t.std >= MIN_PATTERN_STD) this.current = t;
         }
-        return { x: pick5.x, y: pick5.y, confidence: pick5.score, adapted };
+        return { x: pick5.x, y: pick5.y, confidence: pick5.score, adapted, ...fb !== void 0 ? { fb_px: fb } : {} };
       }
     };
     MIN_PATTERN_ISOTROPY = 0.1;
@@ -47715,6 +47765,10 @@ var init_track = __esm({
       ),
       search_radius: external_exports.number().int().min(2).max(300).optional().describe("How far (px) from the predicted position to look each frame. Default 40; raise it for fast motion."),
       min_confidence: external_exports.number().min(0).max(1).optional().describe("Below this match score (0..1) the point counts as lost and tracking stops. Default 0.6."),
+      normalize_light: external_exports.number().min(0).max(60).optional().describe("Local contrast normalisation before matching, radius in px at 1080 lines (see ae_track_multi): for a shadow, flicker or uneven light over the point. 8 is the measured setting; default 0, off."),
+      fb_check_px: external_exports.number().min(0).max(20).default(2).describe(
+        "Forward-backward check (px at 1080 lines): every match is searched back in the frame before; when it lands further than this from where the point was, the match was a look-alike (a repeating texture, the next mark along) and the point counts as lost there. Default 2; 0 turns it off. fb_max_px reports the largest distance of the accepted frames."
+      ),
       apply: external_exports.object({
         null_name: external_exports.string().min(1).max(200).describe("Name of the new null layer that gets the track as Position keys, one per frame."),
         expect: ExpectSchema
@@ -47738,6 +47792,7 @@ var init_track = __esm({
             adaptBelow: 0.8
           };
           const label2 = `ae_track_point(${args.comp_id})`;
+          const fbAt1080 = args.fb_check_px ?? 2;
           const tracked = await queued(ctx, label2, opId, async () => {
             const compResp = await ctx.bridge.evalRaw({
               id: `${opId}_comp`,
@@ -47760,7 +47815,7 @@ var init_track = __esm({
             for (let i = 0; i < times2.length; i++) {
               const snap = await captureCompFrame({ ctx, opId, compId: args.comp_id, time: times2[i], frameIndex: i, framesDir, toolName: "ae_track_point" });
               const png = decodePngFile(snap.path);
-              const gray = toGray(png);
+              const gray = normalizeLight(toGray(png), (args.normalize_light ?? 0) * png.height / 1080);
               if (i === 0) {
                 firstFrame = png;
                 scale = png.width / Number(comp.width);
@@ -47771,15 +47826,22 @@ var init_track = __esm({
                 tracker2 = new PointTracker(gray, px, py, {
                   ...opts,
                   patchSize: chosen.size,
-                  searchRadius: Math.max(2, Math.round(opts.searchRadius * scale))
+                  searchRadius: Math.max(2, Math.round(opts.searchRadius * scale)),
+                  // A right match comes back within a few tenths of a pixel at any resolution: the limit never goes under 1 px.
+                  fbMaxPx: fbAt1080 > 0 ? Math.max(1, fbAt1080 * png.height / 1080) : 0
                 });
                 points2.push({ time: times2[0], x: args.point[0], y: args.point[1], confidence: 1, adapted: false });
               } else {
                 const s = tracker2.step(gray);
                 if (!s) {
-                  lostAt2 = { time: times2[i], frame: Math.round(times2[i] * fps) };
+                  const fbFail = tracker2.lastFb !== null && tracker2.lastScore >= opts.minConfidence;
+                  lostAt2 = {
+                    time: times2[i],
+                    frame: Math.round(times2[i] * fps),
+                    reason: fbFail ? `forward-backward: the match, searched back in the frame before, landed ${Math.round(tracker2.lastFb * 100) / 100} px from where the point was (a look-alike, at confidence ${Math.round(tracker2.lastScore * 100) / 100})` : `confidence ${Math.round(tracker2.lastScore * 100) / 100} under min_confidence`
+                  };
                 } else {
-                  points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted });
+                  points2.push({ time: times2[i], x: (s.x + 0.5) / scale, y: (s.y + 0.5) / scale, confidence: s.confidence, adapted: s.adapted, ...s.fb_px !== void 0 ? { fb: s.fb_px / scale } : {} });
                 }
               }
               fs44.rmSync(snap.path, { force: true });
@@ -47813,6 +47875,7 @@ var init_track = __esm({
             mean_confidence: conf.length ? r215(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
             min_confidence: conf.length ? r215(Math.min(...conf)) : null,
             adapted_frames: points.filter((p) => p.adapted).length,
+            ...fbAt1080 > 0 ? { fb_check_px: fbAt1080, fb_max_px: points.some((p) => p.fb !== void 0) ? r215(Math.max(...points.filter((p) => p.fb !== void 0).map((p) => p.fb))) : null } : {},
             pattern_contrast: r215(tracked.contrast),
             pattern_size_used: tracked.pattern.size,
             ...tracked.pattern.isotropy !== null ? { pattern_isotropy: r215(tracked.pattern.isotropy) } : {},
@@ -49620,6 +49683,8 @@ async function trackMulti(ctx, args) {
       warp_patterns: args.warp_patterns ?? true,
       pre_blur: args.pre_blur ?? 0,
       channel: args.channel,
+      fb_check_px: args.fb_check_px,
+      normalize_light: args.normalize_light ?? 0,
       ...args.isolate_layers ? { isolate_layers: args.isolate_layers } : {},
       ...args.holdout_layers ? { holdout_layers: args.holdout_layers } : {},
       method: args.region ? "region" : args.screen ? "screen" : "points",
@@ -49630,7 +49695,7 @@ async function trackMulti(ctx, args) {
       o.model = "perspective";
     }
     const maxMisses = maxMissesFor(fps);
-    const prep = (png) => boxBlurGray(channelGray(png, o.channel), o.pre_blur);
+    const prep = (png) => normalizeLight(boxBlurGray(channelGray(png, o.channel), o.pre_blur), (o.normalize_light ?? 0) * png.height / 1080);
     let note;
     let checkpoint = null;
     let sessionFields = {};
@@ -49726,7 +49791,8 @@ async function trackMulti(ctx, args) {
         minConfidence: o.min_confidence,
         warpPatterns: o.warp_patterns,
         ransacPx: Math.max(2, o.pattern_size / 10),
-        seed: 1234
+        seed: 1234,
+        fbCheckPx: (o.fb_check_px ?? 0) * compSize[1] / 1080
       });
       let state;
       const quad = stored ? stored.tracking.quad : o.method === "screen" ? refPoints : args.quad ?? (o.method === "region" ? refPoints : boundingQuad(refPoints));
@@ -50260,6 +50326,12 @@ var init_planar = __esm({
       min_confidence: external_exports.number().min(0).max(1).default(0.6).describe("Below this match score (0..1) a point counts as lost for the frame. Default 0.6."),
       warp_patterns: external_exports.boolean().optional().describe("Re-sample each pattern through the local affine of the motion so far, so rotation and zoom do not kill the match. Default on for similarity, affine and perspective."),
       pre_blur: external_exports.number().int().min(0).max(3).optional().describe("Box blur radius (px) on the gray frame, for grainy plates. Default 0."),
+      normalize_light: external_exports.number().min(0).max(60).optional().describe(
+        "Local contrast normalisation before matching (every method), radius in px at 1080 lines: each frame less its local mean, divided by its local contrast, so light that changes across the surface (a shadow sweeping over it, a flicker, uneven light) stops moving or losing the track. A plain high-pass (Mocha's, SynthEyes' Hi-Pass) handles only light that adds; this also handles a shadow that halves the texture's contrast. 8 is the measured setting; 0 (default) is off, because it lifts noise in flat areas."
+      ),
+      fb_check_px: external_exports.number().min(0).max(20).default(2).describe(
+        "Points: forward-backward check (px at 1080 lines). Each point's match is searched back in the frame before; further than this from where the point was, the match was a look-alike (a repeating texture, the next mark along) and the point counts as lost for the frame (then re-acquired where the other points' motion puts it). Default 2; 0 turns it off."
+      ),
       channel: external_exports.enum(["luma", "red", "green", "blue", "saturation"]).default("luma").describe("Which channel to track. Default luma."),
       quad: external_exports.array(Point).length(4).optional().describe("The surface's corners [UL, UR, LR, LL] in comp pixels at ref_time, drawn in the preview as it moves. Default: the bounding box of the points."),
       isolate_layers: external_exports.array(LayerSelectorSchema).min(1).max(100).optional().describe("Track only these layers (the plate): a temporary copy of the comp with every other layer off is rendered, so patches and overlays above the plate cannot corrupt the track. The copy is removed in the same call (two undo entries). Needs `expect`."),
@@ -50294,7 +50366,9 @@ var init_planar = __esm({
                 patchSize: this.patchImg,
                 searchRadius: Math.max(2, Math.round(opts.searchRadius * scale)),
                 minConfidence: opts.minConfidence,
-                adaptBelow: 0.8
+                adaptBelow: 0.8,
+                // A right match comes back within a few tenths of a pixel at any resolution: the limit never goes under 1 px.
+                fbMaxPx: opts.fbCheckPx && opts.fbCheckPx > 0 ? Math.max(1, opts.fbCheckPx * scale) : 0
               })
             );
           } catch (err) {
@@ -77123,7 +77197,8 @@ var SEARCH_HINTS = {
   ae_render_queue_add: "render export queue output",
   ae_screen_replace: "replace phone tv monitor screen content corner pin",
   ae_screen_foreground: "hand finger in front of screen keep over insert green screen key light wrap spill",
-  ae_track_point: "track follow motion tracker point attach",
+  ae_track_point: "track follow motion tracker point attach reverse backward tracking forward-backward check flicker shadow light normalise",
+  ae_track_multi: "planar track mocha surface plane corner pin reverse backward tracking track backwards from a clean frame forward-backward look-alike high-pass pre-process flicker moving shadow local contrast normalise",
   ae_stabilize: "stabilize shaky camera smooth",
   ae_transcribe: "speech to text subtitles whisper",
   ae_captions: "subtitles lower thirds speech words"
