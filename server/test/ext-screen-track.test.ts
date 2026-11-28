@@ -1,7 +1,11 @@
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 import { applyH, invertH, mulH, type Mat3, type Vec2 } from "../src/tools/ext/planar-math.js";
-import { fitScreenQuad, keyAlpha, keyStrength, ransacLine, redetectQuad, sampleKey, ScreenTracker } from "../src/tools/ext/screen-track.js";
+import { checkPaths } from "../src/tools/ext/path-check.js";
+import { screenArea } from "../src/tools/ext/planar.js";
+import { OccluderDetector, RegionAligner, RegionTracker } from "../src/tools/ext/region-track.js";
+import { fitScreenQuad, keyPresenceOf, keyStrength, ransacLine, sampleKey } from "../src/tools/ext/screen-track.js";
+import { toGray } from "../src/tools/ext/track.js";
 
 // ---------- a green laptop screen in a dark bezel, under a known perspective motion ----------
 
@@ -33,6 +37,8 @@ const grow = (q: Vec2[], px: number): Vec2[] => {
   });
 };
 const BEZEL = grow(SCREEN, 14);
+/** A black rim 2.5 px wide round the screen, inside a grey frame: two parallel edges close together. */
+const RIM = grow(SCREEN, 2.5);
 
 const motion = (k: number): Mat3 => {
   const r = (0.8 * k * Math.PI) / 180;
@@ -44,8 +50,8 @@ const motion = (k: number): Mat3 => {
   return mulH(T2, mulH(P, mulH(R, T1)));
 };
 
-/** 4x supersampled, so the edges are anti-aliased like a real render. `hand`: a skin-coloured block over the frame. */
-function render(k: number, o: { hand?: { x: number; y: number; w: number; h: number }; picture?: boolean } = {}): PNG {
+/** 4x supersampled, so the edges are anti-aliased like a real render. `hand`: a skin-coloured block over the frame; `rim`: a black rim in a grey frame. */
+function render(k: number, o: { hand?: { x: number; y: number; w: number; h: number }; picture?: boolean; rim?: boolean } = {}): PNG {
   const inv = invertH(motion(k))!;
   const png = new PNG({ width: W, height: H });
   for (let y = 0; y < H; y++) {
@@ -61,7 +67,8 @@ function render(k: number, o: { hand?: { x: number; y: number; w: number; h: num
           let c: [number, number, number];
           if (o.hand && px >= o.hand.x && px < o.hand.x + o.hand.w && py >= o.hand.y && py < o.hand.y + o.hand.h) c = [205, 150, 120];
           else if (inside(SCREEN, p)) c = o.picture ? [120 + 80 * Math.sin(p[0] * 0.2), 110 + 70 * Math.cos(p[1] * 0.17), 100] : [40 + 0.1 * p[0], 170 - 0.05 * p[1], 50];
-          else if (inside(BEZEL, p)) c = [28, 30, 32];
+          else if (o.rim && inside(RIM, p)) c = [8, 9, 10];
+          else if (inside(BEZEL, p)) c = o.rim ? [96, 98, 102] : [28, 30, 32];
           else c = [150 + 40 * Math.sin(px * 0.05), 140, 130 + 30 * Math.cos(py * 0.07)];
           r += c[0];
           g += c[1];
@@ -110,40 +117,79 @@ describe("screen key", () => {
   });
 });
 
-describe("ScreenTracker", () => {
-  const ref = render(0);
-  const key = sampleKey(ref, SCREEN)!;
+describe("screen tracking: the region aligned in brightness and key, what is in front found by the key", () => {
+  // The screen's area as the tool takes it: its corners grown by 4% about their centre.
+  const AREA = screenArea(SCREEN, 6);
+  const maskOf = () => {
+    const m = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inside(AREA, [x, y])) m[y * W + x] = 1;
+    return m;
+  };
+  const setup = (o: { rim?: boolean } = {}) => {
+    const ref = render(0, o);
+    const key = sampleKey(ref, SCREEN)!;
+    const chans = (png: PNG) => [toGray(png), keyStrength(png, key, [0, 0, W, H])];
+    const mask = maskOf();
+    const al = new RegionAligner(chans(ref), mask, { verdictChannels: [1] });
+    const det = new OccluderDetector(ref, mask, al, (r, g, b) => keyPresenceOf(key, r, g, b));
+    return { tr: new RegionTracker(al, SCREEN, det), chans };
+  };
+  const cornersOf = (Hm: Mat3) => SCREEN.map((p) => applyH(Hm, p) as Vec2);
 
-  it("follows the screen with a hand across one side, corners within 0.3 px", () => {
-    const tr = new ScreenTracker(key, SCREEN);
+  it("keeps the corners on the screen while a hand crosses one side, and finds the hand", () => {
+    const { tr, chans } = setup();
+    let found = 0;
     for (let k = 1; k <= 10; k++) {
-      // A hand covers the middle of the right side from frame 4 on.
+      // A hand covers the middle of the right side from frame 4 on: its edge is the same step from the key as the screen's.
       const t = truthAt(k);
       const hand = k >= 4 ? { x: (t[1][0] + t[2][0]) / 2 - 20, y: (t[1][1] + t[2][1]) / 2 - 22, w: 60, h: 44 } : undefined;
-      const s = tr.step(render(k, { hand }));
+      const png = render(k, { hand });
+      const s = tr.step(chans(png), png);
       expect(s.ok).toBe(true);
-      expect(cornerErr(s.corners!, t)).toBeLessThan(0.3);
-      expect(s.support).toBeGreaterThan(0.25);
+      expect(cornerErr(cornersOf(s.H), t)).toBeLessThan(0.3);
+      if (hand) found = Math.max(found, s.occluded ?? 0);
+    }
+    expect(found).toBeGreaterThan(0.02);
+  });
+
+  it("does not flicker between the two edges of a dark rim: the corners' paths pass the jump check", () => {
+    const { tr, chans } = setup({ rim: true });
+    const samples: Array<{ frame: number; points: Vec2[] }> = [];
+    for (let k = 1; k <= 16; k++) {
+      const png = render(k, { rim: true });
+      const s = tr.step(chans(png), png);
+      expect(s.ok).toBe(true);
+      expect(cornerErr(cornersOf(s.H), truthAt(k))).toBeLessThan(0.3);
+      samples.push({ frame: k, points: cornersOf(s.H) });
+    }
+    expect(checkPaths(samples)!.flags).toEqual([]);
+  });
+
+  it("places a corner a hand covers whole from the rest of the screen", () => {
+    const { tr, chans } = setup();
+    for (let k = 1; k <= 8; k++) {
+      const t = truthAt(k);
+      const hand = k >= 3 && k <= 6 ? { x: t[2][0] - 30, y: t[2][1] - 25, w: 70, h: 60 } : undefined;
+      const png = render(k, { hand });
+      const s = tr.step(chans(png), png);
+      expect(s.ok).toBe(true);
+      expect(cornerErr(cornersOf(s.H), t)).toBeLessThan(0.5);
     }
   });
 
   it("reports a frame without the screen, and finds it again", () => {
-    const tr = new ScreenTracker(key, SCREEN);
-    for (let k = 1; k <= 3; k++) expect(tr.step(render(k)).ok).toBe(true);
+    const { tr, chans } = setup();
+    for (let k = 1; k <= 3; k++) {
+      const png = render(k);
+      expect(tr.step(chans(png), png).ok).toBe(true);
+    }
     const blank = new PNG({ width: W, height: H });
     blank.data.fill(90);
-    const a = tr.step(blank);
+    const a = tr.step(chans(blank), blank);
     expect(a.ok).toBe(false);
-    expect(a.note).toMatch(/edge was not found|not found/);
-    const back = tr.step(render(5));
+    const png = render(5);
+    const back = tr.step(chans(png), png);
     expect(back.ok).toBe(true);
-    expect(cornerErr(back.corners!, truthAt(5))).toBeLessThan(0.5);
-  });
-
-  it("re-detects the screen from the keyed area when the prediction is far off", () => {
-    const alpha = keyAlpha(render(6), key, [0, 0, W, H]);
-    const q = redetectQuad(alpha, SCREEN);
-    expect(q).not.toBeNull();
-    expect(cornerErr(q!, truthAt(6))).toBeLessThan(4);
+    expect(cornerErr(cornersOf(back.H), truthAt(5))).toBeLessThan(0.5);
   });
 });

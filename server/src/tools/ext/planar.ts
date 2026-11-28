@@ -92,8 +92,8 @@ import {
 } from "./planar-math.js";
 import { blit, createCanvas, drawCross, drawLabel, drawPolygon, encodePng, fitWithin, resizeArea, strokeRect, type RgbaImage } from "./png-utils.js";
 import { checkPaths, type PathCheckResult } from "./path-check.js";
-import { compToImgH, imgToCompH, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
-import { fitScreenQuad, keyStrength, sampleKey, ScreenTracker, type ScreenKey } from "./screen-track.js";
+import { compToImgH, imgToCompH, OccluderDetector, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
+import { fitScreenQuad, keyPresenceOf, keyStrength, sampleKey, type ScreenKey } from "./screen-track.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
 import { boxBlurGray, makeWarpedTemplate, PointTracker, toGray, trackTimes, type GrayImage, type Template } from "./track.js";
 import { expectThat, runGuardedWrite } from "./write-runner.js";
@@ -975,8 +975,8 @@ export class MultiTracker {
 
 /** What ae_track_multi steps through a chunk: a point tracker or a region tracker, in comp px. */
 export interface DirectionTracker {
-  /** `rgba` is the frame as rendered (the screen tracker keys its colour). */
-  step(gray: GrayImage, time: number, rgba?: RgbaImage): StepResult;
+  /** `rgba` is the frame as rendered (a screen track keys its colour); `matte` a hand-drawn matte of what is in front (alpha, frame px). */
+  step(gray: GrayImage, time: number, rgba?: RgbaImage, matte?: GrayImage): StepResult;
   /** The last good motion, comp px. */
   readonly lastH: Mat3;
   /** The good motion before it, when the tracker keeps one (a region track's speed). */
@@ -987,8 +987,10 @@ export interface DirectionTracker {
 export const maxMissesFor = (fps: number): number => Math.max(12, Math.round(2 * (fps > 0 ? fps : 25)));
 
 /**
- * A region track as a direction: RegionTracker in image px, frames in comp px. The quad's corners are the
- * track's points (what the nulls mode writes); confidence is the frame's correlation.
+ * A region or screen track as a direction: RegionTracker in image px, frames in comp px. The quad's corners
+ * are the track's points (what the nulls mode writes); confidence is the frame's correlation. `channels`
+ * makes the images the aligner was built on from a frame (a screen: its brightness and its key); a screen
+ * also has an occluder detector.
  */
 export class RegionDirection implements DirectionTracker {
   private readonly rt: RegionTracker;
@@ -997,11 +999,15 @@ export class RegionDirection implements DirectionTracker {
     aligner: RegionAligner,
     private readonly quad: Vec2[],
     private readonly scale: number,
-    private readonly maxMisses: number
+    private readonly maxMisses: number,
+    private readonly channels: (gray: GrayImage, rgba?: RgbaImage) => GrayImage | GrayImage[] = (g) => g,
+    detector: OccluderDetector | null = null
   ) {
     this.rt = new RegionTracker(
       aligner,
-      quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2)
+      quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2),
+      detector,
+      Math.max(4, Math.round(6 * scale))
     );
   }
 
@@ -1017,8 +1023,8 @@ export class RegionDirection implements DirectionTracker {
     this.rt.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
   }
 
-  step(gray: GrayImage, time: number): StepResult {
-    const r = this.rt.step(gray);
+  step(gray: GrayImage, time: number, rgba?: RgbaImage, matte?: GrayImage): StepResult {
+    const r = this.rt.step(this.channels(gray, rgba), rgba, matte);
     if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
     const H = r.ok ? imgToCompH(r.H, this.scale) : null;
     const points = this.quad.map((p) => (H ? applyH(H, p) : null));
@@ -1102,60 +1108,18 @@ export class VerifiedPoints implements DirectionTracker {
   }
 }
 
-/** A screen track as a direction: ScreenTracker in image px, frames in comp px; the screen's corners are the points. */
-export class ScreenDirection implements DirectionTracker {
-  private readonly st: ScreenTracker;
-
-  constructor(
-    key: ScreenKey,
-    private readonly quad: Vec2[],
-    private readonly scale: number,
-    private readonly maxMisses: number
-  ) {
-    this.st = new ScreenTracker(
-      key,
-      quad.map((p) => [p[0] * scale - 0.5, p[1] * scale - 0.5] as Vec2),
-      Math.max(6, Math.round(12 * scale))
-    );
-  }
-
-  get lastH(): Mat3 {
-    return imgToCompH(this.st.Hprev, this.scale);
-  }
-
-  get prevH(): Mat3 | null {
-    return imgToCompH(this.st.Hprev2, this.scale);
-  }
-
-  restore(last: Mat3, prev: Mat3 | null): void {
-    this.st.restore(compToImgH(last, this.scale), prev ? compToImgH(prev, this.scale) : null);
-  }
-
-  step(_gray: GrayImage, time: number, rgba?: RgbaImage): StepResult {
-    if (!rgba) throw new Error("the screen tracker needs the frame's colours");
-    const r = this.st.step(rgba);
-    if (!r.ok && r.misses >= this.maxMisses) return { frame: null, stop: "lost", lost: [], reacquired: [] };
-    const H = r.ok ? imgToCompH(r.H, this.scale) : null;
-    const points = this.quad.map((p) => (H ? applyH(H, p) : null));
-    const conf = r.ok && r.support !== null ? r4(Math.min(1, r.support)) : null;
-    return {
-      frame: {
-        time,
-        ok: r.ok,
-        H,
-        points,
-        confidence: points.map(() => conf),
-        rms_px: null,
-        expected_px: r.ok && r.expected_px !== null ? r4(r.expected_px / this.scale) : null,
-        inliers: r.ok ? 4 : 0,
-        coverage: r.coverage === null ? null : r4(r.coverage),
-        ...(r.ok ? {} : { note: r.note ?? "the outline was not found" }),
-      },
-      stop: null,
-      lost: [],
-      reacquired: [],
-    };
-  }
+/**
+ * A screen's area: its corners grown about their centre by 4%, and by at least `minBand` (comp px) at the
+ * nearest corner, so the rim and the inside edge of its frame are in it, and each edge's whole profile at the
+ * coarsest pyramid level: a band of 2-3 px round a small screen cut that profile off and held the fit 1-3 px
+ * off (5-6 px brought it to 0.04-0.17 px; more reaches past a thin frame into what is behind it).
+ */
+export function screenArea(corners: Vec2[], minBand = 0): Vec2[] {
+  const cx = corners.reduce((t, p) => t + p[0], 0) / corners.length;
+  const cy = corners.reduce((t, p) => t + p[1], 0) / corners.length;
+  const near = Math.min(...corners.map((p) => Math.hypot(p[0] - cx, p[1] - cy)));
+  const g = Math.max(1.04, near > 0 ? 1 + minBand / near : 1.04);
+  return corners.map((p) => [r4(cx + (p[0] - cx) * g), r4(cy + (p[1] - cy) * g)] as Vec2);
 }
 
 /** The quad a region stands for: a 4-corner polygon as given when it is a proper quad, else its bounding rectangle. */
@@ -1400,9 +1364,12 @@ export function lensCheck(track: PlanarTrack): { k: number; edge_px: number; res
 }
 
 /**
- * Once a track is finished: a frame whose expected error is far above the track's own typical one
- * (8x its median and over 2 px) got a wild fit, usually from too few inliers or a point off the plane
- * voting with the rest. Seen on a parallax shot: such frames were 20-120 px off while marked ok. They
+ * Once a track is finished: a frame whose expected error is far above the track's own typical one (6x its
+ * median and over 1 px, scaled from 1080 lines) got a wild fit: too few inliers, a point off the plane
+ * voting with the rest, or a surface whose part that holds it is hidden. Seen: on a parallax shot such
+ * frames were 20-120 px off while marked ok; on a green board with an arm across one side and a cyan top
+ * against its edge, 12-24 px off at 10x the median (1.4-2.0 px), while a laptop screen's and a truck's good
+ * frames stayed within 3.2x and a licence plate's within 4x but for its one motion-blurred frame. They
  * become not ok with a note, so ae_track_apply interpolates across them instead of writing the jump.
  */
 export function flagUnreliableFrames(track: PlanarTrack): number[] {
@@ -1412,7 +1379,7 @@ export function flagUnreliableFrames(track: PlanarTrack): number[] {
     .sort((a, b) => a - b);
   if (ex.length < 5) return [];
   const typical = ex[Math.floor(ex.length / 2)];
-  const limit = Math.max(2, 8 * typical);
+  const limit = Math.max(Math.max(1, track.comp_size[1] / 1080), 6 * typical);
   const flagged: number[] = [];
   for (const f of track.frames) {
     if (f.ok && typeof f.expected_px === "number" && f.expected_px > limit) {
@@ -2385,6 +2352,8 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
         if (!fit.ok) throw new PlanarError("bad_args", `The screen's outline was not found near those corners at ref_time: ${fit.why}. Give the corners within about 10 px of where the key colour ends.`);
         o.screen_key = key;
         refPoints = fit.corners.map((p) => [r4((p[0] + 0.5) / scale), r4((p[1] + 0.5) / scale)] as Vec2);
+        o.area = { polygon: screenArea(refPoints, 6 / scale) };
+        o.exclude = [];
       } else if (args.points) {
         refPoints = args.points as Vec2[];
       } else {
@@ -2464,10 +2433,23 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
       const opts = mkOpts();
       // The region (a region track's area, or where a points track is checked), built once when trackers are made.
       let aligner: RegionAligner | null = null;
+      let detector: OccluderDetector | null = null;
+      if (o.method === "screen" && !o.area) throw new PlanarError("refused", "This screen track was made by an older version of the tool, which followed the screen's edges another way; it cannot be continued. Track it again.");
       if (((!state.forward.done && !fwd) || (!state.backward.done && !bwd)) && o.area) {
         try {
-          aligner = new RegionAligner(refGray!, regionMask(refGray!.width, refGray!.height, scale, o.area, o.exclude ?? [], 0));
+          const mask = regionMask(refGray!.width, refGray!.height, scale, o.area, o.exclude ?? [], 0);
+          if (o.method === "screen") {
+            const key = o.screen_key as ScreenKey;
+            // The brightness and the key together; only the key says whether a frame is on the screen (its brightness drifts as the bezel turns to the light).
+            aligner = new RegionAligner([refGray!, keyStrength(refPng!, key, [0, 0, refPng!.width, refPng!.height])], mask, { verdictChannels: [1] });
+            detector = new OccluderDetector(refPng!, mask, aligner, (r, g, b) => keyPresenceOf(key, r, g, b));
+          } else {
+            aligner = new RegionAligner(refGray!, mask);
+          }
         } catch (err) {
+          if (o.method === "screen") {
+            throw new PlanarError("bad_args", `The screen cannot be followed: ${errMessage(err)}. Give its corners where the key colour ends, with the screen's rim and some of its frame in the picture.`);
+          }
           if (o.method === "region") {
             throw new PlanarError(
               "bad_args",
@@ -2485,7 +2467,12 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           return d;
         }
         if (o.method === "screen") {
-          const d = new ScreenDirection(o.screen_key!, quad, scale, maxMisses);
+          const key = o.screen_key as ScreenKey;
+          const chans = (g: GrayImage, rgba?: RgbaImage) => {
+            if (!rgba) throw new Error("a screen track needs the frame's colours");
+            return [g, keyStrength(rgba, key, [0, 0, rgba.width, rgba.height])];
+          };
+          const d = new RegionDirection(aligner!, quad, scale, maxMisses, chans, detector);
           if (stored) d.restore(ds.last_H, ds.prev_H ?? null);
           return d;
         }
@@ -2666,7 +2653,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
   const nextTime = nextDir === "forward" ? st.forward.next_time : nextDir === "backward" ? st.backward.next_time : null;
   const notes = [...ran.notes];
   const method = (st.options as unknown as TrackOptionsStored).method ?? "points";
-  if (method === "screen") notes.push("A screen track follows where the key colour ends: the corners are where its sides' lines meet, so a corner covered by a hand is still placed from its sides. The ref_points are the snapped corners at ref_time.");
+  if (method === "screen") notes.push("A screen track aligns the screen with its rim and the inside edge of its frame to the reference frame, in its brightness and its key together (no edge is picked frame by frame, so two parallel edges at the rim cannot make it flicker); a hand or anything else in front of the key is found by its colour and left out, its edges with it. A corner out of the frame or under a hand is placed by the rest of the screen. The ref_points are the snapped corners at ref_time.");
   else if (method === "region") notes.push("The area must be one flat surface: whatever in it is at another depth (a frame's edge standing out, a shelf) moves differently and is pushed out of the fit, but a large part of it off the plane pulls the solve.");
   else notes.push("Points must lie on one plane: a point on a different depth slides against the others and the fit gets worse (see rms_px).");
   const lostDir = [st.forward, st.backward].find((d) => d.stop?.reason === "lost");
