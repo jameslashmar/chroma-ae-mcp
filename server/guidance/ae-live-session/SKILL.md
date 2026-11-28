@@ -39,7 +39,7 @@ listed; some appear there as one tool with an `action` field (`ae_checkpoint { a
    project once and returns what it took the request to mean, questions whose answers change the work,
    a plan with a tool per step and hazards. Whether you ask the questions or use its stated defaults
    follows the user's "Ask first" button in the panel; the result says which.
-2. `ae_status` gives the open project's path (`"<unsaved>"` if never saved), the dirty flag, the active
+2. `ae_status` gives the open project's path (a marker if never saved: copy it exactly), the dirty flag, the active
    comp, selected layers and the quarantine list. `detail: true` adds the Project panel selection, the
    time, selected properties and warnings. Selection can change between this read and your write, so
    act on explicit ids and indexes, not on "the selected layer".

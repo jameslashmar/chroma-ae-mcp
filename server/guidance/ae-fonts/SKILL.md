@@ -83,8 +83,8 @@ Turkish caption). A font can exist and still draw boxes for some characters.
 
 Parameters: `from` and `to` (both required; PostScript name or `{ family, style }`), `dry_run`
 (default **true**), `no_font_locking` (default false), `expect` (required when `dry_run` is false:
-`{ project_path, comp_id? }`, where `project_path` is the open .aep's absolute path, or
-`"<unsaved>"`).
+`{ project_path, comp_id? }`, with `project_path` copied exactly from `ae_status`: the open .aep's
+absolute path, or its marker for a project never saved).
 
 `from` may be a font that is missing: the project's own used-font list is searched for it, not the
 installed list. `to` must be installed and must not itself be substituted (`font_not_found` or
@@ -207,9 +207,11 @@ file deletes and quitting. Ask the user to:
   Book), and remove the duplicate or the second copy of an Adobe font;
 - for an Adobe Fonts font, switch it off and on again in the Creative Cloud app, with Creative Cloud
   running;
-- with AE closed, delete Adobe's font cache files `AdobeFnt*.lst` (Windows: under
+- with AE closed, delete Adobe's font cache files (`AdobeFnt*.lst`; Windows: AE 2026 keeps its own
+  under `%LOCALAPPDATA%\Temp\Adobe\After Effects\26.3\Typesupport` (the folder is named after the
+  version), other Adobe apps use
   `%LOCALAPPDATA%\Adobe\TypeSupport` and the CT Font Cache folders under `%APPDATA%\Adobe`); AE
-  rebuilds them on start;
+  rebuilds them on start. A stale cache is the least likely cause: try it after the font fixes;
 - **restart AE** after any font change. Fonts changed while AE is open raise the warning again, and
   AE's list may be stale. After the restart, read again with `in_use` and `check`.
 

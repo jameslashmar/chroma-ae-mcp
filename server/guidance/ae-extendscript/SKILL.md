@@ -45,7 +45,7 @@ what the code does.
 | `code` | The body of a function. Write `return <value>` to send a result. Do not write `function () {}` around it. |
 | `mutates` | Required, no default. `true` if the script changes anything in the project. |
 | `label` | Required. Names the undo step in AE and the entry in the panel log. |
-| `expect` | Required when `mutates` is true: `{ project_path, comp_id? }`. Copy `project_path` from `ae_status` (`"<unsaved>"` for a project never saved). If AE has something else open the call is refused with `kind: "guard"` and nothing runs. |
+| `expect` | Required when `mutates` is true: `{ project_path, comp_id? }`. Copy `project_path` exactly from `ae_status` (it has a marker in place of a path for a project never saved; pass that unchanged). If AE has something else open the call is refused with `kind: "guard"` and nothing runs. |
 
 The server wraps `code` as `(function(){ <code> \n})()` evaluated in the panel's scope, so a
 `return` works and line numbers in errors match your `code`. Variables you declare with `var` stay
