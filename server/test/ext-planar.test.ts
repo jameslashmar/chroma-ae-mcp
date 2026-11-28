@@ -870,6 +870,11 @@ describe("ae_track_multi", () => {
     expect(out.directions.forward.stop.reason).toBe("end");
     expect(out.directions.backward.stop.reason).toBe("end");
     expect(fs.existsSync(out.preview_path)).toBe(true);
+    // Nothing was flagged: the close-ups show the frames round the one whose corners moved most, rendered again.
+    expect(out.path_check.frames_flagged).toBe(0);
+    expect(fs.existsSync(out.jump_preview_path)).toBe(true);
+    expect(out.budget.preview_renders).toBeGreaterThanOrEqual(3);
+    expect(out.budget.preview_renders).toBeLessThanOrEqual(5);
     expect(fs.existsSync(out.track_path)).toBe(true);
     expect(out.frame_rows).toHaveLength(10);
     // Read-only: no write host was called, and the frames were rendered from the comp itself.

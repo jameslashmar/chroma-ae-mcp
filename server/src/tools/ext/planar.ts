@@ -90,7 +90,7 @@ import {
   type TrackingState,
   type Vec2,
 } from "./planar-math.js";
-import { blit, createCanvas, drawCross, drawLabel, drawPolygon, encodePng, fitWithin, resizeArea, strokeRect, type RgbaImage } from "./png-utils.js";
+import { blit, createCanvas, cropImage, drawCross, drawLabel, drawLine, drawPolygon, encodePng, fitWithin, resizeArea, scaleNearest, strokeRect, type RgbaImage } from "./png-utils.js";
 import { checkPaths, type PathCheckResult } from "./path-check.js";
 import { compToImgH, imgToCompH, OccluderDetector, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
 import { fitScreenQuad, keyPresenceOf, keyStrength, sampleKey, type ScreenKey } from "./screen-track.js";
@@ -1753,6 +1753,85 @@ export function drawTrackSheet(tiles: SheetTile[], o: { quad: Vec2[]; patchSize:
   return sheet;
 }
 
+export interface CloseupTile {
+  image: RgbaImage;
+  frame: PlanarFrame;
+  label: string;
+}
+
+/**
+ * Close-ups of the surface's four corners, frame by frame: one row per stretch of frames, one tile per
+ * frame, each tile the corners [UL, UR / LL, LR] zoomed in, cropped at the same place for every frame of the
+ * row (where the corner is on average), so a corner that jumps moves in its tile while the picture stands
+ * still. The tracked corner is a cross and its two sides lines, cyan on frames written (green would vanish on a
+ * green screen), red on frames not.
+ * `scale` is image px per comp px.
+ */
+export function drawCornerCloseups(rows: CloseupTile[][], quad: Vec2[], scale: number): PNG {
+  const Z = 96;
+  const gap = 4;
+  const head = 14;
+  const diag = Math.max(Math.hypot(quad[0][0] - quad[2][0], quad[0][1] - quad[2][1]), Math.hypot(quad[1][0] - quad[3][0], quad[1][1] - quad[3][1]));
+  // Half the crop, comp px: about 3% of the surface's size, so a 1 px jump of a mid-sized screen is a few px in the tile.
+  const R = Math.max(8, Math.round(0.03 * diag));
+  const tileW = 2 * Z + gap;
+  const tileH = 2 * Z + gap + head;
+  const cols = Math.max(1, ...rows.map((r) => r.length));
+  const sheet = createCanvas(cols * (tileW + gap), Math.max(1, rows.length) * (tileH + gap), [24, 24, 24, 255]);
+  const cyan: [number, number, number, number] = [0, 220, 255, 255];
+  const red: [number, number, number, number] = [255, 60, 60, 255];
+  const pos = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+  ];
+  rows.forEach((row, ri) => {
+    const centres = quad.map((c) => {
+      const ps = row.map((t) => (t.frame.H ? applyH(t.frame.H, c) : null)).filter((p): p is Vec2 => p !== null);
+      return ps.length ? ([ps.reduce((a, p) => a + p[0], 0) / ps.length, ps.reduce((a, p) => a + p[1], 0) / ps.length] as Vec2) : null;
+    });
+    row.forEach((t, ci) => {
+      const x0 = ci * (tileW + gap);
+      const y0 = ri * (tileH + gap);
+      const col = t.frame.ok ? cyan : red;
+      const corners = quad.map((c) => (t.frame.H ? applyH(t.frame.H, c) : null));
+      for (let k = 0; k < Math.min(4, quad.length); k++) {
+        const ctr = centres[k];
+        const tx = x0 + pos[k][0] * (Z + gap);
+        const ty = y0 + head + pos[k][1] * (Z + gap);
+        const r = R * scale;
+        if (!ctr) continue;
+        const ax = Math.round(ctr[0] * scale - r);
+        const ay = Math.round(ctr[1] * scale - r);
+        // A corner out of the picture: nothing to show.
+        if (ax < 0 || ay < 0 || ax + 2 * r > t.image.width || ay + 2 * r > t.image.height) {
+          drawLabel(sheet, "out", tx + 4, ty + 4, 1, [200, 200, 200, 255], [40, 40, 40, 255], 2);
+          continue;
+        }
+        const zoom = scaleNearest(cropImage(t.image, ax, ay, Math.round(2 * r), Math.round(2 * r)), Z, Z);
+        const f = Z / Math.round(2 * r);
+        const to = (p: Vec2): [number, number] => [(p[0] * scale - ax) * f, (p[1] * scale - ay) * f];
+        const c0 = corners[k];
+        if (c0) {
+          for (const nb of [(k + 1) % 4, (k + 3) % 4]) {
+            const c1 = corners[nb];
+            if (!c1) continue;
+            const a = to(c0);
+            const b = to(c1);
+            drawLine(zoom, a[0], a[1], b[0], b[1], 1, col);
+          }
+          const p = to(c0);
+          drawCross(zoom, p[0], p[1], 5, 1, col);
+        }
+        blit(sheet, zoom, tx, ty);
+      }
+      drawLabel(sheet, t.label, x0, y0, 1, [16, 16, 16, 255], t.frame.ok ? [255, 214, 0, 255] : [255, 120, 120, 255], 2);
+    });
+  });
+  return sheet;
+}
+
 function writeSheet(framesDir: string, tag: string, png: PNG): string {
   fs.mkdirSync(framesDir, { recursive: true });
   const file = path.join(framesDir, `track_${tag}.png`);
@@ -2621,6 +2700,45 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
 
       let previewPath: string | undefined;
       let previewError: string | undefined;
+      // Close-ups of the frames the path check flagged worst (up to two stretches of five frames), or, when it
+      // flagged none, of the frame whose corners moved most against the others, to see that it is clean:
+      // rendered again, not charged to max_frames.
+      let jumpPreviewPath: string | undefined;
+      let previewRenders = 0;
+      const pcheck = track.tracking?.path_check as { worst?: Array<{ frame: number }>; per_corner?: Record<string, { worst_jump_px: number; worst_jump_frame: number | null }> } | undefined;
+      if (args.preview && pcheck && track.tracking!.forward.done && track.tracking!.backward.done) {
+        try {
+          const events: number[] = [];
+          for (const w of pcheck.worst ?? []) if (events.length < 2 && events.every((e) => Math.abs(e - w.frame) >= 5)) events.push(w.frame);
+          if (!events.length) {
+            const top = Object.values(pcheck.per_corner ?? {}).sort((a, b) => b.worst_jump_px - a.worst_jump_px)[0];
+            if (top && top.worst_jump_frame !== null) events.push(top.worst_jump_frame);
+          }
+          const byFrame = new Map(track.frames.map((fr) => [Math.round(fr.time * fps), fr]));
+          const rows: CloseupTile[][] = [];
+          for (const ev of events) {
+            const row: CloseupTile[] = [];
+            for (let d = -2; d <= 2; d++) {
+              const fr = byFrame.get(ev + d);
+              if (!fr || !fr.H) continue;
+              const shot = await captureCompFrame({ ctx, opId, compId: renderCompId, time: fr.time, frameIndex: 400001 + previewRenders, framesDir, toolName });
+              previewRenders++;
+              let img: PNG;
+              try {
+                img = decodePngFile(shot.path);
+              } finally {
+                fs.rmSync(shot.path, { force: true });
+              }
+              row.push({ image: img, frame: fr, label: `${ev + d}${fr.ok ? "" : " not ok"}` });
+              await yieldLoop();
+            }
+            if (row.length) rows.push(row);
+          }
+          if (rows.length) jumpPreviewPath = writeSheet(framesDir, `${track.track_id}_${opId}_jumps`, drawCornerCloseups(rows, quad, scale));
+        } catch (err) {
+          previewError = errMessage(err);
+        }
+      }
       if (args.preview) {
         try {
           const tiles: SheetTile[] = [];
@@ -2635,7 +2753,7 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           previewError = errMessage(err);
         }
       }
-      return { track, notes, previewPath, previewError, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
+      return { track, notes, previewPath, previewError, jumpPreviewPath, previewRenders, chosen, scale, renderError: run_.renderError, blocked: run_.blocked, reacquired: run_.reacquired, dropped };
     };
 
     type Temp = { copy_id: number; removed: boolean; error?: string };
@@ -2772,13 +2890,19 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
     })),
     reacquired_points_this_call: ran.reacquired,
     ...(ran.previewPath ? { preview_path: ran.previewPath } : {}),
+    ...(ran.jumpPreviewPath
+      ? {
+          jump_preview_path: ran.jumpPreviewPath,
+          jump_preview_note: "Close-ups of the four corners around the frames the path check flagged worst, or around the frame whose corners moved most when it flagged none (one row per stretch, frame numbers on the tiles): each corner is cropped at the same place for the whole row, so a corner that jumps moves in its tile. Cyan: written; red: not written. Look at it before trusting the track.",
+        }
+      : {}),
     ...(ran.previewError ? { preview_error: ran.previewError } : {}),
     ...(ran.renderError ? { render_error: ran.renderError } : {}),
     ...(ran.temp ? { temp_comp: { copy_removed: ran.temp.removed, ...(ran.temp.error ? { error: ran.temp.error } : {}) } } : {}),
     ...(ran.temp ? { checkpoint: ran.checkpoint, receipt: buildReceipt({ before: null, after: { temp_comp: ran.temp }, customMismatches: baseMismatches }), ...ran.sessionFields } : {}),
     notes,
   };
-  result.budget = { max_frames: args.max_frames, max_seconds: args.max_seconds, renders_this_call: ran.rendersUsed, ...(ran.rebuildRenders ? { rebuild_renders: ran.rebuildRenders } : {}) };
+  result.budget = { max_frames: args.max_frames, max_seconds: args.max_seconds, renders_this_call: ran.rendersUsed, ...(ran.rebuildRenders ? { rebuild_renders: ran.rebuildRenders } : {}), ...(ran.previewRenders ? { preview_renders: ran.previewRenders } : {}) };
 
   if (args.apply && expect) {
     if (!finished) {
