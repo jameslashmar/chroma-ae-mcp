@@ -68,6 +68,8 @@ export interface TrackingState {
   forward: TrackingDirection;
   backward: TrackingDirection;
   dropped: Array<{ index: number; reason: string }>;
+  /** The corners' paths checked once the track was finished (planar.ts flagPathJumps). */
+  path_check?: Record<string, unknown>;
 }
 
 export interface PlanarTrack {

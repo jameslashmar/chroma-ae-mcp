@@ -91,6 +91,7 @@ import {
   type Vec2,
 } from "./planar-math.js";
 import { blit, createCanvas, drawCross, drawLabel, drawPolygon, encodePng, fitWithin, resizeArea, strokeRect, type RgbaImage } from "./png-utils.js";
+import { checkPaths, type PathCheckResult } from "./path-check.js";
 import { compToImgH, imgToCompH, pyramid, RegionAligner, RegionTracker, verdict, verdictWhy } from "./region-track.js";
 import { fitScreenQuad, keyStrength, sampleKey, ScreenTracker, type ScreenKey } from "./screen-track.js";
 import { beginInflight, endInflight, noteAfterWrite, noteBeforeWrite, type WriteInfo } from "./session.js";
@@ -1423,6 +1424,64 @@ export function flagUnreliableFrames(track: PlanarTrack): number[] {
   return flagged;
 }
 
+const CORNER_NAMES = ["UL", "UR", "LR", "LL"];
+const cornerName = (k: number, n: number) => (n === 4 ? CORNER_NAMES[k] : `point ${k + 1}`);
+
+/** The corners' paths of a track's solved frames (path-check.ts), comp px. */
+function pathCheckOf(track: PlanarTrack): { res: PathCheckResult | null; quad: Vec2[] } {
+  const quad = track.tracking?.quad ?? boundingQuad(track.ref_points);
+  const samples = track.frames
+    .filter((f) => f.ok && f.H)
+    .map((f) => ({ frame: Math.round(f.time * track.fps), points: quad.map((p) => applyH(f.H as Mat3, p)) }))
+    .filter((x) => x.points.every((p) => p !== null)) as Array<{ frame: number; points: Vec2[] }>;
+  return { res: checkPaths(samples, { compHeight: track.comp_size[1] }), quad };
+}
+
+/** The bounded report of a path check. */
+function pathReport(res: PathCheckResult, nCorners: number, flagged: number | null): Record<string, unknown> {
+  const per: Record<string, unknown> = {};
+  res.per_corner.forEach((c, k) => {
+    per[cornerName(k, nCorners)] = { worst_jump_px: c.worst_jump_px, worst_jump_frame: c.worst_jump_frame, jumps: c.jumps, worst_off_px: c.worst_off_px, worst_off_frame: c.worst_off_frame, off_frames: c.off_frames };
+  });
+  return {
+    frames_checked: res.frames_checked,
+    corner_noise_px: res.corner_sigma_px,
+    jump_limit_px: res.jump_limit_px,
+    off_limit_px: res.off_limit_px,
+    ...(flagged !== null ? { frames_flagged: flagged } : { frames_over: new Set(res.flags.map((f) => f.frame)).size }),
+    per_corner: per,
+    worst: res.flags.slice(0, 8).map((f) => ({ frame: f.frame, kind: f.kind, px: f.px })),
+    sharpest_move: res.whole,
+  };
+}
+
+const PATH_CHECK_NOTE =
+  "path_check: every corner's path was checked once the track was finished, whatever made it. A camera shake moves, turns and scales the whole surface at once; what it hardly changes from frame to frame is the surface's shape. So each corner's place in that shape is compared with a robust fit through the frames around it: a jump is a frame off the fit through its 3 neighbours each side (over jump_limit_px: a tick the eye sees), off its path is off the fit through 12 each side (over off_limit_px: an edge dragged away for several frames, such as by a hand's edge taken for the surface's). Taking the camera's move out takes part of a wrong move with it: one edge moving by d alone shows as about 0.4 d, so the px here run below how far the edge moved. Those frames are not ok and not written; AE interpolates across them. sharpest_move is the whole surface's sharpest move off its smooth path (a footstep's jolt, or a jump): reported only, a path alone cannot tell the two apart.";
+
+/**
+ * Once a track is finished: every corner's path checked for jumps (path-check.ts), whatever made the
+ * track, and the frames where a corner jumped or left its path become not ok with a note, so they are
+ * never written (AE interpolates across them). The reference frame is never flagged. The report is
+ * kept on the track (tracking.path_check).
+ */
+export function flagPathJumps(track: PlanarTrack): number[] {
+  const { res, quad } = pathCheckOf(track);
+  if (!res) return [];
+  const byFrame = new Map(res.flags.map((fl) => [fl.frame, fl]));
+  const flagged: number[] = [];
+  for (const f of track.frames) {
+    if (!f.ok || Math.abs(f.time - track.ref_time) < 1e-6) continue;
+    const fl = byFrame.get(Math.round(f.time * track.fps));
+    if (!fl) continue;
+    f.ok = false;
+    const what = fl.kind === "jump" ? `jumps ${fl.px} px against the frames on either side` : `is ${fl.px} px off the path of the frames around it`;
+    f.note = `the surface's shape (its corners against each other, the camera's move taken out) ${what} (limit ${fl.limit_px} px): the track bent it on its own (an occluder's edge taken for the surface's, a second parallel edge, a reflection); not written`;
+    flagged.push(f.time);
+  }
+  if (track.tracking) track.tracking.path_check = pathReport(res, quad.length, flagged.length);
+  return flagged;
+}
+
 /**
  * Points that do not move with the plane the others define: per point, how far it sits from where
  * the solved motion puts it, frame by frame. A point on the plane stays within the trackers' noise;
@@ -1620,6 +1679,14 @@ export function trackSummary(track: PlanarTrack, maxFrames = 500): Record<string
         : null,
     error_note: EXPECTED_ERROR_NOTE,
     corner_jitter_px: cornerJitter(track, track.tracking?.quad ?? boundingQuad(track.ref_points)),
+    ...(() => {
+      // A finished ae_track_multi track carries the check made before its frames were flagged; any other
+      // track (read from the project, or not finished yet) is checked here, for the report only.
+      const stored = track.tracking?.path_check;
+      if (stored) return { path_check: stored, path_check_note: PATH_CHECK_NOTE };
+      const { res, quad } = pathCheckOf(track);
+      return res ? { path_check: pathReport(res, quad.length, null), path_check_note: PATH_CHECK_NOTE } : {};
+    })(),
     ...(() => {
       const advice = modelAdvice(track);
       return advice ? { model_advice: advice } : {};
@@ -2510,7 +2577,10 @@ async function trackMulti(ctx: ToolContext, args: AeTrackMultiArgs): Promise<Rec
           };
       remember(track.track_id, Object.assign({ forward: fwd, backward: bwd }, { scale }));
       track.tracking!.options = o as unknown as Record<string, unknown>;
-      if (track.tracking!.forward.done && track.tracking!.backward.done) flagUnreliableFrames(track);
+      if (track.tracking!.forward.done && track.tracking!.backward.done) {
+        flagUnreliableFrames(track);
+        flagPathJumps(track);
+      }
       saveTrack(track);
 
       let previewPath: string | undefined;
