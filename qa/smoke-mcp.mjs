@@ -61,6 +61,22 @@ function postMcp(body, route = "/mcp") {
   });
 }
 
+/** GET a service route with the token (the panel's admin routes). */
+function getRoute(route) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: DEFAULT_HOST, port: Number(process.env.CHROMA_AE_MCP_PORT) || DEFAULT_PORT, method: "GET", path: route, timeout: 30_000, headers: { authorization: `Bearer ${token}` } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve(data ? JSON.parse(data) : null));
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 async function call(name, args = {}) {
   const r = await postMcp({ jsonrpc: "2.0", id: ++seq, method: "tools/call", params: { name, arguments: args } });
   if (r.error) return { __error: r.error.message };
@@ -237,17 +253,28 @@ const FONT_WARNING_RE = /BIB Error|cannot access font/i;
 /** AE's font warnings that are open now, answered with OK. Only these: any other popup is left to the step that caused it. */
 async function answerFontWarnings() {
   const d = await call("ae_dialogs", {});
-  const out = { answered: 0, open: 0, texts: [] };
+  const out = { answered: 0, open: 0, notOurs: 0, texts: [] };
   for (const x of d.dialogs ?? []) {
     const text = `${x.title ?? ""} ${x.text ?? ""}`;
     if (!FONT_WARNING_RE.test(text)) continue;
     out.open++;
     if (out.texts.length < 2) out.texts.push(text.replace(/\s+/g, " ").trim().slice(0, 120));
-    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK" });
+    // AE raises the same warnings again when Windows fonts change while it is open (Jay, PRISM, 2026-11-28). Those
+    // came from no call of ours (caused_by_op null), and ae_dialog_respond rightly refuses them without the user's
+    // instruction: they are counted apart and left for the user, not tried and reported as a failed answer.
+    if (x.caused_by_op === null) {
+      out.notOurs++;
+      continue;
+    }
+    // `reason` is required by ae_dialog_respond: without it every answer was refused (invalid_args), so a PC that shows these warnings kept them open.
+    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK", reason: "smoke test: AE's font warning (Unknown BIB Error) during the ae_fonts scan; OK lets AE carry on" });
     if (!refused(r)) out.answered++;
   }
   return out;
 }
+
+/** The note for font warnings AE raised on its own, left for the user (empty when there were none). */
+const notOursNote = (n) => (n > 0 ? `; ${n} font warning(s) AE raised on its own (no call of ours: caused_by_op null, as after a Windows font change while AE is open), left for the user to press OK in AE, as ae_dialog_respond refuses them without the user's instruction` : "");
 
 /** ae_fonts with AE's font warnings answered while the scan runs and for a few quiet seconds after it. */
 async function fontSearchAnsweringWarnings(args) {
@@ -278,7 +305,8 @@ async function fontSearchAnsweringWarnings(args) {
   }
   const last = await answerFontWarnings();
   answered += last.answered;
-  return { result: await pending, answered, leftOpen: last.open - last.answered, texts, seconds: Math.round((Date.now() - started) / 1000) };
+  // Warnings of our own that stayed open are a failure; AE's own ones are reported apart (notOurs).
+  return { result: await pending, answered, leftOpen: last.open - last.answered - last.notOurs, notOurs: last.notOurs, texts, seconds: Math.round((Date.now() - started) / 1000) };
 }
 
 async function main() {
@@ -314,7 +342,7 @@ async function main() {
     check(
       "ae_fonts (warm-up: the whole font list is scanned; AE's font warnings are answered)",
       w.available === false || (w.available === true && w.scan_truncated === false && w.total_matches === 0 && warm.leftOpen === 0),
-      `${w.scanned ?? 0} fonts in ${w.scan_calls ?? "?"} call(s), ${warm.seconds} s; ${warm.answered} warning(s) answered, ${warm.leftOpen} left open${warm.texts.length ? `: ${warm.texts.join(" | ").slice(0, 160)}` : ""}${w.available === false ? `; ${w.reason}` : ""}`
+      `${w.scanned ?? 0} fonts in ${w.scan_calls ?? "?"} call(s), ${warm.seconds} s; ${warm.answered} warning(s) answered, ${warm.leftOpen} left open${warm.texts.length ? `: ${warm.texts.join(" | ").slice(0, 160)}` : ""}${notOursNote(warm.notOurs)}${w.available === false ? `; ${w.reason}` : ""}`
     );
   }
 
@@ -608,6 +636,34 @@ async function main() {
   r = await call("ae_motion_review", { comp_id: LC });
   const edgeCut = (r.findings ?? []).find((f) => f.kind === "cut_off" && f.layer?.name === "Edge");
   check("ae_motion_review (rest bounds)", Boolean(edgeCut) && edgeCut.suggested_shift?.[0] < 0, String(edgeCut?.message ?? JSON.stringify(r.bounds_unchecked ?? r.by_kind)));
+
+  // ---------- ae_plan: read before a task; questions follow the panel's Ask first (off by default) ----------
+  {
+    const before = await getRoute("/admin/plan").catch(() => null);
+    const wasOn = before?.ask_first === true;
+    try {
+      if (wasOn) await postMcp({ ask_first: false }, "/admin/plan");
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"] });
+      check(
+        "ae_plan (Ask first off: no question, the defaults as assumptions, a plan of real tools)",
+        r.ok === true && r.ask_first === false && Array.isArray(r.questions) && r.questions.length === 0 && r.assumptions?.length > 0 && r.understood?.comp?.id === LC && r.understood?.layers?.[0]?.name === "Edge" && r.plan?.some((x) => x.tool === "ae_set_keyframe_ease"),
+        `${r.assumptions?.length} assumption(s): ${(r.assumptions ?? []).map((x) => `${x.id}=${x.assumed}`).join(", ")}; plan ${(r.plan ?? []).map((x) => x.tool).join(" > ")}`
+      );
+      const on = await postMcp({ ask_first: true }, "/admin/plan");
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"] });
+      const qs = r.questions ?? [];
+      check(
+        "ae_plan (Ask first on, switched like the panel button: questions with options from the comp)",
+        on?.ask_first === true && r.ask_first === true && qs.some((q) => q.id === "duration" && q.options?.length === 3) && qs.some((q) => q.id === "feel" && q.kind === "ease"),
+        `${qs.length} question(s): ${qs.map((q) => q.id).join(", ")}`
+      );
+      const answers = Object.fromEntries(qs.map((q) => [q.id, q.default]));
+      r = await call("ae_plan", { request: "make the edge box bounce in", intent: "animate", comp_id: LC, layers: ["Edge"], answers });
+      check("ae_plan (the answers close the questions)", r.ok === true && (r.questions ?? []).length === 0 && Object.keys(r.answered ?? {}).length === qs.length, JSON.stringify(r.answered));
+    } finally {
+      await postMcp({ ask_first: wasOn }, "/admin/plan").catch(() => null);
+    }
+  }
 
   // ---------- 0.4: reads ----------
   r = await call("ae_comp_tree", {});
@@ -2208,7 +2264,7 @@ async function main() {
       check(
         "ae_fonts (check_files: every font file on disk)",
         x.available === false || (x.available === true && x.fonts > 0 && Array.isArray(x.problems) && x.scan_truncated === false && fc.leftOpen === 0),
-        `${x.fonts} fonts, ${x.files} files, ${x.problem_fonts} problem(s) ${JSON.stringify(x.problem_counts)}${(x.problems ?? []).length ? ": " + x.problems.slice(0, 3).map((p) => `${p.postscript} ${p.problem}`).join(", ") : ""}, ${x.without_file?.count ?? 0} without a file, ${x.seconds} s; ${fc.answered} warning(s) answered${x.available === false ? "; " + x.reason : ""}`
+        `${x.fonts} fonts, ${x.files} files, ${x.problem_fonts} problem(s) ${JSON.stringify(x.problem_counts)}${(x.problems ?? []).length ? ": " + x.problems.slice(0, 3).map((p) => `${p.postscript} ${p.problem}`).join(", ") : ""}, ${x.without_file?.count ?? 0} without a file, ${x.seconds} s; ${fc.answered} warning(s) answered${notOursNote(fc.notOurs)}${x.available === false ? "; " + x.reason : ""}`
       );
     }
     r = await call("ae_fonts", { action: "search", query: "arial", page_size: 5 });

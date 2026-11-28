@@ -123,7 +123,11 @@
   // The 16.1 API takes 0 for a horizontal guide and 1 for a vertical one; AE
   // 26.5 documents that these integers may differ between versions. On 26.5+
   // use an orientation enum constant when the DOM exposes one; otherwise keep
-  // 0/1 and flag the result as unverified.
+  // 0/1 and flag the result as unverified. The enum constant goes into a
+  // GuideOptions object only: measured on AE 27.0x78, the two-argument
+  // addGuide(orientation, position) still takes 0/1 and makes any other number
+  // (GuideOrientationType.VERTICAL is 14213 there) a horizontal guide, so that
+  // form always gets the legacy integer.
   function aeAtLeast(major, minor) {
     var v = "";
     try { v = String(app.version); } catch (e) { return false; }
@@ -159,10 +163,10 @@
     if (name === "vertical") legacy = 1;
     if (aeAtLeast(26, 5)) {
       var e = orientationEnumValue(name);
-      if (e !== null) return { value: e, unverified: false };
-      return { value: legacy, unverified: true };
+      if (e !== null) return { value: e, legacy: legacy, unverified: false };
+      return { value: legacy, legacy: legacy, unverified: true };
     }
-    return { value: legacy, unverified: false };
+    return { value: legacy, legacy: legacy, unverified: false };
   }
 
   // The 26.5 enums (GuideOrientationType, GuidePositionType) number their members
@@ -606,7 +610,7 @@
         if (!isNum(op.position) || Math.abs(op.position) > 100000) fail("bad_args", where + ".position must be a number within +-100000 px");
         var ori = guideOrientation(op.orientation);
         if (ori.unverified) plan.unverified = true;
-        var addStep = { action: "add", orientation_type: ori.value, orientation: op.orientation, position: op.position };
+        var addStep = { action: "add", orientation_type: ori.value, legacy_orientation: ori.legacy, orientation: op.orientation, position: op.position };
         planGuideExtras(op, addStep, where);
         plan.push(addStep);
         var added = { orientation: addStep.orientation_type };
@@ -1423,8 +1427,16 @@
 
   // ---------- write ----------
 
-  // AE 26.5's form takes a GuideOptions object made with new GuideOptions() (attribute
-  // `orientation`); a plain object stands in where the class does not exist.
+  // AE 26.5's form takes a GuideOptions object made with new GuideOptions(); a plain
+  // object stands in where the class does not exist (AE 27.0 refuses one: "Expected a
+  // GuideOptions object"). The 26.5 notes name the direction `orientation`; AE 27.0x78's
+  // GuideOptions has `orientationType` (with color, pinned, position, positionType) and
+  // ignores `orientation`, so the direction is given under both names.
+  function setGuideDirection(o, value) {
+    try { o.orientationType = value; } catch (eT) {}
+    try { o.orientation = value; } catch (eO) {}
+  }
+
   function guideOptions(orientation, position, step) {
     var o = null;
     try {
@@ -1434,12 +1446,12 @@
     }
     if (!o) o = {};
     if (step && step.keep) {
-      if (step.keep.orientation !== undefined) o.orientation = step.keep.orientation;
+      if (step.keep.orientation !== undefined) setGuideDirection(o, step.keep.orientation);
       if (step.keep.position_type !== undefined) o.positionType = step.keep.position_type;
       if (step.keep.color !== undefined) o.color = step.keep.color;
       if (step.keep.pinned !== undefined) o.pinned = step.keep.pinned;
     }
-    if (orientation !== null && orientation !== undefined) o.orientation = orientation;
+    if (orientation !== null && orientation !== undefined) setGuideDirection(o, orientation);
     o.position = position;
     if (step) {
       if (step.position_type_value !== undefined) o.positionType = step.position_type_value;
@@ -1454,8 +1466,10 @@
       comp.addGuide(guideOptions(step.orientation_type, step.position, step));
       return "options";
     }
+    // The two-argument form takes 0/1 on every build measured (16.1 to 27.0), whatever the enum says.
+    var legacyValue = step.legacy_orientation !== undefined ? step.legacy_orientation : step.orientation_type;
     try {
-      comp.addGuide(step.orientation_type, step.position);
+      comp.addGuide(legacyValue, step.position);
       return "legacy";
     } catch (eLegacy) {
       // AE 26.5 added a GuideOptions form; try it before giving up.

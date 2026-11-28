@@ -736,6 +736,36 @@
       return;
     }
 
+    // The panel's "Ask first" button: whether ae_plan asks the user before a task (off by default).
+    // GET answers { ok, ask_first }; POST takes { ask_first: true | false } and answers the state after it.
+    if ((req.method === "GET" || req.method === "POST") && reqUrl === "/admin/plan") {
+      var mcpPlan = getPanelMcp();
+      if (!mcpPlan || typeof mcpPlan.planSettings !== "function" || typeof mcpPlan.setAskFirst !== "function") {
+        sendJson(res, 503, { ok: false, error: { kind: "unavailable", message: "The MCP bundle is not loaded" } });
+        return;
+      }
+      if (req.method === "GET") {
+        sendJson(res, 200, { ok: true, ask_first: mcpPlan.planSettings().ask_first });
+        return;
+      }
+      readRequestBody(req, res, function (rawBody) {
+        var wanted = null;
+        try {
+          wanted = JSON.parse(rawBody);
+        } catch (e) {
+          wanted = null;
+        }
+        if (!wanted || typeof wanted !== "object" || typeof wanted.ask_first !== "boolean") {
+          sendJson(res, 400, { ok: false, error: { kind: "invalid_request", message: "POST /admin/plan requires JSON {ask_first: true|false}" } });
+          return;
+        }
+        var after = mcpPlan.setAskFirst(wanted.ask_first);
+        log("ok", "Ask first " + (after.ask_first ? "on" : "off") + ": the agent " + (after.ask_first ? "asks before a task" : "goes ahead with its assumptions"));
+        sendJson(res, 200, { ok: true, ask_first: after.ask_first });
+      });
+      return;
+    }
+
     // Save diagnostics button: the same file as the ae_diagnostics tool.
     if (req.method === "POST" && reqUrl === "/admin/diagnostics") {
       readRequestBody(req, res, function () {

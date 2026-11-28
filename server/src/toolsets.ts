@@ -149,9 +149,9 @@ export const TOOL_GROUPS: Record<string, ToolGroup> = {
     ],
   },
   app: {
-    blurb: "ExtendScript, dialogs, questions to the user, diagnostics, memory, panels, skills, viewer.",
+    blurb: "Task plans, ExtendScript, dialogs, questions, diagnostics, memory, panels, skills, viewer.",
     tools: [
-      "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_ask_user", "ae_diagnostics", "ae_memory_status",
+      "ae_plan", "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_ask_user", "ae_diagnostics", "ae_memory_status",
       "ae_memory_purge", "ae_list_panels", "ae_open_panel", "ae_ui_screenshot", "ae_view", "ae_skill_list",
       "ae_skill_save", "ae_skill_run",
     ],
@@ -196,7 +196,7 @@ export const SEARCH_HINTS: Record<string, string> = {
 // ---------- core list ----------
 
 export const CORE_TOOL_NAMES: readonly string[] = [
-  "ae_status", "ae_get_project", "ae_get_comp", "ae_comp_tree", "ae_get_layer_props", "ae_find_layers",
+  "ae_plan", "ae_status", "ae_get_project", "ae_get_comp", "ae_comp_tree", "ae_get_layer_props", "ae_find_layers",
   "ae_get_keyframes", "ae_set_property", "ae_batch_set", "ae_set_text", "ae_create_layer", "ae_create_comp",
   "ae_layer_ops", "ae_import_footage", "ae_add_effect", "ae_set_effect", "ae_save", "ae_snapshot_frame",
   "ae_run_jsx", "ae_dialogs", "ae_dialog_respond", "ae_skill_run", "ae_multi_comp_apply",
@@ -215,6 +215,8 @@ const SCHEMA_POINTER = "More: ae_get_tool_schema.";
 
 /** Hand-written summaries for the core tools whose first sentence is not enough. */
 export const CORE_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  ae_plan:
+    "Call first for a new task (request, intent, named layers). Returns what it took the request to mean, the plan with a tool per step, extras and hazards; questions only when the user turned Ask first on in the panel (off by default: go ahead, state the assumptions). Read-only.",
   ae_run_jsx:
     "Run ExtendScript (function body; `return` a value). With `mutates: true` it needs `expect`, runs in one undo group and returns a before/after receipt. ES3 only (no let/const/arrows, no chained ternaries). A best-effort safety lint (a guard rail, not a sandbox) refuses system.callSystem, file writes and deletes, dialogs and quitting. app.executeCommand silently does nothing through CEP: use DOM methods. Prefer a dedicated tool when one exists.",
   ae_render_queue_render:
@@ -328,6 +330,82 @@ const CORE_PROPERTY_CAPS: Record<string, number> = {
   "ae_set_effect.params[].value": 400,
 };
 
+/**
+ * A tool argument whose nested schema is still over this many characters after trimming is listed
+ * as a one-line summary in the core list: its own text, every field with its type and its enum
+ * values (`size?: [integer,integer]; justification?: left|center|right`), and a pointer to
+ * ae_get_tool_schema for the per-field text and bounds. Only optional arguments (settings such as text style or light options):
+ * a required argument is the call itself, and one holding a contract kept long on purpose
+ * (CORE_PROPERTY_CAPS) stays whole. Measured 2026-11-27: the core list was about 20k tokens and most of it was a
+ * few nested arguments (ae_set_text style, ranges and paragraphs; ae_layer_ops where; ae_import_assets
+ * rules and interpret; ae_render_queue_edit output modules). The server still checks every call
+ * against the full schema, and the full list and ae_get_tool_schema keep it whole.
+ */
+export const CORE_COLLAPSE_MIN_CHARS = 600;
+
+/** Ends every summarised argument; the test finds them by it. */
+export const COLLAPSED_POINTER = "Per-field text and bounds: ae_get_tool_schema.";
+
+const isJson = (v: unknown): v is Json => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** A short type for one field: number, a|b|c for an enum, T[] or [A,B] for arrays, object, or A or B for a union. */
+function shortTypeOf(n: unknown): string {
+  if (!isJson(n)) return "any";
+  if (Array.isArray(n.enum)) return n.enum.map((v) => String(v)).join("|");
+  if (n.const !== undefined) return JSON.stringify(n.const);
+  const alts = (n.anyOf ?? n.oneOf) as unknown;
+  if (Array.isArray(alts)) return [...new Set(alts.map(shortTypeOf))].join(" or ");
+  const t = Array.isArray(n.type) ? (n.type as unknown[]).join("|") : n.type;
+  if (t === "array") return Array.isArray(n.items) ? `[${(n.items as unknown[]).map(shortTypeOf).join(",")}]` : `${shortTypeOf(n.items)}[]`;
+  if (t === "object" || isJson(n.properties)) return "object";
+  if (typeof t === "string") return t;
+  // An untyped field (a union Zod could not express) says its forms in its text: keep that, briefly.
+  if (typeof n.description === "string" && n.description.trim()) return `(${firstSentences(n.description, UNTYPED_FIELD_TEXT_MAX)})`;
+  return "any";
+}
+
+/** How much of an untyped field's text a summarised argument keeps (its forms: "a name, { postscript } or { family, style }"). */
+const UNTYPED_FIELD_TEXT_MAX = 110;
+
+/**
+ * The fields of an object schema, of an array of objects, or of every member of a union, as
+ * `name: type` with `?` on an optional one.
+ */
+function fieldListOf(node: Json): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (n: unknown) => {
+    if (!isJson(n)) return;
+    if (isJson(n.properties)) {
+      const required = Array.isArray(n.required) ? (n.required as unknown[]).map(String) : [];
+      for (const [k, v] of Object.entries(n.properties)) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(`${k}${required.includes(k) ? "" : "?"}: ${shortTypeOf(v)}`);
+      }
+    }
+    if (isJson(n.items)) add(n.items);
+    for (const u of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(n[u])) for (const m of n[u] as unknown[]) add(m);
+  };
+  add(node);
+  return out;
+}
+
+function collapseLargeArgument(full: unknown, trimmed: unknown, path: string): unknown {
+  // Only a tool's own optional arguments (tool.argument; required ones are the call itself and stay whole),
+  // never one holding a contract kept long on purpose (CORE_PROPERTY_CAPS at it or below it), nor expect.
+  if (path.split(".").length !== 2 || path.endsWith(".expect")) return trimmed;
+  if (Object.keys(CORE_PROPERTY_CAPS).some((k) => k === path || k.startsWith(`${path}.`) || k.startsWith(`${path}[]`))) return trimmed;
+  if (!isJson(full) || !isJson(trimmed) || JSON.stringify(trimmed).length <= CORE_COLLAPSE_MIN_CHARS) return trimmed;
+  const fields = fieldListOf(full);
+  if (fields.length === 0) return trimmed;
+  const own = typeof trimmed.description === "string" ? trimmed.description.replace(/\s*$/, "") : "";
+  const text = `${own ? (/[.!?]$/.test(own) ? own : `${own}.`) + " " : ""}Fields: ${fields.join("; ")}. ${COLLAPSED_POINTER}`;
+  if (full.type === "array") return { type: "array", items: { type: "object" }, description: text };
+  if (full.type === "object") return { type: "object", description: text };
+  return { description: text };
+}
+
 export function trimToolDescription(tool: ToolDefinition<any>): string {
   const override = CORE_DESCRIPTION_OVERRIDES[tool.name];
   const body = override ?? firstSentences(stripSafety(tool.description), TOOL_DESC_MAX);
@@ -363,7 +441,12 @@ export function trimSchema(node: unknown, path = ""): unknown {
       if (text) out.description = text;
     } else if (key === "properties" && value !== null && typeof value === "object" && !Array.isArray(value)) {
       const props: Json = {};
-      for (const [name, sub] of Object.entries(value as Json)) props[name] = trimSchema(sub, path ? `${path}.${name}` : name);
+      const required = Array.isArray(src.required) ? (src.required as unknown[]).map(String) : [];
+      for (const [name, sub] of Object.entries(value as Json)) {
+        const subPath = path ? `${path}.${name}` : name;
+        const trimmed = trimSchema(sub, subPath);
+        props[name] = required.includes(name) ? trimmed : collapseLargeArgument(sub, trimmed, subPath);
+      }
       out.properties = props;
     } else if (key === "items") {
       out.items = trimSchema(value, `${path}[]`);
@@ -423,6 +506,7 @@ export function coreInstructions(): string {
     "- ae_search_tools { query?, pattern?, group?, limit?, offset?, detail? }: find tools by keywords, a name fragment (^ and $ anchor it; not a regex) or a group. An empty call lists the groups.",
     "- ae_get_tool_schema { name | names }: full description (with the safety text) and schema of up to 5 tools. Read it before a tool's first use.",
     "- ae_invoke_tool { name, arguments }: call any tool by name, exactly like calling it directly. Put the tool's arguments under `arguments`.",
+    "Start a new task with ae_plan (the request, its intent, the layers it names): the plan, and whether to ask the user first or go ahead with stated assumptions.",
     "Tools shown in this list can be called directly. Every tool that changes the project takes `expect` (project_path, optional comp_id); copy project_path from ae_status. Give each write a unique `idempotency_key`: a resend with it returns the first answer, not a second write.",
     "",
     "Tool groups:",

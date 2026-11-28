@@ -43,6 +43,7 @@ import { aerenderTools } from "./aerender.js";
 import { animateTools } from "./animate.js";
 import { annotateTools } from "./annotate.js";
 import { askTools } from "./ask.js";
+import { planTools } from "./plan.js";
 import { assetsTools } from "./assets.js";
 import { audioTools } from "./audio.js";
 import { briefTools } from "./brief.js";
@@ -87,6 +88,7 @@ export const extTools: ToolDefinition<any>[] = [
   ...framesTools,
   ...motionTools,
   ...askTools,
+  ...planTools,
   ...skillsTools,
   ...briefTools,
   ...aerenderTools,
