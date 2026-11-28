@@ -9,6 +9,13 @@
 - **Also fixed:** the before / after sheets of `ae_screen_replace` had blank labels (the label font has capitals only).
 - **Not done:** the screen's light on the subject away from the edge (spill replacement): this plate shows none, so it is only reported. Over a screen showing a picture (not a key colour) a hand still needs a roto.
 
+## Tracker research, forward-backward check, light normalisation; Jay's notes on #19, 2026-11-28 (`feat/planar-real-footage`)
+
+- **Research.** Emre asked for the trade's terms (reverse tracking, high-pass and the rest) researched and built in. The sourced survey is `docs/TRACKING-RESEARCH.md`; its first table says what the MCP has. Reverse tracking was already there (both ways from `ref_time`). Built now: `fb_check_px` (a forward-backward check on every point match, default 2 px at 1080 lines) and `normalize_light` (local contrast normalisation, off by default). Both are measured in docs/CALIBRATION.md. Next from the survey's ranked list: a drift-corrected template update or keyed references, keyed bidirectional segments, a coarse search before LK, lens undistortion.
+- **Jay's notes on #19.** `answerFontWarnings` lacked `reason`: fixed in `01f7f38`. Font warnings AE raises on its own after a Windows font change (`caused_by_op` null) are now counted apart in the smoke test and left for the user, so the check no longer looks broken. Jay found PRISM's six warnings to be FontBase copies of Adobe Clean, which is not a code issue.
+- **CI.** The push of `ae_screen_foreground` failed the coverage gate (lines 93.98% of 94). Its whole flow is now tested through a fake bridge: lines at 94.47%, functions at 97.43%.
+- **Live evidence for #24** still needs a run of `qa/live-evidence.mjs` in an empty, unsaved project. That means closing the HCW test project, so it waits for Emre's OK.
+
 ## macOS and Windows live checks, 2026-11-22 (`mac/live-fixes-2026-11-22`)
 
 ### Where it is
