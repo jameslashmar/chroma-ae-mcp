@@ -108,17 +108,24 @@ describe("toolset choice", () => {
     expect(parseToolset("core")).toEqual({ toolset: "core", invalid: false });
     expect(parseToolset(" CORE ")).toEqual({ toolset: "core", invalid: false });
     expect(parseToolset(["core"])).toEqual({ toolset: "core", invalid: false });
-    expect(parseToolset(undefined)).toEqual({ toolset: "full", invalid: false });
-    expect(parseToolset("")).toEqual({ toolset: "full", invalid: false });
+    // Core is the default: a client that does not ask gets the small list.
+    expect(parseToolset(undefined)).toEqual({ toolset: "core", invalid: false });
+    expect(parseToolset("")).toEqual({ toolset: "core", invalid: false });
     expect(parseToolset("full")).toEqual({ toolset: "full", invalid: false });
-    expect(parseToolset("tiny")).toEqual({ toolset: "full", invalid: true });
+    expect(parseToolset(" FULL ")).toEqual({ toolset: "full", invalid: false });
+    expect(parseToolset("tiny")).toEqual({ toolset: "core", invalid: true });
   });
 });
 
 describe("full toolset", () => {
   it("is every tool, families in place of their members: same order and text, no meta-tools, no instructions", async () => {
     const expected = listedTools().map((t) => ({ name: t.name, description: t.description, inputSchema: withIdempotencyKey(t.name, toolInputSchema(t)), annotations: annotationsFor(t.name) }));
-    for (const toolset of [undefined, "full", "bogus", ""]) {
+    // No header, an empty one or a bad one is core now; full is asked for.
+    for (const toolset of [undefined, "bogus", ""]) {
+      const names = (await rpc("tools/list", undefined, noAeCtx(), toolset)).tools.map((t: any) => t.name);
+      expect(names).toEqual([...META_TOOL_NAMES, ...CORE_TOOL_NAMES]);
+    }
+    for (const toolset of ["full", "FULL"]) {
       const result = await rpc("tools/list", undefined, noAeCtx(), toolset);
       expect(result.tools).toEqual(expected);
       expect(JSON.stringify(result.tools)).toBe(JSON.stringify(expected));
@@ -938,13 +945,13 @@ describe("X-Chroma-Toolset header through the panel's HTTP handler", () => {
   }
   const list = { jsonrpc: "2.0", id: 1, method: "tools/list" };
 
-  it("serves the core list for core and the full list for no header, full or a bad value", async () => {
-    const core = await post({ "x-chroma-toolset": "core" }, list);
-    expect(core.result.tools.map((t: any) => t.name)).toEqual([...META_TOOL_NAMES, ...CORE_TOOL_NAMES]);
-    for (const headers of [{}, { "x-chroma-toolset": "full" }, { "x-chroma-toolset": "tiny" }]) {
-      const full = await post(headers, list);
-      expect(full.result.tools).toHaveLength(listedTools().length);
+  it("serves the core list for core, no header or a bad value, and the full list for full", async () => {
+    for (const headers of [{ "x-chroma-toolset": "core" }, {}, { "x-chroma-toolset": "tiny" }]) {
+      const core = await post(headers, list);
+      expect(core.result.tools.map((t: any) => t.name)).toEqual([...META_TOOL_NAMES, ...CORE_TOOL_NAMES]);
     }
+    const full = await post({ "x-chroma-toolset": "full" }, list);
+    expect(full.result.tools).toHaveLength(listedTools().length);
     const init = await post({ "x-chroma-toolset": "core" }, { jsonrpc: "2.0", id: 2, method: "initialize", params: {} });
     expect(init.result.instructions).toContain("ae_search_tools");
   });

@@ -188,7 +188,7 @@ describe("dispatch", () => {
   });
 
   it("lists the family with a merged schema and the members' text", async () => {
-    const res: any = await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx);
+    const res: any = await handleRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx, { toolset: "full" });
     const names = res.result.tools.map((t: any) => t.name);
     expect(names).toContain("ae_zz_fam");
     expect(names).not.toContain("ae_zz_fam_two");

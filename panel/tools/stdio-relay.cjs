@@ -14,16 +14,14 @@
 //   and resources/read from the guidance text it served, so everything stays
 //   registered and readable; a tool call tells the user to start AE.
 // - The toolset. "core" is a small tool list (a few everyday tools plus ae_search_tools /
-//   ae_get_tool_schema / ae_invoke_tool); "full" is every tool. The relay sends core on every
-//   request in an X-Chroma-Toolset header; full sends nothing.
+//   ae_get_tool_schema / ae_invoke_tool); "full" is every tool. The relay sends the choice on every
+//   request in an X-Chroma-Toolset header (the panel's own default is core too).
 //   * CHROMA_AE_MCP_TOOLSET set: it wins ("core", "full"; anything else is logged once and
-//     treated as full).
-//   * Unset: every client gets core, except clients known to load MCP tool schemas on demand
-//     themselves (FULL_CLIENTS, today only Claude Code, clientInfo.name "claude-code", matched
-//     case-insensitively), which get full. The name is read at the client's initialize; an
-//     unknown name or a missing clientInfo gets core. Before an initialize it is core too: a
-//     client that skips the handshake gets the cheap list, and a missing core cache falls back
-//     to the full cached list, so nothing is lost.
+//     treated as core).
+//   * Unset: every client gets core, Claude Code included. It used to get full on the belief that
+//     it loads MCP tool schemas on demand; measured 2026-11-27 (Claude Code 2.1.332) it sent all 136
+//     schemas with every request, about 143k tokens. A missing core cache falls back to the full
+//     cached list, so nothing is lost.
 //   The choice is logged once on stderr (the host's MCP log) with the client name and the
 //   reason. The tool list cache is kept per toolset.
 // - X-Chroma-Client carries the client's name (sanitised, at most 40 characters) on every
@@ -114,19 +112,15 @@ function resolveToolset() {
   const raw = process.env.CHROMA_AE_MCP_TOOLSET;
   if (raw === undefined) return { set: false, toolset: "core", note: "" };
   const v = String(raw).trim().toLowerCase();
-  if (v === "" || v === "full") return { set: true, toolset: "full", note: "" };
+  if (v === "full") return { set: true, toolset: "full", note: "" };
+  if (v === "") return { set: true, toolset: "core", note: "" };
   if (v === "core") return { set: true, toolset: "core", note: "" };
   return {
     set: true,
-    toolset: "full",
-    note: "CHROMA_AE_MCP_TOOLSET=" + JSON.stringify(String(raw).slice(0, 40)) + " is not 'core' or 'full'; using the full tool list.",
+    toolset: "core",
+    note: "CHROMA_AE_MCP_TOOLSET=" + JSON.stringify(String(raw).slice(0, 40)) + " is not 'core' or 'full'; using the core tool list.",
   };
 }
-
-// Client names that get the full list when the environment does not choose; every other client
-// gets core. Exact, lower case. Claude Code defers MCP tool schemas natively, so the full list
-// costs it little and direct calls to the real tool names work better there.
-const FULL_CLIENTS = ["claude-code"];
 
 // A client name that is safe in a header and a log line: printable ASCII only, one line, 40 characters.
 function sanitizeClientName(raw) {
@@ -200,14 +194,7 @@ function observeInitialize(message) {
     clientElicits = !!caps.elicitation && typeof caps.elicitation === "object";
     toolsetDecided = true;
     let why;
-    if (ENV_TOOLSET.set) {
-      why = "env";
-    } else if (clientName && FULL_CLIENTS.indexOf(clientName.toLowerCase()) >= 0) {
-      TOOLSET.toolset = "full";
-      why = "client " + clientName;
-    } else {
-      why = "default core";
-    }
+    why = ENV_TOOLSET.set ? "env" : "default core";
     log("toolset " + TOOLSET.toolset + " (" + why + "); client " + JSON.stringify(clientName || "unknown"));
   }
 }
@@ -241,9 +228,9 @@ function post(bodyText) {
             Accept: "application/json, text/event-stream",
             "Content-Length": Buffer.byteLength(bodyText),
           },
-          // The panel is stateless, so the choice goes with every request. A panel that does
-          // not know the header ignores it and serves the full list.
-          TOOLSET.toolset === "core" ? { "X-Chroma-Toolset": "core" } : {},
+          // The panel is stateless, so the choice goes with every request, full included (the
+          // panel's default is core).
+          { "X-Chroma-Toolset": TOOLSET.toolset },
           clientName ? { "X-Chroma-Client": clientName } : {},
           clientElicits ? { "X-Chroma-Elicitation": "1" } : {}
         ),

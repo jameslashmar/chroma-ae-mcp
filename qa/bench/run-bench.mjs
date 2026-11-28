@@ -6,7 +6,7 @@
  * (`claude -p`) with only this MCP (and Read, to look at frames), and the check reads the result back.
  * Recorded per task: pass/fail with the numbers, tool calls (and which failed), turns, tokens, cost, time.
  *
- *   node qa/bench/run-bench.mjs [--tasks T01,T05] [--toolset core|full] [--model <alias>]
+ *   node qa/bench/run-bench.mjs [--tasks T01,T05] [--toolset core|full|default] [--model <alias>]
  *                               [--claude <path to claude>] [--out <dir>] [--timeout-min 15] [--budget-usd 5]
  *
  * Needs After Effects with the panel service running (port 7790), the token, the `claude` CLI logged in,
@@ -96,7 +96,7 @@ const SYSTEM =
 
 /** Runs Claude Code headless on the prompt; resolves with the stream-json lines and whether it timed out. */
 function runClaude(prompt, dir) {
-  const mcp = { mcpServers: { "chroma-ae": { type: "http", url: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/mcp`, headers: { Authorization: `Bearer ${token}`, ...(toolset === "core" ? { "X-Chroma-Toolset": "core" } : {}) } } } };
+  const mcp = { mcpServers: { "chroma-ae": { type: "http", url: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/mcp`, headers: { Authorization: `Bearer ${token}`, ...(toolset === "default" ? {} : { "X-Chroma-Toolset": toolset }) } } } };
   const cfg = path.join(dir, "mcp.json");
   fs.writeFileSync(cfg, JSON.stringify(mcp));
   const argv = [

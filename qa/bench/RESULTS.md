@@ -1,5 +1,29 @@
 # Task bench results
 
+## 2026-11-27, second run: no toolset header (the README setup), core by default
+
+Same machine and versions as the first run, on `1e49acb` (core is the default). Claude Code saw 37 MCP tools: the 34 core tools and the three meta-tools.
+
+15/15 passed. $3.62 in all, 126 tool calls, 1 failed and recovered (T15, the same empty-queue `ae_render_templates` call as before), 8 minutes. T11 had no `idempotency_key_reused` this time (keys are scoped to the project now).
+
+| Task | Result | Tool calls (failed) | Turns | Cost | Time |
+|---|---|---|---|---|---|
+| T01-title Title card: new comp with centred text | pass | 10 (0) | 11 | $0.55 | 32 s |
+| T02-fade Fade a layer in and out | pass | 5 (0) | 6 | $0.13 | 19 s |
+| T03-pop Scale pop with overshoot | pass | 12 (0) | 13 | $0.32 | 54 s |
+| T04-slide Slide in from the left with ease-out | pass | 11 (0) | 12 | $0.25 | 36 s |
+| T05-stagger Staggered fade-in of five layers | pass | 7 (0) | 8 | $0.16 | 25 s |
+| T06-shadow Drop shadow effect with settings | pass | 3 (0) | 4 | $0.11 | 14 s |
+| T07-color Change a solid's colour (checked on the rendered pixel) | pass | 5 (0) | 6 | $0.16 | 13 s |
+| T08-precompose Precompose five layers | pass | 6 (0) | 7 | $0.13 | 14 s |
+| T09-null Null controller parenting without a jump | pass | 6 (0) | 7 | $0.20 | 27 s |
+| T10-mask Feathered elliptical mask | pass | 5 (0) | 6 | $0.12 | 13 s |
+| T11-trim Trim a layer | pass | 4 (0) | 5 | $0.10 | 10 s |
+| T12-rotate Continuous rotation | pass | 6 (0) | 7 | $0.14 | 21 s |
+| T13-captions Captions from an SRT file | pass | 15 (0) | 16 | $0.45 | 38 s |
+| T14-track Track a moving square and attach a layer | pass | 19 (0) | 20 | $0.51 | 90 s |
+| T15-render Render one second as a PNG sequence | pass | 12 (1) | 13 | $0.29 | 46 s |
+
 ## 2026-11-27: AE 27.0x78 (Windows), Claude Code 2.1.332, core toolset
 
 The first run. Every task passed; the two failed calls were recovered by Claude itself:

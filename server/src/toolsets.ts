@@ -24,14 +24,19 @@ export const TOOLSET_HEADER = "x-chroma-toolset";
 export const CLIENT_HEADER = "x-chroma-client";
 export const TOOLSET_ENV = "CHROMA_AE_MCP_TOOLSET";
 
-/** "core" -> core, undefined / "" / "full" -> full, anything else -> full with `invalid` set. */
+/**
+ * "full" -> full; undefined / "" / "core" -> core; anything else -> core with `invalid` set.
+ * Core is the default for every client that does not ask: measured 2026-11-27 with Claude Code 2.1.332
+ * (`claude -p`, direct HTTP), the full list sent all 136 schemas with every request (about 143k tokens):
+ * a one-line question cost $2.35 against $0.27 with core, and the task bench passed 15/15 on core.
+ */
 export function parseToolset(value: unknown): { toolset: Toolset; invalid: boolean } {
   const raw = Array.isArray(value) ? value[0] : value;
-  if (raw === undefined || raw === null) return { toolset: "full", invalid: false };
+  if (raw === undefined || raw === null) return { toolset: "core", invalid: false };
   const v = String(raw).trim().toLowerCase();
-  if (v === "" || v === "full") return { toolset: "full", invalid: false };
-  if (v === "core") return { toolset: "core", invalid: false };
-  return { toolset: "full", invalid: true };
+  if (v === "full") return { toolset: "full", invalid: false };
+  if (v === "" || v === "core") return { toolset: "core", invalid: false };
+  return { toolset: "core", invalid: true };
 }
 
 // ---------- groups ----------
