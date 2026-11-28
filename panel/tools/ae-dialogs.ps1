@@ -26,6 +26,10 @@ param(
     # respond with -Key: refuse (dialog_changed) when the window rect is no longer "left,top,right,bottom".
     [string]$ExpectRect = "",
 
+    # respond: click an AE-painted dialog's button at "x,y" (pixels of the window, as in its screenshot), for
+    # a button no key answers. Same guards as -Key; -ExpectRect is required with it.
+    [string]$Click = "",
+
     # watch: exit when this process (the panel service's Node) is gone.
     [int]$ParentPid = 0,
 
@@ -209,16 +213,26 @@ function Wait-WinRt($op, [Type]$t) {
     return $task.Result
 }
 # Returns @{ lines = @(@{ text; words = @(@{ text; x; y; w; h }) }) } in the ORIGINAL image's pixels.
-function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
+# -FromY reads only the rows from that one down (the boxes still come back in the whole image's pixels);
+# -Invert reads the colours inverted (white on blue, as on AE 27's default button, reads as dark on light).
+function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3, [int]$FromY = 0, [switch]$Invert) {
     if (-not (Initialize-Ocr)) { return $null }
     $tmp = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($PngPath), "_ocr_" + [Guid]::NewGuid().ToString("N") + ".png")
+    $y0 = 0
     try {
         $src = [System.Drawing.Image]::FromFile($PngPath)
         try {
-            $big = New-Object System.Drawing.Bitmap ($src.Width * $Scale), ($src.Height * $Scale)
+            $y0 = [Math]::Max(0, [Math]::Min($FromY, $src.Height - 1))
+            $rows = $src.Height - $y0
+            $big = New-Object System.Drawing.Bitmap ($src.Width * $Scale), ($rows * $Scale)
             $g = [System.Drawing.Graphics]::FromImage($big)
             $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-            $g.DrawImage($src, 0, 0, $big.Width, $big.Height)
+            $attr = New-Object System.Drawing.Imaging.ImageAttributes
+            if ($Invert) {
+                $m = New-Object System.Drawing.Imaging.ColorMatrix(,[single[][]]@(@(-1,0,0,0,0),@(0,-1,0,0,0),@(0,0,-1,0,0),@(0,0,0,1,0),@(1,1,1,0,1)))
+                $attr.SetColorMatrix($m)
+            }
+            $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $big.Width, $big.Height), 0, $y0, $src.Width, $rows, [System.Drawing.GraphicsUnit]::Pixel, $attr)
             $g.Dispose()
             $big.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
             $big.Dispose()
@@ -234,7 +248,7 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
         foreach ($ln in $res.Lines) {
             $words = @()
             foreach ($w in $ln.Words) {
-                $words += @{ text = [string]$w.Text; x = [int]($w.BoundingRect.X / $Scale); y = [int]($w.BoundingRect.Y / $Scale); w = [int]($w.BoundingRect.Width / $Scale); h = [int]($w.BoundingRect.Height / $Scale) }
+                $words += @{ text = [string]$w.Text; x = [int]($w.BoundingRect.X / $Scale); y = [int]($w.BoundingRect.Y / $Scale) + $y0; w = [int]($w.BoundingRect.Width / $Scale); h = [int]($w.BoundingRect.Height / $Scale) }
             }
             $lines += @{ text = [string]$ln.Text; words = $words }
         }
@@ -244,6 +258,37 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
     } finally {
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
     }
+}
+
+# The bottom band of a dialog read again, as it is and inverted, and every word not already read added as
+# a line of its own. Read whole, AE 27's Project Settings came back without its "OK" (white on a blue fill)
+# and "Cancel"; the bottom band alone read "Cancel", inverted it read both (2026-11-28). The band is the
+# lower 22% of the window, at least 60 px.
+function Add-ButtonBandOcr($Ocr, [string]$PngPath, [int]$Height) {
+    if ($null -eq $Ocr -or $Height -le 0) { return $Ocr }
+    $band = [Math]::Max(60, [int]($Height * 0.22))
+    $fromY = [Math]::Max(0, $Height - $band)
+    $have = New-Object System.Collections.ArrayList
+    foreach ($l in $Ocr.lines) { foreach ($w in $l.words) { [void]$have.Add($w) } }
+    $lines = @($Ocr.lines)
+    foreach ($inv in @($false, $true)) {
+        $more = if ($inv) { Invoke-DialogOcr $PngPath -FromY $fromY -Invert } else { Invoke-DialogOcr $PngPath -FromY $fromY }
+        if ($null -eq $more) { continue }
+        foreach ($l in $more.lines) {
+            $kept = @()
+            foreach ($w in $l.words) {
+                $dup = $false
+                foreach ($h in $have) {
+                    $ix = [Math]::Min($w.x + $w.w, $h.x + $h.w) - [Math]::Max($w.x, $h.x)
+                    $iy = [Math]::Min($w.y + $w.h, $h.y + $h.h) - [Math]::Max($w.y, $h.y)
+                    if ($ix -gt 0 -and $iy -gt 0 -and ($ix * $iy) -ge 0.3 * [Math]::Min($w.w * $w.h, $h.w * $h.h)) { $dup = $true; break }
+                }
+                if (-not $dup) { $kept += $w; [void]$have.Add($w) }
+            }
+            if ($kept.Count -gt 0) { $lines += @{ text = (($kept | ForEach-Object { $_.text }) -join " "); words = $kept } }
+        }
+    }
+    return @{ lines = $lines }
 }
     # ---------- watch ----------
     # A long-running, cheap look at AE's top-level windows (Win32 only: no UI Automation, no screenshot, no
@@ -559,6 +604,7 @@ function Invoke-DialogOcr([string]$PngPath, [int]$Scale = 3) {
                     }
                     if ($ocrPng -and (Test-Path -LiteralPath $ocrPng)) {
                         $ocr = Invoke-DialogOcr $ocrPng
+                        if ($buttons.Count -eq 0) { $ocr = Add-ButtonBandOcr $ocr $ocrPng ([int]$bh) }
                         if ($null -ne $ocr) {
                             if ([string]::IsNullOrWhiteSpace($joinedText)) {
                                 $joinedText = (($ocr.lines | ForEach-Object { $_.text }) -join "`n")
@@ -624,9 +670,33 @@ public class ChromaPost {
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
+  [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr h, POINT p, uint flags);
   public static bool Key(IntPtr h, int vk) {
     PostMessage(h, 0x0100, (IntPtr)vk, (IntPtr)0x00000001);
     return PostMessage(h, 0x0101, (IntPtr)vk, unchecked((IntPtr)0xC0000001));
+  }
+  // The deepest visible child of top under the screen point (AE paints a dialog's controls into one child).
+  public static IntPtr Deepest(IntPtr top, int sx, int sy) {
+    IntPtr cur = top;
+    for (int i = 0; i < 16; i++) {
+      POINT pt = new POINT(); pt.X = sx; pt.Y = sy; ScreenToClient(cur, ref pt);
+      IntPtr c = ChildWindowFromPointEx(cur, pt, 1 | 4); // CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT
+      if (c == IntPtr.Zero || c == cur) break;
+      cur = c;
+    }
+    return cur;
+  }
+  // A left click posted to the window under (sx, sy): move, down, up, in that window's client pixels.
+  // Nothing global: the mouse pointer does not move and no window is activated.
+  public static IntPtr Click(IntPtr top, int sx, int sy) {
+    IntPtr t = Deepest(top, sx, sy);
+    POINT pt = new POINT(); pt.X = sx; pt.Y = sy; ScreenToClient(t, ref pt);
+    IntPtr lp = (IntPtr)(((pt.Y & 0xFFFF) << 16) | (pt.X & 0xFFFF));
+    PostMessage(t, 0x0200, IntPtr.Zero, lp);
+    PostMessage(t, 0x0201, (IntPtr)1, lp);
+    System.Threading.Thread.Sleep(50);
+    PostMessage(t, 0x0202, IntPtr.Zero, lp);
+    return t;
   }
 }
 "@
@@ -646,9 +716,13 @@ public class ChromaPost {
             exit 0
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($Key)) {
+        if (-not [string]::IsNullOrWhiteSpace($Key) -or -not [string]::IsNullOrWhiteSpace($Click)) {
             # -Key: TypeScript has read the dialog (screenshot, OCR, button row, default button) moments ago
             # and decided which key answers it: Enter presses the default button, Escape answers Cancel/No.
+            # -Click: for any other button it read, the point to click (the middle of its label). The click
+            # is posted to the window under that point inside the dialog, like the key: the mouse pointer does
+            # not move and AE is not brought to the front. Measured on AE 27.0x78 (2026-11-28) on the painted
+            # Project Settings dialog: a posted click switched its tab, and one on Cancel closed it.
             # Posted to the dialog's own window, so AE is not brought to the front and no focus changes.
             # This is the ONLY place a key is posted. Every guard runs before it and none touches the UI
             # Automation tree of the window.
@@ -661,7 +735,24 @@ public class ChromaPost {
             # foreground re-checked right before the key, one Enter and no other key, previous foreground
             # window restored. Until then a dialog that does not close is reported closed:false.
             $keyName = $Key.Trim().ToLowerInvariant()
-            if ($keyName -ne "enter" -and $keyName -ne "escape") {
+            $clickAt = $null
+            if (-not [string]::IsNullOrWhiteSpace($Click)) {
+                if ($keyName -ne "") {
+                    Write-JsonOut @{ ok = $false; error = "bad_key"; detail = "-Key and -Click together" }
+                    exit 0
+                }
+                $parts = $Click.Split(",")
+                $cx = 0; $cy = 0
+                if ($parts.Count -ne 2 -or -not [int]::TryParse($parts[0].Trim(), [ref]$cx) -or -not [int]::TryParse($parts[1].Trim(), [ref]$cy)) {
+                    Write-JsonOut @{ ok = $false; error = "bad_click"; detail = "-Click takes x,y in the window's pixels" }
+                    exit 0
+                }
+                if ($ExpectRect -eq "") {
+                    Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "-Click needs -ExpectRect" }
+                    exit 0
+                }
+                $clickAt = @($cx, $cy)
+            } elseif ($keyName -ne "enter" -and $keyName -ne "escape") {
                 Write-JsonOut @{ ok = $false; error = "bad_key" }
                 exit 0
             }
@@ -706,7 +797,16 @@ public class ChromaPost {
                 Write-JsonOut @{ ok = $false; error = "dialog_changed"; detail = "no expected title was given" }
                 exit 0
             }
-            if ($keyName -eq "enter") {
+            if ($null -ne $clickAt) {
+                $wr2 = New-Object ChromaWin32+RECT
+                $null = [ChromaWin32]::GetWindowRect($hwndPtr, [ref]$wr2)
+                if ($clickAt[0] -lt 0 -or $clickAt[1] -lt 0 -or $clickAt[0] -ge ($wr2.Right - $wr2.Left) -or $clickAt[1] -ge ($wr2.Bottom - $wr2.Top)) {
+                    Write-JsonOut @{ ok = $false; error = "bad_click"; detail = "the point is outside the dialog" }
+                    exit 0
+                }
+                $null = [ChromaPost]::Click($hwndPtr, $wr2.Left + $clickAt[0], $wr2.Top + $clickAt[1])
+                $method = "post_click"
+            } elseif ($keyName -eq "enter") {
                 $null = [ChromaPost]::Key($hwndPtr, 0x0D)
                 $method = "post_enter"
             } else {

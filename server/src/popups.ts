@@ -11,7 +11,8 @@
  * - Anything else: the user is asked, with the popup's own buttons as the options: in the panel ("After
  *   Effects asks", with its screenshot) and, when a running call's client handles elicitation, in the client
  *   too. Their pick is pressed through ae_dialog_respond's checks, quoting it as the user's instruction.
- *   Buttons Claude cannot press without focusing AE (on a popup AE painted itself) are named, not offered.
+ *   Buttons Claude cannot press without focusing AE (on a popup AE painted itself, one whose place in its
+ *   screenshot could not be read) are named, not offered.
  *
  * Popups are never suppressed (the user's rule) and never answered without the user, except that one OK.
  * Whatever happened is reported once on the agent's next tool result (`popups`), so the agent tells the
@@ -36,7 +37,7 @@ export interface PopupButton {
   default?: boolean;
   /** Loses or replaces something (Don't Save, Replace, Delete...; or OK on a popup that talks about it). */
   destructive: boolean;
-  /** Claude can press it (a real button, or on a painted popup its default OK-like button or Cancel/No/Close). */
+  /** Claude can press it (a real button; on a painted popup Cancel/No/Close, its default OK-like button, or any button read on its pill, which is clicked). */
   pressable: boolean;
 }
 

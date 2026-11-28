@@ -37,8 +37,11 @@ export interface PaintedButton {
 export interface PaintedAnalysis {
   buttons: PaintedButton[];
   default_index: number | null;
-  /** "ring": the outlined default button was found; "only_button": one button read and the row shows no other pill; null: unknown. */
-  default_source: "ring" | "only_button" | null;
+  /**
+   * "ring": the outlined default button was found (AE 26); "fill": the one button filled in blue (AE 27);
+   * "only_button": one button read and the row shows no other pill; null: unknown.
+   */
+  default_source: "ring" | "fill" | "only_button" | null;
   /** The OCR text above the button row (the whole text when no button row was accepted). */
   body_text: string;
   /** One button was read and the row shows another pill (or label) that OCR did not read: the dialog has more buttons than listed. */
@@ -87,6 +90,23 @@ export const RING_MIN_ASPECT = 1.5;
 export const RING_MAX_ASPECT = 6;
 export const RING_MIN_HEIGHT = 22;
 export const RING_MAX_HEIGHT = 70;
+
+/**
+ * AE 27 paints its buttons the Spectrum way: the default one filled in blue (6,108,231 measured on the
+ * Project Settings dialog, 2026-11-28) with white text, the others outlined grey. The fill is sampled this
+ * many word heights outside the label, inside the pill (the pill reaches about 2.7 word heights out, so
+ * the border search above can just miss its far edge).
+ */
+export const FILL_SAMPLE_FACTOR = 0.5;
+/** Two fill samples (left and right of the label) of one pill differ by at most this much per channel. */
+export const FILL_MATCH_TOLERANCE = 24;
+/** How far (word heights) a filled pill's own edge can sit from its label. */
+export const FILLED_FAR_FACTOR = 3.5;
+
+/** A saturated blue: AE 27's filled default (6,108,231) and AE 26's ring (64,150,243) both are. */
+export function isDefaultBlue(r: number, g: number, b: number): boolean {
+  return b >= 170 && b - r >= 110 && b - g >= 50;
+}
 
 interface Box {
   x1: number;
@@ -157,6 +177,48 @@ function hasPillBorders(png: PngPixels, label: Box, wordHeight: number, farFacto
   const left = stripHasEdge(png, label.x1 - far, label.x1 - near, y);
   const right = stripHasEdge(png, label.x2 + near, label.x2 + far, y);
   return left && right;
+}
+
+/** The commonest brightness along row y: the dialog's background there. */
+function rowBackground(png: PngPixels, y: number): number {
+  const hist = new Map<number, number>();
+  let bg = 0;
+  let best = -1;
+  for (let x = 0; x < png.width; x++) {
+    const l = Math.round(lum(png, x, y));
+    const n = (hist.get(l) ?? 0) + 1;
+    hist.set(l, n);
+    if (n > best) {
+      best = n;
+      bg = l;
+    }
+  }
+  return bg;
+}
+
+/**
+ * The fill of the pill around a label, when the label sits in a filled button: the same colour just left
+ * and just right of it, unlike the row's background. Null when there is no such fill (an outlined or flat
+ * button, or text on the background).
+ */
+export function pillFill(png: PngPixels, label: Box, wordHeight: number): [number, number, number] | null {
+  const y = Math.round((label.y1 + label.y2) / 2);
+  const off = Math.max(2, FILL_SAMPLE_FACTOR * wordHeight);
+  const xl = Math.round(label.x1 - off);
+  const xr = Math.round(label.x2 + off);
+  if (y < 0 || y >= png.height || xl < 0 || xr >= png.width) return null;
+  const px = (x: number): [number, number, number] => {
+    const i = (y * png.width + x) * 4;
+    return [png.data[i], png.data[i + 1], png.data[i + 2]];
+  };
+  const a = px(xl);
+  const b = px(xr);
+  if (Math.abs(a[0] - b[0]) > FILL_MATCH_TOLERANCE || Math.abs(a[1] - b[1]) > FILL_MATCH_TOLERANCE || Math.abs(a[2] - b[2]) > FILL_MATCH_TOLERANCE) return null;
+  const bg = rowBackground(png, y);
+  const la = lum(png, xl, y);
+  const lb = lum(png, xr, y);
+  if (Math.abs(la - bg) < OUTLINE_MIN_CONTRAST || Math.abs(lb - bg) < OUTLINE_MIN_CONTRAST) return null;
+  return a;
 }
 
 /**
@@ -358,7 +420,7 @@ export function analysePaintedDialog(
     const lowestBody = bodyInfos.length > 0 ? bodyInfos.reduce((a, b) => (b.cy > a.cy ? b : a)) : null;
     band = lowestBody !== null && messageBoxBand(png, ref.cy, lowestBody.cy);
     for (const c of candidates) {
-      if (!hasPillBorders(png, c.box, wordHeight) && !(band && hasPillBorders(png, c.box, wordHeight, MESSAGE_BOX_FAR_FACTOR))) return noButtons(infos);
+      if (!hasPillBorders(png, c.box, wordHeight) && !(band && hasPillBorders(png, c.box, wordHeight, MESSAGE_BOX_FAR_FACTOR)) && !pillFill(png, c.box, wordHeight)) return noButtons(infos);
     }
   }
 
@@ -392,11 +454,25 @@ export function analysePaintedDialog(
         source = "ring";
       }
     }
+    // AE 27: no ring, but exactly one read button filled in blue.
+    if (defaultIndex === null && rings.length === 0) {
+      const blue: number[] = [];
+      candidates.forEach((c, idx) => {
+        const fill = pillFill(png, c.box, wordHeight);
+        if (fill && isDefaultBlue(fill[0], fill[1], fill[2])) blue.push(idx);
+      });
+      if (blue.length === 1) {
+        defaultIndex = blue[0];
+        source = "fill";
+      }
+    }
   }
   // With one button read, does the row show another pill OCR missed? Computed for the ringed case too: a lone ringed OK is not
   // an unread Cancel.
   // A light message box button reaches further from its label (MESSAGE_BOX_FAR_FACTOR): its own border is not another pill.
-  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale, band ? MESSAGE_BOX_FAR_FACTOR : OUTLINE_FAR_FACTOR) : undefined;
+  // A filled pill reaches further from its label than the border search (about 2.7 word heights for AE 27's OK).
+  const ownReach = (c: { box: Box }) => (band ? MESSAGE_BOX_FAR_FACTOR : png && pillFill(png, c.box, wordHeight) ? FILLED_FAR_FACTOR : OUTLINE_FAR_FACTOR);
+  const otherPill = buttons.length === 1 && png ? otherPillOnRow(png, candidates[0].box, wordHeight, scale, ownReach(candidates[0])) : undefined;
   if (defaultIndex === null && buttons.length === 1 && png && ringCount === 0) {
     const c = candidates[0];
     if (!otherPill) {

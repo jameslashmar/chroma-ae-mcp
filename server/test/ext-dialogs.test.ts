@@ -694,6 +694,7 @@ describe("ae_dialogs / ae_dialog_respond on AE-painted dialogs (OCR boxes and sc
 
   const OK_ONLY: Fixture = { lines: [...TALL_BODY, line(word("OK", 300, 250, 22))], pills: [{ cx: 311, cy: 257, w: 70, ring: true }] };
   const okCancel = (ringOn: "ok" | "cancel" | "none"): Fixture => ({
+    rect: "100,100,580,400",
     lines: [...TALL_BODY.slice(0, 3), line(word("OK", 300, 250, 22)), line(word("Cancel", 380, 250, 44))],
     pills: [
       { cx: 311, cy: 257, w: 70, ring: ringOn === "ok" },
@@ -716,7 +717,7 @@ describe("ae_dialogs / ae_dialog_respond on AE-painted dialogs (OCR boxes and sc
     install(() => listed(OK_ONLY));
     const res: any = await tool("ae_dialogs").handler({ screenshots: true }, ctx);
     const d = res.dialogs[0];
-    expect(d.buttons).toEqual([{ name: "OK", automationId: "", enabled: true, source: "ocr", default: true }]);
+    expect(d.buttons).toEqual([{ name: "OK", automationId: "", enabled: true, source: "ocr", default: true, box: { x: 300, y: 250, w: 22, h: 14 } }]);
     expect(d.default_button).toBe("OK");
     expect(d.default_source).toBe("ring");
     expect(d.kind).toBe("info");
@@ -751,28 +752,41 @@ describe("ae_dialogs / ae_dialog_respond on AE-painted dialogs (OCR boxes and sc
     expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Key", "escape"]));
   });
 
-  it("OK + Cancel with the ring on Cancel: asking for OK returns button_not_default and nothing is sent", async () => {
-    install(() => listed(okCancel("cancel")));
+  it("OK + Cancel with the ring on Cancel: OK, not the default, is clicked at the middle of its label", async () => {
+    install(() => listed(okCancel("cancel")), () => ({ ok: true, handle: 5150, pressed: "OK", method: "post_click", checked: null, closed: true }));
     await listOwn("op_c");
     const res: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "OK", reason: "r" }, ctx);
-    expect(res).toMatchObject({ ok: false, error: "button_not_default", default_button: "Cancel" });
-    expect(res.message).toMatch(/NOT pressed/);
-    expect(res.message).toMatch(/default, outlined button is "Cancel"/);
-    expect(respondCalls()).toHaveLength(0);
+    expect(res).toMatchObject({ ok: true, method: "post_click", closed: true, default_button: "Cancel" });
+    const sent = respondCalls()[0];
+    // the label "OK" at x 300-322, y 250-264: its middle
+    expect(sent).toEqual(expect.arrayContaining(["-Click", "311,257", "-ExpectRect", "100,100,580,400", "-ExpectTitle", "After Effects"]));
+    expect(sent).not.toContain("-Key");
+    expect(sent.join(" ")).not.toMatch(/Focus|SendKeys/i);
   });
 
-  it("no ring found: the default is unknown, OK is not answerable and nothing is sent; Cancel still is", async () => {
+  it("no ring found: the default is unknown, so OK is clicked rather than sent as Enter; Cancel still goes as Escape", async () => {
     install(() => listed(okCancel("none")));
     const list = await listOwn("op_d");
     expect(list.dialogs[0].default_button).toBeNull();
     expect(list.dialogs[0].buttons.map((b: any) => b.default)).toEqual([undefined, undefined]);
+    expect(list.dialogs[0].unattended.answerable).toEqual(["Cancel", "OK"]);
     const res: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "OK", reason: "r" }, ctx);
-    expect(res).toMatchObject({ ok: false, error: "button_not_answerable" });
-    expect(res.message).toMatch(/could not be identified/);
-    expect(respondCalls()).toHaveLength(0);
+    expect(res.ok).toBe(true);
+    expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Click", "311,257"]));
+    install(() => listed(okCancel("none")));
+    await listOwn("op_d2");
     const cancel: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Cancel", reason: "r" }, ctx);
     expect(cancel.ok).toBe(true);
     expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Key", "escape"]));
+  });
+
+  it("a click is not aimed without the dialog's place on the screen: dialog_changed, nothing sent", async () => {
+    install(() => listed({ ...okCancel("cancel"), rect: "" }));
+    await listOwn("op_c2");
+    const res: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "OK", reason: "r" }, ctx);
+    expect(res).toMatchObject({ ok: false, error: "dialog_changed" });
+    expect(res.message).toMatch(/cannot be aimed/);
+    expect(respondCalls()).toHaveLength(0);
   });
 
   it("refuses with dialog_changed when the dialog is not the one that was listed, and sends nothing", async () => {
@@ -808,19 +822,22 @@ describe("ae_dialogs / ae_dialog_respond on AE-painted dialogs (OCR boxes and sc
     expect(respondCalls()).toHaveLength(1);
   });
 
-  it("a destructive button needs both flags, and even then only the default can be answered, and only when it is OK-like", async () => {
-    install(() => listed(saveDialog));
+  it("a destructive button needs both flags; with them Don't Save is clicked, without them nothing is sent", async () => {
+    install(() => listed({ ...saveDialog, rect: "10,10,490,310" }));
     const list = await listOwn("op_g");
     expect(list.dialogs[0].buttons.map((b: any) => b.name)).toEqual(["Save", "Don't Save", "Cancel"]);
     expect(list.dialogs[0].kind).toBe("destructive");
+    expect(list.dialogs[0].unattended.answerable).toEqual(["Cancel", "Save", "Don't Save"]);
     const noFlags: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Don't Save", reason: "r" }, ctx);
     expect(noFlags.error).toBe("refused_destructive_button");
-    const both = { allow_destructive: true, user_instruction: 'Jay: "do not save"' };
-    const notDefault: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Don't Save", reason: "r", ...both }, ctx);
-    expect(notDefault).toMatchObject({ ok: false, error: "button_not_default", default_button: "Save" });
-    const saveDefault: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Save", reason: "r", ...both }, ctx);
-    expect(saveDefault).toMatchObject({ ok: false, error: "button_not_answerable" }); // default, but not OK/Yes/Continue
+    const onlyOne: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Don't Save", reason: "r", allow_destructive: true }, ctx);
+    expect(onlyOne.error).toBe("refused_destructive_button");
     expect(respondCalls()).toHaveLength(0);
+    const both = { allow_destructive: true, user_instruction: 'Jay: "do not save"' };
+    const dontSave: any = await tool("ae_dialog_respond").handler({ handle: 5150, button: "Don't Save", reason: "r", ...both }, ctx);
+    expect(dontSave.ok).toBe(true);
+    // "Don't" at 207-237 and "Save" at 240-266, y 250-264: the middle of the label
+    expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Click", "237,257", "-ExpectRect", "10,10,490,310"]));
   });
 
   it("when the posted key does not close the dialog the result says so and no second attempt is made", async () => {
@@ -1059,17 +1076,20 @@ describe("ae_dialogs / ae_dialog_respond on AE-painted dialogs (OCR boxes and sc
     expect((await answer("OK")).ok).toBe(true);
   });
 
-  it("No or Close is refused when a Cancel is on the row (Escape would answer Cancel); Cancel itself still goes", async () => {
+  it("No next to a Cancel is clicked (Escape would answer Cancel); Cancel itself still goes as Escape", async () => {
     const yesNoCancel: Fixture = {
+      rect: "0,0,480,300",
       lines: [...TALL_BODY.slice(0, 2), line(word("Yes", 150, 250, 26), word("No", 240, 250, 18), word("Cancel", 330, 250, 40))],
       pills: [{ cx: 163, cy: 257, w: 70, ring: true }, { cx: 249, cy: 257, w: 70 }, { cx: 350, cy: 257, w: 80 }],
     };
     install(() => listed(yesNoCancel));
     const list = await listOwn("op_ync");
     expect(list.dialogs[0].buttons.map((b: any) => b.name)).toEqual(["Yes", "No", "Cancel"]);
-    expect(list.dialogs[0].unattended.answerable).toEqual(["Cancel", "Yes"]);
-    expect(await answer("No")).toMatchObject({ ok: false, error: "button_not_answerable" });
-    expect(respondCalls()).toHaveLength(0);
+    expect(list.dialogs[0].unattended.answerable).toEqual(["Cancel", "Yes", "No"]);
+    expect((await answer("No")).ok).toBe(true);
+    expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Click", "249,257"]));
+    install(() => listed(yesNoCancel));
+    await listOwn("op_ync2");
     expect((await answer("Cancel")).ok).toBe(true);
     expect(respondCalls()[0]).toEqual(expect.arrayContaining(["-Key", "escape"]));
   });
@@ -1152,16 +1172,18 @@ describe.skipIf(process.platform !== "win32")("ae-dialogs.ps1 (parsed only, neve
     expect(out.trim()).toBe("0");
   });
 
-  it("takes -Key, -ExpectTitle and -ExpectEmptyTitle, and builds no focus-taking fallback", () => {
+  it("takes -Key, -Click, -ExpectTitle and -ExpectEmptyTitle, and builds no focus-taking fallback", () => {
     const text = fs.readFileSync(script, "utf8");
     expect(text).toMatch(/\[string\]\$Key\b/);
+    expect(text).toMatch(/\[string\]\$Click\b/);
     expect(text).toMatch(/\[string\]\$ExpectTitle\b/);
     expect(text).toMatch(/\[switch\]\$ExpectEmptyTitle\b/);
     const code = text
       .split(/\r?\n/)
       .filter((l) => !/^\s*#/.test(l))
       .join("\n");
-    expect(code).not.toMatch(/SendKeys|AppActivate|SetForegroundWindow|SendInput/i);
+    // The click is posted to the dialog's window: nothing global (no input injection, no pointer moved).
+    expect(code).not.toMatch(/SendKeys|AppActivate|SetForegroundWindow|SendInput|mouse_event|SetCursorPos/i);
   });
 });
 
@@ -1186,6 +1208,17 @@ describe.skipIf(process.platform !== "win32")("ae-dialogs.ps1 -Key path, execute
     const res = run(["-Mode", "respond", "-Handle", desktop(), "-Button", "OK", "-Key", "enter", "-ExpectTitle", "x"]);
     expect(res).toMatchObject({ ok: false, error: "dialog_changed" });
     expect(res.detail).toMatch(/not an After Effects window/);
+  });
+
+  it("-Click: refuses a point that is not x,y, a click without -ExpectRect, a window that is not After Effects, and -Key with -Click", () => {
+    const d = desktop();
+    expect(run(["-Mode", "respond", "-Handle", d, "-Button", "OK", "-Click", "5", "-ExpectRect", "0,0,1,1", "-ExpectTitle", "x"])).toMatchObject({ ok: false, error: "bad_click" });
+    expect(run(["-Mode", "respond", "-Handle", d, "-Button", "OK", "-Click", "5,5", "-ExpectTitle", "x"])).toMatchObject({ ok: false, error: "dialog_changed", detail: expect.stringMatching(/ExpectRect/) });
+    const notAe = run(["-Mode", "respond", "-Handle", d, "-Button", "OK", "-Click", "5,5", "-ExpectRect", "0,0,1,1", "-ExpectTitle", "x"]);
+    expect(notAe).toMatchObject({ ok: false, error: "dialog_changed" });
+    expect(notAe.detail).toMatch(/not an After Effects window/);
+    expect(run(["-Mode", "respond", "-Handle", d, "-Button", "OK", "-Click", "5,5", "-Key", "enter", "-ExpectRect", "0,0,1,1", "-ExpectTitle", "x"])).toMatchObject({ ok: false, error: "bad_key" });
+    expect(run(["-Mode", "respond", "-Handle", "1", "-Button", "OK", "-Click", "5,5", "-ExpectRect", "0,0,1,1", "-ExpectTitle", "x"])).toEqual({ ok: false, error: "dialog_gone" });
   });
 
   it("without -Key it never posts: an unknown window gets button_not_answerable or dialog_gone, not a key", () => {

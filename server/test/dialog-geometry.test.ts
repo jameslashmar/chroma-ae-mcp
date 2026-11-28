@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   analysePaintedDialog,
   findRings,
+  isDefaultBlue,
   otherPillOnRow,
   type OcrLine,
   type PngPixels,
@@ -332,6 +333,37 @@ describe("layouts measured on real dialogs (synthetic reproductions)", () => {
     const res = analysePaintedDialog(lines, png);
     expect(res.buttons.map((b) => b.name)).toEqual(["Save", "Don't Save", "Cancel"]);
     expect(res.default_index).toBe(0);
+  });
+});
+
+describe("AE 27's Project Settings (measured): a blue-filled OK and an outlined Cancel at the bottom of a tall dialog", () => {
+  const dir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures");
+  const shot = PNG.sync.read(fs.readFileSync(path.join(dir, "project-settings-ae27.png")));
+  const png: PngPixels = { width: shot.width, height: shot.height, data: shot.data };
+  const ocr = JSON.parse(fs.readFileSync(path.join(dir, "project-settings-ae27.ocr.json"), "utf8")) as { ocr_lines: OcrLine[] };
+
+  it("reads both buttons from the button band's own OCR, OK as the default by its blue fill", () => {
+    const res = analysePaintedDialog(ocr.ocr_lines, png);
+    expect(res.buttons.map((b) => b.name)).toEqual(["0K", "Cancel"]);
+    expect(res.default_index).toBe(0);
+    expect(res.default_source).toBe("fill");
+    expect(res.body_text).toContain("Mercury Software Only");
+    // the labels sit on their pills, where a click would go
+    const cancel = res.buttons[1];
+    expect(cancel.x).toBeGreaterThan(600);
+    expect(cancel.y).toBeGreaterThan(740);
+  });
+
+  it("the whole-window OCR alone has no button row (why the band is read again)", () => {
+    const whole = ocr.ocr_lines.filter((l) => !/^(0K|OK|Cancel)$/.test(l.text.trim()));
+    expect(analysePaintedDialog(whole, png).buttons).toEqual([]);
+  });
+
+  it("takes AE 27's fill and AE 26's ring for the default blue, not the grey of an outlined button", () => {
+    expect(isDefaultBlue(6, 108, 231)).toBe(true);
+    expect(isDefaultBlue(64, 150, 243)).toBe(true);
+    expect(isDefaultBlue(75, 75, 75)).toBe(false);
+    expect(isDefaultBlue(29, 29, 29)).toBe(false);
   });
 });
 

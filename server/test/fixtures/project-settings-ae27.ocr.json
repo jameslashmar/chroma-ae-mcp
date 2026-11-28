@@ -1,0 +1,189 @@
+{
+ "ocr_lines": [
+  {
+   "text": "Project Settings",
+   "words": [
+    {
+     "y": 10,
+     "w": 36,
+     "h": 13,
+     "text": "Project",
+     "x": 16
+    },
+    {
+     "y": 10,
+     "w": 42,
+     "h": 13,
+     "text": "Settings",
+     "x": 56
+    }
+   ]
+  },
+  {
+   "text": "Video Rendering and Effed Time Display Style",
+   "words": [
+    {
+     "y": 57,
+     "w": 28,
+     "h": 10,
+     "text": "Video",
+     "x": 34
+    },
+    {
+     "y": 57,
+     "w": 50,
+     "h": 13,
+     "text": "Rendering",
+     "x": 66
+    },
+    {
+     "y": 57,
+     "w": 19,
+     "h": 10,
+     "text": "and",
+     "x": 118
+    },
+    {
+     "y": 57,
+     "w": 30,
+     "h": 10,
+     "text": "Effed",
+     "x": 140
+    },
+    {
+     "y": 58,
+     "w": 25,
+     "h": 9,
+     "text": "Time",
+     "x": 191
+    },
+    {
+     "y": 58,
+     "w": 35,
+     "h": 12,
+     "text": "Display",
+     "x": 220
+    },
+    {
+     "y": 58,
+     "w": 23,
+     "h": 12,
+     "text": "Style",
+     "x": 258
+    }
+   ]
+  },
+  {
+   "text": "Use: Mercury Software Only",
+   "words": [
+    {
+     "y": 102,
+     "w": 20,
+     "h": 9,
+     "text": "Use:",
+     "x": 48
+    },
+    {
+     "y": 102,
+     "w": 41,
+     "h": 11,
+     "text": "Mercury",
+     "x": 86
+    },
+    {
+     "y": 101,
+     "w": 43,
+     "h": 10,
+     "text": "Software",
+     "x": 129
+    },
+    {
+     "y": 101,
+     "w": 24,
+     "h": 12,
+     "text": "Only",
+     "x": 174
+    }
+   ]
+  },
+  {
+   "text": "Color",
+   "words": [
+    {
+     "y": 58,
+     "w": 26,
+     "h": 9,
+     "text": "Color",
+     "x": 302
+    }
+   ]
+  },
+  {
+   "text": "Audio",
+   "words": [
+    {
+     "y": 58,
+     "w": 29,
+     "h": 9,
+     "text": "Audio",
+     "x": 349
+    }
+   ]
+  },
+  {
+   "text": "Expressions",
+   "words": [
+    {
+     "y": 58,
+     "w": 56,
+     "h": 11,
+     "text": "Expressions",
+     "x": 400
+    }
+   ]
+  },
+  {
+   "text": "Scratch Disls",
+   "words": [
+    {
+     "y": 57,
+     "w": 35,
+     "h": 10,
+     "text": "Scratch",
+     "x": 478
+    },
+    {
+     "y": 58,
+     "w": 25,
+     "h": 9,
+     "text": "Disls",
+     "x": 516
+    }
+   ]
+  },
+  {
+   "text": "Cancel",
+   "words": [
+    {
+     "y": 752,
+     "w": 34,
+     "h": 10,
+     "text": "Cancel",
+     "x": 612
+    }
+   ]
+  },
+  {
+   "text": "0K",
+   "words": [
+    {
+     "y": 753,
+     "w": 16,
+     "h": 9,
+     "text": "0K",
+     "x": 557
+    }
+   ]
+  }
+ ]
+}
