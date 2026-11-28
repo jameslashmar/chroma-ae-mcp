@@ -14,9 +14,9 @@ Priorities and reasons are in `docs/FEATURES.md`; the "Atom" items come from `do
 Planned on 2026-11-08 after reading premiere-pro-mcp's commits up to v1.30.0 (MIT: port with its copyright notice). Sizes are rough: S small, M medium.
 
 **0.8.0: reliability**
-- [ ] **Write outcomes** (S/M; premiere-pro-mcp `src/workflows/mutation-receipt.ts`, 0716cc8d, 3cffd793). Today a throw part-way through a write leaves the partial changes (`A.withUndo` in `panel/host/core.jsx` closes the group in `finally`) and the server returns a bare `evalscript_error`. Add `A.refuse(code, msg)` for checks before anything is touched (`outcome: "not_applied"`), map any other write error to `outcome: "unknown"` with next steps (one Ctrl+Z, `ae_comp_diff`, the checkpoint), and put `outcome` on success too. Check whether a failure in a later chunk of `ae_batch_set`, `ae_render_batch` or `ae_multi_comp_apply` still reports the chunks that committed.
-- [ ] **Idempotency keys and recent operations** (S/M; `src/workflows/idempotency.ts`, 08f6ddda, 77e45529). Quarantine covers our own timeouts, but a client that gives up and resends runs the write twice. An optional `idempotency_key` handled once in `tools/ext/write-runner.ts` (SHA-256 of key and arguments, 200 entries, 1 h, module-level so every request shares it), and an `ae_recent_ops` read tool.
-- [ ] **Tool groups** (S; `src/workflows/tool-packs.ts`, b4699c66, c15fb464). `CHROMA_AE_MCP_TOOLSET` takes `full`, `core` or group names from `TOOL_GROUPS` (`core,render,captions`); `CHROMA_AE_MCP_TOOL_LIST` names tools; unknown names stop startup with a clear error.
+- [x] **Write outcomes** (done in 0.8.0, #19; S/M; premiere-pro-mcp `src/workflows/mutation-receipt.ts`, 0716cc8d, 3cffd793). Today a throw part-way through a write leaves the partial changes (`A.withUndo` in `panel/host/core.jsx` closes the group in `finally`) and the server returns a bare `evalscript_error`. Add `A.refuse(code, msg)` for checks before anything is touched (`outcome: "not_applied"`), map any other write error to `outcome: "unknown"` with next steps (one Ctrl+Z, `ae_comp_diff`, the checkpoint), and put `outcome` on success too. Check whether a failure in a later chunk of `ae_batch_set`, `ae_render_batch` or `ae_multi_comp_apply` still reports the chunks that committed.
+- [x] **Idempotency keys and recent operations** (done in 0.8.0, #19, scoped to the project in #22; S/M; `src/workflows/idempotency.ts`, 08f6ddda, 77e45529). Quarantine covers our own timeouts, but a client that gives up and resends runs the write twice. An optional `idempotency_key` handled once in `tools/ext/write-runner.ts` (SHA-256 of key and arguments, 200 entries, 1 h, module-level so every request shares it), and an `ae_recent_ops` read tool.
+- [ ] **Tool groups** (partly done in 0.8.0: `TOOL_GROUPS` and tool families behind `ae_search_tools`, `ae_get_tool_schema` and `ae_invoke_tool` (#19), and core as every client's default (#23). Still to do: `CHROMA_AE_MCP_TOOLSET` taking group names, and `CHROMA_AE_MCP_TOOL_LIST`. S; `src/workflows/tool-packs.ts`, b4699c66, c15fb464). `CHROMA_AE_MCP_TOOLSET` takes `full`, `core` or group names from `TOOL_GROUPS` (`core,render,captions`); `CHROMA_AE_MCP_TOOL_LIST` names tools; unknown names stop startup with a clear error.
 - [ ] The three items left open by the 0.7.0 live check (below): stopping a render in AE, long H.264 renders, the rest of the checklist.
 - [ ] **zod 4.** `npm audit` reports a high-severity advisory in zod 3 (memory exhaustion on oversized constrained collections, fixed only in 4.6.6+). The server listens on localhost behind a token, so the exposure is small, but every tool schema has to move.
 - [ ] Dev tooling: vitest 2 and esbuild 0.24 carry advisories (dev only, not shipped in the panel); move to current majors.
@@ -79,6 +79,25 @@ Found by the live smoke run on AE 26.3x87 (Windows, `main` after PR #11, 2026-11
 - production: shape contents, Essential Graphics and MOGRT export, render templates, shot versioning, chunked batches;
 - P3: masks, text animators, purge unused, house style checks;
 - render verification by importing into AE instead of ffprobe.
+
+**Done in 0.8.0** (#19–#23 from Emre, #26 and #28; live evidence on AE 26.3 and 27.0 on Windows):
+- **reliability:**
+  - write outcomes (`applied`, `no_op`, `partial`, `not_applied`, `unknown`, with `next_steps`);
+  - idempotency keys scoped to the project, and `ae_recent_ops`;
+  - tool families behind three meta-tools, with core as every client's default toolset;
+  - `Connection: close` on every reply;
+- **AE 26.3:**
+  - frame grabs refuse the comps whose render never finishes (an environment light plus another 3D layer);
+  - font search scans the whole list;
+  - the 26.3 mesh and camera-focus options;
+- **`ae_plan`:** a plan per request, with the panel's "Ask first" switch;
+- **popups:** After Effects popups are answered as they appear (ours at once, others asked in the panel), and reported on the next result;
+- **task bench:** `qa/bench`;
+- **MCP revision 2026-07-28** next to the older ones, and **Skills over MCP**: Claude Code (2.1.331+) lists `/chroma-ae:<skill>` for five skills (`ae-extendscript`, `ae-live-session`, `ae-fonts`, `captions`, `chroma-motion-director`);
+- **a Code Mode switch** for Claude Code in the gear menu (experimental, off by default);
+- **compositing calibration**, and the macOS live fixes.
+
+Still open from the 0.8.0 list: zod 4, the CHROMA_AE_MCP_TOOLSET group names, and the three items from the 0.7.0 live check.
 
 **Done in 0.7.5** (live-checked on AE 26.3 on Windows):
 - a Stop / Start pill left of the panel's status badge: stopped, every eval is refused before it reaches After Effects and the agent is told the user pressed Stop; the call in flight finishes, the port stays held, and each launch starts with the MCP on;
