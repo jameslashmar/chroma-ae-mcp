@@ -259,7 +259,8 @@ async function answerFontWarnings() {
     if (!FONT_WARNING_RE.test(text)) continue;
     out.open++;
     if (out.texts.length < 2) out.texts.push(text.replace(/\s+/g, " ").trim().slice(0, 120));
-    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK" });
+    // `reason` is required by ae_dialog_respond: without it every answer was refused (invalid_args), so a PC that shows these warnings kept them open.
+    const r = await call("ae_dialog_respond", { handle: x.handle, button: "OK", reason: "smoke test: AE's font warning (Unknown BIB Error) during the ae_fonts scan; OK lets AE carry on" });
     if (!refused(r)) out.answered++;
   }
   return out;
