@@ -502,3 +502,20 @@ describe("ae_run_jsx safety lint over RPC", () => {
     }
   });
 });
+
+describe("legacy error texts (the shared tools/call and prompts/get helpers)", () => {
+  const ctx = {} as ToolContext;
+  const run = async (method: string, params?: unknown) =>
+    (await handleRpc({ jsonrpc: "2.0", id: 1, method, params }, ctx, { toolset: "full" })) as any;
+
+  it("tools/call and prompts/get keep their -32602 messages and resources/read its -32002", async () => {
+    expect((await run("tools/call", {})).error).toEqual({ code: -32602, message: "Invalid params: tools/call requires a string `name`" });
+    expect((await run("tools/call", { name: "ae_get_comp", arguments: [] })).error).toEqual({ code: -32602, message: "Invalid params: `arguments` must be an object" });
+    expect((await run("prompts/get", { name: "nope" })).error.message).toMatch(/^Invalid params: unknown prompt "nope"\. Available: motion_director, motion_review, captions$/);
+    expect((await run("prompts/get", { name: "captions", arguments: 3 })).error.message).toBe("Invalid params: `arguments` must be an object");
+    expect((await run("prompts/get", { name: "captions", arguments: { task: 3 } })).error.message).toBe("Invalid params: argument `task` must be a string");
+    expect((await run("resources/read", { uri: "x://y" })).error).toEqual({ code: -32002, message: 'Resource not found: "x://y". Use resources/list.' });
+    expect((await run("tools/call", 5)).error).toEqual({ code: -32602, message: "Invalid params: expected an object" });
+    expect((await run("resources/templates/list")).error.code).toBe(-32601);
+  });
+});

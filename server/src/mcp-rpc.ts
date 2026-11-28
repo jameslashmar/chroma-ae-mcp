@@ -1,6 +1,6 @@
 import { listedTools } from "./tool-families.js";
 import { callMetaTool, isMetaTool, metaToolList } from "./meta-tools.js";
-import { cancelCall, deliverClientResponse, requestFromClient, runInCall } from "./call-context.js";
+import { cancelCall, deliverClientResponse, requestFromClient, runInCall, type CallState } from "./call-context.js";
 import { callTool } from "./tool-call.js";
 import {
   coreInstructions,
@@ -14,6 +14,17 @@ import {
 import type { ToolContext } from "./tools/common.js";
 import { ALL_TOOLS } from "./tools/registry.js";
 import { captionsSkillBody, listGuidanceResources, readGuidance, reviewBody, skillBody } from "./guidance/index.js";
+import { getMcpSkill, listMcpSkillResources, listMcpSkills, readMcpSkillFile, SKILL_URI_SCHEME } from "./guidance/mcp-skills.js";
+import {
+  ALL_PROTOCOL_VERSIONS,
+  cacheable,
+  classifyRequest,
+  clientLabelOf,
+  decorateResult,
+  LEGACY_PROTOCOL_VERSIONS,
+  type ModernClassification,
+  type ServerInfo,
+} from "./mcp-modern.js";
 
 export { ALL_TOOLS };
 
@@ -56,6 +67,12 @@ export interface RpcOptions {
   notify?: (message: Record<string, unknown>) => void;
   /** The client handles elicitation/create (the relay's X-Chroma-Elicitation header): tools may ask it questions. */
   elicitation?: boolean;
+  /**
+   * Called when a single (not batched) tools/call starts, with a function that cancels exactly that call (it is
+   * marked and stops at its next safe point). The HTTP handler uses it when a 2026-07-28 client closes the connection;
+   * looking the call up by client and id instead could hit another session's call with the same label and id.
+   */
+  onCallStart?: (cancel: (reason: string) => void) => void;
 }
 
 /** The tools/list result for a toolset: the full list, or the core list with the three meta-tools first. */
@@ -66,11 +83,8 @@ export function listTools(toolset: Toolset): ListedTool[] {
   return listedTools().map(fullListEntry);
 }
 
-export const SUPPORTED_PROTOCOL_VERSIONS = [
-  "2025-06-18",
-  "2025-03-26",
-  "2024-11-05",
-] as const;
+/** The initialize-era revisions. The modern revision (2026-07-28) is in mcp-modern.ts; its requests need no initialize. */
+export const SUPPORTED_PROTOCOL_VERSIONS = LEGACY_PROTOCOL_VERSIONS;
 
 export const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 export const SERVER_NAME = "chroma-ae-mcp";
@@ -120,13 +134,197 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
 }
 
+/** What a method implementation answers: a result, or a JSON-RPC error. Both eras wrap it in their own envelope. */
+type Outcome = { result: unknown } | { code: number; message: string; data?: unknown };
+
+function respond(id: JsonRpcId, outcome: Outcome): JsonRpcResponse {
+  if ("result" in outcome) return { jsonrpc: "2.0", id, result: outcome.result };
+  return makeErrorResponse(id, outcome.code, outcome.message, outcome.data);
+}
+
+function promptsListPayload(): { prompts: unknown[] } {
+  return { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) };
+}
+
+function promptsGet(params: Record<string, unknown>): Outcome {
+  const name = params.name;
+  const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : undefined;
+  if (!prompt) {
+    return { code: -32602, message: `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}` };
+  }
+  const rawArgs = params.arguments;
+  if (rawArgs !== undefined && !isPlainObject(rawArgs)) {
+    return { code: -32602, message: "Invalid params: `arguments` must be an object" };
+  }
+  const arg = rawArgs?.[prompt.arguments[0].name];
+  if (arg !== undefined && typeof arg !== "string") {
+    return { code: -32602, message: `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string` };
+  }
+  return {
+    result: {
+      description: prompt.description,
+      messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }],
+    },
+  };
+}
+
+function guidanceResourcesPayload(): { resources: unknown[] } {
+  return {
+    resources: listGuidanceResources().map((r) => ({
+      uri: r.uri,
+      name: r.name,
+      description: r.description,
+      mimeType: r.mimeType,
+    })),
+  };
+}
+
+/** tools/call for both eras. `elicitation` is only ever true for legacy requests. */
+async function toolsCall(
+  id: JsonRpcId,
+  params: Record<string, unknown>,
+  ctx: ToolContext,
+  toolset: Toolset,
+  client: string | undefined,
+  notify: ((message: Record<string, unknown>) => void) | undefined,
+  elicitation: boolean | undefined,
+  onCallStart?: RpcOptions["onCallStart"]
+): Promise<Outcome> {
+  const toolName = params.name;
+  if (typeof toolName !== "string" || toolName.length === 0) {
+    return { code: -32602, message: "Invalid params: tools/call requires a string `name`" };
+  }
+
+  const rawArgs = params.arguments;
+  if (rawArgs !== undefined && !isPlainObject(rawArgs)) {
+    return { code: -32602, message: "Invalid params: `arguments` must be an object" };
+  }
+
+  // Meta-tools answer in either toolset (they are only listed in core). Everything else,
+  // listed or not, goes through the one shared path in tool-call.ts.
+  const meta = isPlainObject(params._meta) ? params._meta : {};
+  const token = meta.progressToken;
+  const state: CallState = {
+    requestId: id ?? "",
+    client: client ?? "",
+    cancelled: false,
+    progress: 0,
+    ...(typeof token === "string" || typeof token === "number" ? { progressToken: token } : {}),
+    ...(notify ? { notify } : {}),
+    ...(notify && elicitation ? { request: (m: string, p: Record<string, unknown>, ms: number) => requestFromClient(notify, m, p, ms) } : {}),
+  };
+  onCallStart?.((reason) => {
+    state.cancelled = true;
+    state.reason = reason.slice(0, 200);
+  });
+  const result = await runInCall(state, () =>
+    isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
+  );
+  return { result };
+}
+
+const SERVER_INFO: ServerInfo = { name: SERVER_NAME, version: SERVER_VERSION };
+
+/**
+ * A request of revision 2026-07-28: no initialize, no ping, no server-initiated requests (so a tool call
+ * never elicits); answers carry resultType "complete" and the server's identity, and the cacheable ones
+ * ttlMs and cacheScope. Anything else is -32601.
+ */
+async function handleModern(
+  id: JsonRpcId,
+  method: string,
+  params: Record<string, unknown>,
+  info: ModernClassification,
+  ctx: ToolContext,
+  toolset: Toolset,
+  client: string | undefined,
+  notify: ((message: Record<string, unknown>) => void) | undefined,
+  onCallStart?: RpcOptions["onCallStart"]
+): Promise<JsonRpcResponse> {
+  const done = (payload: Record<string, unknown>): JsonRpcResponse => ({ jsonrpc: "2.0", id, result: decorateResult(payload, SERVER_INFO) });
+  const settle = (outcome: Outcome): JsonRpcResponse => ("result" in outcome ? done(outcome.result as Record<string, unknown>) : respond(id, outcome));
+  const label = client ?? (clientLabelOf(info) || undefined);
+
+  switch (method) {
+    case "server/discover":
+      return done(
+        cacheable(
+          {
+            supportedVersions: ALL_PROTOCOL_VERSIONS,
+            capabilities: {
+              tools: { listChanged: false },
+              prompts: { listChanged: false },
+              resources: { subscribe: false, listChanged: false },
+              extensions: { "io.modelcontextprotocol/skills": {} },
+            },
+            ...(toolset === "core" ? { instructions: coreInstructions() } : {}),
+          },
+          "private"
+        )
+      );
+
+    case "tools/list":
+      return done(cacheable({ tools: listTools(toolset) }, "private"));
+
+    case "tools/call":
+      // No elicitation: this revision has no server-to-client requests, so ae_ask_user falls back to the panel.
+      return settle(await toolsCall(id, params, ctx, toolset, label, notify, false, onCallStart));
+
+    case "prompts/list":
+      return done(cacheable(promptsListPayload(), "public"));
+
+    case "prompts/get":
+      return settle(promptsGet(params));
+
+    case "resources/list":
+      // The skill files, named from their frontmatter (ext-skills "Resource Metadata"). The chroma-ae://guidance
+      // URIs are still readable through resources/read; the legacy list keeps them.
+      return done(cacheable({ resources: listMcpSkillResources() }, "public"));
+
+    case "resources/templates/list":
+      return done(cacheable({ resourceTemplates: [] }, "public"));
+
+    case "resources/read": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        return respond(id, { code: -32602, message: "Invalid params: `uri` must be a string" });
+      }
+      const file = uri.startsWith(SKILL_URI_SCHEME) ? readMcpSkillFile(uri) : readGuidance(uri);
+      if (!file) {
+        return respond(id, { code: -32602, message: `Resource not found: ${JSON.stringify(uri)}`, data: { uri } });
+      }
+      return done(cacheable({ contents: [{ uri: file.uri, mimeType: file.mimeType, text: file.text }] }, "public"));
+    }
+
+    case "skills/list":
+      return done(cacheable({ skills: listMcpSkills() }, "public"));
+
+    case "skills/get": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        return respond(id, { code: -32602, message: "Invalid params: `uri` must be a string" });
+      }
+      const skill = getMcpSkill(uri);
+      if (!skill) {
+        return respond(id, { code: -32602, message: `No skill is served at ${uri}`, data: { uri } });
+      }
+      return done(cacheable({ skill }, "public"));
+    }
+
+    default:
+      return makeErrorResponse(id, -32601, `Method not found: ${method}`);
+  }
+}
+
 async function handleSingleRpc(
   message: unknown,
   ctx: ToolContext,
   toolset: Toolset,
   client?: string,
   notify?: (message: Record<string, unknown>) => void,
-  elicitation?: boolean
+  elicitation?: boolean,
+  onCallStart?: RpcOptions["onCallStart"],
+  batched = false
 ): Promise<JsonRpcResponse | null> {
   if (!isPlainObject(message)) {
     return makeErrorResponse(null, -32600, "Invalid Request");
@@ -166,6 +364,17 @@ async function handleSingleRpc(
     );
   }
   const params: Record<string, unknown> = rawParams ?? {};
+
+  // Revision 2026-07-28 requests announce themselves in params._meta; everything else is the legacy switch below.
+  const era = classifyRequest(message);
+  if (era.era === "error") return era.response;
+  if (era.era === "modern") {
+    // 2026-07-28 has no JSON-RPC batches: each request is its own message (one HTTP POST, one stdio line).
+    if (batched) {
+      return makeErrorResponse(id, -32600, `Invalid Request: a ${era.version} request cannot be sent in a JSON-RPC batch; send it on its own`);
+    }
+    return handleModern(id, method, params, era, ctx, toolset, client, notify, onCallStart);
+  }
 
   switch (method) {
     case "initialize": {
@@ -228,84 +437,19 @@ async function handleSingleRpc(
     }
 
     case "tools/call": {
-      const toolName = params.name;
-      if (typeof toolName !== "string" || toolName.length === 0) {
-        return makeErrorResponse(
-          id,
-          -32602,
-          "Invalid params: tools/call requires a string `name`"
-        );
-      }
-
-      const rawArgs = params.arguments;
-      if (rawArgs !== undefined && !isPlainObject(rawArgs)) {
-        return makeErrorResponse(
-          id,
-          -32602,
-          "Invalid params: `arguments` must be an object"
-        );
-      }
-
-      // Meta-tools answer in either toolset (they are only listed in core). Everything else,
-      // listed or not, goes through the one shared path in tool-call.ts.
-      const meta = isPlainObject(params._meta) ? params._meta : {};
-      const token = meta.progressToken;
-      const state = {
-        requestId: id ?? "",
-        client: client ?? "",
-        cancelled: false,
-        progress: 0,
-        ...(typeof token === "string" || typeof token === "number" ? { progressToken: token } : {}),
-        ...(notify ? { notify } : {}),
-        ...(notify && elicitation ? { request: (m: string, p: Record<string, unknown>, ms: number) => requestFromClient(notify, m, p, ms) } : {}),
-      };
-      const result = await runInCall(state, () =>
-        isMetaTool(toolName) ? callMetaTool(toolName, rawArgs, ctx, { toolset, client }) : callTool(toolName, rawArgs, ctx, { toolset, client })
-      );
-      return { jsonrpc: "2.0", id, result };
+      return respond(id, await toolsCall(id, params, ctx, toolset, client, notify, elicitation));
     }
 
     case "prompts/list": {
-      return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map((p) => ({ name: p.name, description: p.description, arguments: p.arguments })) } };
+      return { jsonrpc: "2.0", id, result: promptsListPayload() };
     }
 
     case "prompts/get": {
-      const name = params.name;
-      const prompt = typeof name === "string" ? PROMPTS.find((p) => p.name === name) : undefined;
-      if (!prompt) {
-        return makeErrorResponse(id, -32602, `Invalid params: unknown prompt ${JSON.stringify(name)}. Available: ${PROMPTS.map((p) => p.name).join(", ")}`);
-      }
-      const rawArgs = params.arguments;
-      if (rawArgs !== undefined && !isPlainObject(rawArgs)) {
-        return makeErrorResponse(id, -32602, "Invalid params: `arguments` must be an object");
-      }
-      const arg = rawArgs?.[prompt.arguments[0].name];
-      if (arg !== undefined && typeof arg !== "string") {
-        return makeErrorResponse(id, -32602, `Invalid params: argument \`${prompt.arguments[0].name}\` must be a string`);
-      }
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          description: prompt.description,
-          messages: [{ role: "user", content: { type: "text", text: prompt.build(arg) } }],
-        },
-      };
+      return respond(id, promptsGet(params));
     }
 
     case "resources/list": {
-      return {
-        jsonrpc: "2.0",
-        id,
-        result: {
-          resources: listGuidanceResources().map((r) => ({
-            uri: r.uri,
-            name: r.name,
-            description: r.description,
-            mimeType: r.mimeType,
-          })),
-        },
-      };
+      return { jsonrpc: "2.0", id, result: guidanceResourcesPayload() };
     }
 
     case "resources/read": {
@@ -358,7 +502,7 @@ export async function handleRpc(
     }
     const results: JsonRpcResponse[] = [];
     for (const item of parsed) {
-      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation);
+      const res = await handleSingleRpc(item, ctx, toolset, client, opts.notify, opts.elicitation, undefined, true);
       if (res !== null) {
         results.push(res);
       }
@@ -366,5 +510,5 @@ export async function handleRpc(
     return results.length > 0 ? results : null;
   }
 
-  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation);
+  return await handleSingleRpc(parsed, ctx, toolset, client, opts.notify, opts.elicitation, opts.onCallStart);
 }

@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/jameslashmar/chroma-ae-mcp?label=release&color=e34e9c)](https://github.com/jameslashmar/chroma-ae-mcp/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-3f4fa1.svg)](LICENSE)
 [![After Effects](https://img.shields.io/badge/After%20Effects-2026%20(26.x)-674fa1.svg?logo=adobeaftereffects&logoColor=white)](https://www.adobe.com/products/aftereffects.html)
-[![MCP](https://img.shields.io/badge/MCP-2025--11--25-43c0bc.svg)](https://modelcontextprotocol.io/specification/2025-11-25)
+[![MCP](https://img.shields.io/badge/MCP-2026--07--28-43c0bc.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B%20%C2%B7%20CEP%2017.7-f37d5b.svg?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS-f06465.svg)](#)
 
@@ -171,7 +171,7 @@ Full details, including what can't be undone: [docs/SAFETY.md](docs/SAFETY.md).
 
 ## Tools
 
-184 tools in 55 groups (the last three, `ae_render_queue_render`, its status and `ae_layout_apply`, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). The full list: [docs/TOOLS.md](docs/TOOLS.md).
+184 tools in 55 groups (the last three, `ae_render_queue_render`, its status and `ae_layout_apply`, are not in the released 0.6.0), from reads and writes to planar tracking, captions (standards, QA, export and transcription), batch renders and delivery checks, plus Chroma's motion-director guidance and the `captions` guidance as MCP prompts and resources (`motion_director`, `motion_review`, `captions`). Clients on MCP 2026-07-28, such as Claude Code, also get five skills over MCP (`/chroma-ae:<skill>`), see [docs/SKILLS.md](docs/SKILLS.md). The full list: [docs/TOOLS.md](docs/TOOLS.md).
 
 **Output format and waiting.** Tool results are compact JSON (no indentation), which keeps them small for the model. To follow a render, call `ae_render_queue_render_status` or `ae_aerender_status` once with `wait_seconds` (0-30): it answers when the job changes or an output file appears, instead of you polling.
 
@@ -209,6 +209,7 @@ Building, the dev install, releasing and QA are in [docs/DEVELOP.md](docs/DEVELO
 ## Docs
 
 - `docs/TOOLS.md`: every tool by group, the motion guidance, and where the MCP keeps its files.
+- `docs/SKILLS.md`: the skills served over MCP (MCP 2026-07-28), how Claude Code loads them, and how to add one.
 - `docs/SAFETY.md`: the safety model in full.
 - `docs/DEVELOP.md`: building, releasing and QA.
 - `docs/LIVE-EVIDENCE.md`: the live After Effects report every pull request that changes AE code must carry.

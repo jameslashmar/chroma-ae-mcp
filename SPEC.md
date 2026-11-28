@@ -27,6 +27,9 @@ attribution in `ATTRIBUTION.md`; do not copy whole files.
 ```
 server/            TypeScript MCP server (Node 20+, ESM, @modelcontextprotocol/sdk, zod), stdio transport
   src/index.ts       registers tools, starts stdio
+  src/mcp-rpc.ts     JSON-RPC MCP handler the panel serves (legacy revisions and 2026-07-28)
+  src/mcp-modern.ts  2026-07-28 rules: era classification, _meta, result fields, HTTP headers
+  src/guidance/      skills and guidance text, compiled in (content.generated.ts)
   src/bridge.ts      HTTP client to the panel
   src/queue.ts       single-writer queue
   src/quarantine.ts  uncertain-write state
